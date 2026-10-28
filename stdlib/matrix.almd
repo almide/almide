@@ -7,13 +7,10 @@
 // standard `prepare_lambda` lambda-prep and renders as an ordinary
 // Rust closure.
 //
-// `MatrixFusionPass` runs *before* `StdlibLoweringPass` (see
-// `crates/almide-codegen/src/target.rs`), so `matrix.add(matrix.scale(
-// a, ka), matrix.scale(b, kb))` already collapses to `matrix.fma(a,
-// ka, b, kb)` by the time the InlineRust dispatch fires. No
-// fusion-preserving reorder is needed — the fused form is still a
-// plain `CallTarget::Module { module: "matrix", func: "fma" }`, which
-// the bundled `@inline_rust` path dispatches directly.
+// The operators desugar to the internal `__add` / `__sub` / `__mul` /
+// `__div` / `__neg` below (R-matrix-14); `__mul_scaled`, `__fma` and
+// `__fma3` are the fused kernels only the `@rewrite` rules and the
+// desugars emit (R-matrix-02).
 // ── construction + metadata ──
 /// rows x cols of 0.0; negatives clamp to 0.
 @intrinsic("almide_rt_matrix_zeros")
@@ -31,43 +28,24 @@ fn shape(m: Matrix) -> (Int, Int) = _
 @intrinsic("almide_rt_matrix_transpose")
 fn transpose(m: Matrix) -> Matrix = _
 
-/// Matrix of equal-length rows; [] is 0 x 0.
+/// Matrix of the equal-length rows xs; [] is 0 x 0.
 @intrinsic("almide_rt_matrix_from_lists")
-fn from_lists(rows: List[List[Float]]) -> Matrix = _
-
-// Gather a subset of rows from a matrix by index. Returns a new matrix
-// of shape (row_ids.len, original_cols). Avoids `to_lists` round-trips
-// for embedding lookups and other row-indexed slicing.
-/// Rows at row_ids; id < 0 is row 0, past end zeros.
-@intrinsic("almide_rt_matrix_select_rows")
-fn select_rows(m: Matrix, row_ids: List[Int]) -> Matrix = _
+fn from_lists(xs: List[List[Float]]) -> Matrix = _
 
 // Row-wise concat — used for KV-cache accumulation (append one new
 // K/V row per gen step to the running seq).
 /// base rows then extra; empty side gives other.
 @intrinsic("almide_rt_matrix_append_rows")
-fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
+fn __append_rows(base: Matrix, extra: Matrix) -> Matrix = _
 
 // ── f32 bytes-resident path (L2-2) ──
-// Weights are consumed straight from the source GGUF buffer — no decoded
-// Matrix, no model record, no per-call deep clones.
-// y = x @ W^T with W f32 row-major (out, in) at `w_offset` in `w_bytes`.
-/// x times f32 LE W^T.
-@intrinsic("almide_rt_matrix_linear_f32_row_no_bias")
-fn linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
-
-// Gather rows from an f32 tensor still in the byte buffer (embedding lookup).
-/// f32 LE rows at row_ids; past-data rows are 0.
-@intrinsic("almide_rt_matrix_select_rows_f32")
-fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
-
 /// Rows as lists; r x 0 gives r empty rows.
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
-/// Element at (row, col); out of range aborts.
+/// Element at (row, col); none out of range.
 @intrinsic("almide_rt_matrix_get")
-fn get(m: Matrix, row: Int, col: Int) -> Float = _
+fn get(m: Matrix, row: Int, col: Int) -> Float? = _
 
 /// Row count; 0 for an empty matrix.
 @intrinsic("almide_rt_matrix_rows")
@@ -80,11 +58,11 @@ fn cols(m: Matrix) -> Int = _
 // ── elementwise arithmetic ──
 /// Elementwise a + b; shapes truncate to overlap.
 @intrinsic("almide_rt_matrix_add")
-fn add(a: Matrix, b: Matrix) -> Matrix = _
+fn __add(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Matrix product; cols(a) == rows(b) is not checked.
 @intrinsic("almide_rt_matrix_mul")
-fn mul(a: Matrix, b: Matrix) -> Matrix = _
+fn __mul(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Every element times s.
 @intrinsic("almide_rt_matrix_scale")
@@ -92,36 +70,32 @@ fn scale(m: Matrix, s: Float) -> Matrix = _
 
 /// a*ka + b*kb in one pass; shapes truncate.
 @intrinsic("almide_rt_matrix_fma")
-fn fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
+fn __fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
 
 /// a*ka + b*kb + c*kc; shapes truncate.
 @intrinsic("almide_rt_matrix_fma3")
-fn fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
+fn __fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
 
 /// Elementwise a - b; shapes truncate to overlap.
 @intrinsic("almide_rt_matrix_sub")
-fn sub(a: Matrix, b: Matrix) -> Matrix = _
+fn __sub(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Elementwise a / b; x/0.0 is inf or NaN.
 @intrinsic("almide_rt_matrix_div")
-fn div(a: Matrix, b: Matrix) -> Matrix = _
+fn __div(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Every element negated.
 @intrinsic("almide_rt_matrix_neg")
-fn neg(m: Matrix) -> Matrix = _
-
-/// Elementwise x^exp; x < 0, fractional exp: NaN.
-@intrinsic("almide_rt_matrix_pow")
-fn pow(m: Matrix, exp: Float) -> Matrix = _
+fn __neg(m: Matrix) -> Matrix = _
 
 /// f applied to every element.
 @intrinsic("almide_rt_matrix_map")
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 // ── bytes serialisation ──
-/// f32 LE rows x cols at offset; all 0 if data short.
+/// f32 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -135,13 +109,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; all 0 if data short.
+/// f16 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
-/// f64 LE rows x cols at offset; all 0 if data short.
+/// f64 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 // ── neural-network primitives (row-wise) ──
 /// bias added to each row; cols cut to bias.
@@ -154,28 +128,16 @@ fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
 @intrinsic("almide_rt_matrix_concat_cols_many")
-fn concat_cols(matrices: List[Matrix]) -> Matrix = _
+fn concat_cols(xs: List[Matrix]) -> Matrix = _
 
 /// Alias of matrix.concat_cols.
 @deprecated(since=5, use="matrix.concat_cols")
 @intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 
-/// x W^T + bias; empty x or W gives 0 x 0.
-@intrinsic("almide_rt_matrix_linear_row")
-fn linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
-
-/// x W^T; empty x or W gives 0 x 0.
-@intrinsic("almide_rt_matrix_linear_row_no_bias")
-fn linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix = _
-
-/// Rows [start, end), end clamped to the row count.
+/// Rows [start, end), each bound clamped to 0..row count.
 @intrinsic("almide_rt_matrix_slice_rows")
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
-
-/// 1-D conv over rows; [] if input too short.
-@intrinsic("almide_rt_matrix_conv1d")
-fn conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix = _
 
 /// Rows at indices; out of range is a zero row.
 @intrinsic("almide_rt_matrix_gather_rows")
@@ -192,47 +154,15 @@ fn dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
 // ── f32 preview path ──
-//
-// Stage 4 P5: the f32 constructors / BLAS ops now carry `Matrix[Float32]`
-// at the type level. Runtime representation is unchanged (tagged
-// `AlmideMatrix` enum with SmallF32 variant + Accelerate `cblas_sgemm`
-// dispatch). The type annotation keeps f32 and f64 matrices from
-// silently mixing — passing a `Matrix[Float32]` to a fn expecting
-// bare `Matrix` (= `Matrix[Float]` default) now surfaces as a checker
-// error instead of runtime storage churn.
-/// Float32 rows x cols of 0.0; negatives clamp.
-@intrinsic("almide_rt_matrix_zeros_f32")
-fn zeros_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
-
-/// Float32 rows x cols of 1.0; negatives clamp.
-@intrinsic("almide_rt_matrix_ones_f32")
-fn ones_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
-
-/// Float32 product; cols(a) == rows(b) is not checked.
-@intrinsic("almide_rt_matrix_mul_f32")
-fn mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
-
-/// alpha * (a x b), Float32.
-@intrinsic("almide_rt_matrix_mul_f32_scaled")
-fn mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
-
-/// a x transpose(b), Float32.
-@intrinsic("almide_rt_matrix_mul_f32_t")
-fn mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
-
-/// alpha * (a x transpose(b)), Float32.
-@intrinsic("almide_rt_matrix_mul_f32_t_scaled")
-fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
-
 // mul_scaled folds a scalar into cblas_dgemm's `alpha` parameter. Two
 // mirror fusions exist since either operand may carry the scale. The
 // runtime has a `FUSED_ALPHA_MAX=512` crossover above which it reverts
 // to scale+mul; both rules still fire and let the runtime decide.
-/// Same as scale(mul(a, b), alpha).
-@rewrite(name="mul_scaled_rhs", from="matrix.mul(?a, matrix.scale(?b, ?s))", to="matrix.mul_scaled(?a, ?s, ?b)")
-@rewrite(name="mul_scaled_lhs", from="matrix.mul(matrix.scale(?a, ?s), ?b)", to="matrix.mul_scaled(?a, ?s, ?b)")
+/// Same as scale(__mul(a, b), alpha).
+@rewrite(name="mul_scaled_rhs", from="matrix.__mul(?a, matrix.scale(?b, ?s))", to="matrix.__mul_scaled(?a, ?s, ?b)")
+@rewrite(name="mul_scaled_lhs", from="matrix.__mul(matrix.scale(?a, ?s), ?b)", to="matrix.__mul_scaled(?a, ?s, ?b)")
 @intrinsic("almide_rt_matrix_mul_scaled")
-fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+fn __mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
 
 /// f over each pair of same-position elements; a shape mismatch aborts.
 @intrinsic("almide_rt_matrix_zip_with")

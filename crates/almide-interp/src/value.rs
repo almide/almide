@@ -443,8 +443,7 @@ impl<'a> TotalOrder<'a> {
     }
 
     /// The case's declaration index, or `None` when this value's type is not in
-    /// the program's decls — the bundled `bytes.Endian`, whose decl never
-    /// reaches `IrProgram`. Abstaining there is right: guessing an order for a
+    /// the program's decls. Abstaining there is right: guessing an order for a
     /// case whose declaration we cannot read is guessing.
     fn tag(&self, ty: Option<Sym>, ctor: Sym) -> Option<u32> {
         self.tags.get(&(ty?, ctor)).copied()

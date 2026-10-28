@@ -1,4 +1,4 @@
-//! #3691 — `map.delete` is amortized O(1) on both legs, and every observable
+//! #3691 — deleting a map entry (`m = map.remove(m, k)`) is amortized O(1) on both legs, and every observable
 //! of a map that has had entries deleted is what it was.
 //!
 //! Before the fix a delete was linear in the map's size on both legs: native's
@@ -35,11 +35,11 @@ use std::time::{Duration, Instant};
 
 const SEMANTICS: &str = r#"type Holder = { snap: Map[String, Int], tag: Int }
 
-fn show(m: Map[String, Int]) -> String = map.entries(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
+fn show(m: Map[String, Int]) -> String = map.to_list(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
 
-fn showi(m: Map[Int, String]) -> String = map.fold(m, "", (acc, k, v) => acc + "${k}:${v};")
+fn showi(m: Map[Int, String]) -> String = map.fold(m, "", (acc, (k, v)) => acc + "${k}:${v};")
 
-fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007)
+fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, (k, v)) => (acc * 31 + k * 7 + v) % 1000000007)
 
 fn drop_evens(m: Map[Int, Int], i: Int, n: Int) -> Map[Int, Int] = if i >= n then m
 else drop_evens(map.remove(m, i * 2), i + 1, n)
@@ -47,14 +47,14 @@ else drop_evens(map.remove(m, i * 2), i + 1, n)
 fn trimmed(n: Int) -> Map[Int, Int] = {
   var x: Map[Int, Int] = list.range(0, n) |> list.fold(map.new(), (a, i) => map.set(a, i, i))
   for i in 0..<n {
-    if i % 3 == 0 then map.delete(x, i) else ()
+    if i % 3 == 0 then { x = map.remove(x, i) } else ()
   }
   x
 }
 
 fn bump(mut m: Map[Int, Int]) -> Unit = {
-  map.delete(m, 1)
-  map.insert(m, 1, 99)
+  m = map.remove(m, 1)
+  m = map.set(m, 1, 99)
 }
 
 effect fn main() -> Unit = {
@@ -62,11 +62,11 @@ effect fn main() -> Unit = {
   var m: Map[String, Int] = list.range(0, 40) |> list.fold(map.new(), (acc, i) => map.set(acc, "k${i}", i))
   let alias = m
   let h = { snap: m, tag: 7 }
-  map.delete(m, "k3")
-  map.delete(m, "k17")
-  map.delete(m, "nope")
-  map.delete(m, "k39")
-  println("${map.len(m)} ${map.is_empty(m)} ${map.get(m, "k3")} ${map.get(m, "k4")} ${map.contains(m, "k17")} ${map.get_or(m, "k39", -1)}")
+  m = map.remove(m, "k3")
+  m = map.remove(m, "k17")
+  m = map.remove(m, "nope")
+  m = map.remove(m, "k39")
+  println("${map.len(m)} ${map.is_empty(m)} ${map.get(m, "k3")} ${map.get(m, "k4")} ${map.contains(m, "k17")} ${map.get(m, "k39") ?? -1}")
   println(show(m))
   println("${map.keys(m) |> list.take(5)} ${map.values(m) |> list.drop(33)}")
   var acc = ""
@@ -77,27 +77,27 @@ effect fn main() -> Unit = {
   // an alias and a holder bound before the deletes keep the old map (C-033)
   println("${map.len(alias)} ${map.get(alias, "k3")} ${map.len(h.snap)} ${map.get(h.snap, "k39")} ${h.tag}")
   // delete then re-insert appends at the end; an overwrite keeps position
-  map.delete(m, "k0")
+  m = map.remove(m, "k0")
   m = map.set(m, "k0", 100)
   m = map.set(m, "k1", 101)
-  map.insert(m, "k3", 103)
+  m = map.set(m, "k3", 103)
   println(show(m) |> string.split(",") |> list.drop(34) |> list.join(","))
   println("${map.keys(m) |> list.take(3)} ${map.len(m)}")
   // equality against a map built fresh, either order of construction
-  let fresh = map.entries(m) |> list.reverse |> map.from_list
+  let fresh = map.to_list(m) |> list.reverse |> map.from_list
   println("${m == fresh} ${m == alias} ${map.len(fresh)}")
   // display through interpolation after deletes
   var small: Map[String, Int] = map.from_list([("a", 1), ("b", 2), ("c", 3)])
-  map.delete(small, "b")
+  small = map.remove(small, "b")
   println("${small}")
   // delete everything, then rebuild
   var all: Map[Int, String] = list.range(0, 50) |> list.fold(map.new(), (acc2, i) => map.set(acc2, i, "v${i}"))
   for i in 0..<50 {
-    map.delete(all, (i * 7) % 50)
+    all = map.remove(all, (i * 7) % 50)
   }
   println("${map.len(all)} ${map.is_empty(all)} ${all} ${map.keys(all)}")
-  map.insert(all, 5, "five")
-  map.insert(all, 2, "two")
+  all = map.set(all, 5, "five")
+  all = map.set(all, 2, "two")
   println("${showi(all)} ${map.len(all)}")
   // many deletes and re-inserts: the compaction path, interleaved with reads
   var big: Map[Int, Int] = list.range(0, 3000) |> list.fold(map.new(), (acc3, i) => map.set(acc3, i, i * 3))
@@ -107,7 +107,7 @@ effect fn main() -> Unit = {
   while j < 7700 {
     let k = (j * 7919) % 3000
     if map.contains(big, k) then {
-      map.delete(big, k)
+      big = map.remove(big, k)
       hits = hits + 1
     } else {
       big = map.set(big, k, j)
@@ -116,12 +116,12 @@ effect fn main() -> Unit = {
     j = j + 1
   }
   println("${hits} ${map.len(big)} ${digest(big)} ${map.keys(big) |> list.take(6)} ${map.len(before)} ${digest(before)}")
-  let rebuilt = map.entries(big) |> map.from_list
+  let rebuilt = map.to_list(big) |> map.from_list
   println("${rebuilt == big} ${digest(rebuilt) == digest(big)} ${big == before}")
   // FIFO: delete the oldest, append a new one
   var q: Map[Int, Int] = list.range(0, 100) |> list.fold(map.new(), (acc4, i) => map.set(acc4, i, i))
   for i in 0..<500 {
-    map.delete(q, i)
+    q = map.remove(q, i)
     q = map.set(q, 100 + i, i)
   }
   println("${map.len(q)} ${map.keys(q) |> list.take(4)} ${digest(q)} ${map.get(q, 399)} ${map.get(q, 400)}")
@@ -138,8 +138,8 @@ effect fn main() -> Unit = {
   var p: Map[Int, Int] = list.range(0, 30) |> list.fold(map.new(), (acc7, i) => map.set(acc7, i, i))
   let snap = p
   let peek = () => map.len(snap)
-  map.delete(p, 4)
-  map.delete(p, 5)
+  p = map.remove(p, 4)
+  p = map.remove(p, 5)
   println("${digest(p)} ${peek()} ${map.len(p)} ${map.keys(p) |> list.take(6)}")
   // sets: remove keeps the survivors' order
   var s: Set[Int] = list.range(0, 40) |> set.from_list
@@ -159,15 +159,15 @@ effect fn main() -> Unit = {
   var tm = trimmed(40)
   bump(tm)
   let hl = [tm, tm]
-  map.delete(tm, 2)
+  tm = map.remove(tm, 2)
   println("${map.len(tm)} ${map.keys(tm) |> list.take(4)} ${map.keys(tm) |> list.drop(24)} ${hl |> list.map((x) => map.len(x))} ${digest(tm)}")
   // handle values released by deletes and by compaction
   var lv: Map[String, List[Int]] = list.range(0, 64) |> list.fold(map.new(), (a, i) => map.set(a, "L${i}", [i, i + 1]))
   for i in 0..<60 {
-    map.delete(lv, "L${i}")
-    map.insert(lv, "N${i}", [i])
+    lv = map.remove(lv, "L${i}")
+    lv = map.set(lv, "N${i}", [i])
   }
-  println("${map.len(lv)} ${map.entries(lv) |> list.take(6)} ${map.get(lv, "N59")} ${map.get(lv, "L1")}")
+  println("${map.len(lv)} ${map.to_list(lv) |> list.take(6)} ${map.get(lv, "N59")} ${map.get(lv, "L1")}")
 }
 "#;
 
@@ -208,11 +208,11 @@ const SCALING: &str = r#"import env
 effect fn churn(n: Int, d: Int) -> Unit = {
   var m: Map[Int, Int] = map.new()
   for i in 0..<n {
-    map.insert(m, i, i)
+    m = map.set(m, i, i)
   }
   let t0 = datetime.monotonic_ns()!
   for i in 0..<d {
-    map.delete(m, i)
+    m = map.remove(m, i)
     m = map.set(m, n + i, i)
   }
   let t1 = datetime.monotonic_ns()!

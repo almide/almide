@@ -26,7 +26,7 @@
 # ---------------------------------------------------------
 # A slot the matrix cannot build is coverage the matrix does not have, and the
 # count of those was printed for a month and never read back — it held
-# `json.index(path: JsonPath, i: Int)`, the signature that carried #2396. So a
+# `json.index(path: JsonPath, i: Int)` (now `value.index`), the signature that carried #2396. So a
 # skip is now a ledger row with a name and a reason, and the diff runs on it:
 #
 #   skipped-but-undeclared   -> coverage LOST (a type left the tables, a probe

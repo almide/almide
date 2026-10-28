@@ -160,16 +160,59 @@ pub fn emit_append(
 /// op 26 (`env.get`), first half: find the name's entry in the log. A hit
 /// points `g_ppos` / `g_plen` at the value where it sits in the log and
 /// returns `pack(0, len)`; a miss falls through to the caller's
-/// host-environment lookup.
+/// host-environment lookup. A hit on `env.remove`'s mark — the one-byte
+/// value NUL, which `env.set` refuses (#3908) — answers `pack(2, 0)`, the
+/// ok-none tag, without consulting the host environment.
 pub fn emit_scan(i: &mut InstructionSink<'_>, log: OverlayLog, (g_ppos, g_plen): (u32, u32), l: ScanLocals) {
-    let ScanLocals { vlen, best, .. } = l;
+    let ScanLocals { klen, vlen, best, .. } = l;
     emit_find(i, log, l);
     // A hit: the value already sits in the log, so point at it in place
     // rather than copying it into a page that may not hold it (#2120).
     i.local_get(best).i32_const(0).i32_ne().if_(BlockType::Empty);
     i.local_get(best).i32_load(mem(4)).local_set(vlen);
+    i.local_get(best).i32_load(mem(0)).local_set(klen);
+    i.local_get(vlen).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(best).i32_const(8).i32_add().local_get(klen).i32_add().i32_load8_u(mem8(0)).i32_eqz().if_(BlockType::Empty);
+    i.i64_const(2).i64_const(32).i64_shl().return_();
+    i.end();
+    i.end();
     i.local_get(best).i32_const(8).i32_add().local_get(best).i32_load(mem(0)).i32_add().global_set(g_ppos);
     i.local_get(vlen).global_set(g_plen);
     i.local_get(vlen).i64_extend_i32_u().return_();
     i.end();
+}
+
+/// The scratch locals (i32) of [`emit_frames`].
+#[derive(Clone, Copy)]
+pub struct FrameLocals {
+    pub p: u32,
+    pub endp: u32,
+    pub klen: u32,
+    pub vlen: u32,
+}
+
+/// `env.vars`' overlay half (op 77, #3908): append every log entry at `out`
+/// as one `[len u32][name=value]` frame and leave `out` past the last one.
+/// A frame is 3 bytes shorter than its entry, so the caller that reserved
+/// the log's length for them has room. The entries keep the log's order; a
+/// removed name's frame carries the NUL mark, which the guest's Almide body
+/// reads as "drop this name".
+pub fn emit_frames(i: &mut InstructionSink<'_>, log: OverlayLog, out: u32, l: FrameLocals) {
+    let FrameLocals { p, endp, klen, vlen } = l;
+    i.global_get(log.g_base).local_set(p);
+    i.global_get(log.g_base).global_get(log.g_len).i32_add().local_set(endp);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(endp).i32_ge_u().br_if(1);
+    i.local_get(p).i32_load(mem(0)).local_set(klen);
+    i.local_get(p).i32_load(mem(4)).local_set(vlen);
+    // [klen + 1 + vlen][name]['='][value]
+    i.local_get(out).local_get(klen).local_get(vlen).i32_add().i32_const(1).i32_add().i32_store(mem(0));
+    i.local_get(out).i32_const(4).i32_add().local_get(p).i32_const(8).i32_add().local_get(klen).memory_copy(0, 0);
+    i.local_get(out).i32_const(4).i32_add().local_get(klen).i32_add().i32_const(61).i32_store8(mem8(0));
+    i.local_get(out).i32_const(5).i32_add().local_get(klen).i32_add();
+    i.local_get(p).i32_const(8).i32_add().local_get(klen).i32_add();
+    i.local_get(vlen).memory_copy(0, 0);
+    i.local_get(out).i32_const(5).i32_add().local_get(klen).i32_add().local_get(vlen).i32_add().local_set(out);
+    i.local_get(p).i32_const(8).i32_add().local_get(klen).i32_add().local_get(vlen).i32_add().local_set(p);
+    i.br(0).end().end();
 }

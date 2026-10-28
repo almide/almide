@@ -12,6 +12,13 @@
 // tool takes, so the three surfaces cannot drift. The child runs in the
 // file's project root (the nearest `almide.toml`), where the CLI resolves
 // dependencies. Nothing is written.
+//
+// The request RUNS CODE: the tests that reach the file and its contract
+// fixtures, native and wasm. So the URI is confined to the workspace root
+// (symlinks resolved; a URI outside it is refused, #4185), and the child
+// resolves dependencies cache-only (`ALMIDE_DEPS_CACHE_ONLY`, the #4128 rule
+// the rest of the server keeps): nothing is cloned and almide.lock is never
+// written.
 
 fn survive_project_dir(path: &std::path::Path) -> std::path::PathBuf {
     let start = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -27,7 +34,7 @@ fn survive_project_dir(path: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[allow(clippy::mutable_key_type)] // same Uri-key false positive as handle_notification
-fn handle_survive(req: &Request, documents: &HashMap<Uri, String>) -> Response {
+fn handle_survive(req: &Request, documents: &HashMap<Uri, String>, workspace_root: &Option<std::path::PathBuf>) -> Response {
     let fail = |code: lsp_server::ErrorCode, msg: String| Response::new_err(req.id.clone(), code as i32, msg);
     let params = &req.params;
     let Some(uri) = params
@@ -57,14 +64,23 @@ fn handle_survive(req: &Request, documents: &HashMap<Uri, String>) -> Response {
             }
         },
     };
-    let abs = std::path::Path::new(&path);
-    let cwd = survive_project_dir(abs);
+    let Some(root) = workspace_root else {
+        return fail(lsp_server::ErrorCode::RequestFailed, "almide/survive needs a workspace root".into());
+    };
+    let abs = match super::project_scope::confined(root, root, &path, "textDocument.uri") {
+        Ok(p) => p,
+        Err(e) => return fail(lsp_server::ErrorCode::InvalidParams, e),
+    };
+    let cwd = survive_project_dir(&abs);
+    let as_kind = format!("--as={kind}");
     let exe = match std::env::current_exe() {
         Ok(e) => e,
         Err(e) => return fail(lsp_server::ErrorCode::InternalError, format!("cannot locate the almide binary: {e}")),
     };
     let child = std::process::Command::new(exe)
-        .args(["survive", &path, "--with", "-", "--json", "--as", kind])
+        .args(["survive", "--with", "-", "--json", &as_kind, "--"])
+        .arg(&abs)
+        .env("ALMIDE_DEPS_CACHE_ONLY", "1")
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

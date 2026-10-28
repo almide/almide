@@ -12,10 +12,10 @@ fn main() -> Unit = {
   println(string.to_lower("İSTANBUL"))
   let parts = string.split("a🦀b🦀c", "🦀")
   println("${int.to_string(list.len(parts))}:${list.join(parts, "|")}")
-  println(string.join(["α", "β", "γ"], "・"))
+  println(list.join(["α", "β", "γ"], "・"))
   println(string.replace("ααα", "α", "β"))
-  println(string.from_codepoint(129408))
-  println(string.from_codepoint(233))
+  println((string.from_codepoint(129408) ?? ""))
+  println((string.from_codepoint(233) ?? ""))
   let t = "e${"n${"est"}ed"}!"
   println(t)
   println(string.repeat("ab", 3))

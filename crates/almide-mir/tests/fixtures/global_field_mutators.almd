@@ -35,18 +35,18 @@ fn pop_loop() -> Unit = {
 }
 
 fn insert_line() -> Unit = {
-  map.insert(g.m, "a", 1)
+  g.m = map.set(g.m, "a", 1)
   ()
 }
 
 fn insert_loop() -> Unit = {
   for i in 0..<2 {
-    map.insert(g.m, "a", i)
+    g.m = map.set(g.m, "a", i)
   }
 }
 
 fn delete_line() -> Unit = {
-  map.delete(g.m, "a")
+  g.m = map.remove(g.m, "a")
   ()
 }
 

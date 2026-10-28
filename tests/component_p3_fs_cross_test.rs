@@ -160,14 +160,14 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("almide_p3_large")!
   let p = d + "/big.txt"
   let s = string.repeat("0123456789abcdef", 40000)
-  fs.write(p, s)!
+  fs.write_text(p, s)!
   let t = fs.read_text(p)!
   println("len=${string.len(t)} same=${t == s}")
-  fs.append(p, s)!
-  println("size=${fs.file_size(p)!}")
-  println("bytes=${list.len(fs.read_bytes(p)!)}")
+  fs.append_text(p, s)!
+  println("size=${fs.stat(p)!.size}")
+  println("bytes=${bytes.len(fs.read_bytes(p)!)}")
   fs.copy(p, d + "/c.txt")!
-  println("copy=${fs.file_size(d + "/c.txt")!}")
+  println("copy=${fs.stat(d + "/c.txt")!.size}")
   let parts = fan.map([p, d + "/c.txt"], (q) => fs.read_text(q)!)!
   println("fan=${list.len(parts)} ${string.len(list.get(parts, 1) ?? "")}")
   fs.remove_all(d)!
@@ -217,9 +217,9 @@ const ENV_OVER_HOST: &str = r#"import env
 
 effect fn main() -> Unit = {
   println(env.get("ENVSET_3223_HOST") ?? "unset")
-  env.set("ENVSET_3223_HOST", "guest")
+  env.set("ENVSET_3223_HOST", "guest")!
   println(env.get("ENVSET_3223_HOST") ?? "unset")
-  env.set("ENVSET_3223_HOST", "")
+  env.set("ENVSET_3223_HOST", "")!
   println("[${env.get("ENVSET_3223_HOST") ?? "unset"}]")
 }
 "#;
@@ -231,7 +231,7 @@ const ENV_LOG_GROWS: &str = r#"import env
 effect fn main() -> Unit = {
   let v = string.repeat("x", 1000)
   for k in list.range(0, 100) {
-    env.set("ENVSET_3223_K${k}", "${k}${v}")
+    env.set("ENVSET_3223_K${k}", "${k}${v}")!
   }
   println("${string.len(env.get("ENVSET_3223_K0") ?? "")}")
   println("${string.len(env.get("ENVSET_3223_K99") ?? "")}")

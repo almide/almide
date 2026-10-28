@@ -5,9 +5,9 @@
 // binary32 layout, the subnormals and the one canonical NaN included.
 import testing
 
-fn f32(x: Float) -> Float32 = float.to_float32(x)
+fn f32(x: Float) -> Float32 = float32.from(x)
 
-fn f64(x: Float) -> Float64 = float.to_float64(x)
+fn f64(x: Float) -> Float64 = float64.from(x)
 
 // ── compare ──
 test "compare is IEEE total order with one NaN" {
@@ -47,11 +47,11 @@ test "clamp limits to lo..hi and passes NaN through" {
 test "clamp aborts when lo > hi" {
   testing.assert_aborts(
     "clamp requires min <= max",
-    () => float32.clamp(float.to_float32(0.5), float.to_float32(1.0), float.to_float32(0.0)),
+    () => float32.clamp(float32.from(0.5), float32.from(1.0), float32.from(0.0)),
   )
   testing.assert_aborts(
     "clamp requires min <= max",
-    () => float64.clamp(float.to_float64(0.5), float.to_float64(1.0), float.to_float64(0.0)),
+    () => float64.clamp(float64.from(0.5), float64.from(1.0), float64.from(0.0)),
   )
 }
 
@@ -136,22 +136,22 @@ test "float64 bits are the binary64 layout" {
 
 // ── constants ──
 test "infinity, nan, epsilon, max_value and min_value" {
-  assert_eq(float.from_float32(float32.infinity()) > 0.0, true)
+  assert_eq(float.from(float32.infinity()) > 0.0, true)
   assert_eq(float32.is_infinite(float32.infinity()), true)
   assert_eq(float32.is_nan(float32.nan()), true)
-  assert_eq(float.from_float32(float32.epsilon()), 1.0 / 8388608.0)
+  assert_eq(float.from(float32.epsilon()), 1.0 / 8388608.0)
   assert_eq(float32.to_bits(float32.max_value()), 2139095039)
   assert_eq(
-    float32.is_infinite(float.to_float32(float.from_float32(float32.max_value()) * 2.0)),
+    float32.is_infinite(float32.from(float.from(float32.max_value()) * 2.0)),
     true,
   )
-  assert_eq(float.from_float32(float32.min_value()), 0.0 - float.from_float32(float32.max_value()))
-  assert_eq(float.from_float64(float64.infinity()) > 0.0, true)
+  assert_eq(float.from(float32.min_value()), 0.0 - float.from(float32.max_value()))
+  assert_eq(float.from(float64.infinity()) > 0.0, true)
   assert_eq(float64.is_nan(float64.nan()), true)
-  assert_eq(float.from_float64(float64.epsilon()), 1.0 / 4503599627370496.0)
-  assert_eq(1.0 + float.from_float64(float64.epsilon()) > 1.0, true)
+  assert_eq(float.from(float64.epsilon()), 1.0 / 4503599627370496.0)
+  assert_eq(1.0 + float.from(float64.epsilon()) > 1.0, true)
   assert_eq(float64.to_bits(float64.max_value()), 9218868437227405311)
-  assert_eq(float.from_float64(float64.min_value()), 0.0 - float.from_float64(float64.max_value()))
+  assert_eq(float.from(float64.min_value()), 0.0 - float.from(float64.max_value()))
 }
 
 // ── parse ──

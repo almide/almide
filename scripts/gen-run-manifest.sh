@@ -33,7 +33,13 @@ case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
 # #2405: a stale oracle, a foreign binary, a worktree behind upstream or an
 # untracked fixture is refused HERE, before anything is truncated.
 refuse_stale_tree || exit $?
-OUT_DIR="$PWD/crates/almide-spine/tests/golden"
+# The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 only the
+# selected fixtures are regenerated, into GEN_MANIFEST_OUT_DIR (a scratch dir
+# scripts/check-parity-goldens.sh compares row by row) — never the committed
+# golden, which a slice would truncate to 1 in k rows.
+. scripts/lib/ci-slice.sh
+if ci_slice_active && [ -z "${GEN_MANIFEST_OUT_DIR:-}" ]; then ci_slice_refuse_regen "$(basename "$0")"; fi
+OUT_DIR="${GEN_MANIFEST_OUT_DIR:-$PWD/crates/almide-spine/tests/golden}"
 mkdir -p "$OUT_DIR"
 MANIFEST="$OUT_DIR/spec-run-manifest.txt"
 EXCLUDED="$OUT_DIR/spec-run-exclusions.txt"
@@ -56,7 +62,7 @@ run_one() {
 }
 export -f run_one; export ORACLE
 
-find spec/wasm_cross spec/wasm_fail -name '*.almd' | sort \
+find spec/wasm_cross spec/wasm_fail -name '*.almd' | sort | ci_slice_filter gen-run-manifest \
   | xargs -P 8 -I{} bash -c 'run_one "$@"' _ {} > /tmp/run-manifest-raw.$$
 
 grep -v $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | sort -t$'\t' -k3 > "$MANIFEST"

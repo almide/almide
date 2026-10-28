@@ -1,0 +1,56 @@
+// @contract: C-413
+// int.parse and float.parse trim ASCII whitespace only (#4121): exactly
+// U+0009 TAB, U+000A LF, U+000C FF, U+000D CR and U+0020 SPACE on either end
+// (Rust's str::trim_ascii set). U+000B VT and every non-ASCII White_Space
+// scalar (U+00A0, U+3000, U+2028, U+0085, ...) are not trimmed, so the digit
+// grammar refuses them. string.trim is unchanged (full Unicode White_Space).
+// The sized wrappers (int8.parse, uint64.parse, ...) are pinned in
+// number_parse_ascii_trim_sized.almd.
+fn si(s: String) -> String = match int.parse(s) {
+  ok(n) => "ok(${int.to_string(n)})",
+  err(e) => "err(${e})",
+}
+
+fn sf(s: String) -> String = match float.parse(s) {
+  ok(v) => "ok(${float.to_string(v)})",
+  err(e) => "err(${e})",
+}
+
+effect fn main() -> Unit = {
+  // The issue's probes.
+  println(si("\u{A0}5"))
+  // err(invalid digit found in string)
+  println(si("\u{3000}5"))
+  // err(invalid digit found in string)
+  println(si("\u{2028}5"))
+  // err(invalid digit found in string)
+  println(si("5\u{85}"))
+  // err(invalid digit found in string)
+  println(si("\u{B}5"))
+  // err(invalid digit found in string)  (VT is not in the set)
+  // The five trimmed bytes, on both ends.
+  println(si("\t\n\u{C}\r 5 \r\u{C}\n\t"))
+  // ok(5)
+  println(si(" -42 "))
+  // ok(-42)
+  println(si(" \t "))
+  // err(cannot parse integer from empty string)
+  println(si("\u{A0}"))
+  // err(invalid digit found in string)
+  // float.parse: the same set.
+  println(sf("\u{A0}5"))
+  // err(invalid float literal)
+  println(sf("\u{3000}2.5"))
+  // err(invalid float literal)
+  println(sf("2.5\u{2028}"))
+  // err(invalid float literal)
+  println(sf("\u{B}2.5"))
+  // err(invalid float literal)
+  println(sf("\t\n\u{C}\r 2.5 \r\u{C}\n\t"))
+  // ok(2.5)
+  println(sf("\r\n"))
+  // err(cannot parse float from empty string)
+  // string.trim still strips Unicode White_Space: parse after it to accept it.
+  // ok(5)
+  println(si(string.trim("\u{A0}5\u{3000}")))
+}

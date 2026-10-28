@@ -114,8 +114,20 @@ fn sweep() -> Vec<Row> {
     let mut rows = Vec::new();
     for module in STDLIB_MODULES {
         for func in module_functions(module) {
-            let Some(sig) = lookup_sig(module, func) else { continue };
+            let Some(mut sig) = lookup_sig(module, func) else { continue };
+            // A parameter spelled by the module's own type alias (`handler:
+            // HttpHandler`) is the aliased type at every call: route on that.
+            for (_, t) in sig.params.iter_mut() {
+                if let Ty::Named(n, a) = t
+                    && a.is_empty()
+                        && let Some(almide::ir::IrTypeDecl { kind: almide::ir::IrTypeDeclKind::Alias { target }, .. }) =
+                            almide_frontend::lower::lower_bundled_type_decl(module, n.as_str())
+                        {
+                            *t = target;
+                        }
+            }
             for (args, ret) in instantiations(&sig) {
+                let args = spread_entry_callbacks(module, func, args);
                 let raw = routers_call_name(module, func, &args, &ret, RouterHints::default());
                 let raw_fit = signature_fit(&raw, &args);
                 let fin = refuse_unless_fits(module, func, raw.clone(), &args);
@@ -124,6 +136,29 @@ fn sweep() -> Vec<Row> {
         }
     }
     rows
+}
+
+/// The callback a v1 / wasm leg actually routes: `almide_ir::entry_split`
+/// spreads a tuple-taking callback (`((K, V)) -> R`) into separate
+/// parameters before either leg lowers it, when the self-hosted body
+/// registered for the surface declares that many parameters at that position.
+/// The sweep routes the same adapted types, read from the same declaration.
+fn spread_entry_callbacks(module: &str, func: &str, mut args: Vec<Ty>) -> Vec<Ty> {
+    let Some(decl) = registry_signature(&format!("{module}.{func}")) else { return args };
+    for (i, arg) in args.iter_mut().enumerate() {
+        let Ty::Fn { params, .. } = arg else { continue };
+        let Some(Ty::Fn { params: dp, .. }) = decl.params.get(i) else { continue };
+        let Some(mask) = almide::ir::entry_split::spread_mask(params, dp.len()) else { continue };
+        *params = params
+            .iter()
+            .zip(&mask)
+            .flat_map(|(p, &spread)| match p {
+                Ty::Tuple(es) if spread => es.clone(),
+                other => vec![other.clone()],
+            })
+            .collect();
+    }
+    args
 }
 
 fn short(t: &Ty) -> String {

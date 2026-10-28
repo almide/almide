@@ -42,11 +42,14 @@ test "take, drop, take_end, drop_end, split_at clamp and abort" {
   assert_eq(l(bytes.drop_end(x, 9)), [])
   let (p, q) = bytes.split_at(x, 1)
   assert_eq((l(p), l(q)), ([1], [2, 3]))
-  testing.assert_aborts("bytes.take", () => bytes.take(bytes.from_list([1, 2, 3]), -1))
-  testing.assert_aborts("bytes.drop", () => bytes.drop(bytes.from_list([1, 2, 3]), -1))
-  testing.assert_aborts("bytes.take_end", () => bytes.take_end(bytes.from_list([1, 2, 3]), -1))
-  testing.assert_aborts("bytes.drop_end", () => bytes.drop_end(bytes.from_list([1, 2, 3]), -1))
-  testing.assert_aborts("bytes.split_at", () => bytes.split_at(bytes.from_list([1, 2, 3]), -1))
+  // A negative count is 0 (#4147), as in list.take / string.take.
+  assert_eq(bytes.to_list(bytes.take(bytes.from_list([1, 2, 3]), -1)), [])
+  assert_eq(bytes.to_list(bytes.drop(bytes.from_list([1, 2, 3]), -1)), [1, 2, 3])
+  assert_eq(bytes.to_list(bytes.take_end(bytes.from_list([1, 2, 3]), -1)), [])
+  assert_eq(bytes.to_list(bytes.drop_end(bytes.from_list([1, 2, 3]), -1)), [1, 2, 3])
+  let (h, t) = bytes.split_at(bytes.from_list([1, 2, 3]), -1)
+  assert_eq(bytes.to_list(h), [])
+  assert_eq(bytes.to_list(t), [1, 2, 3])
 }
 
 test "first, last, filter, fold, any, all, count, find, find_index" {

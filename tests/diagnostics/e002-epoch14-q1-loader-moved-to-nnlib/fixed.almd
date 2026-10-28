@@ -1,8 +1,0 @@
-// The real fix is `almide add almide/nnlib@v0.1.0`, `import nnlib` and
-// `nnlib.from_q1_0_bytes(w, 0, 1, 128)`; this case checks without dependencies,
-// so it reads the f32 weights the stdlib still decodes.
-fn main() -> Unit = {
-  let w = bytes.zeros(512)
-  let m = matrix.from_bytes_f32_le(w, 0, 1, 128)
-  println(int.to_string(matrix.cols(m)))
-}

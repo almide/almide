@@ -730,6 +730,15 @@ impl IrMutVisitor for Lower<'_> {
                 for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
                 self.ref_binders.extend(bound);
             }
+            // A head read the clone pass borrowed (`almide_list_get_ref!`)
+            // is an `Option<&T>`: its arms bind `&T` as well. Left out, a
+            // `&m` of that binder in the generic key slot of `map.get`
+            // rendered `&&String` (rustc E0277, `Borrow<&AlmideStr>`, #4274).
+            if crate::pass_clone_projection::is_borrowed_head(subject) {
+                let mut bound = Vec::new();
+                for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
+                self.ref_binders.extend(bound);
+            }
         }
         walk_expr_mut(self, expr);
         match &expr.kind {
@@ -769,6 +778,19 @@ impl IrMutVisitor for Lower<'_> {
         match &mut stmt.kind {
             IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
             | IrStmtKind::FieldAssign { value, .. } | IrStmtKind::IndexAssign { value, .. } => {
+                self.lower_stored_value(value);
+                self.own_consumed_ref_mut(value);
+            }
+            // `m[k] = v` stores BOTH the key and the value: `insert` /
+            // `upsert_with` take an owned `K` and `V`. Borrow inference
+            // records the key as an operand and the value as an assigned
+            // read (neither consumes, so a `String` param used only there is
+            // `&str` — and the ownership certifier's C4 would refuse an owned
+            // verdict for it), so the store owns them here, exactly as a
+            // `let` initializer is owned.
+            IrStmtKind::MapInsert { key, value, .. } => {
+                self.lower_stored_value(key);
+                self.own_consumed_ref_mut(key);
                 self.lower_stored_value(value);
                 self.own_consumed_ref_mut(value);
             }

@@ -1,7 +1,7 @@
-//! #1853: a stdlib import used ONLY through the type it owns — `e: Endian`
-//! in a signature, a `List[Endian]` annotation, the bare `LittleEndian`
-//! constructor, a `LittleEndian =>` arm — is a USE of that import. The E060
-//! pre-pass judged usage by qualified `bytes.*` heads alone and warned on
+//! #1853: a stdlib import used ONLY through the type it owns — `e: IpAddr`
+//! in a signature, a `List[IpAddr]` annotation, the bare `V4(..)`
+//! constructor, a `V4(..) =>` arm — is a USE of that import. The E060
+//! pre-pass judged usage by qualified `net.*` heads alone and warned on
 //! every such program. The diagnostics harness pins a warning's PRESENCE,
 //! never its absence, so the no-warning half lives here; the signature
 //! matrix walks `STDLIB_OWNED_TYPES` so a type added to the table is pinned
@@ -55,28 +55,64 @@ fn explicit_import_owned_types() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// How many type parameters `module`'s `ty` takes, read off its `type`
+/// declaration in the bundled source (`type Secret[A] = …` → 1). A
+/// runtime-backed row has no declaration and takes none.
+fn owned_type_arity(module: &str, ty: &str) -> usize {
+    let Some(source) = almide::stdlib_info::bundled_source(module) else { return 0 };
+    let program = almide_lang::parse_cached(source).unwrap_or_else(|| panic!("bundled {module} parses"));
+    program
+        .decls
+        .iter()
+        .find_map(|decl| match decl {
+            almide::ast::Decl::Type { name, generics, .. } if name.as_str() == ty => {
+                Some(generics.as_ref().map_or(0, |g| g.len()))
+            }
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+/// `ty` applied to `Int` once per declared type parameter (`Secret[Int]`),
+/// bare when it takes none — the spelling a signature must write.
+fn applied(module: &str, ty: &str) -> String {
+    match owned_type_arity(module, ty) {
+        0 => ty.to_string(),
+        n => format!("{ty}[{}]", vec!["Int"; n].join(", ")),
+    }
+}
+
 #[test]
 fn signature_only_use_of_every_owned_type_is_a_use() {
     let cells = explicit_import_owned_types();
     assert!(cells.len() >= 11, "the owned-type table shrank: {cells:?}");
     for (module, ty) in cells {
+        let t = applied(module, ty);
         assert_no_e060(
-            &format!("{module}'s {ty} in a signature"),
+            &format!("{module}'s {t} in a signature"),
             &format!(
-                "import {module}\n\nfn keep(x: {ty}) -> {ty} = x\n\nfn main() -> Unit = println(\"ok\")\n"
+                "import {module}\n\nfn keep(x: {t}) -> {t} = x\n\nfn main() -> Unit = println(\"ok\")\n"
             ),
         );
     }
 }
 
 #[test]
+fn a_generic_owned_type_is_spelled_with_its_arguments() {
+    // The arity comes from the declaration, so the matrix above spells a
+    // generic owned type applied, never bare (E093).
+    assert_eq!(applied("secret", "Secret"), "Secret[Int]");
+    assert_eq!(applied("http", "HttpRequest"), "HttpRequest");
+}
+
+#[test]
 fn annotation_and_generic_argument_use_is_a_use() {
     assert_no_e060(
-        "List[Endian] annotation",
-        r#"import bytes
+        "List[IpAddr] annotation",
+        r#"import net
 
 fn main() -> Unit = {
-  let xs: List[Endian] = [LittleEndian, BigEndian]
+  let xs: List[IpAddr] = [V4(127, 0, 0, 1), V6([0, 0, 0, 0, 0, 0, 0, 1])]
   println(int.to_string(list.len(xs)))
 }
 "#,
@@ -86,17 +122,17 @@ fn main() -> Unit = {
 #[test]
 fn bare_constructor_use_is_a_use() {
     assert_no_e060(
-        "bare LittleEndian value",
-        r#"import bytes
+        "bare V4 value",
+        r#"import net
 
-fn main() -> Unit = println("${LittleEndian}")
+fn main() -> Unit = println("${V4(127, 0, 0, 1)}")
 "#,
     );
     assert_no_e060(
-        "LittleEndian in a match arm",
-        r#"import bytes
+        "V4 in a match arm",
+        r#"import net
 
-fn main() -> Unit = println(match LittleEndian { LittleEndian => "le", BigEndian => "be" })
+fn main() -> Unit = println(match V4(127, 0, 0, 1) { V4(_, _, _, _) => "v4", V6(_) => "v6" })
 "#,
     );
 }
@@ -104,46 +140,46 @@ fn main() -> Unit = println(match LittleEndian { LittleEndian => "le", BigEndian
 #[test]
 fn owning_a_type_is_not_a_use_of_the_import() {
     assert_e060_on(
-        "import bytes with neither a call nor a type",
-        r#"import bytes
+        "import net with neither a call nor a type",
+        r#"import net
 
-fn main() -> Unit = println("no bytes used")
+fn main() -> Unit = println("no net used")
 "#,
-        "bytes",
+        "net",
     );
 }
 
 #[test]
 fn a_user_shadow_of_the_owned_type_is_not_a_use() {
-    // #1837: the program's own `type Endian` is `self.Endian`; its bare
-    // spellings (and its cases) are the user's, so `import bytes` stays unused.
+    // #1837: the program's own `type IpAddr` is `self.IpAddr`; its bare
+    // spellings (and its cases) are the user's, so `import net` stays unused.
     assert_e060_on(
-        "user type Endian beside import bytes",
-        r#"import bytes
+        "user type IpAddr beside import net",
+        r#"import net
 
-type Endian = | Little | Big
+type IpAddr = | Little | Big
 
-fn f(e: Endian) -> Endian = e
+fn f(e: IpAddr) -> IpAddr = e
 
 fn main() -> Unit = println(match f(Little) { Little => "little", Big => "big" })
 "#,
-        "bytes",
+        "net",
     );
 }
 
 #[test]
 fn the_stdlib_constructor_beside_a_user_shadow_is_still_a_use() {
-    // The shadow reuses the TYPE name only; `LittleEndian` is still the
-    // `bytes` module's case, judged by the case's owner, not the type name.
+    // The shadow reuses the TYPE name only; `V4` is still the `net`
+    // module's case, judged by the case's owner, not the type name.
     assert_no_e060(
-        "LittleEndian beside a user type Endian",
-        r#"import bytes
+        "V4 beside a user type IpAddr",
+        r#"import net
 
-type Endian = | Little | Big
+type IpAddr = | Little | Big
 
-fn f(e: Endian) -> Endian = e
+fn f(e: IpAddr) -> IpAddr = e
 
-fn main() -> Unit = println("${LittleEndian} ${match f(Little) { Little => "little", Big => "big" }}")
+fn main() -> Unit = println("${V4(127, 0, 0, 1)} ${match f(Little) { Little => "little", Big => "big" }}")
 "#,
     );
 }

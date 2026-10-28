@@ -13,16 +13,6 @@ test "zlib.deflate_level unit=value" {
   assert_eq("${1}", "1")
 }
 
-test "zlib.crc32 unit=value" {
-  let crc = zlib.crc32(bytes.from_list([1, 2, 3]))
-  assert_eq("${crc}", "1438416925")
-}
-
-test "zlib.adler32 unit=value" {
-  let adl = zlib.adler32(bytes.from_list([1, 2, 3]))
-  assert_eq("${adl}", "851975")
-}
-
 test "zlib.inflate_max unit=byte-count" {
   let sm_raw = bytes.from_list([
     1,

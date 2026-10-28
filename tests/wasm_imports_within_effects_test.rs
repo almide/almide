@@ -114,8 +114,12 @@ const BASE_CAPS: &[u32] = &[cap::STDOUT, cap::CLOCK];
 
 /// The capability ids each effect adds to [`BASE_CAPS`], as [`BY_EFFECT`].
 const CAPS_BY_EFFECT: &[(&str, &[u32])] = &[
-    ("FS.read", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
-    ("FS.write", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
+    // The temp root (`fs.temp_dir`, the parent `fs.create_temp_*` names an
+    // entry under) is `$TMPDIR` ?? "/tmp" (C-189), so the file leaves reach
+    // the environment — the `environ_get` their [`BY_EFFECT`] rows already
+    // allow — and writing may draw a temp name's entropy (`random_get`).
+    ("FS.read", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN, cap::ENV]),
+    ("FS.write", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN, cap::ENV, cap::ENTROPY]),
     ("IO.stdin", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
     ("IO.stdout", &[]),
     ("IO.stderr", &[]),
@@ -239,6 +243,14 @@ fn every_shipped_module_imports_only_what_its_effects_allow() {
         .filter(|p| p.extension().is_some_and(|x| x == "almd"))
         .collect();
     fixtures.sort();
+    // Every fixture on a full run; the CI slice (ALMIDE_CI_SLICE) plus the
+    // change's own fixtures otherwise. The blind-gate floors below count the
+    // whole corpus and are judged on a full run only; a slice must still
+    // judge at least one fixture.
+    let fixtures = almide_corpus::select(fixtures, "wasm_imports_within_effects", |p| {
+        format!("spec/wasm_cross/{}", p.file_name().unwrap_or_default().to_string_lossy())
+    });
+    let full = almide_corpus::full_run();
     let tmp = tempfile::tempdir().expect("tempdir");
     let bin = almide_bin();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -302,7 +314,7 @@ fn every_shipped_module_imports_only_what_its_effects_allow() {
         rows.len(),
         wrong.len()
     );
-    assert!(pure > 600, "only {pure} effect-free fixtures were judged — the effect reader went blind");
-    assert!(io_with_fs >= 15, "only {io_with_fs} IO fixtures import the file system — the import reader went blind");
+    assert!(pure > if full { 600 } else { 0 }, "only {pure} effect-free fixtures were judged — the effect reader went blind");
+    assert!(!full || io_with_fs >= 15, "only {io_with_fs} IO fixtures import the file system — the import reader went blind");
     assert!(wrong.is_empty(), "{} fixture(s):\n{}", wrong.len(), wrong.join("\n"));
 }

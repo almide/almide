@@ -112,8 +112,8 @@ fn tag(next: HttpHandler) -> HttpHandler = (req) => {
 let app = http.wrap(http.router([http.route("GET /hi/{name}", hello)]) ?? hello, [tag])
 
 effect fn visit(target: String) -> String = {
-  let res = app(http.new_request("GET", target, "", [:]))!
-  "${http.status_code(res)} ${http.body(res)} ${http.get_header(res, "X-Tag") ?? "-"}"
+  let res = app(http.new_request("GET", target, "", []))!
+  "${http.status(res)} ${http.body(res)} ${http.header(res, "X-Tag") ?? "-"}"
 }
 
 effect fn main() -> Unit = {
@@ -151,7 +151,7 @@ fn top_level_wrapped_router_runs_on_the_structural_leg() {
 /// on two different closure types.
 const BRANCHED_HANDLER_ARGS: &str = r#"import http
 
-effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", []))!)
 
 effect fn run(flag: Bool) -> String = {
   let a = http.wrap(if flag then (req) => http.response(200, "a") else (req) => http.response(201, "b"), [])
@@ -203,13 +203,13 @@ fn branched_lambdas_into_an_aliased_effect_slot_run_on_both_legs() {
 /// borrowed fn param yields the closure handle, which the borrow derefs.
 const MIXED_ARM_HOOKS: &str = r#"import http
 
-effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", []))!)
 "#;
 
 const MIXED_ARM_APP: &str = r#"import http
 import hooks
 
-effect fn local_hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
+effect fn local_hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", []))!)
 
 effect fn run(flag: Bool) -> String = {
   let a = http.wrap(if flag then http.wrap((req) => http.response(201, "a"), []) else (req) => http.response(200, "b"), [])
@@ -295,7 +295,7 @@ const HANDLERS_THROUGH_DATA: &str = r#"import http
 
 type Boxed = { name: String, h: HttpHandler }
 
-effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", []))!)
 
 effect fn main() -> Unit = {
   let none_h: HttpHandler? = none
@@ -349,7 +349,7 @@ fn nested_middleware_lambdas_take_the_declared_effect_type() {
 }
 
 /// The expected type of a GENERIC call's result flows back into the
-/// arguments that produce it: `map.get_or(m, k, d)` in a `HttpHandler` slot
+/// arguments that produce it: `map.get(m, k) ?? d` in a `HttpHandler` slot
 /// makes `V` the handler, so the map literal's value lambdas and the default
 /// are effect closures; `map.values(m)` in a `List[HttpMiddleware]` slot does
 /// the same for `m`'s values; and a `let` annotation reaches through a pipe
@@ -358,15 +358,15 @@ fn nested_middleware_lambdas_take_the_declared_effect_type() {
 /// type resolution failed"; the pipe was refused with E001.
 const HANDLERS_THROUGH_GENERIC_RETURNS: &str = r#"import http
 
-effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", []))!)
 
 effect fn main() -> Unit = {
-  let r = http.route("GET /p", map.get_or(["k0": (req) => http.response(200, "a"), "k1": (req) => http.redirect("/r")], "k0", (req) => http.response(200, "y")))
-  let b = hit(map.get_or(["k0": (req) => http.response(200, "x")], "zz", (req) => http.response(200, "b")))!
+  let r = http.route("GET /p", map.get(["k0": (req) => http.response(200, "a"), "k1": (req) => http.redirect("/r")], "k0") ?? ((req) => http.response(200, "y")))
+  let b = hit(map.get(["k0": (req) => http.response(200, "x")], "zz") ?? ((req) => http.response(200, "b")))!
   let w = http.wrap((req) => http.response(200, "c"), map.values(["k0": (next) => http.wrap(next, []), "k1": (next) => next]))
   let mws: List[HttpMiddleware] = list.range(0, 2) |> list.map((i) => (next) => (req) => http.set_header(next(req)!, "x${i}", "1"))
-  let resp = http.wrap((req) => http.response(200, "d"), mws)(http.new_request("GET", "/", "", [:]))!
-  println(hit(r.handler)! + b + hit(w)! + http.body(resp) + (http.get_header(resp, "x0") ?? "-") + (http.get_header(resp, "x1") ?? "-"))
+  let resp = http.wrap((req) => http.response(200, "d"), mws)(http.new_request("GET", "/", "", []))!
+  println(hit(r.handler)! + b + hit(w)! + http.body(resp) + (http.header(resp, "x0") ?? "-") + (http.header(resp, "x1") ?? "-"))
 }
 "#;
 
@@ -383,11 +383,11 @@ fn effect_lambdas_shaped_through_a_generic_return_run_on_both_legs() {
 /// `map.get`, a fold's init and a `Result`.
 const GENERIC_RETURNS_DECIDED_BY_DATA: &str = r#"import http
 
-effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", []))!)
 
 effect fn main() -> Unit = {
   let m = ["k": (req) => http.response(200, "z")]
-  let a = hit(map.get_or(m, "k", (req) => http.response(200, "y")))!
+  let a = hit(map.get(m, "k") ?? ((req) => http.response(200, "y")))!
   let ls = [(req) => http.response(200, "q")]
   let b = hit(list.first(ls) ?? ((req) => http.response(200, "w")))!
   let c = hit(option.unwrap_or(list.get(ls, 5), (req) => http.response(200, "e")))!
@@ -396,11 +396,11 @@ effect fn main() -> Unit = {
 "#;
 const GENERIC_RETURNS_MORE_SHAPES: &str = r#"import http
 
-effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", []))!)
 
 effect fn main() -> Unit = {
   let a = hit(list.first([(req) => http.response(200, "a")]) ?? ((req) => http.response(200, "x")))!
-  let b = hit(list.get_or([(req) => http.response(200, "b")], 0, (req) => http.response(200, "x")))!
+  let b = hit(list.get([(req) => http.response(200, "b")], 0) ?? ((req) => http.response(200, "x")))!
   let mw = map.values(["k": (next) => next])
   let c = hit(http.wrap((req) => http.response(200, "c"), mw))!
   let d = hit(option.unwrap_or_else(map.get(["k": (req) => http.response(200, "d")], "k"), () => (req) => http.response(200, "x")))!

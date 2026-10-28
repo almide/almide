@@ -1,0 +1,74 @@
+// wasm:skip — process.start keeps a live child behind a handle, a native runtime table; the wasm legs refuse the family at check time (E081, proofs/target-availability.toml)
+import process
+import env
+
+fn sleeper(timeout_ms: Int) -> process.ProcessCommand = process.ProcessCommand {
+  cmd: "perl",
+  args: ["-e", "sleep 100"],
+  timeout_ms: timeout_ms,
+}
+
+test "start returns at once and poll is none while the child runs" {
+  let c = process.start(sleeper(0))!
+  assert(process.child_pid(c)! > 0)
+  assert_eq(process.poll(c)!, none)
+  match process.stop(c, 200) {
+    ok(s) => assert(s.code != 0),
+    err(_) => assert(false),
+  }
+}
+
+test "wait gives the exit code and the captured output" {
+  let c = process.start(process.ProcessCommand { cmd: "perl", args: ["-e", 'print "out"; print STDERR "err"; exit 3'] })!
+  let s = process.wait(c)!
+  assert_eq(s.code, 3)
+  assert_eq(s.stdout, "out")
+  assert_eq(s.stderr, "err")
+}
+
+test "poll answers the outcome once the child has ended, and again after" {
+  let c = process.start(process.ProcessCommand { cmd: "perl", args: ["-e", "exit 0"] })!
+  let s = process.wait(c)!
+  assert_eq(s.code, 0)
+  match process.poll(c)! {
+    some(ok(again)) => assert_eq(again.code, 0),
+    _ => assert(false),
+  }
+}
+
+test "the stdin text reaches the child" {
+  let c = process.start(process.ProcessCommand { cmd: "cat", args: [], stdin: "piped" })!
+  assert_eq(process.wait(c)!.stdout, "piped")
+}
+
+test "read_new_stdout answers only what is new since the last read" {
+  let c = process.start(process.ProcessCommand { cmd: "perl", args: ["-e", '$| = 1; print "a"; sleep 100'] })!
+  env.sleep_ms(500)
+  assert_eq(process.read_new_stdout(c)!, "a")
+  assert_eq(process.read_new_stdout(c)!, "")
+  let _ = process.stop(c, 200)
+}
+
+test "a deadline ends the child with the pinned err" {
+  let c = process.start(sleeper(100))!
+  match process.wait(c) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "exec timed out after 100ms"),
+  }
+}
+
+test "kill by child_pid ends the child" {
+  let c = process.start(sleeper(0))!
+  process.kill(process.child_pid(c)!, 9)!
+  match process.wait(c) {
+    ok(s) => assert_eq(s.code, 0 - 1),
+    err(_) => assert(false),
+  }
+}
+
+test "a missing program is the start err naming it" {
+  match process.start(process.ProcessCommand { cmd: "almide-no-such-binary-1040", args: [] }) {
+    ok(_) => assert(false),
+    err(e) => assert(string.starts_with(e, 'process.start("almide-no-such-binary-1040"): ')),
+  }
+}

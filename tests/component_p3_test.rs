@@ -161,8 +161,8 @@ fn dir() -> PathBuf {
 const ECHO: &str = r#"import io
 
 effect fn main() -> Unit = {
-  let b = io.read_byte()
-  let l = io.read_line()!
+  let b = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)
+  let l = (io.read_line() ?? "")
   let rest = io.read_all()
   eprintln("err-side")
   println("b=${b} l=${l} rest=${rest}")
@@ -300,13 +300,13 @@ const FS_ERRNO_TABLE: &str = r#"import fs
 
 effect fn main() -> Unit = {
   println(match fs.read_text("f.txt/x") { ok(v) => "ok(${v})", err(m) => m })
-  println(match fs.write("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.write_text("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("adir") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt/sub") { ok(_) => "ok", err(m) => m })
   println(match fs.read_text("nope.txt") { ok(v) => "ok(${v})", err(m) => m })
-  println(match fs.write("adir", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.write_text("adir", "z") { ok(_) => "ok", err(m) => m })
 }
 "#;
 
@@ -526,17 +526,17 @@ const FS_WRITE: &str = r#"import fs
 
 effect fn main() -> Unit = {
   let _ = fs.mkdir_p("wtmp/deep/nest")!
-  let _ = fs.write("wtmp/deep/nest/x.txt", "written-body")!
-  let _ = fs.append("wtmp/deep/nest/x.txt", "+tail")!
+  let _ = fs.write_text("wtmp/deep/nest/x.txt", "written-body")!
+  let _ = fs.append_text("wtmp/deep/nest/x.txt", "+tail")!
   println(fs.read_text("wtmp/deep/nest/x.txt")!)
-  let _ = fs.write_bytes("wtmp/deep/nest/b.bin", [72, 73, 10])!
+  let _ = fs.write_bytes("wtmp/deep/nest/b.bin", bytes.from_list([72, 73, 10]))!
   println(fs.read_text("wtmp/deep/nest/b.bin")!)
   let _ = fs.remove("wtmp/deep/nest/x.txt")!
   let _ = fs.remove("wtmp/deep/nest/b.bin")!
   let _ = fs.remove("wtmp/deep/nest")!
   let _ = fs.remove_all("wtmp/deep")!
   println(if fs.exists("wtmp/deep") then "BAD-still-there" else "cleaned")
-  match fs.write("wtmp/deep/nope.txt", "x") {
+  match fs.write_text("wtmp/deep/nope.txt", "x") {
     ok(_)  => println("BAD-ghost-dir"),
     err(m) => println("werr=${m}"),
   }
@@ -567,7 +567,7 @@ fn p3_component_writes_the_filesystem() {
 HI
 
 cleaned
-werr=fs.write(\"wtmp/deep/nope.txt\"): No such file or directory (os error 2)
+werr=fs.write_text(\"wtmp/deep/nope.txt\"): No such file or directory (os error 2)
 ",
         "fs write surface diverged (stderr: {err})"
     );
@@ -796,21 +796,21 @@ effect fn main() -> Unit = {{
     ok(b) => println("get:${{b}}"),
     err(e) => println("get-err:${{e}}"),
   }}
-  match http.post("http://{addr}/echo", "tiny body") {{
+  match http.request("POST", "http://{addr}/echo", "tiny body", []) {{
     ok(b) => println("post:${{b}}"),
     err(e) => println("post-err:${{e}}"),
   }}
   let chunk = string.repeat("abcdefgh", 32768)
   let body = chunk + chunk + chunk + chunk + chunk + chunk + chunk + chunk
-  match http.put("http://{addr}/echo", body) {{
+  match http.request("PUT", "http://{addr}/echo", body, []) {{
     ok(b) => println("put:${{b}}"),
     err(e) => println("put-err:${{e}}"),
   }}
-  match http.patch("http://{addr}/echo", "patch") {{
+  match http.request("PATCH", "http://{addr}/echo", "patch", []) {{
     ok(b) => println("patch:${{b}}"),
     err(e) => println("patch-err:${{e}}"),
   }}
-  match http.delete("http://{addr}/gone") {{
+  match http.request("DELETE", "http://{addr}/gone", "", []) {{
     ok(b) => println("del:${{b}}"),
     err(e) => println("del-err:${{e}}"),
   }}
@@ -876,8 +876,8 @@ effect fn main() -> Unit = {{
     ok(b) => println("get:${{b}}"),
     err(e) => println("get-err:${{e}}"),
   }}
-  match http.get_status("http://{addr}/late") {{
-    ok((c, t)) => println("gets:${{c}}:" + t),
+  match http.get_response("http://{addr}/late") {{
+    ok(r) => println("gets:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("gets err:" + e),
   }}
 }}
@@ -905,13 +905,13 @@ effect fn main() -> Unit = {{
 }
 
 /// #1710 PR B, the framed family on the p3 component: `request` /
-/// `request_status` / `get_status` / `request_bytes` / `get_bytes` ride
-/// the same async-lowered exchange (ops 48..=50). The frame the guest
+/// `send` / `get_response` ride the same async-lowered exchange (op 48
+/// and the response op 65; op 50, the retired bytes form, is unused). The frame the guest
 /// builds (stdlib/http_framed.almd: method, body, header cells with CHAR
 /// counts) is parsed in the shim; the method lands as the named variant
 /// case (or `other(string)`), the headers through `fields.append` (the
 /// echo server reflects `x-probe` into the body to prove they crossed),
-/// and `request_status` prefixes the decimal status the host lane prints.
+/// and `send` answers the status the host lane prints.
 #[test]
 fn p3_component_speaks_framed_http() {
     let addr = spawn_http_echo();
@@ -921,27 +921,27 @@ fn p3_component_speaks_framed_http() {
         r#"import http
 
 effect fn main() -> Unit = {{
-  match http.request("POST", "http://{addr}/echo", "héllo", ["x-probe": "p3"]) {{
+  match http.request("POST", "http://{addr}/echo", "héllo", [("x-probe", "p3")]) {{
     ok(t) => println("req:" + t),
     err(e) => println("req err:" + e),
   }}
-  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), map.new()) {{
-    ok((c, t)) => println("status:${{c}}:" + t),
+  match http.send(http.new_request("PUT", "http://{addr}/echo", string.repeat("x", 2048), [])) {{
+    ok(r) => println("status:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("status err:" + e),
   }}
-  match http.get_status("http://{addr}/hello") {{
-    ok((c, t)) => println("gets:${{c}}:" + t),
+  match http.get_response("http://{addr}/hello") {{
+    ok(r) => println("gets:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("gets err:" + e),
   }}
-  match http.get_bytes("http://{addr}/hello") {{
+  match (http.get_response("http://{addr}/hello") |> result.map((r) => http.body_bytes(r))) {{
     ok(b) => println("bytes:${{bytes.len(b)}}"),
     err(e) => println("bytes err:" + e),
   }}
-  match http.request_bytes("DELETE", "http://{addr}/gone", "", map.new()) {{
+  match (http.send(http.new_request("DELETE", "http://{addr}/gone", "", [])) |> result.map((r) => http.body_bytes(r))) {{
     ok(b) => println("rb:${{bytes.len(b)}}"),
     err(e) => println("rb err:" + e),
   }}
-  match http.request("PROPFIND", "http://{addr}/echo", "z", map.new()) {{
+  match http.request("PROPFIND", "http://{addr}/echo", "z", []) {{
     ok(t) => println("other:" + t),
     err(e) => println("other err:" + e),
   }}
@@ -972,7 +972,7 @@ effect fn main() -> Unit = {{
 /// string pointers) was written over the RET scratch where the trailers
 /// future's pending ok(none) buffer lived, and the NEXT exchange trapped
 /// (`failed to read result … unknown handle index <an address>`); the
-/// waitable set leaked per failed exchange; and a bare `get_status` as
+/// waitable set leaked per failed exchange; and a bare status read as
 /// the FIRST call trapped `index 3 is not a resource` — the status was
 /// read AFTER consume-body had taken the response by value. The program
 /// below is every one of those shapes in sequence against one echo.
@@ -991,16 +991,16 @@ fn p3_http_transport_error_leaves_the_next_exchange_intact() {
         r#"import http
 
 effect fn main() -> Unit = {{
-  match http.get_status("http://{addr}/hello") {{
-    ok((c, t)) => println("first:${{c}}:" + t),
+  match http.get_response("http://{addr}/hello") {{
+    ok(r) => println("first:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("first err:" + e),
   }}
-  match http.request("POST", "http://{dead}/echo", "héllo", ["x-probe": "p3"]) {{
+  match http.request("POST", "http://{dead}/echo", "héllo", [("x-probe", "p3")]) {{
     ok(t) => println("dead:" + t),
     err(e) => println("dead err"),
   }}
-  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), ["x-probe": "again"]) {{
-    ok((c, t)) => println("after:${{c}}:" + t),
+  match http.send(http.new_request("PUT", "http://{addr}/echo", string.repeat("x", 2048), [("x-probe", "again")])) {{
+    ok(r) => println("after:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("after err:" + e),
   }}
   match http.get("http://{dead}/hello") {{
@@ -1054,13 +1054,13 @@ fn p3_component_spells_the_fs_errno_table() {
     };
     let expected = [
         format!("fs.read_text(\"f.txt/x\"): {}", ENOTDIR.text),
-        format!("fs.write(\"f.txt/y\"): {}", ENOTDIR.text),
+        format!("fs.write_text(\"f.txt/y\"): {}", ENOTDIR.text),
         format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
         format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
         "ok".to_string(),
         format!("fs.mkdir_p(\"f.txt/sub\"): {}", ENOTDIR.text),
         format!("fs.read_text(\"nope.txt\"): {}", ENOENT.text),
-        format!("fs.write(\"adir\"): {}", EISDIR.text),
+        format!("fs.write_text(\"adir\"): {}", EISDIR.text),
     ]
     .join("\n")
         + "\n";
@@ -1121,7 +1121,7 @@ fn p3_components_need_no_feature_flag() {
             r#"import fs
 
 effect fn main() -> Unit = {
-  fs.write("out.txt", fs.read_text("in.txt")! + " copied")!
+  fs.write_text("out.txt", fs.read_text("in.txt")! + " copied")!
   println(fs.read_text("out.txt")!)
 }
 "#
@@ -1185,7 +1185,6 @@ effect fn main() -> Unit = {
 // cached list), argv[0] skipped with an empty and a spaced argument, and
 // a sleep that is observed on the monotonic clock.
 const ENV_PROBE: &str = r#"import env
-import process
 
 effect fn main() -> Unit = {
   println(env.get("P3_PROBE_KEY") ?? "<none>")
@@ -1198,8 +1197,6 @@ effect fn main() -> Unit = {
   for x in a {
     println("arg=[${x}]")
   }
-  let pa = process.args()
-  println("process argc=${list.len(pa)}")
   let t0 = datetime.monotonic_ns()
   env.sleep_ms(120)
   let dt = datetime.monotonic_ns() - t0
@@ -1236,7 +1233,7 @@ fn p3_component_serves_env_args_and_sleep_like_native() {
     assert!(native.status.success(), "native: {}", String::from_utf8_lossy(&native.stderr));
     assert_eq!(
         native_out,
-        "välue ✓=x\n<none>\n\n<none>\nvälue ✓=x\nargc=3\narg=[one]\narg=[two words]\narg=[]\nprocess argc=4\nslept\ndone\n",
+        "välue ✓=x\n<none>\n\n<none>\nvälue ✓=x\nargc=3\narg=[one]\narg=[two words]\narg=[]\nslept\ndone\n",
         "the native oracle moved"
     );
     if !wasmtime_available() || !wasmtime_runs_p3() {

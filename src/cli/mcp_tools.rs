@@ -19,6 +19,19 @@
 //! its `--check` form; the writing forms (`almide fmt`, `almide fix`,
 //! `almide apply`) stay on the CLI, where the edit is visible in the agent's
 //! own transcript. `almide_survive` judges an edit without writing it.
+//!
+//! **Arguments are data, never flags (#4178).** The client is an agent that
+//! may be steered by text it read, so every argument is treated as untrusted:
+//! a path is confined to the project root (the server's working directory,
+//! canonicalized, so `..` and a symlink out of it are both refused) and passed
+//! after `--`, where the CLI cannot read it as a flag; a free-text value rides
+//! `--flag=value`; an enum is checked against its values. `"path":
+//! "--update-snapshots"` used to rewrite a test's expected snapshot.
+//!
+//! **Offline (#4179).** Every child runs with `ALMIDE_DEPS_CACHE_ONLY`: the
+//! dependencies resolve from what is already on disk, a dependency that is not
+//! cached is a tool error, and nothing clones a repository or writes
+//! `almide.lock` — so `readOnlyHint` / `openWorldHint: false` stay true.
 
 use serde_json::{json, Value};
 
@@ -35,18 +48,19 @@ struct CliRun {
 /// the tool result is produced by the same build of the same compiler the user
 /// would get from the shell, and a compiler panic on a malformed input kills a
 /// subprocess instead of the session.
-fn run_cli(args: &[String], cwd: Option<&str>) -> Result<CliRun, String> {
+fn run_cli(args: &[String], cwd: Option<&std::path::Path>) -> Result<CliRun, String> {
     run_cli_with_stdin(args, cwd, None)
 }
 
 /// [`run_cli`] with `stdin` fed to the child (the proposed edit of
 /// `almide_survive`, which the CLI reads from `--with -`).
-fn run_cli_with_stdin(args: &[String], cwd: Option<&str>, stdin: Option<&str>) -> Result<CliRun, String> {
+fn run_cli_with_stdin(args: &[String], cwd: Option<&std::path::Path>, stdin: Option<&str>) -> Result<CliRun, String> {
     use std::io::Write;
     let exe = std::env::current_exe()
         .map_err(|e| format!("cannot locate the almide binary: {}", e))?;
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args)
+        .env("ALMIDE_DEPS_CACHE_ONLY", "1")
         .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -143,6 +157,40 @@ fn with_stderr(obj: &mut Value, run: &CliRun) {
     }
 }
 
+// ── argument confinement (#4178) ──
+
+/// Where a tool call runs: the project root every path must stay under, and
+/// the (confined) directory the child runs in.
+struct Place {
+    root: std::path::PathBuf,
+    cwd: std::path::PathBuf,
+}
+
+/// The project root is the directory the server was started in.
+fn place(args: &Value) -> Result<Place, String> {
+    let root = std::env::current_dir()
+        .and_then(|d| d.canonicalize())
+        .map_err(|e| format!("cannot resolve the server's project root: {}", e))?;
+    let cwd = match arg_str(args, "cwd") {
+        None => root.clone(),
+        Some(c) => super::project_scope::confined(&root, &root, &c, "cwd")?,
+    };
+    Ok(Place { root, cwd })
+}
+
+/// A confined path argument, handed to the child as given (it runs in the
+/// confined cwd) after the confinement check.
+fn path_arg(pl: &Place, p: &str, key: &str) -> Result<String, String> {
+    super::project_scope::confined(&pl.root, &pl.cwd, p, key)?;
+    Ok(p.to_string())
+}
+
+/// A free-text value for `--flag`: passed as `--flag=value`, which the CLI
+/// reads as that flag's value whatever it starts with.
+fn flag_eq(flag: &str, value: &str) -> String {
+    format!("{}={}", flag, value)
+}
+
 // ── tools ──
 
 /// `almide check --json` → the diagnostic list, verbatim.
@@ -153,8 +201,9 @@ fn with_stderr(obj: &mut Value, run: &CliRun) {
 /// the span it replaces.
 fn tool_check(args: &Value) -> Result<Value, String> {
     let file = require_str(args, "file")?;
-    let cwd = arg_str(args, "cwd");
-    let run = run_cli(&["check".into(), file.clone(), "--json".into()], cwd.as_deref())?;
+    let pl = place(args)?;
+    let target = path_arg(&pl, &file, "file")?;
+    let run = run_cli(&["check".into(), "--json".into(), "--".into(), target], Some(&pl.cwd))?;
     let (diagnostics, unparsed) = split_json_lines(&run.stdout);
     let errors = count_level(&diagnostics, "error");
     let warnings = count_level(&diagnostics, "warning");
@@ -180,17 +229,16 @@ fn tool_check(args: &Value) -> Result<Value, String> {
 /// `runner_output_unstructured` rather than parsed into a shape the CLI does
 /// not actually promise.
 fn tool_test(args: &Value) -> Result<Value, String> {
-    let mut argv: Vec<String> = vec!["test".into()];
-    if let Some(path) = arg_str(args, "path") {
-        argv.push(path);
-    }
-    argv.push("--json".into());
+    let pl = place(args)?;
+    let mut argv: Vec<String> = vec!["test".into(), "--json".into()];
     if let Some(filter) = arg_str(args, "run") {
-        argv.push("--run".into());
-        argv.push(filter);
+        argv.push(flag_eq("--run", &filter));
     }
-    let cwd = arg_str(args, "cwd");
-    let run = run_cli(&argv, cwd.as_deref())?;
+    if let Some(path) = arg_str(args, "path") {
+        argv.push("--".into());
+        argv.push(path_arg(&pl, &path, "path")?);
+    }
+    let run = run_cli(&argv, Some(&pl.cwd))?;
     let (rows, other) = split_json_lines(&run.stdout);
     let files: Vec<Value> = rows.into_iter().filter(|v| v.get("file").is_some()).collect();
     let passed = files.iter().filter(|v| v.get("status").and_then(|s| s.as_str()) == Some("pass")).count();
@@ -213,24 +261,29 @@ fn tool_test(args: &Value) -> Result<Value, String> {
 /// surface of a file or a stdlib module.
 fn tool_api(args: &Value) -> Result<Value, String> {
     let target = require_str(args, "target")?;
-    let cwd = arg_str(args, "cwd");
+    let pl = place(args)?;
     let mut argv: Vec<String> = vec!["ide".into()];
     if target == "@stdlib" {
         argv.push("stdlib-snapshot".into());
+        argv.push("--json".into());
         if let Some(modules) = arg_str(args, "modules") {
-            argv.push("--modules".into());
-            argv.push(modules);
+            argv.push(flag_eq("--modules", &modules));
         }
     } else {
         argv.push("outline".into());
-        argv.push(target.clone());
+        argv.push("--json".into());
         if let Some(filter) = arg_str(args, "filter") {
-            argv.push("--filter".into());
-            argv.push(filter);
+            argv.push(flag_eq("--filter", &filter));
         }
+        argv.push("--".into());
+        argv.push(match target.strip_prefix("@stdlib/") {
+            // A stdlib module name, never a path: letters, digits, `_`, `.`.
+            Some(m) if !m.is_empty() && m.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') => target.clone(),
+            Some(_) => return Err(format!("`{}` is not a stdlib module name", target)),
+            None => path_arg(&pl, &target, "target")?,
+        });
     }
-    argv.push("--json".into());
-    let run = run_cli(&argv, cwd.as_deref())?;
+    let run = run_cli(&argv, Some(&pl.cwd))?;
     if run.exit_code != 0 {
         return Err(format!(
             "{}\n(hint: a file target must type-check first — call almide_check on it)",
@@ -248,7 +301,11 @@ fn tool_api(args: &Value) -> Result<Value, String> {
 /// not parsed into fields, because it does not have any.
 fn tool_explain(args: &Value) -> Result<Value, String> {
     let code = require_str(args, "code")?;
-    let run = run_cli(&["explain".into(), code.clone()], None)?;
+    if code.is_empty() || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(format!("`{}` is not a diagnostic code (e.g. E042)", code));
+    }
+    let pl = place(args)?;
+    let run = run_cli(&["explain".into(), "--".into(), code.clone()], Some(&pl.cwd))?;
     if run.exit_code != 0 {
         return Err(run.stderr.trim().to_string());
     }
@@ -257,10 +314,12 @@ fn tool_explain(args: &Value) -> Result<Value, String> {
 
 /// `almide fmt --check --json` → which files are not formatted. Never writes.
 fn tool_fmt_check(args: &Value) -> Result<Value, String> {
-    let mut argv: Vec<String> = vec!["fmt".into(), "--check".into(), "--json".into()];
-    argv.extend(arg_strs(args, "paths"));
-    let cwd = arg_str(args, "cwd");
-    let run = run_cli(&argv, cwd.as_deref())?;
+    let pl = place(args)?;
+    let mut argv: Vec<String> = vec!["fmt".into(), "--check".into(), "--json".into(), "--".into()];
+    for p in arg_strs(args, "paths") {
+        argv.push(path_arg(&pl, &p, "paths")?);
+    }
+    let run = run_cli(&argv, Some(&pl.cwd))?;
     let report: Value = serde_json::from_str(run.stdout.trim()).map_err(|_| {
         format!(
             "almide fmt produced no JSON report (exit {}): {}",
@@ -280,13 +339,17 @@ fn tool_fmt_check(args: &Value) -> Result<Value, String> {
 fn tool_survive(args: &Value) -> Result<Value, String> {
     let file = require_str(args, "file")?;
     let edit = require_str(args, "edit")?;
-    let mut argv: Vec<String> = vec!["survive".into(), file.clone(), "--with".into(), "-".into(), "--json".into()];
+    let pl = place(args)?;
+    let mut argv: Vec<String> = vec!["survive".into(), "--with".into(), "-".into(), "--json".into()];
     if let Some(kind) = arg_str(args, "kind") {
-        argv.push("--as".into());
-        argv.push(kind);
+        if !matches!(kind.as_str(), "auto" | "patch" | "text") {
+            return Err(format!("`kind` = `{}` is not one of auto, patch, text", kind));
+        }
+        argv.push(flag_eq("--as", &kind));
     }
-    let cwd = arg_str(args, "cwd");
-    let run = run_cli_with_stdin(&argv, cwd.as_deref(), Some(&edit))?;
+    argv.push("--".into());
+    argv.push(path_arg(&pl, &file, "file")?);
+    let run = run_cli_with_stdin(&argv, Some(&pl.cwd), Some(&edit))?;
     let report: Value = serde_json::from_str(run.stdout.trim()).map_err(|_| {
         format!("almide survive produced no JSON report (exit {}): {}", run.exit_code, run.stderr.trim())
     })?;
@@ -324,7 +387,7 @@ fn read_only() -> Value {
 }
 
 fn cwd_prop() -> Value {
-    json!({ "type": "string", "description": "Directory to run in (defaults to the server's cwd). Use the project root so almide.toml is found." })
+    json!({ "type": "string", "description": "Directory to run in, inside the project root (defaults to the server's cwd, which is the root). Use the project root so almide.toml is found." })
 }
 
 fn tool_check_def() -> Value {
@@ -411,7 +474,7 @@ fn tool_survive_def() -> Value {
     json!({
         "name": "almide_survive",
         "title": "Judge an edit before writing it",
-        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide survive --with - --json`.",
+        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract, no removed test or contract, and no test hollowed to assertions that read nothing). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide survive --with - --json`.",
         "inputSchema": obj_schema(
             json!({
                 "file": { "type": "string", "description": "The .almd file the edit is to" },

@@ -1,0 +1,15 @@
+import secret
+
+type Credential = | Token(Secret[String]) | Anonymous
+
+fn same(a: Credential, b: Credential) -> Bool = match (a, b) {
+  (Token(x), Token(y)) => x == y,
+  (Anonymous, Anonymous) => true,
+  _ => false,
+}
+
+fn main() -> Unit = {
+  let a = Token(secret.new("t-1"))
+  let b = Token(secret.new("t-1"))
+  println(if same(a, b) then "same" else "different")
+}

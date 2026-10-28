@@ -5,7 +5,12 @@
 use crate::emitter::Emitter;
 use crate::*;
 
-use super::{initializer_needs_own_frame, Ctx};
+use std::collections::HashSet;
+
+use almide_ir::VarId;
+use wasm_encoder::ValType;
+
+use super::Ctx;
 
 /// The live-heap measurement (`alloc_count`, armed builds only): drop every
 /// droppable top-let global at the end of `main`, so a value that is live by
@@ -86,4 +91,56 @@ pub(super) fn top_lets_gate(top_lets: &[crate::InitLet], ctx: &Ctx) -> Option<St
         Ok(false) => crate::witness::top_let_subset(&il.tl.value),
         Err(_) => Some("top-let:unlowered".to_string()),
     })
+}
+
+/// #1627: does this module-space initializer carry inner binds? Those
+/// binds index the MODULE's VarTable, so the value cannot lower inline in
+/// the calling frame — it needs its own.
+pub(super) fn initializer_needs_own_frame(il: &crate::InitLet, ctx: &Ctx) -> Result<bool, EmitError> {
+    if il.space == 0 {
+        return Ok(false);
+    }
+    let mut probe: Vec<(VarId, SliceTy)> = Vec::new();
+    let mut probe_seen: HashSet<VarId> = HashSet::new();
+    collect_binds(&il.tl.value, &mut probe, &mut probe_seen, ctx.types)?;
+    Ok(!probe.is_empty())
+}
+
+/// #1627: register the binds-carrying module initializer as a synthetic
+/// zero-param entry on the lifted pipeline — lowered in its own frame
+/// with the module's space and name — and call_indirect it exactly as a
+/// closure would (env 0: nothing to capture; no hop charge: native
+/// charges nothing for reaching a top-let's value).
+pub(super) fn emit_modinit_call(
+    em: &mut crate::emitter::Emitter<'_>,
+    il: &crate::InitLet,
+    declared: SliceTy,
+    site_name: String,
+) {
+    let j = em.work.register_lambda(crate::LiftedLambda {
+        site_name: Some(site_name),
+        params: Vec::new(),
+        ret: Some(declared),
+        effect_raw: None,
+        body: il.tl.value.clone(),
+        captures: Vec::new(),
+        var_space: il.space,
+        cur_module: il.module.clone(),
+        charge_hop: false,
+    });
+    let slot = em.work.slot(crate::TableEntry::Lambda(j));
+    let ti = em.work.itype(vec![ValType::I32], Some(declared.val_type()));
+    em.f.instructions().i32_const(0); // env: unused
+    em.f.instructions().i32_const(slot as i32);
+    em.f.instructions().call_indirect(0, ti);
+}
+
+/// The name a wall in top-let `il`'s initializer is reported under
+/// (decline_site.rs): module-qualified, as program functions are.
+pub(super) fn top_let_site_name(il: &crate::InitLet, ctx: &Ctx) -> String {
+    let name = (ctx.var_name)(il.space, il.tl.var).unwrap_or_else(|| "<top-let>".to_string());
+    match &il.module {
+        Some(m) => format!("{m}.{name}"),
+        None => name,
+    }
 }

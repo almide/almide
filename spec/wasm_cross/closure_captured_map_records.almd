@@ -2,7 +2,7 @@
 // The closure_capture_map fold class (#1143): a captured-and-mutated `var`
 // Map[String, <record>] is ONE shared storage through the closure — the
 // ROUTED cell class. map.new/set/get ride the _hobj handle-level twins; the
-// closure's map.insert writes through the cell and the enclosing scope reads
+// closure's `m[k] = v` writes through the cell and the enclosing scope reads
 // them back; the cell frees via the generated $__drop_map_rec_<R> sweep at
 // its last ref (scope end AND the closure-env capture leg — a len sweep
 // would leak the split layout's value handles). The churn loop is the leak
@@ -13,8 +13,12 @@ effect fn main() -> Unit = {
   var stats: Map[String, Acc] = map.new()
   let feed = (k: String, t: Int) => {
     match map.get(stats, k) {
-      some(s) => map.insert(stats, k, Acc { sum: s.sum + t, count: s.count + 1 }),
-      none => map.insert(stats, k, Acc { sum: t, count: 1 }),
+      some(s) => {
+        stats[k] = Acc { sum: s.sum + t, count: s.count + 1 }
+      },
+      none => {
+        stats[k] = Acc { sum: t, count: 1 }
+      },
     }
   }
   feed("x", 10)
@@ -38,8 +42,12 @@ effect fn main() -> Unit = {
     var m: Map[String, Acc] = map.new()
     let bump = (k: String) => {
       match map.get(m, k) {
-        some(s) => map.insert(m, k, Acc { sum: s.sum + 1, count: s.count + 1 }),
-        none => map.insert(m, k, Acc { sum: 1, count: 1 }),
+        some(s) => {
+          m[k] = Acc { sum: s.sum + 1, count: s.count + 1 }
+        },
+        none => {
+          m[k] = Acc { sum: 1, count: 1 }
+        },
       }
     }
     bump("kkkkkkkkkkkkkkkk")

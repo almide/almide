@@ -43,6 +43,8 @@ struct HelperLits {
     false_base: u32,
     oom_msg: u32,
     repeat_msg: u32,
+    /// `$alloc`'s out-of-memory probe (runtime_alloc.rs `emit_alloc`).
+    oom_probe: bool,
 }
 
 impl HelperLits {
@@ -57,7 +59,7 @@ impl HelperLits {
             crate::checked_alloc::set_message(at(F_ALLOC, crate::checked_alloc::TEXT));
             crate::checked_alloc::set_overrun_message(at(F_ALLOC, crate::checked_alloc::OVERRUN_TEXT));
         }
-        Self { true_base, false_base, oom_msg, repeat_msg }
+        Self { true_base, false_base, oom_msg, repeat_msg, oom_probe: false }
     }
 }
 
@@ -70,7 +72,7 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_ITOA, emit_itoa()),
         (F_APPEND_I64, emit_append_i64()),
         (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base)),
-        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed())),
+        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed(), lit.oom_probe)),
         (F_INT_TO_STRING, emit_int_to_string()),
         (F_CONCAT, emit_concat()),
         (F_STR_EQ, emit_str_eq()),
@@ -156,7 +158,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
             .chain(extra_fns.iter().map(|(_, f)| f)),
         if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
-    let lits = HelperLits::intern(pool, &used);
+    let mut lits = HelperLits::intern(pool, &used);
+    // Row 1 / C-434: a module running the contained serve loop marks its
+    // allocator's wrapped-frontier die for the embedded host (emit_alloc).
+    // The probe is no call edge, so `used` above is unchanged by it.
+    lits.oom_probe = work.host_ops.borrow().contains(&crate::fs_meta::OP_HTTP_SERVE_RUN);
     // ── assemble the module structurally ────────────────────────────────
     let line_start = (pool.data.len() as u32 + 15) & !15;
     let heap_start = u64::from(line_start) + LINE_BUF_MIN;
@@ -372,6 +378,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
             &ConstExpr::i64_const(0),
         );
     }
+    // #4250/#4252: the deep-walk queues and depths, last of all — only when a
+    // recursive type's drop, `==` or display walks one (deep_walk.rs).
+    debug_assert!(!work.deep_globals_used.get() || globals.len() == work.deep_global_base.get());
+    crate::deep_walk::declare_globals(&mut globals, work);
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
@@ -389,6 +399,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
     // #2407: the counters, read by the host beside `__heap` (armed only).
     crate::alloc_count::export_globals(&mut exports, counters);
+    export_serve_restore_state(&mut exports, work, globals.len());
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
@@ -469,6 +480,20 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
 
 /// One emitted-helper BODY (split from resolve_extras for the
 /// complexity budget).
+/// #4203: a module running the contained serve loop (op 75) exports its
+/// table and every global, so the embedded host can call the loop's
+/// closure and put the instance back to its state at the call after a
+/// handler abort. A module without the op keeps its bytes.
+fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global_count: u32) {
+    if !work.host_ops.borrow().contains(&crate::fs_meta::OP_HTTP_SERVE_RUN) {
+        return;
+    }
+    exports.export("__almide_table", ExportKind::Table, 0);
+    for g in 0..global_count {
+        exports.export(&format!("__almide_g{g}"), ExportKind::Global, g);
+    }
+}
+
 fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
     match h {
     Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
@@ -490,14 +515,12 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     }
     Helper::ValueField => value_helpers::emit_value_field_helper(),
     Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
+    Helper::ErrText => utf8_helpers::emit_err_text_helper(),
     Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
         work.helper_base.get() + hpos as u32,
         *key_off,
         *val_off,
     ),
-    Helper::ValueMerge { key_off, val_off } => {
-        value_helpers::emit_value_merge_helper(*key_off, *val_off)
-    }
     Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
     Helper::StringSplit => value_helpers::emit_string_split_helper(),
     Helper::ScanF64 => runtime::emit_scan_f64(),
@@ -506,12 +529,13 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
     _ => match map_index::helper_body(h)
+        .or_else(|| crate::map_ordered::helper_body(h, work.helper_base.get() + hpos as u32))
         .or_else(|| crate::fan::js_async::helper_body(h))
         .or_else(|| runtime_alloc::helper_body(h, work))
         .or_else(|| runtime_line::helper_body(h, work))
     {
         Some(f) => f,
-        None => helper_body_b(h, work, helper_snapshot),
+        None => helper_body_b(h, work),
     },
     }
 }
@@ -530,6 +554,7 @@ pub(crate) fn resolve_extras(
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match map_index::helper_params(h)
+            .or_else(|| crate::map_ordered::helper_params(h))
             .or_else(|| crate::fan::js_async::helper_params(h))
             .or_else(|| runtime_alloc::helper_params(h))
             .or_else(|| runtime_line::helper_params(h))
@@ -538,16 +563,14 @@ pub(crate) fn resolve_extras(
             None => match h {
             Helper::ValueKeys
             | Helper::Utf8Lossy
+            | Helper::ErrText
             | Helper::BytesToString { .. } => vec![ValType::I32],
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             Helper::ScanDeep { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
-            Helper::JsonValuePretty { .. } | Helper::JsonPathRemove => {
+            Helper::JsonValuePretty { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32]
-            }
-            Helper::JsonPathSet { .. } => {
-                vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
             _ => vec![ValType::I32, ValType::I32],
             },
@@ -604,7 +627,7 @@ pub(crate) fn resolve_extras(
 }
 /// The named-type / json-path half of the helper table —
 /// split from `helper_body` for the complexity budget.
-fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Function {
+fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
     match h {
     Helper::DisplayNamed { ti, irk } => {
         match work.display_bodies.borrow_mut().remove(&(*ti, *irk)) {
@@ -634,12 +657,6 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
             f
         }
     },
-    Helper::JsonPathSet { vdec } => {
-        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot, *vdec)
-    }
-    Helper::JsonPathRemove => {
-        json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)
-    }
     Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
         Some(work::DisplayBuild::Built(f)) => f,
         _ => {

@@ -8,6 +8,25 @@ use crate::types::Ty;
 use super::types::resolve_ty;
 use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
+/// A call whose protocol-bounded type parameters were still open inference
+/// vars when the call was checked — judged post-solve (#4235).
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredBoundSite {
+    /// The callee as written at the call.
+    pub callee: String,
+    pub sig: crate::types::FnSig,
+    /// The call's generic bindings (inference vars intact).
+    pub bindings: HashMap<Sym, Ty>,
+    /// The bounded parameters that were open at the call.
+    pub tvs: Vec<Sym>,
+    pub span: Option<ast::Span>,
+}
+
+/// An unbound `?` inference var (not a rigid type parameter, not `Unknown`).
+fn is_open_infer_var(t: &Ty) -> bool {
+    matches!(t, Ty::TypeVar(n) if n.as_str().starts_with('?'))
+}
+
 /// Substitute named TypeVars in a type with replacement types.
 pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     match ty {
@@ -223,6 +242,9 @@ impl Checker {
         let seeds = self.bindings_from_expected_ret(call_sig.as_ref());
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
+            if let Some(sig) = call_sig.as_ref() {
+                self.regroup_tuple_lambda_arg(a, sig, i, &bindings);
+            }
             let pinned = if is_lambda_arg(a) {
                 call_sig.as_ref().and_then(|sig| self.lambda_pin_for_arg(sig, i, &bindings))
             } else { None };
@@ -284,12 +306,77 @@ impl Checker {
             // Accumulate generic bindings from this arg so later lambda params can be pinned. Lambdas contribute nothing new here.
             if let Some(sig) = call_sig {
                 if let Some((_, pty)) = sig.params.get(i) {
-                    crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
+                    let apart = self.caller_letters_apart_from(sig);
+                    Self::unify_apart(pty, &resolve_ty(&aty, &self.uf), &apart, &mut bindings);
                 }
             }
             tys.push(aty);
         }
         tys
+    }
+
+    /// R-map-09: a lambda whose parameters spell a tuple slot's ELEMENTS one by
+    /// one is regrouped into the tuple-pattern form before it is inferred.
+    ///
+    /// - A slot taking ONE tuple (`f: ((K, V)) -> Bool`, or `(A) -> B` once an
+    ///   earlier argument bound `A` to a tuple) accepts a lambda with one
+    ///   parameter per element: `map.filter(m, (k, v) => v > 0)` reads as
+    ///   `((k, v)) => v > 0`, Swift's rule for a closure over a tuple element.
+    /// - A slot taking a tuple BESIDE other parameters (`map.fold`'s
+    ///   `(A, (K, V)) -> A`) does not: the flat `(acc, k, v) =>` is the spelling
+    ///   epoch 15 removed, so it is E004 with the grouped rewrite. The lambda is
+    ///   regrouped anyway so the body checks once, without a cascade.
+    ///
+    /// Read from the slot's type alone: any callback slot, no list of names. A
+    /// parameter with an annotation or a pattern of its own is left as written.
+    fn regroup_tuple_lambda_arg(&mut self, a: &mut ast::Expr, sig: &crate::types::FnSig, i: usize, bindings: &HashMap<Sym, Ty>) {
+        let Some((_, pty)) = sig.params.get(i) else { return };
+        let Ty::Fn { params: slot, .. } = crate::types::substitute(pty, bindings) else { return };
+        let arities: Vec<usize> = slot.iter().map(|t| match resolve_ty(t, &self.uf) {
+            Ty::Tuple(es) if es.len() >= 2 => es.len(),
+            _ => 1,
+        }).collect();
+        let span = a.span;
+        let Some(params) = lambda_params_mut(a) else { return };
+        if params.len() <= slot.len()
+            || arities.iter().sum::<usize>() != params.len()
+            || params.iter().any(|p| p.tuple_names.is_some() || p.ty.is_some())
+        {
+            return;
+        }
+        let mut flat = std::mem::take(params).into_iter();
+        let mut grouped: Vec<ast::LambdaParam> = Vec::with_capacity(arities.len());
+        for &n in &arities {
+            if n == 1 {
+                grouped.extend(flat.next());
+            } else {
+                let names: Vec<Sym> = flat.by_ref().take(n).map(|p| p.name).collect();
+                grouped.push(ast::LambdaParam { name: names[0], tuple_names: Some(names), ty: None });
+            }
+        }
+        let spelled = grouped.iter().map(|p| match &p.tuple_names {
+            Some(ns) => format!("({})", ns.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ")),
+            None => p.name.as_str().to_string(),
+        }).collect::<Vec<_>>().join(", ");
+        *params = grouped;
+        if slot.len() == 1 {
+            return;
+        }
+        let saved = self.current_span;
+        if span.is_some() {
+            self.current_span = span;
+        }
+        self.emit(super::err(
+            format!(
+                "this callback takes {} parameter(s), and the lambda spells a tuple parameter's elements as separate parameters",
+                slot.len()
+            ),
+            format!(
+                "a tuple parameter is one parenthesized pattern: rewrite as `({spelled}) => …` (the flat `(acc, k, v)` callback of `map.fold` was removed at dialect epoch 15)"
+            ),
+            "lambda argument".to_string(),
+        ).with_code("E004"));
+        self.current_span = saved;
     }
 
     /// #3469: the fn type of call slot `i` when arg `a` is a bare fn reference
@@ -533,6 +620,8 @@ impl Checker {
         }
 
         self.check_protocol_bounds(name, &sig, &bindings);
+        // Row 22 (C-436): an `@input_sink`'s input types are judged post-solve.
+        self.defer_input_sink_checks(name, qualified_via_direct.as_deref(), &bindings);
         self.propagate_call_arg_types(name, &sig, CheckedArgs {
             arg_tys, aligned_raw: &aligned_raw, e005_fired: &e005_fired,
         }, &bindings);
@@ -623,7 +712,7 @@ impl Checker {
             None => (msg, format!("call to {}()", name)),
         };
         let mut diag = super::err(msg, hint, context).with_code("E006");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(name), self.current_module_prefix.as_deref()) {
             diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
         }
         self.emit(diag);
@@ -713,6 +802,7 @@ impl Checker {
         &mut self, name: &str, sig: &crate::types::FnSig, concrete_args: &[Ty], bindings: &mut HashMap<Sym, Ty>,
     ) -> Vec<bool> {
         let mut e005_fired: Vec<bool> = Vec::new();
+        let apart = self.caller_letters_apart_from(sig);
         for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
             // Point caret at the exact argument expression for E005
             let saved_span = self.current_span;
@@ -720,18 +810,71 @@ impl Checker {
                 self.current_span = Some(sp);
             }
             let site = ArgSite { fn_name: name, param_name: pname };
-            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, bindings);
+            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, &apart, bindings);
             if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
         self.arg_spans.clear();
         e005_fired
     }
-    /// Verify protocol bounds on generic type parameters. Verbatim text move out of [`Self::check_named_call_with_type_args`].
+    /// Verify protocol bounds on generic type parameters. A parameter whose
+    /// binding is still an open inference var here (`let r: String =
+    /// list.product(list.with_capacity(0))` — `A` is pinned only later, by
+    /// the annotation) is deferred whole: [`Self::validate_deferred_protocol_bounds`]
+    /// judges it post-solve with the same diagnostics. Skipping it outright
+    /// let a non-conforming type pass check and reach ResolveCalls as an
+    /// unresolvable `A.__product` dispatch (#4235).
     fn check_protocol_bounds(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
-        for (tv_name, proto_names) in &sig.protocol_bounds {
-            if let Some(concrete_ty) = bindings.get(tv_name) {
-                let type_name = self.resolve_type_name_for_protocol(concrete_ty);
+        let open: Vec<Sym> = sig.protocol_bounds.keys()
+            .filter(|tv| bindings.get(*tv).is_some_and(|b| is_open_infer_var(&resolve_ty(b, &self.uf))))
+            .copied()
+            .collect();
+        if !open.is_empty() {
+            self.deferred_protocol_bounds.push(DeferredBoundSite {
+                callee: name.to_string(),
+                sig: sig.clone(),
+                bindings: bindings.clone(),
+                tvs: open.clone(),
+                span: self.current_span,
+            });
+        }
+        self.check_protocol_bounds_on(name, sig, bindings, &|tv| !open.contains(&tv));
+    }
+
+    /// Post-solve half of [`Self::check_protocol_bounds`]: each deferred
+    /// parameter, now resolved, gets the call-time check verbatim. One still
+    /// open after the solve is left to inference defaulting, as before.
+    pub(crate) fn validate_deferred_protocol_bounds(&mut self) {
+        let sites = std::mem::take(&mut self.deferred_protocol_bounds);
+        for site in sites {
+            let resolved: HashMap<Sym, Ty> = site.bindings.iter()
+                .map(|(k, v)| (*k, resolve_ty(v, &self.uf)))
+                .collect();
+            let closed: Vec<Sym> = site.tvs.iter()
+                .filter(|tv| resolved.get(*tv).is_some_and(|t| !is_open_infer_var(t)))
+                .copied()
+                .collect();
+            if closed.is_empty() {
+                continue;
+            }
+            let saved_span = std::mem::replace(&mut self.current_span, site.span);
+            self.check_protocol_bounds_on(&site.callee, &site.sig, &resolved, &|tv| closed.contains(&tv));
+            self.current_span = saved_span;
+        }
+    }
+
+    /// The bound checks of [`Self::check_protocol_bounds`], restricted to the
+    /// type parameters `judge` selects.
+    fn check_protocol_bounds_on(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, judge: &dyn Fn(Sym) -> bool) {
+        let mut bounds: Vec<(&Sym, &Vec<Sym>)> = sig.protocol_bounds.iter().collect();
+        bounds.sort_by_key(|(tv, _)| tv.as_str());
+        for (tv_name, proto_names) in bounds {
+            if !judge(*tv_name) {
+                continue;
+            }
+            if let Some(bound_ty) = bindings.get(tv_name) {
+                let concrete_ty = resolve_ty(bound_ty, &self.uf);
+                let type_name = self.resolve_type_name_for_protocol(&concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
                         // An unknown protocol is reported once, at the bound
@@ -751,11 +894,11 @@ impl Checker {
                         }
                     }
                 } else {
-                    self.check_structural_protocol_bound(name, sig, *tv_name, proto_names, concrete_ty, bindings);
+                    self.check_structural_protocol_bound(name, sig, *tv_name, proto_names, &concrete_ty, bindings);
                 }
             }
         }
-        self.check_protocol_bound_args(name, sig, bindings);
+        self.check_protocol_bound_args(name, sig, bindings, judge);
     }
 
     /// A container, tuple or function type has no conformance-table name, but
@@ -800,10 +943,11 @@ impl Checker {
     /// unifying them also pins a letter only the bound mentions (`K` from
     /// `type UserRepo: Repository[UserId, User]`). No other implementation
     /// is searched for: a conformance with different arguments is a mismatch.
-    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
+    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, judge: &dyn Fn(Sym) -> bool) {
         let mut applied: Vec<(&(Sym, Sym), &Vec<Ty>)> = sig.protocol_bound_args.iter().collect();
         applied.sort_by_key(|((tv, p), _)| (tv.as_str(), p.as_str()));
         for ((tv, proto), want) in applied {
+            if !judge(*tv) { continue; }
             let Some(bound_ty) = bindings.get(tv) else { continue };
             let concrete = resolve_ty(bound_ty, &self.uf);
             let Some(type_name) = self.resolve_type_name_for_protocol(&concrete) else { continue };
@@ -1391,7 +1535,7 @@ impl Checker {
         }
     }
 }
-/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.chars + list.all"`).
+/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.to_list + list.all"`).
 fn is_clean_fn_name(s: &str) -> bool {
     // Single-condition decisions (MC/DC ledger, #566): each guard is its
     // own early return, same short-circuit order.
@@ -1430,6 +1574,16 @@ include!("calls_arg.rs");
 /// then inferred against fresh vars, an ill-typed `+` unified as concat instead
 /// of colliding, and the first complaint arrived at IR verify — past the point
 /// where an E-diagnostic promises that a check-green program builds (#1018).
+/// The parameter list of a lambda argument, through redundant parentheses
+/// (the [`is_lambda_arg`] reading).
+fn lambda_params_mut(a: &mut ast::Expr) -> Option<&mut Vec<ast::LambdaParam>> {
+    match &mut a.kind {
+        ExprKind::Lambda { params, .. } => Some(params),
+        ExprKind::Paren { expr } => lambda_params_mut(expr),
+        _ => None,
+    }
+}
+
 fn is_lambda_arg(a: &ast::Expr) -> bool {
     match &a.kind {
         ExprKind::Lambda { .. } => true,
@@ -1473,12 +1627,11 @@ fn bundled_call_is_lifted(name: &str) -> bool {
 fn argv_reader_hint(name: &str) -> Option<String> {
     let reads_argv = matches!(
         name.split_once('.'),
-        Some(("env" | "process", "args"))
-            | Some(("args", "raw" | "flag" | "option" | "option_or" | "positional" | "positional_at"))
+        Some(("env", "args")) | Some(("args", "has_flag" | "option" | "positional"))
     );
     // The `args` readers have Almide bodies, so their call is a Result
-    // propagated with `!`; `env.args` / `process.args` are runtime templates
-    // that return the list itself.
+    // propagated with `!`; `env.args` is a runtime template that returns the
+    // list itself.
     let call = if name.starts_with("args.") { format!("{name}(..)!") } else { format!("{name}()") };
     reads_argv.then(|| {
         format!(

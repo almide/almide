@@ -62,8 +62,8 @@ fn main() -> Unit = {
   // ── get / get_or: UNSIGNED index → none / default when OOB ──
   println("get 2^32+1: " + int.to_string(list.get(xs, 4294967297) ?? -1))
   println("get 2:      " + int.to_string(list.get(xs, 2) ?? -1))
-  println("get_or 2^32+1: " + int.to_string(list.get_or(xs, 4294967297, -9)))
-  println("get_or -1:     " + int.to_string(list.get_or(xs, -1, -9)))
+  println("get_or 2^32+1: " + int.to_string(list.get(xs, 4294967297) ?? -9))
+  println("get_or -1:     " + int.to_string(list.get(xs, -1) ?? -9))
   // ── set / insert / remove_at / swap / update: no-op / append on OOB ──
   println("set 2^32+1: " + fmt(list.set(xs, 4294967297, 99)))
   println("set 2:      " + fmt(list.set(xs, 2, 99)))
@@ -82,9 +82,9 @@ fn main() -> Unit = {
   println("chunk 2^32 outer-len:   " + int.to_string(list.len(list.chunk(xs, 4294967296))))
   println("chunk 2 outer-len:      " + int.to_string(list.len(list.chunk(xs, 2))))
   println("chunk -1 outer-len:     " + int.to_string(list.len(list.chunk(xs, -1))))
-  println("windows 2^32 outer-len: " + int.to_string(list.len(list.windows(xs, 4294967296))))
-  println("windows 2 outer-len:    " + int.to_string(list.len(list.windows(xs, 2))))
-  println("windows -1 outer-len:   " + int.to_string(list.len(list.windows(xs, -1))))
+  println("windows 2^32 outer-len: " + int.to_string(list.len(list.window(xs, 4294967296))))
+  println("windows 2 outer-len:    " + int.to_string(list.len(list.window(xs, 2))))
+  println("windows -1 outer-len:   " + int.to_string(list.len(list.window(xs, -1))))
   // ── repeat: small count materializes; the wrap is just made lossless.
   // A NEGATIVE count clamps SIGNED to the EMPTY list on both targets (was a
   // native `vec![x; n as usize]` capacity panic vs a wasm alloc trap) ──

@@ -7,5 +7,5 @@ effect fn serve_on(port: Int, h: HttpHandler) -> Unit = http.serve(port, h)!
 
 effect fn main() -> Unit = serve_on(
   8080,
-  (req) => http.response(200, "${prefix}${http.req_path(req)}"),
+  (req) => http.response(200, "${prefix}${http.path(req)}"),
 )!

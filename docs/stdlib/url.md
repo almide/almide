@@ -4,7 +4,7 @@ URL parsing, building, and percent-encoding (RFC 3986-lite). `import url`.
 
 Pure — no capability, identical on both targets. Three family pairs, each
 closed under round-trip: `parse ⇄ to_string`, `encode_component ⇄
-decode_component`, `query_pairs ⇄ build_query`. Failures are `Result`s with
+decode_component`, `parse_query ⇄ build_query`. Failures are `Result`s with
 reasons (the `int.parse` precedent) — no panicking variants.
 
 Scope (documented limits, not accidents): schemes with an authority only
@@ -89,15 +89,9 @@ a%20b
 The inverse of `encode_component`. A broken escape (`%zz`, truncated `%A`)
 is an `err` naming the position; `+` passes through unchanged.
 
-### `url.query_pairs(query: String) -> List[(String, String)]`
-
-Splits a raw query string on `&` and `=` into ordered pairs. A key without
-`=` yields `(key, "")`; the empty string yields `[]`. Values are NOT
-percent-decoded (compose with `decode_component` when needed).
-
 ### `url.build_query(pairs: List[(String, String)]) -> String`
 
-The inverse of `query_pairs`, percent-encoding each key and value with
+The inverse of `parse_query`, percent-encoding each key and value with
 `encode_component`.
 
 ```almd run
@@ -113,7 +107,7 @@ q=a%20b&lang=ja
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (10 functions)
+## Signature index (9 functions)
 
 ```
 // All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
@@ -132,13 +126,9 @@ url.parse(s: String) -> Result[Url, String]
 // @since 0.6.0 or earlier
 url.to_string(u: Url) -> String
 
-// Undecoded (k, v) pairs; bare key gets "".
-// @since 0.60.0 or earlier
-url.query_pairs(query: String) -> List[(String, String)]
-
 // k=v joined by &, both sides percent-encoded.
 // @since 0.60.0 or earlier
-url.build_query(pairs: List[(String, String)]) -> String
+url.build_query(xs: List[(String, String)]) -> String
 
 // Like encode_component, but a space becomes +.
 // @since unreleased

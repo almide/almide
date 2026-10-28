@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined method 'encode' on UserInput"
+hint_substring = "is `: Decode` only"

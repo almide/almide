@@ -38,9 +38,9 @@ fn tsv_row(line: String) -> Row? = {
   let f = string.split(line, "\t")
   if list.len(f) != 3 then none
   else some(Row {
-    blocks: list.get_or(f, 0, ""),
-    issue: list.get_or(f, 1, ""),
-    fixture: list.get_or(f, 2, ""),
+    blocks: list.get(f, 0) ?? "",
+    issue: list.get(f, 1) ?? "",
+    fixture: list.get(f, 2) ?? "",
   })
 }
 
@@ -137,7 +137,7 @@ effect fn run(root: String, update: Bool) -> Verdict = {
     lines: (bad |> list.map((b) => "::error::certified-leaks: " + b)) + ["certified-leaks: FAILED — " + int.to_string(list.len(bad)) + " finding(s) against " + path],
     ok: false,
   } else if update then {
-    fs.write(path, ledger_text(derived))!
+    fs.write_text(path, ledger_text(derived))!
     Verdict {
       lines: notice + ["certified-leaks: ledger rewritten — " + int.to_string(list.len(derived)) + " certified fixture(s) still leak"],
       ok: true,
@@ -168,8 +168,8 @@ test "a new joined row and a stale pinned row are both findings" {
   ]
   let d = drift(pinned, derived)
   assert_eq(list.len(d), 2)
-  assert(string.starts_with(list.get_or(d, 0, ""), "NEW certified leak new.almd"))
-  assert(string.contains(list.get_or(d, 1, ""), "old.almd"))
+  assert(string.starts_with(list.get(d, 0) ?? "", "NEW certified leak new.almd"))
+  assert(string.contains(list.get(d, 1) ?? "", "old.almd"))
 }
 
 test "a row whose blocks moved is a finding, an identical ledger is not" {

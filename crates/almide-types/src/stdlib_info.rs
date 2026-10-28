@@ -6,14 +6,15 @@
 pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bool", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
-    "option", "error", "datetime", "testing", "value", "set", "deque", "heap",
+    "option", "datetime", "testing", "value", "set", "deque", "heap",
     "base64", "hex", "hash", "net", "url", "zlib",
     // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
     "bigint",
+    // Never auto-imported: `import secret` is the opt-in (#4107).
+    "secret",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-    // Each hosts UFCS conversion methods (`.to_int64()`,
-    // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
-    // so users never need `import int32`.
+    // Each hosts its conversions (`int32.from(x)`, ...). Auto-imported
+    // alongside `int` / `float` so users never need `import int32`.
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -22,15 +23,22 @@ pub const STDLIB_MODULES: &[&str] = &[
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
     "args", "path", "list", "int", "base64", "hex", "hash", "float", "bool", "bytes",
-    "error", "math", "datetime", "value", "option", "result",
+    "math", "datetime", "value", "option", "result",
     "map", "set", "string", "deque", "heap",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
     // Raw addresses at the foreign-function boundary (R-ffi-01). Never
     // auto-imported: `import ffi` is the opt-in.
     "ffi",
+    // Unix-domain sockets and shared memory (R-unix-01, #3853) and RFC 9562
+    // identifiers (R-uuid-01). Never auto-imported.
+    "unix", "uuid",
     // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
     "bigint",
+    // A value every renderer hides (#4107). Never auto-imported: a local
+    // named `secret` is common exactly where the module is used, so the
+    // `import secret` line is the visible opt-in.
+    "secret",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -67,7 +75,7 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // without requiring a redundant `import <name>`. The set mirrors
     // the auto-import behavior the generated `stdlib_sigs` previously
     // provided.
-    "error", "math", "datetime", "value", "option", "result",
+    "math", "datetime", "value", "option", "result",
     "map", "set", "string", "deque", "heap",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
@@ -94,9 +102,6 @@ pub const RUNTIME_BACKED_TYPES: &[(&str, &str)] = &[
     // The in-flight call of `http.start` (#2631): a shared handle whose last
     // copy going away cancels the call.
     ("http", "HttpCall"),
-    // The opaque path handle of `json.root()`/`json.field(...)` — self-hosted
-    // as a `List[String]` newtype, still spelled `JsonPath` in signatures.
-    ("json", "JsonPath"),
 ];
 
 /// The owning module of a runtime-backed nominal type, accepting the bare
@@ -111,9 +116,41 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The function that DISPLAYS a runtime-backed type (#4204):
+/// `<module>.__<type_in_snake_case>_repr` (`http.__http_request_repr`),
+/// derived from the type's `RUNTIME_BACKED_TYPES` row. The owner module
+/// declares it beside the type's other operations; native implements it as the
+/// runtime's `AlmideRepr` impl, and a self-hosted rep (`HttpRequest` is a
+/// `List[String]` on wasm) shows that same text only through it, never through
+/// the generic display of its carrier — the carrier holds what the repr hides
+/// (every header value). The wasm display engine calls it whenever the module
+/// declares and the self-host registry links one; `None` when `name` is not
+/// runtime-backed.
+pub fn runtime_backed_repr_surface(name: &str) -> Option<String> {
+    let owner = runtime_backed_type_owner(name)?;
+    let bare = name.rsplit_once('.').map(|(_, b)| b).unwrap_or(name);
+    let mut snake = String::new();
+    for (i, c) in bare.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            snake.push('_');
+        }
+        snake.push(c.to_ascii_lowercase());
+    }
+    Some(format!("{owner}.__{snake}_repr"))
+}
+
+/// Is `module.func` the declared repr of one of `module`'s runtime-backed
+/// types ([`runtime_backed_repr_surface`])? A repr reads its value and builds
+/// text: it is pure whatever module declares it.
+pub fn is_runtime_backed_repr(module: &str, func: &str) -> bool {
+    RUNTIME_BACKED_TYPES.iter().any(|(m, ty)| {
+        *m == module && runtime_backed_repr_surface(ty).is_some_and(|s| s.split_once('.').map(|(_, f)| f) == Some(func))
+    })
+}
+
 /// Nominal type names a stdlib module OWNS, `(module, type name)`: the
 /// builtin dynamic `Value`, every `RUNTIME_BACKED_TYPES` row, and every
-/// `type` declared in a bundled module (`fs.FileStat`, `bytes.Endian`, …).
+/// `type` declared in a bundled module (`fs.FileStat`, `net.IpAddr`, …).
 ///
 /// The checker gives a stdlib type its BARE name as its canonical identity
 /// (`Ty::Named("Value")` is what every `json.*` / `value.*` signature
@@ -132,8 +169,6 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("http", "HttpRequest"),
     ("http", "HttpResponse"),
     ("http", "HttpCall"),
-    ("json", "JsonPath"),
-    ("bytes", "Endian"),
     ("http", "HttpLimits"),
     ("http", "HttpHandler"),
     ("http", "HttpMiddleware"),
@@ -141,16 +176,27 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("fs", "FileStat"),
     ("fs", "FsRoot"),
     ("html", "SafeHtml"),
+    ("io", "Stdin"),
+    ("io", "Stdout"),
+    ("io", "Stderr"),
     ("net", "TcpListener"),
     ("net", "TcpStream"),
-    ("path", "SafePath"),
+    ("net", "UdpSocket"),
+    ("net", "UdpPacket"),
+    ("net", "IpAddr"),
+    ("unix", "Fd"),
+    ("uuid", "Uuid"),
     ("process", "ProcessStatus"),
+    ("process", "ProcessCommand"),
+    ("process", "ProcessChild"),
     ("random", "Rng"),
     ("regex", "Regex"),
     ("url", "Url"),
     ("deque", "Deque"),
     ("heap", "Heap"),
     ("bigint", "BigInt"),
+    ("secret", "Secret"),
+    ("value", "Path"),
 ];
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
@@ -158,6 +204,39 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
 /// (the common case).
 pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
     STDLIB_OWNED_TYPES.iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
+}
+
+/// The marker a built-in protocol requirement's name starts with when one
+/// stdlib module declares SEVERAL types that satisfy it (`Close`: net's
+/// `TcpStream`, `TcpListener` and `UdpSocket`; `HttpMessage`: http's request
+/// and response). Such a requirement cannot be one module function of its own
+/// name, so it resolves per conforming type ([`requirement_fn_name`]). Every
+/// other requirement of a stdlib type is its module's function of the
+/// requirement's own name (`bigint.add`, `int8.__trunc`).
+pub const PER_TYPE_REQUIREMENT_PREFIX: &str = "__self_";
+
+/// The function of a stdlib type's module that satisfies the protocol
+/// requirement `method` for `type_name` (bare or module-qualified): for a
+/// per-type requirement `__<snake type>_<verb>` (`TcpStream` and `__self_read`
+/// → `__tcp_stream_read`, `HttpRequest` and `__self_header` →
+/// `__http_request_header`), else `method` itself. The one place the spelling
+/// is derived: the checker's conformance check, monomorphization and the
+/// conformance matrix gate all call it.
+pub fn requirement_fn_name(type_name: &str, method: &str) -> String {
+    let Some(verb) = method.strip_prefix(PER_TYPE_REQUIREMENT_PREFIX) else {
+        return method.to_string();
+    };
+    let bare = type_name.rsplit_once('.').map_or(type_name, |(_, b)| b);
+    let mut snake = String::new();
+    let mut prev_lower = false;
+    for c in bare.chars() {
+        if c.is_ascii_uppercase() && prev_lower {
+            snake.push('_');
+        }
+        prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+        snake.push(c.to_ascii_lowercase());
+    }
+    format!("__{}_{}", snake, verb)
 }
 
 /// Are `a` and `b` a stdlib-owned type's own BARE name and a USER scope's
@@ -247,8 +326,8 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "float" => Some(crate::embedded::SRC_FLOAT),
         "bool" => Some(crate::embedded::SRC_BOOL),
         "bytes" => Some(crate::embedded::SRC_BYTES),
-        "error" => Some(crate::embedded::SRC_ERROR),
         "value" => Some(crate::embedded::SRC_VALUE),
+        "secret" => Some(crate::embedded::SRC_SECRET),
         _ => None,
     }
 }
@@ -300,6 +379,8 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         "net" => Some(crate::embedded::SRC_NET),
         "zlib" => Some(crate::embedded::SRC_ZLIB),
         "ffi" => Some(crate::embedded::SRC_FFI),
+        "unix" => Some(crate::embedded::SRC_UNIX),
+        "uuid" => Some(crate::embedded::SRC_UUID),
         "bigint" => Some(crate::embedded::SRC_BIGINT),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
@@ -353,12 +434,12 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         // ── string-only ──
         "trim" | "split" | "pad_start"
         | "starts_with" | "ends_with"
-        | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
+        | "to_upper" | "to_lower" | "capitalize"
         | "replace" | "lines"
-        | "chars" | "repeat" | "from_bytes"
+        | "repeat"
         | "is_digit" | "is_alpha" | "is_alphanumeric"
         | "is_whitespace" | "is_upper" | "is_lower"
-        | "codepoint" | "from_codepoint"
+        | "to_codepoint" | "from_codepoint"
         | "pad_end" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
         | "replace_first" | "last_index_of" => vec!["string"],
@@ -371,9 +452,9 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         | "reduce" | "group_by"
         | "remove_at" | "find_index"
         | "scan" | "intersperse"
-        | "windows" | "dedup" | "zip_with"
+        | "dedup" | "zip_with"
         | "push" | "pop"
-        | "shuffle" | "window" => vec!["list"],
+        | "window" => vec!["list"],
 
         // ── list + map + set ──
         "fold" | "any" | "all" => vec!["list", "map", "set"],
@@ -382,9 +463,7 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         "find" | "partition" | "update" => vec!["list", "map"],
 
         // ── map-only ──
-        "keys" | "values" | "entries" | "merge"
-        | "delete"
-        => vec!["map"],
+        "keys" | "values" | "merge" => vec!["map"],
 
         // ── set-only ──
         "union" | "intersection" | "difference" | "symmetric_difference"
@@ -395,27 +474,20 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         // so it belongs to the sized-numeric table below — see #893.)
         "to_hex"
         | "band" | "bor" | "bxor" | "bnot" | "bshl" | "bshr"
-        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left"
-        | "to_u32" | "to_u8" => vec!["int"],
+        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left" => vec!["int"],
 
         // ── float-only ──
-        "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
-        | "is_nan" | "is_infinite" | "to_int" => vec!["float"],
+        "to_fixed" | "round" | "floor" | "ceil"
+        | "is_nan" | "is_infinite" => vec!["float"],
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else" => vec!["option"],
-        "to_list" => vec!["set", "option"],
+        "to_list" => vec!["string", "map", "set", "option"],
 
         // ── result-only ──
         "map_err"
         | "is_ok" | "is_err"
         | "to_err_option" | "to_option" => vec!["result"],
-
-        // ── error-only ──
-        "context" | "message" | "chain" => vec!["error"],
-
-        // ── datetime-only ──
-        "is_before" | "is_after" => vec!["datetime"],
 
         _ => vec![],
     }
@@ -440,7 +512,7 @@ fn resolve_ufcs_ambiguous_string_list(method: &str) -> Vec<&'static str> {
         "take" | "drop" | "take_end" | "drop_end" => vec!["string", "list"],
         "reverse" => vec!["string", "list"],
         "index_of" => vec!["string", "list"],
-        "join" => vec!["string", "list"],
+        "join" => vec!["list"],
         "slice" => vec!["string", "list"],
 
         // ── ambiguous: string + list + map + set ──
@@ -469,36 +541,30 @@ fn resolve_ufcs_ambiguous_container(method: &str) -> Vec<&'static str> {
         "map" | "filter" => vec!["list", "map", "set", "result", "option"],
 
         // ── ambiguous: list + map + set ──
-        "insert" | "clear" => vec!["list", "map", "set"],
+        "insert" => vec!["list", "set"],
+        "clear" => vec!["list", "map", "set"],
         "remove" => vec!["map", "set"],
 
         // ── ambiguous: string + list + map ──
-        "get" | "get_or" => vec!["string", "list", "map"],
+        "get" => vec!["string", "list", "map"],
         "set" => vec!["list", "map"],
 
         // ── ambiguous: list ──
         "swap" | "sort" | "min" | "max" => vec!["list"],
 
         // ── ambiguous: int + float ──
-        "abs" | "clamp" => vec!["int", "float"],
-        "to_float" => vec!["string", "int"],
-
-        // ── ambiguous: math + float ──
-        "sign" => vec!["math", "float"],
+        "abs" | "clamp" | "sign" => vec!["int", "float"],
 
         _ => vec![],
     }
 }
 
-/// Sized numeric conversion methods (Stage 3). Every sized int / float
-/// provides these UFCS methods. The concrete module (int32, uint8, float32,
-/// ...) is picked by the receiver's type at codegen (`resolve_module_from_ty`).
+/// Methods every sized int / float module provides. The concrete module
+/// (int32, uint8, float32, ...) is picked by the receiver's type at codegen
+/// (`resolve_module_from_ty`).
 fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
     match method {
-        "to_int8" | "to_int16" | "to_int32" | "to_int64"
-        | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
-        | "to_float32" | "to_float64"
-        // `to_string` too (#893): every sized-numeric module declares one, and
+        // `to_string` (#893): every sized-numeric module declares one, and
         // the UFCS resolver reaches this table when `env.functions` has no
         // entry — which is the case for an embedder that hands the renderer a
         // bare source (no resolved bundled modules), so `big.to_string()`
@@ -507,7 +573,7 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
         // candidate list is only consulted after `builtin_module_for_type`
         // has already picked the ONE module for the receiver's type, so
         // listing them together cannot make a call ambiguous.
-        | "to_string" => vec![
+        "to_string" => vec![
             "int", "float",
             "int8", "int16", "int32", "int64",
             "uint8", "uint16", "uint32", "uint64",
@@ -554,6 +620,20 @@ pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
 /// unless the calling file writes `import ffi`. Never auto-imported, so the
 /// import line is the one visible place a reader finds raw memory in a file.
 pub const MEMORY_UNSAFE_OPT_IN: &str = "ffi";
+
+/// Every bundled stdlib fn declared `@signals_process` (#4125): it starts no
+/// child but signals or probes a pid, so `[permissions] proc` bounds it as the
+/// `kill` command it used to run. Derived from the one declaration site.
+pub fn signals_process_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| marked_stdlib_fns("@signals_process"))
+}
+
+/// True if `module.func` is a `@signals_process` stdlib fn (#4125).
+pub fn is_signals_process_stdlib_fn(module: &str, func: &str) -> bool {
+    signals_process_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
 
 /// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
 /// text scan of the bundled sources (an attribute block, then the fn it
@@ -603,10 +683,14 @@ pub fn is_ordered_stdlib_fn(module: &str, func: &str) -> bool {
     ordered_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
-/// True if the runtime symbol (`almide_rt_env_set`) is the intrinsic of an
+/// True if the runtime symbol (`almide_rt_env___set`) is the intrinsic of an
 /// `@ordered` stdlib fn — the shape a lowered stdlib call has in codegen.
 pub fn is_ordered_runtime_symbol(symbol: &str) -> bool {
-    ordered_stdlib_fns().iter().any(|(_, _, i)| i.as_deref() == Some(symbol))
+    // An intrinsic answers by its symbol; a bodied stdlib fn (`env.set` over
+    // `__set`, #4200) by the `almide_rt_<module>_<fn>` name codegen gives it.
+    ordered_stdlib_fns()
+        .iter()
+        .any(|(m, f, i)| i.as_deref() == Some(symbol) || (i.is_none() && symbol == format!("almide_rt_{m}_{f}")))
 }
 
 #[cfg(test)]
@@ -615,13 +699,17 @@ mod ordered_tests {
     fn the_ordered_table_is_the_d3_set() {
         let t = super::ordered_stdlib_fns();
         assert!(super::is_ordered_stdlib_fn("env", "set"));
-        assert!(super::is_ordered_stdlib_fn("fs", "write"));
+        assert!(super::is_ordered_stdlib_fn("env", "remove"));
+        assert!(super::is_ordered_stdlib_fn("fs", "write_text"));
         assert!(super::is_ordered_stdlib_fn("io", "read_line"));
-        assert!(super::is_ordered_stdlib_fn("process", "spawn"));
-        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"));
-        assert!(super::is_ordered_runtime_symbol("almide_rt_process_spawn"));
+        assert!(super::is_ordered_stdlib_fn("process", "start"));
+        assert!(super::is_ordered_stdlib_fn("io", "read"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_env___set"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"), "env.set's bodied wrapper");
+        assert!(super::is_ordered_runtime_symbol("almide_rt_process___os_start"));
         // reads, output and the clock are not ordered (D3)
         assert!(!super::is_ordered_stdlib_fn("env", "get"));
+        assert!(!super::is_ordered_stdlib_fn("env", "vars"));
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
@@ -640,6 +728,18 @@ mod ordered_tests {
             ]
         );
         assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
+    }
+
+    /// A per-type requirement names its type in snake case; any other
+    /// requirement is the module function of its own name.
+    #[test]
+    fn a_per_type_requirement_names_its_type() {
+        assert_eq!(super::requirement_fn_name("TcpStream", "__self_read"), "__tcp_stream_read");
+        assert_eq!(super::requirement_fn_name("net.UdpSocket", "__self_close"), "__udp_socket_close");
+        assert_eq!(super::requirement_fn_name("HttpRequest", "__self_set_body_bytes"), "__http_request_set_body_bytes");
+        assert_eq!(super::requirement_fn_name("Fd", "__self_write"), "__fd_write");
+        assert_eq!(super::requirement_fn_name("BigInt", "add"), "add");
+        assert_eq!(super::requirement_fn_name("Int8", "__trunc"), "__trunc");
     }
 
     /// #4043: the opt-in is an import a file must WRITE — a module every file

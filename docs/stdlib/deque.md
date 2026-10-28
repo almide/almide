@@ -302,12 +302,4 @@ deque.sum(d: Deque[A]) -> A
 deque.product(d: Deque[A]) -> A
 ```
 
-## Type index (1 types)
-
-```
-// A double-ended queue, front to back.
-// @since unreleased
-type deque.Deque = { front: List[A], back: List[A] }
-```
-
 <!-- END GENERATED SIGNATURE INDEX -->

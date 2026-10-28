@@ -322,8 +322,13 @@ fn cell_user_bound(proto: &str) -> String {
     let p = almide_frontend::canonicalize::protocols::builtin_protocol(proto).expect("a builtin protocol");
     let witness = match p.conformers.first() {
         Some(almide_frontend::types::Ty::String) => "string.len(keep(\"z\"))",
-        Some(almide_frontend::types::Ty::Float) => "float.to_int(keep(1.0))",
+        Some(almide_frontend::types::Ty::Float) => "int.from_saturating(keep(1.0))",
         Some(almide_frontend::types::Ty::Int) => "keep(1)",
+        // A protocol only stdlib NOMINAL types meet (`Read`, `Write`,
+        // `Close`, `HttpMessage`: each type answers by its own
+        // `__<type>_<verb>`) has no builtin conformer to instantiate: the
+        // bound alone is the reference the redeclaring module must not capture.
+        None => "0",
         other => panic!("{proto}: teach the cell a witness for conformer {other:?}"),
     };
     cell_user_with(&format!("fn keep[T: {proto}](x: T) -> T = x\n\n"), witness)
@@ -340,7 +345,7 @@ fn cell_user_with(head: &str, term: &str) -> String {
          \x20 let r: Result[Int, String] = ok(5)\n\
          \x20 let t: String = \"xy\"\n\
          \x20 let f: Float = 1.5\n\
-         \x20 map.len(m) + list.len(l) + (o ?? 0) + set.len(s) + (r ?? 0) + string.len(t) + float.to_int(f) + {term}\n\
+         \x20 map.len(m) + list.len(l) + (o ?? 0) + set.len(s) + (r ?? 0) + string.len(t) + int.from_saturating(f) + {term}\n\
          }}\n"
     )
 }
@@ -365,14 +370,17 @@ fn stdlib_name_cell(module: &str, dir: &Path) {
 
 /// A builtin-protocol cell: `src/<proto>.almd` redeclaring `protocol <P>`,
 /// beside a `user.almd` that derives the builtin `P` (or, for a non-derivable
-/// one, bounds a generic on it — `cell_user_bound`).
+/// one, bounds a generic on it — `cell_user_bound`). Built-in protocol names
+/// are reserved in every module (#4190), so both legs must refuse the
+/// redeclaration the same way; the module declares nothing that conforms to
+/// it, so the refusal is the one diagnostic either leg reports.
 fn builtin_protocol_cell(proto: &str, dir: &Path) {
     let module = format!("{}_decl", proto.to_lowercase());
     write(&dir.join("almide.toml"), &format!("[package]\nname = \"{CELL_PKG}\"\nversion = \"0.1.0\"\n"));
     write(
         &dir.join("src").join(format!("{module}.almd")),
         &format!(
-            "protocol {proto} {{\n  fn ping(self) -> Int\n}}\n\ntype Q: {proto} = {{ v: Int }}\n\nfn Q.ping(self) -> Int = self.v\n\nfn get() -> Int = Q {{ v: 1 }}.ping()\n"
+            "protocol {proto} {{\n  fn ping(self) -> Int\n}}\n\nfn get() -> Int = 1\n"
         ),
     );
     let derivable = almide_frontend::canonicalize::protocols::builtin_protocol(proto).is_some_and(|p| p.derivable);
@@ -573,6 +581,11 @@ fn every_multi_module_project_agrees_in_dependency_shape() {
         cases.len()
     );
     let skips = load_skips();
+    // The discovery floor above and the "no longer a corpus case" skip check
+    // below read every DISCOVERED case; the two-shape comparison judges every
+    // case on a full run and the CI slice (ALMIDE_CI_SLICE) of them otherwise.
+    let discovered: BTreeSet<String> = cases.iter().map(|c| c.id.clone()).collect();
+    let cases = almide_corpus::select(cases, "dep_shaped_leg", |c| c.id.clone());
 
     let results: Mutex<Vec<(String, Outcome, Outcome)>> = Mutex::new(Vec::new());
     let queue = Mutex::new(cases.iter());
@@ -590,7 +603,7 @@ fn every_multi_module_project_agrees_in_dependency_shape() {
     let mut results = results.into_inner().unwrap();
     results.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let ids: BTreeSet<&str> = results.iter().map(|r| r.0.as_str()).collect();
+    let ids: BTreeSet<&str> = discovered.iter().map(String::as_str).collect();
     let mut failures = Vec::new();
     for (id, d, p) in &results {
         let agree = d == p;

@@ -1,8 +1,8 @@
 // A String is not a sequence in a `for` head — character iteration goes
-// through string.chars, which materializes the List the loop can walk.
+// through string.to_list, which materializes the List the loop can walk.
 fn main() -> Unit = {
   let s = "abc"
-  for c in string.chars(s) {
+  for c in string.to_list(s) {
     println(c)
   }
 }

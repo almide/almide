@@ -52,7 +52,7 @@ effect fn main() -> Unit = {
   let in_map = m |> map.fold({
     m = ["z": "9"]
     ""
-  }, (acc, k, v) => acc + k + v)
+  }, (acc, (k, v)) => acc + k + v)
   println("map=${in_map} now=${map.len(m)}")
   var sr = set.from_list(["a", "b", "c"])
   let read_then_rebind = sr |> set.fold(
@@ -71,7 +71,7 @@ effect fn main() -> Unit = {
       mr = ["z": "9", "y": "8"]
       "${n}:"
     },
-    (acc, k, v) => acc + k + v,
+    (acc, (k, v)) => acc + k + v,
   )
   println("map read=${map_read_then_rebind} now=${map.len(mr)}")
 }

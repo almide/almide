@@ -10,9 +10,9 @@ type Post = { id: Int, title: String, body: String, user_id: Int }
 
 // Convention methods — "method exists = interface satisfied"
 fn User.from_json(v: Value) -> User? = {
-  let id = json.get_int(v, "id")
-  let name = json.get_string(v, "name")
-  let email = json.get_string(v, "email")
+  let id = value.get_int(v, "id")
+  let name = value.get_string(v, "name")
+  let email = value.get_string(v, "email")
   match (id, name, email) {
     (some(i), some(n), some(e)) => some(User { id: i, name: n, email: e }),
     _ => none,
@@ -20,10 +20,10 @@ fn User.from_json(v: Value) -> User? = {
 }
 
 fn Post.from_json(v: Value) -> Post? = {
-  let id = json.get_int(v, "id")
-  let title = json.get_string(v, "title")
-  let body = json.get_string(v, "body")
-  let user_id = json.get_int(v, "user_id")
+  let id = value.get_int(v, "id")
+  let title = value.get_string(v, "title")
+  let body = value.get_string(v, "body")
+  let user_id = value.get_int(v, "user_id")
   match (id, title, body, user_id) {
     (some(i), some(t), some(b), some(u)) => some(Post { id: i, title: t, body: b, user_id: u }),
     _ => none,
@@ -32,8 +32,8 @@ fn Post.from_json(v: Value) -> Post? = {
 
 fn User.to_json(u: User) -> String = json.stringify(value.object([
   ("id", value.int(u.id)),
-  ("name", value.str(u.name)),
-  ("email", value.str(u.email))
+  ("name", value.string(u.name)),
+  ("email", value.string(u.email))
 ]))
 
 // ── API helpers ──
@@ -44,7 +44,7 @@ effect fn api_get(base_url: String, path: String) -> Result[Value, String] = {
 
 // ── Tests ──
 test "User.from_json parses valid" {
-  let v = value.object([("id", value.int(1)), ("name", value.str("Alice")), ("email", value.str("alice@example.com"))])
+  let v = value.object([("id", value.int(1)), ("name", value.string("Alice")), ("email", value.string("alice@example.com"))])
   match User.from_json(v) {
     some(u) => {
       assert_eq(u.name, "Alice")
@@ -61,7 +61,7 @@ test "User.from_json rejects invalid" {
 }
 
 test "Post.from_json parses valid" {
-  let v = value.object([("id", value.int(42)), ("title", value.str("Hello")), ("body", value.str("World")), ("user_id", value.int(1))])
+  let v = value.object([("id", value.int(42)), ("title", value.string("Hello")), ("body", value.string("World")), ("user_id", value.int(1))])
   match Post.from_json(v) {
     some(p) => {
       assert_eq(p.title, "Hello")

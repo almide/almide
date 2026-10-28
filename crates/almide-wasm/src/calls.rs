@@ -192,15 +192,16 @@ impl Emitter<'_> {
                 // module-fn simple-name index (intra-module calls arrive
                 // as Named after lower_module) — see `resolve_named_fn`.
                 let Some(i) = self.resolve_named_fn(name) else {
-                    // Inside the fs module's own Almide bodies (the rooted
-                    // family, #4022) a sibling host-op fn arrives as Named:
-                    // the same lowering `fs.<name>` takes from outside.
+                    // Inside a stdlib module's own Almide bodies (fs's rooted
+                    // family, #4022; `env.set` over `__set`, #4200) a sibling
+                    // host-op fn arrives as Named: the same lowering
+                    // `<module>.<name>` takes from outside.
                     // The call is re-dispatched as that module call on a pinned
                     // node; its ownership mark moves back to this node.
-                    if self.cur_module == Some("fs") {
+                    if let Some(module) = self.cur_module.filter(|m| almide_types::stdlib_info::is_bundled_module(m)) {
                         let pinned = self.owned_call_marks.pin(IrExpr {
                             kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: almide_base::intern::sym("fs"), func: almide_base::intern::sym(name), def_id: None },
+                                target: CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(name), def_id: None },
                                 args: Vec::new(),
                                 type_args: Vec::new(),
                             },
@@ -566,7 +567,6 @@ impl Emitter<'_> {
                 // own string buffer, and builds Option via typed constructors.
                 "string_byte_slice",
                 "string_to_int",
-                "int_from_hex",
                 "float_parse",
                 // The JSON parser: raw ops build its OWN string buffers
                 // (layout-shared); every Value comes through the public
@@ -611,7 +611,7 @@ impl Emitter<'_> {
                     // The incumbent packs EVERY list element into an
                     // 8-byte slot; ours are 4 for the i32 word class —
                     // List[Int]/List[Float] agree, List[String]/List[Bool]
-                    // do not (string.join through a linked impl trapped).
+                    // do not (list.join through a linked impl trapped).
                     SliceTy::List(h) => self.types.el(*h).slot_size() == 4,
                     _ => false,
                 }
@@ -734,7 +734,7 @@ impl Emitter<'_> {
         let mut no_transfer = false;
         let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
         // The same move-in as the Named arm (#3337 / #3406): `x =
-        // http.status(x, c)` hands the dying `x` to the self-hosted
+        // http.set_status(x, c)` hands the dying `x` to the self-hosted
         // implementation's owned param, so its `@reuse` op meets rc 1.
         let move_in = self.take_move_in(args, true, tail && Some(index) != self.self_index);
         let mut moved_in = Vec::new();

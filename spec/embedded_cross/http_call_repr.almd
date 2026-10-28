@@ -1,0 +1,22 @@
+// @contract: C-432
+// ALS-R8: an HttpCall interpolates as its declared repr `HttpCall`, bare and
+// nested in a list, an option and a tuple, byte-identically on native and the
+// embedded host — never the host's call id. #4204: the embedded lane printed
+// the emitter's one-slot handle block (`{ #http_call: 1 }`). The call dials a
+// closed local port, so no live network is involved; dropping the handle
+// cancels it.
+import http
+
+effect fn main() -> Unit = {
+  let c = http.start(
+    "GET",
+    "http://127.0.0.1:1/x",
+    "",
+    ["Authorization": "Bearer CALL-SECRET"],
+    { total_ms: 1000, idle_ms: 1000 },
+  )!
+  println("${c}")
+  println("${[c, c]}")
+  println("${some(c)}")
+  println("${(c, 1)}")
+}

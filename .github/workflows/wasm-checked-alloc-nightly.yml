@@ -35,6 +35,7 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -73,6 +74,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -102,16 +104,18 @@ jobs:
     # proofs/fixtures/<property>-witness/reinject/ is put back into the
     # emitter and its witness must be rejected, while the unpatched
     # emitter's witness for the same program is accepted — a lost bounds
-    # check for `bounds`, a lost list-literal slot store for `init`.
+    # check for `bounds`, a lost list-literal slot store for `init`, a lost
+    # release in the verified native render for `native` (#4006).
     name: Re-injected lost instructions are rejected (${{ matrix.property }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        property: [bounds, init]
+        property: [bounds, init, native, anchors]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:

@@ -16,11 +16,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const PROBE: &str = r#"import zlib
+import hash
 
 // One token per decode: the output length and crc for ok, the err text's
 // failure class otherwise (the texts are pinned by the named-case test).
 fn tok(fname: String, r: Result[Bytes, String]) -> String = match r {
-  ok(o) => "[ok ${bytes.len(o)} ${zlib.crc32(o)}]",
+  ok(o) => "[ok ${bytes.len(o)} ${hash.crc32(o)}]",
   err(e) => "[" + string.replace(e, "zlib.${fname}: ", "") + "]",
 }
 

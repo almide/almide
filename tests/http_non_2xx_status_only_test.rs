@@ -1,17 +1,15 @@
-//! A non-2xx refusal reads `HTTP <status>: <body>` on every leg — no reason
-//! phrase (owner ruling 2026-10-17). wasi:http hands the guest a status code
-//! and no reason phrase, so a leg on it cannot spell one; the reason phrase
-//! is already outside C-367's comparison for the same cause. Native used to
-//! answer `HTTP 404: Not Found: gone` from the status line.
+//! A non-2xx answer is the response, not an err, on every leg, and its status
+//! is the code alone — no reason phrase (owner ruling 2026-10-17). wasi:http
+//! hands the guest a status code and no reason phrase, so a leg on it cannot
+//! spell one. The streaming clients that refused a non-2xx as
+//! `HTTP <status>: <body>` are gone (R-http-01): the call handle and `send`
+//! answer `ok` with the status and the body.
 //!
 //! The server answers every request `404` with a reason phrase no table
 //! would produce (`Gone Fishing`), so a leg that still renders the line's
-//! reason, or one that renders a table's, is visible. Both streaming calls —
-//! the `_with_limits` twin and the plain `request_stream` — run on native
-//! (`almide run`) and on the embedded lane (`almide run --target wasm`), and
-//! both print the expected bytes. (The OpenAI and Anthropic clients left for
-//! package almide/llm at dialect epoch 14; they are built on these calls and
-//! inherit the text.)
+//! reason, or one that renders a table's, is visible. The handle and `send`
+//! run on native (`almide run`) and on the embedded lane
+//! (`almide run --target wasm`), and both print the expected bytes.
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -58,25 +56,30 @@ fn serve() -> u16 {
     port
 }
 
-fn program(port: u16) -> String {
+fn program(port: u16, call: &str) -> String {
     format!(
         r#"import http
 
-fn said(tag: String, r: Result[Unit, String]) -> Unit = match r {{
-  ok(_) => println("${{tag}} ok"),
+fn said(tag: String, r: Result[HttpResponse, String]) -> Unit = match r {{
+  ok(resp) => println("${{tag}} ok ${{http.status(resp)}} ${{http.body(resp)}}"),
   err(e) => println("${{tag}} err ${{e}}"),
 }}
 
 effect fn main() -> Unit = {{
   let url = "http://127.0.0.1:{port}/x"
-  said("stream_limits", http.request_stream_with_limits("GET", url, "", map.new(), {{ total_ms: 20000, idle_ms: 0 }}, (c) => println("chunk ${{c}}")))
-  said("stream", http.request_stream("GET", url, "", map.new(), (c) => println("chunk ${{c}}")))
+  {call}
 }}
 "#
     )
 }
 
-const EXPECTED: &str = "stream_limits err HTTP 404: gone\nstream err HTTP 404: gone\n";
+/// The handle (op 53) and the framed client (op 65) are served by different
+/// wasm hosts, so each runs as its own program: one artifact naming both is
+/// refused at check time (E081).
+const CALLS: &[(&str, &str)] = &[
+    ("said(\"handle\", http.wait(http.start(http.new_request(\"GET\", url, \"\", []), { total_ms: 20000, idle_ms: 0 })!))", "handle ok 404 gone\n"),
+    ("said(\"send\", http.send(http.new_request(\"GET\", url, \"\", [])))", "send ok 404 gone\n"),
+];
 
 fn run(file: &Path, wasm: bool) -> (String, String, Option<i32>) {
     let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
@@ -89,13 +92,15 @@ fn run(file: &Path, wasm: bool) -> (String, String, Option<i32>) {
 }
 
 #[test]
-fn a_non_2xx_streaming_call_answers_the_status_without_a_reason_phrase_on_every_leg() {
+fn a_non_2xx_call_answers_the_status_and_body_without_a_reason_phrase_on_every_leg() {
     let port = serve();
     let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("non_2xx.almd");
-    std::fs::write(&file, program(port)).expect("write");
-    let native = run(&file, false);
-    assert_eq!((native.0.as_str(), native.2), (EXPECTED, Some(0)), "native: {}", native.1);
-    let embedded = run(&file, true);
-    assert_eq!((embedded.0.as_str(), embedded.2), (EXPECTED, Some(0)), "the embedded lane: {}", embedded.1);
+    for (i, (call, expected)) in CALLS.iter().enumerate() {
+        let file = dir.path().join(format!("non_2xx_{i}.almd"));
+        std::fs::write(&file, program(port, call)).expect("write");
+        let native = run(&file, false);
+        assert_eq!((native.0.as_str(), native.2), (*expected, Some(0)), "native: {}", native.1);
+        let embedded = run(&file, true);
+        assert_eq!((embedded.0.as_str(), embedded.2), (*expected, Some(0)), "the embedded lane: {}", embedded.1);
+    }
 }

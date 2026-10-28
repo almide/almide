@@ -59,7 +59,7 @@ fn lower_to_ir_impl(
 /// intrinsic declarations as `Hole` bodies. Where the self-host registry
 /// implements that surface, the declaration is dropped so the call links the
 /// registry's body exactly as it does when the module is auto-imported and
-/// never lowered (#2747: `bytes.write_uint16` walled `expr:Hole` behind an
+/// never lowered (#2747: a since-removed `bytes` writer walled `expr:Hole` behind an
 /// `import bytes` and lowered without one).
 fn drop_registered_intrinsic_stubs(name: &str, module: &mut crate::ir::IrModule) {
     if !crate::stdlib::is_stdlib_module(name) && !crate::stdlib::is_bundled_module(name) {
@@ -232,6 +232,10 @@ pub(crate) fn lower_resolved(
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
+    // R-map-09: the inline map arms load an entry's key and value into two
+    // locals — the protocol the registered self-hosted bodies declare — so a
+    // `((k, v)) => …` callback is adapted to it here (almide_ir::entry_split).
+    crate::ir::entry_split::split_entry_callbacks(&mut ir);
     // #806 step 2, on this leg too (#2319): small pure-scalar fns inline as
     // reduced expressions at their call sites. The incumbent pipeline has run
     // this since #806 (almide-mir/pipeline.rs, post-link and pre-mut-param —
@@ -289,16 +293,32 @@ fn link_self_host(
         }
     }
 
+    fn demand_declared_reprs(t: &crate::types::Ty, out: &mut HashSet<String>) {
+        if let crate::types::Ty::Named(name, _) = t
+            && let Some(surface) = almide_types::stdlib_info::runtime_backed_repr_surface(name.as_str())
+        {
+            out.insert(surface);
+        }
+        for c in t.children() {
+            demand_declared_reprs(c, out);
+        }
+    }
+
     fn demand_requirement(key: &str, out: &mut HashSet<String>) {
         let Some((_, method)) = key.split_once('.') else { return };
-        for (module, _, req) in crate::canonicalize::protocols::builtin_conformance_requirements() {
-            if req == method {
-                out.insert(format!("{module}.{method}"));
+        for r in crate::canonicalize::protocols::builtin_conformance_requirements() {
+            if r.requirement == method {
+                out.insert(format!("{}.{}", r.module, r.function));
             }
         }
     }
 
     fn scan_expr(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
+        // A value of a runtime-backed type displays through its declared repr
+        // (#4204) wherever it meets a display — bare, nested, or in an error
+        // message — so its mention is the demand (an unused splice is
+        // reachability-pruned).
+        demand_declared_reprs(&e.ty, out);
         match &e.kind {
             crate::ir::IrExprKind::Call { target, args, .. }
             | crate::ir::IrExprKind::TailCall { target, args, .. } => {
@@ -306,23 +326,16 @@ fn link_self_host(
                     crate::ir::CallTarget::Module { module, func, .. } => {
                         // The native JSON serializer formats floats through
                         // the linked float.to_string.
-                        if (module.as_str() == "json" || module.as_str() == "value")
-                            && func.as_str() == "stringify"
+                        if (module.as_str() == "json" && func.as_str() == "stringify")
+                            || (module.as_str() == "value" && func.as_str() == "__stringify")
                         {
                             out.insert("float.to_string".to_string());
                         }
-                        // string.from_bytes lowers as from_list ∘ the
-                        // linked lossy decoder (same WHATWG algorithm).
-                        if module.as_str() == "string" && func.as_str() == "from_bytes" {
-                            out.insert("bytes.to_string_lossy".to_string());
-                        }
-                        // value.object and the key renames box their pairs
-                        // through the linked `__vu_fold_pairs` (C-401: one
-                        // entry per key), which lives in value_utils — linked
-                        // through its registered surface value.pick.
-                        if module.as_str() == "value"
-                            && matches!(func.as_str(), "object" | "to_camel_case" | "to_snake_case")
-                        {
+                        // value.object boxes its pairs through the linked
+                        // `__vu_fold_pairs` (C-401: one entry per key), which
+                        // lives in value_utils — linked through its registered
+                        // surface value.pick.
+                        if module.as_str() == "value" && func.as_str() == "object" {
                             out.insert("value.pick".to_string());
                         }
                         // testing.assert_contains lowers as a native arm
@@ -364,7 +377,7 @@ fn link_self_host(
             // `**` on floats lowers to the LINKED vendored pow — the
             // demand is implicit in the operator.
             crate::ir::IrExprKind::BinOp { op: crate::ir::BinOp::PowFloat, .. } => {
-                out.insert("math.fpow".to_string());
+                out.insert("math.__fpow".to_string());
             }
             // `%` on floats lowers to the LINKED exact remainder (wasm has no
             // float rem instruction, #3080).
@@ -589,7 +602,7 @@ pub fn infer_module_capturing(
         // Its E006s are reported, against the embedded source. Every
         // bundled diagnostic used to be dropped ("no user file to blame"),
         // and that hid a bundled module breaking the effect rule the checker
-        // enforces on everyone (#848: `args.flag`, a plain fn, read argv).
+        // enforces on everyone (#848: an `args` plain fn read argv).
         // An E006 is context-free once the callee resolves (it reads only
         // the callee's `effect` marker), so a bundled one is a stdlib bug
         // and fails the build that reaches it; tests/bundled_module_effect_
@@ -597,7 +610,7 @@ pub fn infer_module_capturing(
         // dropped: a bundled module inferred here is not in the context it
         // was written for, and measured on 2026-10-07 `http` reports 48
         // errors (its self-qualified `http.*` calls and types) and `json` 1
-        // (`JsonPath`) that are artifacts of that context, not defects. A
+        // (a runtime-backed type) that are artifacts of that context, not defects. A
         // cross-module call the checker cannot resolve here (args.almd had no
         // `import env`, so `env.args` was E003, not E006) is caught by the
         // context-free rule in scripts/check-cap-effect-consistency.sh.

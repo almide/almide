@@ -118,7 +118,7 @@ fn lex_all_keywords() {
     ];
     for (kw, expected) in keywords {
         let toks = token_types(kw);
-        assert_eq!(toks, vec![expected.clone()], "keyword '{}' should produce {:?}", kw, expected);
+        assert_eq!(toks, vec![expected], "keyword '{}' should produce {:?}", kw, expected);
     }
 }
 

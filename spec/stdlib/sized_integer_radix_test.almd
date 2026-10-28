@@ -56,8 +56,8 @@ test "unsigned round trips at the bounds" {
       ok(uint64.max_value()),
     )
     assert_eq(
-      uint64.parse_radix(uint64.to_string_radix(int.to_uint64(int.min_value()), r), r),
-      ok(int.to_uint64(int.min_value())),
+      uint64.parse_radix(uint64.to_string_radix(uint64.from_wrapping(int.min_value()), r), r),
+      ok(uint64.from_wrapping(int.min_value())),
     )
   }
   assert_eq(uint64.to_string_radix(uint64.max_value(), 16), "ffffffffffffffff")
@@ -91,9 +91,9 @@ test "range errors and the unsigned - sign" {
 }
 
 test "float32.parse" {
-  assert_eq(float32.parse("3.5"), ok(float.to_float32(3.5)))
-  assert_eq(float32.parse(" -0.25 "), ok(float.to_float32(-0.25)))
-  assert(float32.is_infinite(float32.parse("1e40") ?? float.to_float32(0.0)))
-  assert(float32.is_nan(float32.parse("nan") ?? float.to_float32(0.0)))
+  assert_eq(float32.parse("3.5"), ok(float32.from(3.5)))
+  assert_eq(float32.parse(" -0.25 "), ok(float32.from(-0.25)))
+  assert(float32.is_infinite(float32.parse("1e40") ?? float32.from(0.0)))
+  assert_eq(float32.parse("nan"), err("invalid float literal"))
   assert_eq(float32.parse("x"), err("invalid float literal"))
 }

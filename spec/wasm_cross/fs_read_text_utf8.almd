@@ -3,12 +3,12 @@
 // with NO UTF-8 check, so `fs.read_text` on a non-UTF-8 file returned ok(<raw bytes>)
 // on wasm where native (std::fs::read_to_string) returns
 // err("stream did not contain valid UTF-8") — and the invalid String then trapped in
-// rc_dec downstream (string.chars). A silent wrong Result branch, then a crash.
+// rc_dec downstream (string.to_list). A silent wrong Result branch, then a crash.
 //
 // This pins the text readers (read_text / read_lines / read_text_if_exists) against
 // invalid, truncated, surrogate and overlong byte sequences — the exact table Rust's
-// str::from_utf8 rejects — and the bytes readers (read_bytes / read_bytes_raw) beside
-// them, which must keep handing back the raw bytes. Valid multibyte UTF-8 and ASCII
+// str::from_utf8 rejects — and the bytes reader (read_bytes, printed as the
+// `bytes` and `raw` cells) beside them, which must keep handing back the raw bytes. Valid multibyte UTF-8 and ASCII
 // stay ok so the fix cannot be "err on every high byte".
 import fs
 
@@ -29,10 +29,10 @@ effect fn show(label: String, dir: String, p: String) -> Unit = {
     err(m) => "${label} text_if=err(${redact(m, dir)})",
   })
   println(match fs.read_bytes(p) {
-    ok(bs) => "${label} bytes=ok(${list.len(bs)})",
+    ok(bs) => "${label} bytes=ok(${bytes.len(bs)})",
     err(m) => "${label} bytes=err(${redact(m, dir)})",
   })
-  println(match fs.read_bytes_raw(p) {
+  println(match fs.read_bytes(p) {
     ok(b) => "${label} raw=ok(${bytes.len(b)})",
     err(m) => "${label} raw=err(${redact(m, dir)})",
   })
@@ -52,7 +52,7 @@ effect fn main() -> Unit = {
   // Latin-1 bytes inside an otherwise-ASCII file (the teastia fixture that found it).
   fs.write_bytes(
     d + "/latin1.js",
-    [
+    bytes.from_list([
       99,
       111,
       110,
@@ -69,18 +69,18 @@ effect fn main() -> Unit = {
       34,
       59,
       10
-    ],
+    ]),
   )!
   // A truncated 3-byte sequence (E2 82 without its third byte).
-  fs.write_bytes(d + "/truncated.bin", [226, 130])!
+  fs.write_bytes(d + "/truncated.bin", bytes.from_list([226, 130]))!
   // A UTF-16 surrogate encoded as UTF-8 (ED A0 80 = U+D800): rejected by the table.
-  fs.write_bytes(d + "/surrogate.bin", [237, 160, 128])!
+  fs.write_bytes(d + "/surrogate.bin", bytes.from_list([237, 160, 128]))!
   // An overlong encoding of '/' (C0 AF): rejected by the table.
-  fs.write_bytes(d + "/overlong.bin", [192, 175])!
+  fs.write_bytes(d + "/overlong.bin", bytes.from_list([192, 175]))!
   // Valid 2/3/4-byte UTF-8 ("é", "✓", U+1D11E) and plain ASCII stay readable.
   fs.write_bytes(
     d + "/valid.txt",
-    [
+    bytes.from_list([
       195,
       169,
       32,
@@ -93,9 +93,9 @@ effect fn main() -> Unit = {
       132,
       158,
       10
-    ],
+    ]),
   )!
-  fs.write(d + "/ascii.txt", "plain\n")!
+  fs.write_text(d + "/ascii.txt", "plain\n")!
   show("latin1", d, d + "/latin1.js")!
   show("truncated", d, d + "/truncated.bin")!
   show("surrogate", d, d + "/surrogate.bin")!

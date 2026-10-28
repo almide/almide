@@ -14,7 +14,10 @@ use crate::*;
 /// The top-let prelude's store, gate and measurement release (file budget).
 #[path = "func_toplets.rs"]
 mod toplets;
-use toplets::{release_runtime_blocks_for_measurement, release_top_lets_for_measurement, store_top_let, top_lets_gate};
+use toplets::{
+    emit_modinit_call, initializer_needs_own_frame, release_runtime_blocks_for_measurement,
+    release_top_lets_for_measurement, store_top_let, top_let_site_name, top_lets_gate,
+};
 
 /// String literals placed in linear memory as REAL layout blocks.
 ///
@@ -104,58 +107,6 @@ impl Pool {
         self.data.extend_from_slice(payload);
         self.blocks.insert(payload.to_vec(), base);
         base
-    }
-}
-
-/// #1627: does this module-space initializer carry inner binds? Those
-/// binds index the MODULE's VarTable, so the value cannot lower inline in
-/// the calling frame — it needs its own.
-fn initializer_needs_own_frame(il: &crate::InitLet, ctx: &Ctx) -> Result<bool, EmitError> {
-    if il.space == 0 {
-        return Ok(false);
-    }
-    let mut probe: Vec<(VarId, SliceTy)> = Vec::new();
-    let mut probe_seen: HashSet<VarId> = HashSet::new();
-    collect_binds(&il.tl.value, &mut probe, &mut probe_seen, ctx.types)?;
-    Ok(!probe.is_empty())
-}
-
-/// #1627: register the binds-carrying module initializer as a synthetic
-/// zero-param entry on the lifted pipeline — lowered in its own frame
-/// with the module's space and name — and call_indirect it exactly as a
-/// closure would (env 0: nothing to capture; no hop charge: native
-/// charges nothing for reaching a top-let's value).
-fn emit_modinit_call(
-    em: &mut crate::emitter::Emitter<'_>,
-    il: &crate::InitLet,
-    declared: SliceTy,
-    site_name: String,
-) {
-    let j = em.work.register_lambda(crate::LiftedLambda {
-        site_name: Some(site_name),
-        params: Vec::new(),
-        ret: Some(declared),
-        effect_raw: None,
-        body: il.tl.value.clone(),
-        captures: Vec::new(),
-        var_space: il.space,
-        cur_module: il.module.clone(),
-        charge_hop: false,
-    });
-    let slot = em.work.slot(crate::TableEntry::Lambda(j));
-    let ti = em.work.itype(vec![ValType::I32], Some(declared.val_type()));
-    em.f.instructions().i32_const(0); // env: unused
-    em.f.instructions().i32_const(slot as i32);
-    em.f.instructions().call_indirect(0, ti);
-}
-
-/// The name a wall in top-let `il`'s initializer is reported under
-/// (decline_site.rs): module-qualified, as program functions are.
-fn top_let_site_name(il: &crate::InitLet, ctx: &Ctx) -> String {
-    let name = (ctx.var_name)(il.space, il.tl.var).unwrap_or_else(|| "<top-let>".to_string());
-    match &il.module {
-        Some(m) => format!("{m}.{name}"),
-        None => name,
     }
 }
 
@@ -347,6 +298,7 @@ pub(crate) fn lower_fn(
     let no_cells: HashSet<VarId> = HashSet::new();
     let no_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
     let mut f = Function::new(local_decls);
+    let anchor_serial = crate::witness::anchor::begin_fn();
     let mut calls: HashSet<usize> = HashSet::new();
     {
         let mut em = Emitter {
@@ -398,6 +350,7 @@ pub(crate) fn lower_fn(
             cells: &cell_vars,
             tomb_vars: &tomb_vars,
             raw_map_read: false,
+            tomb_tail: Default::default(),
             moves: Default::default(),
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;
@@ -629,6 +582,7 @@ pub(crate) fn lower_fn(
     crate::exit_plan::validate_exits(&f, &exit_ledger, &fn_name, &drop_fns, |idx| {
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
+    crate::witness::anchor::seal(anchor_serial, &f);
     Ok((f, calls))
 }
 

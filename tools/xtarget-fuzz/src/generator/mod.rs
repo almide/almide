@@ -445,25 +445,13 @@ mod tests {
         assert!(to_upper.weight > 1, "to_upper should be boosted");
     }
 
-    /// `http.decode_json` returns `Result[T, HttpResponse]`: the focused
-    /// campaign builds calls of it, binds the result at that type and prints
-    /// it with the error side seen through HttpResponse's own readers — a
-    /// Result whose error is not a String was outside the model, and the
-    /// function was never called.
+    /// An `@input_sink` (`http.decode_json`) is not catalogued: its type
+    /// parameter takes only a user-declared input type (row 22, E110), which
+    /// the generator's universe does not hold.
     #[test]
-    fn a_result_with_a_nominal_error_is_generated_and_observed() {
-        let engine = Engine::with_family(std::path::Path::new("/nonexistent"), Family::Synthesis).focus("http.decode_json").expect("decode_json is catalogued");
-        let mut calls = 0;
-        for index in 0..40u64 {
-            let g = engine.generate(7, index);
-            assert!(parses(&g.source), "program {index} did not parse:\n{}", g.source);
-            if let Some(line) = g.source.lines().find(|l| l.contains("= http.decode_json(")) {
-                calls += 1;
-                assert!(line.contains(": Result[") && line.contains(", HttpResponse] = "), "{line}");
-                assert!(g.source.contains("err(e0) => {\n    let e0o: (Int, (String, Map[String, String])) = (http.status_code(e0), "), "{}", g.source);
-            }
-        }
-        assert!(calls > 20, "only {calls} of 40 focused programs call http.decode_json");
+    fn an_input_sink_is_not_catalogued() {
+        let catalogue = crate::generator::catalogue::build();
+        assert!(!catalogue.iter().any(|s| s.module == "http" && s.func == "decode_json"));
     }
 
     /// Synthesis-only generation must always emit parseable source. This

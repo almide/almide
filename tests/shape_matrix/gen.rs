@@ -935,8 +935,7 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
     let mut val = kind.val * names.len() as i64;
     let mut root_decls = String::new();
     // Spell a root let as this module's mangled static.
-    if let Some(m) = modname {
-        if d.chance(1, 3) {
+    if let Some(m) = modname.filter(|_| d.chance(1, 3)) {
             let spelled = format!("almide_rt_{m}_{}", names[0].to_ascii_lowercase());
             if !root_names.contains(&spelled) {
                 let _ = writeln!(root_decls, "let {spelled} = 100");
@@ -945,7 +944,6 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
                 val += 100;
             }
         }
-    }
     Part { decls, root_decls, stmts, val }
 }
 

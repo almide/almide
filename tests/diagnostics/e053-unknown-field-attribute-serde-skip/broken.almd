@@ -1,0 +1,4 @@
+// The serde spelling: accepted silently before #4108, and the decoder still set the field.
+type User: Codec = { name: String, @serde(skip) is_admin: Bool = false }
+
+fn main() -> Unit = println("ok")

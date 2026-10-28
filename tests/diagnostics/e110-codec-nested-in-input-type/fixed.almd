@@ -1,0 +1,18 @@
+// Every record inside an input type is an input type too.
+import http
+
+type Address: Codec = { city: String, verified: Bool = false }
+
+type AddressInput: Decode = { city: String }
+
+type SignupInput: Decode = { name: String, address: AddressInput }
+
+effect fn signup(req: HttpRequest) -> HttpResponse = match http.decode_json[SignupInput](req) {
+  ok(i) => {
+    let a = Address { city: i.address.city, verified: false }
+    http.response(201, "${i.name} ${a.city}")
+  },
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(signup(http.new_request("POST", "/s", "{}", []))!))

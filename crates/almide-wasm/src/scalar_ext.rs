@@ -56,7 +56,7 @@ impl Emitter<'_> {
             }
             // The smuggling door C-210 tolerates: bits go in RAW (payload
             // NaNs live internally; only observation canonicalizes).
-            ("int", "bits_to_float", [x]) => {
+            ("int", "__bits_to_float", [x]) => {
                 self.lower_arg(x, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_reinterpret_i64();
                 Some(Lowered::scalar(FLOAT))
@@ -69,7 +69,7 @@ impl Emitter<'_> {
             // -x > x)` — f64.sqrt's NaN carries the canonical payload, `abs`
             // clears the sign, and `-x > x` (x < 0 without an 8-byte f64
             // constant) is false for -0.0 and for a NaN x, which pass through.
-            ("math" | "float", "sqrt", [x]) => {
+            ("math", "sqrt", [x]) => {
                 self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 let h = self.hold_f64()?;
                 let r = self.hold_f64()?;
@@ -87,16 +87,16 @@ impl Emitter<'_> {
             }
             // Same square-and-multiply (wrapping) + negative-exponent
             // abort as the `**` operator — one definition, two spellings.
-            ("math", "pow", [b, e]) => Some(Lowered::scalar(self.lower_pow_int(b, e)?)),
+            ("math", "__pow", [b, e]) => Some(Lowered::scalar(self.lower_pow_int(b, e)?)),
             // `n as f64` IS f64.convert_i64_s (IEEE round-to-nearest-even)
-            // — int.to_float with the module spelled the other way.
-            ("float" | "float64", "from_int", [n]) | ("int", "to_float64", [n]) => {
+            // — int.__raw_to_float with the module spelled the other way.
+            ("float", "__from_int", [n]) | ("int", "__to_float64", [n]) => {
                 self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
                 Some(Lowered::scalar(FLOAT))
             }
             ("int", "band" | "bor" | "bxor" | "bshl" | "bshr" | "wrap_add" | "wrap_mul"
-                | "bnot" | "to_u32" | "to_u8", _) => {
+                | "bnot", _) => {
                 return self.lower_int_bitops(func.as_str(), args).map(Some);
             }
             // The constants, as the constants (#2980): a call to a
@@ -312,7 +312,7 @@ impl Emitter<'_> {
         Ok(FLOAT)
     }
 
-    /// The int bit family + the width-wrap pair — split from
+    /// The int bit family + the 64-bit wrap pair — split from
     /// lower_scalar_ext for the complexity budget.
     fn lower_int_bitops(
         &mut self,
@@ -333,45 +333,22 @@ impl Emitter<'_> {
                 };
                 Ok(Some(Lowered::scalar(INT)))
             }
-            // #1423 stage 4: the pure bit family's unary/masking trio —
-            // semantics verbatim from stdlib/int_wrap.almd (`bnot(n) =
-            // bxor(n, -1)`, `to_u32(n) = n & 0xFFFFFFFF`, `to_u8(n) =
-            // n & 0xFF`, low bits zero-extended).
+            // #1423 stage 4: the pure bit family's unary — semantics
+            // verbatim from stdlib/int_wrap.almd (`bnot(n) = bxor(n, -1)`).
             ("bnot", [a]) => {
                 self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().i64_const(-1).i64_xor();
                 Ok(Some(Lowered::scalar(INT)))
             }
-            ("to_u32", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
-                self.f.instructions().i64_const(0xFFFF_FFFF).i64_and();
-                Ok(Some(Lowered::scalar(INT)))
-            }
-            ("to_u8", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
-                self.f.instructions().i64_const(0xFF).i64_and();
-                Ok(Some(Lowered::scalar(INT)))
-            }
-            ("wrap_add" | "wrap_mul", [a, b, bits]) => {
-                let mul = func == "wrap_mul";
+            // The 64-bit register (R-int-12): i64.add / i64.mul already wrap.
+            ("wrap_add" | "wrap_mul", [a, b]) => {
                 self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
-                if mul {
+                if func == "wrap_mul" {
                     self.f.instructions().i64_mul();
                 } else {
                     self.f.instructions().i64_add();
                 }
-                self.lower_arg(bits, Some(INT), ArgMode::Borrow)?;
-                let hb = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                // mask = bits >= 64 ? -1 : (1<<bits)-1  (select: v1 first)
-                i.i64_const(-1);
-                i.i64_const(1).local_get(hb).i64_shl().i64_const(1).i64_sub();
-                i.local_get(hb).i64_const(64).i64_ge_s();
-                i.select().i64_and();
-                let _ = i;
-                self.release_i64();
                 Ok(Some(Lowered::scalar(INT)))
             }
             _ => unsup(&format!("call:int.{func}")),

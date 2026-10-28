@@ -25,7 +25,7 @@ fn set.__fallible_zip_with[A, B, C, E](s: Set[A], ys: List[B], f: fn(A, B) -> Re
 fn set.all[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.any[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.clear[A](s: Set[A]) -> Unit
-fn set.contains[A](s: Set[A], value: A) -> Bool
+fn set.contains[A](s: Set[A], x: A) -> Bool
 fn set.count[A](s: Set[A], f: fn(A) -> Bool) -> Int
 fn set.difference[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.enumerate[A](s: Set[A]) -> List[(Int, A)]
@@ -36,7 +36,7 @@ fn set.find_map[A, B](s: Set[A], f: fn(A) -> Option[B]) -> Option[B]
 fn set.fold[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> B
 fn set.from_list[A](xs: List[A]) -> Set[A]
 fn set.group_by[A, B](s: Set[A], f: fn(A) -> B) -> Map[B, List[A]]
-fn set.insert[A](s: Set[A], value: A) -> Set[A]
+fn set.insert[A](s: Set[A], x: A) -> Set[A]
 fn set.intersection[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.is_disjoint[A](a: Set[A], b: Set[A]) -> Bool
 fn set.is_empty[A](s: Set[A]) -> Bool
@@ -53,7 +53,7 @@ fn set.new[A]() -> Set[A]
 fn set.partition[A](s: Set[A], f: fn(A) -> Bool) -> (List[A], List[A])
 fn set.product[A](s: Set[A]) -> A
 fn set.reduce[A](s: Set[A], f: fn(A, A) -> A) -> Option[A]
-fn set.remove[A](s: Set[A], value: A) -> Set[A]
+fn set.remove[A](s: Set[A], x: A) -> Set[A]
 fn set.scan[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> List[B]
 fn set.sort[A](s: Set[A]) -> List[A]
 fn set.sort_by[A, B](s: Set[A], f: fn(A) -> B) -> List[A]

@@ -1,0 +1,22 @@
+// wasm:skip — uuid.v7's process-wide stamp is a native runtime cell; the wasm legs refuse it at check time (E081, proofs/target-availability.toml)
+import uuid
+
+test "v7 carries version 7 and the variant, its time is now, and each is greater than the last" {
+  let t0 = datetime.now_ms()!
+  var us: List[uuid.Uuid] = []
+  for _ in list.range(0, 200) {
+    us = us + [
+      uuid.v7()!
+    ]
+  }
+  let t1 = datetime.now_ms()!
+  for u in us {
+    let b = uuid.to_bytes(u)
+    assert_eq(int.bshr(bytes.get(b, 6) ?? 0, 4), 7)
+    assert_eq(int.bshr(bytes.get(b, 8) ?? 0, 6), 2)
+    let ms = list.range(0, 6) |> list.fold(0, (acc, i) => acc * 256 + (bytes.get(b, i) ?? 0))
+    assert(ms >= t0 and ms <= t1 + 1)
+  }
+  let pairs = list.zip(us, list.drop(us, 1))
+  assert(pairs |> list.all(((a, b)) => uuid.compare(a, b) < 0))
+}

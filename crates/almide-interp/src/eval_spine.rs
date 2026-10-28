@@ -101,7 +101,7 @@ impl<'a> Interpreter<'a> {
     ///
     /// Resolution order mirrors `eval_named_call` exactly: builtins first
     /// (they may evaluate args, so once consulted this fn must complete),
-    /// then variant ctors / Endian (pure lookups — declined to the normal
+    /// then variant ctors (pure lookups — declined to the normal
     /// path), then the fn table. A `mut`-param callee declines the transfer:
     /// copy-out needs the caller's lvalue, which a transferred frame no
     /// longer has (#1022).
@@ -119,10 +119,7 @@ impl<'a> Interpreter<'a> {
                 if let Some(flow) = self.eval_builtin_call(name.as_str(), args, scope) {
                     return Some(SpineOutcome::Done(flow));
                 }
-                if self.variant_ctor(*name).is_some()
-                    || (args.is_empty()
-                        && matches!(name.as_str(), "LittleEndian" | "BigEndian"))
-                {
+                if self.variant_ctor(*name).is_some() {
                     return None;
                 }
                 // The same definition `eval_named_call` would call: the

@@ -25,7 +25,7 @@ fn rank_of(classes: List[String], c: String) -> Int = {
 }
 
 fn is_three_digit_id(id: String) -> Bool = {
-  string.starts_with(id, "C-") and string.len(id) == 5 and (string.slice(id, 2) |> string.chars |> list.all((c) => string.contains("0123456789", c)))
+  string.starts_with(id, "C-") and string.len(id) == 5 and (string.slice(id, 2) |> string.to_list |> list.all((c) => string.contains("0123456789", c)))
 }
 
 // MAJOR.MINOR.PATCH, every part non-empty and numeric. `since` was documented REQUIRED and
@@ -34,7 +34,7 @@ fn is_three_digit_id(id: String) -> Bool = {
 // reads is a field that silently goes missing.
 fn is_semver(v: String) -> Bool = {
   let parts = string.split(v, ".")
-  list.len(parts) == 3 and (parts |> list.all((p) => p != "" and (p |> string.chars |> list.all((c) => string.contains("0123456789", c)))))
+  list.len(parts) == 3 and (parts |> list.all((p) => p != "" and (p |> string.to_list |> list.all((c) => string.contains("0123456789", c)))))
 }
 
 fn schema_errors(t: toml.Table, doc_exists: Bool) -> List[String] = {
@@ -190,9 +190,9 @@ test "the schema errors come out in the bash's emission order" {
   }
   let errs = schema_errors(t, true)
   assert_eq(list.len(errs), 5)
-  assert_eq(string.starts_with(list.get_or(errs, 0, ""), "bad contract id"), true)
-  assert_eq(string.contains(list.get_or(errs, 1, ""), "is not one of {active"), true)
-  assert_eq(string.contains(list.get_or(errs, 2, ""), "'title' is missing"), true)
-  assert_eq(string.contains(list.get_or(errs, 3, ""), "'statement' is missing"), true)
-  assert_eq(string.contains(list.get_or(errs, 4, ""), "'since' is missing"), true)
+  assert_eq(string.starts_with(list.get(errs, 0) ?? "", "bad contract id"), true)
+  assert_eq(string.contains(list.get(errs, 1) ?? "", "is not one of {active"), true)
+  assert_eq(string.contains(list.get(errs, 2) ?? "", "'title' is missing"), true)
+  assert_eq(string.contains(list.get(errs, 3) ?? "", "'statement' is missing"), true)
+  assert_eq(string.contains(list.get(errs, 4) ?? "", "'since' is missing"), true)
 }

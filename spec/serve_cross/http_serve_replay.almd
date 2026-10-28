@@ -20,22 +20,22 @@ fn render_query(req: HttpRequest) -> String = match http.query_params(req) {
 }
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let method = http.req_method(req)
-  let path = http.req_path(req)
+  let method = http.method(req)
+  let path = http.path(req)
   let route = string.split(path, "?") |> list.get(0) ?? path
   eprintln("${method} ${path}")
   match route {
     "/hello" => http.response(200, "hello"),
     "/echo" => http.with_headers(
       201,
-      "${method} ${http.req_body(req)}",
+      "${method} ${http.body(req)}",
       [
-        "X-Echo": http.req_header(req, "x-token") ?? "none",
-        "Content-Type": "text/plain; charset=utf-8"
+        ("X-Echo", http.header(req, "x-token") ?? "none"),
+        ("Content-Type", "text/plain; charset=utf-8")
       ],
     ),
     "/query" => http.json(200, "\"${render_query(req)}\""),
-    "/teapot" => http.response(200, "short and stout") |> http.status(418) |> http.set_header(
+    "/teapot" => http.response(200, "short and stout") |> http.set_status(418) |> http.set_header(
       "x-kind",
       "teapot",
     ),
@@ -49,11 +49,17 @@ effect fn handle(req: HttpRequest) -> HttpResponse = {
     // Clock reads in the handler (#2703): the values differ per run, the
     // answer does not.
     "/clock" => {
-      let started = env.millis()
-      http.response(200, "${env.millis() >= started} ${datetime.now() >= started / 1000}")
+      let started = datetime.now_ms()
+      http.response(200, "${datetime.now_ms() >= started} ${datetime.now() >= started / 1000}")
     },
     "/fail" => {
       deny(route)!
+      http.response(200, "unreachable")
+    },
+    // An err holding a bidi and a C1 control (#4126): stderr quotes them by
+    // C-418's set, `\u{202e}` and `\u{85}`, on both legs.
+    "/fail-bidi" => {
+      deny("\u{202e}\u{85}x")!
       http.response(200, "unreachable")
     },
     _ => http.response(404, "not found: ${route}"),
@@ -64,7 +70,7 @@ effect fn main() -> Unit = {
   let port = env.args() |> list.get(0) ?? "0"
   // A clock read in main before serve (#2703). The app below reads no local
   // of main: it is instance-closed (ADR-0020 §5.2, E095).
-  let started = env.millis()
+  let started = datetime.now_ms()
   eprintln(if started >= 0 then "ready" else "a clock before the epoch")
   http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
 }

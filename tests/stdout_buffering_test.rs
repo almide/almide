@@ -21,7 +21,7 @@ fn write(dir: &Path, name: &str, src: &str) -> std::path::PathBuf {
     p
 }
 
-const ORDER: &str = "import io\n\neffect fn main() -> Unit = {\n  println(\"one\")\n  io.write(bytes.from_list([116, 119, 111, 10]))\n  io.print(\"three\\n\")\n  println(\"four\")\n  io.write_bytes([102, 105, 118, 101, 10])\n  println(\"six\")\n}\n";
+const ORDER: &str = "import io\n\neffect fn main() -> Unit = {\n  println(\"one\")\n  io.write(io.stdout()!, bytes.from_list([116, 119, 111, 10]))!\n  io.print(\"three\\n\")\n  println(\"four\")\n  io.write(io.stdout()!, bytes.from_list([102, 105, 118, 101, 10]))!\n  println(\"six\")\n}\n";
 
 #[test]
 fn println_lowers_to_the_buffered_macro_and_never_to_rusts_println() {
@@ -72,7 +72,7 @@ fn lines_printed_before_a_panic_and_before_an_err_out_of_main_reach_a_pipe() {
 #[test]
 fn a_prompt_printed_before_a_stdin_read_reaches_the_reader_before_the_read_blocks() {
     let dir = tempfile::tempdir().unwrap();
-    let prog = write(dir.path(), "prompt.almd", "import io\n\neffect fn main() -> Unit = {\n  println(\"name?\")\n  let n = io.read_line()\n  println(\"hi \" + n)\n}\n");
+    let prog = write(dir.path(), "prompt.almd", "import io\n\neffect fn main() -> Unit = {\n  println(\"name?\")\n  let n = (io.read_line() ?? \"\")\n  println(\"hi \" + n)\n}\n");
     let exe = dir.path().join("prompt");
     let built = Command::new(almide()).arg("build").arg(&prog).arg("-o").arg(&exe).output().unwrap();
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));

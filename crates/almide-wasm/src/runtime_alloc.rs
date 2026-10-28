@@ -17,7 +17,14 @@ use crate::*;
 /// the counter switch is armed — every call bumps `__alloc_count` and adds
 /// `len` to `__alloc_bytes`, a free-list pop bumps `__alloc_reused`. `None`
 /// (the shipped module) emits none of it. `canonical`: see canonical_alloc.rs.
-pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -> Function {
+/// `oom_probe` (row 1 of the security table, C-434): only in a module that
+/// runs the contained serve loop (op 75), the wrapped-frontier die first
+/// asks `memory.grow` for every page there is and drops the answer. The
+/// request cannot succeed, so the embedded host's store limiter refuses it
+/// and marks the call out of memory, which it never contains: the wrap is
+/// as much a failed allocation as a refused growth. Every other module,
+/// and the tree proofs/StructuralRuntime.v transcribes, has `false`.
+pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, oom_probe: bool) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32 (class scratch
     // before the bump path claims it), 3=want i32, 4=head i32, 5..=9 the
     // large-list walk (pp, p, q, z, r — runtime_large.rs)
@@ -116,6 +123,9 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
     // frontier is an allocation the machine cannot satisfy: die in the
     // defined form before the grow guard can misjudge it.
     i.local_get(next).local_get(base).i32_lt_u().if_(BlockType::Empty);
+    if oom_probe {
+        i.i32_const(-1).memory_grow(0).drop();
+    }
     i.i32_const(oom_msg as i32).call(F_EPRINTLN_BLOCK);
     i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
     i.end();
@@ -689,7 +699,7 @@ mod tests {
         // $alloc with a FIXED probe immediate for its one per-program
         // parameter (the OOM message address): the tree shape is pinned;
         // the immediate's value is not part of the transcription.
-        body_bytes(&super::emit_alloc(0, None, false)).hash(&mut h);
+        body_bytes(&super::emit_alloc(0, None, false, false)).hash(&mut h);
         let got = h.finish();
         // Recorded at the StructuralRuntime.v landing; moved by #4023
         // ($dec_flat's double-free sentinel, dec_body's
@@ -720,7 +730,7 @@ mod byte_dump {
             ("free", super::emit_free(None, false)),
             // 0 stands in for the per-program OOM message address; the
             // .v side carries that immediate as a parameter.
-            ("alloc", super::emit_alloc(0, None, false)),
+            ("alloc", super::emit_alloc(0, None, false, false)),
         ] {
             let mut cs = CodeSection::new();
             cs.function(&f);

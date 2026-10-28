@@ -74,7 +74,7 @@ fn every_streaming_cell_decides_its_fallible_form() {
     for (cell, carrier) in STREAMING_MATRIX {
         // The cell name, e.g. "fold_lines_range".
         let name = cell["fn ".len()..]
-            .split(|c| c == '[' || c == '(')
+            .split(['[', '('])
             .next()
             .expect("cell name");
         match carrier {
@@ -145,7 +145,7 @@ fn the_frontend_dispatch_table_matches_the_matrix() {
         .expect("FALLIBLE_HOF_FS table");
     for (cell, carrier) in STREAMING_MATRIX {
         let name = cell["fn ".len()..]
-            .split(|c| c == '[' || c == '(')
+            .split(['[', '('])
             .next()
             .expect("cell name");
         let listed = table.contains(&format!("\"{name}\""));

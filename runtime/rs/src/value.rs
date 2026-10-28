@@ -1,12 +1,19 @@
 // AlmideValue — universal data model for Codec protocol
 // All public functions use `almide_rt_` prefix for consistent codegen dispatch.
 
+// The nesting bound (#4020 / #4209): JSON_MAX_DEPTH and json_depth_error(),
+// declared once for every leg. Spliced HERE, not in json.rs: value.set_path
+// holds it too and links without json.rs, while json.rs always pulls this
+// module in (it names AlmideValue), so both read the one copy.
+include!("../../../crates/almide-base/src/json_limits.rs");
+
 /// An object key (#1679). The keys of every document a program parses come
 /// from a small fixed vocabulary — the field names of its types — so they are
-/// interned: the first sighting leaks one `&'static str`, every later one is
-/// a pointer copy. `Cow` keeps the fallback honest: past the intern cap, or on
-/// a slot collision, a key is an ordinary owned `String`. Clone of an
-/// interned key is free, no refcount, and the type stays `Send`.
+/// interned: the first sighting fills one slot of a fixed table, every later
+/// one is a pointer copy. `Cow` keeps the fallback honest: a key too long to
+/// intern, or one whose slot holds another key, is an ordinary owned
+/// `String`. Clone of an interned key is free, no refcount, and the type
+/// stays `Send`.
 pub type AlmideKey = std::borrow::Cow<'static, str>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,13 +28,19 @@ pub enum AlmideValue {
 }
 
 const ALMIDE_KEY_SLOTS: usize = 1024;
-const ALMIDE_KEY_LEAK_CAP: usize = 4096;
-thread_local! {
-    /// Direct-mapped key table: one probe, one byte compare, no hashing
-    /// machinery. A collision does not evict — the newcomer stays owned.
-    static ALMIDE_KEY_TABLE: std::cell::RefCell<(Vec<Option<&'static str>>, usize)> =
-        std::cell::RefCell::new((vec![None; ALMIDE_KEY_SLOTS], 0));
-}
+/// A key longer than this is never interned: field names are short, and the
+/// bound keeps the table's whole footprint at most 1024 × 128 bytes.
+const ALMIDE_KEY_INTERN_MAX_LEN: usize = 128;
+/// Direct-mapped key table, ONE for the process (#4202): one probe, one byte
+/// compare, no hashing machinery. A slot is filled once and never evicted —
+/// a collision leaves the newcomer owned. It was per thread, with a leaked
+/// allocation per new key, so every `fan` arm and `fs.fold_lines_chunked`
+/// worker (a fresh thread each call) leaked up to its own table's worth of
+/// keys of any length: RSS grew with every call. Now the whole process holds
+/// at most `ALMIDE_KEY_SLOTS` keys of at most `ALMIDE_KEY_INTERN_MAX_LEN`
+/// bytes, and nothing is leaked.
+static ALMIDE_KEY_TABLE: [std::sync::OnceLock<Box<str>>; ALMIDE_KEY_SLOTS] =
+    [const { std::sync::OnceLock::new() }; ALMIDE_KEY_SLOTS];
 
 #[inline]
 fn almide_rt_key_slot(k: &str) -> usize {
@@ -36,25 +49,14 @@ fn almide_rt_key_slot(k: &str) -> usize {
     (h >> 32) as usize % ALMIDE_KEY_SLOTS
 }
 
-/// Intern `k` as an object key: a pointer copy when it has been seen, one
-/// leaked allocation the first time (bounded by `ALMIDE_KEY_LEAK_CAP`), an owned
-/// `String` otherwise.
+/// Intern `k` as an object key: a pointer copy when its slot holds it (the
+/// first key to reach an empty slot fills it), an owned `String` otherwise.
 pub(crate) fn almide_rt_intern_key(k: &str) -> AlmideKey {
-    ALMIDE_KEY_TABLE.with(|t| {
-        let mut t = t.borrow_mut();
-        let slot = almide_rt_key_slot(k);
-        match t.0[slot] {
-            Some(hit) if hit == k => AlmideKey::Borrowed(hit),
-            Some(_) => AlmideKey::Owned(k.to_string()),
-            None if t.1 < ALMIDE_KEY_LEAK_CAP => {
-                let leaked: &'static str = std::boxed::Box::leak(k.to_string().into_boxed_str());
-                t.0[slot] = Some(leaked);
-                t.1 += 1;
-                AlmideKey::Borrowed(leaked)
-            }
-            None => AlmideKey::Owned(k.to_string()),
-        }
-    })
+    if k.len() > ALMIDE_KEY_INTERN_MAX_LEN {
+        return AlmideKey::Owned(k.to_string());
+    }
+    let held: &'static str = ALMIDE_KEY_TABLE[almide_rt_key_slot(k)].get_or_init(|| k.into());
+    if held == k { AlmideKey::Borrowed(held) } else { AlmideKey::Owned(k.to_string()) }
 }
 
 // ── Construction ──
@@ -67,8 +69,8 @@ pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue
 pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())) }
 /// No Object holds a key twice (C-401, #4112): a pair list that repeats a key
 /// is folded as one upsert per pair — the key keeps the POSITION of its first
-/// occurrence and takes the VALUE of its last, the `json.to_map` rule (C-380,
-/// ALS-C1). So every reader of the Object (`field`, `keys`, `stringify`,
+/// occurrence and takes the VALUE of its last, the C-380 rule
+/// (ALS-C1). So every reader of the Object (`field`, `keys`, `stringify`,
 /// `to_map`) sees one entry, and `json.stringify` never writes a key twice.
 /// Small lists compare pairwise; from 16 pairs an index answers.
 pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> Vec<(AlmideKey, AlmideValue)> {
@@ -148,7 +150,7 @@ pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, 
             for (k, val) in pairs {
                 if k.as_ref() == key { return Ok(val.clone()); }
             }
-            Err(format!("missing field '{}'", key))
+            Err(format!("missing field '{}'", almide_rt_errtext_escape(key)))
         } else {
             Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
         }
@@ -170,6 +172,15 @@ pub fn almide_rt_value_as_float(v: &AlmideValue) -> Result<f64, AlmideString> {
 }
 pub fn almide_rt_value_as_bool(v: &AlmideValue) -> Result<bool, AlmideString> { let __almide_r: Result<bool, String> = (|| { match v { AlmideValue::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> { let __almide_r: Result<Vec<AlmideValue>, String> = (|| { match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
+/// `value.as_object` (R-value-02): the Object's pairs in order, the `as_array`
+/// family's Object cell; any other kind is the same `expected Object` err
+/// `value.__field` gives.
+pub fn almide_rt_value_as_object(v: &AlmideValue) -> Result<Vec<(AlmideString, AlmideValue)>, AlmideString> {
+    match v {
+        AlmideValue::Object(pairs) => Ok(pairs.iter().map(|(k, x)| (AlmideString::from(k.as_ref()), x.clone())).collect()),
+        _ => Err(AlmideString::from(format!("expected Object, received {}", almide_rt_value_kind(v)))),
+    }
+}
 /// The `@reuse` twin (#2157): a Value at its last use hands its items over
 /// instead of having every element (each a whole subtree) cloned out of it.
 pub fn almide_rt_value_as_array_owned(v: AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> {
@@ -254,7 +265,7 @@ pub fn almide_rt_value_field_ref<'a>(v: &'a AlmideValue, key: &str) -> Result<&'
             for (k, val) in pairs {
                 if k.as_ref() == key { return Ok(val); }
             }
-            Err(format!("missing field '{}'", key))
+            Err(format!("missing field '{}'", almide_rt_errtext_escape(key)))
         } else {
             Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
         }
@@ -346,7 +357,7 @@ pub fn almide_rt___decode_default_list_bool(v: &AlmideValue, key: AlmideString, 
 // ── AlmideValue utilities ──
 
 /// Object keys in insertion order. Lives in the `value` runtime (not reusing
-/// `almide_json_keys`) so a program that uses `value.keys` but never `json` still
+/// `almide_json_keys`) so a program that uses `value.__keys` but never `json` still
 /// links — the native runtime is included per-module, so a cross-module reference
 /// would be undefined on a value-only program (#416 native-link fix).
 pub fn almide_rt_value_keys(v: &AlmideValue) -> Vec<AlmideString> {
@@ -366,19 +377,12 @@ pub fn almide_rt_value_keys(v: &AlmideValue) -> Vec<AlmideString> {
 pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
-            AlmideValue::Object(pairs.iter().filter(|(k, _)| keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
+            // One hash set of the key list (#4207): O(n + k), not a scan of
+            // `keys` per field.
+            let want: std::collections::HashSet<&str> = keys.iter().map(|x| x.as_str()).collect();
+            AlmideValue::Object(pairs.iter().filter(|(k, _)| want.contains(k.as_ref())).cloned().collect())
         }
         _ => AlmideValue::Object(Vec::new()),
-    }
-}
-
-/// Rename keys in an Object using a transform function.
-pub fn almide_rt_value_rename_keys(v: &AlmideValue, f: impl Fn(AlmideString) -> AlmideString) -> AlmideValue {
-    match v {
-        AlmideValue::Object(pairs) => {
-            AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(&f(AlmideString::from(k.to_string()))), v.clone())).collect()))
-        }
-        other => other.clone(),
     }
 }
 
@@ -386,17 +390,85 @@ pub fn almide_rt_value_rename_keys(v: &AlmideValue, f: impl Fn(AlmideString) -> 
 pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
     match (a, b) {
         (AlmideValue::Object(pa), AlmideValue::Object(pb)) => {
-            let mut pa = pa.clone();
+            // The FIRST slot holding each key, built once (#4207): O(|a| + |b|)
+            // where a scan of the growing result per key of b was O(|a|·|b|).
+            // The fold is unchanged — a key of b overrides the first of a's
+            // repeats in place, a new key is appended at its first position
+            // and later repeats in b override that slot, so b's last value wins.
+            let mut out = pa.clone();
+            let mut at: std::collections::HashMap<&str, usize> = std::collections::HashMap::with_capacity(pa.len() + pb.len());
+            for (i, (k, _)) in pa.iter().enumerate() {
+                at.entry(k.as_ref()).or_insert(i);
+            }
             for (k, v) in pb {
-                if let Some(pos) = pa.iter().position(|(ek, _)| ek == k) {
-                    pa[pos] = (k.clone(), v.clone());
-                } else {
-                    pa.push((k.clone(), v.clone()));
+                match at.get(k.as_ref()) {
+                    Some(&pos) => out[pos] = (k.clone(), v.clone()),
+                    None => {
+                        at.insert(k.as_ref(), out.len());
+                        out.push((k.clone(), v.clone()));
+                    }
                 }
             }
-            AlmideValue::Object(pa)
+            AlmideValue::Object(out)
         }
         (_, b) => b.clone(),
+    }
+}
+
+/// `value.set_path` (stdlib/value.almd's `__set_path_steps`, #4207): `v` with
+/// `x` at the path `steps` — `(true, name, _)` a key step, `(false, _, i)` an
+/// index step. `v` and `x` are taken BY VALUE (`@consume`), so a document at
+/// its last use is updated IN PLACE: only the path is walked, every untouched
+/// sibling stays where it is, and a fold of n calls is n walks instead of n
+/// whole-document copies. The answer is the self-hosted walk's
+/// (stdlib/json_path.almd, the wasm leg and the interp oracle; C-090): a key
+/// step over a non-Object replaces it with an Object holding just that key, a
+/// missing key is appended holding `{}` for the steps below it, an index step
+/// that misses — a negative index, one past the end, a non-Array — leaves the
+/// value as is (the keys created above it stay). A result nested past
+/// JSON_MAX_DEPTH — the path's steps plus `x`'s own nesting — is
+/// `json_depth_error()` (#4209, C-433), checked before anything is touched.
+pub fn almide_rt_value_set_path_steps(v: AlmideValue, steps: &[(bool, AlmideString, i64)], x: AlmideValue) -> Result<AlmideValue, AlmideString> {
+    if steps.len() > JSON_MAX_DEPTH || almide_rt_value_nests_past(&x, JSON_MAX_DEPTH - steps.len()) {
+        return Err(json_depth_error().into());
+    }
+    let mut root = v;
+    let mut cur: &mut AlmideValue = &mut root;
+    for (is_key, name, i) in steps {
+        if *is_key {
+            if !matches!(cur, AlmideValue::Object(_)) {
+                *cur = AlmideValue::Object(Vec::new());
+            }
+            let AlmideValue::Object(entries) = cur else { unreachable!() };
+            // No Object holds a key twice (C-401), so the first match is the one.
+            let at = match entries.iter().position(|(k, _)| k.as_ref() == name.as_str()) {
+                Some(at) => at,
+                None => {
+                    entries.push((almide_rt_intern_key(name.as_str()), AlmideValue::Object(Vec::new())));
+                    entries.len() - 1
+                }
+            };
+            cur = &mut entries[at].1;
+        } else {
+            match cur {
+                AlmideValue::Array(items) if usize::try_from(*i).is_ok_and(|at| at < items.len()) => {
+                    cur = &mut items[*i as usize];
+                }
+                _ => return Ok(root),
+            }
+        }
+    }
+    *cur = x;
+    Ok(root)
+}
+
+/// `v` holds containers nested more than `budget` deep. Recurses at most
+/// `budget + 1` frames whatever `v` holds.
+fn almide_rt_value_nests_past(v: &AlmideValue, budget: usize) -> bool {
+    match v {
+        AlmideValue::Array(items) => budget == 0 || items.iter().any(|x| almide_rt_value_nests_past(x, budget - 1)),
+        AlmideValue::Object(entries) => budget == 0 || entries.iter().any(|(_, x)| almide_rt_value_nests_past(x, budget - 1)),
+        _ => false,
     }
 }
 
@@ -404,37 +476,14 @@ pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
 pub fn almide_rt_value_omit(v: &AlmideValue, keys: &[AlmideString]) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
-            AlmideValue::Object(pairs.iter().filter(|(k, _)| !keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
+            let drop: std::collections::HashSet<&str> = keys.iter().map(|x| x.as_str()).collect();
+            AlmideValue::Object(pairs.iter().filter(|(k, _)| !drop.contains(k.as_ref())).cloned().collect())
         }
         other => other.clone(),
     }
 }
 
-/// Convert snake_case key to camelCase.
-pub fn almide_rt_value_to_camel_case(v: &AlmideValue) -> AlmideValue {
-    almide_rt_value_rename_keys(v, |k| {
-        let mut result = String::new();
-        let mut capitalize_next = false;
-        for c in k.chars() {
-            if c == '_' { capitalize_next = true; }
-            else if capitalize_next { result.push(c.to_ascii_uppercase()); capitalize_next = false; }
-            else { result.push(c); }
-        }
-        AlmideString::from(result)
-    })
-}
 
-/// Convert camelCase key to snake_case.
-pub fn almide_rt_value_to_snake_case(v: &AlmideValue) -> AlmideValue {
-    almide_rt_value_rename_keys(v, |k| {
-        let mut result = String::new();
-        for (i, c) in k.chars().enumerate() {
-            if c.is_ascii_uppercase() && i > 0 { result.push('_'); }
-            result.push(c.to_ascii_lowercase());
-        }
-        AlmideString::from(result)
-    })
-}
 
 // ── Variant decode helper ──
 

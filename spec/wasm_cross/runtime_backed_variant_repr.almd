@@ -1,0 +1,27 @@
+// @contract: C-432
+// ALS-R8: a runtime-backed value that is the payload of a user variant (a
+// tuple case, a record case, a generic variant's fixed field) interpolates as
+// its declared repr inside the variant's display, byte-identically on native
+// and wasm: an HttpRequest shows its header COUNT, never a header value.
+// #4230: the MIR route displayed such a variant through its structural repr,
+// which after newtype erasure walks the request's carrier (every header
+// value); v1 now refuses it, and the leg that renders it prints the repr.
+import http
+
+type Ev = | Got(HttpRequest) | Hit { at: HttpResponse } | Nothing
+
+type Tag[T] = | Tagged(T, HttpRequest)
+
+fn leaks(t: String) -> Bool = ["TOKXYZ-SECRET", "sid=COOKIE-SECRET", "Bearer", "Authorization", "Cookie"] |> list.any((s) => string.contains(t, s))
+
+effect fn main() -> Unit = {
+  let h = [("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")]
+  let req = http.new_request("GET", "/v", "", h)
+  let resp = http.response(200, "ok")
+  let a = Got(req)
+  let b = Hit { at: resp }
+  let c: Tag[Int] = Tagged(7, req)
+  let lines = ["${a}", "${b}", "${c}", "${Nothing}"]
+  println(lines |> list.join("\n"))
+  println("leaked: ${lines |> list.any((l) => leaks(l))}")
+}

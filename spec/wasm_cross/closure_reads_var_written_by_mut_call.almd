@@ -25,6 +25,6 @@ effect fn main() -> Unit = {
   println("user mut fn " + int.to_string(n2()))
   var m: Map[String, Int] = map.new()
   let size = () => map.len(m)
-  map.insert(m, "a", 1)
-  println("map.insert " + int.to_string(size()))
+  m = map.set(m, "a", 1)
+  println("map.set " + int.to_string(size()))
 }

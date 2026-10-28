@@ -22,9 +22,9 @@ test "match arms each consume the accumulator exactly once" {
       none => map.set(acc, k, 1),
     }
   }
-  assert_eq(map.get_or(acc, "x", 0), 3)
-  assert_eq(map.get_or(acc, "y", 0), 1)
-  assert_eq(map.get_or(acc, "z", 0), 1)
+  assert_eq(map.get(acc, "x") ?? 0, 3)
+  assert_eq(map.get(acc, "y") ?? 0, 1)
+  assert_eq(map.get(acc, "z") ?? 0, 1)
 }
 
 test "if branches with exclusive last uses" {
@@ -38,9 +38,9 @@ test "if branches with exclusive last uses" {
 test "fold with map accumulator threads without corruption" {
   let counts = [1, 2, 1, 3, 1] |> list.fold(
     map.new(),
-    (acc, n) => map.set(acc, n, map.get_or(acc, n, 0) + 1),
+    (acc, n) => map.set(acc, n, map.get(acc, n) ?? 0 + 1),
   )
-  assert_eq(map.get_or(counts, 1, 0), 3)
-  assert_eq(map.get_or(counts, 2, 0), 1)
-  assert_eq(map.get_or(counts, 3, 0), 1)
+  assert_eq(map.get(counts, 1) ?? 0, 3)
+  assert_eq(map.get(counts, 2) ?? 0, 1)
+  assert_eq(map.get(counts, 3) ?? 0, 1)
 }

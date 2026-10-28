@@ -15,7 +15,7 @@ effect fn main() -> Unit = {
 
 fn md_to_html(input: String) -> String = {
   let lines = string.lines(input)
-  let body = list.map(lines, (line) => convert_line(line)) |> string.join("\n")
+  let body = list.map(lines, (line) => convert_line(line)) |> list.join("\n")
   "<!DOCTYPE html>\n<html><body>\n" + body + "\n</body></html>"
 }
 

@@ -90,6 +90,10 @@ pub fn optimize_half(ir: &mut IrProgram) {
 /// linker sees the monomorphized call graph.
 pub fn link_half(ir: &mut IrProgram) {
     almide_optimize::mono::monomorphize(ir);
+    // After mono, so a generic caller (`http.decode_json[T]`) names its
+    // concrete `T.decode_strict`: an `@on_demand` derive nothing reaches is
+    // dropped, on every leg alike.
+    almide_optimize::on_demand::prune_unreached(ir);
     almide_frontend::ir_link::ir_link(ir);
 }
 

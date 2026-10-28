@@ -69,7 +69,7 @@ pub fn include_native_callback_modules(
             continue;
         }
         let mod_path: Vec<crate::intern::Sym> = segs.iter().map(|s| crate::intern::sym(s)).collect();
-        let canonical = self_module_canonical(&mod_path);
+        let canonical = self_module_canonical(&mod_path, ctx.dep_paths);
         if !ctx.loaded_names.contains(&canonical) {
             load_self_module(&canonical, &mod_path, &src_dir, &mut ctx, false)?;
         }

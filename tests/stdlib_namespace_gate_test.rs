@@ -13,8 +13,9 @@
 //!    and none of the dropped alias names may ever reappear;
 //! 2. no intrinsic is reachable under two public names (the rule the window
 //!    existed to reach);
-//! 3. `value.get` never regrows — `get → Option` is the map/list convention,
-//!    and the Result accessor is `value.field`.
+//! 3. `value.get` is the `get → Option` convention of map and list
+//!    (R-value-07): it answers `Value?`, never a Result — the Result reads
+//!    are `as_<kind>`.
 //!
 //! The executable twin of rule 1 is `tests/diagnostics/retired-json-alias/`
 //! (a retired spelling must FAIL with E002) and
@@ -79,21 +80,17 @@ const DROPPED: &[&str] = &[
     "json.as_bool",
     "json.as_array",
     "json.get",
-    "value.get",
 ];
 
 /// Rule 1: json's surface is EXACTLY the format identity, and the dropped
 /// aliases do not resolve — in either module.
 #[test]
 fn json_surface_is_exactly_the_format_identity() {
-    // The one-sentence identity: json is the FORMAT (parse/print), plus the
-    // json-branded path API and typed-key conveniences that have no second
-    // name. Anything else is a regression toward the two-names problem.
+    // The one-sentence identity: json is the FORMAT (parse/print). The path
+    // API and the typed-key readers live on value.* (R-json-01). Anything
+    // else is a regression toward the two-names problem.
     let allowed: HashSet<&str> = [
         "parse", "stringify", "stringify_pretty",
-        "root", "field", "index", "get_path", "set_path", "remove_path",
-        "get_string", "get_int", "get_float", "get_bool", "get_array",
-        "to_map",
     ]
     .into();
     let mut declared: HashSet<String> = HashSet::new();
@@ -118,9 +115,9 @@ fn json_surface_is_exactly_the_format_identity() {
     }
     // The survivors must all exist, or a dropped alias lost its operation.
     for survivor in [
-        "value.null", "value.object", "value.array", "value.keys", "value.str",
+        "value.null", "value.object", "value.array", "value.string",
         "value.int", "value.bool", "value.float", "value.as_string", "value.as_int",
-        "value.as_float", "value.as_bool", "value.as_array", "value.field",
+        "value.as_float", "value.as_bool", "value.as_array", "value.get",
     ] {
         assert!(declared.contains(survivor), "survivor {survivor} is not declared");
     }
@@ -146,15 +143,14 @@ fn no_intrinsic_is_reachable_under_two_names() {
     }
 }
 
-/// Rule 3: the value side never regrows a `get`-shaped Result accessor:
-/// `value.field` is the survivor, and `get → Option` is the map/list
-/// convention.
+/// Rule 3: `value.get` keeps the map/list `get → Option` shape (R-value-07):
+/// it may never regrow the Result accessor the window dropped.
 #[test]
-fn value_get_never_regrows() {
-    let has_get = surface_decls("value.almd").iter().any(|(n, _)| n == "get");
+fn value_get_is_the_option_read() {
+    let path = format!("{}/stdlib/value.almd", env!("CARGO_MANIFEST_DIR"));
+    let src = std::fs::read_to_string(&path).expect("stdlib/value.almd");
     assert!(
-        !has_get,
-        "value.get regrew — get→Option is the map/list convention; \
-         the Result accessor is value.field"
+        src.lines().any(|l| l.starts_with("fn get(v: Value, key: String) -> Value? =")),
+        "value.get must be `fn get(v: Value, key: String) -> Value?` — get→Option is the map/list convention"
     );
 }

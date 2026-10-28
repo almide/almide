@@ -27,7 +27,7 @@ fn a_block_body_with_a_float_literal_tail() {
         r#"fn main() -> Unit = {
   let k = 0.5
   let xs = list.range(0, 4) |> list.flat_map((i) => {
-    let f = float.from_int(i)
+    let f = float.from(i)
     let g = f * k
     [f, g, f + g]
   })

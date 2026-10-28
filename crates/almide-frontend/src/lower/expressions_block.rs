@@ -177,6 +177,19 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             // This preserves the actual error type (e.g., List[String] from result.collect)
             // instead of hardcoding String.
             let inner_checked_ty = ctx.expr_ty(inner);
+            // #4215: a piped CALL the checker typed as a plain value cannot
+            // fail, so its `!` is a no-op — the rule the direct `expr!`
+            // spelling follows (#1049, `lower_expr`). In a test block
+            // `xs |> list.map((x) => f(x)!)!` stays the plain map (the
+            // callback's `!` unwraps), and a fabricated `Result` here
+            // rendered `.unwrap()` on the collected `Vec`. A bare callee
+            // (`p |> fs.read_text!`) is typed as the fn, not its result, so
+            // it keeps the Result built below.
+            let plain_call = matches!(inner.kind, ast::ExprKind::Call { .. })
+                && !matches!(inner_checked_ty, Ty::Unknown | Ty::TypeVar(_) | Ty::Fn { .. });
+            if plain_call && !inner_checked_ty.is_result() && !inner_checked_ty.is_option() {
+                return lower_pipe(ctx, left, inner, ty, span);
+            }
             let inner_ty = if inner_checked_ty.is_result() || inner_checked_ty.is_option() {
                 inner_checked_ty
             } else {

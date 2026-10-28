@@ -37,8 +37,29 @@ pub(crate) struct NetRun {
     unix: AlmideUnixTables,
 }
 
+impl NetRun {
+    /// An `http.serve` handler call starts / returns / aborts (#4203): the
+    /// shared cores record what it opens and close it on an abort.
+    /// The records are per thread; the guest and its host calls run on one.
+    pub(crate) fn request_begin(&mut self) {
+        almide_rt_core::net_core::almide_net_request_begin();
+        almide_rt_core::net_unix_core::almide_unix_request_begin();
+    }
+
+    pub(crate) fn request_end(&mut self) {
+        let _ = almide_rt_core::net_core::almide_net_request_end();
+        let _ = almide_rt_core::net_unix_core::almide_unix_request_end();
+    }
+
+    pub(crate) fn request_abort(&mut self) -> usize {
+        let tcp = almide_rt_core::net_core::almide_net_request_end();
+        let unix = almide_rt_core::net_unix_core::almide_unix_request_end();
+        self.tcp.close_opened(&tcp) + self.unix.close_held(&unix)
+    }
+}
+
 fn int(s: &str) -> Result<i64, String> {
-    s.trim().parse().map_err(|_| format!("malformed net operand {s:?}"))
+    s.trim().parse().map_err(|_| format!("malformed net operand {}", almide_base::err_text::almide_rt_errtext_quote(s)))
 }
 
 fn text(r: Result<i64, String>) -> Result<Vec<u8>, String> {

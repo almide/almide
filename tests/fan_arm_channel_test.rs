@@ -309,7 +309,7 @@ effect fn f(p: Int) -> Result[Int, Bad] = {{
     assert!(emitted.status.success(), "emit failed:\n{}", String::from_utf8_lossy(&emitted.stderr));
     let rust = String::from_utf8_lossy(&emitted.stdout).into_owned();
     let user = rust.rsplit("//__ALMIDE_RT_BOUNDARY__").next().unwrap();
-    assert!(user.contains("__almide_s.spawn"), "the arms keep their threads:\n{user}");
+    assert!(user.contains("almide_fan_spawn(__almide_s"), "the arms keep their threads:\n{user}");
     assert!(user.contains("-> Result<_, Bad>"), "the join propagates into the fn's error type:\n{user}");
     let rs = dir.join("main.rs");
     std::fs::write(&rs, &rust).expect("write rust");

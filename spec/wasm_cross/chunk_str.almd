@@ -9,7 +9,7 @@ effect fn main() -> Unit = {
   println(int.to_string(list.len(list.chunk(xs, 2))))
   println(int.to_string(list.len(list.chunk(xs, 3))))
   println(int.to_string(list.len(list.chunk(xs, 1))))
-  println(int.to_string(list.len(list.windows(xs, 2))))
+  println(int.to_string(list.len(list.window(xs, 2))))
   let one = ["solo"]
   println(int.to_string(list.len(list.chunk(one, 5))))
   // C-054's negative-count rule on the HEAP-element variants. The Int variants
@@ -20,8 +20,8 @@ effect fn main() -> Unit = {
   // 803), and a negative chunk count reached an alloc as a negative length.
   // Negative n reads as v0's `n as usize`: chunk → ONE chunk holding
   // everything, windows → n > len → [].
-  println(int.to_string(list.len(list.windows(xs, -2147483648))))
-  println(int.to_string(list.len(list.windows(xs, -1))))
+  println(int.to_string(list.len(list.window(xs, -2147483648))))
+  println(int.to_string(list.len(list.window(xs, -1))))
   println(int.to_string(list.len(list.chunk(xs, -2147483648))))
   println(int.to_string(list.len(list.chunk(one, -1))))
   // The POSITIVE extreme of the same domain, which nothing exercised: the

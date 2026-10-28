@@ -21,7 +21,7 @@ fn parse_contract_header(line: String) -> List[String] = {
 }
 
 // The header's grammar: `// @contract: C-001` or `// @contract: C-001, C-002`.
-fn is_contract_id(s: String) -> Bool = string.starts_with(s, "C-") and string.len(s) == 5 and (string.chars(string.slice(s, 2, 5)) |> list.all((c) => string.is_digit(c)))
+fn is_contract_id(s: String) -> Bool = string.starts_with(s, "C-") and string.len(s) == 5 and (string.to_list(string.slice(s, 2, 5)) |> list.all((c) => string.is_digit(c)))
 
 // A well-formed id is `C-` plus three digits — the bash pins the width, so `C-1` and
 // `C-1000` are both malformed rather than leniently accepted.

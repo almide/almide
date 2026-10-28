@@ -32,7 +32,7 @@ fn emit_rust(dir: &std::path::Path, program: &str) -> String {
 /// outer `map`'s closure — spectralnorm's inner loop, minus the arithmetic.
 const CAPTURED: &str = r#"
 fn rows(v: List[Float], n: Int) -> List[Float] =
-  list.map(0..<n, (i) => list.fold(list.enumerate(v), 0.0, (acc, p) => acc + float.from_int(p.0 + i) * p.1))
+  list.map(0..<n, (i) => list.fold(list.enumerate(v), 0.0, (acc, p) => acc + float.from(p.0 + i) * p.1))
 
 fn main() -> Unit = println(float.to_fixed(list.fold(rows([1.0, 2.0, 3.0], 3), 0.0, (a, x) => a + x), 3))
 "#;

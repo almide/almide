@@ -1,7 +1,7 @@
-/// Wraps items as an Array Value.
+/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
-@reuse(items)
-fn array(items: List[Value]) -> Value = _
+@reuse(xs)
+fn array(xs: List[Value]) -> Value = _
 
 /// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
@@ -44,10 +44,10 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
+/// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
-@reuse(pairs)
-fn object(pairs: List[(String, Value)]) -> Value = _
+@reuse(xs)
+fn object(xs: List[(String, Value)]) -> Value = _
 
 /// v minus the listed keys; non-objects as-is.
 @intrinsic("almide_rt_value_omit")
@@ -59,29 +59,211 @@ fn pick(v: Value, keys: List[String]) -> Value = _
 
 /// Value holding the String s.
 @intrinsic("almide_rt_value_str")
-fn str(s: String) -> Value = _
+fn string(s: String) -> Value = _
 
 // The Value's JSON text (C-060): a Float prints in its shortest form without
 // a trailing `.0`, and a NON-FINITE Float (NaN, ±inf) is `null` — JSON has no
 // spelling for it, and the text always parses back (#2499, C-356).
 /// Compact JSON; NaN/inf print as null.
 @intrinsic("almide_rt_value_stringify")
-fn stringify(v: Value) -> String = _
-
-/// Top-level keys to camelCase; nested untouched.
-@intrinsic("almide_rt_value_to_camel_case")
-fn to_camel_case(v: Value) -> Value = _
-
-/// Top-level keys to snake_case; userID -> user_i_d.
-@intrinsic("almide_rt_value_to_snake_case")
-fn to_snake_case(v: Value) -> Value = _
+fn __stringify(v: Value) -> String = _
 
 /// Value at key; err if missing or v not an Object.
 @intrinsic("almide_rt_value_field")
-fn field(v: Value, key: String) -> Result[Value, String] = _
+fn __field(v: Value, key: String) -> Result[Value, String] = _
 
 // Object keys, in insertion order. Backed by `almide_rt_value_keys` in the value
 // runtime so a value-only program links natively (#416).
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
-fn keys(v: Value) -> List[String] = _
+fn __keys(v: Value) -> List[String] = _
+
+/// Object pairs in order; err if v is another kind.
+@intrinsic("almide_rt_value_as_object")
+fn as_object(v: Value) -> Result[List[(String, Value)], String] = _
+
+// ── reading by key (R-value-02, R-value-07) ──
+// `get` and every `get_<kind>` answer an Option: none when v is not an Object,
+// the key is absent, or the value there is another kind. `as_<kind>` is the
+// Result form that says why. `get_int` never truncates a Float and `get_float`
+// widens an Int, exactly as `as_int` / `as_float` do.
+/// Value at key; none if absent or v is not an Object.
+fn get(v: Value, key: String) -> Value? = result.to_option(value.__field(v, key))
+
+/// String at key; none if absent or another kind.
+fn get_string(v: Value, key: String) -> String? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_string(x)),
+  none => none,
+}
+
+/// Int at key; none if absent or not an Int (a Float is never truncated).
+fn get_int(v: Value, key: String) -> Int? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_int(x)),
+  none => none,
+}
+
+/// Float at key (an Int widens); none if absent or another kind.
+fn get_float(v: Value, key: String) -> Float? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_float(x)),
+  none => none,
+}
+
+/// Bool at key; none if absent or another kind.
+fn get_bool(v: Value, key: String) -> Bool? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_bool(x)),
+  none => none,
+}
+
+/// Array items at key; none if absent or another kind.
+fn get_array(v: Value, key: String) -> List[Value]? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_array(x)),
+  none => none,
+}
+
+/// Object pairs at key; none if absent or another kind.
+fn get_object(v: Value, key: String) -> List[(String, Value)]? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_object(x)),
+  none => none,
+}
+
+// ── paths (R-value-03) ──
+// A path is its steps from the root: (true, name, 0) is the key `name` and
+// (false, "", i) the array index i. A negative index is out of range — it does
+// not count from the end — so it never matches. get_path / remove_path are
+// pure Almide over `get` / `as_array` / `as_object` and the constructors;
+// set_path's walk is the native runtime's, in place (`__set_path_steps`).
+/// A path into a Value: key and index steps from the root.
+mod type Path = List[(Bool, String, Int)]
+
+/// The empty path: the whole value.
+fn root() -> Path = Path([])
+
+/// p extended by the object key name.
+fn key(p: Path, name: String) -> Path = match p {
+  Path(steps) => Path(steps + [(true, name, 0)])
+}
+
+/// p extended by the array index i; a negative i is out of range.
+fn index(p: Path, i: Int) -> Path = match p {
+  Path(steps) => Path(steps + [(false, "", i)])
+}
+
+/// Value at p, or none if a step misses.
+fn get_path(v: Value, p: Path) -> Value? = match p {
+  Path(steps) => __get_steps(v, steps, 0)
+}
+
+/// v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
+fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
+  Path(steps) => value.__set_path_steps(v, steps, x)
+}
+
+// set_path's walk (#4207). The runtime takes v BY VALUE (`@consume`), so a
+// document at its last use — the accumulator of a fold of set_path calls —
+// is updated in place: only the path is walked, every untouched sibling stays
+// where it is. A rebuild per call (copy the pairs, map them, wrap them again)
+// made a fold of n calls copy n² nodes. A v still read afterwards is cloned
+// at the call site, which is what the rebuild cost anyway. The runtime also
+// holds the nesting bound (#4209, C-433): a result nested past 1000 — the
+// path's steps plus x's own nesting — is json.parse's err, so a value
+// set_path builds is one parse could have made. The wasm leg and the interp
+// oracle run stdlib/json_path.almd's `value.set_path` body instead.
+@intrinsic("almide_rt_value_set_path_steps")
+@consume(v, x)
+fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
+
+// The same walk in pure Almide over the public Value surface, one rebuild
+// per step: the body the wasm leg and the interp oracle run for
+// `__set_path_steps` (stdlib/json_path.almd). The depth bound first (#4209):
+// json.parse's bound and err text, which the runtime walk spells from
+// crates/almide-base/src/json_limits.rs.
+fn __set_path_pure(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = {
+  let n = list.len(steps)
+  if n > 1000 or __nests_past(x, 1000 - n) then err("json: nesting deeper than 1000")
+  else ok(__set_steps(v, steps, 0, x))
+}
+
+// x holds containers nested more than `budget` deep; the walk stops at the
+// budget, so it is at most 1000 frames whatever x holds.
+local fn __nests_past(x: Value, budget: Int) -> Bool = match value.as_array(x) {
+  ok(xs) => budget == 0 or list.any(xs, (e) => __nests_past(e, budget - 1)),
+  err(_) => match value.as_object(x) {
+    ok(kvs) => budget == 0 or list.any(kvs, (kv) => __nests_past(kv.1, budget - 1)),
+    err(_) => false,
+  },
+}
+
+local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(
+  steps,
+  k,
+) {
+  none => x,
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
+      pairs,
+      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x))
+      else (pk, pv),
+    ))
+    else value.object(pairs + [
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+    err(_) => value.object([
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => value.array(list.set(xs, i, __set_steps(child, steps, k + 1, x))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}
+
+/// v minus the entry at p; unchanged if absent; null for the root.
+fn remove_path(v: Value, p: Path) -> Value = match p {
+  Path(steps) => __remove_steps(v, steps, 0)
+}
+
+local fn __step_at(v: Value, step: (Bool, String, Int)) -> Value? = match step {
+  (true, name, _) => value.get(v, name),
+  (false, _, i) => match value.as_array(v) {
+    ok(xs) => list.get(xs, i),
+    err(_) => none,
+  },
+}
+
+local fn __get_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value? = match list.get(
+  steps,
+  k,
+) {
+  none => some(v),
+  some(step) => match __step_at(v, step) {
+    some(child) => __get_steps(child, steps, k + 1),
+    none => none,
+  },
+}
+
+local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value = match list.get(
+  steps,
+  k,
+) {
+  none => value.null(),
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => value.object(list.filter_map(
+      pairs,
+      ((pk, pv)) => if pk != name then some((pk, pv))
+      else if k + 1 >= list.len(steps) then none
+      else some((pk, __remove_steps(pv, steps, k + 1))),
+    )),
+    err(_) => v,
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => if k + 1 >= list.len(steps) then value.array(list.remove_at(xs, i))
+      else value.array(list.set(xs, i, __remove_steps(child, steps, k + 1))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}

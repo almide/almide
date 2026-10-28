@@ -57,8 +57,8 @@ fn to_err_option[A, E](r: Result[A, E]) -> E? = _
 
 /// (ok values, err values), each in list order.
 @intrinsic("almide_rt_result_partition")
-@consume(rs)
-fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
+@consume(xs)
+fn partition[A, E](xs: List[Result[A, E]]) -> (List[A], List[E]) = _
 
 // ── Symmetry fills (mirrors option.*) ──
 //
@@ -95,8 +95,8 @@ fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = m
   err(e) => f(e),
 }
 
-/// err(err_val) if pred fails on ok; err kept.
-fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
-  ok(v) => if pred(v) then ok(v) else err(err_val),
+/// err(err_val) if f fails on ok; err kept.
+fn filter[A, E](r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
+  ok(v) => if f(v) then ok(v) else err(err_val),
   err(e) => err(e),
 }

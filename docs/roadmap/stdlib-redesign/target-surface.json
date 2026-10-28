@@ -15,7 +15,7 @@
 {
 "mod": "args",
 "name": "positional",
-"sig": "effect fn args.positional() -> List[String]",
+"sig": "effect fn args.positional(options: List[String]) -> List[String]",
 "kind": "据え置き"
 },
 {
@@ -1267,6 +1267,12 @@
 "kind": "追加"
 },
 {
+"mod": "bytes",
+"name": "is_equal_constant_time",
+"sig": "fn bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool",
+"kind": "追加"
+},
+{
 "mod": "compute",
 "name": "ns",
 "sig": "fn compute.ns(n: Int) -> Compute",
@@ -1867,6 +1873,12 @@
 "kind": "追加"
 },
 {
+"mod": "env",
+"name": "secret",
+"sig": "effect fn env.secret(name: String) -> Secret[String]?",
+"kind": "追加"
+},
+{
 "mod": "ffi",
 "name": "address",
 "sig": "fn ffi.address(b: Bytes) -> RawPtr",
@@ -2258,30 +2270,6 @@
 },
 {
 "mod": "hash",
-"name": "md5",
-"sig": "fn hash.md5(b: Bytes) -> Bytes",
-"kind": "追加"
-},
-{
-"mod": "hash",
-"name": "md5_hex",
-"sig": "fn hash.md5_hex(b: Bytes) -> String",
-"kind": "追加"
-},
-{
-"mod": "hash",
-"name": "sha1",
-"sig": "fn hash.sha1(b: Bytes) -> Bytes",
-"kind": "追加"
-},
-{
-"mod": "hash",
-"name": "sha1_hex",
-"sig": "fn hash.sha1_hex(b: Bytes) -> String",
-"kind": "追加"
-},
-{
-"mod": "hash",
 "name": "sha512",
 "sig": "fn hash.sha512(b: Bytes) -> Bytes",
 "kind": "追加"
@@ -2290,6 +2278,30 @@
 "mod": "hash",
 "name": "sha512_hex",
 "sig": "fn hash.sha512_hex(b: Bytes) -> String",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "hmac_sha256",
+"sig": "fn hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "hmac_sha512",
+"sig": "fn hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "is_valid_hmac_sha256",
+"sig": "fn hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "is_valid_hmac_sha512",
+"sig": "fn hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool",
 "kind": "追加"
 },
 {
@@ -2619,8 +2631,8 @@
 {
 "mod": "http",
 "name": "decode_json",
-"sig": "fn http.decode_json[A](req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]",
-"kind": "据え置き"
+"sig": "fn http.decode_json[A: Decode](req: HttpRequest) -> Result[A, HttpResponse]",
+"kind": "意味変更"
 },
 {
 "mod": "http",
@@ -4517,6 +4529,18 @@
 "name": "filter",
 "sig": "fn result.filter(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]",
 "kind": "据え置き"
+},
+{
+"mod": "secret",
+"name": "new",
+"sig": "fn secret.new[A](x: A) -> Secret[A]",
+"kind": "追加"
+},
+{
+"mod": "secret",
+"name": "reveal",
+"sig": "fn secret.reveal[A](s: Secret[A]) -> A",
+"kind": "追加"
 },
 {
 "mod": "set",
@@ -7297,6 +7321,12 @@
 "kind": "追加"
 },
 {
+"mod": "string",
+"name": "is_equal_constant_time",
+"sig": "fn string.is_equal_constant_time(a: String, b: String) -> Bool",
+"kind": "追加"
+},
+{
 "mod": "testing",
 "name": "assert_aborts",
 "sig": "fn testing.assert_aborts[A](expected: String, f: () -> A) -> Unit",
@@ -7769,7 +7799,7 @@
 },
 {
 "name": "positional_at",
-"to": "`list.get(args.positional()!, i)`"
+"to": "`list.get(args.positional(options)!, i)`"
 }
 ],
 "bytes": [
@@ -7964,6 +7994,14 @@
 {
 "name": "to_int",
 "to": "`int.from`"
+},
+{
+"name": "to_int_checked",
+"to": "`int.from_checked`"
+},
+{
+"name": "to_int_saturating",
+"to": "`int.from_saturating`"
 },
 {
 "name": "from_int",
@@ -8511,11 +8549,11 @@
 },
 {
 "name": "linear_f32_row_no_bias",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "select_rows_f32",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "add",
@@ -8555,15 +8593,15 @@
 },
 {
 "name": "linear_row",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "linear_row_no_bias",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "conv1d",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "row_dot",

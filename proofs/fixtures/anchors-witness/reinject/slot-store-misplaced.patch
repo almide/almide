@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
+index d73ce9cf3..4c6c7440e 100644
+--- a/crates/almide-wasm/src/emitter.rs
++++ b/crates/almide-wasm/src/emitter.rs
+@@ -674,7 +674,7 @@ impl Emitter<'_> {
+                     self.lower(el, Some(elem))?;
+                     self.rc_share_guard(el, elem);
+                     self.witness_store(el, elem);
+-                    self.store_ty_slot(elem, i as u32 * stride);
++                    self.store_ty_slot(elem, if i == 0 && elements.len() > 1 { stride } else { i as u32 * stride });
+                     crate::witness::init::store(site, i, self.f);
+                 }
+                 self.f.instructions().local_get(hold);

@@ -1,0 +1,9 @@
+// E109 (#4151): a pure fn pipes `fs.read_text` into a lambda that calls it.
+// No call names the effect fn, so only the value flow sees it: the pure fn
+// runs an effect fn it does not call by name. v0.68.0-rc2 checked this and
+// printed the file on both targets.
+import fs
+
+fn sneaky(p: String) -> Result[String, String] = fs.read_text |> ((f) => f(p))
+
+effect fn main() -> Unit = println(sneaky("s.txt") ?? "none")

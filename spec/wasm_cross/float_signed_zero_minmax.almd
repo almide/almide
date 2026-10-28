@@ -35,17 +35,17 @@ fn main() -> Unit = {
   // -1
   println(float.to_string(float.sign(float.min(pz, mz))))
   // -1
-  println(float.to_string(float.sign(math.fmin(mz, pz))))
+  println(float.to_string(float.sign(float.min(mz, pz))))
   // -1
-  println(float.to_string(float.sign(math.fmin(pz, mz))))
+  println(float.to_string(float.sign(float.min(pz, mz))))
   // -1
   // max: +0 wins in either order
   println(float.to_string(float.sign(float.max(mz, pz))))
   // 1
   println(float.to_string(float.sign(float.max(pz, mz))))
   // 1
-  println(float.to_string(float.sign(math.fmax(mz, pz))))
+  println(float.to_string(float.sign(float.max(mz, pz))))
   // 1
   // 1
-  println(float.to_string(float.sign(math.fmax(pz, mz))))
+  println(float.to_string(float.sign(float.max(pz, mz))))
 }

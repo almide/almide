@@ -138,7 +138,7 @@ impl LowerCtx {
     /// Wrap `v` to `ty`'s declared width — [`Self::narrow_wrap`] without the
     /// which-operator gate, for a producer that is not an `IntBinOp`.
     ///
-    /// The `^` OPERATOR needs it: on wasm it lowers to a `math.pow` CALL, so it
+    /// The `^` OPERATOR needs it: on wasm it lowers to a `math.__pow` CALL, so it
     /// never passed through the `IntBinOp` path that wraps, and `Int32 999997 ^ 2`
     /// printed the full i64 `999994000009` while native — which computes at the
     /// base's own width — printed the wrapped `-733379959`. `*` and `+` at the same

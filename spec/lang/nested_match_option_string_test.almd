@@ -4,7 +4,7 @@
 // matches. Inside a lambda (e.g. list.fold callback), the inner type could be
 // TypeVar or Unknown, so the pass didn't trigger, causing Rust String vs &str mismatch.
 fn is_balanced(s: String) -> Bool = match list.fold(
-  string.chars(s),
+  string.to_list(s),
   some([]),
   (acc, c) => match acc {
     none => none,

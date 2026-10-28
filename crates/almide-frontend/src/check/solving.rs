@@ -102,6 +102,7 @@ impl Checker {
             .or_else(|| clash.as_deref().map(builtin_named_decl_hint))
             .or_else(|| fallible_callback_shape_hint(&exp, &act))
             .or_else(|| arity_shape_hint(&exp, &act))
+            .or_else(|| self.encode_into_hint(&exp, &act))
         {
             Some(h) => h,
             None => Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act),
@@ -259,6 +260,11 @@ impl Checker {
     /// side, so the pair keeps its orientation (an open-row slot `{ name, .. }`
     /// is only satisfied as expected-vs-actual).
     fn unify_record_literal(&mut self, id: u32, other: Ty, literal_is_actual: bool) -> bool {
+        // A literal standing for an opaque record outside its module (#4107),
+        // reported where the literal first meets the nominal type.
+        if self.uf.resolve(id).is_none_or(super::types::is_structural_record) {
+            self.reject_foreign_opaque_record(&other, "build a literal of");
+        }
         let Some(existing) = self.uf.resolve(id).cloned() else {
             self.uf.bind(id, other);
             return true;
@@ -394,14 +400,45 @@ impl Checker {
             (Ty::Named(na, _), Ty::Named(nb, _)) => self.unify_distinct_nominals(a, b, *na, *nb),
             (Ty::Named(_, _), _) => {
                 let resolved = self.env.resolve_named(a);
-                if resolved != *a { self.unify_infer(&resolved, b) } else { a.compatible(b) }
+                if resolved != *a { self.unify_infer(&resolved, b) }
+                else if self.opaque_against_record(a, b) { false }
+                else { a.compatible(b) }
             }
             (_, Ty::Named(_, _)) => {
                 let resolved = self.env.resolve_named(b);
-                if resolved != *b { self.unify_infer(a, &resolved) } else { a.compatible(b) }
+                if resolved != *b { self.unify_infer(a, &resolved) }
+                else if self.opaque_against_record(b, a) { false }
+                else { a.compatible(b) }
             }
             _ => return None,
         })
+    }
+
+    /// `x.encode()` is what turns the actual type into the expected one: a
+    /// `: Codec` record where its encoded `Value` is expected (#4272). Read
+    /// off the type's own `encode`, whatever it returns.
+    fn encode_into_hint(&self, exp: &Ty, act: &Ty) -> Option<String> {
+        let Ty::Named(n, _) = act else { return None };
+        let key = crate::canonicalize::registration::convention_fn_key(&self.env, n.as_str(), "encode")?;
+        let sig = self.env.functions.get(&key)?;
+        (sig.ret == *exp).then(|| {
+            let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+            format!("'{bare}' is not a {} — its `encode` builds one: pass `x.encode()`", exp.display())
+        })
+    }
+
+    /// Is `named` a stdlib-owned nominal with no structural form (`Value`,
+    /// a runtime-backed handle — `resolve_named` leaves it as it is) and
+    /// `other` a record shape? `compatible` lets an unexpanded name meet any
+    /// record (the "one side not yet resolved" leniency), so a record reached
+    /// `json.stringify(v: Value)` as a `Value`: check green, rustc E0308 on
+    /// `&P` where `&AlmideValue` was expected (#4272). A type with no fields
+    /// is never a record's expansion.
+    fn opaque_against_record(&self, named: &Ty, other: &Ty) -> bool {
+        let Ty::Named(n, _) = named else { return false };
+        matches!(other, Ty::Record { .. } | Ty::OpenRecord { .. })
+            && !n.as_str().contains('.')
+            && almide_lang::stdlib_info::stdlib_owned_type_owner(n.as_str()).is_some()
     }
 
     /// Unify two nominal types with DIFFERENT names by expanding both to their

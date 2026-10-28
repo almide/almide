@@ -30,15 +30,8 @@ use almide_base::span::Span;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// ADR-0022's admitted builtins — the writes and aborts a plain `fn` may make
-/// and a `@pure` fn may not — with what each does.
-const OUTPUT_ABORT_BUILTINS: &[(&str, &str)] = &[
-    ("println", "writes to stdout"),
-    ("eprintln", "writes to stderr"),
-    ("panic", "aborts the program"),
-    ("assert", "aborts the program when it fails"),
-    ("assert_eq", "aborts the program when it fails"),
-    ("assert_ne", "aborts the program when it fails"),
-];
+/// and a `@pure` fn may not — with what each does: the one builtin table.
+use super::builtin_calls::OUTPUT_ABORT_BUILTINS;
 
 /// What one recorded call reaches.
 #[derive(Clone, Debug)]

@@ -107,7 +107,7 @@ pub fn monomorphize(program: &mut IrProgram) {
         for ((fn_name, suffix), bindings) in &new {
             if let Some(orig) = program.functions.iter().find(|f| !f.is_test && f.name == *fn_name) {
                 let bindings = bind_from_conformances(orig, bindings, &program.protocol_conformance_args);
-                new_functions.push(specialize_function(orig, suffix, &bindings, &mut program.var_table, &global_vars));
+                new_functions.push(specialize_function(orig, suffix, &bindings, &mut program.var_table, &global_vars, &program.operator_requirements));
             }
         }
 
@@ -578,7 +578,7 @@ fn specialize_discovered(
         let orig = program.modules[mi].functions[fi].clone();
         let bindings = bind_from_conformances(&orig, &bindings, &program.protocol_conformance_args);
         let mod_vt = &mut program.modules[mi].var_table;
-        let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt, &module_globals);
+        let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt, &module_globals, &program.operator_requirements);
         let new_name = specialized.name.to_string();
         program.modules[mi].functions.push(specialized);
         rename.insert(key, new_name);

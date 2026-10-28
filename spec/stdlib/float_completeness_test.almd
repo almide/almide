@@ -47,40 +47,40 @@ test "float.abs zero" {
   assert_eq(float.abs(0.0), 0.0)
 }
 
-test "float.sqrt of 4" {
-  assert_eq(float.sqrt(4.0), 2.0)
+test "math.sqrt of 4" {
+  assert_eq(math.sqrt(4.0), 2.0)
 }
 
-test "float.sqrt of 9" {
-  assert_eq(float.sqrt(9.0), 3.0)
+test "math.sqrt of 9" {
+  assert_eq(math.sqrt(9.0), 3.0)
 }
 
-test "float.sqrt of 1" {
-  assert_eq(float.sqrt(1.0), 1.0)
+test "math.sqrt of 1" {
+  assert_eq(math.sqrt(1.0), 1.0)
 }
 
-test "float.to_int truncates positive" {
-  assert_eq(float.to_int(3.9), 3)
+test "int.from_saturating truncates positive" {
+  assert_eq(int.from_saturating(3.9), 3)
 }
 
-test "float.to_int truncates negative" {
-  assert_eq(float.to_int(-3.9), -3)
+test "int.from_saturating truncates negative" {
+  assert_eq(int.from_saturating(-3.9), -3)
 }
 
-test "float.to_int zero" {
-  assert_eq(float.to_int(0.0), 0)
+test "int.from_saturating zero" {
+  assert_eq(int.from_saturating(0.0), 0)
 }
 
-test "float.from_int basic" {
-  assert_eq(float.from_int(42), 42.0)
+test "float.from basic" {
+  assert_eq(float.from(42), 42.0)
 }
 
-test "float.from_int zero" {
-  assert_eq(float.from_int(0), 0.0)
+test "float.from zero" {
+  assert_eq(float.from(0), 0.0)
 }
 
-test "float.from_int negative" {
-  assert_eq(float.from_int(-10), -10.0)
+test "float.from negative" {
+  assert_eq(float.from(-10), -10.0)
 }
 
 test "float.min picks smaller" {

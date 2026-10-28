@@ -54,14 +54,13 @@ pub(crate) enum Helper {
     /// (recursive): tags must match, Float is IEEE ==, Array/Object
     /// compare element/pair-wise IN ORDER (the oracle's value_eq).
     ValueEq { key_off: u32, val_off: u32 },
-    /// `$value_merge(a, b) -> i32` — object merge: A's keys in order
-    /// (B's value wins on a shared key), then B's new keys in B order;
-    /// any non-Object operand yields b (the oracle's value_merge).
-    ValueMerge { key_off: u32, val_off: u32 },
     /// `$utf8_lossy(bytes) -> str` — String::from_utf8_lossy verbatim:
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).
     Utf8Lossy,
+    /// `$err_text(str) -> str` — C-418's escaper (#4126) for the error texts
+    /// the emitter builds itself; always a fresh block.
+    ErrText,
     /// `$named_<op>_<ti>(a, b) -> i32` — the runtime-recursive body of a
     /// type-directed walk over a RECURSIVE Named type (the DisplayNamed
     /// doctrine for `==` and for the total order). Both ops have the same
@@ -69,11 +68,6 @@ pub(crate) enum Helper {
     /// inlines the type's shape, so a type that contains itself has to
     /// become a CALL somewhere or the emitter recurses forever.
     NamedOp { op: NamedOp, ti: u32 },
-    /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
-    /// core over THIS backend's Value layout.
-    JsonPathSet { vdec: u32 },
-    /// `$jp_remove(j, path, k) -> Value` — json.remove_path's core.
-    JsonPathRemove,
     /// `$scan_deep_<key>(block, stride, off, needle) -> i32` — the scan
     /// family's DEEP lane: compound keys (tuples, records) compare by
     /// the type-directed `==` instead of a word/byte class.
@@ -127,16 +121,28 @@ pub(crate) enum Helper {
     /// been given — one per functional rebuild probed twice.
     MapIdxForget { side_get: u32, side_set: u32 },
     MapIdxHash { key: crate::map_index::IdxKey },
-    MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxBuild { key: crate::map_index::IdxKey, hash: u32, ord_build: u32 },
     MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
     MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, grow: u32 },
     /// The hole family (#3691, map_index.rs "Holes"): the index doubled with
     /// its tombstones dropped, the delete's tombstone, the in-place
     /// compaction and the hole count.
-    MapIdxGrow { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxGrow { key: crate::map_index::IdxKey, hash: u32, from_index: u32 },
     MapIdxKill { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
     MapIdxSettle { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
     MapIdxDead { side_get: u32 },
+    /// The flood fallback (#4104, map_ordered.rs): the AVL index a block's
+    /// hash index turns into once an insert probes past `FLOOD_PROBES`.
+    MapOrdRot { left: bool },
+    MapOrdBalance { rot_l: u32, rot_r: u32 },
+    MapOrdDelMin { balance: u32 },
+    MapOrdInsert { key: crate::map_index::IdxKey, balance: u32 },
+    MapOrdDelete { key: crate::map_index::IdxKey, balance: u32, delmin: u32 },
+    MapOrdFind { key: crate::map_index::IdxKey },
+    MapOrdNew,
+    MapOrdAdd { key: crate::map_index::IdxKey, insert: u32 },
+    MapOrdFromIndex { add: u32, new: u32 },
+    MapOrdBuildAll { key: crate::map_index::IdxKey, add: u32, new: u32 },
     /// `$drop_list(block)` — the typed drop of a List whose elements are
     /// heap HANDLES (#2010 stage 2b): the spine's credit down; at zero
     /// every element released through `elem_dec` (`$dec_flat` for a
@@ -332,6 +338,16 @@ pub(crate) struct FnWork {
     /// declaration table charges them to the region opener, not the frame.
     pub(crate) meter_reads_pending: std::cell::Cell<u32>,
     pub(crate) meter_reads: std::cell::RefCell<HashMap<String, u32>>,
+    /// #4250/#4252: the index of the first of the deep-walk globals
+    /// (`deep_walk.rs`), appended after every other global, and whether any
+    /// helper uses them (a module with no recursive type declares none).
+    pub(crate) deep_global_base: std::cell::Cell<u32>,
+    pub(crate) deep_globals_used: std::cell::Cell<bool>,
+    /// While a recursive type's display body is written: `Some(closers)`
+    /// when nothing but fixed text follows the current position in that
+    /// body — the closing texts of the enclosing levels, outermost first
+    /// (deep_walk.rs). `None` everywhere else.
+    pub(crate) disp_tail: std::cell::RefCell<Option<Vec<&'static str>>>,
 }
 
 pub(crate) enum DisplayBuild {

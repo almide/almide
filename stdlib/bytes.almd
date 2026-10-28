@@ -92,7 +92,7 @@ fn compare(a: Bytes, b: Bytes) -> Int = _
 
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
-fn concat(a: Bytes, b: Bytes) -> Bytes = _
+fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 
 /// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
@@ -144,10 +144,6 @@ fn from_string(s: String) -> Bytes = _
 @intrinsic("almide_rt_bytes_get")
 fn get(b: Bytes, i: Int) -> Int? = _
 
-/// Byte at index i, or default when out of range.
-@intrinsic("almide_rt_bytes_get_or")
-fn get_or(b: Bytes, i: Int, default: Int) -> Int = _
-
 /// First offset of needle, or none; some(0) if empty.
 @intrinsic("almide_rt_bytes_index_of")
 fn index_of(b: Bytes, needle: Bytes) -> Int? = _
@@ -168,10 +164,6 @@ fn is_valid_utf8(b: Bytes) -> Bool = _
 @intrinsic("almide_rt_bytes_len")
 fn len(b: Bytes) -> Int = _
 
-/// Pieces split at LF; CR kept; a final LF adds no piece.
-@intrinsic("almide_rt_bytes_lines")
-fn lines(b: Bytes) -> List[Bytes] = _
-
 /// f applied per byte; results cut to low 8 bits.
 @intrinsic("almide_rt_bytes_map_each")
 fn map(b: Bytes, f: (Int) -> Int) -> Bytes = _
@@ -191,10 +183,6 @@ fn pad_end(b: Bytes, n: Int, fill: Int) -> Bytes = _
 /// Appends x's low 8 bits in place.
 @intrinsic("almide_rt_bytes_push")
 fn push(mut b: Bytes, x: Int) -> Unit = _
-
-/// Sets byte i to val's low 8 bits; no-op out of range.
-@intrinsic("almide_rt_bytes_set_at")
-fn set_at(mut b: Bytes, i: Int, val: Int) -> Unit = _
 
 /// Copies src_start..src_end to dst; no-op if it won't fit.
 @intrinsic("almide_rt_bytes_copy_within")
@@ -340,22 +328,6 @@ fn __read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 @intrinsic("almide_rt_bytes_read_i64_le_at")
 fn __read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
-/// Up to count u32-LE-prefixed strings; stops if cut off.
-@intrinsic("almide_rt_bytes_read_length_prefixed_strings_le")
-fn read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = _
-
-/// len bytes at pos, lossy UTF-8; empty if out of range.
-@intrinsic("almide_rt_bytes_read_string_at")
-fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = _
-
-/// String after a u32 BE length at pos; empty if cut off.
-@intrinsic("almide_rt_bytes_read_string_be")
-fn read_string_be(b: Bytes, pos: Int) -> String = _
-
-/// Cursor form of read_string_be; (pos, none) if cut off.
-@intrinsic("almide_rt_bytes_read_string_be_at")
-fn read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) = _
-
 /// u16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_be")
 fn __read_u16_be(b: Bytes, pos: Int) -> Int = _
@@ -403,10 +375,6 @@ fn __read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 /// (pos+4, u32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_le_at")
 fn __read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
-
-/// Byte at pos; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_u8")
-fn read_u8(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+1, byte); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u8_at")
@@ -493,11 +461,7 @@ fn __set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_skip")
 fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
-/// Offset past count u32-LE-prefixed records.
-@intrinsic("almide_rt_bytes_skip_length_prefixed_le")
-fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
-
-/// Copy of start..end capped at len; empty if start >= end.
+/// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
@@ -508,6 +472,13 @@ fn split(b: Bytes, sep: Bytes) -> List[Bytes] = _
 /// True if b begins with prefix, or prefix is empty.
 @intrinsic("almide_rt_bytes_starts_with")
 fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
+
+/// True if a and b hold the same bytes, in time that depends only on their
+/// lengths: no early exit on the first differing byte. Use it to compare a
+/// MAC, token or password hash; `==` returns at the first difference. A length
+/// mismatch is false at once (lengths are public).
+@intrinsic("almide_rt_bytes_is_equal_constant_time")
+fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = _
 
 /// (pos+n, n-byte copy); (pos, none) if out of range.
 @intrinsic("almide_rt_bytes_take_at")
@@ -529,85 +500,9 @@ fn to_string_lossy(b: Bytes) -> String = _
 @intrinsic("almide_rt_bytes_write_bool")
 fn append_bool(mut b: Bytes, x: Bool) -> Unit = _
 
-/// Appends val as 8-byte f64, BE.
-@intrinsic("almide_rt_bytes_write_f64_be")
-fn write_f64_be(mut b: Bytes, val: Float) -> Unit = _
-
-/// Appends val as 8 bytes, BE.
-@intrinsic("almide_rt_bytes_write_i64_be")
-fn write_i64_be(mut b: Bytes, val: Int) -> Unit = _
-
-/// Appends s after a u32 BE byte-length prefix.
-@intrinsic("almide_rt_bytes_write_string_be")
-fn write_string_be(mut b: Bytes, s: String) -> Unit = _
-
-/// Appends val's low 32 bits, BE.
-@intrinsic("almide_rt_bytes_write_u32_be")
-fn write_u32_be(mut b: Bytes, val: Int) -> Unit = _
-
-/// Appends val's low 8 bits; 256 becomes 0.
-@intrinsic("almide_rt_bytes_write_u8")
-fn write_u8(mut b: Bytes, val: Int) -> Unit = _
-
 /// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
-
-// ── The Endian-argument family (Stage 4a) ──
-//
-// A second spelling of four cells of the typed byte IO matrix, with the byte
-// order as an argument. R-bytes-04 retires it; the get_ / next_ / put_ /
-// append_ matrix further down is the surface.
-/// Byte order: LittleEndian or BigEndian.
-type Endian = | LittleEndian | BigEndian
-
-/// UInt16 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_uint16")
-fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 = _
-
-/// UInt32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_uint32")
-fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 = _
-
-/// Int32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_int32")
-fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 = _
-
-/// Float32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_float32")
-fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 = _
-
-/// Appends value as 2 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_uint16")
-fn write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_uint32")
-fn write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_int32")
-fn write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_float32")
-fn write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_uint16")
-fn set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_uint32")
-fn set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_int32")
-fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_float32")
-fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
 
 // ── Text requirement (R-L0-42): `list.join[T: Text]` over Bytes ──
 /// The parts with sep between them; empty for [].
@@ -1078,7 +973,7 @@ fn next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int) = {
 
 /// Appends src's bytes to b in place.
 fn append_bytes(mut b: Bytes, src: Bytes) -> Unit = {
-  b = bytes.concat(b, src)
+  b = bytes.__concat(b, src)
 }
 
 /// An empty byte buffer.
@@ -1098,26 +993,31 @@ fn pop(mut b: Bytes) -> Int? = {
   last
 }
 
-/// The first n bytes; all of b past its length; n < 0 aborts.
-fn take(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take: negative count ${n}")
-else bytes.slice(b, 0, n)
+// A negative count is 0 (#4147), as in list.take / string.take: these used to
+// abort on n < 0 while the list and string spellings answered.
+/// The first n bytes; all of b past its length; empty if n < 0.
+fn take(b: Bytes, n: Int) -> Bytes = bytes.slice(b, 0, int.max(n, 0))
 
-/// b without its first n bytes; empty past its length; n < 0 aborts.
-fn drop(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop: negative count ${n}")
-else bytes.slice(b, n, bytes.len(b))
+/// b without its first n bytes; empty past its length; all of b if n < 0.
+fn drop(b: Bytes, n: Int) -> Bytes = bytes.slice(b, int.max(n, 0), bytes.len(b))
 
-/// The last n bytes; all of b past its length; n < 0 aborts.
-fn take_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take_end: negative count ${n}")
-else bytes.slice(b, int.max(bytes.len(b) - n, 0), bytes.len(b))
+/// The last n bytes; all of b past its length; empty if n < 0.
+fn take_end(b: Bytes, n: Int) -> Bytes = {
+  let k = int.min(int.max(n, 0), bytes.len(b))
+  bytes.slice(b, bytes.len(b) - k, bytes.len(b))
+}
 
-/// b without its last n bytes; empty past its length; n < 0 aborts.
-fn drop_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop_end: negative count ${n}")
-else bytes.slice(b, 0, int.max(bytes.len(b) - n, 0))
+/// b without its last n bytes; empty past its length; all of b if n < 0.
+fn drop_end(b: Bytes, n: Int) -> Bytes = {
+  let k = int.min(int.max(n, 0), bytes.len(b))
+  bytes.slice(b, 0, bytes.len(b) - k)
+}
 
-/// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
-fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) =
-  if n < 0 then panic("bytes.split_at: negative index ${n}")
-  else (bytes.slice(b, 0, n), bytes.slice(b, n, bytes.len(b)))
+/// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
+fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
+  let k = int.max(n, 0)
+  (bytes.slice(b, 0, k), bytes.slice(b, k, bytes.len(b)))
+}
 
 /// The first byte, or none if b is empty.
 fn first(b: Bytes) -> Int? = bytes.get(b, 0)
@@ -1186,14 +1086,35 @@ fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 /// The bytes ordered by f's key; equal keys keep their order.
 fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
-local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, i: Int, j: Int, acc: List[Int]) -> List[Int] = match (list.get(
-  xs,
-  i,
-), list.get(ys, j)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
-  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
-  (some(_), none) => acc + list.drop(xs, i),
-  _ => acc + list.drop(ys, j),
+// The stable merge, pushing into one output (#4196): the earlier merge
+// appended `acc + [y]` per step, a full copy on wasm, which made the sort
+// quadratic there. The decision and call order are unchanged: a right element
+// goes first only when cmp(right, left) < 0, one cmp call per comparison.
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
+  var out: List[Int] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(xs) + list.len(ys)) {
+    match (list.get(xs, i), list.get(ys, j)) {
+      (some(x), some(y)) => if cmp(y, x) < 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
 }
 
 local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
@@ -1203,9 +1124,6 @@ local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
-    0,
-    0,
-    [],
   )
 }
 
@@ -1277,39 +1195,18 @@ fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 /// The first byte of each key f gives, in order.
 fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
-// Does needle occur in xs at i?
-local fn matches_at(xs: List[Int], needle: List[Int], i: Int) -> Bool = list.slice(
-  xs,
-  i,
-  i + list.len(needle),
-) == needle
-
-// The first match at or after i, or -1.
-local fn find_from(xs: List[Int], needle: List[Int], i: Int) -> Int =
-  if i + list.len(needle) > list.len(xs) then -1
-  else if matches_at(xs, needle, i) then i
-  else find_from(xs, needle, i + 1)
-
-// The last match at or before i, or -1.
-local fn find_back(xs: List[Int], needle: List[Int], i: Int) -> Int =
-  if i < 0 then -1
-  else if matches_at(xs, needle, i) then i
-  else find_back(xs, needle, i - 1)
-
+// The searches below go through bytes.index_of and bytes.split, the one
+// linear-time substring search each target has (#4206): they used to compare
+// a `list.slice` window at every position, O(n·m) with a copy per probe.
 /// Byte index of the last needle, or none; an empty needle is found at len.
 fn last_index_of(b: Bytes, needle: Bytes) -> Int? = {
-  let xs = bytes.to_list(b)
-  let ns = bytes.to_list(needle)
-  let i = find_back(xs, ns, list.len(xs) - list.len(ns))
-  if i < 0 then none else some(i)
-}
-
-// Non-overlapping matches from i, left to right, each replaced by to.
-local fn replace_go(xs: List[Int], from: List[Int], to: List[Int], i: Int, limit: Int, acc: List[Int]) -> List[Int] = {
-  let j = if limit == 0 then -1
-  else find_from(xs, from, i)
-  if j < 0 then acc + list.drop(xs, i)
-  else replace_go(xs, from, to, j + list.len(from), limit - 1, acc + list.slice(xs, i, j) + to)
+  // The leftmost match in the reversed bytes is the rightmost one here.
+  let n = bytes.len(b)
+  let m = bytes.len(needle)
+  match bytes.index_of(bytes.reverse(b), bytes.reverse(needle)) {
+    some(i) => some(n - i - m),
+    none => none,
+  }
 }
 
 // An empty pattern matches before every byte and at the end (the string rule).
@@ -1318,21 +1215,36 @@ local fn replace_empty(xs: List[Int], to: List[Int], limit: Int) -> List[Int] =
   else to + xs
 
 /// b with every non-overlapping from replaced by to, left to right.
-fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
-  let xs = bytes.to_list(b)
-  let fs = bytes.to_list(from)
-  let ts = bytes.to_list(to)
-  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, -1))
-  else bytes.from_list(replace_go(xs, fs, ts, 0, -1, []))
-}
+fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes =
+  if bytes.is_empty(from) then bytes.from_list(replace_empty(bytes.to_list(b), bytes.to_list(to), -1))
+  else {
+    // The pieces between the non-overlapping matches, written once each
+    // into a buffer sized up front, with `to` between them.
+    let pieces = bytes.split(b, from)
+    let tn = bytes.len(to)
+    var out = bytes.zeros(bytes.len(b) + (list.len(pieces) - 1) * (tn - bytes.len(from)))
+    var at = 0
+    var first = true
+    for piece in pieces {
+      if first then {
+        first = false
+      } else {
+        bytes.copy_from(out, to, at, 0, tn)
+        at = at + tn
+      }
+      bytes.copy_from(out, piece, at, 0, bytes.len(piece))
+      at = at + bytes.len(piece)
+    }
+    out
+  }
 
 /// b with the first from replaced by to.
-fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
-  let xs = bytes.to_list(b)
-  let fs = bytes.to_list(from)
-  let ts = bytes.to_list(to)
-  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, 1))
-  else bytes.from_list(replace_go(xs, fs, ts, 0, 1, []))
+fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = match bytes.index_of(b, from) {
+  some(i) => bytes.__concat(
+    bytes.__concat(bytes.slice(b, 0, i), to),
+    bytes.slice(b, i + bytes.len(from), bytes.len(b)),
+  ),
+  none => b,
 }
 
 /// b without prefix, or none when b does not start with it.
@@ -1345,12 +1257,6 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
   if bytes.ends_with(b, suffix) then some(bytes.slice(b, 0, bytes.len(b) - bytes.len(suffix)))
   else none
 
-local fn count_go(xs: List[Int], needle: List[Int], i: Int, n: Int) -> Int = {
-  let j = find_from(xs, needle, i)
-  if j < 0 then n
-  else count_go(xs, needle, j + list.len(needle), n + 1)
-}
-
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
-else count_go(bytes.to_list(b), bytes.to_list(needle), 0, 0)
+else list.len(bytes.split(b, needle)) - 1

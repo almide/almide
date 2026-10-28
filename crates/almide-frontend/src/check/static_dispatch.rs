@@ -173,6 +173,10 @@ impl Checker {
                 self.env.import_table.mark_used(module);
                 return Some(Ty::String);
             }
+            if self.reject_secret_encode(&arg_concrete) {
+                self.env.import_table.mark_used(module);
+                return Some(Ty::String);
+            }
         }
         self.resolve_module_member(module, field, arg_tys)
     }
@@ -505,6 +509,24 @@ impl Checker {
             }
             _ => None,
         }
+    }
+
+    /// E023 (#4107, R-secret-04): `T.encode` on a type that holds a Secret.
+    /// The Codec derive never writes a Secret out, so the type has `decode`
+    /// only; name that rather than a missing method. True when reported.
+    pub(crate) fn reject_secret_encode(&mut self, ty: &Ty) -> bool {
+        let Ty::Named(name, _) = ty else { return false };
+        let Some(shape) = self.env.types.get(name).cloned() else { return false };
+        if !crate::secret_type::holds_secret(&self.env, &shape) {
+            return false;
+        }
+        let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str()).to_string();
+        self.emit(super::err(
+            format!("type '{}' holds a Secret, so the Codec derive does not derive '{}.encode'", bare, bare),
+            "A Secret is decoded, never written out. Build the Value by hand and reveal the field you mean to send: `value.object([(\"user\", value.string(x.user)), (\"password\", value.string(secret.reveal(x.password)))])`".to_string(),
+            format!("{}.encode", bare),
+        ).with_code("E023"));
+        true
     }
 
     /// Check if a type has a Codec encode function registered.

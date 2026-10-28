@@ -283,7 +283,7 @@ fn join_allocates_one_result_under_fixed_budget() {
     let jn = dir.join("join-budget.almd");
     std::fs::write(
         &jn,
-        "import int\n\neffect fn main() -> Unit = {\n  let n = 50000\n  let parts = list.range(0, n) |> list.map((i) => int.to_string(i))\n  let joined = string.join(parts, \",\")\n  let back = string.split(joined, \",\")\n  println(int.to_string(string.len(joined)))\n  println(int.to_string(list.len(back)))\n}\n",
+        "import int\n\neffect fn main() -> Unit = {\n  let n = 50000\n  let parts = list.range(0, n) |> list.map((i) => int.to_string(i))\n  let joined = list.join(parts, \",\")\n  let back = string.split(joined, \",\")\n  println(int.to_string(string.len(joined)))\n  println(int.to_string(list.len(back)))\n}\n",
     )
     .expect("write");
     let jn_wasm = dir.join("join-budget.wasm");

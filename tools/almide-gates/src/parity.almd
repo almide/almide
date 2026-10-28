@@ -85,7 +85,7 @@ fn strip_warning_blocks(lines: List[String]) -> List[String] = strip_warnings_fr
 fn strip_warnings_from(lines: List[String], i: Int, skipping: Bool, acc: List[String]) -> List[String] =
   if i >= list.len(lines) then acc
   else {
-    let l = list.get_or(lines, i, "")
+    let l = list.get(lines, i) ?? ""
     if string.starts_with(l, "warning[") then strip_warnings_from(lines, i + 1, true, acc)
     else if skipping and l == "" then strip_warnings_from(lines, i + 1, false, acc)
     else if skipping and (string.starts_with(l, "Error:") or string.starts_with(l, "error[") or string.starts_with(
@@ -117,7 +117,7 @@ fn normalize_wasm_err(s: String, wat_path: String) -> String = {
 fn lines_of(s: String) -> List[String] = {
   let parts = string.split(s, "\n")
   let n = list.len(parts)
-  if n > 0 and list.get_or(parts, n - 1, "x") == "" then list.take(parts, n - 1) else parts
+  if n > 0 and list.get(parts, n - 1) ?? "x" == "" then list.take(parts, n - 1) else parts
 }
 
 // `sed 's/^ *[0-9]*: *//'` — drop an indented `12: ` backtrace index. A line with no index is

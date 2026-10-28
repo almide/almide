@@ -3,7 +3,10 @@
 //! A pure fn read and deleted files by passing an effect fn as a value
 //! (`list.map(fs.read_text)`), through a user higher-order fn, through a
 //! record field, and through a fn-typed parameter handed a stored closure —
-//! on both targets. And `[permissions]` missed the same values: a manifest
+//! on both targets. The same holds for `option.map` and `result.map` handed
+//! the effect fn and for an effect fn piped into a lambda that calls it
+//! (`fs.read_text |> ((f) => f(p))`): v0.68.0-rc2 checked each pure form and
+//! printed the file on both targets. And `[permissions]` missed the same values: a manifest
 //! allowing only `Time` built `list.map(fs.read_text)` and read the file.
 //!
 //! These tests pin, per shape and on both targets:
@@ -69,6 +72,36 @@ const SHAPES: &[(&str, &str, &str, &str)] = &[
          fn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f(\"s.txt\")\n\
          effect fn reads(r: Reader) -> Result[String, String] = call_it(r.read)\n\
          effect fn main() -> Unit = {\n  let r = Reader { read: (p) => fs.read_text(p) }\n  println(reads(r) ?? \"none\")\n}\n",
+    ),
+    (
+        "option-map",
+        "E006",
+        "import fs\n\
+         fn sneaky() -> Option[Result[String, String]] = option.map(some(\"s.txt\"), fs.read_text)\n\
+         effect fn main() -> Unit = println(\"${sneaky()}\")\n",
+        "import fs\n\
+         effect fn reads() -> Option[Result[String, String]] = option.map(some(\"s.txt\"), fs.read_text)\n\
+         effect fn main() -> Unit = println(\"${reads()!}\")\n",
+    ),
+    (
+        "result-map",
+        "E006",
+        "import fs\n\
+         fn sneaky() -> Result[Result[String, String], String] = result.map(ok(\"s.txt\"), fs.read_text)\n\
+         effect fn main() -> Unit = println(match sneaky() {\n  ok(r) => r ?? \"none\",\n  err(e) => e,\n})\n",
+        "import fs\n\
+         effect fn reads() -> Result[Result[String, String], String] = result.map(ok(\"s.txt\"), fs.read_text)\n\
+         effect fn main() -> Unit = println(match reads() {\n  ok(r) => r ?? \"none\",\n  err(e) => e,\n})\n",
+    ),
+    (
+        "pipe-into-lambda",
+        "E109",
+        "import fs\n\
+         fn sneaky() -> Result[String, String] = fs.read_text |> ((f) => f(\"s.txt\"))\n\
+         effect fn main() -> Unit = println(sneaky() ?? \"none\")\n",
+        "import fs\n\
+         effect fn reads() -> Result[String, String] = fs.read_text |> ((f) => f(\"s.txt\"))\n\
+         effect fn main() -> Unit = println(reads() ?? \"none\")\n",
     ),
 ];
 

@@ -1,9 +1,0 @@
-// E006 (#4159): `process.env` reads the environment like `env.get` — it was
-// declared a plain fn, so a pure fn read $HOME. It is an `effect fn` now, as
-// are `process.pid`, `process.sleep`, `process.is_alive`, `io.write`,
-// `io.write_bytes` and `net.tcp_is_open`.
-import process
-
-fn home() -> String = process.env("HOME") ?? "none"
-
-effect fn main() -> Unit = println(home())

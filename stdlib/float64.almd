@@ -1,48 +1,14 @@
-// float64 — bundled-Almide sized-numeric conversion module.
-//
-// Routed through canonical `float` (= f64), exactly as `float32.almd` is. The
-// `float.from_float64` pivot is a no-op at the codegen level; it exists so the
-// sized type has the same surface as every other width.
-//
-// `Float64` and the canonical `Float` share a representation but not a type,
-// so without this module `float64.to_string` did not exist and a caller had to
-// know the `float.to_string(float.from_float64(x))` pivot (#894). There is no
-// `to_float64` — that is the identity on this type.
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int8(x: Float64) -> Int8 = float.to_int8(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int16(x: Float64) -> Int16 = float.to_int16(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int32(x: Float64) -> Int32 = float.to_int32(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int64(x: Float64) -> Int64 = float.to_int64(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint8(x: Float64) -> UInt8 = float.to_uint8(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint16(x: Float64) -> UInt16 = float.to_uint16(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint32(x: Float64) -> UInt32 = float.to_uint32(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint64(x: Float64) -> UInt64 = float.to_uint64(float.from_float64(x))
-
 /// Nearest Float32; overflow becomes infinity.
-fn to_float32(x: Float64) -> Float32 = float.to_float32(float.from_float64(x))
+fn __raw_to_float32(x: Float64) -> Float32 = float.__raw_to_float32(float.__from_float64(x))
 
 /// Plain decimal, never an exponent; 2.0 keeps .0.
-fn to_string(x: Float64) -> String = float.to_string(float.from_float64(x))
+fn to_string(x: Float64) -> String = float.to_string(float.__from_float64(x))
 
 // ── FloatingPoint: compare, select, classify, round, constants, bits (R-sized-02/03/08/11) ──
 /// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
 fn compare(a: Float64, b: Float64) -> Int = total_order(
-  float.from_float64(a),
-  float.from_float64(b),
+  float.__from_float64(a),
+  float.__from_float64(b),
 )
 
 local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
@@ -61,53 +27,53 @@ local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
 }
 
 /// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-fn min(a: Float64, b: Float64) -> Float64 = float.to_float64(float.min(float.from_float64(a), float.from_float64(b)))
+fn min(a: Float64, b: Float64) -> Float64 = float.__to_float64(float.min(float.__from_float64(a), float.__from_float64(b)))
 
 /// Greater; a NaN operand is ignored; 0.0 > -0.0.
-fn max(a: Float64, b: Float64) -> Float64 = float.to_float64(float.max(float.from_float64(a), float.from_float64(b)))
+fn max(a: Float64, b: Float64) -> Float64 = float.__to_float64(float.max(float.__from_float64(a), float.__from_float64(b)))
 
 /// x limited to lo..hi; lo > hi or a NaN bound aborts.
-fn clamp(x: Float64, lo: Float64, hi: Float64) -> Float64 = float.to_float64(float.clamp(float.from_float64(x), float.from_float64(lo), float.from_float64(hi)))
+fn clamp(x: Float64, lo: Float64, hi: Float64) -> Float64 = float.__to_float64(float.clamp(float.__from_float64(x), float.__from_float64(lo), float.__from_float64(hi)))
 
 /// True only for NaN.
-fn is_nan(x: Float64) -> Bool = float.is_nan(float.from_float64(x))
+fn is_nan(x: Float64) -> Bool = float.is_nan(float.__from_float64(x))
 
 /// True for inf and -inf; false for NaN.
-fn is_infinite(x: Float64) -> Bool = float.is_infinite(float.from_float64(x))
+fn is_infinite(x: Float64) -> Bool = float.is_infinite(float.__from_float64(x))
 
 /// True unless x is inf, -inf or NaN.
-fn is_finite(x: Float64) -> Bool = not (float.is_nan(float.from_float64(x)) or float.is_infinite(float.from_float64(x)))
+fn is_finite(x: Float64) -> Bool = not (float.is_nan(float.__from_float64(x)) or float.is_infinite(float.__from_float64(x)))
 
 /// Magnitude; -0.0 gives 0.0, NaN stays NaN.
-fn abs(x: Float64) -> Float64 = float.to_float64(float.abs(float.from_float64(x)))
+fn abs(x: Float64) -> Float64 = float.__to_float64(float.abs(float.__from_float64(x)))
 
 /// Round toward -inf; -0.5 gives -1.0.
-fn floor(x: Float64) -> Float64 = float.to_float64(float.floor(float.from_float64(x)))
+fn floor(x: Float64) -> Float64 = float.__to_float64(float.floor(float.__from_float64(x)))
 
 /// Round toward +inf; -0.5 gives -0.0.
-fn ceil(x: Float64) -> Float64 = float.to_float64(float.ceil(float.from_float64(x)))
+fn ceil(x: Float64) -> Float64 = float.__to_float64(float.ceil(float.__from_float64(x)))
 
 /// Nearest whole value; halves round away from zero.
-fn round(x: Float64) -> Float64 = float.to_float64(float.round(float.from_float64(x)))
+fn round(x: Float64) -> Float64 = float.__to_float64(float.round(float.__from_float64(x)))
 
 /// Round toward 0; -0.5 gives -0.0.
 fn trunc(x: Float64) -> Float64 = {
-  let f = float.from_float64(x)
-  float.to_float64(if f < 0.0 then float.ceil(f) else float.floor(f))
+  let f = float.__from_float64(x)
+  float.__to_float64(if f < 0.0 then float.ceil(f) else float.floor(f))
 }
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 fn signum(x: Float64) -> Float64 = {
-  let f = float.from_float64(x)
+  let f = float.__from_float64(x)
   if float.is_nan(f) then x
-  else if float.to_bits(f) < 0 then float.to_float64(-1.0) else float.to_float64(1.0)
+  else if float.to_bits(f) < 0 then float.__to_float64(-1.0) else float.__to_float64(1.0)
 }
 
 /// The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
-fn to_bits(x: Float64) -> Int = float.to_bits(float.from_float64(x))
+fn to_bits(x: Float64) -> Int = float.to_bits(float.__from_float64(x))
 
 /// Float64 whose IEEE-754 binary64 bits are bits.
-fn from_bits(bits: Int) -> Float64 = float.to_float64(int.bits_to_float(bits))
+fn from_bits(bits: Int) -> Float64 = float.__to_float64(int.__bits_to_float(bits))
 
 /// Positive infinity.
 fn infinity() -> Float64 = from_bits(9218868437227405312)
@@ -124,9 +90,9 @@ fn max_value() -> Float64 = from_bits(9218868437227405311)
 /// Most negative finite Float64 (= -max_value()), not the smallest positive.
 fn min_value() -> Float64 = from_bits(-4503599627370497)
 
-/// Float64 from trimmed s, the grammar of float.parse; err on junk.
+/// Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
 fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
-  ok(f) => ok(float.to_float64(f)),
+  ok(f) => ok(float.__to_float64(f)),
   err(e) => err(e),
 }
 
@@ -135,37 +101,37 @@ fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
 //    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
 //    type defines below its own conversions. ──
 /// x as the nearest Float64 (ties to even); NaN stays NaN.
-fn from[S: Numeric](x: S) -> Float64 = float.to_float64(x.__to_float())
+fn from[S: Numeric](x: S) -> Float64 = float.__to_float64(x.__to_float())
 
 /// some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
 fn from_checked[S: Numeric](x: S) -> Float64? = match x.__to_float_exact() {
-  some(f) => some(float.to_float64(f)),
+  some(f) => some(float.__to_float64(f)),
   none => none,
 }
 
 // ── Numeric requirements: the conversion pivots the `<T>.from`
 //    family reads through a type variable, and the receiver-less sum and
 //    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
-fn __int_exact(x: Float64) -> Int? = float.__int_exact(float.from_float64(x))
+fn __int_exact(x: Float64) -> Int? = float.__int_exact(float.__from_float64(x))
 
-fn __uint64_exact(x: Float64) -> UInt64? = float.__uint64_exact(float.from_float64(x))
+fn __uint64_exact(x: Float64) -> UInt64? = float.__uint64_exact(float.__from_float64(x))
 
 fn __trunc(x: Float64) -> Float64 = float64.trunc(x)
 
-fn __int_sat(x: Float64) -> Int = float.__int_sat(float.from_float64(x))
+fn __int_sat(x: Float64) -> Int = float.__int_sat(float.__from_float64(x))
 
-fn __uint64_sat(x: Float64) -> UInt64 = float.__uint64_sat(float.from_float64(x))
+fn __uint64_sat(x: Float64) -> UInt64 = float.__uint64_sat(float.__from_float64(x))
 
-fn __to_float(x: Float64) -> Float = float.from_float64(x)
+fn __to_float(x: Float64) -> Float = float.__from_float64(x)
 
-fn __to_float_exact(x: Float64) -> Float? = float.__to_float_exact(float.from_float64(x))
+fn __to_float_exact(x: Float64) -> Float? = float.__to_float_exact(float.__from_float64(x))
 
-fn __to_float32(x: Float64) -> Float32 = float64.to_float32(x)
+fn __to_float32(x: Float64) -> Float32 = float64.__raw_to_float32(x)
 
-fn __to_float32_exact(x: Float64) -> Float32? = float.to_float32_checked(float.from_float64(x))
+fn __to_float32_exact(x: Float64) -> Float32? = float.__to_float32_checked(float.__from_float64(x))
 
-fn __decimal_exact(x: Float64) -> String? = float.__decimal_exact(float.from_float64(x))
+fn __decimal_exact(x: Float64) -> String? = float.__decimal_exact(float.__from_float64(x))
 
-fn __sum(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 0.0, (a, b) => a + float.from_float64(b)))
+fn __sum(xs: List[Float64]) -> Float64 = float.__to_float64(list.fold(xs, 0.0, (a, b) => a + float.__from_float64(b)))
 
-fn __product(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 1.0, (a, b) => a * float.from_float64(b)))
+fn __product(xs: List[Float64]) -> Float64 = float.__to_float64(list.fold(xs, 1.0, (a, b) => a * float.__from_float64(b)))

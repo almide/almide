@@ -1,9 +1,9 @@
 // @contract: C-184
 //
-// The `^` OPERATOR is the same total exponentiation as `math.pow` on BOTH
+// The `^` OPERATOR is the same total exponentiation as `int.pow` on BOTH
 // targets. The native emit used to render it as `{left}.pow({right} as u32)`,
 // an OPERATOR form with two divergences from the wasm leg (which has always
-// routed `^` through math.pow):
+// routed `^` through int.pow):
 //
 //   * PRECEDENCE — Rust binds a method call tighter than unary minus, so a
 //     const-folded negative base rendered `-3i64.pow(2)` == `-(3.pow(2))`
@@ -12,7 +12,7 @@
 //   * NEGATIVE EXPONENT — `as u32` wrapped `-1` into 4294967295 and computed
 //     garbage; wasm aborted. `^` is total (C-047), so it aborts.
 //
-// Both legs now go through `almide_pow!` / `math.pow`: the same
+// Both legs now go through `almide_pow!` / `int.pow`: the same
 // exponentiation-by-squaring with wrapping multiply, at the base's own width.
 fn main() -> Unit = {
   // Negative base, EVEN exponent — the precedence trap. -3^2 is (-3)*(-3) = 9,
@@ -32,6 +32,6 @@ fn main() -> Unit = {
   // Zero exponent is one; zero base with a positive exponent is zero.
   println(int.to_string(n ^ 0))
   println(int.to_string(0 ^ 5))
-  // Wrapping overflow, same as math.pow: 2^64 == 0.
+  // Wrapping overflow, same as int.pow: 2^64 == 0.
   println(int.to_string(2 ^ 64))
 }

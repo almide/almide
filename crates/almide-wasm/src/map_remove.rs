@@ -1,7 +1,6 @@
 //! The in-place map delete (#3640), `map.set`'s window (map_inplace.rs)
-//! applied to removal. `map.delete(m, k)` on a var the frame owns, and the
-//! functional `map.remove(m, k)` over a receiver whose credit the op holds
-//! (an owned temporary, or a dying var: the rebind `m = map.remove(m, k)`
+//! applied to removal. The functional `map.remove(m, k)` over a receiver
+//! whose credit the op holds (an owned temporary, or a dying var: the rebind `m = map.remove(m, k)`
 //! in a loop, a self tail call, a fold callback — `@reuse(m)` on the
 //! declaration), used to copy the whole map on every call, an absent key
 //! included. Now the same judge decides:
@@ -14,7 +13,7 @@
 //!   entries shift down one (insertion order kept, as native's
 //!   `Vec::remove`), `len` drops by one entry and an indexed block's index
 //!   is retired (map_index.rs invariant 3). That shift is O(n), so the
-//!   `map.delete` of a TOMBSTONE var (below) leaves a hole instead.
+//!   remove on a TOMBSTONE var (below) leaves a hole instead.
 //! * **present key, shared** (an alias, a holder, a pool static) — the
 //!   functional copy without the entry, and the op's credit on the shared
 //!   original goes: every other holder keeps the pre-delete map (C-033).
@@ -23,14 +22,14 @@
 //!
 //! # Tombstone vars (#3691)
 //!
-//! The `map.delete(m, k)` of a local `m` with an indexed key class (Int or
+//! The `m = map.remove(m, k)` of a local `m` with an indexed key class (Int or
 //! String) past the index threshold tombstones the entry instead of
 //! shifting (map_index.rs "Holes": `$mapidx_kill`, then `$mapidx_settle`
 //! compacts once the holes outnumber the live entries) — native's
 //! `AlmideMap::remove` holes the same way, so a delete is amortized O(1) on
 //! both legs. The holes must not reach anything that walks the block, so
 //! they stay inside the var: `tomb_vars_of` names, per frame, every var a
-//! `map.delete` receives, and each read of one SETTLES the block (compacts
+//! tail remove rebinds, and each read of one SETTLES the block (compacts
 //! it, a no-op without holes) before the value goes anywhere — the read
 //! hook in emitter.rs and the `mut`-param pass (`emit_read_mut_var_cow`).
 //! Only the reads that look through the index read it raw: `get`,
@@ -39,11 +38,21 @@
 //! rc 1 — every holder takes its credit through a settling read — so a
 //! shared block's functional copy never copies one. A param, a global and
 //! a C-319 cell keep the shift.
+//!
+//! #4208: the FUNCTIONAL remove holes too when its result is the var's own
+//! next value — `m = map.remove(m, k)` / `s = set.remove(s, x)` and a
+//! `list.fold` body ending in `map.remove(acc, k)` (`tail_removes_of`: the
+//! remove in tail position of the rebind's rhs or the fold body). Those
+//! vars are tombstone vars, the remove reads its dying receiver raw, and
+//! the plain fold settles its accumulator once as it hands the result on.
+//! Sets hole the same way through the same helpers (stride = the member
+//! slot, the key at offset 0); `set.contains` / `len` / `is_empty` read a
+//! tombstone set raw. A remove anywhere else still shifts.
 
 use std::collections::HashSet;
 
-use almide_ir::visit::{walk_expr, IrVisitor};
-use almide_ir::{CallTarget, IrExpr, IrExprKind, VarId};
+use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 use wasm_encoder::{BlockType, MemArg};
 
 use crate::arm::{ArgMode, Lowered};
@@ -60,25 +69,77 @@ struct RemoveFns {
     tomb: Option<(u32, u32)>,
 }
 
-/// Every var a `map.delete` in `body` receives — the frame's candidate
-/// tombstone vars (an over-approximation is only a no-op settle per read).
+/// Every var rebound to a functional remove of itself (`m = map.remove(m, k)`, `s = set.remove(s,
+/// x)`), and every `list.fold` accumulator whose callback body ends in one
+/// (`(m, i) => map.remove(m, i)`, #4208) — the frame's candidate tombstone
+/// vars (an over-approximation is only a no-op settle per read).
 pub(crate) fn tomb_vars_of(body: &IrExpr) -> HashSet<VarId> {
     struct Scan(HashSet<VarId>);
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
-                && module.as_str() == "map"
-                && func.as_str() == "delete"
-                && let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind)
-            {
-                self.0.insert(*id);
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind {
+                if module.as_str() == "list"
+                    && func.as_str() == "fold"
+                    && let Some(IrExprKind::Lambda { params, body, .. }) = args.get(2).map(|a| &a.kind)
+                    && let Some(&(acc, _)) = params.first()
+                    && !tail_removes_of(body, acc).is_empty()
+                {
+                    self.0.insert(acc);
+                }
             }
             walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Assign { var, value } = &s.kind
+                && !tail_removes_of(value, *var).is_empty()
+            {
+                self.0.insert(*var);
+            }
+            walk_stmt(self, s);
         }
     }
     let mut s = Scan(HashSet::new());
     s.visit_expr(body);
     s.0
+}
+
+/// The receiver nodes of the `map.remove(var, _)` / `set.remove(var, _)`
+/// calls in TAIL position of `e` (through block tails, `if` branches and
+/// `match` arms) — the removes whose result IS the next value of `var`
+/// (the rhs of `var = …`, or a fold body whose value rebinds the
+/// accumulator). Only those may leave holes (#4208): a remove anywhere else
+/// hands its result to a holder that does not settle.
+/// A receiver of the keyed-block representation: a Map or a Set block,
+/// the two kinds the key index (map_index.rs) and its holes cover. The
+/// property is read off the receiver's TYPE, so the scan names no module:
+/// a remove over any other collection keeps its own lowering.
+fn is_keyed_block(ty: &almide_types::types::Ty) -> bool {
+    use almide_types::types::TypeConstructorId as C;
+    matches!(ty, almide_types::types::Ty::Applied(C::Map | C::Set, _))
+}
+
+pub(crate) fn tail_removes_of(e: &IrExpr, var: VarId) -> Vec<*const IrExpr> {
+    fn walk(e: &IrExpr, var: VarId, out: &mut Vec<*const IrExpr>) {
+        match &e.kind {
+            IrExprKind::Call { target: CallTarget::Module { func, .. }, args, .. }
+                if func.as_str() == "remove" && args.len() == 2 && is_keyed_block(&args[0].ty) =>
+            {
+                if matches!(args[0].kind, IrExprKind::Var { id } if id == var) {
+                    out.push(&args[0] as *const IrExpr);
+                }
+            }
+            IrExprKind::Block { expr: Some(tail), .. } => walk(tail, var, out),
+            IrExprKind::If { then, else_, .. } => {
+                walk(then, var, out);
+                walk(else_, var, out);
+            }
+            IrExprKind::Match { arms, .. } => arms.iter().for_each(|a| walk(&a.body, var, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(e, var, &mut out);
+    out
 }
 
 /// The holds a judged delete works on: the receiver block (its result,
@@ -103,11 +164,60 @@ impl Emitter<'_> {
         if self.raw_map_read || !self.tomb_vars.contains(id) || self.cells.contains(id) {
             return;
         }
-        let SliceTy::Map(kt, vt) = ty else { return };
-        let (k, v) = (self.types.el(kt), self.types.el(vt));
+        let (k, koff, esz) = match ty {
+            SliceTy::Map(kt, vt) => {
+                let (k, v) = (self.types.el(kt), self.types.el(vt));
+                let (koff, _, esz) = crate::collections::entry_layout(k, v);
+                (k, koff, esz)
+            }
+            // a Set block is its members, one stride each, the key at 0
+            SliceTy::Set(h) => {
+                let e = self.types.el(h);
+                (e, 0, e.slot_size())
+            }
+            _ => return,
+        };
         let Some(settle) = self.keyed_settle(k) else { return };
-        let (koff, _, esz) = crate::collections::entry_layout(k, v);
         self.f.instructions().i32_const(esz as i32).i32_const(koff as i32).i32_const(1).call(settle);
+    }
+
+    /// Lower with the functional removes of `var` in tail position of `e`
+    /// allowed to leave holes (#4208): `e` is the rhs of `var = e`, or a
+    /// fold body whose value rebinds the accumulator `var`, so their result
+    /// is `var`'s next value and the holes stay inside the tombstone var.
+    pub(crate) fn with_tomb_tail<T>(&mut self, var: VarId, e: &IrExpr, f: impl FnOnce(&mut Self) -> T) -> T {
+        let marks: Vec<usize> = if self.tomb_vars.contains(&var) && !self.cells.contains(&var) {
+            tail_removes_of(e, var).into_iter().map(|p| p as usize).collect()
+        } else {
+            Vec::new()
+        };
+        for m in &marks {
+            self.tomb_tail.insert(*m);
+        }
+        let got = f(self);
+        for m in &marks {
+            self.tomb_tail.remove(m);
+        }
+        got
+    }
+
+    /// The functional remove over receiver `m` leaves a hole: `m` is a
+    /// dying tombstone var (a frame local, not a param) and the call is a
+    /// tail remove of its rebind ([`Self::with_tomb_tail`]).
+    fn hole_lane(&self, m: &IrExpr, dying: Option<(VarId, u32, SliceTy)>) -> bool {
+        dying.is_some_and(|(id, idx, _)| self.tomb_vars.contains(&id) && idx >= self.rc_param_ceiling)
+            && self.tomb_tail.contains(&(m as *const IrExpr as usize))
+    }
+
+    /// Lower a remove's receiver, retained; a hole lane's read is raw (the
+    /// block may hold holes, and the remove steps over them).
+    fn lower_remove_receiver(&mut self, m: &IrExpr, dying: Option<(VarId, u32, SliceTy)>, hole: bool) -> Result<SliceTy, EmitError> {
+        self.owned_call_marks.set_moving(m, dying.is_some());
+        self.raw_map_read = hole;
+        let got = self.lower_arg(m, None, ArgMode::Retain);
+        self.raw_map_read = false;
+        self.owned_call_marks.set_moving(m, false);
+        got
     }
 
     /// Lower a keyed read's receiver `m`: a plain var is read raw (no
@@ -277,50 +387,12 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    /// `map.delete(m, k)` on a var the frame owns: the judged delete on the
-    /// var's credit. `Ok(false)` when the receiver does not qualify (the
-    /// window's rules: not metered, not a C-319 cell, not a param) — the
-    /// caller keeps the functional remove + var write-back.
-    pub(crate) fn try_map_delete_in_place(&mut self, id: &VarId, key: &IrExpr) -> Result<bool, EmitError> {
-        if self.metered || self.cells.contains(id) {
-            return Ok(false);
-        }
-        let Some((idx, ty, global)) = self.mut_var(id) else {
-            return Ok(false);
-        };
-        if !global && idx < self.rc_param_ceiling {
-            return Ok(false);
-        }
-        let SliceTy::Map(kt, vt) = ty else {
-            return Ok(false);
-        };
-        let (k, v) = (self.types.el(kt), self.types.el(vt));
-        let mut fns = self.map_remove_fns(k, v)?;
-        if !global && self.tomb_vars.contains(id) {
-            fns.tomb = self.keyed_kill(k);
-        }
-        let kh = self.hold_for(k)?;
-        self.lower_arg(key, Some(k), ArgMode::Borrow)?;
-        self.f.instructions().local_set(kh);
-        let mh = self.hold_i32()?;
-        self.emit_read_mut_var(id, idx, ty, global);
-        self.f.instructions().local_set(mh);
-        self.emit_map_remove_scanned(mh, kh, (k, v), fns)?;
-        self.f.instructions().local_get(mh);
-        self.emit_store_mut_var(*id, idx, ty, global)?;
-        self.witness_mut_rebind(*id, global);
-        self.release_i32(); // mh
-        self.release_for(k);
-        Ok(true)
-    }
-
     /// `map.remove(m, k)` over a receiver whose credit the op may take
     /// (`owned_receiver`); `None` keeps the borrowed-receiver copy.
     pub(crate) fn try_map_remove_owned(&mut self, m: &IrExpr, key: &IrExpr) -> Result<Option<Lowered>, EmitError> {
         let Some(dying) = self.owned_receiver(m, &[key]) else { return Ok(None) };
-        self.owned_call_marks.set_moving(m, dying.is_some());
-        let got = self.lower_arg(m, None, ArgMode::Retain)?;
-        self.owned_call_marks.set_moving(m, false);
+        let hole = self.hole_lane(m, dying);
+        let got = self.lower_remove_receiver(m, dying, hole)?;
         let SliceTy::Map(kt, vt) = got else {
             return unsup(&format!("map-op-of:{got:?}"));
         };
@@ -330,7 +402,10 @@ impl Emitter<'_> {
         if let Some((id, idx, _)) = dying {
             self.empty_dying(id, idx);
         }
-        let fns = self.map_remove_fns(k, v)?;
+        let mut fns = self.map_remove_fns(k, v)?;
+        if hole {
+            fns.tomb = self.keyed_kill(k);
+        }
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Borrow)?;
         self.f.instructions().local_set(kh);
@@ -349,9 +424,8 @@ impl Emitter<'_> {
     /// credit on the original. `None` keeps the borrowed-receiver copy.
     pub(crate) fn try_set_remove_owned(&mut self, s: &IrExpr, x: &IrExpr) -> Result<Option<Lowered>, EmitError> {
         let Some(dying) = self.owned_receiver(s, &[x]) else { return Ok(None) };
-        self.owned_call_marks.set_moving(s, dying.is_some());
-        let got = self.lower_arg(s, None, ArgMode::Retain)?;
-        self.owned_call_marks.set_moving(s, false);
+        let hole = self.hole_lane(s, dying);
+        let got = self.lower_remove_receiver(s, dying, hole)?;
         let SliceTy::Set(h) = got else {
             return unsup(&format!("set-op-of:{got:?}"));
         };
@@ -363,6 +437,7 @@ impl Emitter<'_> {
         }
         let scan = self.keyed_find(e)?;
         let forget = self.keyed_remove(e);
+        let tomb = if hole { self.keyed_kill(e) } else { None };
         let drop_set = self.dec_fn_of(got);
         let xh = self.hold_for(e)?;
         self.lower_arg(x, Some(e), ArgMode::Borrow)?;
@@ -378,22 +453,24 @@ impl Emitter<'_> {
             i.local_get(sh).global_get(G_LINE_END).i32_ge_u();
             i.local_get(sh).i32_load(rc).i32_const(1).i32_eq();
             i.i32_and().if_(BlockType::Empty);
-            i.local_get(eh);
         }
-        self.emit_release_slot_at(e);
-        {
-            let mut i = self.f.instructions();
-            // memmove(eh, eh + stride, end - (eh + stride)), end = sh + PAYLOAD + len
-            i.local_get(eh).local_get(eh).i32_const(stride).i32_add();
-            i.local_get(sh).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_get(sh).i32_load(len_memarg()).i32_add();
-            i.local_get(eh).i32_sub().i32_const(stride).i32_sub();
-            i.memory_copy(0, 0);
-            i.local_get(sh).local_get(sh).i32_load(len_memarg()).i32_const(stride).i32_sub().i32_store(len_memarg());
-            if let Some(forget) = forget {
-                i.local_get(sh).i32_const(0).call(forget).drop();
+        match tomb {
+            // #4208: a tombstone var's tail remove holes the member, as the
+            // map's does (stride = the member slot, the key at offset 0)
+            Some((kill, settle)) => {
+                let mut i = self.f.instructions();
+                i.local_get(sh).i32_const(stride).i32_const(0).local_get(eh).call(kill);
+                i.if_(BlockType::Empty);
+                self.emit_release_and_clear(eh, 0, e);
+                let mut i = self.f.instructions();
+                i.local_get(sh).i32_const(stride).i32_const(0).i32_const(0).call(settle).drop();
+                i.else_();
+                self.emit_set_remove_shift(sh, eh, e, forget);
+                self.f.instructions().end();
             }
-            i.else_();
+            None => self.emit_set_remove_shift(sh, eh, e, forget),
         }
+        self.f.instructions().else_();
         self.emit_set_remove_copy(sh, eh, e)?;
         let mut i = self.f.instructions();
         i.local_set(oh).local_get(sh).call(drop_set).local_get(oh).local_set(sh);
@@ -404,5 +481,24 @@ impl Emitter<'_> {
         self.release_for(e);
         self.release_i32(); // sh
         Ok(Some(Lowered::owned(got)))
+    }
+
+    /// Remove the member at `eh` from set `sh` IN PLACE: its credit
+    /// released, the later members moved down one, `len` shrunk, the index
+    /// retired.
+    fn emit_set_remove_shift(&mut self, sh: u32, eh: u32, e: SliceTy, forget: Option<u32>) {
+        let stride = e.slot_size() as i32;
+        self.f.instructions().local_get(eh);
+        self.emit_release_slot_at(e);
+        let mut i = self.f.instructions();
+        // memmove(eh, eh + stride, end - (eh + stride)), end = sh + PAYLOAD + len
+        i.local_get(eh).local_get(eh).i32_const(stride).i32_add();
+        i.local_get(sh).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_get(sh).i32_load(len_memarg()).i32_add();
+        i.local_get(eh).i32_sub().i32_const(stride).i32_sub();
+        i.memory_copy(0, 0);
+        i.local_get(sh).local_get(sh).i32_load(len_memarg()).i32_const(stride).i32_sub().i32_store(len_memarg());
+        if let Some(forget) = forget {
+            i.local_get(sh).i32_const(0).call(forget).drop();
+        }
     }
 }

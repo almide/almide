@@ -1,4 +1,4 @@
-//! #3848 — `zlib.crc32` on the wasm leg costs a table lookup per byte, not eight
+//! #3848 — `hash.crc32` on the wasm leg costs a table lookup per byte, not eight
 //! data-dependent branches per byte. The bit-at-a-time loop
 //! (`if acc & 1 == 1 then 0xEDB88320 ^ (acc >> 1) else acc >> 1`, eight times a
 //! byte) is a branch the predictor loses on half the bits; LLVM turns it into a
@@ -12,9 +12,9 @@
 //! probe's answers pin the checksum on both the table path and the short path.
 
 fn probe(n: u32, crc: bool) -> String {
-    let r = if crc { "zlib.crc32(b)" } else { "bytes.len(b)" };
+    let r = if crc { "hash.crc32(b)" } else { "bytes.len(b)" };
     format!(
-        r#"import zlib
+        r#"import hash
 fn probe() -> Int = {{
   let b = bytes.pad_end(bytes.from_list([1, 7, 2, 2, 7]), {n}, 255)
   {r}
@@ -62,12 +62,12 @@ fn zlib_crc32_costs_a_table_lookup_per_byte() {
     let (fuel, out) = crc_fuel(N);
     assert_eq!(out, 241196957, "crc32 over {N} bytes answered wrong");
     let per_byte = fuel as f64 / f64::from(N);
-    println!("RATCHET zlib.crc32 fuel n={N}: {fuel}, {per_byte:.1} per byte");
+    println!("RATCHET hash.crc32 fuel n={N}: {fuel}, {per_byte:.1} per byte");
     // Anti-vacuous: the checksum must be measurable.
     assert!(per_byte > 5.0, "crc32 cost {per_byte:.1} fuel a byte — too little to gate on");
     assert!(
         per_byte <= 100.0,
-        "zlib.crc32 cost {per_byte:.1} fuel a byte: the table loop is 58, \
+        "hash.crc32 cost {per_byte:.1} fuel a byte: the table loop is 58, \
          the eight-branch bit loop 212"
     );
 }

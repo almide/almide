@@ -1,0 +1,63 @@
+// env.vars and env.remove (#3908, R-env-02): the environment read whole, and
+// `env.set`'s counterpart. Names are file-unique, so the tests below may run
+// in any order inside one process.
+import env
+
+test "env.vars holds a variable the program set" {
+  env.set("ALMIDE_EVR_SET", "one=two")!
+  let all = env.vars()!
+  assert_eq(all["ALMIDE_EVR_SET"], some("one=two"))
+}
+
+test "env.vars agrees with env.get on every name it lists" {
+  env.set("ALMIDE_EVR_AGREE", "x")!
+  var disagree = 0
+  for (name, value) in env.vars()! {
+    disagree = disagree + (if env.get(name) == some(value) then 0 else 1)
+  }
+  assert_eq(disagree, 0)
+}
+
+test "env.vars is ordered by name" {
+  env.set("ALMIDE_EVR_ORDER_B", "b")!
+  env.set("ALMIDE_EVR_ORDER_A", "a")!
+  let names = env.vars()! |> map.keys
+  assert_eq(names, list.sort(names))
+}
+
+test "env.vars sees a later set over an earlier one" {
+  env.set("ALMIDE_EVR_TWICE", "first")!
+  env.set("ALMIDE_EVR_TWICE", "second")!
+  assert_eq(env.vars()!["ALMIDE_EVR_TWICE"], some("second"))
+}
+
+test "env.remove unsets a name the program set" {
+  env.set("ALMIDE_EVR_GONE", "v")!
+  env.remove("ALMIDE_EVR_GONE")!
+  assert_eq(env.get("ALMIDE_EVR_GONE"), none)
+  assert_eq(map.contains(env.vars()!, "ALMIDE_EVR_GONE"), false)
+}
+
+test "env.remove of an unset name is ok" {
+  env.remove("ALMIDE_EVR_NEVER_SET")!
+  assert_eq(env.get("ALMIDE_EVR_NEVER_SET"), none)
+}
+
+test "env.set after env.remove sets the name again" {
+  env.set("ALMIDE_EVR_BACK", "old")!
+  env.remove("ALMIDE_EVR_BACK")!
+  env.set("ALMIDE_EVR_BACK", "new")!
+  assert_eq(env.get("ALMIDE_EVR_BACK"), some("new"))
+  assert_eq(env.vars()!["ALMIDE_EVR_BACK"], some("new"))
+}
+
+effect fn try_remove(name: String) -> String = match env.remove(name) {
+  ok(_) => "ok",
+  err(e) => e,
+}
+
+test "env.remove refuses the names env.set refuses" {
+  assert_eq(try_remove("")!, "env.remove: empty name")
+  assert_eq(try_remove("ALMIDE_EVR=EQ")!, "env.remove: name contains '='")
+  assert_eq(try_remove("ALMIDE_EVR\u{0}NUL")!, "env.remove: name contains NUL")
+}

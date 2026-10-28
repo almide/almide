@@ -12,5 +12,5 @@ fn main() -> Unit = {
   println("before")
   let m: Int8 = -128
   let r: Int8 = m / neg_one_i8(7)
-  println(int.to_string(int.from_int8(r)))
+  println(int.to_string(int.from(r)))
 }

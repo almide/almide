@@ -102,7 +102,7 @@ HttpMessage
 | 入れ物 | `SetAlgebra` | `Membership` | `insert`・`remove`・`union`・`intersection`・`difference`・`symmetric_difference`・`is_subset`・`is_disjoint` | — | SetAlgebra | Set[A] |
 | 入れ物 | `KeyValue` | `Sized` | `new`・`get`・`set`・`remove`・`contains`・`keys`・`values`・`update`・`upsert`・`merge` | — | Dictionary（具体型） | Map[K, V] |
 | 入れ物 | `PriorityQueue` | `Container` | `push`・`pop`・`peek` | — | Heap（swift-collections） | Heap[A] |
-| 入れ物 | `Text` | `Ordered` | `contains`・`starts_with`・`ends_with`・`index_of`・`last_index_of`・`count_matches`・`split`・`replace`・`replace_first`・`strip_prefix`・`strip_suffix`・`repeat`・`pad_start`・`pad_end` | — | StringProtocol | String・Bytes |
+| 入れ物 | `Text` | `Ordered` | `contains`・`starts_with`・`ends_with`・`index_of`・`last_index_of`・`count_matches`・`split`・`replace`・`replace_first`・`strip_prefix`・`strip_suffix`・`repeat`・`pad_start`・`pad_end`・`is_equal_constant_time` | — | StringProtocol | String・Bytes |
 | 入出力 | `Read` | — | `read`・`read_exact`・`read_to_end` | `read_exact`・`read_to_end` | — | TcpStream・Fd・Stdin |
 | 入出力 | `Write` | — | `write` | — | — | TcpStream・Fd・Stdout・Stderr |
 | 入出力 | `Close` | — | `close` | — | — | TcpStream・TcpListener・UdpSocket・Fd |

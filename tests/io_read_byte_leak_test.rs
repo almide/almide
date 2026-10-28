@@ -1,17 +1,18 @@
-//! `io.read_byte` leaves no heap block live on wasm. The structural arm read
-//! the byte into a one-byte staging block and never released it: one block
-//! per byte read. The inspection campaign's effect catalogue (#3627) put
-//! `io.read_byte` into programs for every function under test, so this one
+//! A one-byte `io.read(io.stdin()!, 1)` leaves no heap block live on wasm. The
+//! structural arm of its predecessor `io.read_byte` read the byte into a
+//! one-byte staging block and never released it: one block per byte read.
+//! The inspection campaign's effect catalogue (#3627) put the byte read into
+//! programs for every function under test, so this one
 //! leak failed the parity criterion across about a hundred unrelated
 //! functions.
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 #[test]
-fn read_byte_releases_its_staging_block_on_wasm() {
+fn a_one_byte_read_releases_its_staging_block_on_wasm() {
     let dir = tempfile::tempdir().expect("scratch");
     let file = dir.path().join("leak.almd");
-    let src = "import io\neffect fn main() -> Unit = {\n  let a = io.read_byte()\n  let b = io.read_byte()\n  let c = io.read_byte()\n  println(\"${a} ${b} ${c}\")\n}\n";
+    let src = "import io\neffect fn main() -> Unit = {\n  let a = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)\n  let b = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)\n  let c = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)\n  println(\"${a} ${b} ${c}\")\n}\n";
     std::fs::write(&file, src).expect("source");
     let mut child = Command::new(env!("CARGO_BIN_EXE_almide"))
         .arg("run")

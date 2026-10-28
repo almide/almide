@@ -1,0 +1,9 @@
+// E006: a pure fn hands `fs.read_text` to `option.map` as a value. The
+// value carries its effect bit to the call site (ADR-0009 D2, #4151), so the
+// call is refused like `fs.read_text(p)` would be. v0.68.0-rc2 checked this
+// and printed the file on both targets: some(ok("<file contents>")).
+import fs
+
+fn sneaky(p: String) -> Option[Result[String, String]] = option.map(some(p), fs.read_text)
+
+effect fn main() -> Unit = println("${sneaky("s.txt")}")

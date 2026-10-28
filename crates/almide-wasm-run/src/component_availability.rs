@@ -5,17 +5,19 @@
 /// entropy, the clocks and panic; p3 adds env.get (26), the program
 /// arguments (29) and env.sleep_ms (36) over wasi:cli/environment and
 /// monotonic-clock.wait-for (ADR-0023 step 3), env.set (37) through the
-/// guest-side overlay env.get reads first (#3223), the http client
-/// (43..=50), and — through the spliced p1 fs service over its
+/// guest-side overlay env.get reads first (#3223), env.vars' frames (77,
+/// #3908) over the same environment and overlay, the http client
+/// (43..=49; op 50 is retired), and — through the spliced p1 fs service over its
 /// wasi:filesystem@0.3 adapter (#3140) — every op the p1 fs service
-/// answers, the fan prefetch triple (40..=42) and env.os / env.temp_dir /
+/// answers, the fan prefetch triple (40..=42) and env.os / fs.temp_dir /
 /// env.cwd (27 / 28 / 33) among them.
 pub fn serves(op: i32, p3: bool) -> bool {
     // 74: the instance-parallel fan offer (#3003), answered "not served" by
     // both component shims — the guest then runs its chunks sequentially.
-    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74);
+    // 76: a deliberate exit's mark (#4203), answered 0.
+    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74 | 76);
     let extra = p3
-        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50 | 65)
+        && (matches!(op, 26 | 29 | 36 | 37 | 40..=49 | 65 | 77)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -92,10 +94,11 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 /// `op`: the p3 command shim's set without the filesystem — the service
 /// world imports no `wasi:filesystem`, which `wasmtime serve` does not link
 /// without a flag (#2659, measured on wasmtime 47) — plus `http.serve`'s
-/// own ops 70..=72, which the shim answers guest-side.
+/// own ops 70..=72 and 75 (the contained loop, #4203, answered "not
+/// served"), which the shim answers guest-side.
 pub fn serves_service(op: i32) -> bool {
     let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
-    matches!(op, 70..=72) || (!fs && serves(op, true))
+    matches!(op, 70..=72 | 75) || (!fs && serves(op, true))
 }
 
 /// [`check`] for the service shape: an op the export cannot answer is E081
@@ -121,14 +124,14 @@ fn operation_label(op: i32) -> &'static str {
 
 fn operation_name(op: i32) -> &'static str {
     const NAMES: &[&str] = &[
-        "unknown operation", "fs.read_text", "fs.write", "fs.write_bytes",
+        "unknown operation", "fs.read_text", "fs.write_text", "fs.write_bytes",
         "fs.exists", "fs.is_dir", "fs.is_file", "fs.mkdir_p", "fs.remove",
         "fs.remove_all", "fs.create_temp_dir", "fs.list_dir", "fs.read_lines",
-        "fs.read_text_if_exists", "fs.read_bytes", "fs.write_bytes", "fs.append",
-        "fs.file_size", "fs.modified_at", "fs.copy", "fs.rename",
+        "fs.read_text_if_exists", "fs.read_bytes", "fs.write_bytes", "fs.append_text",
+        "unknown operation", "unknown operation", "fs.copy", "fs.rename",
         "fs.create_temp_file", "fs.is_symlink", "fs.walk", "fs.read_lines_if_exists",
-        "fs.read_bytes_if_exists", "env.get", "env.os", "env.temp_dir",
-        "env.args / process.args (also used by args.option and other args helpers)",
+        "fs.read_bytes_if_exists", "env.get", "env.os", "fs.temp_dir",
+        "env.args (also used by args.option and other args helpers)",
         "io.write", "io.read_all", "random", "env.cwd", "time.now",
         "io.read_byte / io.read_line / io.read_line_opt", "env.sleep_ms", "env.set",
     ];
@@ -138,13 +141,15 @@ fn operation_name(op: i32) -> &'static str {
             40..=42 => "filesystem fan prefetch",
             43 => "http.get", 44 => "http.post", 45 => "http.put",
             46 => "http.patch", 47 => "http.delete",
-            48..=50 | 65 => "the framed http client (http.request, its status / bytes shapes, the *_response family)",
+            // 50 (the framed raw-bytes request) is retired: "unknown operation".
+            48 | 49 | 65 => "the framed http client (http.request, its status shape, the *_response family)",
             51 => "fs.fold_lines", 52 => "fs.for_each_line",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             60 => "datetime.monotonic_ns",
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
-            63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
+            63 => "fs.read_bytes", 64 => "fs.read_bytes_if_exists",
             73 => "panic",
+            77 => "env.vars",
             91..=103 => "the net core (net.tcp_*)",
             // Interim embedded-only ops (#3620): WASI has neither Unix-domain
             // sockets nor shared memory; they retire at ADR-0023 step 7.

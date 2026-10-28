@@ -18,8 +18,8 @@ test "a parenthesized lambda still sees its pinned parameter types (#1018)" {
   // The REAL parameter order is (acc, k, v); naming them (k, v, acc) means the
   // body adds the accumulator to the key. Both spellings must agree that this
   // is well-typed only when the names line up with the signature.
-  assert_eq(map.fold(m, 0, ((acc, k, v) => acc + v)), 3)
-  assert_eq(map.fold(m, 0, (acc, k, v) => acc + v), 3)
+  assert_eq(map.fold(m, 0, ((acc, (k, v)) => acc + v)), 3)
+  assert_eq(map.fold(m, 0, (acc, (k, v)) => acc + v), 3)
 }
 
 test "the paren does not change what a lambda means (#1018)" {

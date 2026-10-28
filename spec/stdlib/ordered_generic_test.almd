@@ -1,0 +1,10 @@
+// list.binary_search (R-list-15) and testing.assert_gt / assert_lt
+// (R-testing-02) over element types other than Int.
+import testing
+
+test "list.binary_search and testing.assert_gt take any ordered type" {
+  assert_eq(list.binary_search(["a", "c", "e"], "c"), some(1))
+  assert_eq(list.binary_search([1.5, 2.5], 3.0), none)
+  testing.assert_gt("b", "a")
+  testing.assert_lt(1.5, 2.5)
+}

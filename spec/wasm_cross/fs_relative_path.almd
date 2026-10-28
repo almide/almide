@@ -14,7 +14,7 @@
 // different cwd than cargo test) and removes it at the end.
 //
 // What this LOCKS:
-//   - fs.mkdir_p / fs.write / fs.read_text / fs.exists / fs.remove_all on a
+//   - fs.mkdir_p / fs.write_text / fs.read_text / fs.exists / fs.remove_all on a
 //     RELATIVE path all resolve to the same host file as native (write →
 //     read-back → cleanup round-trip). fs.stat's relative-path + 8-aligned
 //     filestat-scratch behavior is pinned by the second evidence fixture
@@ -28,7 +28,7 @@ effect fn main() -> Unit = {
   let dir = "almide_xt_relpath_tmp"
   let _ = fs.mkdir_p(dir)!
   let path = "almide_xt_relpath_tmp/probe.txt"
-  let _ = fs.write(path, "RELATIVE-OK")!
+  let _ = fs.write_text(path, "RELATIVE-OK")!
   let back = fs.read_text(path)!
   println(back)
   let e = fs.exists(path)

@@ -1,0 +1,8 @@
+// #4006 drill: a pass before the verified native render loses a release
+// (the last `Drop` of each function) and the renderer's own Rust-mirror
+// ownership check is bypassed. The ownership witness taken from the
+// rendered MIR then leaks, and the extracted checker rejects it.
+effect fn main() -> Unit = {
+  let s = "hel" + "lo"
+  println(s)
+}

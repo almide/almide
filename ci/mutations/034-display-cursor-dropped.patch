@@ -1,13 +1,13 @@
-diff --git a/crates/almide-wasm/src/display.rs b/crates/almide-wasm/src/display.rs
-index c205b3598..4dd0d3ff1 100644
---- a/crates/almide-wasm/src/display.rs
-+++ b/crates/almide-wasm/src/display.rs
-@@ -273,7 +273,7 @@ impl Emitter<'_> {
-                         .instructions()
-                         .local_get(self.cursor_local)
-                         .call(idx)
--                        .local_set(self.cursor_local);
-+                        .drop(); // [MUTANT: cursor writeback dropped]
-                 } else {
-                     path.push(ti);
-                     self.emit_display_named(ti, ir, path)?;
+diff --git a/crates/almide-wasm/src/deep_walk.rs b/crates/almide-wasm/src/deep_walk.rs
+index 51bee94ef..e2e3294a3 100644
+--- a/crates/almide-wasm/src/deep_walk.rs
++++ b/crates/almide-wasm/src/deep_walk.rs
+@@ -353,7 +353,7 @@ impl crate::emitter::Emitter<'_> {
+         i.local_set(hi);
+         i.global_get(gd).i32_eqz().local_set(outer);
+         i.global_get(gd).i32_const(1).i32_add().global_set(gd);
+-        i.local_get(hv).local_get(cursor).call(idx).local_set(cursor);
++        i.local_get(hv).local_get(cursor).call(idx).drop(); // [MUTANT: cursor writeback dropped]
+         i.global_get(gd).i32_const(1).i32_sub().global_set(gd);
+         emit_flush_suffixes(&mut i, gq, hh, cursor, q, v);
+         i.local_get(outer).if_(BlockType::Empty);

@@ -25,13 +25,13 @@ fn repo_root() -> PathBuf {
 const PROGRAM: &str = r#"import io
 
 effect fn main() -> Unit = {
-  let a = io.read_n_bytes(3)
-  let b = io.read_byte()
-  let l1 = io.read_line()!
-  let l2 = io.read_line()!
+  let a = bytes.to_list(io.read(io.stdin()!, 3)!)
+  let b = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)
+  let l1 = (io.read_line() ?? "")
+  let l2 = (io.read_line() ?? "")
   let rest = io.read_all()
-  let e1 = io.read_byte()
-  let e2 = io.read_line()!
+  let e1 = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)
+  let e2 = (io.read_line() ?? "")
   println("a=${a} b=${b} l1=${l1} l2=${l2} rest=${rest} e1=${e1} e2=[${e2}]")
 }
 "#;

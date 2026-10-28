@@ -20,9 +20,9 @@ test "every partition folds every line exactly once" {
   let d = tmp()!
   let p = d + "/data.txt"
   // lines: "aa"(0..2) "bbb"(3..6) "c"(7..8) "dddd"(9..13), size 14
-  fs.write(p, "aa\nbbb\nc\ndddd\n")!
+  fs.write_text(p, "aa\nbbb\nc\ndddd\n")!
   let whole = fs.read_lines(p)!
-  let size = fs.file_size(p)!
+  let size = fs.stat(p)!.size
   let partitions = [
     [0, size],
     [0, 7, size],
@@ -40,9 +40,9 @@ test "every partition folds every line exactly once" {
 test "no trailing newline still partitions exactly" {
   let d = tmp()!
   let p = d + "/tail.txt"
-  fs.write(p, "one\ntwo\nthree")!
+  fs.write_text(p, "one\ntwo\nthree")!
   let whole = fs.read_lines(p)!
-  let size = fs.file_size(p)!
+  let size = fs.stat(p)!.size
   for cuts in [
     [0, 5, size],
     [0, 4, size],
@@ -55,9 +55,9 @@ test "no trailing newline still partitions exactly" {
 test "crlf boundary cuts stay exact" {
   let d = tmp()!
   let p = d + "/crlf.txt"
-  fs.write(p, "a\r\nbb\r\nc\r\n")!
+  fs.write_text(p, "a\r\nbb\r\nc\r\n")!
   let whole = fs.read_lines(p)!
-  let size = fs.file_size(p)!
+  let size = fs.stat(p)!.size
   for cuts in [
     [0, 2, size],
     [0, 3, size],
@@ -70,14 +70,14 @@ test "crlf boundary cuts stay exact" {
 test "empty range folds to init" {
   let d = tmp()!
   let p = d + "/e.txt"
-  fs.write(p, "x\ny\n")!
+  fs.write_text(p, "x\ny\n")!
   assert_eq(fs.fold_lines_range(p, 2, 2, ["seed"], (acc, line) => acc + [line])!, ["seed"])
 }
 
 test "the range twin matrix: every accumulator type folds the same lines" {
   let d = tmp()!
   let p = d + "/cells.txt"
-  fs.write(p, "alpha\nbeta\ngamma\ndelta\n")!
+  fs.write_text(p, "alpha\nbeta\ngamma\ndelta\n")!
   // Int acc (_i): byte-length sum — the range [0, 6) owns only "alpha"
   // (beta STARTS at byte 6, and a line folds only while its start < end).
   assert_eq(fs.fold_lines_range(p, 0, 6, 100, (acc: Int, line) => acc + string.len(line))!, 105)
@@ -107,17 +107,20 @@ test "invalid UTF-8 outside the walked part does not fail the range" {
   let d = tmp()!
   let p = d + "/mix.txt"
   // "a\nb\n" ++ [0xFF, 0xFE] ++ "\nc\n"
-  fs.write_bytes(p, [
-    97,
-    10,
-    98,
-    10,
-    255,
-    254,
-    10,
-    99,
-    10
-  ])!
+  fs.write_bytes(
+    p,
+    bytes.from_list([
+      97,
+      10,
+      98,
+      10,
+      255,
+      254,
+      10,
+      99,
+      10
+    ]),
+  )!
   assert_eq(fs.fold_lines_range(p, 0, 2, [], (acc, line) => acc + [line])!, ["a"])
   assert_eq(fs.fold_lines_range(p, 0, 2, 0, (acc: Int, line) => acc + 1)!, 1)
   assert_eq(fs.fold_lines_range(p, 9, 11, [], (acc, line) => acc + [line])!, [])
@@ -134,7 +137,7 @@ test "invalid UTF-8 outside the walked part does not fail the range" {
   let b = d + "/bin.dat"
   fs.write_bytes(
     b,
-    [
+    bytes.from_list([
       0,
       1,
       2,
@@ -145,7 +148,7 @@ test "invalid UTF-8 outside the walked part does not fail the range" {
       10,
       13,
       0
-    ],
+    ]),
   )!
   assert_eq(fs.fold_lines_range(b, 0, 0, [], (acc, line) => acc + [line])!, [])
 }

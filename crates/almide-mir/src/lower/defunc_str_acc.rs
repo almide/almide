@@ -157,7 +157,7 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use crate::PrimKind;
         // The body is a 2-arm variant match (the keep/skip decision), OR a BLOCK whose leading lets feed
-        // the tail match (`(k) => { let val = json.get_string(obj, k); match val { … } }` — porta
+        // the tail match (`(k) => { let val = value.get_string(obj, k); match val { … } }` — porta
         // load_porta_config's CAPTURING `secrets` filter_map). The leading lets are lowered per-iteration
         // AFTER the element param is bound (captures resolve via value_of), BEFORE the match arms. Defer
         // anything else.
@@ -245,7 +245,7 @@ impl LowerCtx {
         }
 
         // Lower the per-element keep/skip variant match into the write-cursor result list. A Block body's
-        // leading lets (`let val = json.get_string(obj, k)`) are lowered FIRST in this per-iteration frame
+        // leading lets (`let val = value.get_string(obj, k)`) are lowered FIRST in this per-iteration frame
         // (their captures resolve via value_of, the element param is bound above) so the tail match's
         // subject (`val`) is in scope; their own heap temps are freed within the iteration frame.
         self.in_frame += 1;

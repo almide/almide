@@ -16,20 +16,20 @@ fn show(tag: String, r: Result[String, String]) -> Unit = {
 
 effect fn main() -> Unit = {
   let url = "http://127.0.0.1:9/"
-  show("name-space", http.request("GET", url, "", ["x bad": "v"]))
-  show("name-colon", http.request("GET", url, "", ["x:y": "v"]))
-  show("value-crlf", http.request("GET", url, "", ["X-A": "a\r\nInjected: 1"]))
-  show("value-nul", http.request("GET", url, "", ["X-A": "a\u{0}b"]))
-  show("host", http.request("GET", url, "", ["Host": "evil.example"]))
-  show("connection", http.request("GET", url, "", ["connection": "keep-alive"]))
-  show("transfer-encoding", http.request("POST", url, "b", ["Transfer-Encoding": "chunked"]))
+  show("name-space", http.request("GET", url, "", [("x bad", "v")]))
+  show("name-colon", http.request("GET", url, "", [("x:y", "v")]))
+  show("value-crlf", http.request("GET", url, "", [("X-A", "a\r\nInjected: 1")]))
+  show("value-nul", http.request("GET", url, "", [("X-A", "a\u{0}b")]))
+  show("host", http.request("GET", url, "", [("Host", "evil.example")]))
+  show("connection", http.request("GET", url, "", [("connection", "keep-alive")]))
+  show("transfer-encoding", http.request("POST", url, "b", [("Transfer-Encoding", "chunked")]))
   show(
     "upgrade",
-    http.request_status("GET", url, "", ["UPGRADE": "h2c"]) |> result.map(((c, b)) => b),
+    http.send(http.new_request("GET", url, "", [("UPGRADE", "h2c")])) |> result.map((r) => http.body(r)),
   )
   show(
     "proxy-authorization",
-    http.request_bytes("GET", url, "", ["Proxy-Authorization": "x"]) |> result.map((b) => "bytes"),
+    http.send(http.new_request("GET", url, "", [("Proxy-Authorization", "x")])) |> result.map((r) => http.body_bytes(r)) |> result.map((b) => "bytes"),
   )
-  show("sendable", http.request("GET", url, "", ["X-Ok": "fine"]))
+  show("sendable", http.request("GET", url, "", [("X-Ok", "fine")]))
 }

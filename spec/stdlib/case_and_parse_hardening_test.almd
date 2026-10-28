@@ -1,0 +1,70 @@
+// #4121: case mapping never folds a non-ASCII scalar into ASCII (C-412),
+// float.parse is finite-only (C-413), and int.parse / float.parse trim ASCII
+// whitespace only (C-413).
+test "to_upper keeps a non-ASCII scalar whose mapping holds ASCII" {
+  assert_eq(string.to_upper("adm\u{131}n"), "ADM\u{131}N")
+  assert_eq(string.to_upper("\u{17F}ecret"), "\u{17F}ECRET")
+  assert_eq(string.to_upper("stra\u{DF}e \u{FB01}le"), "STRA\u{DF}E \u{FB01}LE")
+  assert_eq(string.to_upper("\u{149}\u{1F0}\u{1E96}\u{1E9A}"), "\u{149}\u{1F0}\u{1E96}\u{1E9A}")
+  assert(string.to_upper("adm\u{131}n") != "ADMIN")
+}
+
+test "to_upper still maps non-ASCII scalars that stay non-ASCII" {
+  assert_eq(string.to_upper("caf\u{E9}"), "CAF\u{C9}")
+  assert_eq(string.to_upper("\u{390}"), "\u{399}\u{308}\u{301}")
+  assert_eq(string.to_upper("hello"), "HELLO")
+}
+
+test "to_lower keeps the Kelvin sign and dotted capital I" {
+  assert_eq(string.to_lower("\u{212A}ey"), "\u{212A}ey")
+  assert_eq(string.to_lower("\u{130}STANBUL"), "\u{130}stanbul")
+  assert(string.to_lower("\u{212A}ey") != "key")
+  assert_eq(string.to_lower("\u{212B}"), "\u{E5}")
+}
+
+test "to_lower final sigma still sees a held-back cased neighbour" {
+  assert_eq(string.to_lower("\u{212A}\u{3A3}"), "\u{212A}\u{3C2}")
+  assert_eq(string.to_lower("\u{3A3}\u{212A}"), "\u{3C3}\u{212A}")
+  assert_eq(string.to_lower("\u{39F}\u{394}\u{39F}\u{3A3}"), "\u{3BF}\u{3B4}\u{3BF}\u{3C2}")
+}
+
+test "capitalize applies the to_upper rule to its head" {
+  assert_eq(string.capitalize("\u{131}d"), "\u{131}d")
+  assert_eq(string.capitalize("\u{DF}eta"), "\u{DF}eta")
+  assert_eq(string.capitalize("\u{E9}t\u{E9}"), "\u{C9}t\u{E9}")
+  assert_eq(string.capitalize("hello"), "Hello")
+}
+
+test "float.parse refuses NaN and infinity spellings" {
+  assert_eq(float.parse("NaN"), err("invalid float literal"))
+  assert_eq(float.parse("+nan"), err("invalid float literal"))
+  assert_eq(float.parse("inf"), err("invalid float literal"))
+  assert_eq(float.parse("-Infinity"), err("invalid float literal"))
+}
+
+test "float.parse refuses overflow and keeps underflow" {
+  assert_eq(float.parse("1e400"), err("float literal out of range"))
+  assert_eq(float.parse("-1e400"), err("float literal out of range"))
+  assert_eq(float.parse("1e-400"), ok(0.0))
+  assert_eq(float.parse("1.7976931348623157e308"), ok(1.7976931348623157e308))
+}
+
+test "int.parse trims ASCII whitespace only" {
+  assert_eq(int.parse("\u{A0}5"), err("invalid digit found in string"))
+  assert_eq(int.parse("\u{3000}5"), err("invalid digit found in string"))
+  assert_eq(int.parse("\u{2028}5"), err("invalid digit found in string"))
+  assert_eq(int.parse("\u{B}5"), err("invalid digit found in string"))
+  assert_eq(int.parse("\t\n\u{C}\r 5 "), ok(5))
+}
+
+test "float.parse trims ASCII whitespace only" {
+  assert_eq(float.parse("\u{A0}2.5"), err("invalid float literal"))
+  assert_eq(float.parse("2.5\u{3000}"), err("invalid float literal"))
+  assert_eq(float.parse("\u{B}2.5"), err("invalid float literal"))
+  assert_eq(float.parse(" \t2.5\r\n"), ok(2.5))
+}
+
+test "int.parse_radix keeps its whitespace handling" {
+  assert_eq(int.parse_radix("\u{A0}ff", 16), ok(255))
+  assert_eq(int.parse_radix(" ff ", 16), ok(255))
+}

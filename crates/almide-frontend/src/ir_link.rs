@@ -273,27 +273,26 @@ fn scan_stmt_stdlib(stmt: &IrStmt, used: &mut HashSet<String>) {
 /// Hand the program the bundled declaration of every stdlib-DECLARED nominal
 /// type it SPELLS whose declaration did not arrive with a loaded module.
 ///
-/// The checker auto-imports `bytes` (`ImportTable::new`'s seed) and registers
-/// every bundled `type` for name resolution, so `let e: Endian = BigEndian`
-/// type-checks with no `import`; but a bundled module's DECLARATIONS reach the
-/// IR only when the resolver loaded the module — the explicit-import path —
-/// and `bytes` is not resolve-time auto-loaded (`AUTO_IMPORT_BUNDLED`). Every
+/// The checker registers every bundled `type` for name resolution, so a
+/// stdlib-owned type can be spelled with its module never loaded; but a
+/// bundled module's DECLARATIONS reach the IR only when the resolver loaded
+/// the module — the explicit-import path. Every
 /// consumer keyed on the declaration — the structural wasm emitter's type
 /// table, the incumbent's variant layouts, both repr generators — then met a
-/// `Named(Endian)` it could not resolve, and the wasm leg walled each shape
+/// `Named(..)` it could not resolve, and the wasm leg walled each shape
 /// the explicit import served (`bind-ty:Named`, an UNTRACKED match subject,
-/// an unlinked `__repr_Endian`).
+/// an unlinked `__repr_<T>`).
 ///
 /// Spelled from the PROGRAM, not from calls: a type annotation, a ctor's
 /// result type, a param, a match subject, a top-let — any `Ty::Named` in the
 /// linked IR (entry and modules alike). A name the program or a loaded module
-/// already declares is left alone (the user's own `type Endian` is the user's;
-/// an explicitly imported `bytes` carries its own). The pulled decl is the one
+/// already declares is left alone (the user's own `type FileStat` is the
+/// user's; an explicitly imported `fs` carries its own). The pulled decl is the one
 /// `lower_module` would have produced (`lower_bundled_type_decl`), so the
 /// explicit-import and auto-import programs link the same IR. The type
 /// reference IS a use of the owner module, so the owners are returned for
 /// `used_stdlib_modules` — native's inline splice then defines the runtime
-/// twin (`AlmideEndian`) exactly as it does under `import bytes`.
+/// twin (`AlmideFileStat`) exactly as it does under `import fs`.
 fn pull_spelled_stdlib_type_decls(program: &mut IrProgram) -> Vec<String> {
     let declared: HashSet<String> = program
         .type_decls

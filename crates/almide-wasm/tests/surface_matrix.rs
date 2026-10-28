@@ -114,8 +114,8 @@ fn exercised_surface_matches_golden() {
     .expect("run manifest");
 
     let mut surface: BTreeSet<String> = BTreeSet::new();
-    for line in almide_corpus::manifest_rows(&manifest) {
-        let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
+    let rows: Vec<&str> = almide_corpus::manifest_rows(&manifest).map(|line| line.splitn(3, '\t').nth(2).expect("manifest row")).collect();
+    for rel in almide_corpus::select(rows, "surface_matrix", |rel| rel.to_string()) {
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
         if almide_wasm::emit_program(&ir).is_ok() {
@@ -127,6 +127,7 @@ fn exercised_surface_matches_golden() {
 
     let golden_path = root.join("crates/almide-wasm/tests/golden/wasm-exercised-surface.txt");
     if std::env::var("ALMIDE_UPDATE_SURFACE").is_ok() {
+        almide_corpus::refuse_regen("surface_matrix");
         std::fs::create_dir_all(golden_path.parent().expect("dir")).expect("mkdir");
         std::fs::write(&golden_path, &measured).expect("write golden");
         println!("surface golden regenerated: {} constructs", surface.len());
@@ -137,7 +138,16 @@ fn exercised_surface_matches_golden() {
     let golden_set: BTreeSet<&str> = golden.lines().filter(|l| !l.is_empty()).collect();
     let measured_set: BTreeSet<&str> = measured.lines().filter(|l| !l.is_empty()).collect();
 
-    let lost: Vec<&&str> = golden_set.difference(&measured_set).collect();
+    // Under the CI slice the measured surface is a 1-in-k corpus's: a
+    // construct it did not meet is not "lost" (the full run judges that), but
+    // a construct outside the golden is new whatever fixture showed it.
+    assert!(!measured_set.is_empty(), "no construct measured — the sweep went blind");
+    let lost: Vec<&&str> = if almide_corpus::full_run() {
+        golden_set.difference(&measured_set).collect()
+    } else {
+        println!("surface_matrix: CI slice — {} construct(s) measured; disappearance is judged on the full run", measured_set.len());
+        Vec::new()
+    };
     let gained: Vec<&&str> = measured_set.difference(&golden_set).collect();
     assert!(
         lost.is_empty(),

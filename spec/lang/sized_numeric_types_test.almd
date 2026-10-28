@@ -144,56 +144,56 @@ test "UInt64 subtraction" {
 // The negative path (unconverted mix is a compile error) is covered by
 // `tests/check_sized_numeric_mixed_width.rs` at the Rust-side checker
 // layer because `.almd` has no negative-test syntax.
-fn a32_plus_b8_via_i32(a: Int32, b: Int8) -> Int32 = a + b.to_int32()
+fn a32_plus_b8_via_i32(a: Int32, b: Int8) -> Int32 = a + int32.from(b)
 
-fn f32_plus_i32_via_float(a: Float32, b: Int32) -> Float32 = a + b.to_float32()
+fn f32_plus_i32_via_float(a: Float32, b: Int32) -> Float32 = a + float32.from(b)
 
-test "Int32 + Int8 via .to_int32()" {
+test "Int32 + Int8 via int32.from" {
   assert_eq(a32_plus_b8_via_i32(100, 5), 105)
 }
 
-test "Float32 + Int32 via .to_float32()" {
+test "Float32 + Int32 via float32.from" {
   assert_eq(f32_plus_i32_via_float(1.5, 3), 4.5)
 }
 
-// ── Stage 3: UFCS conversion methods ─────────────────────────────
+// ── Stage 3: T.from conversions ───────────────────────────────────
 test "Int32 to Int64" {
   let x: Int32 = 42
-  let y: Int64 = x.to_int64()
+  let y: Int64 = int64.from(x)
   assert_eq(y, 42)
 }
 
 test "Int to UInt8 with wrap (256 → 0)" {
   let x: Int = 256
-  let y: UInt8 = x.to_uint8()
-  let z: Int64 = y.to_int64()
+  let y: UInt8 = uint8.from_wrapping(x)
+  let z: Int64 = int64.from(y)
   assert_eq(z, 0)
 }
 
 test "UInt8 max → Int64 preserves 255" {
   let y = id_u8(255)
-  let z: Int64 = y.to_int64()
+  let z: Int64 = int64.from(y)
   assert_eq(z, 255)
 }
 
 test "Float to Int32 truncates toward zero" {
   let x: Float = 3.7
-  let y: Int32 = x.to_int32()
-  let z: Int64 = y.to_int64()
+  let y: Int32 = int32.from_saturating(x)
+  let z: Int64 = int64.from(y)
   assert_eq(z, 3)
 }
 
 test "Int32 to Float32 round-trip" {
   let x: Int32 = 100
-  let y: Float32 = x.to_float32()
-  let z: Int32 = y.to_int32()
-  assert_eq(z.to_int64(), 100)
+  let y: Float32 = float32.from(x)
+  let z: Int32 = int32.from_saturating(y)
+  assert_eq(int64.from(z), 100)
 }
 
 test "Float64 to Float32 demotes precision" {
   let x: Float = 3.14
-  let y: Float32 = x.to_float32()
-  let z: Float64 = y.to_float64()
+  let y: Float32 = float32.from(x)
+  let z: Float64 = float64.from(y)
   // Rounded to f32 precision then back; approximation
   assert_eq(z > 3.13, true)
   assert_eq(z < 3.15, true)
@@ -202,8 +202,8 @@ test "Float64 to Float32 demotes precision" {
 test "Int8 sign extends to Int64" {
   // -1 as i8 → sign extend → -1 as i64
   let x: Int = -1
-  let y: Int8 = x.to_int8()
-  let z: Int64 = y.to_int64()
+  let y: Int8 = int8.from_wrapping(x)
+  let z: Int64 = int64.from(y)
   assert_eq(z, -1)
 }
 
@@ -218,40 +218,40 @@ test "Int8 sign extends to Int64" {
 test "List of (Int8, Int) tuples narrows element literal" {
   let a: List[(Int8, Int)] = [(1, 100)]
   let p = a[0]
-  assert_eq(p.0.to_int64(), 1)
+  assert_eq(int64.from(p.0), 1)
   assert_eq(p.1, 100)
 }
 
 test "List[Int8] narrows every element literal" {
   let a: List[Int8] = [1, 2, 3]
   assert_eq(list.len(a), 3)
-  assert_eq(a[2].to_int64(), 3)
+  assert_eq(int64.from(a[2]), 3)
 }
 
 test "List of (UInt8, Int16) narrows mixed-width elements" {
   let a: List[(UInt8, Int16)] = [(7, 300)]
   let p = a[0]
-  assert_eq(p.0.to_int64(), 7)
-  assert_eq(p.1.to_int64(), 300)
+  assert_eq(int64.from(p.0), 7)
+  assert_eq(int64.from(p.1), 300)
 }
 
 test "Structural record with Int8 field narrows literal" {
   let r: { b: Int8, n: Int } = { b: 5, n: 99 }
-  assert_eq(r.b.to_int64(), 5)
+  assert_eq(int64.from(r.b), 5)
   assert_eq(r.n, 99)
 }
 
 test "Nested tuple narrows Int8 at depth" {
   let t: ((Int8, Int), Int) = ((1, 2), 3)
   let inner = t.0
-  assert_eq(inner.0.to_int64(), 1)
+  assert_eq(int64.from(inner.0), 1)
   assert_eq(inner.1, 2)
   assert_eq(t.1, 3)
 }
 
 test "Bare (Int8, Int) tuple narrows first element" {
   let t: (Int8, Int) = (1, 2)
-  assert_eq(t.0.to_int64(), 1)
+  assert_eq(int64.from(t.0), 1)
   assert_eq(t.1, 2)
 }
 
@@ -275,20 +275,20 @@ type USizedRec = { x: UInt8, y: Int }
 
 test "Named record alias with Int8 field narrows literal" {
   let r: SizedRec = { b: 127, n: 9999 }
-  assert_eq(r.b.to_int64(), 127)
+  assert_eq(int64.from(r.b), 127)
   assert_eq(r.n, 9999)
 }
 
 test "Named record alias with UInt8 field narrows literal" {
   let u: USizedRec = { x: 200, y: 5 }
-  assert_eq(u.x.to_int64(), 200)
+  assert_eq(int64.from(u.x), 200)
   assert_eq(u.y, 5)
 }
 
 test "Named record alias nested inside a tuple narrows field" {
   let v: (SizedRec, Int) = ({ b: 127, n: 9999 }, 42)
   let r = v.0
-  assert_eq(r.b.to_int64(), 127)
+  assert_eq(int64.from(r.b), 127)
   assert_eq(r.n, 9999)
   assert_eq(v.1, 42)
 }

@@ -16,7 +16,7 @@ struct DefuncResultShape {
     /// the parse_records pair).
     str_value_tuple: bool,
     /// A `(String, String)` tuple element → `DropListStrStr` (str_str_elems,
-    /// the url.query_pairs shape).
+    /// the url.parse_query shape).
     str_str_tuple: bool,
     /// A dynamic Value element → `DropListValue` (value_elem_lists, parse_records'
     /// outer `data |> list.map(row => value.object(…))`).
@@ -226,7 +226,7 @@ impl LowerCtx {
         let str_value_tuple = matches!(&result_elem,
             Some(Ty::Tuple(tys)) if tys.len() == 2
                 && matches!(tys[0], Ty::String) && crate::lower::is_value_ty(&tys[1]));
-        // A `(String, String)` pair element (url.query_pairs) — the existing
+        // A `(String, String)` pair element (url.parse_query) — the existing
         // `DropListStrStr` route frees each tuple's two String slots.
         let str_str_tuple = matches!(&result_elem,
             Some(Ty::Tuple(tys)) if tys.len() == 2
@@ -234,7 +234,7 @@ impl LowerCtx {
         let value = matches!(&result_elem, Some(t) if crate::lower::is_value_ty(t));
         // A `List[<record>]` result element with a generated recursive `$__drop_<R>` (`map`/`filter`
         // building/keeping records — porta load_porta_config's `env_keys |> list.map((k) => {key:k,
-        // val:json.get_string(env_obj,k)??""})`, which CAPTURES env_obj). Admitted here so the CAPTURING
+        // val:value.get_string(env_obj,k)??""})`, which CAPTURES env_obj). Admitted here so the CAPTURING
         // record-element closure inlines (captures resolve via value_of, control_p5 head) instead of
         // falling to lift_lambda (which rejects every capturing lambda) → an honest wall. The result list
         // is registered for the RECURSIVE `$__drop_list_<R>` below (NOT the flat DropListStr that leaks the
@@ -495,7 +495,7 @@ impl LowerCtx {
             self.value_of.insert(params[0].0, st.acc_local.expect("acc_local is Some here: func == \"fold\" is the only path that reaches this branch"));
         }
         // enumerate+map FUSION: bind the destructured INDEX var to the loop index `i_v` (a scalar),
-        // so the fused body's `list.get_or(row, i, …)` reads the right index. (key was bound above as
+        // so the fused body's `list.get(row, i)` reads the right index. (key was bound above as
         // the element param.)
         if let Some(i_var) = st.fuse_index {
             self.value_of.insert(i_var, st.i_v);

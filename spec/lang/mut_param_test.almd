@@ -20,10 +20,10 @@ test "mut param with stdlib list.push" {
   assert(xs[2] == 30)
 }
 
-test "mut param with map.insert" {
+test "mut param with map index assignment" {
   var m = map.new[String, Int]()
-  map.insert(m, "a", 1)
-  map.insert(m, "b", 2)
+  m = map.set(m, "a", 1)
+  m = map.set(m, "b", 2)
   assert(map.len(m) == 2)
-  assert(map.get_or(m, "a", 0) == 1)
+  assert(map.get(m, "a") ?? 0 == 1)
 }

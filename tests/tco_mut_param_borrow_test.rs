@@ -110,7 +110,7 @@ effect fn main() -> Unit = {
 const MAP_SRC: &str = "\
 fn fill(mut m: Map[Int, Int], n: Int) -> Int =
   if n == 0 then map.len(m)
-  else { map.insert(m, n, n * 10); fill(m, n - 1) }
+  else { m[n] = n * 10; fill(m, n - 1) }
 
 effect fn main() -> Unit = {
   var m: Map[Int, Int] = [:]

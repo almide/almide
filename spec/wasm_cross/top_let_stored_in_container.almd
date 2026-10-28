@@ -75,7 +75,7 @@ fn main() -> Unit = {
     total = total + list.len(noise)
   }
   println(int.to_string(total))
-  println(string.join(WORDS, ",") + " " + NAME)
+  println(list.join(WORDS, ",") + " " + NAME)
   println(int.to_string(list.len(KEYS)) + " " + (list.first(KEYS) ?? ("?", inc)).0)
   println(int.to_string(list.len(CTRL)) + " " + (list.first(CTRL) ?? ("?", inc)).0)
 }

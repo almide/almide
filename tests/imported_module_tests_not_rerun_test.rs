@@ -26,10 +26,11 @@ fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-/// The issue's repro, verbatim: `process.spawn` keeps both files on native.
+/// The issue's repro (the old spawn call then; its successor `process.start`,
+/// native-only, now): it keeps both files on native.
 const NATIVE_HELPER: &str = "import process\n\
 \n\
-effect fn start() -> Result[Int, String] = process.spawn(\"true\", [])\n\
+effect fn start() -> Result[Int, String] = process.child_pid(process.start(process.ProcessCommand { cmd: \"true\", args: [] })!)\n\
 \n\
 test \"helper fails\" {\n\
   let pid = start()!\n\

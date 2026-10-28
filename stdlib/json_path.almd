@@ -1,33 +1,19 @@
-// json_path — SELF-HOSTED json path API (root/field/index/get_path/set_path/remove_path).
-// v0's JsonPath
-// is an opaque Rust enum (JpRoot/JpField/JpIndex) consumed ONLY by these fns, so the
-// v1 self-host owns the rep: a List[String] of segments, root-first — "f<name>" is a
-// field step, "i<int>" an index step (digits from int.to_string, so int.parse always
-// round-trips). The newtype eraser publishes Named("JsonPath") → List[String], making
-// user-side binds route the List[String] drop. get_path walks the PROVEN value.field /
-// value.as_array / generic list.get path, byte-matching almide_json_get_path: a field
-// step on a non-object → none; an index step wraps a NEGATIVE i from the end (len + i)
-// and misses out-of-range.
-fn json_path_root() -> List[String] = []
-
-fn json_path_field(path: List[String], name: String) -> List[String] = {
-  let seg = "f" + name
-  path + [seg]
-}
-
+// json_path — SELF-HOSTED value.Path API (root/key/index/get_path/set_path/remove_path).
+// The rep is a List[String] of segments, root-first — "f<name>" is a key step, "i<int>"
+// an index step (digits from int.to_string, so int.parse always round-trips). A step
+// appends to a uniquely owned path in place (the `let seg` + `path + [seg]` shape), so
+// building a deep path stays linear.
 fn json_path_index(path: List[String], i: Int) -> List[String] = {
   let seg = "i" + int.to_string(i)
   path + [seg]
 }
-
-fn json_path_get(j: Value, path: List[String]) -> Value? = json_path_get_go(j, path, 0)
 
 fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
   if k >= list.len(path) then some(j)
   else {
     let seg = list.get(path, k) ?? ""
     let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then match value.field(j, rest) {
+    if string.take(seg, 1) == "f" then match value.__field(j, rest) {
       ok(v) => json_path_get_go(v, path, k + 1),
       err(_) => none,
     } else match int.parse(rest) {
@@ -38,10 +24,7 @@ fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
 
 fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? = match value.as_array(j) {
   ok(xs) => {
-    let n = list.len(xs)
-    let idx = if i < 0 then n + i else i
-    if idx < 0 then none
-    else match list.get(xs, idx) {
+    match list.get(xs, i) {
       some(v) => json_path_get_go(v, path, k + 1),
       none => none,
     }
@@ -49,14 +32,46 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
   err(_) => none,
 }
 
+// ── value.Path (#4220) ── stdlib/value.almd's root/key/index/get_path/set_path/
+// remove_path on the wasm leg, over this file's List[String] segment rep (the newtype
+// eraser publishes Named("Path") → List[String]). value.index treats a negative i as
+// OUT OF RANGE (it never counts from the end), so a negative step is recorded as the
+// largest Int, which no array reaches — get misses, set and remove leave v as is.
+@implements("value.root")
+fn value_path_root() -> List[String] = []
+
+@implements("value.key")
+fn value_path_key(p: List[String], name: String) -> List[String] = {
+  let seg = "f" + name
+  p + [seg]
+}
+
+@implements("value.index")
+fn value_path_index(p: List[String], i: Int) -> List[String] =
+  if i < 0 then json_path_index(p, 9223372036854775807)
+  else json_path_index(p, i)
+
+@implements("value.get_path")
+fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
+
+@implements("value.set_path")
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
+  let steps = list.len(p)
+  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
+  else ok(json_path_set_go(v, p, 0, x))
+}
+
+@implements("value.remove_path")
+fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
+
 // ── set_path / remove_path — byte-matching native set_at_steps / remove_at_steps ──
-// (runtime/rs/src/json.rs, the C-090 oracle). Both are INFALLIBLE (set_path's Result is
-// always ok). A Field step over an Object rewrites EVERY entry whose key matches — the
+// (runtime/rs/src/json.rs, the C-090 oracle). remove_path is INFALLIBLE; set_path's Result
+// is err only past the nesting bound (#4209). A Field step over an Object rewrites EVERY entry whose key matches — the
 // walks go by SLOT index (key @ h+12+(2i)*8, value @ +8), not by key lookup, so duplicate
 // keys transform each entry exactly like native's entries map. Over a non-object, set
 // AUTOVIVIFIES: the whole node is replaced by a fresh single-key object, and descents are
-// seeded with `{}` (__jp_empty_obj). An Index step normalizes a negative i from the end
-// (n + i); a non-array node or an out-of-range index is a NO-OP — the shared `j` returned
+// seeded with `{}` (__jp_empty_obj). An Index step is never negative (value.index); a
+// non-array node or an out-of-range index is a NO-OP — the shared `j` returned
 // bare (auto-acquire, the value_pick `else v` precedent) stands in for native's clone,
 // byte-identical because Values are immutable. Rebuilds go through the PROVEN
 // value.object / value.array ctors: the entry walks Dup borrowed slot handles into
@@ -81,12 +96,37 @@ else {
   else __jp_has(j, key, i + 1, n)
 }
 
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = ok(json_path_set_go(
-  j,
-  path,
-  0,
-  nv,
-))
+// The value set_path builds nests its path's steps plus the new value's own
+// nesting deep; past json.parse's bound it is refused with parse's text
+// (#4209), so a value made here is one parse could have made and every
+// recursive walk of it stays bounded. A self-hosted source links on its own
+// (a private fn of stdlib/json_parse.almd is not callable from here), so the
+// bound is read through this file's `__jpath_max_depth`, which
+// tests/json_depth_limit_test.rs pins, with json_parse.almd's, to
+// crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH.
+fn __jpath_max_depth() -> Int = 1000
+
+// json.parse's err text, spelled out; the test pins it to json_depth_error().
+fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
+
+// `v` holds containers nested more than `budget` deep (tag 5 = array, 6 =
+// object); recurses at most `budget + 1` levels whatever `v` holds.
+fn __json_nests_past(v: Value, budget: Int) -> Bool = {
+  let tag = prim.load32(prim.handle(v) + 4)
+  if tag != 5 and tag != 6 then false
+  else if budget == 0 then true
+  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
+  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
+}
+
+// Slot `i * stride + stride - 1` is an element (stride 1) or an entry's
+// value (stride 2: key, value).
+fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
+else {
+  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
+  if __json_nests_past(ev, budget) then true
+  else __jnp_items(v, budget, i + 1, n, stride)
+}
 
 fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
   if k >= list.len(path) then nv
@@ -128,8 +168,7 @@ fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: 
 fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
   if prim.load32(prim.handle(j) + 4) == 5 then {
     let n = prim.load32(prim.handle(j) + 8)
-    let idx = if i < 0 then n + i else i
-    if idx >= 0 and idx < n then value.array(__jps_items(j, path, k, nv, idx, 0, n, []))
+    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
     else j
   } else j
 
@@ -142,8 +181,6 @@ fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int
       __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
     } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
   }
-
-fn json_path_remove(j: Value, path: List[String]) -> Value = json_path_rm_go(j, path, 0)
 
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
@@ -179,8 +216,7 @@ fn __jpr_pairs(j: Value, path: List[String], k: Int, key: String, last: Bool, i:
 fn json_path_rm_index(j: Value, path: List[String], k: Int, i: Int, last: Bool) -> Value =
   if prim.load32(prim.handle(j) + 4) == 5 then {
     let n = prim.load32(prim.handle(j) + 8)
-    let idx = if i < 0 then n + i else i
-    if idx >= 0 and idx < n then value.array(__jpr_items(j, path, k, idx, last, 0, n, []))
+    if i < n then value.array(__jpr_items(j, path, k, i, last, 0, n, []))
     else j
   } else j
 
@@ -197,35 +233,14 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
 
-// ── json.to_map ── SELF-HOSTED `json.to_map(j)` (#3700, C-380): an object's fields
-// folded into a Map[String, String] one `map.set` at a time, so a key the object
-// repeats keeps its first position and takes its last value; a Str field is
-// taken verbatim, any other value is its `value.stringify` text; a non-object
-// is none. Native answers from its intrinsic and wasm from its emitter
-// lowering (crates/almide-wasm/src/value.rs); this body is the one the
-// reference interpreter evaluates, the third vote on the C-380 fixture.
-//
-// The object walk reads value_core's block layout (tag 6 at @4, the slot
-// count at @8, (key, value) handle pairs from @12), as value_keys does.
-@implements("json.to_map")
-fn json_to_map(j: Value) -> Map[String, String]? =
-  if prim.load32(prim.handle(j) + 4) == 6 then some(__tomap_fold(
-    j,
-    0,
-    prim.load32(prim.handle(j) + 8) / 2,
-    map.new(),
-  ))
-  else none
-
-fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(v)
-    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    __tomap_fold(v, i + 1, n, map.set(acc, k, __tomap_text(x)))
-  }
-
-fn __tomap_text(x: Value) -> String =
-  if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
-  else value.stringify(x)
+// ── value.__set_path_steps ── the wasm leg's and the interp oracle's body for
+// the native runtime walk value.set_path calls over the bundled Path's
+// (is_key, name, index) steps: stdlib/value.almd's pure `__set_path_pure`,
+// which walks the public Value surface only (no layout reads, unlike
+// `__json_nests_past` here), so the structural leg links it.
+@implements("value.__set_path_steps")
+fn value_set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = value.__set_path_pure(
+  v,
+  steps,
+  x,
+)

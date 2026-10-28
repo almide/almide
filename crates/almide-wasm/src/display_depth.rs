@@ -17,6 +17,12 @@ impl Emitter<'_> {
         ir: Option<&Ty>,
         path: &mut Vec<u32>,
     ) -> Result<(), EmitError> {
+        // A runtime-backed type shows its DECLARED repr (#4204), at any depth:
+        // its self-hosted carrier (`HttpRequest` is a `List[String]`) holds
+        // what the repr hides, so the carrier's own display never runs.
+        if let Some(i) = self.declared_repr_fn(ir) {
+            return self.emit_declared_repr(i);
+        }
         let container = matches!(
             got,
             SliceTy::List(_) | SliceTy::Set(_) | SliceTy::Map(..) | SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_)
@@ -83,6 +89,62 @@ impl Emitter<'_> {
 
     fn display_fields_need(&self, fields: &[SliceTy], path: &mut Vec<u32>) -> u32 {
         fields.iter().map(|t| self.display_hold_need(*t, path)).max().unwrap_or(0)
+    }
+
+    /// The linked repr function of the runtime-backed type `ir` names
+    /// (#4204), from its row: `stdlib_info::runtime_backed_repr_surface`.
+    /// `None` for every other type, for a user type that shadows the bare
+    /// name, and for a runtime-backed type whose module declares no repr.
+    fn declared_repr_fn(&self, ir: Option<&Ty>) -> Option<usize> {
+        let Some(Ty::Named(name, args)) = ir else { return None };
+        if !args.is_empty() || self.types.by_name.contains_key(name.as_str()) {
+            return None;
+        }
+        let surface = almide_types::stdlib_info::runtime_backed_repr_surface(name.as_str())?;
+        self.resolve_qualified(&surface)
+    }
+
+    /// The runtime-backed value on the stack, appended through its declared
+    /// repr `i` (a `(T) -> String` that borrows its argument). The text it
+    /// hands over is copied into the line and released here — the
+    /// `emit_float_display` discipline.
+    fn emit_declared_repr(&mut self, i: usize) -> Result<(), EmitError> {
+        let info = &self.table.infos[i];
+        if info.refuse.is_some() || info.ret != Some(STR) || info.params.len() != 1 {
+            return unsup("interp-part:declared-repr-impl");
+        }
+        // The display walk only lends the value: a callee that owns its
+        // param releases it at exit, so it gets its own credit first (the
+        // RC-3 callee-owned convention, `lower_conv_arg`).
+        let owned = info.param_owned.first().copied().unwrap_or(true);
+        let idx = info.wasm_index;
+        if owned {
+            self.rc_inc_top();
+        }
+        self.calls.insert(i);
+        self.witness_discard();
+        // The repr builds its text with interpolations of its own: publish
+        // this line's cursor so that build starts past what is already here
+        // (the `lower_interp_part` rule).
+        self.f
+            .instructions()
+            .local_get(self.cursor_local)
+            .global_set(G_LINE_CURSOR)
+            .call(idx)
+            .local_set(self.tmp_i32_local);
+        self.f
+            .instructions()
+            .local_get(self.cursor_local)
+            .local_get(self.tmp_i32_local)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(self.tmp_i32_local)
+            .i32_load(len_memarg())
+            .call(F_APPEND_COPY)
+            .local_set(self.cursor_local);
+        let dec = self.dec_fn_of(STR);
+        self.f.instructions().local_get(self.tmp_i32_local).call(dec);
+        Ok(())
     }
 }
 

@@ -37,7 +37,7 @@ fn accepted_corpus_contains_zero_recovery_nodes() {
     let mut checked = 0usize;
     for entry in std::fs::read_dir(&dir).expect("read spec/wasm_cross") {
         let path = entry.expect("entry").path();
-        if path.extension().map_or(true, |e| e != "almd") {
+        if path.extension().is_none_or(|e| e != "almd") {
             continue;
         }
         let src = std::fs::read_to_string(&path).expect("read fixture");

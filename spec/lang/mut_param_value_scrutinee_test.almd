@@ -1,0 +1,30 @@
+// #4080: a value-returning call with a `mut` param as a match scrutinee or an
+// if condition writes its buffer back before the arms run, on every leg.
+fn pop_last(mut xs: List[Int]) -> Int? = list.pop(xs)
+
+fn grow(mut xs: List[Int]) -> Bool = {
+  list.push(xs, 9)
+  list.len(xs) > 2
+}
+
+test "a mut-param call as a match scrutinee writes back each turn" {
+  var q = [1, 2, 3]
+  var out: List[Int] = []
+  for _ in 0..<4 {
+    match pop_last(q) {
+      some(x) => list.push(out, x),
+      none => list.push(out, 0),
+    }
+  }
+  assert_eq(out, [3, 2, 1, 0])
+  assert_eq(q, [])
+}
+
+test "a mut-param call as an if condition writes back before the branch" {
+  var a = [1, 2]
+  let n = if grow(a) then list.len(a) else 0
+  assert_eq(n, 3)
+  var b = [1]
+  let m = if grow(b) then 0 else list.len(b)
+  assert_eq(m, 2)
+}

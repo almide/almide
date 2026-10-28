@@ -216,6 +216,13 @@ fn init_examples() {
             ("h12 w8 n1 r0 s0 ;", true),
             ("h012 w8 n01 r0 s000", true),
             (";", false),
+            // loop fills (fill_bytes)
+            ("h12 w8 v4 r0 f4 t8", true),
+            ("h12 w8 v4 r0 f4 t8 ; h12 w8 n1 r0 s0", true),
+            ("h12 w8 v4 r0 f5 t8", false),
+            ("h12 w8 v4 r0 f4 t16", false),
+            ("h12 w8 v4 r0 f4 t8 s0", false),
+            ("h12 w8 v4 r0 f4", false),
         ],
     );
 }

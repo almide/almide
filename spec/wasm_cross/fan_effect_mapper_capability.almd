@@ -35,8 +35,8 @@ effect fn helper(p: String) -> Result[String, String] = fs.read_text(p)
 
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("fanCap")!
-  fs.write(d + "/a.txt", "alpha")!
-  fs.write(d + "/b.txt", "beta")!
+  fs.write_text(d + "/a.txt", "alpha")!
+  fs.write_text(d + "/b.txt", "beta")!
   // Shape B, ok path: a `??` chain over the capability call itself.
   let b_ok = fs.read_text(d + "/a.txt") ?? "fb0"
   println("B ok ${b_ok}")

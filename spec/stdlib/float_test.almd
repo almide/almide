@@ -11,20 +11,20 @@ test "float.to_string decimal" {
 }
 
 // ── to_int ──
-test "float.to_int truncates down" {
-  assert_eq(float.to_int(3.7), 3)
+test "int.from_saturating truncates down" {
+  assert_eq(int.from_saturating(3.7), 3)
 }
 
-test "float.to_int truncates negative" {
-  assert_eq(float.to_int(-2.9), -2)
+test "int.from_saturating truncates negative" {
+  assert_eq(int.from_saturating(-2.9), -2)
 }
 
-test "float.to_int zero" {
-  assert_eq(float.to_int(0.0), 0)
+test "int.from_saturating zero" {
+  assert_eq(int.from_saturating(0.0), 0)
 }
 
-test "float.to_int exact" {
-  assert_eq(float.to_int(5.0), 5)
+test "int.from_saturating exact" {
+  assert_eq(int.from_saturating(5.0), 5)
 }
 
 // ── round ──
@@ -98,34 +98,34 @@ test "float.abs zero" {
 }
 
 // ── sqrt ──
-test "float.sqrt perfect square" {
-  assert_eq(float.sqrt(4.0), 2.0)
+test "math.sqrt perfect square" {
+  assert_eq(math.sqrt(4.0), 2.0)
 }
 
-test "float.sqrt one" {
-  assert_eq(float.sqrt(1.0), 1.0)
+test "math.sqrt one" {
+  assert_eq(math.sqrt(1.0), 1.0)
 }
 
-test "float.sqrt zero" {
-  assert_eq(float.sqrt(0.0), 0.0)
+test "math.sqrt zero" {
+  assert_eq(math.sqrt(0.0), 0.0)
 }
 
-test "float.sqrt non-perfect" {
-  let s = float.sqrt(2.0)
+test "math.sqrt non-perfect" {
+  let s = math.sqrt(2.0)
   assert(s > 1.41 and s < 1.42)
 }
 
 // ── from_int ──
-test "float.from_int positive" {
-  assert_eq(float.from_int(5), 5.0)
+test "float.from positive" {
+  assert_eq(float.from(5), 5.0)
 }
 
-test "float.from_int zero" {
-  assert_eq(float.from_int(0), 0.0)
+test "float.from zero" {
+  assert_eq(float.from(0), 0.0)
 }
 
-test "float.from_int negative" {
-  assert_eq(float.from_int(-10), -10.0)
+test "float.from negative" {
+  assert_eq(float.from(-10), -10.0)
 }
 
 // ── min / max ──
@@ -201,12 +201,12 @@ test "float.abs via module call" {
   assert_eq(float.abs(-5.0), 5.0)
 }
 
-test "float.sqrt via module call large" {
-  assert_eq(float.sqrt(144.0), 12.0)
+test "math.sqrt via module call large" {
+  assert_eq(math.sqrt(144.0), 12.0)
 }
 
-test "float.to_int via module call" {
-  assert_eq(float.to_int(7.9), 7)
+test "int.from_saturating via module call" {
+  assert_eq(int.from_saturating(7.9), 7)
 }
 
 // ── to_bits ──
@@ -220,10 +220,10 @@ test "float.to_bits 0.0" {
 
 test "float.to_bits round-trip" {
   let bits = float.to_bits(3.14159)
-  assert_eq(int.bits_to_float(bits), 3.14159)
+  assert_eq(float.from_bits(bits), 3.14159)
 }
 
 test "float.to_bits negative" {
   let bits = float.to_bits(-1.0)
-  assert_eq(int.bits_to_float(bits), -1.0)
+  assert_eq(float.from_bits(bits), -1.0)
 }

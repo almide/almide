@@ -1,6 +1,11 @@
 // json extern — JSON parse, stringify, and AlmideValue query/manipulation
 // AlmideValue type is defined in value.rs (included before this file)
 
+// The nesting bound (#4020 / #4209): JSON_MAX_DEPTH and json_depth_error(),
+// declared once for every leg, are spliced into value.rs (value.set_path
+// holds the same bound and links without this module; this one always pulls
+// value.rs in).
+
 // ── Parse + Stringify ──
 
 pub fn almide_rt_json_stringify(v: &AlmideValue) -> AlmideString { almide_rt_value_stringify(v) }
@@ -21,8 +26,8 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
         // stdlib/json_parse.almd is the self-hosted twin, clause for clause.
         //
         // Nesting is bounded (R-L0-47, R-json-04, #4020): an array or object
-        // opened inside 1000 others is `json: nesting deeper than 1000`.
-        const JSON_MAX_DEPTH: usize = 1000;
+        // opened inside JSON_MAX_DEPTH (1000) others is
+        // `json: nesting deeper than 1000`.
         fn at(what: &str, t: &str, pos: usize) -> String {
             format!("{} at pos {}", what, t[..pos].chars().count())
         }
@@ -59,7 +64,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
                 b'"' => parse_string(t, pos).map(AlmideValue::Str),
-                b'{' | b'[' if depth >= JSON_MAX_DEPTH => Err("json: nesting deeper than 1000".into()),
+                b'{' | b'[' if depth >= JSON_MAX_DEPTH => Err(json_depth_error()),
                 b'{' => parse_object(t, pos, depth + 1),
                 b'[' => parse_array(t, pos, depth + 1),
                 b't' => parse_literal(t, pos, b"true", AlmideValue::Bool(true), "expected bool"),
@@ -68,11 +73,11 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
                 c if c == b'-' || c.is_ascii_digit() => parse_number(t, pos),
                 _ => {
                     let ch = t[*pos..].chars().next().unwrap_or('\u{FFFD}');
-                    Err(format!("unexpected char '{}' at pos {}", ch, t[..*pos].chars().count()))
+                    Err(format!("unexpected char '{}' at pos {}", almide_rt_errtext_escape(&ch.to_string()), t[..*pos].chars().count()))
                 }
             }
         }
-        fn parse_literal(t: &str, pos: &mut usize, word: &[u8], v: AlmideValue, msg: &str) -> Result<AlmideValue, String> {
+        fn parse_literal(t: &str, pos: &mut usize, word: &[u8], v: AlmideValue, msg: &'static str) -> Result<AlmideValue, String> {
             if t.as_bytes()[*pos..].starts_with(word) { *pos += word.len(); Ok(v) } else { Err(msg.into()) }
         }
         /// A string at its opening quote. The escape-free run becomes the
@@ -193,7 +198,15 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             if q != end { return bad(); }
             *pos = end;
             let s = &t[start..end];
-            if is_float { s.parse::<f64>().map(AlmideValue::Float).map_err(|e| e.to_string()) }
+            // A float token reads as `float.parse` reads it (C-413), the wasm
+            // leg's json_parse.almd included: one that overflows binary64 is
+            // the same err there, never an infinity (I-JSON, RFC 7493 §2.2).
+            if is_float {
+                match s.parse::<f64>() {
+                    Ok(f) if f.is_infinite() => Err("float literal out of range".to_string()),
+                    r => r.map(AlmideValue::Float).map_err(|e| e.to_string()),
+                }
+            }
             else { s.parse::<i64>().map(AlmideValue::Int).map_err(|e| e.to_string()) }
         }
         fn parse_array(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
@@ -280,36 +293,10 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
 
 // ── Key-based getters ──
 
-pub fn almide_json_get(j: &AlmideValue, key: &str) -> Option<AlmideValue> {
-    match j {
-        AlmideValue::Object(entries) => entries.iter().find(|(k, _)| k.as_ref() == key).map(|(_, v)| v.clone()),
-        _ => None,
-    }
-}
 
-pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<AlmideString> { let __almide_v: Option<AlmideString> = (|| {
-    match almide_json_get(j, key)? { AlmideValue::Str(s) => Some(s), _ => None }
-})(); __almide_v.into_almide() }
 
-/// An Int field only: a Float value is `None`, even an integral one (`3.0`),
-/// never truncated — the same answer as `value.as_int` and Codec Int decode, and
-/// the self-hosted `json_get_int` the wasm legs link (#2476). The widening runs
-/// one way only: `get_float` accepts an Int (C-085).
-pub fn almide_json_get_int(j: &AlmideValue, key: &str) -> Option<i64> {
-    match almide_json_get(j, key)? { AlmideValue::Int(n) => Some(n), _ => None }
-}
 
-pub fn almide_json_get_float(j: &AlmideValue, key: &str) -> Option<f64> {
-    match almide_json_get(j, key)? { AlmideValue::Float(f) => Some(f), AlmideValue::Int(n) => Some(n as f64), _ => None }
-}
 
-pub fn almide_json_get_bool(j: &AlmideValue, key: &str) -> Option<bool> {
-    match almide_json_get(j, key)? { AlmideValue::Bool(b) => Some(b), _ => None }
-}
-
-pub fn almide_json_get_array(j: &AlmideValue, key: &str) -> Option<Vec<AlmideValue>> {
-    match almide_json_get(j, key)? { AlmideValue::Array(a) => Some(a), _ => None }
-}
 
 // ── Keyless extractors ──
 
@@ -339,21 +326,6 @@ pub fn almide_json_keys(j: &AlmideValue) -> Vec<AlmideString> { let __almide_v: 
     match j { AlmideValue::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(), _ => vec![] }
 })(); __almide_v.into_almide() }
 
-pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<AlmideString, AlmideString>> { let __almide_v: Option<AlmideMap<String, String>> = (|| {
-    match j {
-        AlmideValue::Object(entries) => {
-            let map: AlmideMap<String, String> = entries.iter().map(|(k, v)| {
-                let s = match v {
-                    AlmideValue::Str(s) => s.to_string(),
-                    _ => String::from(almide_rt_value_stringify(v)),
-                };
-                (k.to_string(), s)
-            }).collect();
-            Some(map)
-        }
-        _ => None,
-    }
-})(); __almide_v.into_almide() }
 
 pub fn almide_json_object(entries: &[(AlmideString, AlmideValue)]) -> AlmideValue {
     AlmideValue::Object(entries.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())
@@ -398,156 +370,5 @@ fn stringify_value(v: &AlmideValue, depth: usize) -> String {
             let parts: Vec<String> = entries.iter().map(|(k, v)| format!("{}{}: {}", ind1, json_quote(k), stringify_value(v, depth + 1))).collect();
             format!("{{\n{}\n{}}}", parts.join(",\n"), ind)
         }
-    }
-}
-
-// ── AlmideJsonPath type and operations ──
-
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum AlmideJsonPath {
-    JpRoot,
-    JpField(std::boxed::Box<AlmideJsonPath>, String),
-    JpIndex(std::boxed::Box<AlmideJsonPath>, i64),
-}
-
-impl std::fmt::Display for AlmideJsonPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AlmideJsonPath::JpRoot => write!(f, "$"),
-            AlmideJsonPath::JpField(parent, name) => write!(f, "{}.{}", parent, name),
-            AlmideJsonPath::JpIndex(parent, i) => write!(f, "{}[{}]", parent, i),
-        }
-    }
-}
-
-// A record may hold a path, and a record's repr calls each field's (#2647).
-impl AlmideRepr for AlmideJsonPath {
-    fn almide_repr(&self) -> String { self.to_string() }
-}
-
-// Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
-pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
-pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(std::boxed::Box::new(path), name.to_string()) }
-pub fn almide_rt_json_index(path: AlmideJsonPath, i: i64) -> AlmideJsonPath { AlmideJsonPath::JpIndex(std::boxed::Box::new(path), i) }
-
-/// Resolve a AlmideJsonPath to a list of traversal steps, root-first.
-fn resolve_path(path: &AlmideJsonPath) -> Vec<AlmidePathStep> {
-    let mut steps = Vec::new();
-    let mut current = path;
-    loop {
-        match current {
-            AlmideJsonPath::JpRoot => break,
-            AlmideJsonPath::JpField(parent, name) => {
-                steps.push(AlmidePathStep::Field(name.clone()));
-                current = parent;
-            }
-            AlmideJsonPath::JpIndex(parent, i) => {
-                steps.push(AlmidePathStep::Index(*i));
-                current = parent;
-            }
-        }
-    }
-    steps.reverse();
-    steps
-}
-
-enum AlmidePathStep {
-    Field(String),
-    Index(i64),
-}
-
-fn get_by_step(v: &AlmideValue, step: &AlmidePathStep) -> Option<AlmideValue> {
-    match step {
-        AlmidePathStep::Field(key) => almide_json_get(v, key),
-        AlmidePathStep::Index(i) => match v {
-            AlmideValue::Array(items) => {
-                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
-                items.get(idx).cloned()
-            }
-            _ => None,
-        },
-    }
-}
-
-pub fn almide_json_get_path(j: &AlmideValue, path: &AlmideJsonPath) -> Option<AlmideValue> {
-    let steps = resolve_path(path);
-    let mut current = j.clone();
-    for step in &steps {
-        current = get_by_step(&current, step)?;
-    }
-    Some(current)
-}
-
-pub fn almide_json_set_path(j: &AlmideValue, path: &AlmideJsonPath, value: AlmideValue) -> Result<AlmideValue, AlmideString> { let __almide_r: Result<AlmideValue, String> = (|| {
-    let steps = resolve_path(path);
-    Ok(set_at_steps(j, &steps, &value))
-})(); __almide_r.map_err(Into::into) }
-
-pub fn almide_json_remove_path(j: &AlmideValue, path: &AlmideJsonPath) -> AlmideValue {
-    let steps = resolve_path(path);
-    remove_at_steps(j, &steps)
-}
-
-fn set_at_steps(j: &AlmideValue, steps: &[AlmidePathStep], value: &AlmideValue) -> AlmideValue {
-    if steps.is_empty() { return value.clone(); }
-    match &steps[0] {
-        AlmidePathStep::Field(key) => match j {
-            AlmideValue::Object(entries) => {
-                let rest = &steps[1..];
-                let mut new_entries: Vec<(AlmideKey, AlmideValue)> = entries.iter()
-                    .map(|(k, v)| if k.as_ref() == key.as_str() { (k.clone(), set_at_steps(v, rest, value)) } else { (k.clone(), v.clone()) })
-                    .collect();
-                if !entries.iter().any(|(k, _)| k.as_ref() == key.as_str()) {
-                    new_entries.push((almide_rt_intern_key(key), set_at_steps(&AlmideValue::Object(vec![]), rest, value)));
-                }
-                AlmideValue::Object(new_entries)
-            }
-            _ => AlmideValue::Object(vec![(almide_rt_intern_key(key), set_at_steps(&AlmideValue::Object(vec![]), &steps[1..], value))]),
-        },
-        AlmidePathStep::Index(i) => match j {
-            AlmideValue::Array(items) => {
-                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
-                let mut new_items = items.clone();
-                if idx < new_items.len() {
-                    new_items[idx] = set_at_steps(&new_items[idx], &steps[1..], value);
-                }
-                AlmideValue::Array(new_items)
-            }
-            _ => j.clone(),
-        },
-    }
-}
-
-fn remove_at_steps(j: &AlmideValue, steps: &[AlmidePathStep]) -> AlmideValue {
-    if steps.is_empty() { return AlmideValue::Null; }
-    match &steps[0] {
-        AlmidePathStep::Field(key) => match j {
-            AlmideValue::Object(entries) => {
-                if steps.len() == 1 {
-                    AlmideValue::Object(entries.iter().filter(|(k, _)| k.as_ref() != key.as_str()).cloned().collect())
-                } else {
-                    AlmideValue::Object(entries.iter().map(|(k, v)| {
-                        if k.as_ref() == key.as_str() { (k.clone(), remove_at_steps(v, &steps[1..])) } else { (k.clone(), v.clone()) }
-                    }).collect())
-                }
-            }
-            other => other.clone(),
-        },
-        AlmidePathStep::Index(i) => match j {
-            AlmideValue::Array(items) => {
-                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
-                if steps.len() == 1 {
-                    AlmideValue::Array(items.iter().enumerate().filter(|(ii, _)| *ii != idx).map(|(_, v)| v.clone()).collect())
-                } else {
-                    let mut new_items = items.clone();
-                    if idx < new_items.len() {
-                        new_items[idx] = remove_at_steps(&new_items[idx], &steps[1..]);
-                    }
-                    AlmideValue::Array(new_items)
-                }
-            }
-            other => other.clone(),
-        },
     }
 }

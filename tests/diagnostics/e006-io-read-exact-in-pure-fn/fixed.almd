@@ -1,0 +1,5 @@
+import io
+
+fn header_len(b: Bytes) -> Int = bytes.len(b)
+
+effect fn main() -> Unit = println("${header_len(io.read_exact(io.stdin()!, 4) ?? bytes.new())}")

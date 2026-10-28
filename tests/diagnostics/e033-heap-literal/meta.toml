@@ -1,0 +1,3 @@
+expects_code = "E033"
+expects_error = "cannot build a literal of opaque type 'Heap' outside its module 'heap'"
+hint_substring = "`heap.new`"

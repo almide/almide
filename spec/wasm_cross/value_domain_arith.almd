@@ -33,6 +33,13 @@
 // A documented scope that produces a malformed value outside itself is not a scope.
 import datetime
 
+// A from_parts answer as text: the timestamp, or the err naming the part
+// out of range (R-datetime-07).
+fn fp_text(r: Result[Int, String]) -> String = match r {
+  ok(t) => int.to_string(t),
+  err(e) => e,
+}
+
 fn main() -> Unit = {
   // to_iso across the whole i64 range, plus year 1 to pin the zero-padding.
   println("iso_epoch=" + datetime.to_iso(0))
@@ -40,20 +47,20 @@ fn main() -> Unit = {
   println("iso_max=" + datetime.to_iso(9223372036854775807))
   println("iso_min=" + datetime.to_iso(0 - 9223372036854775807 - 1))
   // from_parts: the valid months must be untouched by the signedness change.
-  println("fp_jan=" + int.to_string(datetime.from_parts(2020, 1, 1, 0, 0, 0)))
-  println("fp_dec=" + int.to_string(datetime.from_parts(2020, 12, 1, 0, 0, 0)))
-  println("fp_neg=" + int.to_string(datetime.from_parts(2020, 0 - 1, 1, 0, 0, 0)))
-  println("fp_min=" + int.to_string(datetime.from_parts(2020, 0 - 9223372036854775807 - 1, 1, 0, 0, 0)))
+  println("fp_jan=" + fp_text(datetime.from_parts(2020, 1, 1, 0, 0, 0)))
+  println("fp_dec=" + fp_text(datetime.from_parts(2020, 12, 1, 0, 0, 0)))
+  println("fp_neg=" + fp_text(datetime.from_parts(2020, 0 - 1, 1, 0, 0, 0)))
+  println("fp_min=" + fp_text(datetime.from_parts(2020, 0 - 9223372036854775807 - 1, 1, 0, 0, 0)))
   // choose: the real answer, then the two wrapping ones.
   println("ch_5=" + int.to_string(math.choose(5, 2)))
   println("ch_max=" + int.to_string(math.choose(9223372036854775807, 2)))
   println("ch_2p32=" + int.to_string(math.choose(4294967296, 2)))
   // from_codepoint: valid, the surrogate hole, the last codepoint, and past it.
-  println("cp_a=[" + string.from_codepoint(65) + "]")
-  println("cp_jp=[" + string.from_codepoint(12354) + "]")
-  println("cp_surrogate=[" + string.from_codepoint(55296) + "]")
-  println("cp_last=" + int.to_string(string.len(string.from_codepoint(1114111))))
-  println("cp_past=[" + string.from_codepoint(1114112) + "]")
-  println("cp_2p32=[" + string.from_codepoint(4294967296) + "]")
-  println("cp_min=[" + string.from_codepoint(0 - 9223372036854775807 - 1) + "]")
+  println("cp_a=[" + (string.from_codepoint(65) ?? "") + "]")
+  println("cp_jp=[" + (string.from_codepoint(12354) ?? "") + "]")
+  println("cp_surrogate=[" + (string.from_codepoint(55296) ?? "") + "]")
+  println("cp_last=" + int.to_string(string.len((string.from_codepoint(1114111) ?? ""))))
+  println("cp_past=[" + (string.from_codepoint(1114112) ?? "") + "]")
+  println("cp_2p32=[" + (string.from_codepoint(4294967296) ?? "") + "]")
+  println("cp_min=[" + (string.from_codepoint(0 - 9223372036854775807 - 1) ?? "") + "]")
 }

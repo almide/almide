@@ -69,10 +69,11 @@ effect fn main() -> Unit = {
 fn runtime_false_guard_else_exit_exits_with_code() {
     let (code, stdout) = run_native(
         r#"import process
+import env
 
 effect fn main() -> Unit = {
   println("before-guard")
-  let n = list.len(process.args())
+  let n = list.len(env.args())
   guard n > 99 else process.exit(3)
   println("unreachable")
 }

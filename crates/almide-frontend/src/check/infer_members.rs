@@ -29,11 +29,110 @@ impl Checker {
         }
         let obj_ty = self.infer_expr(object);
         let concrete = resolve_ty(&obj_ty, &self.uf);
+        self.reject_foreign_opaque_record(&concrete, &format!("read field '{}' of", field));
         let field_ty = self.resolve_field_type(&concrete, field);
         if matches!(field_ty, Ty::Unknown) {
             self.report_unknown_member(object, field, &concrete, member_span);
         }
         field_ty
+    }
+
+    /// E033 (#4107): `ty` is a bundled module's `mod type` record and this
+    /// code is outside that module — the type is opaque here, so `doing` (a
+    /// field read, a literal) is refused and the module's own fns named.
+    pub(crate) fn reject_foreign_opaque_record(&mut self, ty: &Ty, doing: &str) {
+        let Ty::Named(n, _) = ty else { return };
+        // The type it NAMES, not its spelling: `type Mine = Secret[Int]` (an
+        // alias at any depth, any instantiation, in any module) is the
+        // opaque type itself, so the boundary reads through every alias link.
+        let n = &self.opaque_check_target(*n);
+        let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+        let Some(owner) = self.env.opaque_records.get(&sym(bare)).copied() else { return };
+        // Only the bundled module's own type: its bare key or `owner.T`. A user
+        // type of the same name (`m.Secret`, an in-package or dependency module
+        // named after the stdlib one) is that module's own record (#2843).
+        if n.as_str() != bare && n.as_str() != format!("{owner}.{bare}") {
+            return;
+        }
+        if self.current_module_prefix.as_deref() == Some(owner.as_str()) {
+            return;
+        }
+        let msg = format!("cannot {} opaque type '{}' outside its module '{}'", doing, bare, owner);
+        let line = self.current_span.map(|s| s.line);
+        if self.diagnostics.iter().any(|d| d.message == msg && d.line == line) {
+            return;
+        }
+        let named = self.opaque_entry_fns(owner.as_str(), bare);
+        let hint = if named.is_empty() {
+            format!("'{}' is opaque: build and read it with the `{}` module's fns", bare, owner)
+        } else {
+            let list: Vec<String> = named.iter().map(|f| format!("`{owner}.{f}`")).collect();
+            format!("'{}' is opaque: build and read it with the `{}` module's fns ({})", bare, owner, list.join(", "))
+        };
+        self.emit(super::err(msg, hint, format!("opaque type {}", bare)).with_code("E033"));
+    }
+
+    /// The fns an E033 hint names, read off the owner module's signatures
+    /// rather than spelled per type (#4256): the builder with the fewest
+    /// parameters, then a one-parameter reader that answers the type's
+    /// content (a list of its type argument, else the argument) when exactly
+    /// one fn does — `secret.new` / `secret.reveal`, `heap.new` /
+    /// `heap.to_list`. Builder ties go to the name.
+    fn opaque_entry_fns(&self, owner: &str, bare: &str) -> Vec<String> {
+        let qualified = format!("{owner}.{bare}");
+        let is_it = |t: &Ty| matches!(t, Ty::Named(n, _) if n.as_str() == bare || n.as_str() == qualified);
+        let prefix = format!("{owner}.");
+        let mut fns: Vec<(&str, &almide_lang::types::FnSig)> = self
+            .env
+            .functions
+            .iter()
+            .filter_map(|(k, sig)| {
+                let name = k.as_str().strip_prefix(prefix.as_str())?;
+                (!name.contains('.') && !name.starts_with("__")).then_some((name, sig))
+            })
+            .collect();
+        fns.sort_by(|a, b| a.0.cmp(b.0));
+        let builder = fns
+            .iter()
+            .filter(|(_, sig)| is_it(&sig.ret) && !sig.params.iter().any(|(_, t)| is_it(t)))
+            .min_by_key(|(name, sig)| (sig.params.len(), *name));
+        // 0 = answers a list of the content (the whole of it), 1 = the
+        // content itself; a list reader is preferred.
+        let reads = |sig: &almide_lang::types::FnSig| -> Option<u8> {
+            let [(_, p @ Ty::Named(_, args))] = sig.params.as_slice() else { return None };
+            let a = args.first().filter(|_| is_it(p))?;
+            match &sig.ret {
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e) if e.first() == Some(a) => Some(0),
+                r if r == a => Some(1),
+                _ => None,
+            }
+        };
+        // The best rank's reader, named only when it is the one fn of that
+        // rank: two list readers (`deque.to_list` / `deque.sort`) leave the
+        // signatures no way to tell which reads the content as it is.
+        let ranked: Vec<(u8, &(&str, &almide_lang::types::FnSig))> =
+            fns.iter().filter_map(|f| reads(f.1).map(|rank| (rank, f))).collect();
+        let best = ranked.iter().map(|(rank, _)| *rank).min();
+        let top: Vec<_> = ranked.iter().filter(|(rank, _)| Some(*rank) == best).collect();
+        let reader = match top.as_slice() {
+            [(_, f)] => Some(*f),
+            _ => None,
+        };
+        builder.into_iter().chain(reader).map(|(name, _)| name.to_string()).collect()
+    }
+
+    /// The declaration a type name finally denotes: follows transparent alias
+    /// links (`type A = B[..]`) whatever their generic arguments, stopping at
+    /// a self-named newtype identity or a non-alias declaration.
+    fn opaque_check_target(&self, n: Sym) -> Sym {
+        let mut cur = n;
+        for _ in 0..16 {
+            match self.env.types.get(&cur) {
+                Some(Ty::Named(next, _)) if *next != cur => cur = *next,
+                _ => break,
+            }
+        }
+        cur
     }
 
     /// Resolve `mod.name` where `mod` names a module rather than a value.

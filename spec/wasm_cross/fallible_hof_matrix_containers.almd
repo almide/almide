@@ -116,7 +116,7 @@ fn show[T](label: String, r: Result[T, String], f: (T) -> String) -> Unit = matc
 
 fn b(v: Bool) -> String = if v then "true" else "false"
 
-fn mi(m: Map[String, Int]) -> String = map.entries(m) |> list.map((e) => e.0 + "=" + int.to_string(e.1)) |> list.join(",")
+fn mi(m: Map[String, Int]) -> String = map.to_list(m) |> list.map((e) => e.0 + "=" + int.to_string(e.1)) |> list.join(",")
 
 fn si(s: Set[Int]) -> String = set.to_list(s) |> list.map((n) => int.to_string(n)) |> list.join(",")
 
@@ -141,8 +141,8 @@ effect fn main() -> Unit = {
   show("map.map", bad |> map.map((v) => dbl(v)!), mi)
   show("map.filter", good |> map.filter((k, v) => kv(k, v)!), mi)
   show("map.filter", bad |> map.filter((k, v) => kv(k, v)!), mi)
-  show("map.fold", good |> map.fold(0, (a, k, v) => acc(a, k, v)!), (n) => int.to_string(n))
-  show("map.fold", bad |> map.fold(0, (a, k, v) => acc(a, k, v)!), (n) => int.to_string(n))
+  show("map.fold", good |> map.fold(0, (a, (k, v)) => acc(a, k, v)!), (n) => int.to_string(n))
+  show("map.fold", bad |> map.fold(0, (a, (k, v)) => acc(a, k, v)!), (n) => int.to_string(n))
   show("map.any", good |> map.any((k, v) => kv(k, v)!), b)
   show("map.any", bad |> map.any((k, v) => kv(k, v)!), b)
   show("map.all", good |> map.all((k, v) => kv(k, v)!), b)

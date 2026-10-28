@@ -275,6 +275,42 @@ impl LowerCtx {
         arms: &[IrMatchArm],
         result_ty: &Ty,
     ) -> Option<ValueId> {
+        if let Some(v) = self.try_lower_variant_value_match_direct(subject, arms, result_ty) {
+            return Some(v);
+        }
+        // Subject-ANF retry: a CALL subject the direct path cannot classify
+        // (`match value.get_array(v, k) { … }` — the same call `let`-bound first
+        // matches fine) binds through the bind-position machinery, which routes
+        // the callee; the match then dispatches on a tracked VAR seeded BY TYPE.
+        // The call still runs exactly once, before the arms. `speculate` rolls
+        // every side effect back on a decline.
+        if !matches!(subject.kind, IrExprKind::Call { .. }) || !crate::lower::is_variant_ty(&subject.ty) {
+            return None;
+        }
+        self.speculate(|ctx| {
+            let t = almide_ir::VarId(crate::lower::desugar_var_seed());
+            ctx.lower_bind(t, &subject.ty, subject).ok()?;
+            if let Ok(tval) = ctx.value_for(t) {
+                ctx.seed_variant_value_shape(tval, &subject.ty);
+            }
+            let tv = IrExpr {
+                kind: IrExprKind::Var { id: t },
+                ty: subject.ty.clone(),
+                span: subject.span.clone(),
+                def_id: None,
+            };
+            ctx.try_lower_variant_value_match_direct(&tv, arms, result_ty)
+        })
+    }
+
+    /// [`Self::try_lower_variant_value_match`] over the subject AS WRITTEN (no
+    /// subject-ANF retry).
+    fn try_lower_variant_value_match_direct(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
         use crate::PrimKind;
         // SCALAR result, OR a HEAP result over a SCALAR-PAYLOAD variant via the
         // SUBJECT-DROP-BEFORE-ARMS desugar (below): copy the scalar tag/payload, DROP the

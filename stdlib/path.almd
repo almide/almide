@@ -1,11 +1,5 @@
 // path — file path manipulation (secure-by-design Layer 3)
 // Bundled stdlib module (written in Almide, auto multi-target)
-//
-// `SafePath` is an opaque type: external modules cannot construct it
-// from raw String. Construction goes through from_string(), which admits
-// only a path that stays inside whatever directory it is joined to (#4146).
-mod type SafePath = String
-
 // Whether `s` stays inside the directory it is joined to: relative (no
 // leading `/` or `\`, no drive letter `C:`, no leading `~`), no NUL, and no
 // `..` segment once split on BOTH separators — `..\..\x` climbs on Windows.
@@ -26,21 +20,6 @@ local fn stays_inside(s: String) -> Bool = {
   not (rooted or drive or home or nul or climbs)
 }
 
-// Validate and construct a SafePath.
-/// SafePath of s; err unless relative and inside.
-fn from_string(s: String) -> Result[SafePath, String] =
-  if stays_inside(s) then ok(SafePath(s)) else err("path traversal rejected: " + s)
-
-// Trust a raw path — explicit opt-in for known-safe paths.
-/// SafePath of s with no traversal check.
-fn trusted(s: String) -> SafePath = SafePath(s)
-
-// Unwrap SafePath to String
-/// Path text inside p, unchanged.
-fn to_string(p: SafePath) -> String = match p {
-  SafePath(s) => s
-}
-
 // For a child that crossed a trust boundary, use join_within (#4146): here an
 // absolute child replaces base and a `..` child climbs out of it.
 /// base/child; an absolute child replaces base.
@@ -48,9 +27,11 @@ fn join(base: String, child: String) -> String = {
   // If child is absolute, it replaces base (matches Rust Path::join behavior)
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
-    else base
-    if string.len(b) == 0 then child else b + "/" + child
+    let n = if string.ends_with(base, "/") then string.len(base) - 1 else string.len(base)
+    // The root keeps its slash: join("/", "a") is "/a" (#4072).
+    if n > 0 then string.slice(base, 0, n) + "/" + child
+    else if string.starts_with(base, "/") then "/" + child
+    else child
   }
 }
 
@@ -61,22 +42,22 @@ fn join(base: String, child: String) -> String = {
 fn join_within(base: String, child: String) -> Result[String, String] =
   if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
-/// p minus last segment; "" if no slash.
-fn dirname(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// path minus last segment; "" if no slash.
+fn dirname(path: String) -> String = {
+  let parts = string.split(path, "/")
   let n = list.len(parts)
   if n <= 1 then ""
   else {
     let parent_parts = list.take(parts, n - 1)
-    let joined = string.join(parent_parts, "/")
+    let joined = list.join(parent_parts, "/")
     // Preserve root "/" for absolute paths
-    if string.len(joined) == 0 and string.starts_with(p, "/") then "/" else joined
+    if string.len(joined) == 0 and string.starts_with(path, "/") then "/" else joined
   }
 }
 
-/// Last non-empty segment; "" for / or empty p.
-fn basename(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// Last non-empty segment; "" for / or empty path.
+fn basename(path: String) -> String = {
+  let parts = string.split(path, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name,
@@ -85,8 +66,8 @@ fn basename(p: String) -> String = {
 }
 
 /// After basename's last dot; none if no dot or dotfile.
-fn extension(p: String) -> String? = {
-  let name = basename(p)
+fn extension(path: String) -> String? = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
   // A leading dot names a hidden file, not an extension: `.gitignore` has
@@ -95,12 +76,12 @@ fn extension(p: String) -> String? = {
   else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
-/// True when p starts with /.
-fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
+/// True when path starts with /.
+fn is_absolute(path: String) -> Bool = string.starts_with(path, "/")
 
 /// Basename minus last extension; dotfiles as-is.
-fn stem(p: String) -> String = {
-  let name = basename(p)
+fn stem(path: String) -> String = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
   // No dot, or only a leading dot (e.g. ".hidden") → return as-is
@@ -109,41 +90,33 @@ fn stem(p: String) -> String = {
   else {
     // Drop the last segment and rejoin
     let prefix_parts = list.take(parts, n - 1)
-    string.join(prefix_parts, ".")
+    list.join(prefix_parts, ".")
   }
 }
 
 /// Resolves . and .. lexically; "" becomes ".".
-fn normalize(p: String) -> String = {
-  let absolute = string.starts_with(p, "/")
-  let segments = string.split(p, "/")
-  // Filter out empty segments (from //) and "." segments
-  let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
-  // Fold left, building a reversed list of resolved segments
-  let resolved = list.fold(
-    cleaned,
-    [],
-    (acc, seg) => {
-      if seg == ".." then {
-        let acc_len = list.len(acc)
-        if acc_len == 0 then {
-          // Nothing to pop — keep ".." only if relative
-          if absolute then acc
-          else [".."] + acc
-        } else {
-          let top = match list.first(acc) {
-            some(v) => v,
-            none => "",
-          }
-          // Can't pop past ".."
-          if top == ".." then [".."] + acc
-          else list.drop(acc, 1)
-        }
-      } else [seg] + acc
-    },
-  )
-  let ordered = list.reverse(resolved)
-  let joined = string.join(ordered, "/")
+fn normalize(path: String) -> String = {
+  let absolute = string.starts_with(path, "/")
+  // The resolved segments, as a stack pushed and popped at its END: each segment
+  // costs O(1), so the walk is linear in the path (#4211 — the old fold prepended
+  // `[seg] + acc` and dropped with `list.drop`, a full copy per segment).
+  var stack: List[String] = []
+  for seg in string.split(path, "/") {
+    // Empty segments (from //) and "." resolve to nothing.
+    if string.len(seg) == 0 or seg == "." then ()
+    else if seg == ".." then {
+      match list.last(stack) {
+        // Nothing to pop: keep ".." only if relative.
+        none => if absolute then () else list.push(stack, ".."),
+        // Can't pop past "..".
+        some(top) => if top == ".." then list.push(stack, "..")
+        else {
+          let _ = list.pop(stack)
+        },
+      }
+    } else list.push(stack, seg)
+  }
+  let joined = list.join(stack, "/")
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
@@ -163,7 +136,7 @@ fn relative_to(path: String, base: String) -> String? = {
   let rest = list.drop(pc, list.len(bc))
   if list.take(pc, list.len(bc)) != bc or list.contains(rest, "..") then none
   else if list.is_empty(rest) then some(".")
-  else some(string.join(rest, "/"))
+  else some(list.join(rest, "/"))
 }
 
 local fn trim_end_slashes(p: String) -> String =

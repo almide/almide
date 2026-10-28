@@ -15,7 +15,7 @@ effect fn e_int(pass: Bool) -> Int = gate(pass, "int")! + 41
 
 effect fn e_float(pass: Bool) -> Float = {
   let n = gate(pass, "float")!
-  float.from_int(n) / 4.0
+  float.from(n) / 4.0
 }
 
 effect fn e_bool(pass: Bool) -> Bool = {

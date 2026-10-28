@@ -4,13 +4,10 @@
 // accumulate from 0.0, k ascending, mul then add, no fused step:
 // - mul is a.rows × b.cols over min(a.cols, b.rows) terms; an operand with no
 //   rows or cols gives the all-zero / empty product;
-// - linear_row / linear_row_no_bias dot each x row with each weight row, bias
-//   added last; either operand empty is the empty matrix;
-// - conv1d zero-pads the input, starts each sum at the bias and is the empty
-//   matrix when the input is empty or shorter than the kernel.
 // The operands are small integers and halves so every summation order agrees
 // (native's matmul may run through the platform BLAS). (swiglu_gate, pinned
-// here before, left the stdlib at dialect epoch 14 for package almide/nnlib.)
+// here before, left the stdlib at dialect epoch 14 for module nn.kernels of package almide-graphics/nn;
+// the linear-row and conv1d kernels followed it at epoch 15.)
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
@@ -33,71 +30,10 @@ fn main() -> Unit = {
     [70.0, 80.0, 90.0]
   ])
   let e = matrix.zeros(0, 0)
-  show("mul", matrix.mul(a, b))
-  show("mul_k0", matrix.mul(matrix.zeros(3, 0), matrix.from_lists([
+  show("mul", a * b)
+  show("mul_k0", matrix.zeros(3, 0) * matrix.from_lists([
     [1.0, 2.0]
-  ])))
-  show("mul_b0", matrix.mul(a, e))
-  show("mul_a0", matrix.mul(e, a))
-  show("lin", matrix.linear_row(a, c, [1.0, 2.0, 3.0]))
-  show("lin_nb", matrix.linear_row_no_bias(a, c))
-  show("lin_x0", matrix.linear_row(e, c, [1.0]))
-  show("lin_w0", matrix.linear_row(a, e, []))
-  show(
-    "conv",
-    matrix.conv1d(
-      a,
-      matrix.from_lists([
-        [
-          1.0,
-          0.0,
-          -1.0,
-          2.0,
-          0.5,
-          1.0
-        ]
-      ]),
-      [0.5],
-      2,
-      1,
-      1,
-    ),
-  )
-  show(
-    "conv_s2",
-    matrix.conv1d(
-      c,
-      matrix.from_lists([
-        [
-          1.0,
-          1.0,
-          1.0,
-          1.0,
-          1.0,
-          1.0
-        ],
-        [
-          0.5,
-          0.0,
-          0.0,
-          0.5,
-          1.0,
-          -1.0
-        ]
-      ]),
-      [0.0, 1.0],
-      2,
-      2,
-      0,
-    ),
-  )
-  show("conv_k0", matrix.conv1d(a, matrix.from_lists([
-    [1.0]
-  ]), [2.5], 0, 1, 0))
-  show("conv_short", matrix.conv1d(a, matrix.from_lists([
-    [1.0, 1.0, 1.0]
-  ]), [0.0], 9, 1, 1))
-  show("conv_empty", matrix.conv1d(e, matrix.from_lists([
-    [1.0]
-  ]), [0.0], 1, 1, 0))
+  ]))
+  show("mul_b0", a * e)
+  show("mul_a0", e * a)
 }

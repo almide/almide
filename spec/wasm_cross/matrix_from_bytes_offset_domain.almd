@@ -1,17 +1,34 @@
 // @contract: C-341
-// `matrix.from_bytes_f32_le` / `_f16_le` judge their offset on the buffer
-// side: an offset beyond the buffer — including one near i64::MAX — is the
-// all-zero matrix on both targets. The structural leg's in-bounds test was
+// `matrix.from_bytes_f32_le` / `_f16_le` / `_f64_le` judge their offset on
+// the buffer side and answer `Option[Matrix]`: `some(matrix)` only when
+// `0 <= off <= len` and `r*c*width <= len - off`, and `none` for any other
+// offset — negative, past the end, or near i64::MAX — on both targets.
+// (Before stdlib redesign R-matrix-15 a non-fitting offset answered the
+// all-zero matrix.) The structural leg's in-bounds test was once
 // `offset + r*c*width <= len`; the sum wrapped negative for a huge offset,
 // passed, and the read returned a subnormal out of the wrong bytes (fuzz
-// seed 541740772278:10760, #1909).
+// seed 541740772278:10760, #1909) — the buffer-side test is what keeps a
+// huge offset `none`.
+fn show(o: Matrix?) -> String = match o {
+  some(m) => "some ${matrix.to_lists(m)}",
+  none => "none",
+}
+
 fn main() -> Unit = {
   var f = bytes.zeros(8)
   bytes.put_f32_le(f, 0, 1.5)
   bytes.put_f32_le(f, 4, -2.0)
-  println("in bounds: ${matrix.to_lists(matrix.from_bytes_f32_le(f, 0, 1, 2))}")
-  println("past end: ${matrix.to_lists(matrix.from_bytes_f32_le(f, 8, 1, 2))}")
-  println("huge offset: ${matrix.to_lists(matrix.from_bytes_f32_le(f, 9223372036854775807, 1, 2))}")
-  println("negative offset: ${matrix.to_lists(matrix.from_bytes_f32_le(f, -1, 1, 2))}")
-  println("half huge: ${matrix.to_lists(matrix.from_bytes_f16_le(f, 9223372036854775806, 1, 2))}")
+  println("in bounds: ${show(matrix.from_bytes_f32_le(f, 0, 1, 2))}")
+  println("tail fits: ${show(matrix.from_bytes_f32_le(f, 4, 1, 1))}")
+  println("tail short: ${show(matrix.from_bytes_f32_le(f, 4, 1, 2))}")
+  println("past end: ${show(matrix.from_bytes_f32_le(f, 8, 1, 2))}")
+  println("huge offset: ${show(matrix.from_bytes_f32_le(f, 9223372036854775807, 1, 2))}")
+  println("negative offset: ${show(matrix.from_bytes_f32_le(f, -1, 1, 2))}")
+  println("half huge: ${show(matrix.from_bytes_f16_le(f, 9223372036854775806, 1, 2))}")
+  println("half negative: ${show(matrix.from_bytes_f16_le(f, -2, 1, 1))}")
+  var g = bytes.zeros(16)
+  bytes.put_f64_le(g, 8, -0.75)
+  println("f64 fits: ${show(matrix.from_bytes_f64_le(g, 8, 1, 1))}")
+  println("f64 short: ${show(matrix.from_bytes_f64_le(g, 9, 1, 1))}")
+  println("f64 huge: ${show(matrix.from_bytes_f64_le(g, 9223372036854775800, 1, 1))}")
 }

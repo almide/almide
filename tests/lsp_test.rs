@@ -22,8 +22,11 @@ const RECV_DEADLINE: Duration = Duration::from_secs(60);
 /// an INVALID URI the server's params deserialization rejected, which is how
 /// the didChange test's hover went unanswered and hung the suite for 6h per
 /// run (#1008).
+/// A canonicalized Windows path carries the `\\?\` verbatim prefix, which is
+/// not part of the URI the server reports, so it is dropped here too.
 fn file_uri(path: &Path) -> String {
-    let s = path.display().to_string().replace('\\', "/");
+    let raw = path.display().to_string();
+    let s = raw.strip_prefix(r"\\?\").unwrap_or(&raw).replace('\\', "/");
     if s.starts_with('/') { format!("file://{s}") } else { format!("file:///{s}") }
 }
 
@@ -86,10 +89,18 @@ impl LspClient {
     /// `home` replaces `$HOME` for the server, so a test can watch the
     /// dependency cache (`$HOME/.almide/cache`) without touching the real one.
     fn start_with_home(home: Option<&Path>) -> Self {
+        Self::start_with(home, None, None)
+    }
+
+    /// The server started in `cwd`, initialized with `root` as its `rootUri`.
+    fn start_with(home: Option<&Path>, root: Option<&Path>, cwd: Option<&Path>) -> Self {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
         cmd.arg("lsp").env("ALMIDE_LSP_TRACE", "1");
         if let Some(home) = home {
             cmd.env("HOME", home);
+        }
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
         }
         let mut child = cmd
             .stdin(Stdio::piped())
@@ -111,7 +122,7 @@ impl LspClient {
             }
         });
         let mut client = LspClient { child, rx, server_log, capabilities: Value::Null };
-        client.initialize();
+        client.initialize(root.map(file_uri));
         client
     }
 
@@ -161,7 +172,7 @@ impl LspClient {
         panic!("response id={} not found", id);
     }
 
-    fn initialize(&mut self) {
+    fn initialize(&mut self, root_uri: Option<String>) {
         self.send(&json!({
             "jsonrpc": "2.0",
             "id": 0,
@@ -169,7 +180,7 @@ impl LspClient {
             "params": {
                 "processId": null,
                 "capabilities": {},
-                "rootUri": null
+                "rootUri": root_uri
             }
         }));
         let resp = self.recv_response(0);
@@ -740,7 +751,7 @@ fn lsp_try_fix_reaches_client_as_code_action() {
 
     let resp = c.code_action(1, TEST_URI, json!([e013]));
     let actions = resp["result"].as_array().unwrap();
-    let fix = actions.iter().find(|a| a["title"].as_str().map_or(false, |t| t.contains("p.name")))
+    let fix = actions.iter().find(|a| a["title"].as_str().is_some_and(|t| t.contains("p.name")))
         .unwrap_or_else(|| panic!("expected a quickfix applying `p.name`, got {}", resp["result"]));
     let edits = &fix["edit"]["changes"][TEST_URI];
     assert_eq!(edits[0]["newText"].as_str(), Some("p.name"), "quickfix edit text: {}", fix);
@@ -879,7 +890,7 @@ fn lsp_survive_judges_the_unsaved_buffer_without_writing() {
     let disk = "fn label(n: Int) -> String = n\n";
     std::fs::write(&path, disk).unwrap();
     let uri = file_uri(&path);
-    let mut c = LspClient::start();
+    let mut c = LspClient::start_with(None, Some(dir.path()), None);
     c.open_file(&uri, "// labels\nfn label(n: Int) -> String = int.to_string(n)\n");
     c.send(&json!({
         "jsonrpc": "2.0",
@@ -915,4 +926,100 @@ fn lsp_survive_judges_the_unsaved_buffer_without_writing() {
     assert!(resp["error"]["message"].as_str().unwrap_or("").contains("not both"), "{}", resp);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), disk, "almide/survive wrote the file");
     c.shutdown();
+}
+
+/// #4185: the workspace root is the client's `rootUri`, as an absolute path.
+/// The old derivation stripped its leading `/` and resolved the rest under
+/// the server's CWD, so `workspace/symbol` read a decoy tree planted at
+/// `<ws>/<ws without its leading slash>` instead of the workspace.
+#[test]
+fn lsp_workspace_symbol_indexes_the_root_uri_not_a_decoy_under_the_cwd() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir_all(ws.join("src")).unwrap();
+    std::fs::write(ws.join("src/real.almd"), "fn real_target() -> Int = 1\n").unwrap();
+    let decoy = ws.join(ws.strip_prefix("/").unwrap_or(&ws)).join("src");
+    std::fs::create_dir_all(&decoy).unwrap();
+    std::fs::write(decoy.join("d.almd"), "fn decoy_target() -> Int = 2\n").unwrap();
+    let mut c = LspClient::start_with(None, Some(&ws), Some(&ws));
+    c.send(&json!({"jsonrpc": "2.0", "id": 3, "method": "workspace/symbol", "params": {"query": "target"}}));
+    let resp = c.recv_response(3);
+    let names: Vec<String> = resp["result"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|s| s["name"].as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    // The decoy sits inside the workspace too, so the sweep may find it; the
+    // point is that the REAL root is the one indexed.
+    assert!(names.iter().any(|n| n == "real_target"), "the root's own symbol was not indexed: {}", resp);
+    for s in resp["result"].as_array().cloned().unwrap_or_default() {
+        let uri = s["location"]["uri"].as_str().unwrap_or("");
+        assert!(uri.starts_with(&file_uri(&ws)), "a symbol came back with a URI outside the root: {}", uri);
+    }
+    c.shutdown();
+}
+
+/// #4185: `almide/survive` runs the tests and contract fixtures that reach a
+/// file, so a URI outside the workspace is refused, and the child resolves
+/// dependencies cache-only: inside the root, a project with an uncached git
+/// dependency fetches nothing and writes no lock. Control: the
+/// `lsp_survive_judges_the_unsaved_buffer_without_writing` test above gets
+/// its report for a URI inside its root.
+#[test]
+fn lsp_survive_refuses_a_uri_outside_the_workspace_and_never_fetches() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let home = root.path().join("home");
+    let app = root.path().join("app");
+    let outside = root.path().join("outside");
+    for d in [&repo.join("src"), &home, &app, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(repo.join("almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(repo.join("src/mod.almd"), "fn f() -> Int = 1\n").unwrap();
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        assert!(ok, "git {args:?} failed");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+    git(&["tag", "v0.1.0"]);
+    std::fs::write(
+        app.join("almide.toml"),
+        format!(
+            "[package]\nname = \"lsp_survive_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
+            repo.display()
+        ),
+    )
+    .unwrap();
+    let inside = app.join("main.almd");
+    std::fs::write(&inside, "fn label(n: Int) -> String = n\n").unwrap();
+    let foreign = outside.join("x.almd");
+    std::fs::write(&foreign, "fn label(n: Int) -> String = n\n").unwrap();
+
+    let mut c = LspClient::start_with(Some(&home), Some(&app), Some(&app));
+    let survive = |c: &mut LspClient, id: i64, path: &Path| {
+        c.send(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "almide/survive",
+            "params": { "textDocument": { "uri": file_uri(path) }, "text": "fn label(n: Int) -> String = int.to_string(n)\n" }
+        }));
+        c.recv_response(id)
+    };
+    let refused = survive(&mut c, 4, &foreign);
+    let msg = refused["error"]["message"].as_str().unwrap_or("").to_string();
+    assert!(msg.contains("outside the project root"), "a URI outside the workspace was served: {}", refused);
+    let _ = survive(&mut c, 5, &inside);
+    c.shutdown();
+    assert!(!app.join("almide.lock").exists(), "almide/survive wrote almide.lock");
+    let cache = home.join(".almide").join("cache");
+    let cloned = std::fs::read_dir(&cache).map(|mut d| d.next().is_some()).unwrap_or(false);
+    assert!(!cloned, "almide/survive cloned into the dependency cache ({})", cache.display());
 }

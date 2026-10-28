@@ -8,7 +8,7 @@ import json
 
 fn main() -> Unit = {
   let v = value.object([
-    ("name", value.str("almide")),
+    ("name", value.string("almide")),
     ("nums", value.array([value.int(1), value.int(2), value.int(3)])),
     ("nested", value.object([("x", value.int(10)), ("y", value.bool(true))])),
     ("empty_arr", value.array([])),
@@ -18,11 +18,11 @@ fn main() -> Unit = {
   ])
   println(json.stringify_pretty(v))
   // top-level array + scalar
-  println(json.stringify_pretty(value.array([value.str("a"), value.str("b")])))
+  println(json.stringify_pretty(value.array([value.string("a"), value.string("b")])))
   println(json.stringify_pretty(value.int(42)))
   // Combining-mark strings/keys stay RAW UTF-8 under the canonical 5-escape
   // rule (the {:?} escape_debug path emitted `\u{301}` — invalid JSON and a
   // byte divergence vs the wasm leg; differential-fuzz).
-  let accents = value.object([("café", value.str("éclair")), ('quoted"key', value.str("tab\there"))])
+  let accents = value.object([("café", value.string("éclair")), ('quoted"key', value.string("tab\there"))])
   println(json.stringify_pretty(accents))
 }

@@ -27,7 +27,7 @@ effect fn main() -> Unit = {
     none => 1000000,
   }
   let parts = list.range(0, n) |> list.map((i) => int.to_string(i))
-  let joined = string.join(parts, ",")
+  let joined = list.join(parts, ",")
   let back = string.split(joined, ",")
   let total = back |> list.map((s) => string.len(s)) |> list.sum
   println("n: ${n} chars: ${string.len(joined)} sum: ${total}")

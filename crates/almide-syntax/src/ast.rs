@@ -210,6 +210,29 @@ impl Expr {
     pub fn new(id: ExprId, span: Option<Span>, kind: ExprKind) -> Self {
         Expr { id, span, kind }
     }
+
+    /// The constructor word this expression was written as when it is a BARE
+    /// builtin constructor: `none`, or `some` / `ok` / `err` with no parens,
+    /// which the parser synthesizes as `(__ctor_arg) => ctor(__ctor_arg)`
+    /// (#1111). The one reading of that shape, shared by the formatter (which
+    /// prints it back as the word) and the checker (which resolves the word
+    /// to a binding of the same name in scope, #4237).
+    pub fn bare_ctor_word(&self) -> Option<&'static str> {
+        let ExprKind::Lambda { params, body } = &self.kind else {
+            return matches!(self.kind, ExprKind::None).then_some("none");
+        };
+        let [p] = params.as_slice() else { return None };
+        if p.name.as_str() != "__ctor_arg" || p.ty.is_some() || p.tuple_names.is_some() {
+            return None;
+        }
+        let (word, inner) = match &body.kind {
+            ExprKind::Some { expr } => ("some", expr),
+            ExprKind::Ok { expr } => ("ok", expr),
+            ExprKind::Err { expr } => ("err", expr),
+            _ => return None,
+        };
+        matches!(&inner.kind, ExprKind::Ident { name } if name.as_str() == "__ctor_arg").then_some(word)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

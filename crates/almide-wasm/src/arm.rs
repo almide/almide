@@ -98,7 +98,7 @@ impl crate::emitter::Emitter<'_> {
         let got = self.lower(a, want)?;
         // Retain IS the share: a block the arm stores that already has a
         // holder (a Var, a funnel over borrows) takes +1 here — the
-        // declaration carries the guard, no arm repeats it. (value.str
+        // declaration carries the guard, no arm repeats it. (value.string
         // stored a Var's string bare and only an over-borrow elsewhere kept
         // it alive — heap_result_tuple_return, 2026-09-07.) An owned
         // temporary moves in: `rc_share_guard` incs nothing fresh.

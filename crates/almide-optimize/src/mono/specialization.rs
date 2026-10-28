@@ -16,6 +16,7 @@ pub(super) fn specialize_function(
     bindings: &HashMap<String, Ty>,
     vt: &mut VarTable,
     globals: &std::collections::HashSet<VarId>,
+    operator_requirements: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
 ) -> IrFunction {
     // Phase 1: Collect all VarIds referenced in the original function
     let mut old_ids = Vec::new();
@@ -55,6 +56,9 @@ pub(super) fn specialize_function(
     // Phase 4: Clone body, substitute types, and remap VarIds
     let mut body = orig.body.clone();
     substitute_expr_types(&mut body, bindings);
+    if !operator_requirements.is_empty() {
+        lower_requirement_operators(&mut body, operator_requirements);
+    }
     remap_expr_varids(&mut body, &remap);
 
     // Phase 5: rename self-recursive `Named { orig.name }` calls in the
@@ -95,6 +99,78 @@ pub(super) fn specialize_function(
         // mut-param handling and masked it — the #1551 wasm follow-through).
         mutated_params: orig.mutated_params.clone(), module_origin: None,
     }
+}
+
+// ── Operators on a bound conforming type (#4099) ───────────────
+
+/// The requirement method an arithmetic `BinOp` stands for.
+fn requirement_method(op: BinOp) -> Option<&'static str> {
+    Some(match op {
+        BinOp::AddInt | BinOp::AddFloat => "add",
+        BinOp::SubInt | BinOp::SubFloat => "sub",
+        BinOp::MulInt | BinOp::MulFloat => "mul",
+        BinOp::DivInt | BinOp::DivFloat => "div",
+        BinOp::ModInt | BinOp::ModFloat => "rem",
+        _ => return None,
+    })
+}
+
+/// The requirement function of `method` on the (now concrete) type `ty`.
+fn operator_requirement_target(
+    ty: &Ty, method: &str,
+    table: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
+) -> Option<CallTarget> {
+    let Ty::Named(name, _) = ty else { return None };
+    let m = almide_base::intern::sym(method);
+    table.get(&(*name, m)).cloned().or_else(|| {
+        let bare = name.as_str().rsplit_once('.').map(|(_, b)| b)?;
+        table.get(&(almide_base::intern::sym(bare), m)).cloned()
+    })
+}
+
+/// A generic body's operator on a type parameter lowered to a `BinOp` /
+/// `UnOp`, since nothing about `T` named a function. Once `T` is bound to a
+/// declared type conforming to the operator's protocol (`BigInt: Numeric`),
+/// the operator is that type's requirement — the call lowering gives the
+/// same operator on a concrete `BigInt` (R-bigint-04): `a + b` is
+/// `bigint.add(a, b)`, `a < b` is `bigint.compare(a, b) < 0`, `-a` is
+/// `bigint.neg(a)`. `==` stays: equality is structural on every type.
+fn lower_requirement_operators(
+    expr: &mut IrExpr,
+    table: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
+) {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    struct Lower<'a> { table: &'a HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget> }
+    impl IrMutVisitor for Lower<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let span = expr.span;
+            match &mut expr.kind {
+                IrExprKind::BinOp { op, left, right } => {
+                    if let Some(method) = requirement_method(*op) {
+                        let Some(target) = operator_requirement_target(&left.ty, method, self.table) else { return };
+                        let (l, r) = (std::mem::take(&mut **left), std::mem::take(&mut **right));
+                        expr.kind = IrExprKind::Call { target, args: vec![l, r], type_args: vec![] };
+                    } else if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte) {
+                        let Some(target) = operator_requirement_target(&left.ty, "compare", self.table) else { return };
+                        let (l, r) = (std::mem::take(&mut **left), std::mem::take(&mut **right));
+                        **left = IrExpr {
+                            kind: IrExprKind::Call { target, args: vec![l, r], type_args: vec![] },
+                            ty: Ty::Int, span, def_id: None,
+                        };
+                        **right = IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span, def_id: None };
+                    }
+                }
+                IrExprKind::UnOp { op: UnOp::NegInt | UnOp::NegFloat, operand } => {
+                    let Some(target) = operator_requirement_target(&operand.ty, "neg", self.table) else { return };
+                    let a = std::mem::take(&mut **operand);
+                    expr.kind = IrExprKind::Call { target, args: vec![a], type_args: vec![] };
+                }
+                _ => {}
+            }
+        }
+    }
+    Lower { table }.visit_expr_mut(expr);
 }
 
 // ── Self-recursive Named rename ────────────────────────────────
@@ -394,9 +470,15 @@ fn requirement_target(key: &str, bindings: &HashMap<String, Ty>) -> Option<CallT
     let (tv_name, method_name) = key.split_once('.')?;
     let concrete_ty = bindings.get(tv_name)?;
     if let Some(module) = concrete_ty.owning_module() {
+        // A per-type requirement (`__self_close`, which several types of one
+        // module satisfy) names the type: `net.__tcp_listener_close`.
+        let func = match ty_to_name(concrete_ty) {
+            Some(n) => almide_lang::stdlib_info::requirement_fn_name(&n, method_name),
+            None => method_name.to_string(),
+        };
         return Some(CallTarget::Module {
             module: almide_base::intern::sym(module),
-            func: almide_base::intern::sym(method_name),
+            func: almide_base::intern::sym(&func),
             def_id: None,
         });
     }

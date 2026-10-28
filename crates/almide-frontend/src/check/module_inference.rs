@@ -30,6 +30,8 @@ impl Checker {
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
         self.validate_type_param_inference();
+        self.validate_input_sinks();
+        self.validate_deferred_protocol_bounds();
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
@@ -174,6 +176,8 @@ impl Checker {
             self.deferred_eq_checks.len(),
             self.deferred_cascade_diags.len(),
             self.deferred_type_param_checks.len(),
+            self.deferred_input_sink_checks.len(),
+            self.deferred_protocol_bounds.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -232,6 +236,8 @@ impl Checker {
         self.deferred_eq_checks.truncate(saved_deferred_lens.13);
         self.deferred_cascade_diags.truncate(saved_deferred_lens.14);
         self.deferred_type_param_checks.truncate(saved_deferred_lens.15);
+        self.deferred_input_sink_checks.truncate(saved_deferred_lens.16);
+        self.deferred_protocol_bounds.truncate(saved_deferred_lens.17);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
@@ -372,11 +378,46 @@ impl Checker {
                      explicit widening required (e.g. `int.from_{}(...)`)",
                     name, rr.display(), rb.display(), rb.display().to_lowercase()
                 ),
-                "Widen the value at the return: `int.from_uint8(x)` / `int.from_int32(x)` \
-                 (`float.from_float32(x)` for the float widths).",
+                "Widen the value at the return: `int.from(x)` \
+                 (`float.from(x)` for the float widths).",
                 format!("fn '{}'", name),
             ).with_code("E001"));
         }
+    }
+
+    /// `Never` is the bottom type (result-option-effect.md §Never): a `Never`
+    /// value fits every slot, but no other value fits a `Never` slot. The
+    /// solver's `compatible` lets `Never` match in BOTH directions (it is the
+    /// join's identity), so a fn declared `-> Never` whose body completes with
+    /// a value (`{ println("x") }` is `Unit`) passed `check` and failed the
+    /// native build: the lowering leaves a `Never` fn's tail un-Ok-wrapped
+    /// (#4226). The body of a `-> Never` fn must itself diverge — a `panic`,
+    /// `process.exit`, a call to another `-> Never` fn, or a branch whose arms
+    /// all do. An unresolved body type (a `_` hole, a still-open variable) is
+    /// not judged here.
+    fn check_never_return(&mut self, name: &str, ret_ty: &Ty, body_ty: &Ty, is_effect: bool) {
+        if resolve_ty(ret_ty, &self.uf) != Ty::Never {
+            return;
+        }
+        let mut rb = resolve_ty(body_ty, &self.uf);
+        if is_effect {
+            if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = rb.clone() {
+                if let Some(ok) = args.first() { rb = resolve_ty(ok, &self.uf); }
+            }
+        }
+        if rb == Ty::Never || rb.contains_unknown() || rb.contains_typevar() {
+            return;
+        }
+        self.emit(err(
+            format!(
+                "fn '{}' declares -> Never but its body can complete with a {} value",
+                name, rb.display()
+            ),
+            "A `-> Never` fn must not return: end its body in `panic(..)`, \
+             `process.exit(..)` or a call to another `-> Never` fn — or declare \
+             the type the body actually yields (e.g. `-> Unit`).",
+            format!("fn '{}'", name),
+        ).with_code("E001"));
     }
 
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
@@ -439,6 +480,7 @@ impl Checker {
         self.expect_lambda(body, &ret_ty);
         self.lambda_expect.clear();
         self.call_expect.clear();
+        self.qq_fallback_expect.clear();
         self.expect_expr(body, &ret_ty);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the
@@ -476,6 +518,7 @@ impl Checker {
         // wherever inference happened to end — the last arm's last leaf.
         let saved_span = self.current_span;
         self.current_span = arm_blame::tail_report_span(body).or(saved_span);
+        self.check_never_return(name, &ret_ty, &body_ity, is_effect);
         if effect.unwrap_or(false) || fallible_marker {
             self.constrain_effect_body(name, &ret_ty, body_ity, body);
         } else {

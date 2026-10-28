@@ -137,6 +137,15 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
         .collect();
     entries.sort_by_key(|e| e.path());
+    // ALMIDE_CI_SLICE=k (crates/almide-corpus/src/ci_slice.rs): a PR into
+    // develop judges the commit-rotated 1-in-k slice plus the change's own
+    // fixtures, taken BEFORE the shard so a solo leg walks slice ∩ shard. All
+    // three gates over this table assert per fixture (a stale @xt-allow is the
+    // fixture's own directive), so a slice is judged whole; a full run keeps
+    // every fixture.
+    entries = almide_corpus::select(entries, env!("CARGO_CRATE_NAME"), |e| {
+        format!("spec/wasm_cross/{}", e.file_name().to_string_lossy())
+    });
     // ALMIDE_CORPUS_SHARD=k/N (#2381): the k-th modulo slice of the SORTED
     // list, taken here and nowhere else. The three gates over this table
     // assert per fixture, so a slice is judged whole in its shard; the

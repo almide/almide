@@ -5,5 +5,5 @@
 fn main() -> Unit = {
   var v: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
   v = map.from_list([("a", 1)])
-  println(int.to_string(map.get_or(v, "a", 0 - 1) * 10 + map.len(v)))
+  println(int.to_string(map.get(v, "a") ?? (0 - 1) * 10 + map.len(v)))
 }

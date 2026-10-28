@@ -101,8 +101,8 @@ fn serve() -> u16 {
     port
 }
 
-/// The framed family (request / request_status / request_bytes /
-/// request_response), served on native, the embedded lane and stock p3.
+/// The framed family (request / send, and send read as raw body bytes), served on native,
+/// the embedded lane and stock p3.
 fn framed_program(port: u16) -> String {
     let base = format!("http://127.0.0.1:{port}");
     format!(
@@ -117,34 +117,45 @@ effect fn main() -> Unit = {{
   // The inspection's case: http.response's headers carry a length of "ok".
   let r: Result[String, String] = http.request("GET", "{base}/status/404", "日本語", http.headers(http.response(200, "ok")))
   show("response-headers", r)
-  show("short", http.request("POST", "{base}/e", "日本語", ["Content-Length": "2"]))
-  show("long", http.request_status("PUT", "{base}/e", "abc", ["content-length": "99"]) |> result.map(((c, b)) => "${{int.to_string(c)}} ${{b}}"))
-  show("equal", http.request_bytes("POST", "{base}/e", "xyz", ["CONTENT-LENGTH": "3"]) |> result.map((b) => bytes.to_string_lossy(b)))
-  show("empty", http.request_response("PATCH", "{base}/e", "", ["Content-Length": "5"]) |> result.map((r) => http.body(r)))
-  show("get", http.request("GET", "{base}/e", "", ["content-length": "7", "X-K": "v"]))
+  show("short", http.request("POST", "{base}/e", "日本語", [("Content-Length", "2")]))
+  show("long", http.send(http.new_request("PUT", "{base}/e", "abc", [("content-length", "99")])) |> result.map((r) => "${{int.to_string(http.status(r))}} ${{http.body(r)}}"))
+  show("equal", http.send(http.new_request("POST", "{base}/e", "xyz", [("CONTENT-LENGTH", "3")])) |> result.map((r) => bytes.to_string_lossy(http.body_bytes(r))))
+  show("empty", http.send(http.new_request("PATCH", "{base}/e", "", [("Content-Length", "5")])) |> result.map((r) => http.body(r)))
+  show("get", http.request("GET", "{base}/e", "", [("content-length", "7"), ("X-K", "v")]))
 }}
 "#
     )
 }
 
-/// The streaming members, served on native and the embedded lane.
+/// The call handle (start, then read_new until poll answers), served on
+/// native and the embedded lane: the body is read as it arrives.
 fn stream_program(port: u16) -> String {
     let base = format!("http://127.0.0.1:{port}");
     format!(
-        r#"import http
+        r#"import env
+import http
+
+effect fn drain(c: HttpCall, acc: String) -> Result[String, String] = match http.poll(c) {{
+  none => {{
+    env.sleep_ms(2)
+    drain(c, acc + http.read_new(c))
+  }},
+  some(r) => match r {{
+    ok(_) => ok(acc + http.read_new(c)),
+    err(e) => err(e),
+  }},
+}}
 
 effect fn main() -> Unit = {{
-  var got = ""
-  let a: Result[Unit, String] = http.request_stream("POST", "{base}/e", "body", ["Content-Length": "1"], (c) => {{ got = got + c }})
-  match a {{
-    ok(_) => println("stream: ${{got}}"),
+  let a = http.start(http.new_request("POST", "{base}/e", "body", [("Content-Length", "1")]), {{ total_ms: 0, idle_ms: 0 }})!
+  match drain(a, "") {{
+    ok(got) => println("stream: ${{got}}"),
     err(e) => println("stream err: ${{e}}"),
   }}
-  var got2 = ""
   let limits = {{ total_ms: 0, idle_ms: 0 }}
-  let b: Result[Unit, String] = http.request_stream_with_limits("PUT", "{base}/e", "λλ", ["content-length": "40"], limits, (c) => {{ got2 = got2 + c }})
-  match b {{
-    ok(_) => println("limited: ${{got2}}"),
+  let b = http.start(http.new_request("PUT", "{base}/e", "λλ", [("content-length", "40")]), limits)!
+  match http.wait(b) {{
+    ok(r) => println("limited: ${{http.body(r)}}"),
     err(e) => println("limited err: ${{e}}"),
   }}
 }}
@@ -279,7 +290,7 @@ fn a_caller_content_length_is_dropped_on_the_p3_component() {
 }
 
 #[test]
-fn a_caller_content_length_is_dropped_by_the_streaming_client() {
+fn a_caller_content_length_is_dropped_by_the_call_handle() {
     let port = serve();
     let dir = tempfile::tempdir().expect("tempdir");
     let file = dir.path().join("http_framing_stream.almd");

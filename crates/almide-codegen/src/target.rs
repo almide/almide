@@ -51,6 +51,7 @@ use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_slice_binders::SliceBindersPass;
 use super::pass_str_map_key::StrMapKeyPass;
 use super::pass_thread_share::ThreadShareMarksPass;
+use super::pass_box_take::BoxTakeLoweringPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -235,6 +236,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // start — spelled as an `InlineRust` block on the final IR,
                 // after every pass that reads a variable occurrence.
                 .add(ThreadShareMarksPass)
+                // #4251/#4252: a recursive type's boxed field is an
+                // `AlmideBox`; each read of one becomes a place or a move —
+                // last, on the final ownership spelling.
+                .add(BoxTakeLoweringPass)
         }
 
         Target::Wgsl => Pipeline::new()

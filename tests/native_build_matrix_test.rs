@@ -27,7 +27,7 @@ fn almide_bin() -> String {
 /// needs no preopens or scratch files beyond the build dir.
 const MATRIX_ALMD: &str = r#"fn build(t: Int, d: Int) -> Matrix =
   matrix.from_lists(list.range(0, t) |> list.map((i) =>
-    list.range(0, d) |> list.map((j) => int.to_float(i * d + j))))
+    list.range(0, d) |> list.map((j) => float.from(i * d + j))))
 
 effect fn main() -> () = {
   let m = build(3, 2)
@@ -36,13 +36,13 @@ effect fn main() -> () = {
   while r < 3 {
     var c = 0
     while c < 2 {
-      s = s + float.to_string(matrix.get(m, r, c)) + " "
+      s = s + float.to_string(matrix.get(m, r, c) ?? 0.0) + " "
       c = c + 1
     }
     r = r + 1
   }
   println(s)
-  println(float.to_string(matrix.get(matrix.transpose(m), 0, 2)))
+  println(float.to_string(matrix.get(matrix.transpose(m), 0, 2) ?? 0.0))
 }
 "#;
 

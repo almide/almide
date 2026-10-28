@@ -643,22 +643,22 @@ fn hint_int_to_string_return() {
     assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string, got: {}", hints[0]);
 }
 
-// #740: an Int-only math builtin given a Float must point at the Float-preserving
-// sibling (float.abs / math.fpow), NOT at the truncating float.to_int.
+// #740: an Int-only builtin given a Float must point at the Float-preserving
+// sibling (float.abs / float.pow), NOT at a truncating conversion.
 #[test]
-fn hint_math_abs_on_float_suggests_float_abs() {
-    let hints = error_hints("import math\nfn f(x: Float) -> Int = math.abs(x)");
+fn hint_int_abs_on_float_suggests_float_abs() {
+    let hints = error_hints("fn f(x: Float) -> Int = int.abs(x)");
     assert!(!hints.is_empty(), "should have an error");
     assert!(hints[0].contains("float.abs"), "hint should suggest float.abs, got: {}", hints[0]);
-    assert!(!hints[0].starts_with("Fix the argument type. Or use `float.to_int"),
+    assert!(!hints[0].starts_with("Fix the argument type. Or use `int.from_saturating"),
         "hint must not lead with the truncating cast, got: {}", hints[0]);
 }
 
 #[test]
-fn hint_math_pow_on_float_suggests_fpow() {
-    let hints = error_hints("import math\nfn f() -> Int = math.pow(2.0, 3.0)");
+fn hint_int_pow_on_float_suggests_float_pow() {
+    let hints = error_hints("fn f() -> Int = int.pow(2.0, 3.0)");
     assert!(!hints.is_empty(), "should have an error");
-    assert!(hints[0].contains("math.fpow"), "hint should suggest math.fpow, got: {}", hints[0]);
+    assert!(hints[0].contains("float.pow"), "hint should suggest float.pow, got: {}", hints[0]);
 }
 
 #[test]
@@ -672,14 +672,14 @@ fn hint_int_to_string_let() {
 fn hint_float_to_int_return() {
     let hints = error_hints("fn f() -> Int = 3.14");
     assert!(!hints.is_empty(), "should have an error");
-    assert!(hints[0].contains("to_int"), "hint should suggest to_int, got: {}", hints[0]);
+    assert!(hints[0].contains("int.from_saturating"), "hint should suggest int.from_saturating, got: {}", hints[0]);
 }
 
 #[test]
 fn hint_int_to_float_return() {
     let hints = error_hints("fn f() -> Float = 42");
     assert!(!hints.is_empty(), "should have an error");
-    assert!(hints[0].contains("to_float"), "hint should suggest to_float, got: {}", hints[0]);
+    assert!(hints[0].contains("float.from"), "hint should suggest float.from, got: {}", hints[0]);
 }
 
 #[test]
@@ -1150,13 +1150,13 @@ effect fn main() -> Unit = {
   http.serve(port, handle)!
   http.serve(port, (req) => http.response(200, greeting))!
   http.serve(port, (req) => {
-    let path = http.req_path(req)
+    let path = http.path(req)
     var n = 0
     n = n + string.len(path)
     http.response(200, "${path} ${n}")
   })!
   http.serve(port, (req) => {
-    let parts = string.split(http.req_path(req), "/") |> list.map((part) => "${part}${greeting}")
+    let parts = string.split(http.path(req), "/") |> list.map((part) => "${part}${greeting}")
     http.response(200, list.join(parts, ","))
   })!
 }
@@ -1181,4 +1181,63 @@ effect fn main() -> Unit = {
         errs.iter().any(|m| m == "the app passed to http.serve captures `greeting`, a local of main"),
         "{errs:?}"
     );
+}
+
+/// A Matrix operand admits `+ - * /` with another Matrix and `*` with a
+/// scale; any other pairing is refused at check time instead of reaching
+/// lowering as a scalar operator on a Matrix (an IR verify ICE).
+#[test]
+fn matrix_operator_without_a_matrix_operation_is_refused() {
+    for src in [
+        "fn f(m: Matrix) -> Matrix = m / 2.0",
+        "fn f(m: Matrix) -> Matrix = m + 1.0",
+        "fn f(m: Matrix) -> Matrix = m % m",
+        "fn f(m: Matrix) -> Matrix = 2.0 - m",
+    ] {
+        let hints = error_hints(src);
+        assert!(!hints.is_empty(), "{src} should not check");
+        assert!(hints[0].contains("matrix.map"), "hint should point at matrix.map for {src}, got: {}", hints[0]);
+    }
+    for src in [
+        "fn f(a: Matrix, b: Matrix) -> Matrix = a / b",
+        "fn f(a: Matrix, b: Matrix) -> Matrix = a + b - b * a",
+        "fn f(a: Matrix) -> Matrix = 2 * a * 0.5",
+    ] {
+        assert!(error_hints(src).is_empty(), "{src} should check");
+    }
+}
+
+/// #4253: every output / abort builtin's name is refused as a top-level `fn`,
+/// `let` or `var` — a bare call reaches the builtin, so the declaration could
+/// never run (and `eprintln` split the legs: native called the user fn, wasm
+/// the builtin). Walks THE table the call check reads, so a builtin added to
+/// it is covered here without a second list. A local or a parameter of the
+/// name still shadows, as every local does.
+#[test]
+fn a_builtin_name_cannot_be_declared_at_top_level() {
+    for (name, _) in almide::check::OUTPUT_ABORT_BUILTINS {
+        for decl in [
+            format!("fn {name}(s: String) -> Unit = ()"),
+            format!("effect fn {name}(s: String) -> Unit = ()"),
+            format!("let {name} = 5"),
+            format!("var {name} = 5"),
+        ] {
+            let src = format!("{decl}\neffect fn main() -> Unit = ()\n");
+            let errs = errors(&src);
+            assert!(
+                errs.iter().any(|m| m.contains(&format!("redefines the builtin '{name}'"))),
+                "`{decl}` must be refused: {errs:?}"
+            );
+        }
+        let local = format!("effect fn main() -> Unit = {{\n  let {name} = (s: String) => ()\n  {name}(\"x\")\n}}\n");
+        assert!(
+            !errors(&local).iter().any(|m| m.contains("redefines the builtin")),
+            "a local `{name}` shadows and is not a redefinition"
+        );
+        let param = format!("fn run({name}: (String) -> Unit) -> Unit = {name}(\"x\")\neffect fn main() -> Unit = ()\n");
+        assert!(
+            !errors(&param).iter().any(|m| m.contains("redefines the builtin")),
+            "a parameter `{name}` shadows and is not a redefinition"
+        );
+    }
 }

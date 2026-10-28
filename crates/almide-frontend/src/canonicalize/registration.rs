@@ -280,7 +280,15 @@ pub fn convention_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option
         return Some(qualified);
     }
     let k = sym(&format!("{}.{}", bare_type_name(type_name), method));
-    env.functions.contains_key(&k).then_some(k)
+    if env.functions.contains_key(&k) {
+        return Some(k);
+    }
+    // A bundled module's own type keeps its BARE name (`Secret`), while the
+    // module's explicit method registers under the module prefix
+    // (`secret.Secret.repr`, #4107): the owner module names the key.
+    let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(bare_type_name(type_name))?;
+    let owned = sym(&format!("{}.{}.{}", owner, bare_type_name(type_name), method));
+    env.functions.contains_key(&owned).then_some(owned)
 }
 
 fn bare_type_name(type_name: &str) -> &str {
@@ -296,7 +304,14 @@ fn bare_type_name(type_name: &str) -> &str {
 /// Emitting the prefixed spelling produced calls to `lib_Color_repr` against a
 /// definition called `almide_rt_lib_Color_repr` (#1087).
 pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
-    convention_fn_key(env, type_name, method).map(|_| {
+    convention_fn_key(env, type_name, method).map(|held| {
+        // A bundled module's method (`secret.Secret.repr`, #4107) links under
+        // the key it was found by: there is one owner and no bare spelling.
+        if almide_lang::stdlib_info::stdlib_owned_type_owner(bare_type_name(type_name))
+            .is_some_and(|m| held.as_str() == format!("{}.{}.{}", m, bare_type_name(type_name), method))
+        {
+            return held;
+        }
         // A receiver whose canonical type is module-qualified (`moda.Box`)
         // emits the QUALIFIED method name ONLY when the bare spelling is
         // AMBIGUOUS — two modules each registered `<mod>.Box.tag`, so the
@@ -503,6 +518,16 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let is_effect = effect.unwrap_or(false);
     let key = prefixed_key(prefix, name);
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
+    // `@input_sink` (row 22, C-436): the `Decode`-bounded type parameters
+    // are input types at every call — read off the declaration, never a name.
+    if attrs.iter().any(|a| a.name.as_str() == "input_sink") {
+        let mut tvs: Vec<Sym> = pb.iter()
+            .filter(|(_, ps)| ps.iter().any(|p| super::protocols::protocol_closure(p.as_str()).contains(&super::protocols::DECODE_PROTOCOL)))
+            .map(|(tv, _)| *tv)
+            .collect();
+        tvs.sort_by_key(|t| t.as_str());
+        env.input_sinks.insert(sym(&key), tvs);
+    }
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, protocol_bound_args: pba, mut_params });
     match crate::deprecation::parse(attrs) {
         Ok(Some(dep)) => { env.deprecations.insert(sym(&key), dep); }
@@ -532,7 +557,11 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         env.fn_visibility.insert(sym(&key), visibility);
     }
     if let Some(s) = span {
-        env.fn_decl_spans.insert(sym(&key), (s.line, s.col));
+        // The declaring module is the file the position is relative to: the
+        // prefixed pass names it, `infer_module`'s unprefixed one runs under
+        // `alias_owner_module` (#4271).
+        let module = prefix.map(sym).or(env.alias_owner_module);
+        env.fn_decl_spans.insert(sym(&key), crate::type_env::FnDeclSite { line: s.line, col: s.col, module });
     }
     if min_p < params.len() {
         env.fn_min_params.insert(sym(&key), min_p);
@@ -580,14 +609,29 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
             env.functions.insert(sym(&key), sig);
         }
     };
+    // C-435: the codec directions come from the protocol table — `Encode`
+    // derives `encode`, `Decode` derives `decode` and `decode_strict`, and
+    // `Codec` is both.
+    let (wants_encode, wants_decode) = super::protocols::codec_directions(derives);
+    if wants_encode || wants_decode {
+        // #4107 (R-secret-04): a type holding a Secret derives `decode`
+        // only; its `encode` does not exist (E023 at the reference).
+        let holds = env.types.get(&sym(&canonical)).or_else(|| env.types.get(&sym(type_name)))
+            .is_some_and(|t| crate::secret_type::holds_secret(env, t));
+        if wants_encode && !holds {
+            register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+        }
+        if wants_decode {
+            register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+            // #4108 / C-436: the strict sibling — refuses a key outside the
+            // type at every depth, for a record and a variant alike.
+            register(env, super::protocols::STRICT_DECODE_METHOD, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+        }
+    }
     for d in derives {
         match d.as_str() {
             "Eq" => register(env, "eq", FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
             "Repr" => register(env, "repr", FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
-            "Codec" => {
-                register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
-                register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
-            }
             _ => {}
         }
     }

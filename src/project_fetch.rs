@@ -215,7 +215,10 @@ thread_local! {
 }
 
 fn offline() -> bool {
-    OFFLINE.with(|o| o.get())
+    // `ALMIDE_DEPS_CACHE_ONLY` is the same mode for a whole process tree:
+    // `almide mcp` sets it on every tool child, whose own children (the
+    // `survive` legs, a test worker) inherit it (#4179).
+    OFFLINE.with(|o| o.get()) || almide_base::env::flag("ALMIDE_DEPS_CACHE_ONLY")
 }
 
 /// Restores the previous offline state when dropped.
@@ -856,8 +859,7 @@ pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>, subdir: Option<
         return Err("almide.toml not found. Run 'almide init' first.".into());
     }
 
-    let mut content = std::fs::read_to_string(toml_path)
-        .map_err(|e| format!("Failed to read almide.toml: {}", e))?;
+    let mut content = crate::project::read_project_file(toml_path)?;
 
     let tag_part = tag.map(|t| format!(", tag = \"{t}\"")).unwrap_or_default();
     let subdir_part = subdir.map(|s| format!(", subdir = \"{s}\"")).unwrap_or_default();

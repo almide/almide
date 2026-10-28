@@ -1,11 +1,25 @@
 // @contract: C-019
-// Regression: wasm had no runtime fn / dispatch arm for string.run_length_encode
-// so the codegen panicked (ICE) instead of emitting. Now a two-pass runtime fn
-// builds List[(String, Int)] grouped by CODEPOINT (matching native `s.chars()`).
+// Regression: wasm had no runtime fn / dispatch arm for run-length encoding
+// so the codegen panicked (ICE) instead of emitting. The runs are now a fold
+// over `string.to_list`, grouped by CODEPOINT (matching native `s.chars()`).
 // ASCII here; the multibyte codepoint-grouping case (formerly byte-granular on
 // wasm) is now fixed and pinned by spec/wasm_cross/string_split_rle_codepoint.almd
 // (C-050).
-fn show(s: String) -> String = string.run_length_encode(s) |> list.map((r) => {
+// Runs of equal codepoints, folded over `string.to_list` (the stdlib's
+// `run_length_encode` left in dialect epoch 15; this is its replacement).
+fn run_length_encode(s: String) -> List[(String, Int)] = {
+  let init: List[(String, Int)] = []
+  string.to_list(s) |> list.fold(
+    init,
+    (runs, c) => match list.last(runs) {
+      some((p, n)) => if p == c then list.drop_end(runs, 1) + [(c, n + 1)]
+      else runs + [(c, 1)],
+      none => [(c, 1)],
+    },
+  )
+}
+
+fn show(s: String) -> String = run_length_encode(s) |> list.map((r) => {
   let (c, n) = r
   c + int.to_string(n)
 }) |> list.join(",")

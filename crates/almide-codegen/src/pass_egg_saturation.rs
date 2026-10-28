@@ -13,7 +13,7 @@
 //!
 //! Tree-shaped matrix expressions only. `MatrixFusionPass` runs after
 //! this pass and handles the complementary let-split chain form
-//! (`let x = matrix.add(...); matrix.scale(x, ...)`) which requires
+//! (`let x = a + b; matrix.scale(x, ...)`) which requires
 //! reasoning across binders that the egg bridge does not yet model.
 //! The two passes compose: egg fuses everything it can reach, the
 //! imperative pass mops up whatever remains.
@@ -77,6 +77,12 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
         // `mul(a, scale(b, s))` fusion's natural direction.
         walk_expr_mut(self, expr);
 
+        if let Some(fused) = fused_fma(expr) {
+            *expr = fused;
+            self.changed = true;
+            return;
+        }
+
         if !is_saturation_target(expr) {
             return;
         }
@@ -88,8 +94,59 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
     }
 }
 
-/// Whether `expr` is a Call the bridge knows how to lift: every
-/// `matrix.<op>` Call. The list combinators are NOT lifted any more
+/// The args of a `matrix.<func>(..)` call of `arity` operands.
+fn matrix_call_args<'a>(e: &'a IrExpr, func: &str, arity: usize) -> Option<&'a [IrExpr]> {
+    match &e.kind {
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func: f, .. }, args, .. }
+            if module.as_str() == "matrix" && f.as_str() == func && args.len() == arity =>
+        {
+            Some(args)
+        }
+        _ => None,
+    }
+}
+
+/// R-matrix-03 on the native leg, the same rewrite the v1 lowering
+/// (`almide-mir` `fused_fma`) and the wasm front desugar make:
+/// `scale(a, ka) + scale(b, kb)` is `__fma(a, ka, b, kb)` and
+/// `__fma(..) + scale(c, kc)` is `__fma3(..)` — the same per-cell products
+/// and left-to-right sum over the operands' overlap, operands in written
+/// order, but one pass over the overlap instead of a whole-operand `scale`
+/// copy each (#3644). The visitor is post-order, so a three-term sum arrives
+/// as `__fma(..) + scale(..)`.
+fn fused_fma(expr: &IrExpr) -> Option<IrExpr> {
+    let (a, b) = match &expr.kind {
+        IrExprKind::BinOp { op: almide_ir::BinOp::AddMatrix, left, right } => (&**left, &**right),
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "__add" && args.len() == 2 =>
+        {
+            (&args[0], &args[1])
+        }
+        _ => return None,
+    };
+    let rhs = matrix_call_args(b, "scale", 2)?;
+    let (fused, lhs) = matrix_call_args(a, "scale", 2)
+        .map(|l| ("__fma", l))
+        .or_else(|| matrix_call_args(a, "__fma", 4).map(|l| ("__fma3", l)))?;
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: almide_ir::CallTarget::Module {
+                module: almide_base::intern::sym("matrix"),
+                func: almide_base::intern::sym(fused),
+                def_id: None,
+            },
+            args: lhs.iter().chain(rhs).cloned().collect(),
+            type_args: vec![],
+        },
+        ty: expr.ty.clone(),
+        span: expr.span,
+        def_id: None,
+    })
+}
+
+/// Whether `expr` is a node the bridge knows how to lift: every
+/// `matrix.<op>` Call, and the matrix operators (`a * b`, `a + b`, a scale),
+/// which lower to `matrix.__mul` / `__add` / `scale` (R-matrix-14). The list combinators are NOT lifted any more
 /// (#2045): the bridge's list rules compose lambdas by substituting one
 /// body into another (`map-filter-fuse` copies `f`'s body three times),
 /// which duplicates and reorders a callback's side effects — the
@@ -99,10 +156,15 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
 /// when the interleaving is unobservable. The rules themselves stay in
 /// `almide-egg-lab` (its bridge tests cover them).
 fn is_saturation_target(expr: &IrExpr) -> bool {
-    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, .. }, .. } = &expr.kind else {
-        return false;
-    };
-    module.as_str() == "matrix"
+    match &expr.kind {
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, .. }, .. } => module.as_str() == "matrix",
+        IrExprKind::BinOp { op, .. } => is_matrix_operator(*op),
+        _ => false,
+    }
+}
+
+fn is_matrix_operator(op: almide_ir::BinOp) -> bool {
+    matches!(op, almide_ir::BinOp::MulMatrix | almide_ir::BinOp::AddMatrix | almide_ir::BinOp::ScaleMatrix)
 }
 
 fn try_saturate(
@@ -122,5 +184,10 @@ fn try_saturate(
     let canonical = runner.egraph.find(root);
     let extractor = Extractor::new(&runner.egraph, almide_egg_lab::FusionCost);
     let (_, best) = extractor.find_best(canonical);
+    // A subtree is replaced only by a fusion: an unfused one keeps its own
+    // nodes, so an operator keeps rendering as the operator it is.
+    if !best.as_ref().iter().any(|n| matches!(n, almide_egg_lab::AlmideExpr::MatrixMulScaled(_))) {
+        return None;
+    }
     bridge.lower(&best, vt).ok()
 }

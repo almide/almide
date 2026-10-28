@@ -633,6 +633,12 @@ fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::FieldAssign { target, field, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
     let val_str = render_expr(ctx, value);
+    // A field closing a recursive record's cycle holds an `AlmideBox` (#4251).
+    let val_str = if super::record_field_is_boxed(ctx, &ctx.var_table.get(*target).ty, field.as_str()) {
+        format!("AlmideBox::new({})", val_str)
+    } else {
+        val_str
+    };
     let field = ctx.field_ident(field.as_str());
     // Shared-mut non-Copy var (`AlmideSharedMut`, P6): assign the field through the cell.
     if ctx.ann.is_shared_mut(target) {

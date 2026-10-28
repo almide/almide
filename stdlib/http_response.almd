@@ -1,7 +1,7 @@
 // http_response — SELF-HOSTED HttpResponse builder family (PURE data ctors on
 // the blanket-impure http module; serve/network stay walled). v0's
 // AlmideHttpResponse { status, body, headers: Vec<(String,String)> } is opaque
-// nominal — the v1 self-host owns the rep (the JsonPath precedent): a
+// nominal — the v1 self-host owns the rep (the value.Path precedent): a
 // List[String] `[int.to_string(status), body, k1, v1, k2, v2, …]` — header
 // pairs flat from slot 2, insertion-ordered exactly like v0's Vec pushes.
 // get_header scans pairs first-match; set_header overwrites in place or
@@ -32,7 +32,7 @@ fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 // A non-ASCII char is not in the table and falls through unchanged, which is
 // exactly what the byte-wise fold does to a UTF-8 lead/continuation byte.
 // Spelled with chars/index_of/slice rather than a byte walk on purpose: the
-// interp oracle bridges those three, while string.to_bytes bottoms out in
+// interp oracle bridges those three, while bytes.from_string bottoms out in
 // prim.handle and would make every http fixture ABSTAIN from the 3-way vote.
 fn __hr_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
@@ -44,23 +44,24 @@ else if __hr_fold(list.get(a, i) ?? "") != __hr_fold(list.get(b, i) ?? "") then 
 else __hr_ci_at(a, b, i + 1)
 
 fn __hr_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hr_ci_at(a, b, 0)
 }
 
-// EXACTLY the given headers (no seeded Content-Type), in map order, a later
-// case-variant spelling upserting the earlier entry rather than appending a
-// shadowed duplicate: each field keeps the spelling and slot it was first
-// stored under and takes the LAST value given for it — __hr_set per entry,
-// through two lowercased-name indexes instead of a scan per entry (O(n²)).
-fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
+// EXACTLY the given headers (no seeded Content-Type), flat [k1, v1, …] in
+// list order (R-http-09), a later case-variant spelling upserting the earlier
+// entry rather than appending a shadowed duplicate: each field keeps the
+// spelling and slot it was first stored under and takes the LAST value given
+// for it — __hr_set per entry, through two lowercased-name indexes instead of
+// a scan per entry (O(n²)).
+fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[String] = {
   let st = int.to_string(status)
-  let named = map.keys(headers) |> list.enumerate |> list.map(((i, k)) => (i, __hr_lower(k), k))
+  let named = list.range(0, list.len(flat) / 2) |> list.map((i) => (i, __hr_lower(list.get(flat, 2 * i) ?? ""), list.get(flat, 2 * i) ?? ""))
   let last = named |> list.fold(
     map.new(),
-    (m, (_, low, k)) => map.set(m, low, map.get(headers, k) ?? ""),
+    (m, (i, low, _)) => map.set(m, low, list.get(flat, 2 * i + 1) ?? ""),
   )
   let first = named |> list.fold(
     map.new(),
@@ -82,7 +83,11 @@ fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
   int.to_string(code),
 )
 
-fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
+// The body cell holds a fetched body's bytes as the host wrote them, so
+// `body` decodes them the lossy way native does and `body_bytes` copies them.
+fn http_body(resp: List[String]) -> String = bytes.to_string_lossy(http_body_bytes(resp))
+
+fn http_body_bytes(resp: List[String]) -> Bytes = bytes.from_string(list.get(resp, 1) ?? "")
 
 fn http_get_header(resp: List[String], key: String) -> String? = __hr_find(resp, 2, key)
 
@@ -122,20 +127,10 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 // ASCII-lowercase a field name through the same per-char fold get_header
 // uses, so the map key spelling agrees with native's to_ascii_lowercase.
-fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
+fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
-// Lowercased-name map, FIRST value wins (the get_header rule). A fold, so
-// the map it builds is the fold's own and each insert lands in place: the
-// recursion it replaces took the map as a parameter and copied it on every
-// header, O(n²) in the header count.
-fn http_headers(resp: List[String]) -> Map[String, String] = list.range(0, (list.len(resp) - 2) / 2) |> list.fold(
-  map.new(),
-  (acc, j) => {
-    let k = __hr_lower(list.get(resp, 2 + 2 * j) ?? "")
-    if map.contains(acc, k) then acc
-    else map.set(acc, k, list.get(resp, 3 + 2 * j) ?? "")
-  },
-)
+// Every header flat, in slot order (the native Vec keeps wire order), repeats kept.
+fn http_headers_flat(resp: List[String]) -> List[String] = list.drop(resp, 2)
 
-// Router plumbing (#2588): HEAD answered by the GET route drops the body.
+// http.set_body; also the router's HEAD answer (#2588) drops the body.
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)

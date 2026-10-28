@@ -28,7 +28,7 @@ test "pipe to user-defined functions" {
 
 // ── Pipe with string operations ──
 test "pipe chain string processing" {
-  let result = "  Hello, World!  " |> string.trim() |> string.to_lower() |> string.split(" ") |> list.map((w) => string.to_upper(string.slice(w, 0, 1)) + string.slice(w, 1, string.len(w))) |> string.join(" ")
+  let result = "  Hello, World!  " |> string.trim() |> string.to_lower() |> string.split(" ") |> list.map((w) => string.to_upper(string.slice(w, 0, 1)) + string.slice(w, 1, string.len(w))) |> list.join(" ")
   assert_eq(result, "Hello, World!")
 }
 

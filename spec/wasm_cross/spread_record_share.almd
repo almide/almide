@@ -17,7 +17,7 @@ fn attr(element: Element, key: String, value: String) -> Element = { ...element,
 ) }
 
 fn render(e: Element) -> String = {
-  let attrs = map.entries(e.attrs) |> list.map((p) => {
+  let attrs = map.to_list(e.attrs) |> list.map((p) => {
     let (k, v) = p
     " ${k}=\"${v}\""
   }) |> list.join("")

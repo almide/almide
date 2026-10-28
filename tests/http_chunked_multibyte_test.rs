@@ -3,15 +3,15 @@
 //! The text clients used to lossily decode the WHOLE framed response before
 //! removing the chunk framing, so the U+FFFD replacement changed the body's
 //! length under the byte-counted chunk walk and slicing the `&str` panicked
-//! ("end byte index N is not a char boundary"). The streaming client did
-//! not panic but decoded each delivery on its own, so the split character
-//! arrived as two U+FFFD pieces.
+//! ("end byte index N is not a char boundary"). The streaming client of the
+//! time did not panic but decoded each delivery on its own, so the split
+//! character arrived as two U+FFFD pieces.
 //!
 //! One local server, one program that reads the same response through every
-//! client shape: `request_response`, `request`, `request_status`,
-//! `request_bytes` (the control that was already right) and
-//! `request_stream` (each chunk flushed separately, so the split also lands
-//! between two socket reads). Every body must be byte-equal to the payload.
+//! client shape: `send`, `request`, `get_response`, `body_bytes` of a sent request (the
+//! control that was already right) and the call handle's `read_new` (each
+//! chunk flushed separately, so the split also lands between two socket
+//! reads). Every body must be byte-equal to the payload.
 use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::process::Command;
@@ -108,12 +108,12 @@ fn line(stdout: &str, tag: &str) -> String {
 #[test]
 fn a_character_split_across_chunks_reads_back_whole_in_every_text_client_shape() {
     let out = run_client(
-        r#"  let resp = http.request_response("GET", "URL", "", [:])!
+        r#"  let resp = http.send(http.new_request("GET", "URL", "", []))!
   println("response:" + http.body(resp))
-  println("request:" + http.request("GET", "URL", "", [:])!)
-  let (code, b) = http.request_status("GET", "URL", "", [:])!
-  println("status:" + int.to_string(code) + ":" + b)
-  let raw = http.request_bytes("GET", "URL", "", [:])!
+  println("request:" + http.request("GET", "URL", "", [])!)
+  let got = http.get_response("URL")!
+  println("status:" + int.to_string(http.status(got)) + ":" + http.body(got))
+  let raw = http.body_bytes(http.send(http.new_request("GET", "URL", "", []))!)
   println("bytes:" + bytes.to_string(raw)!)"#,
         4,
     );
@@ -126,9 +126,18 @@ fn a_character_split_across_chunks_reads_back_whole_in_every_text_client_shape()
 #[test]
 fn a_character_split_across_chunks_streams_whole() {
     let out = run_client(
-        r#"  var pieces: List[String] = []
-  http.request_stream("GET", "URL", "", [:], (chunk: String) => list.push(pieces, chunk))!
-  println("stream:" + string.join(pieces, ""))"#,
+        r#"  let c = http.start(http.new_request("GET", "URL", "", []), { total_ms: 0, idle_ms: 0 })!
+  var pieces: List[String] = []
+  var open = true
+  while open {
+    list.push(pieces, http.read_new(c))
+    open = match http.poll(c) {
+      none => true,
+      some(_) => false,
+    }
+  }
+  list.push(pieces, http.read_new(c))
+  println("stream:" + list.join(pieces, ""))"#,
         1,
     );
     assert_eq!(line(&out, "stream:"), BODY);

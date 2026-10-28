@@ -484,6 +484,10 @@ fn program_to_ir_with(
     // sibling convention impls the round-1 pass could not see; mangle them so
     // the link set carries them (user modules only — see the impl doc).
     resolve_user_module_calls_round2(&mut ir);
+    // R-map-09: a call whose self-hosted body takes a callback's tuple parameter
+    // spread (`map_core`'s `f(k, v)`) gets its callback adapted to that protocol
+    // (almide_ir::entry_split, read from the registered body's declaration).
+    almide_ir::entry_split::split_entry_callbacks(&mut ir);
     // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
     // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
     crate::lower::erase_transparent_newtypes(&mut ir);

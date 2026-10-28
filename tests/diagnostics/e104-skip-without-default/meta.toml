@@ -1,0 +1,3 @@
+expects_code = "E104"
+expects_error = "no default"
+hint_substring = "= <default>"

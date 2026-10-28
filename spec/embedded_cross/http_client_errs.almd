@@ -13,19 +13,19 @@ effect fn main() -> Unit = {
     ok(_) => println("get: unexpected ok"),
     err(e) => println("get: ${e}"),
   }
-  match http.post("http://127.0.0.1:9/x", "{}") {
+  match http.request("POST", "http://127.0.0.1:9/x", "{}", []) {
     ok(_) => println("post: unexpected ok"),
     err(e) => println("post: ${e}"),
   }
-  match http.put("http://127.0.0.1:9/x", "y") {
+  match http.request("PUT", "http://127.0.0.1:9/x", "y", []) {
     ok(_) => println("put: unexpected ok"),
     err(e) => println("put: ${e}"),
   }
-  match http.patch("http://127.0.0.1:9/x", "z") {
+  match http.request("PATCH", "http://127.0.0.1:9/x", "z", []) {
     ok(_) => println("patch: unexpected ok"),
     err(e) => println("patch: ${e}"),
   }
-  match http.delete("http://127.0.0.1:9/x") {
+  match http.request("DELETE", "http://127.0.0.1:9/x", "", []) {
     ok(_) => println("delete: unexpected ok"),
     err(e) => println("delete: ${e}"),
   }

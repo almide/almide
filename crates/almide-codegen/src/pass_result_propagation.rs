@@ -375,8 +375,11 @@ fn wrap_guard_elses(body: &mut IrExpr, lifted: &HashMap<String, Ty>, intr: &Hash
 fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<String>) -> IrExpr {
     // A `panic(..)` tail never yields a value: Ok-wrapping it stamped
     // `Ok::<(), String>(panic)` against the fn's real channel (E0308, #3118).
-    // Left bare, the abort's `!` coerces to whatever the fn returns.
-    if is_panic(&expr) {
+    // Left bare, the abort's `!` coerces to whatever the fn returns. The same
+    // holds for every `Never`-typed tail — `process.exit(n)` as a match arm or
+    // an `if` branch of a value-returning effect fn (#4226), as for a guard
+    // else (#1541).
+    if never_yields(&expr) {
         return expr;
     }
     let ty = expr.ty.clone();
@@ -401,7 +404,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
         IrExprKind::If { cond, then, else_ } => {
             let then = Box::new(wrap_tail_in_ok(*then, lifted, intr));
             let else_ = Box::new(wrap_tail_in_ok(*else_, lifted, intr));
-            let wty = if is_panic(&then) { else_.ty.clone() } else { then.ty.clone() };
+            let wty = if never_yields(&then) { else_.ty.clone() } else { then.ty.clone() };
             IrExpr { kind: IrExprKind::If { cond, then, else_ }, ty: wty, span, def_id: None }
         }
         IrExprKind::Match { subject, arms } => {
@@ -409,7 +412,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
                 pattern: arm.pattern, guard: arm.guard,
                 body: wrap_tail_in_ok(arm.body, lifted, intr),
             }).collect();
-            let wty = arms.iter().find(|a| !is_panic(&a.body)).or(arms.first()).map(|a| a.body.ty.clone())
+            let wty = arms.iter().find(|a| !never_yields(&a.body)).or(arms.first()).map(|a| a.body.ty.clone())
                 .unwrap_or_else(|| Ty::result(ty, Ty::String));
             IrExpr { kind: IrExprKind::Match { subject, arms }, ty: wty, span, def_id: None }
         }
@@ -491,6 +494,12 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
             }
         }
     }
+}
+
+/// A tail that never produces a value to Ok-wrap: a `panic`, or any
+/// `Never`-typed expression (`process.exit(n)`, a call to a `-> Never` fn).
+fn never_yields(expr: &IrExpr) -> bool {
+    is_panic(expr) || matches!(expr.ty, Ty::Never)
 }
 
 /// `panic(..)` — as the builtin call, or once lowered to the prelude's abort

@@ -171,7 +171,7 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         // bare effect STATEMENT — call, rc_dec the Result, return void. That is
         // BOTH a swallowed err and the def/callsite ABI split (callers
         // `local.set` the promised handle over a void callee = invalid wasm;
-        // pin: `effect fn w(p) -> Unit = fs.write(p, "x")!` consumed
+        // pin: `effect fn w(p) -> Unit = fs.write_text(p, "x")!` consumed
         // first-class by testing.assert_err). ADR-0006 Phase 1a names the
         // semantics: a tail `X!` in a fallible fn is PASS-THROUGH — err and ok
         // alike are X's own value, so the root IS the call. Guarded on the
@@ -537,6 +537,7 @@ mod tests;
 include!("drop_sources.rs");
 include!("repr_sources_d.rs");
 include!("newtype_erase.rs");
+include!("runtime_backed_interp.rs");
 include!("newtype_subst.rs");
 include!("record_defaults.rs");
 include!("desugar_guard.rs");
@@ -568,6 +569,7 @@ include!("desugar_b.rs");
 include!("desugar_known_ctor.rs");
 include!("desugar_c.rs");
 include!("desugar_call_arg_anf.rs");
+include!("desugar_heap_qq_operands.rs");
 include!("desugar_stmt_lists.rs");
 include!("desugar_c132_bang.rs");
 include!("desugar_unwrap.rs");

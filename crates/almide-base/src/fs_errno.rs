@@ -63,6 +63,8 @@ pub fn by_os(os: i32) -> Option<&'static FsErrno> {
 }
 
 include!("fs_errno_classified.rs");
+// The bounded whole-file reader and its two refusal texts (#4201).
+include!("fs_read_bounded.rs");
 
 /// Every WASI preview1 code either kind of row spells, with its text: the
 /// Display rows, then the classified rows — the order the p1 fs service lays

@@ -44,6 +44,9 @@ struct EnvImports {
     /// `env.set` (op 37, #3223): the overlay log's append, which imports
     /// nothing — as on p1.
     set: bool,
+    /// `env.vars`' leaf (op 77, #3908): frames over the cached
+    /// `get-environment` snapshot, then the overlay log's entries.
+    vars: bool,
 }
 
 impl EnvImports {
@@ -60,10 +63,11 @@ impl EnvImports {
             })
         };
         let e = EnvImports {
-            get_env: take(wants_http || host_ops.contains(&26)),
+            get_env: take(wants_http || host_ops.contains(&26) || host_ops.contains(&77)),
             get_args: take(host_ops.contains(&29)),
             wait_for: take(host_ops.contains(&36)),
             set: host_ops.contains(&37),
+            vars: host_ops.contains(&77),
         };
         (e, next)
     }
@@ -74,7 +78,7 @@ impl EnvImports {
 
     /// The ops the service answers — what `shim_fs_call` forwards to it.
     fn ops(self) -> Vec<i32> {
-        [(self.get_env.is_some(), 26), (self.get_args.is_some(), 29), (self.wait_for.is_some(), 36), (self.set, 37)]
+        [(self.get_env.is_some(), 26), (self.get_args.is_some(), 29), (self.wait_for.is_some(), 36), (self.set, 37), (self.vars, 77)]
             .into_iter()
             .filter_map(|(on, op)| on.then_some(op))
             .collect()
@@ -148,6 +152,10 @@ impl P3Overlay {
 /// - op 29 args: `get-arguments` (argv0 first, as `args_get` on p1),
 ///   re-framed as `[len u32][bytes]` per entry — the almide frames
 ///   encoding the guest skips frame 0 of.
+/// - op 77 `env.vars`' leaf (#3908): one `[len u32][name=value]` frame per
+///   entry of the cached `get-environment` list, then one per overlay log
+///   entry (a set, or `env.remove`'s NUL mark) — the guest's Almide body
+///   lets the later frame win.
 /// - op 36 `env.sleep_ms(ms)`: the count rides `a_len` (negative = 0);
 ///   `wait-for(ms * 1_000_000)` on the monotonic clock. The task blocks —
 ///   no busy-wait (the p1 shim's spin has no p3 counterpart).
@@ -186,12 +194,7 @@ fn shim_env(g: P3Globals, e: EnvImports, ovl: Option<P3Overlay>) -> Function {
             emit_scan(&mut i, log, (g_ppos, g_plen), ScanLocals { p, endp, klen, vlen, best, j });
         }
         // The snapshot, taken once.
-        i.global_get(g_env).i32_const(0).i32_lt_s().if_(BlockType::Empty);
-        i.i32_const(ENV_RESERVE).call(f_reserve);
-        i.i32_const((park + RET) as i32).call(get_env);
-        i.i32_const((park + RET) as i32).i32_load(mem(0)).global_set(g_env);
-        i.i32_const((park + RET) as i32).i32_load(mem(4)).global_set(g_envn);
-        i.end();
+        fetch_env(&mut i, g, get_env);
         // entries are tuple<string, string>: name ptr/len @0/4, value @8/12.
         i.global_get(g_env).local_set(p);
         i.global_get(g_env).global_get(g_envn).i32_const(16).i32_mul().i32_add().local_set(endp);
@@ -214,6 +217,49 @@ fn shim_env(g: P3Globals, e: EnvImports, ovl: Option<P3Overlay>) -> Function {
         i.local_get(p).i32_const(16).i32_add().local_set(p);
         i.br(0).end().end();
         i.i64_const(2).i64_const(32).i64_shl().return_();
+        i.end();
+    }
+
+    if let (true, Some(get_env)) = (e.vars, e.get_env) {
+        i.local_get(op).i32_const(77).i32_eq().if_(BlockType::Empty);
+        fetch_env(&mut i, g, get_env);
+        // entries are tuple<string, string>: name ptr/len @0/4, value @8/12.
+        i.global_get(g_env).local_set(p);
+        i.global_get(g_env).global_get(g_envn).i32_const(16).i32_mul().i32_add().local_set(endp);
+        // total = Σ (4 + name + 1 + value), plus the log's length: an
+        // overlay frame is shorter than its entry.
+        i.i32_const(0).local_set(total);
+        if let Some(P3Overlay { log, .. }) = ovl {
+            i.global_get(log.g_len).local_set(total);
+        }
+        i.local_get(p).local_set(j);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(j).local_get(endp).i32_ge_u().br_if(1);
+        i.local_get(total).i32_const(5).i32_add();
+        i.local_get(j).i32_load(mem(4)).i32_add().local_get(j).i32_load(mem(12)).i32_add().local_set(total);
+        i.local_get(j).i32_const(16).i32_add().local_set(j);
+        i.br(0).end().end();
+        i.i32_const(0).i32_const(0).i32_const(4).local_get(total).call(f_alloc).local_tee(buf).local_set(out);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(p).local_get(endp).i32_ge_u().br_if(1);
+        i.local_get(p).i32_load(mem(4)).local_set(klen);
+        i.local_get(p).i32_load(mem(12)).local_set(vlen);
+        i.local_get(out).local_get(klen).local_get(vlen).i32_add().i32_const(1).i32_add().i32_store(mem(0));
+        i.local_get(out).i32_const(4).i32_add().local_get(p).i32_load(mem(0)).local_get(klen).memory_copy(0, 0);
+        i.local_get(out).i32_const(4).i32_add().local_get(klen).i32_add().i32_const(61).i32_store8(mem8(0));
+        i.local_get(out).i32_const(5).i32_add().local_get(klen).i32_add();
+        i.local_get(p).i32_load(mem(8)).local_get(vlen).memory_copy(0, 0);
+        i.local_get(out).i32_const(5).i32_add().local_get(klen).i32_add().local_get(vlen).i32_add().local_set(out);
+        i.local_get(p).i32_const(16).i32_add().local_set(p);
+        i.br(0).end().end();
+        if let Some(P3Overlay { log, .. }) = ovl {
+            let frame = crate::wasi::env_overlay::FrameLocals { p, endp, klen, vlen };
+            crate::wasi::env_overlay::emit_frames(&mut i, log, out, frame);
+        }
+        i.local_get(out).local_get(buf).i32_sub().local_set(total);
+        i.local_get(buf).global_set(g_ppos);
+        i.local_get(total).global_set(g_plen);
+        i.local_get(total).i64_extend_i32_u().return_();
         i.end();
     }
 
@@ -256,4 +302,16 @@ fn shim_env(g: P3Globals, e: EnvImports, ovl: Option<P3Overlay>) -> Function {
     i.unreachable();
     i.end();
     f
+}
+
+/// `get-environment`, lowered once into `g_env` / `g_envn` (ops 26 and 77
+/// share the snapshot).
+fn fetch_env(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, get_env: u32) {
+    let P3Globals { park, f_reserve, g_env, g_envn, .. } = g;
+    i.global_get(g_env).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    i.i32_const(ENV_RESERVE).call(f_reserve);
+    i.i32_const((park + RET) as i32).call(get_env);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).global_set(g_env);
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).global_set(g_envn);
+    i.end();
 }

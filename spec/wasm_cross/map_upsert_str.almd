@@ -9,16 +9,16 @@ fn main() -> Unit = {
   let m = ["a": "1", "b": "2"]
   // update path: position kept, f applied
   let m2 = map.upsert(m, "a", "unused-init", (v) => v + "!")
-  println(map.get_or(m2, "a", "-"))
+  println(map.get(m2, "a") ?? "-")
   println("${m2}")
   // insert path: appended at the end with init, f unused
   let m3 = map.upsert(m2, "c", "fresh", (v) => v + "?")
-  println(map.get_or(m3, "c", "-"))
+  println(map.get(m3, "c") ?? "-")
   println(int.to_string(map.len(m3)))
   println("${m3}")
   // chained: insert then update the same key
   let m4 = map.upsert(map.upsert(["k": "v"], "n", "0", (v) => v), "n", "9", (v) => v + v)
-  println(map.get_or(m4, "n", "-"))
+  println(map.get(m4, "n") ?? "-")
   // empty-map insert
   let e: Map[String, String] = [:]
   let e2 = map.upsert(e, "first", "x", (v) => v + "no")

@@ -8,5 +8,5 @@ fn zero(b: Bytes) -> Unit = bytes.put_u8(b, 0, 0)
 fn main() -> Unit = {
   var b = bytes.from_list([1, 2])
   zero(b)
-  println(int.to_string(bytes.get_or(b, 0, 9)))
+  println(int.to_string(bytes.get(b, 0) ?? 9))
 }

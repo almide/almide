@@ -1,0 +1,44 @@
+// @contract: C-411
+// base64.decode and base64.decode_url accept exactly the canonical padded
+// form their encoders emit (#4119): the length a multiple of 4
+// (`invalid base64 length: <n>`), at most two trailing `=`
+// (`invalid base64 padding`), every other byte in the function's OWN alphabet
+// — `+/` for decode, `-_` for decode_url (`invalid base64 character`) — and
+// zero bits under the padding (`invalid base64 trailing bits`), checked in
+// that order. Before this both read both alphabets, stripped any number of
+// `=`, accepted no padding and ignored the dropped bits, so QQ==, QR==, QX==,
+// QQ and QQ======== all decoded to "A". Each row runs through both decoders.
+import base64
+import hex
+
+fn show(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok(${hex.encode(b)})",
+  err(e) => "err(${e})",
+}
+
+fn main() -> Unit = {
+  for s in [
+    "QQ==",
+    "QR==",
+    "QX==",
+    "QQ",
+    "QQ========",
+    "QUJD=",
+    "QUJD====",
+    "QUI=",
+    "QUJ=",
+    "=",
+    "====",
+    "",
+    "Q===",
+    "QQ=A",
+    "+/8=",
+    "-_8=",
+    "+/+/",
+    "-_-_",
+    "aGVsbG8=",
+    "aGVsbG8"
+  ] {
+    println("\"${s}\" decode=${show(base64.decode(s))} decode_url=${show(base64.decode_url(s))}")
+  }
+}

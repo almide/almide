@@ -140,8 +140,8 @@ fn collect_heap_reassign_vars_from(stmts: &[IrStmt], tail: Option<&IrExpr>, out:
                     walk_expr(self, e);
                 }
                 // Every other in-place mutator the statement lowering rewrites
-                // to its functional rebind (`map.insert(m, k, v)` → `m =
-                // map.set(m, k, v)`, the byte appends): read the rebind off the
+                // to its functional rebind (`map.clear(m)` → `m` rebound
+                // to the empty map, the byte appends): read the rebind off the
                 // same rewrite, so the two cannot drift (#3298).
                 // Only the rebind TARGET is read off the rewrite: its value can be
                 // the same call under its functional name (`bytes.append_u16`).

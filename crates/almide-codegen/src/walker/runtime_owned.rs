@@ -4,7 +4,7 @@
 //! (runtime/rs/src), not by the emitted program, and every runtime module is
 //! spliced flat into the user's Rust module. While the emitter spelled such a
 //! type by its Almide name, a user's own `type Value = { … }` /
-//! `type HttpRequest = …` / `type Endian = …` met the runtime's item of the
+//! `type HttpRequest = …` / `type FileStat = …` met the runtime's item of the
 //! same spelling — E0428 / E0574 / E0560 at rustc after a green `almide
 //! check` (the ALS-T6 check-passes/build-fails class). The runtime spells
 //! them under reserved `Almide*` names; this table is the emitter's side of
@@ -14,27 +14,25 @@
 //! Three shapes, one table:
 //! * builtin — `Value` has no declaration anywhere (the checker's
 //!   `Ty::Named("Value")`).
-//! * runtime-backed — `HttpRequest` / `HttpResponse` / `HttpCall` / `JsonPath`
+//! * runtime-backed — `HttpRequest` / `HttpResponse` / `HttpCall`
 //!   (`stdlib_info::RUNTIME_BACKED_TYPES`): named by bundled signatures, no
 //!   declaration.
-//! * bundled twin — `Endian` / `FileStat` / `ProcessStatus` ARE declared, in
-//!   the bundled stdlib module (bytes / fs / process.almd), and that decl
+//! * bundled twin — `FileStat` / `ProcessStatus` ARE declared, in the
+//!   bundled stdlib module (fs / process.almd), and that decl
 //!   reaches the program's type decls whenever the import is explicit; the
 //!   runtime defines the same shape under the reserved name. The twin decl is
 //!   recognised by NAME + SHAPE: it is not emitted (the runtime's definition
-//!   is the one, repr impl included), and its ctors and its record-literal key
-//!   route to the reserved item. A user decl that merely shares the name has a
+//!   is the one, repr impl included), and its record-literal key routes to
+//!   the reserved item. A user decl that merely shares the name has a
 //!   different shape and is the user's type — it is emitted, it claims the
 //!   bare spelling, and the runtime-owned mapping steps aside for it.
 
 use std::collections::{HashMap, HashSet};
 
-use almide_ir::{IrProgram, IrTypeDecl, IrTypeDeclKind, IrVariantKind};
+use almide_ir::{IrProgram, IrTypeDecl, IrTypeDeclKind};
 
 /// The declared shape a bundled twin must carry to be the runtime's type.
 enum TwinShape {
-    /// Nullary variant cases, in declaration order.
-    Variant(&'static [&'static str]),
     /// Record field names, in declaration order.
     Record(&'static [&'static str]),
 }
@@ -55,8 +53,6 @@ const TABLE: &[RuntimeOwned] = &[
     RuntimeOwned { almd: "HttpRequest", rust: "AlmideHttpRequest", module: "http", twin: None },
     RuntimeOwned { almd: "HttpResponse", rust: "AlmideHttpResponse", module: "http", twin: None },
     RuntimeOwned { almd: "HttpCall", rust: "AlmideHttpCall", module: "http", twin: None },
-    RuntimeOwned { almd: "JsonPath", rust: "AlmideJsonPath", module: "json", twin: None },
-    RuntimeOwned { almd: "Endian", rust: "AlmideEndian", module: "bytes", twin: Some(TwinShape::Variant(&["LittleEndian", "BigEndian"])) },
     RuntimeOwned { almd: "FileStat", rust: "AlmideFileStat", module: "fs", twin: Some(TwinShape::Record(&["size", "is_dir", "is_file", "modified"])) },
     RuntimeOwned { almd: "ProcessStatus", rust: "AlmideProcessStatus", module: "process", twin: Some(TwinShape::Record(&["code", "stdout", "stderr"])) },
 ];
@@ -65,17 +61,11 @@ const TABLE: &[RuntimeOwned] = &[
 /// decl, including a user decl that only shares the name.
 pub(crate) fn twin_spelling(td: &IrTypeDecl) -> Option<&'static str> {
     let entry = TABLE.iter().find(|e| e.almd == td.name.as_str())?;
-    let is_twin = match (&entry.twin, &td.kind) {
-        (Some(TwinShape::Variant(cases)), IrTypeDeclKind::Variant { cases: decl, .. }) => {
-            decl.len() == cases.len()
-                && decl.iter().zip(cases.iter())
-                    .all(|(d, c)| d.name.as_str() == *c && matches!(d.kind, IrVariantKind::Unit))
-        }
-        (Some(TwinShape::Record(fields)), IrTypeDeclKind::Record { fields: decl }) => {
-            decl.len() == fields.len()
-                && decl.iter().zip(fields.iter()).all(|(d, f)| d.name.as_str() == *f)
-        }
-        _ => false,
+    let is_twin = if let (Some(TwinShape::Record(fields)), IrTypeDeclKind::Record { fields: decl }) = (&entry.twin, &td.kind) {
+        decl.len() == fields.len()
+            && decl.iter().zip(fields.iter()).all(|(d, f)| d.name.as_str() == *f)
+    } else {
+        false
     };
     is_twin.then_some(entry.rust)
 }
@@ -109,25 +99,10 @@ pub(crate) fn spellings_for(program: &IrProgram) -> HashMap<String, String> {
         .collect()
 }
 
-/// The runtime-owned variant ctors as `(ctor, reserved enum)`. Registered
-/// FIRST in `ctor_to_enum`, so construction and patterns qualify against the
-/// runtime enum whether or not the bundled decl reached the program — with
-/// `bytes` auto-imported it never does, and a bare `LittleEndian` PATTERN was
-/// a catch-all binding (E0170) while construction leaned on a runtime shim fn
-/// — and so that a user decl registered after it wins its own ctor names.
-pub(crate) fn variant_ctors() -> impl Iterator<Item = (&'static str, &'static str)> {
-    TABLE.iter()
-        .filter_map(|e| match e.twin {
-            Some(TwinShape::Variant(cases)) => Some(cases.iter().map(move |c| (*c, e.rust))),
-            _ => None,
-        })
-        .flatten()
-}
-
 /// The runtime modules whose owned type the rendered user code spells — the
 /// module a TYPE reference pulls in (#1829). `IrProgram::used_stdlib_modules`
 /// is call-driven, so a program that only NAMES a runtime-owned type (an
-/// `Endian` annotation, a `BigEndian` ctor or pattern, a `FileStat` param)
+/// `FileStat` param or record literal)
 /// without calling into its module never spliced the module that defines it:
 /// E0425 / E0433 at rustc after a green `almide check`. The reserved spelling
 /// is emitter-only — the bare name is the user's and a user type never
@@ -148,16 +123,20 @@ pub(crate) fn modules_spelled_in(idents: &[&str]) -> Vec<&'static str> {
 
 /// Whether the runtime's definition of a runtime-owned type carries an
 /// `AlmideRepr` impl — the bundled twins do (`impl AlmideRepr for
-/// AlmideEndian` in bytes.rs, `AlmideFileStat` in fs.rs,
+/// AlmideFileStat` in fs.rs,
 /// `AlmideProcessStatus` in process.rs: the impls the walker used to emit
 /// beside the twin decl, moved into the runtime by #1821). `${e}` on such a
 /// value routes through `almide_repr` whether or not the bundled decl
 /// reached the program: under the auto-import it never does, so the
 /// decl-driven `repr_named_types` set left the walker on the `Display` path
-/// and the runtime enum has none (E0277, #1829). The undeclared names
-/// (`Value`, the http/json handles) keep their `Display` route untouched.
+/// and the runtime enum has none (E0277, #1829). The undeclared names route
+/// the same way (#4204): `AlmideHttpRequest` / `AlmideHttpResponse` /
+/// `AlmideHttpCall` have no `Display`, so a bare `${req}` was an E0277 after
+/// a green `almide check`, and `Value` prints its `Display`
+/// text through the repr anyway. Every entry carries the impl — the test
+/// below holds the table to it.
 pub(crate) fn has_runtime_repr(almd: &str) -> bool {
-    TABLE.iter().any(|e| e.almd == almd && e.twin.is_some())
+    TABLE.iter().any(|e| e.almd == almd)
 }
 
 #[cfg(test)]

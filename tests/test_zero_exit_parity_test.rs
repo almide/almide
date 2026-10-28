@@ -1,7 +1,7 @@
 //! The zero-test verdict of `almide test` is the same on both targets (#2204).
 //!
 //! `docs/specs/cli.md` promises one exit-code table for a run that executed
-//! nothing: a `--run` pattern that excluded everything stays 0, "nothing to
+//! nothing: a `--run` pattern that excluded everything is 5 (#4264), "nothing to
 //! run" is 5, `--allow-no-tests` opts out. The table names no target, so both
 //! lanes must honour it — and the wasm lane did not for one shape: a file with
 //! no `main` and no `test` block. The v1 renderer refuses such a program
@@ -102,10 +102,10 @@ fn a_main_only_file_exits_5_on_both_targets() {
 }
 
 #[test]
-fn a_filter_matching_nothing_is_green_on_both_targets() {
+fn a_filter_matching_nothing_exits_5_on_both_targets() {
     if !wasmtime_available() { eprintln!("skip: no wasmtime"); return; }
     let dir = case_dir("filtered", "a_test.almd", TWO_TESTS);
-    assert_both_targets(dir.path(), &["a_test.almd", "--run", "zzz-no-such-test"], 0, "0 tests in 1 file (2 filtered out)");
+    assert_both_targets(dir.path(), &["a_test.almd", "--run", "zzz-no-such-test"], 5, "0 tests in 1 file (2 filtered out)");
 }
 
 #[test]

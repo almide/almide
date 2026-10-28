@@ -145,7 +145,7 @@ fn resolve_self_import(
         let mod_path = &path[1..]; // skip "self"
         // The canonical name is the whole path under src/ (#2654) — aliases
         // are handled by the import table.
-        let mod_name_owned = self_module_canonical(mod_path);
+        let mod_name_owned = self_module_canonical(mod_path, ctx.dep_paths);
         let mod_name = mod_name_owned.as_str();
         let display_name = mod_name;
 
@@ -305,7 +305,7 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
             // Always the canonical name (the whole path under src/), not the
             // alias — aliases are handled by import_table, and module identity
             // must be stable (#2654).
-            let sub_mod_name = self_module_canonical(sub_mod_path);
+            let sub_mod_name = self_module_canonical(sub_mod_path, ctx.dep_paths);
             load_self_module(&sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
         }
     } else {
@@ -336,9 +336,19 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
 /// module never share one key (#2864). Under the bare key the project's `int`
 /// replaced the stdlib's, and the stdlib bodies that call `int.*` (the
 /// sized-int modules) lost their callees on the native leg.
-pub fn self_module_canonical(mod_path: &[crate::intern::Sym]) -> String {
+///
+/// A path that is a DEPENDENCY package's name (`src/llm.almd` beside a
+/// dependency `llm`, direct or transitive) keeps `self.` the same way
+/// (#4270): a dependency's `import llm` loads the package under the bare
+/// key, so the project's module under that key made the dependency's import
+/// resolve to the project's file — reported as a circular import when that
+/// file was still loading.
+pub fn self_module_canonical(mod_path: &[crate::intern::Sym], dep_paths: &[(project::PkgId, PathBuf)]) -> String {
     let joined = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-    if stdlib::is_stdlib_module(&joined) || stdlib::get_bundled_source(&joined).is_some() {
+    if stdlib::is_stdlib_module(&joined)
+        || stdlib::get_bundled_source(&joined).is_some()
+        || dep_paths.iter().any(|(pkg, _)| pkg.name == joined)
+    {
         format!("self.{joined}")
     } else {
         joined

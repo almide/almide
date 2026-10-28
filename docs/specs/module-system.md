@@ -215,8 +215,8 @@ fn Box.tag(self) -> String = "caller"   // ✗ E012: defined in more than one mo
 
 ### 4.2 stdlib 所有型と同名のユーザ型 (#1828)
 
-`Value` / `HttpRequest` / `HttpResponse` / `JsonPath` / `Endian` / `FileStat` /
-`ProcessStatus` / `Url` / `TcpStream` / `TcpListener` / `SafeHtml` / `SafePath` は
+`Value` / `HttpRequest` / `HttpResponse` / `FileStat` / `ProcessStatus` /
+`Url` / `TcpStream` / `TcpListener` / `SafeHtml` / `IpAddr` / `Path` は
 stdlib モジュールが所有する型で、その**裸名が正準の同一性**である(`json.parse` の
 返り値は常に stdlib の `Value`)。台帳は `stdlib_info::STDLIB_OWNED_TYPES`
 (`tests/runtime_backed_types_matrix.rs` が bundled 宣言との一致を機械検査する)。

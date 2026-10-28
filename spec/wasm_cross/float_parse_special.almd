@@ -1,8 +1,8 @@
-// @contract: C-116
-// float.parse on the IEEE 754 special values inf / infinity / nan (case-insensitive, optional sign) —
-// Rust's strtod accepts these; the v1 self-host float_parse used to reject them as "invalid float
-// literal" (a native-vs-v1 divergence). The values are built by RUNTIME division (1/0 = +inf, 0/0 =
-// nan), byte-identical to Rust on both targets. Normal floats + junk (infx/na) are unaffected.
+// @contract: C-116, C-413
+// float.parse on the IEEE 754 special spellings inf / infinity / nan (case-insensitive, optional
+// sign). They once diverged (native accepted, the v1 self-host refused), then both legs accepted
+// them; since C-413 (#4121) float.parse is FINITE-ONLY and every leg refuses them as
+// `invalid float literal`, so each special row prints ERR. Normal floats + junk (infx/na) unaffected.
 fn show(s: String) -> String = match float.parse(s) {
   ok(v) => float.to_string(v),
   err(e) => "ERR",

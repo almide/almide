@@ -77,7 +77,7 @@ fn siblings(n: Int) -> String = {
   let st: Set[String] = set.from_list(["e"])
   var x: String = "s"
   for _i in 0..<n {
-    x = map.fold(m, x, (acc, k, v) => acc + k)
+    x = map.fold(m, x, (acc, (k, v)) => acc + k)
     x = set.fold(st, x, (acc, e) => acc + e)
     x = list.last(list.scan(a0(), x, (a, b) => a + "~")) ?? ""
   }

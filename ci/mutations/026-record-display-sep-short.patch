@@ -1,9 +1,9 @@
 diff --git a/crates/almide-wasm/src/display.rs b/crates/almide-wasm/src/display.rs
-index ba17e4b4f..8b8d1418e 100644
+index bd25a73d7..2a4a18feb 100644
 --- a/crates/almide-wasm/src/display.rs
 +++ b/crates/almide-wasm/src/display.rs
-@@ -243,7 +243,7 @@ impl Emitter<'_> {
-                 }
+@@ -364,7 +364,7 @@ impl Emitter<'_> {
+                 let n = fields.len();
                  for (k, fi) in fields.iter().enumerate() {
                      if k > 0 {
 -                        self.append_lit(", ");

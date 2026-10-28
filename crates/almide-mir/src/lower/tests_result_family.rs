@@ -24,7 +24,7 @@ fn result_family_is_a_total_function_of_the_type() {
         ResultFamily::HeapOk
     );
     // Scalar classes — len-as-tag: scalar Ok payload (the int.parse /
-    // float.parse / fs.file_size shapes), including the scalar-scalar class
+    // float.parse shapes), including the scalar-scalar class
     // (Result[Int, Int] — the err payload's high bits live at @16, which is
     // exactly why a cap-as-tag read must never be applied to this family).
     assert_eq!(result_family(&res(Ty::Int, Ty::String)), ResultFamily::Scalar);
@@ -60,7 +60,7 @@ fn the_merged_name_set_survives_the_historical_name_mangling_incidents() {
     assert!(is_self_host_materialized_result_fn("fs", "__fallible_fold_lines"));
     // The Phase-1 moved family: ctor-built Result[Unit, String] producers are
     // materialized (their layout now byte-matches the prim family's).
-    for f in ["copy", "append", "remove", "write_bytes", "write_bytes_raw", "write", "mkdir_p", "rename", "remove_all"] {
+    for f in ["copy", "append_text", "append_bytes", "remove", "write_bytes", "write_text", "mkdir_p", "rename", "remove_all"] {
         assert!(is_self_host_materialized_result_fn("fs", f), "fs.{f} must be in the merged set");
     }
     // Non-members stay out (the set still gates "materialized at all").
@@ -90,15 +90,9 @@ fn every_registry_result_fn_is_in_the_materialized_set() {
         // Result as it did before the rows existed (untracked); admit them with
         // the layout audit of their bodies, not before.
         "process.exec",
-        "process.exec_attached",
-        "process.exec_in",
-        "process.exec_status",
-        "process.exec_status_timeout",
-        "process.exec_with_stdin",
+        "process.__os_output",
+        "process.__os_run",
         "process.kill",
-        "process.run",
-        "process.run_in",
-        "process.spawn",
     ];
     let member = |module: &str, func: &str| {
         is_self_host_materialized_result_fn(module, func)

@@ -685,11 +685,12 @@ fn main() -> Unit = {
 /// `module.func` with the program's own `func`, so the body called itself.
 /// A `module.func` call never names a program-root fn. Pinned json-free
 /// (the eval_test recipe loads no `json` module): the same shapes over
-/// `int.parse` and `value.stringify`, expression-bodied and block-bodied.
+/// `int.parse` and `json.stringify`, expression-bodied and block-bodied.
 #[test]
 fn module_call_never_resolves_to_the_program_fn_of_the_same_name() {
     expect_out(
-        r#"
+        r#"import json
+
 fn parse(s: String) -> Int = int.parse(s) ?? 0
 
 fn parse_block(s: String) -> Int = {
@@ -697,7 +698,7 @@ fn parse_block(s: String) -> Int = {
   n
 }
 
-fn stringify(v: Value) -> String = value.stringify(v)
+fn stringify(v: Value) -> String = json.stringify(v)
 
 fn main() -> Unit = {
   println("${parse("12")} ${parse("x")}")

@@ -46,10 +46,12 @@ Output (stdout): one line per fn — `status<TAB>module.fn<TAB>detail`.
             synthesizer is the thing to fix, never the enumeration.
 """
 import json
+import multiprocessing
 import os
 import re
 import subprocess
 import sys
+import shutil
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,15 +60,25 @@ DOCDIR = os.path.join(ROOT, "docs/stdlib")
 REGISTRY = os.path.join(ROOT, "crates/almide-types/src/stdlib_info.rs")
 LEGS = ("structural", "stock-p1", "embedded")
 
-# Modules that need an explicit import (the rest are auto-imported).
-EXPLICIT_IMPORT = {
-    "json", "fs", "http", "env", "io", "random", "regex", "process",
-    "testing", "url", "args", "base64", "compute", "hash", "hex",
-    "path", "html", "duration", "net", "zlib",
-}
+def _registry_list(const: str) -> list:
+    """The names of a `pub const <const>: &[&str]` in stdlib_info.rs, re-read
+    so the probe holds no copy that can drift."""
+    src = open(REGISTRY, encoding="utf-8").read()
+    m = re.search(rf"pub const {const}[^=]*= &\[(.*?)\];", src, re.S)
+    return re.findall(r'"([a-z0-9_]+)"', re.sub(r"//[^\n]*", "", m.group(1)))
+
+
+# Modules that need an explicit import: every registered module outside the
+# auto-import surface (TIER1_ALWAYS_ACCESSIBLE + AUTO_IMPORT_BUNDLED), the one
+# list the resolver reads. A hand-kept set here missed every module added
+# after it (`secret`).
+EXPLICIT_IMPORT = (set(_registry_list("STDLIB_MODULES")) | set(_registry_list("BUNDLED_MODULES"))) - (
+    set(_registry_list("TIER1_ALWAYS_ACCESSIBLE")) | set(_registry_list("AUTO_IMPORT_BUNDLED"))
+)
 # docs/stdlib pages that document CHECKER surface (clock constructors), not
-# a module interface — tools/gen-stdlib-doc-index.py's own exclusion.
-DOC_EXCLUDED = {"compute", "duration"}
+# a module interface — tools/gen-stdlib-doc-index.py's own exclusion — and the
+# generated index page README.md.
+DOC_EXCLUDED = {"compute", "duration", "README"}
 # Registered modules with no public page by design: the v1 primitive floor.
 INTERNAL_MODULES = {"prim"}
 
@@ -77,23 +89,15 @@ SIZED_FLOATS = {"Float32", "Float64"}
 STRING_TVARS = {"E", "F"}
 
 # Cells the interface JSON renders as `{"kind": "unknown"}` — types its
-# emitter does not model (the raw-pointer FFI surface, the f32 matrix, the
-# Never return). Keyed "mod.fn" -> {param name | "return": type node}. A NEW
+# emitter does not model (the raw-pointer FFI surface, the Never return). Keyed "mod.fn" -> {param name | "return": type node}. A NEW
 # unknown cell outside this table is an ERROR line, never a guess.
 RAWPTR = {"kind": "named", "name": "RawPtr"}
-MAT_F32 = {"kind": "named", "name": "Matrix", "args": [{"kind": "named", "name": "Float32"}]}
 NEVER = {"kind": "never"}
 UNMODELED = {
     "bytes.as_mut_ptr": {"return": RAWPTR},
     "bytes.as_ptr": {"return": RAWPTR},
     "bytes.copy_to_ptr": {"ptr": RAWPTR},
     "bytes.from_raw_ptr": {"ptr": RAWPTR},
-    "matrix.zeros_f32": {"return": MAT_F32},
-    "matrix.ones_f32": {"return": MAT_F32},
-    "matrix.mul_f32": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
-    "matrix.mul_f32_scaled": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
-    "matrix.mul_f32_t": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
-    "matrix.mul_f32_t_scaled": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
     "process.exit": {"return": NEVER},
 }
 
@@ -103,15 +107,37 @@ UNMODELED = {
 # and the module to import.
 NOMINAL = {
     "Value": ("value.int(0)", "value.int", None),
-    "JsonPath": ("json.root()", "json.root", "json"),
+    # value's path (R-value, wave 4A): built from `value.root()` by key/index.
+    "Path": ("value.root()", "value.root", None),
+    "Rng": ("random.seeded(1)", "random.seeded", "random"),
+    # A capability root over the probe's own working directory.
+    "FsRoot": ('fs.open_root(".")!', "fs.open_root", "fs"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
-    "SafePath": ('path.trusted("x")', "path.trusted", "path"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
     # The call handle (#2631): only `http.start` makes one.
-    "HttpCall": ('http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
+    "HttpCall": ('http.start(http.new_request("GET", "http://127.0.0.1:1/", "", []), { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
     # A route is built with `http.route` — its record fields are the parsed
     # pattern, never written by hand (#2588).
     "HttpRoute": ('http.route("/", (_r) => http.response(200, "x"))', "http.route", "http"),
+    # The stream handles (R-io-05): only io's three constructors make one.
+    "Stdin": ("io.stdin()!", "io.stdin", "io"),
+    "Stdout": ("io.stdout()!", "io.stdout", "io"),
+    "Stderr": ("io.stderr()!", "io.stderr", "io"),
+    # The opaque socket and descriptor handles: only their opening calls make one.
+    # A CLOSED listener: an open one would block `tcp_accept` forever, where a
+    # closed one answers its err at once (an answered err is service).
+    "TcpListener": ('{ let l = net.tcp_listen("127.0.0.1", 0)!\n  io.close(l)!\n  l }', "net.tcp_listen", "net,io"),
+    "TcpStream": ('net.tcp_connect("127.0.0.1", 1)!', "net.tcp_connect", "net"),
+    "UdpSocket": ('net.udp_bind("127.0.0.1", 0)!', "net.udp_bind", "net"),
+    "IpAddr": ('net.parse_ip("127.0.0.1")!', "net.parse_ip", "net"),
+    "Fd": ("unix.shm_create(8)!", "unix.shm_create", "unix"),
+    "Uuid": ('uuid.parse("00000000-0000-0000-0000-000000000000")!', "uuid.parse", "uuid"),
+    # An opaque wrapper: only `secret.new` makes one.
+    "Secret": ("secret.new({0})", "secret.new", "secret"),
+    # The opaque collections (#4256): built through their list constructor.
+    "Deque": ("deque.from_list([{0}])", "deque.from_list", None),
+    "Heap": ("heap.from_list([{0}])", "heap.from_list", None),
+    "ProcessChild": ('process.start(process.ProcessCommand { cmd: "true", args: [] })!', "process.start", "process"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
 
@@ -137,8 +163,31 @@ class Ctx:
         return name
 
 
+# Type variables pinned for the current synthesis (variant 6): a generic the
+# call's arguments cannot fix — it appears only in the return — is given an
+# input record that derives Decode, the one bound a return-only stdlib
+# generic carries (`http.decode_json[T: Decode]`); left open it would default
+# to Int, which conforms to nothing.
+PINNED: dict = {}
+PROBE_INPUT = "ProbeIn"
+PROBE_INPUT_DECL = f"type {PROBE_INPUT}: Decode = {{ n: Int }}\n"
+
+
 def tvar(name: str) -> dict:
+    if name in PINNED:
+        return {"kind": "named", "name": PINNED[name]}
     return {"kind": "string"} if name in STRING_TVARS else {"kind": "int"}
+
+
+def return_only_generics(f: dict, params, ret) -> list:
+    """The fn's generics no parameter mentions but its return does."""
+    def mentions(t, g):
+        if t.get("kind") == "type_var":
+            return t.get("name") == g
+        subs = [t[k] for k in ("inner", "ok", "err", "key", "value", "return") if k in t]
+        subs += t.get("params", []) + t.get("elements", []) + t.get("args", [])
+        return any(mentions(x, g) for x in subs)
+    return [g for g in f.get("generics", []) if mentions(ret, g) and not any(mentions(t, g) for _, t in params)]
 
 
 def render(t: dict) -> str:
@@ -223,9 +272,6 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             return ctx.hoist(name, "0")
         if name in SIZED_FLOATS:
             return ctx.hoist(name, "0.0")
-        if name == "Matrix" and [render(a) for a in t.get("args", [])] == ["Float32"]:
-            ctx.ctors.add("matrix.zeros_f32")
-            return "matrix.zeros_f32(1, 1)"
         if name == "RawPtr":
             ctx.ctors.add("bytes.as_ptr")
             return f"bytes.as_ptr({dummy({'kind': 'bytes'}, ctx, types)})"
@@ -235,12 +281,23 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             # the accessor it measures.
             ctx.imports.add("http")
             ctx.ctors.add("http.new_request")
-            return 'http.new_request("GET", "/", "", [:])'
+            return 'http.new_request("GET", "/", "", [])'
+        # A record's own type parameter (`Heap[A]`'s `slots: List[(A, Int)]`)
+        # reaches the synthesizer as a bare named type: it is a type
+        # variable, measured at Int like every other unpinned one.
+        if len(name) == 1 and name.isupper() and name not in types:
+            return "0"
         if name in NOMINAL:
             expr, ctor, imp = NOMINAL[name]
             ctx.ctors.add(ctor)
-            if imp:
-                ctx.imports.add(imp)
+            for m in (imp or "").split(","):
+                if m:
+                    ctx.imports.add(m)
+            # A generic opaque type is built at its own type argument
+            # (`Secret[Bytes]` is `secret.new(<bytes>)`), Int when unapplied.
+            if "{0}" in expr:
+                args = t.get("args") or []
+                expr = expr.replace("{0}", dummy(args[0], ctx, types) if args else "0")
             return expr
         if name in types:
             mod, kind = types[name]
@@ -256,6 +313,11 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
                     if not case.get("fields") and not case.get("payload") and not case.get("args"):
                         return case["name"]
                 raise Unsynth(f"variant {name} has no payload-less case")
+            # The interface keeps a transparent alias's name where the source
+            # wrote it (`handler: HttpHandler`); a value of it is a value of
+            # its target.
+            if kind.get("kind") == "alias":
+                return dummy(kind["target"], ctx, types)
             raise Unsynth(f"type {name} of kind {kind.get('kind')}")
         raise Unsynth(f"nominal type {name} has no known constructor")
     raise Unsynth(f"type kind={k}")
@@ -299,10 +361,50 @@ def enumerate_surface():
     return sigs, types
 
 
+# Protocol-bounded type variables (`[H: Read]`, `[M: HttpMessage]`): the
+# interface JSON names the variable but not its bound, so the probe pins each
+# to one conformer. Keyed "mod.fn" -> {variable: type node}.
+STDIN = {"kind": "named", "name": "Stdin"}
+STDOUT = {"kind": "named", "name": "Stdout"}
+TCP_LISTENER = {"kind": "named", "name": "TcpListener"}
+HTTP_RESPONSE = {"kind": "named", "name": "HttpResponse"}
+BOUNDED_TVARS = {
+    "io.read": {"H": STDIN},
+    "io.read_exact": {"H": STDIN},
+    "io.read_to_end": {"H": STDIN},
+    "io.write": {"H": STDOUT},
+    "io.close": {"H": TCP_LISTENER},
+    **{f"http.{n}": {"M": HTTP_RESPONSE} for n in (
+        "header", "header_values", "headers", "body", "body_bytes",
+        "set_header", "set_body", "set_body_bytes")},
+    # list.join[T: Text]: String is the conformer a probe can print.
+    "list.join": {"T": {"kind": "string"}},
+}
+
+
+def pin_tvars(t, table):
+    """t with each type variable named in table replaced by its conformer."""
+    if not table or not isinstance(t, dict):
+        return t
+    if t.get("kind") == "type_var" and t.get("name") in table:
+        return table[t["name"]]
+    out = dict(t)
+    for key in ("inner", "ok", "err", "key", "value", "return"):
+        if key in out:
+            out[key] = pin_tvars(out[key], table)
+    for key in ("params", "elements", "args"):
+        if key in out:
+            out[key] = [pin_tvars(x, table) for x in out[key]]
+    return out
+
+
 def resolve_unknowns(mod, f):
     """Substitute the UNMODELED table into a fn record; raise on a new cell."""
     key = f"{mod}.{f['name']}"
     table = UNMODELED.get(key, {})
+    bounded = BOUNDED_TVARS.get(key, {})
+    f = dict(f, params=[dict(p, type=pin_tvars(p["type"], bounded)) for p in f.get("params", [])],
+             **({"return": pin_tvars(f["return"], bounded)} if "return" in f else {}))
     params = []
     for p in f.get("params", []):
         t = p["type"]
@@ -325,6 +427,26 @@ def resolve_unknowns(mod, f):
 
 
 def synth(mod, f, params, ret, types, variant, shape=0):
+    if variant != 6:
+        return _synth(mod, f, params, ret, types, variant, shape)
+    pinned = return_only_generics(f, params, ret)
+    if not pinned:
+        return None, "no-return-only-generic"
+    PINNED.clear()
+    PINNED.update({g: PROBE_INPUT for g in pinned})
+    try:
+        prog, ctx = _synth(mod, f, params, ret, types, 0, shape)
+    finally:
+        PINNED.clear()
+    if prog is None:
+        return prog, ctx
+    targs = ", ".join(PROBE_INPUT if g in pinned else render(tvar(g)) for g in f.get("generics", []))
+    prog = prog.replace(f"{mod}.{f['name']}(", f"{mod}.{f['name']}[{targs}](", 1)
+    head, sep, rest = prog.partition("effect fn main()")
+    return f"{head}{PROBE_INPUT_DECL}\n{sep}{rest}", ctx
+
+
+def _synth(mod, f, params, ret, types, variant, shape=0):
     """A minimal program calling module.fn once, or (None, why).
 
     variant 0: plain args, discarded bind.
@@ -347,6 +469,10 @@ def synth(mod, f, params, ret, types, variant, shape=0):
                wasi:http/handler@0.3.0 export, where main is not run), so
                the opening print of every other variant walls it there by
                the shape rule, not by the fn.
+    variant 6: (built by `synth`) variant 0 with every return-only generic
+               pinned by an explicit type argument to a declared
+               `ProbeIn: Decode` record — `http.decode_json[T: Decode]`
+               left open defaults T to Int, which has no Decode.
 
     Tuple-shaped returns are CONSUMED the way real code consumes them,
     through a `shape` ladder of their own (every variant tries each):
@@ -440,6 +566,10 @@ def synth(mod, f, params, ret, types, variant, shape=0):
         body = f"{body}\n  println(\"p\")"
     if mod in EXPLICIT_IMPORT:
         ctx.imports.add(mod)
+    # The raw-pointer `bytes` spellings sit outside the memory-safety
+    # guarantee: a file calling one must `import ffi` (E100).
+    if any(f"bytes.{p}(" in body for p in ("as_ptr", "as_mut_ptr", "data_ptr", "copy_to_ptr", "from_raw_ptr")):
+        ctx.imports.add("ffi")
     imp = "".join(f"import {m}\n" for m in sorted(ctx.imports))
     imp = imp + "\n" if imp else ""
     return f"{imp}effect fn main() -> Unit = {{\n{body}\n}}\n", ctx
@@ -644,7 +774,7 @@ def measure(mod, f, types, leg, tmp, env):
     except Unsynth as e:
         return "error", str(e)
     verdict, ctors = None, set()
-    for variant, shape in [(v, sh) for v in (0, 1, 2, 3, 4, 5) for sh in (0, 1, 2)]:
+    for variant, shape in [(v, sh) for v in (0, 1, 2, 3, 4, 5, 6) for sh in (0, 1, 2)]:
         try:
             prog, ctx = synth(mod, f, params, ret, types, variant, shape)
         except Unsynth as e:
@@ -706,6 +836,20 @@ def measure(mod, f, types, leg, tmp, env):
     return status, detail
 
 
+_SWEEP = None
+
+
+def _measure_nth(i):
+    """Measure the i-th fn of the sweep in a scratch dir of its own."""
+    sigs, types, leg, tmp, env = _SWEEP
+    mod, f = sigs[i]
+    sub = tempfile.mkdtemp(dir=tmp)
+    try:
+        return measure(mod, f, types, leg, sub, env)
+    finally:
+        shutil.rmtree(sub, ignore_errors=True)
+
+
 def main():
     argv = sys.argv[1:]
     leg = "structural"
@@ -728,8 +872,16 @@ def main():
     sigs, types = enumerate_surface()
     tmp = tempfile.mkdtemp(prefix="almide-avail-")
     counts = {"ok": 0, "wall": 0, "unprobed": 0, "error": 0}
-    for mod, f in sigs:
-        status, detail = measure(mod, f, types, leg, tmp, env)
+    # Every fn is an independent compile, so the sweep fans out over forked
+    # workers (each with its own copy of the synthesis globals and its own
+    # scratch dir); the rows still print in surface order. AVAIL_JOBS=1 is
+    # the serial sweep.
+    global _SWEEP
+    _SWEEP = (sigs, types, leg, tmp, env)
+    jobs = int(os.environ.get("AVAIL_JOBS") or os.cpu_count() or 1)
+    with multiprocessing.get_context("fork").Pool(max(1, jobs)) as pool:
+        verdicts = list(pool.imap(_measure_nth, range(len(sigs))))
+    for (mod, f), (status, detail) in zip(sigs, verdicts):
         counts[status] += 1
         print(f"{status}\t{mod}.{f['name']}\t{detail}", flush=True)
         if status == "error":

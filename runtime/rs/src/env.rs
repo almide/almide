@@ -10,8 +10,31 @@ pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> =
 
 pub fn almide_rt_env_get(name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(name).ok() }; __almide_v.into_almide() }
 
-pub fn almide_rt_env_set(name: &str, value: &str) {
-    std::env::set_var(name, value);
+// Reached only through `env.set` and `env.remove`, whose Almide bodies err on
+// the four pairs set_var panics on (#4200: an empty name, `=` or NUL in the
+// name, NUL in the value). The guard below is the floor under that check, not
+// the answer: a pair the environment cannot hold is never handed to set_var.
+// `env.remove` hands over the value NUL — the one value `set` refuses — as its
+// mark (#3908): the wasm hosts keep it in their overlay, native unsets the name.
+pub fn almide_rt_env___set(name: &str, value: &str) {
+    if name.is_empty() || name.contains('=') || name.contains('\0') {
+        return;
+    }
+    if value == "\0" {
+        std::env::remove_var(name);
+    } else if !value.contains('\0') {
+        std::env::set_var(name, value);
+    }
+}
+
+// `env.vars`'s op (#3908): `name=value` per variable, in the process's order;
+// the Almide body keys and sorts them. A variable whose name or value is not
+// UTF-8 is left out, as `env.get` answers none for it.
+pub fn almide_rt_env___environ() -> Vec<AlmideString> {
+    let __almide_v: Vec<String> = std::env::vars_os()
+        .filter_map(|(k, v)| Some(format!("{}={}", k.into_string().ok()?, v.into_string().ok()?)))
+        .collect();
+    __almide_v.into_almide()
 }
 
 pub fn almide_rt_env_cwd() -> Result<AlmideString, AlmideString> {
@@ -26,31 +49,18 @@ pub fn almide_rt_env_cwd() -> Result<AlmideString, AlmideString> {
     __almide_v.into_almide()
 }
 
-pub fn almide_rt_env_unix_timestamp() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
 
-pub fn almide_rt_env_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
 
 // A negative duration sleeps 0 ms (#2486): `ms as u64` made -1 into u64::MAX
 // milliseconds, so the native leg never returned where every wasm host clamps
 // the count at 0 (crates/almide-wasm/src/host_env.rs, the embedded host's op 36,
-// the stock-p1 shim). `process.sleep` has always clamped the same way. A
+// the stock-p1 shim). A
 // deadline computed as `deadline - now` goes negative once it has passed, and
 // "already late" means "do not wait", not "wait forever" or abort.
 pub fn almide_rt_env_sleep_ms(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
 }
 
-pub fn almide_rt_env_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
 
 pub fn almide_rt_env_os() -> AlmideString {
     let __almide_out: String = {

@@ -18,7 +18,7 @@
 //      then the fixture passes with the bug present. Reading it through an
 //      `effect fn` keeps the value opaque to the folder.
 //   2. It must not touch a host capability the reference interpreter cannot
-//      model. The first version read `process.args()`, whose
+//      model. The first version read the full argv (argv[0] included), whose
 //      `prim.args_get_list_full` made the fixture ABSTAIN from the 3-way oracle
 //      and cost a line in interp-abstain-ledger.txt. The bug is about the arm,
 //      not about where the number comes from.

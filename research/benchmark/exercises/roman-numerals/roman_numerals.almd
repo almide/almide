@@ -4,8 +4,8 @@ fn to_roman(n: Int) -> String = {
   var result = ""
   var remaining = n
   for i in 0..<13 {
-    let value = list.get_or(values, i, 0)
-    let symbol = list.get_or(symbols, i, "")
+    let value = list.get(values, i) ?? 0
+    let symbol = list.get(symbols, i) ?? ""
     while remaining >= value {
       result = result + symbol
       remaining = remaining - value

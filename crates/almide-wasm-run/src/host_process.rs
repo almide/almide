@@ -34,11 +34,12 @@ pub fn set_allowlist(list: Option<Vec<String>>) {
     *ALLOW.lock().unwrap_or_else(|p| p.into_inner()) = list;
 }
 
-fn allowed(call: &str, cmd: &str) -> Result<(), String> {
+fn allowed(call: &'static str, cmd: &str) -> Result<(), String> {
     match &*ALLOW.lock().unwrap_or_else(|p| p.into_inner()) {
-        Some(list) if !list.iter().any(|c| c == cmd) => Err(format!(
-            "{call}(\"{cmd}\"): `{cmd}` is not in [permissions] proc"
-        )),
+        Some(list) if !list.iter().any(|c| c == cmd) => {
+            let shown = almide_base::err_text::almide_rt_errtext_escape(cmd);
+            Err(format!("{call}(\"{shown}\"): `{shown}` is not in [permissions] proc"))
+        }
         _ => Ok(()),
     }
 }
@@ -78,6 +79,28 @@ fn head_and_args(b: &str) -> Result<(String, Vec<String>), String> {
     Ok((head, all))
 }
 
+/// The core's signal syscall (#4125): kill(2) through rustix (safe), never a
+/// `kill` looked up on PATH. The core has already refused pid <= 0 and a
+/// signal outside 0..=31.
+#[cfg(unix)]
+fn signal(pid: i32, sig: i32) -> Result<(), i32> {
+    let Some(pid) = rustix::process::Pid::from_raw(pid) else { return Err(3) };
+    let r = if sig == 0 {
+        rustix::process::test_kill_process(pid)
+    } else {
+        // from_named_raw answers None for a number that is not a named signal.
+        match rustix::process::Signal::from_named_raw(sig) {
+            Some(s) => rustix::process::kill_process(pid, s),
+            None => return Err(22),
+        }
+    };
+    r.map_err(|e| e.raw_os_error())
+}
+#[cfg(windows)]
+fn signal(pid: i32, sig: i32) -> Result<(), i32> {
+    almide_rt_core::process_core::almide_proc_signal_windows(pid, sig)
+}
+
 /// Serve one operation. `flush` runs before a child that shares this
 /// program's stdout starts (run / run_in), as native flushes its own.
 pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String, String> {
@@ -102,34 +125,40 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             core::almide_proc_exec_status(a, &cells(b)?).map(status_text)
         }
         84 => {
-            let (ms, args) = head_and_args(b)?;
-            allowed("process.exec_status_timeout", a)?;
-            let ms: i64 = ms.parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
-            core::almide_proc_exec_status_timeout(a, &args, ms, core::almide_proc_try_wait_poll).map(status_text)
+            let mut all = cells(b)?;
+            if all.len() < 3 {
+                return Err("malformed process frame (missing operand)".to_string());
+            }
+            let rest = all.split_off(3);
+            let ms: i64 = all[0].parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
+            allowed("process.output", a)?;
+            core::almide_proc_output(a, &rest, &all[1], &all[2], ms, core::almide_proc_try_wait_poll).map(status_text)
         }
         85 => {
             allowed("process.run", a)?;
             flush();
             core::almide_proc_run(a, &cells(b)?).map(|c| c.to_string())
         }
-        86 => {
-            allowed("process.spawn", a)?;
-            core::almide_proc_spawn(a, &cells(b)?).map(|p| p.to_string())
-        }
         87 => {
-            let num = |s: &str| s.parse::<i64>().map_err(|_| format!("malformed process operand `{s}`"));
-            core::almide_proc_kill(num(a)?, num(b)?).map(|()| String::new())
+            // #4125: signalling is bounded by `[permissions] proc` as the
+            // `kill` command it used to run (src/cli/mod.rs PROC_SIGNALLING).
+            allowed("process.kill", "kill")?;
+            let num = |s: &str| s.parse::<i64>().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(s)));
+            core::almide_proc_kill(num(a)?, num(b)?, signal).map(|()| String::new())
         }
-        88 => {
-            let pid = a.parse::<i64>().map_err(|_| format!("malformed process operand `{a}`"))?;
-            Ok(if core::almide_proc_is_alive(pid) { "1" } else { "0" }.to_string())
-        }
+        // 86 (spawn) and 88 (is_alive) served the surface process.start
+        // replaced (R-process-03); their numbers stay unused.
         89 => Ok(std::process::id().to_string()),
         90 => {
-            let (cmd, args) = head_and_args(b)?;
-            allowed("process.run_in", &cmd)?;
+            let mut all = cells(b)?;
+            if all.len() < 3 {
+                return Err("malformed process frame (missing operand)".to_string());
+            }
+            let rest = all.split_off(3);
+            let ms: i64 = all[2].parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
+            allowed("process.run", &all[0])?;
             flush();
-            core::almide_proc_run_in(a, &cmd, &args).map(|c| c.to_string())
+            core::almide_proc_run_cmd(&all[0], &rest, a, &all[1], ms).map(|c| c.to_string())
         }
         _ => Err(format!("unknown process op {op}")),
     }
@@ -169,8 +198,9 @@ fn spawn_call<T>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr,
         .and_then(|e| e.into_memory())
         .ok_or_else(|| wasmtime::Error::msg("almide:process/spawn: the guest exports no memory"))?;
     let read = |caller: &wasmtime::Caller<'_, T>, ptr: i32, len: i32| -> wasmtime::Result<String> {
-        let mut buf = vec![0u8; len as u32 as usize];
-        mem.read(caller, ptr as u32 as usize, &mut buf)?;
+        // Bounds-checked before anything is allocated (#4135): a forged
+        // length traps instead of reserving up to 4 GiB.
+        let buf = crate::host::read_guest(caller, mem, ptr, len)?;
         String::from_utf8(buf).map_err(|_| wasmtime::Error::msg("almide:process/spawn: operand is not UTF-8"))
     };
     let a = read(caller, a_ptr, a_len)?;

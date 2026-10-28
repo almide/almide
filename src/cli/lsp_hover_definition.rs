@@ -136,7 +136,7 @@ fn find_stdlib_definition(line: &str, word: &str, start: usize, end: usize) -> O
     let target_line = func_name.as_ref()
         .and_then(|f| find_fn_line_in_file(&path, f))
         .unwrap_or(0);
-    let file_uri = Uri::from_str(&format!("file://{}", path.display())).ok()?;
+    let file_uri = path_to_uri(&path)?;
     Some(Location {
         uri: file_uri,
         range: Range {

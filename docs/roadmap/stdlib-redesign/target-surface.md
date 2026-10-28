@@ -1,7 +1,7 @@
 <!-- description: Stdlib redesign — the standard library as it stands once every adopted proposal lands: every public function with its post-redesign signature, per module, and what was removed -->
 # リデザイン後の標準ライブラリ（設計）
 
-> Last updated: 2026-10-22
+> Last updated: 2026-10-24
 > 元の記録: [README.md](README.md)（案の索引）・各 L2 ページの L3 関数表
 
 採用した案（○）をすべて適用したあとの、標準ライブラリの公開関数の一覧です。各 L2 ページの L3 関数表から機械的に組み立てています。表と食い違うときは、L3 の表と L2 の案が正です。
@@ -33,25 +33,26 @@
 | protocol の階層 | 標準の型は protocol の階層（[protocol-view.md](protocol-view.md)。手本は Swift）に準拠し、モジュールの関数はその protocol の関数そのものです。protocol が要件とする関数は、準拠する型のどれにも同じ名前・同じ形であります。`compare` を持つ型は `min`・`max`・`clamp` を、すべての値の型は `to_string` を、既定の実装で持ちます（この一覧には、型のページに行のある分だけ載せています）。 | R-L0-37、R-L0-38 |
 | 範囲外の扱い | 関数の役割で決まります。範囲を取り出す関数（`slice`・`take`・`drop` など）は、長さを超えた分を丸め、負の位置・負の数は abort です。位置の 1 つを読む関数（`get`・`first`・`bytes.get_*`・`next_*`）は none です。位置の 1 つを書く関数（`set`・`update`・`insert`・`remove_at`・`bytes.put_*`）と、形を前提にする関数（`matrix` の演算、`bytes.xor`、`chunk(0)`）は abort です。 | R-L0-33、R-L0-29 |
 | `zlib` の圧縮 | 圧縮した出力のバイト列は native と wasm で違います。これは「両 target で同じ結果」の約束がまだ果たせていない箇所で、`effect` を付けているのは目印にすぎず、解決ではありません。同じ実装に替えたときの速さと圧縮率を測ってから決めます。往復（圧縮して戻す）は両 target で同じです。 | R-zlib-03（保留、未達） |
+| Codec の入力 | Codec のレコード型 `T` は、`T.decode` のほかに `T.decode_strict` を導出します。`decode` は知らないキーを無視し、`decode_strict` はフィールドを読む前に最初の知らないキーを `unknown key '<k>'` で拒みます。`@skip` のフィールドは読みも書きもせず、`@skip_decode` のフィールドは読まずに書きます（どちらも既定値が必要）。フィールドに置ける属性はこの 2 つと `@builtin`・`@location` だけで、ほかはエラーの E053 です。 | R-L0-48 |
 
 ## 全体の数
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1292 | 409 | 708 | 88 | 87 | 417 |
+| 1001 | 1297 | 408 | 713 | 88 | 88 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,292 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,297 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 796 | 166 |
-| 値の型だけが持つ関数 | 293 | 293 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 203 | 203 |
-| 計 | 1292 | 662 |
+| 値の型だけが持つ関数 | 297 | 297 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 204 | 204 |
+| 計 | 1297 | 667 |
 
 ## モジュールごとの数
 
@@ -61,12 +62,12 @@
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 24 | 24 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
 | [`bool`](#bool) | 3 | 3 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
-| [`bytes`](#bytes) | 177 | 63 | 72 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
+| [`bytes`](#bytes) | 178 | 64 | 72 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
 | [`deque`](#deque)（新しいモジュール） | 60 | 60 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
 | [`duration`](#duration) | 7 | 1 | 0 | 0 | 0 | [L2-duration.md](L2-duration.md) |
-| [`env`](#env) | 8 | 2 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
+| [`env`](#env) | 9 | 3 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
 | `error`（モジュールごと撤去） | 0 | 0 | 0 | 0 | 3 | [L2-error.md](L2-error.md) |
 | [`ffi`](#ffi)（新しいモジュール） | 4 | 4 | 0 | 0 | 0 | [L2-ffi.md](L2-ffi.md) |
 | [`float`](#float) | 26 | 12 | 1 | 0 | 32 | [L2-float.md](L2-float.md) |
@@ -77,7 +78,7 @@
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
-| [`http`](#http) | 34 | 4 | 5 | 9 | 18 | [L2-http.md](L2-http.md) |
+| [`http`](#http) | 34 | 4 | 5 | 10 | 18 | [L2-http.md](L2-http.md) |
 | [`int`](#int) | 45 | 14 | 2 | 4 | 41 | [L2-int.md](L2-int.md) |
 | [`int16`](#int16) | 37 | 34 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`int32`](#int32) | 37 | 34 | 0 | 0 | 21 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -96,8 +97,9 @@
 | [`random`](#random) | 10 | 6 | 0 | 0 | 0 | [L2-random.md](L2-random.md) |
 | [`regex`](#regex) | 15 | 7 | 1 | 7 | 0 | [L2-regex.md](L2-regex.md) |
 | [`result`](#result) | 14 | 0 | 0 | 0 | 1 | [L2-result.md](L2-result.md) |
+| [`secret`](#secret) | 2 | 2 | 0 | 0 | 0 | [L2-secret.md](L2-secret.md) |
 | [`set`](#set) | 42 | 23 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
-| [`string`](#string) | 85 | 40 | 3 | 2 | 5 | [L2-string.md](L2-string.md) |
+| [`string`](#string) | 86 | 41 | 3 | 2 | 5 | [L2-string.md](L2-string.md) |
 | [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](L2-testing.md) |
 | [`uint16`](#uint16) | 35 | 32 | 0 | 0 | 15 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint32`](#uint32) | 35 | 32 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -117,7 +119,7 @@
 |---|---|---|---|
 | `has_flag` | `effect fn args.has_flag(name: String) -> Bool` | 新規 | R-args-01 |
 | `option` | `effect fn args.option(name: String) -> String?` |  |  |
-| `positional` | `effect fn args.positional() -> List[String]` |  |  |
+| `positional` | `effect fn args.positional(options: List[String]) -> List[String]` |  |  |
 
 撤去（4）:
 
@@ -125,7 +127,7 @@
 |---|---|---|
 | `flag` | `has_flag` | R-args-01 |
 | `option_or` | `option(n)! ?? d` | R-args-02 |
-| `positional_at` | `list.get(args.positional()!, i)` | R-args-03 |
+| `positional_at` | `list.get(args.positional(options)!, i)` | R-args-03 |
 | `raw` | `env.args` | R-args-02 |
 
 ## base64
@@ -274,6 +276,7 @@
 | `insert` | `fn bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` | 意味変更: `0..=len` の外は abort | R-bytes-11 |
 | `intersperse` | `fn bytes.intersperse(b: Bytes, sep: Int) -> Bytes` | 新規 | R-L0-42 |
 | `is_empty` | `fn bytes.is_empty(b: Bytes) -> Bool` |  |  |
+| `is_equal_constant_time` | `fn bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool` | 新規 | R-bytes-29 |
 | `is_eof` | `fn bytes.is_eof(b: Bytes, pos: Int) -> Bool` | 改名（旧 `eof`） | R-bytes-07 |
 | `is_valid_utf8` | `fn bytes.is_valid_utf8(b: Bytes) -> Bool` |  |  |
 | `last` | `fn bytes.last(b: Bytes) -> Int?` | 新規 | R-bytes-20 |
@@ -545,7 +548,8 @@
 | `cwd` | `effect fn env.cwd() -> String` |  |  |
 | `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
 | `os` | `fn env.os() -> String` |  |  |
-| `remove` | `effect fn env.remove(name: String) -> Unit` | 新規 | R-env-02 |
+| `remove` | `effect fn env.remove(name: String) -> Result[Unit, String]` | 新規 | R-env-02 |
+| `secret` | `effect fn env.secret(name: String) -> Secret[String]?` | 新規。値は `Secret` で生まれる | R-env-05 |
 | `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
 | `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |
 | `vars` | `effect fn env.vars() -> Map[String, String]` | 新規 | R-env-02 |
@@ -603,7 +607,7 @@
 | `to_string` | `fn float.to_string(x: Float) -> String` |  |  |
 | `trunc` | `fn float.trunc(x: Float) -> Float` | 新規 | R-float-04 |
 
-撤去（32）:
+撤去（34）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
@@ -615,6 +619,8 @@
 | `to_float32_checked` | `float32.from_checked` | R-L0-40 |
 | `to_float64` | `float64.from` | R-L0-40 |
 | `to_int` | `int.from` | R-L0-40 |
+| `to_int_checked` | `int.from_checked` | R-L0-40 |
+| `to_int_saturating` | `int.from_saturating` | R-L0-40 |
 | `to_int16` | `int16.from` | R-L0-40 |
 | `to_int16_checked` | `int16.from_checked` | R-L0-40 |
 | `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
@@ -786,10 +792,10 @@
 | `adler32` | `fn hash.adler32(b: Bytes) -> Int` | 新規 | R-hash-02 |
 | `crc32` | `fn hash.crc32(b: Bytes) -> Int` | 新規 | R-hash-02 |
 | `fnv1a32` | `fn hash.fnv1a32(b: Bytes) -> Int` | 意味変更: 引数を `Bytes` に。`fnv1a32(bytes.from_string(s))` | R-hash-01 |
-| `md5` | `fn hash.md5(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
-| `md5_hex` | `fn hash.md5_hex(b: Bytes) -> String` | 新規。`Bytes` を受け取る | R-hash-03、R-hash-05 |
-| `sha1` | `fn hash.sha1(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
-| `sha1_hex` | `fn hash.sha1_hex(b: Bytes) -> String` | 新規。`Bytes` を受け取る | R-hash-03、R-hash-05 |
+| `hmac_sha256` | `fn hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` | 新規 | R-hash-06、R-hash-07 |
+| `hmac_sha512` | `fn hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` | 新規 | R-hash-06、R-hash-07 |
+| `is_valid_hmac_sha256` | `fn hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` | 新規 | R-hash-06、R-hash-07 |
+| `is_valid_hmac_sha512` | `fn hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` | 新規 | R-hash-06、R-hash-07 |
 | `sha256` | `fn hash.sha256(b: Bytes) -> Bytes` |  |  |
 | `sha256_hex` | `fn hash.sha256_hex(b: Bytes) -> String` | 意味変更: `Bytes` を受け取る | R-hash-05 |
 | `sha512` | `fn hash.sha512(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
@@ -800,6 +806,8 @@
 | 関数 | 代わり | 案 |
 |---|---|---|
 | `fnv1a32_bytes` | `fnv1a32` | R-hash-01 |
+
+足さない（R-hash-07）: `md5`・`md5_hex`・`sha1`・`sha1_hex`（安全性に使えない要約。epoch 15 で撤去、代わりは `sha256`）と、HMAC の `_hex` のセル `hmac_sha256_hex`・`hmac_sha512_hex`（16 進は `hex.encode(secret.reveal(tag))`）。
 
 ## heap
 
@@ -856,7 +864,7 @@
 | `body` | `fn http.body[M: HttpMessage](m: M) -> String` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
 | `body_bytes` | `fn http.body_bytes[M: HttpMessage](m: M) -> Bytes` | 新規。`HttpRequest` も受け取る | R-http-12 |
 | `cancel` | `effect fn http.cancel(c: HttpCall) -> Unit` |  | R-http-01 |
-| `decode_json` | `fn http.decode_json[A](req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]` |  |  |
+| `decode_json` | `fn http.decode_json[A: Decode](req: HttpRequest) -> Result[A, HttpResponse]` | 型引数 `A` は入力の型（`: Decode` だけの record）。`Codec` の型は E110。本文は `A.decode_strict` で読み、型の外のキーは `400 Bad Request: unknown key '<k>'`（decode 関数の引数は撤去） | 行 22、C-436 |
 | `get` | `effect fn http.get(url: String) -> String` |  | R-http-01 |
 | `get_response` | `effect fn http.get_response(url: String) -> HttpResponse` |  | R-http-01 |
 | `header` | `fn http.header[M: HttpMessage](m: M, name: String) -> String?` | 改名（旧 `get_header`）。`HttpRequest` も受け取る | R-http-12 |
@@ -1569,13 +1577,13 @@
 | `add` | `a + b` | R-matrix-14 |
 | `append_rows` | `concat_rows([a, b])` | R-matrix-11 |
 | `concat_cols_many` | `matrix.concat_cols` | R-matrix-06 |
-| `conv1d` | nnlib | R-matrix-01（nnlib） |
+| `conv1d` | nn.kernels | R-matrix-01（nn.kernels） |
 | `div` | `a / b` | R-matrix-14 |
 | `fma` | 内部の `__fma` | R-matrix-02（内部の `__fma`） |
 | `fma3` | 内部の `__fma3` | R-matrix-02（内部の `__fma3`） |
-| `linear_f32_row_no_bias` | nnlib | R-matrix-01（nnlib） |
-| `linear_row` | nnlib | R-matrix-01（nnlib） |
-| `linear_row_no_bias` | nnlib | R-matrix-01（nnlib） |
+| `linear_f32_row_no_bias` | nn.kernels | R-matrix-01（nn.kernels） |
+| `linear_row` | nn.kernels | R-matrix-01（nn.kernels） |
+| `linear_row_no_bias` | nn.kernels | R-matrix-01（nn.kernels） |
 | `mul` | `a * b` | R-matrix-14 |
 | `mul_f32` | `a * b` | R-matrix-03 |
 | `mul_f32_scaled` | `matrix.scale(a * b, s)` | R-matrix-03 |
@@ -1587,7 +1595,7 @@
 | `pow` | `matrix.map(m, (x) => float.pow(x, e))` | R-matrix-13 |
 | `row_dot` | `matrix.dot_row` | R-matrix-06 |
 | `select_rows` | `matrix.gather_rows` | R-matrix-04 |
-| `select_rows_f32` | nnlib | R-matrix-01（nnlib） |
+| `select_rows_f32` | nn.kernels | R-matrix-01（nn.kernels） |
 | `sub` | `a - b` | R-matrix-14 |
 | `zeros_f32` | `matrix.zeros`（f32 のデータは from_bytes_f32_le で読む） | R-matrix-03 |
 
@@ -1791,6 +1799,15 @@
 |---|---|---|
 | `unwrap_or` | `r ?? d` | R-result-01 |
 
+## secret
+
+記録: [L2-secret.md](L2-secret.md)
+
+| 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
+|---|---|---|---|
+| `new` | `fn secret.new[A](x: A) -> Secret[A]` | 新規 | R-secret-01 |
+| `reveal` | `fn secret.reveal[A](s: Secret[A]) -> A` | 新規 | R-secret-01 |
+
 ## set
 
 記録: [L2-set.md](L2-set.md)
@@ -1879,6 +1896,7 @@
 | `is_alphanumeric` | `fn string.is_alphanumeric(s: String) -> Bool` |  |  |
 | `is_digit` | `fn string.is_digit(s: String) -> Bool` |  |  |
 | `is_empty` | `fn string.is_empty(s: String) -> Bool` |  |  |
+| `is_equal_constant_time` | `fn string.is_equal_constant_time(a: String, b: String) -> Bool` | 新規 | R-string-19 |
 | `is_lower` | `fn string.is_lower(s: String) -> Bool` |  |  |
 | `is_upper` | `fn string.is_upper(s: String) -> Bool` |  |  |
 | `is_whitespace` | `fn string.is_whitespace(s: String) -> Bool` |  |  |

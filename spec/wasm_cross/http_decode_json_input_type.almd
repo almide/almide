@@ -1,0 +1,64 @@
+// @contract: C-436
+// C-436: `http.decode_json[T](req)` decodes the body into the input type `T`
+// (a `: Decode` type that is not also `Encode`) with `T.decode_strict`. A key
+// outside T at ANY depth — the over-posted `is_admin`, a typo, a key inside a
+// nested input record — is `400 Bad Request: unknown key '<k>'` with the
+// path of the record it sits in; a missing field and a body that is not JSON
+// are 400s naming why. A variant input type is accepted: a key after the
+// tag, or an unknown key in its record payload, is refused the same way, and
+// an unknown tag is `unknown variant`. The handler builds the domain value,
+// so `is_admin` is never input.
+import http
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+type AddressInput: Decode = { city: String }
+
+type UserInput: Decode = { name: String, email: String, address: AddressInput?, tags: List[AddressInput] = [] }
+
+type CommandInput: Decode = | Rename { name: String } | Pin(AddressInput) | Delete
+
+fn create(req: HttpRequest) -> String = match http.decode_json[UserInput](req) {
+  ok(i) => {
+    let u = User { name: i.name, email: i.email, is_admin: false }
+    let city = match i.address {
+      some(a) => a.city,
+      none => "-",
+    }
+    "ok ${u.name} ${u.email} is_admin=${u.is_admin} city=${city} tags=${list.len(i.tags)}"
+  },
+  err(bad) => "${bad}",
+}
+
+fn command(req: HttpRequest) -> String = match http.decode_json[CommandInput](req) {
+  ok(c) => "ok ${c}",
+  err(bad) => "${bad}",
+}
+
+effect fn main() -> Unit = {
+  let bodies = [
+    "{\"name\":\"m\",\"email\":\"e\"}",
+    "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}",
+    "{\"is_admin\":true,\"name\":\"m\",\"email\":\"e\"}",
+    "{\"name\":\"m\",\"email\":\"e\",\"zz\":1,\"yy\":2}",
+    "{\"name\":\"m\",\"email\":\"e\",\"address\":{\"city\":\"k\"}}",
+    "{\"name\":\"m\",\"email\":\"e\",\"address\":{\"city\":\"k\",\"verified\":true}}",
+    "{\"name\":\"m\",\"email\":\"e\",\"tags\":[{\"city\":\"a\"},{\"city\":\"b\",\"is_admin\":true}]}",
+    "{\"name\":\"m\"}",
+    "not json"
+  ]
+  for body in bodies {
+    println(create(http.new_request("POST", "/users", body, [])))
+  }
+  let commands = [
+    "{\"Rename\":{\"name\":\"n\"}}",
+    "{\"Rename\":{\"name\":\"n\",\"is_admin\":true}}",
+    "{\"Pin\":[{\"city\":\"c\",\"verified\":true}]}",
+    "{\"Delete\":null,\"Rename\":{\"name\":\"n\"}}",
+    "{\"Delete\":null}",
+    "{\"Drop\":null}"
+  ]
+  for body in commands {
+    println(command(http.new_request("POST", "/commands", body, [])))
+  }
+}

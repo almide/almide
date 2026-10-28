@@ -44,7 +44,7 @@ fn baseline_path() -> String = "proofs/fold-seed-source-baseline.txt"
 
 fn is_ident_char(c: String) -> Bool = c != "" and (string.is_alphanumeric(c) or c == "_")
 
-fn is_bare_ident(s: String) -> Bool = s != "" and not string.is_digit(string.take(s, 1)) and (string.chars(s) |> list.all((c) => is_ident_char(c)))
+fn is_bare_ident(s: String) -> Bool = s != "" and not string.is_digit(string.take(s, 1)) and (string.to_list(s) |> list.all((c) => is_ident_char(c)))
 
 // Every codepoint offset at which `needle` starts in `text`, ascending.
 fn offsets_of(text: String, needle: String, from: Int, acc: List[Int]) -> List[Int] = match string.index_of(
@@ -66,8 +66,8 @@ type Strip = { out: String, in_str: Bool }
 
 fn strip_line(cs: List[String], i: Int, st: Strip) -> Strip = if i >= list.len(cs) then st
 else {
-  let c = list.get_or(cs, i, "")
-  let next = list.get_or(cs, i + 1, "")
+  let c = list.get(cs, i) ?? ""
+  let next = list.get(cs, i + 1) ?? ""
   if st.in_str then (if c == "\\" then strip_line(
     cs,
     i + 2,
@@ -84,13 +84,13 @@ fn code_only(text: String) -> String = {
   let folded = string.lines(text) |> list.fold(
     ([], false),
     ((acc, line) => {
-      let st = strip_line(string.chars(line), 0, Strip { out: "", in_str: acc.1 })
+      let st = strip_line(string.to_list(line), 0, Strip { out: "", in_str: acc.1 })
       (acc.0 + [
         st.out
       ], st.in_str)
     }),
   )
-  string.join(folded.0, "\n")
+  list.join(folded.0, "\n")
 }
 
 // ── top-level argument splitting ──
@@ -107,8 +107,8 @@ fn is_close(c: String) -> Bool = c == ")" or c == "]" or c == "}"
 // top-level commas, or none when the list never closes.
 fn split_args(cs: List[String], st: Split) -> List[String]? = if st.i >= list.len(cs) then none
 else {
-  let c = list.get_or(cs, st.i, "")
-  let next = list.get_or(cs, st.i + 1, "")
+  let c = list.get(cs, st.i) ?? ""
+  let next = list.get(cs, st.i + 1) ?? ""
   match st.mode {
     "str" => if c == "\\" then split_args(cs, { ...st, i: st.i + 2, cur: st.cur + c + next })
     else if c == "\"" then split_args(cs, { ...st, i: st.i + 1, mode: "code", cur: st.cur + c })
@@ -142,7 +142,7 @@ else {
 }
 
 fn top_level_args(after_paren: String) -> List[String]? = split_args(
-  string.chars(after_paren),
+  string.to_list(after_paren),
   Split { i: 0, depth: 0, mode: "code", cur: "", args: [] },
 )
 
@@ -162,16 +162,16 @@ fn mentions(s: String, name: String, i: Int) -> Bool = {
 // characters at its end, refused when a `.` precedes it (`a.b` is a field read,
 // not a bare receiver).
 fn trailing_ident(s: String) -> String = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   let n = list.len(cs)
   let run = trailing_run(cs, n, 0)
-  let before = list.get_or(cs, n - run - 1, "")
+  let before = list.get(cs, n - run - 1) ?? ""
   let name = string.take_end(s, run)
   if run > 0 and before != "." and is_bare_ident(name) then name else ""
 }
 
 fn trailing_run(cs: List[String], n: Int, k: Int) -> Int =
-  if k < n and is_ident_char(list.get_or(cs, n - k - 1, "")) then trailing_run(
+  if k < n and is_ident_char(list.get(cs, n - k - 1) ?? "") then trailing_run(
     cs,
     n,
     k + 1,
@@ -196,17 +196,17 @@ fn probe(path: String, text: String, callee: String, p: Int) -> Probe = {
   let before = string.get(text, p - 1) ?? ""
   if is_ident_char(before) or before == "." then Probe { site: none, unsplit: false } else {
     let start = p + string.len(needle)
-    let line = string.count(string.take(text, p), "\n") + 1
+    let line = string.count_matches(string.take(text, p), "\n") + 1
     match top_level_args(string.drop(text, start)) {
       none => Probe { site: none, unsplit: true },
       some(args) => {
         let receiver = pipe_receiver(string.take(text, p))
-        let first = string.trim(list.get_or(args, 0, ""))
+        let first = string.trim(list.get(args, 0) ?? "")
         // Pipe form: the receiver is the source and the first argument is the
         // seed. Call form: the first argument must be a bare identifier and the
         // second is the seed.
-        let (source, seed, form) = if receiver != "" then (receiver, list.get_or(args, 0, ""), "pipe")
-        else if is_bare_ident(first) then (first, list.get_or(args, 1, ""), "call")
+        let (source, seed, form) = if receiver != "" then (receiver, list.get(args, 0) ?? "", "pipe")
+        else if is_bare_ident(first) then (first, list.get(args, 1) ?? "", "call")
         else ("", "", "")
         if source != "" and mentions(seed, source, 0) then Probe {
           site: some(Site { path: path, line: line, callee: callee, source: source, form: form }),
@@ -225,7 +225,7 @@ fn scan_text(path: String, raw: String) -> FileScan = {
   let probes = callees() |> list.flat_map((callee) => offsets_of(text, "list." + callee + "(", 0, []) |> list.map((p) => (p, probe(path, text, callee, p))))
   FileScan {
     sites: probes |> list.filter_map(((p, pr)) => pr.site) |> list.sort_by((s) => s.line),
-    unsplit: probes |> list.filter_map(((p, pr)) => if pr.unsplit then some(path + ":" + int.to_string(string.count(string.take(text, p), "\n") + 1)) else none),
+    unsplit: probes |> list.filter_map(((p, pr)) => if pr.unsplit then some(path + ":" + int.to_string(string.count_matches(string.take(text, p), "\n") + 1)) else none),
   }
 }
 

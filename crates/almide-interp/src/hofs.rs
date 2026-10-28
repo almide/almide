@@ -47,7 +47,7 @@ impl<'a> Interpreter<'a> {
         }
         // INSIDE the pool tier a heap value is its address (`pool_depth`), so
         // a VALUE-level body — an `m |> list.map(..)` composition —
-        // handed a block a HEAP-level body built (`matrix.mul`'s, in the
+        // handed a block a HEAP-level body built (`matrix.__mul`'s, in the
         // `matrix_fused` compositions) would iterate an Int. A HOF only
         // reads its receiver, so it is read back under the receiver's STATIC
         // type here, the same read-back the pool boundary performs; what the
@@ -154,7 +154,7 @@ impl<'a> Interpreter<'a> {
         let text = match crate::vfs::read_text(&self.vfs, &path) {
             Ok(t) => t,
             Err(e) => {
-                let m = format!("{shown}(\"{path}\"): {e}");
+                let m = format!("{shown}({}): {e}", almide_base::err_text::almide_rt_errtext_quote(&path));
                 return Err(Flow::val(Value::Result(Err(Box::new(Value::str(m))))));
             }
         };
@@ -385,8 +385,8 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
-    /// `map.filter(m, (k, v) -> Bool)` — entries kept in order where the
-    /// 2-ary callback answers true.
+    /// `map.filter(m, ((k, v)) -> Bool)` — entries kept in order where the
+    /// callback answers true for the entry as one `(k, v)` tuple (R-map-09).
     fn hof_map_filter(&mut self, args: &[Value]) -> Flow {
         let entries = match args.first() {
             Some(Value::Map(e)) => e.clone(),
@@ -398,7 +398,7 @@ impl<'a> Interpreter<'a> {
         };
         let mut out = Vec::new();
         for (k, v) in entries.iter() {
-            let keep = val!(self.apply_closure(&clo, vec![k.clone(), v.clone()]));
+            let keep = val!(self.apply_closure(&clo, entry_args(&clo, vec![], k, v)));
             if matches!(keep, Value::Bool(true)) {
                 out.push((k.clone(), v.clone()));
             }
@@ -406,8 +406,8 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
-    /// `map.find(m, (k, v) -> Bool)` — first entry (insertion order) the
-    /// 2-ary callback accepts, as `some((k, v))`; a full pass answers `none`.
+    /// `map.find(m, ((k, v)) -> Bool)` — first entry (insertion order) the
+    /// callback accepts, as `some((k, v))`; a full pass answers `none`.
     fn hof_map_find(&mut self, args: &[Value]) -> Flow {
         let entries = match args.first() {
             Some(Value::Map(e)) => e.clone(),
@@ -418,7 +418,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            let hit = val!(self.apply_closure(&clo, vec![k.clone(), v.clone()]));
+            let hit = val!(self.apply_closure(&clo, entry_args(&clo, vec![], k, v)));
             if matches!(hit, Value::Bool(true)) {
                 return Flow::val(Value::Option(Some(Box::new(Value::tuple(vec![
                     k.clone(),
@@ -429,8 +429,8 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Option(None))
     }
 
-    /// `map.fold(m, init, (acc, k, v) -> acc)` — the 3-ary callback form (the
-    /// list fold's callback is 2-ary, so it cannot be reused).
+    /// `map.fold(m, init, (acc, (k, v)) -> acc)` — the accumulator and the
+    /// entry as one `(k, v)` tuple (R-map-09).
     fn hof_map_fold(&mut self, args: &[Value]) -> Flow {
         let entries = match args.first() {
             Some(Value::Map(e)) => e.clone(),
@@ -445,7 +445,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            acc = val!(self.apply_closure(&clo, vec![acc, k.clone(), v.clone()]));
+            acc = val!(self.apply_closure(&clo, entry_args(&clo, vec![acc], k, v)));
         }
         Flow::val(acc)
     }
@@ -515,3 +515,19 @@ include!("hofs_carrier.rs");
 include!("hofs_list_ops.rs");
 include!("hofs_map_set_ops.rs");
 include!("hofs_fallible.rs");
+
+/// The arguments a map entry callback is applied to (R-map-09): the leading
+/// ones, then the entry as ONE `(k, v)` tuple — the surface's callback. A
+/// closure with one parameter more than that is the spread form
+/// `almide_ir::entry_split` adapts a callback to where the self-hosted body
+/// declares it (the IR a wasm-leg cut point hands this interpreter), and gets
+/// the key and the value separately.
+pub(crate) fn entry_args(clo: &crate::Closure, mut lead: Vec<Value>, k: &Value, v: &Value) -> Vec<Value> {
+    if clo.params.len() == lead.len() + 2 {
+        lead.push(k.clone());
+        lead.push(v.clone());
+    } else {
+        lead.push(Value::tuple(vec![k.clone(), v.clone()]));
+    }
+    lead
+}

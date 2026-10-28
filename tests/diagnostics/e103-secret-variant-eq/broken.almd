@@ -1,0 +1,9 @@
+import secret
+
+type Credential = | Token(Secret[String]) | Anonymous
+
+fn main() -> Unit = {
+  let a = Token(secret.new("t-1"))
+  let b = Token(secret.new("t-1"))
+  println(if a == b then "same" else "different")
+}

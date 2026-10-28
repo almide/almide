@@ -49,8 +49,8 @@ const PROGRAM: &str = r#"
 import json
 
 fn cell(c: Int) -> String = {
-  let s = string.from_codepoint(c)
-  let v = value.str(s)
+  let s = (string.from_codepoint(c) ?? "")
+  let v = value.string(s)
   let k = value.object([(s, value.int(1))])
   let pv = string.replace(json.stringify_pretty(value.array([v])), "\n", "/")
   let pk = string.replace(json.stringify_pretty(k), "\n", "/")

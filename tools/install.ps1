@@ -6,6 +6,8 @@
 #   $env:ALMIDE_INSTALL = "$HOME\bin"; .\install.ps1          # custom install dir
 
 $ErrorActionPreference = 'Stop'
+# TLS 1.2 or newer for every download (#4181); the URLs below are https only.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $Repo = "almide/almide"
 $InstallDir = if ($env:ALMIDE_INSTALL) { $env:ALMIDE_INSTALL } else { "$env:USERPROFILE\.local\bin" }

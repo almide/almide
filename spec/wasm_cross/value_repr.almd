@@ -24,13 +24,13 @@ fn main() -> Unit = {
   // AlmideRepr path
   // Bare `Value` across every `value_stringify` branch.
   println("obj=${obj}")
-  println("arr=${value.array([value.int(1), value.str("a"), value.bool(false), value.null()])}")
+  println("arr=${value.array([value.int(1), value.string("a"), value.bool(false), value.null()])}")
   println("int=${value.int(42)}")
   println("neg=${value.int(0 - 7)}")
   println("bool=${value.bool(false)}")
   println("flt=${value.float(2.5)}")
   println("fltint=${value.float(3.0)}")
-  println("str=${value.str('a"b\nc\\d')}")
+  println("str=${value.string('a"b\nc\\d')}")
   println("null=${value.null()}")
   // Nested object holding an array of objects.
   println("nest=${value.object([

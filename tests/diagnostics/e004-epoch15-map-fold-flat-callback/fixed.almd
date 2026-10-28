@@ -1,0 +1,5 @@
+// The entry is one tuple parameter, destructured in place.
+fn main() -> Unit = {
+  let m = ["a": 1, "b": 2]
+  println(int.to_string(map.fold(m, 0, (acc, (k, v)) => acc + v)))
+}

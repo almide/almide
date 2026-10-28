@@ -13,7 +13,7 @@ fn n16(x: Int16) -> Int16 = -x
 fn n32(x: Int32) -> Int32 = -x
 
 effect fn main() -> Unit = {
-  let a: Int8 = int.to_int8(int.parse("-128")!)
+  let a: Int8 = int8.from_wrapping(int.parse("-128")!)
   println(int8.to_string(n8(-128)))
   println(int16.to_string(n16(-32768)))
   println(int32.to_string(n32(-2147483648)))

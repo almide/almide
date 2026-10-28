@@ -540,9 +540,30 @@ impl Emitter<'_> {
         match lt {
             INT | BOOL => self.emit_order_int_bool(lt, op, unsigned),
             FLOAT | STR => self.emit_order_float_str(lt, op),
-            other => return unsup(&format!("binop:cmp-{other:?}")),
+            // #4036: a tuple / list / option / record operand orders
+            // structurally (lexicographic over fields and elements, the
+            // shorter list first on a shared prefix) — the type-directed
+            // compare `list.sort` already uses, read against zero.
+            other => {
+                self.emit_val_cmp(other)?;
+                self.emit_sign_order(op);
+            }
         }
         Ok(BOOL)
+    }
+
+    /// `[verdict: i32]` whose sign orders `a` against `b` -> the i32 verdict
+    /// of `a op b`.
+    fn emit_sign_order(&mut self, op: BinOp) {
+        use BinOp::*;
+        let mut i = self.f.instructions();
+        i.i32_const(0);
+        match op {
+            Lt => i.i32_lt_s(),
+            Gt => i.i32_gt_s(),
+            Lte => i.i32_le_s(),
+            _ => i.i32_ge_s(),
+        };
     }
 
     /// Int (signed/unsigned by C-179) and Bool (false < true) ordering.

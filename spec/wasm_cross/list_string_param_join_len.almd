@@ -1,5 +1,5 @@
 // @contract: C-045
-// Cross-target gate for a `List[String]` PARAM consumed by both `string.join`
+// Cross-target gate for a `List[String]` PARAM consumed by both `list.join`
 // and `list.len` (plus index / iteration).
 //
 // A `List[String]` function param renders as `&[String]` on Rust (so `list.len`
@@ -10,7 +10,7 @@
 // join / len / index / iteration over the same param compiles on both targets.
 fn summary(xs: List[String]) -> String = {
   let n = list.len(xs)
-  string.join(xs, ",") + "/" + int.to_string(n)
+  list.join(xs, ",") + "/" + int.to_string(n)
 }
 
 fn first_and_count(xs: List[String]) -> String = {
@@ -23,7 +23,7 @@ fn joined_with_iter(xs: List[String]) -> String = {
   for x in xs {
     acc = acc + x
   }
-  acc + "|" + string.join(xs, "-") + "|" + int.to_string(list.len(xs))
+  acc + "|" + list.join(xs, "-") + "|" + int.to_string(list.len(xs))
 }
 
 fn main() -> Unit = {
@@ -32,5 +32,5 @@ fn main() -> Unit = {
   println(first_and_count(items))
   println(joined_with_iter(items))
   // Owned literal still joins (the &Vec → &[String] coercion path).
-  println(string.join(["x", "y"], "+"))
+  println(list.join(["x", "y"], "+"))
 }

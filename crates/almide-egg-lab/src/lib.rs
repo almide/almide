@@ -40,7 +40,7 @@ define_language! {
     ///   `matrix.<op>` intrinsics. Op names use underscores here
     ///   (`matrix_mul`) because egg's S-expr tokenizer reads `.` as a
     ///   separator; the buildscript that translates `@rewrite` from
-    ///   stdlib will perform the `matrix.mul` → `matrix_mul` rename.
+    ///   stdlib will perform the `matrix.__mul` → `matrix_mul` rename.
     /// - **Matrix fused ops** — one variant per `@rewrite` RHS. Cost
     ///   function treats these as cheaper than the unfused chain so
     ///   equality saturation picks them.
@@ -75,7 +75,6 @@ define_language! {
         "matrix_mul" = MatrixMul([Id; 2]),
         "matrix_add" = MatrixAdd([Id; 2]),
         "matrix_scale" = MatrixScale([Id; 2]),
-        "matrix_linear_row" = MatrixLinearRow([Id; 3]),
 
         // ── Matrix fused targets (RHS of fusion rules) ────────────
         "matrix_mul_scaled" = MatrixMulScaled([Id; 3]),
@@ -195,7 +194,7 @@ impl CostFunction<AlmideExpr> for FusionCost {
             | AlmideExpr::FlatMap(_) | AlmideExpr::FilterMap(_) => 100,
 
             AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
-            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixLinearRow(_) => 200,
+            | AlmideExpr::MatrixScale(_) => 200,
 
             AlmideExpr::MatrixMulScaled(_) => 110,
 

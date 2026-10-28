@@ -7,7 +7,7 @@
 //! leg (wasmtime's stack is far smaller than native's 8 MB), which makes it a
 //! cross-target divergence as well as a crash:
 //!
-//! - #2291 `string.index_of` / `string.count(s, "")`: `__cp_count` was
+//! - #2291 `string.index_of` / `string.count_matches(s, "")`: `__cp_count` was
 //!   `step + __cp_count(..)`, one frame per byte of the prefix — wasm trapped
 //!   past ~16 KB while native answered.
 //! - #2306 `list.iterate` and the fallible carriers behind
@@ -76,6 +76,9 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
         "one frame per 64 MiB chunk of the requested length"),
     ("json_parse.almd", "__jp_array", "__jp_value", JSON_NESTING),
     ("json_parse.almd", "__jp_object", "__jp_value", JSON_NESTING),
+    // #4209: set_path's nesting probe stops at its budget (at most
+    // JSON_MAX_DEPTH = 1000 levels), whatever the Value holds.
+    ("json_path.almd", "__jnp_items", "__json_nests_past", VALUE_NESTING),
     ("json_path.almd", "__jps_items", "json_path_set_go", PATH_SEGMENTS),
     ("json_path.almd", "__jps_pairs", "json_path_set_go", PATH_SEGMENTS),
     ("json_path.almd", "json_path_set_field", "__jps_pairs", PATH_SEGMENTS),
@@ -117,6 +120,13 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("set_to_string.almd", "__sts_fill_neg", "__sts_fill_neg", DIGITS),
     ("string.almd", "merge_sort_with", "merge_sort_with", HALVING),
     ("value_core.almd", "__varr_eq", "value_eq", VALUE_NESTING),
+    // value.remove_path and set_path's pure walk (stdlib/value.almd, #4220):
+    // one frame per step of the Path, the JSON path walk's bound.
+    ("value.almd", "__set_steps", "__set_steps", PATH_SEGMENTS),
+    ("value.almd", "__remove_steps", "__remove_steps", PATH_SEGMENTS),
+    // set_path's pure nesting probe stops at its budget (at most 1000
+    // levels, the JSON depth cap), whatever the Value holds.
+    ("value.almd", "__nests_past", "__nests_past", VALUE_NESTING),
     ("value_core.almd", "__vobj_eq", "value_eq", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_arr", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_obj", VALUE_NESTING),

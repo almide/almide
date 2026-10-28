@@ -521,7 +521,7 @@ Convention methods register as `Type.method` in the function environment.
 | `Repr`   | `fn repr(v: Self) -> String` | String representation. |
 | `Ord`    | `fn cmp(a: Self, b: Self) -> Int` | Ordering (-1, 0, 1). Not auto-derived — write `fn T.cmp(a: T, b: T) -> Int`. The `<` / `>` operators stay Int/Float/String/Bool only; call `a.cmp(b)`. |
 | `Hash`   | `fn hash(v: Self) -> Int` | Hash code. No `Float`, `Fn`, or `Map`. |
-| `Codec`  | `fn encode(v: Self) -> Value`, `fn decode(v: Value) -> Result[Self, String]` | Serialization. |
+| `Codec`  | `fn encode(v: Self) -> Value`, `fn decode(v: Value) -> Result[Self, String]` | Serialization. A record type also derives `fn decode_strict(v: Value) -> Result[Self, String]`, which refuses a key outside its decoded fields (C-429); a field may carry `@skip` / `@skip_decode` (C-428). |
 
 ### Protocol Validation
 

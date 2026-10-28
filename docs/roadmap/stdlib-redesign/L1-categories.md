@@ -114,6 +114,13 @@
 - (a) Rust `"true".parse::<bool>()`、Go `strconv.ParseBool`、OCaml `bool_of_string_opt`、Kotlin `toBooleanStrictOrNull`、Swift `Bool("true")`。どれも不正な入力を拒みます。
 - issue: #3980
 
+### R-L1-31 秘密の値を包む `secret` — ○ 採用
+
+- いま: パスワードや API キーを持つレコードは、埋め込み・`assert_eq` の失敗表示・`almide test` の報告で全フィールドをそのまま出します（#4107）。フィールドに付けた `@redact` のような属性は読まれず、黙って何も守りません。
+- 案: `secret` モジュールを置き（自動 import しない。`import secret`）、型 `Secret[A]` と `secret.new`・`secret.reveal` を足します。どの表示経路も `Secret(***)` を出し、`==` は String / Bytes だけ定数時間で比べ、Codec は decode だけ導出します。中身は [L2-secret](L2-secret.md)。
+- 根拠: 専用の型を持つのは 2/8（Rust secrecy・pydantic）で、5 言語の基準には届きません。それでも採るのは、1 つの宣言から全表示経路を導く形が型だけだからです（フィールド属性は 1 つのレコードの 1 経路しか守れない）。オーナー裁定 2026-10-24。
+- issue: #4107
+
 ## 3. 足さないカテゴリ（× と理由）
 
 | カテゴリ | 持つ言語 | 判定 | 理由 |

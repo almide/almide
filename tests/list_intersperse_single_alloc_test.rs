@@ -18,7 +18,7 @@ const SOURCE: &str = r#"fn main() -> Unit = {
   println("${list.intersperse([1.5, -2.0], 0.25)}")
   let ss = ["a", "bb", "ccc"]
   let j = list.intersperse(ss, ", ")
-  println("${j} ${ss} ${string.join(j, "")}")
+  println("${j} ${ss} ${list.join(j, "")}")
   let ls = [[1], [2, 2], []]
   let k = list.intersperse(ls, [0])
   println("${k} ${list.len(ls)}")

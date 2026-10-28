@@ -36,6 +36,7 @@ mod mut_param_place;
 mod mut_param_tail_value;
 mod mut_param_unpropagated;
 pub mod exit_code;
+pub mod entry_split;
 pub mod addr_hold;
 pub mod diverge;
 pub mod fusion;

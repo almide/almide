@@ -56,11 +56,30 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     let prefix = owner.as_deref();
     let user_shadow = shadows_stdlib_type(prefix, name);
 
+    // A bundled module's `mod type` record is opaque outside it (#4107).
+    if !matches!(visibility, ast::Visibility::Public)
+        && matches!(resolved, Ty::Record { .. })
+        && let Some(m) = defining_module.filter(|m| almide_lang::stdlib_info::is_bundled_module(m.as_str()))
+    {
+        env.opaque_records.insert(sym(name), m);
+    }
     resolved = register_type_decl_opaque_alias(env, identity, defining_module, resolved, &gnames, visibility);
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
     register_type_decl_finalize(env, name, ty, prefix, resolved, user_shadow);
     register_type_params(env, name, prefix, &gnames, user_shadow);
+
+    // Record-field attributes (#4108): the field vocabulary (E053, an error)
+    // and a skip attribute's required default (E104).
+    // An input type (`: Decode`, not `Encode`) skips no field (row 22 R4).
+    let input_type = deriving.as_ref()
+        .is_some_and(|d| super::protocols::codec_directions(d) == (false, true));
+    for field in crate::attr_vocab::declared_fields(ty) {
+        crate::attr_vocab::check_field_attrs(field, &mut env.attr_diagnostics);
+        if input_type {
+            crate::attr_vocab::check_input_type_field_skips(name, field, &mut env.attr_diagnostics);
+        }
+    }
 
     if let Some(derives) = deriving {
         register_derive_sigs(env, derives, name, prefix);
@@ -352,10 +371,21 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 }
             }
             DeclStep::Protocol(ast::Decl::Protocol { name, generics, methods, .. }) => {
-                // A protocol spelling a built-in's name is legal in a module (it
-                // registers under the module and leaves the bare built-in to the
-                // files that do not import it); refusing it in the entry file only
-                // is #4190.
+                // Built-in protocol names are reserved in every module (#4097,
+                // #4190): protocols are keyed by bare name, so a declaration
+                // spelling a built-in's name replaced its requirements for every
+                // module while the built-in conformances (`Int: Numeric`) stayed —
+                // a bound on it accepted types without the declared methods, and
+                // another module's `type X: Integer` was checked against the
+                // redeclaration's methods.
+                if super::protocols::builtin_protocol(name.as_str()).is_some() {
+                    diagnostics.push(err(
+                        format!("protocol '{}' is built in and cannot be redeclared", name),
+                        format!("Give the protocol another name, or bound on the built-in `{}` directly", name),
+                        format!("protocol {}", name),
+                    ));
+                    continue;
+                }
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
             DeclStep::Protocol(_) => {}
@@ -364,6 +394,11 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         }
     }
     for decl in decls {
+        // Once per declaration: `infer_module`'s unprefixed re-registration
+        // (`alias_owner_module`) sees the same decls again.
+        if env.alias_owner_module.is_none() {
+            refuse_builtin_named_decl(diagnostics, decl);
+        }
         match decl {
             ast::Decl::Fn { .. } => register_decl_fn(env, diagnostics, &mut seen_fn, decl, prefix),
             ast::Decl::Test { .. } => register_decl_test(diagnostics, &mut seen_test, decl),
@@ -383,6 +418,36 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         validate_derive_field_support(env, diagnostics);
         validate_convention_method_conflicts(env, diagnostics);
     }
+}
+/// E012 for a top-level `fn` or `let` spelled with an output / abort builtin's
+/// name (#4253). A bare call to that name resolves to the builtin before any
+/// declaration is consulted (`check_builtin_call`), so the declaration was dead
+/// code on every target — a `fn println` meant to redact every log line never
+/// ran, and nothing said so (and `eprintln` even split: native called the user
+/// fn, wasm the builtin). The builtins keep one meaning per spelling; a local
+/// `let` or a parameter of that name still shadows, as every local does.
+fn refuse_builtin_named_decl(diagnostics: &mut Vec<Diagnostic>, decl: &ast::Decl) {
+    let (kind, name, span) = match decl {
+        ast::Decl::Fn { name, span, .. } => ("fn", name.as_str(), span),
+        ast::Decl::TopLet { name, span, mutable, .. } => (if *mutable { "var" } else { "let" }, name.as_str(), span),
+        _ => return,
+    };
+    if !crate::check::is_output_abort_builtin(name) {
+        return;
+    }
+    let mut diag = err(
+        format!("top-level {kind} '{name}' redefines the builtin '{name}'"),
+        format!(
+            "Every call to `{name}(…)` reaches the builtin, never this declaration. Give it another name (e.g. `my_{name}`) and call that"
+        ),
+        format!("{kind} {name}"),
+    )
+    .with_code("E012");
+    if let Some(s) = span {
+        diag.line = Some(s.line);
+        diag.col = Some(s.col);
+    }
+    diagnostics.push(diag);
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
@@ -492,18 +557,27 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         // looked that up here, where only bare `P` had ever been written — so
         // a conforming type from another module was reported as not
         // implementing the protocol (#1087). A stdlib-owned name's bare slot
-        // is the stdlib's (#1828): the user's derives never land on it.
-        let protocol_keys: Vec<Sym> = if type_key != prefixed_key(prefix, name) {
+        // is the stdlib's (#1828): the user's derives never land on it — in
+        // the entry program (`self.X`) and in a user module (`m.X`) alike.
+        // A module's `type Secret: Codec` once wrote Codec under the bare
+        // `Secret`, the stdlib's generic `secret.Secret[A]`, and the derive
+        // check judged THAT type: E023 "is generic" (#4273).
+        let protocol_keys: Vec<Sym> = if type_key != prefixed_key(prefix, name) || shadows_stdlib_type(owner.as_deref(), name) {
             vec![sym(&type_key)]
         } else {
             vec![sym(name), sym(&type_key)]
         };
+        // A composition conforms to its parts too: `: Codec` is also
+        // `Encode` and `Decode` (C-435), so a `[T: Decode]` bound takes it and
+        // an input sink sees that it is also sent out (E110).
         for d in derives {
-            for key in protocol_keys.iter().copied() {
-                env.type_protocols
-                    .entry(key)
-                    .or_insert_with(std::collections::HashSet::new)
-                    .insert(sym(d));
+            for p in super::protocols::protocol_closure(d.as_str()) {
+                for key in protocol_keys.iter().copied() {
+                    env.type_protocols
+                        .entry(key)
+                        .or_insert_with(std::collections::HashSet::new)
+                        .insert(sym(p));
+                }
             }
         }
         register_conformance_args(env, diagnostics, decl, prefix, &protocol_keys);

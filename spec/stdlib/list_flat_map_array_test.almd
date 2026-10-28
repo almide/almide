@@ -84,8 +84,8 @@ test "flat_map shapes the rewrite declines — same answers" {
 test "flat_map fixed-arity result feeds the consumers that materialize it" {
   let built = list.range(0, 4) |> list.flat_map((i) => [i, i + 100])
   assert_eq(list.len(built), 8)
-  assert_eq(list.get_or(built, 0, -1), 0)
-  assert_eq(list.get_or(built, 7, -1), 103)
+  assert_eq(list.get(built, 0) ?? -1, 0)
+  assert_eq(list.get(built, 7) ?? -1, 103)
   assert_eq(list.sum(built), 0 + 100 + 1 + 101 + 2 + 102 + 3 + 103)
   // Chained after another combinator: the source is a fused producer, not a
   // bound variable.

@@ -1,5 +1,5 @@
-//! Search-flavored list ops: binary_search (std's branchless schedule),
-//! window (the singular guarded form), unique_by (key-scan dedup).
+//! Search-flavored list ops: window (the singular guarded form), unique_by
+//! (key-scan dedup).
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, ValType};
@@ -8,81 +8,8 @@ use crate::emitter::Emitter;
 use crate::*;
 
 impl Emitter<'_> {
-    /// `xs.binary_search(&t)` on List[Int] — std's BRANCHLESS loop
-    /// (base/size halving with a select), which fixes WHICH duplicate
-    /// index comes back (C-054 family: [2,2,2,2,2] → 4, not the classic
-    /// midpoint 2). The final compare happens at `base`.
-    pub(crate) fn lower_list_binary_search(
-        &mut self,
-        xs: &IrExpr,
-        t: &IrExpr,
-    ) -> ArmResult {
-        match self.lower_arg(xs, None, ArgMode::Borrow)? {
-            SliceTy::List(h) if self.types.el(h) == INT => {}
-            other => return unsup(&format!("list-binary-search-of:{other:?}")),
-        }
-        let hb = self.hold_i32()?;
-        self.f.instructions().local_set(hb);
-        self.lower_arg(t, Some(INT), ArgMode::Borrow)?;
-        let ht = self.hold_i64()?;
-        let hsize = self.hold_i32()?;
-        let hbase = self.hold_i32()?;
-        let hhalf = self.hold_i32()?;
-        let hv = self.hold_i64()?;
-        let mut i = self.f.instructions();
-        i.local_set(ht);
-        i.local_get(hb).i32_load(len_memarg()).i32_const(8).i32_div_u().local_set(hsize);
-        i.local_get(hsize).i32_eqz().if_(BlockType::Result(ValType::I32));
-        i.i32_const(almide_layout::NULL_ADDR as i32);
-        i.else_();
-        i.i32_const(0).local_set(hbase);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hsize).i32_const(1).i32_le_u().br_if(1);
-        i.local_get(hsize).i32_const(1).i32_shr_u().local_set(hhalf);
-        i.local_get(hb)
-            .local_get(hbase)
-            .local_get(hhalf)
-            .i32_add()
-            .i32_const(8)
-            .i32_mul()
-            .i32_add()
-            .i64_load(slot_memarg(0))
-            .local_set(hv);
-        // base = (v > t) ? base : mid
-        i.local_get(hbase);
-        i.local_get(hbase).local_get(hhalf).i32_add();
-        i.local_get(hv).local_get(ht).i64_gt_s();
-        i.select().local_set(hbase);
-        i.local_get(hsize).local_get(hhalf).i32_sub().local_set(hsize);
-        i.br(0).end().end();
-        i.local_get(hb)
-            .local_get(hbase)
-            .i32_const(8)
-            .i32_mul()
-            .i32_add()
-            .i64_load(slot_memarg(0));
-        i.local_get(ht).i64_eq().if_(BlockType::Result(ValType::I32));
-        // some(base): an 8-byte option cell holding the i64 index
-        i.i32_const(8).call(F_ALLOC).local_tee(hhalf);
-        i.local_get(hbase).i64_extend_i32_u();
-        i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
-        i.local_get(hhalf);
-        i.else_();
-        i.i32_const(almide_layout::NULL_ADDR as i32);
-        i.end();
-        i.end();
-        let _ = i;
-        self.release_i64();
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        self.release_i64();
-        self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
-    }
-
-    /// `list.window(xs, n)` — n == 0 dies loudly (both targets, C-153
-    /// family), n < 0 or n > len is the empty list, else len-n+1
+    /// `list.window(xs, n)` — n <= 0 dies loudly (both targets, C-153
+    /// family; a negative n is 0, #4147), n > len is the empty list, else len-n+1
     /// overlapping windows.
     pub(crate) fn lower_list_window(
         &mut self,
@@ -106,7 +33,8 @@ impl Emitter<'_> {
         let die = self.pool.intern("Error: window size must be positive");
         let mut i = self.f.instructions();
         i.local_set(hn64);
-        i.local_get(hn64).i64_eqz().if_(BlockType::Empty);
+        // A size of 0 or less aborts (#4147: a negative size is read as 0).
+        i.local_get(hn64).i64_const(0).i64_le_s().if_(BlockType::Empty);
         i.i32_const(die as i32).call(F_EPRINTLN_BLOCK);
         i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
         i.end();

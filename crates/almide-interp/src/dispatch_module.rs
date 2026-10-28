@@ -50,6 +50,19 @@ impl<'a> Interpreter<'a> {
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
+        // The generic `<T>.from` family (`float.from`, `int8.from_checked`, …):
+        // its body reads the source through the `Numeric` pivots, chosen by
+        // the argument's STATIC type — read here, where the type still is.
+        if let Some(flow) = self.eval_numeric_carrier(module, func, args, &evaled) {
+            return flow;
+        }
+        // `value.__set_path_steps` is the native runtime's in-place walk; its
+        // registry body (stdlib/json_path.almd) only forwards to the bundled
+        // pure walk `value.__set_path_pure`, which the pool does not lower —
+        // so the oracle runs that walk directly, as the wasm leg does.
+        if module.as_str() == "value" && func.as_str() == "__set_path_steps" {
+            return self.dispatch_module_resolved(module, almide_base::intern::sym("__set_path_pure"), evaled);
+        }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
         // `handle_arg_ty`). Stashed, not threaded: the hint is consumed by
@@ -343,9 +356,7 @@ impl<'a> Interpreter<'a> {
         // STATELESS bridge cannot serve — they read the run's argv, which is
         // interpreter state (`with_args`, empty by default = exactly how the
         // oracle harness runs every fixture on all three legs).
-        // `args_get_list` answers argv[1..]; `args_get_list_full` prepends an
-        // argv[0] whose only cross-target observable is NONEMPTINESS (the
-        // fixtures assert it, never print it — C-181's argv0 normalization).
+        // `args_get_list` answers argv[1..].
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
@@ -389,7 +400,18 @@ impl<'a> Interpreter<'a> {
         // the body cannot take this call, and the reason says so.
         let (func, func_def, gate_mut) = match self.resolve_body_for_arity(module, func, args.len()) {
             Ok(found) => found,
-            Err(why) => return self.abstain_or_bridge(floor_first, module, func, &args, why),
+            Err(why) => {
+                // A public fn written in its BUNDLED module (`int.pow`,
+                // `bytes.get_u16_le`), which the registry pool does not lower:
+                // its bundled definition, from `surface.rs`.
+                if let Some(flow) = self.eval_bundled_surface(module, func, &args) {
+                    return flow;
+                }
+                if floor_first {
+                    return Flow::Unsupported(why);
+                }
+                return self.no_body_fallback(module, func, args, why);
+            }
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
@@ -463,11 +485,6 @@ impl<'a> Interpreter<'a> {
                     self.args.iter().map(|s| Value::str(s.clone())).collect();
                 Some(Flow::val(Value::list(items)))
             }
-            "args_get_list_full" => {
-                let mut items = vec![Value::str("interp")];
-                items.extend(self.args.iter().map(|s| Value::str(s.clone())));
-                Some(Flow::val(Value::list(items)))
-            }
             // The env floor (same tier as argv, C-133): `prim.env_get`
             // reads the LIVE process environment — exactly what the other
             // two legs observe (native getenv; wasm WASI environ with
@@ -483,8 +500,9 @@ impl<'a> Interpreter<'a> {
                 };
                 // A variable the program set itself wins (`env.set`, held in
                 // the interp's overlay, #3808).
+                // A name it removed (`env.remove`, #3908) reads as unset.
                 let value = crate::bridge::env_overlay_get(name.as_str())
-                    .or_else(|| std::env::var(name.as_str()).ok());
+                    .unwrap_or_else(|| std::env::var(name.as_str()).ok());
                 Some(Flow::val(Value::Option(value.map(|v| Box::new(Value::str(v))))))
             }
             _ => self.vfs_prim(func, args),

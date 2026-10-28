@@ -1,0 +1,433 @@
+# The negative-count rule (#4147): ONE rule for every count-taking function of
+# the sequence modules, held by tests/negative_count_family_test.rs.
+#
+# POPULATION: every public fn of list, string, bytes and matrix with an `Int`
+# parameter, read from the compiler's own module interface (`almide compile
+# <module> --json`). Every slot of it is a row here, either a `[[cell]]` the
+# test RUNS or a slot named under `[outside]` with the reason its class is not a
+# count. A new Int parameter with no row fails the gate, and so does a row whose
+# slot no longer exists, so the family cannot gain a member that escapes it.
+#
+# THE RULE, per class (each `[[cell]]` is run with N = 0, -1 and i64::MIN, on
+# native, on the embedded wasm host and on a stock wasmtime run of the built
+# artifact, and every leg must print the same line):
+#   count  a negative count is 0: f(.., -1) and f(.., i64::MIN) print what
+#          f(.., 0) prints. `take(rows, -1)` is [], never every row.
+#   bound  a range bound clamps into [0, len]: a negative bound is 0, the
+#          same check as `count`.
+#   size   a size's domain is >= 1: N = 0, -1 and i64::MIN each abort with
+#          exit 1 and "must be positive" on stderr (chunk, window(s), conv1d's
+#          stride).
+# `probe` is an Almide String expression with N standing for the argument.
+
+[[cell]]
+slot = "list.take.n"
+class = "count"
+probe = 'show_l(list.take([1, 2, 3], N))'
+
+[[cell]]
+slot = "list.drop.n"
+class = "count"
+probe = 'show_l(list.drop([1, 2, 3], N))'
+
+[[cell]]
+slot = "list.take_end.n"
+class = "count"
+probe = 'show_l(list.take_end([1, 2, 3], N))'
+
+[[cell]]
+slot = "list.drop_end.n"
+class = "count"
+probe = 'show_l(list.drop_end([1, 2, 3], N))'
+
+[[cell]]
+slot = "list.split_at.n"
+class = "count"
+probe = 'show_lp(list.split_at([1, 2, 3], N))'
+
+[[cell]]
+slot = "list.repeat.n"
+class = "count"
+probe = 'show_l(list.repeat(7, N))'
+
+[[cell]]
+slot = "list.iterate.n"
+class = "count"
+probe = 'show_l(list.iterate(1, (x) => x + 1, N))'
+
+[[cell]]
+slot = "list.with_capacity.cap"
+class = "count"
+probe = 'show_l(cap_list(N))'
+
+[[cell]]
+slot = "list.slice.start"
+class = "bound"
+probe = 'show_l(list.slice([1, 2, 3], N, 2))'
+
+[[cell]]
+slot = "list.slice.end"
+class = "bound"
+probe = 'show_l(list.slice([1, 2, 3], 0, N))'
+
+[[cell]]
+slot = "list.chunk.n"
+class = "size"
+probe = 'show_ll(list.chunk([1, 2, 3], N))'
+
+[[cell]]
+slot = "list.window.n"
+class = "size"
+probe = 'show_ll(list.window([1, 2, 3], N))'
+
+[[cell]]
+slot = "string.take.n"
+class = "count"
+probe = 'string.take("aéc", N)'
+
+[[cell]]
+slot = "string.drop.n"
+class = "count"
+probe = 'string.drop("aéc", N)'
+
+[[cell]]
+slot = "string.take_end.n"
+class = "count"
+probe = 'string.take_end("aéc", N)'
+
+[[cell]]
+slot = "string.drop_end.n"
+class = "count"
+probe = 'string.drop_end("aéc", N)'
+
+[[cell]]
+slot = "string.split_at.n"
+class = "count"
+probe = 'show_sp(string.split_at("aéc", N))'
+
+[[cell]]
+slot = "string.repeat.n"
+class = "count"
+probe = 'string.repeat("ab", N)'
+
+[[cell]]
+slot = "string.pad_start.n"
+class = "count"
+probe = 'string.pad_start("ab", N, "x")'
+
+[[cell]]
+slot = "string.pad_end.n"
+class = "count"
+probe = 'string.pad_end("ab", N, "x")'
+
+[[cell]]
+slot = "string.slice.start"
+class = "bound"
+probe = 'string.slice("aéc", N, 2)'
+
+[[cell]]
+slot = "string.slice.end"
+class = "bound"
+probe = 'string.slice("aéc", 0, N)'
+
+[[cell]]
+slot = "string.chunk.n"
+class = "size"
+probe = 'list.join(string.chunk("aéc", N), ",")'
+
+[[cell]]
+slot = "string.window.n"
+class = "size"
+probe = 'list.join(string.window("aéc", N), ",")'
+
+[[cell]]
+slot = "bytes.take.n"
+class = "count"
+probe = 'show_b(bytes.take(bytes.from_list([1, 2, 3]), N))'
+
+[[cell]]
+slot = "bytes.drop.n"
+class = "count"
+probe = 'show_b(bytes.drop(bytes.from_list([1, 2, 3]), N))'
+
+[[cell]]
+slot = "bytes.take_end.n"
+class = "count"
+probe = 'show_b(bytes.take_end(bytes.from_list([1, 2, 3]), N))'
+
+[[cell]]
+slot = "bytes.drop_end.n"
+class = "count"
+probe = 'show_b(bytes.drop_end(bytes.from_list([1, 2, 3]), N))'
+
+[[cell]]
+slot = "bytes.split_at.n"
+class = "count"
+probe = 'show_bp(bytes.split_at(bytes.from_list([1, 2, 3]), N))'
+
+[[cell]]
+slot = "bytes.repeat.n"
+class = "count"
+probe = 'show_b(bytes.repeat(bytes.from_list([1, 2]), N))'
+
+[[cell]]
+slot = "bytes.zeros.n"
+class = "count"
+probe = 'show_b(bytes.zeros(N))'
+
+[[cell]]
+slot = "bytes.pad_start.n"
+class = "count"
+probe = 'show_b(bytes.pad_start(bytes.from_list([1, 2]), N, 9))'
+
+[[cell]]
+slot = "bytes.pad_end.n"
+class = "count"
+probe = 'show_b(bytes.pad_end(bytes.from_list([1, 2]), N, 9))'
+
+[[cell]]
+slot = "bytes.copy_from.len"
+class = "count"
+probe = 'show_b(copy_from_probe(N))'
+
+[[cell]]
+slot = "bytes.slice.start"
+class = "bound"
+probe = 'show_b(bytes.slice(bytes.from_list([1, 2, 3]), N, 2))'
+
+[[cell]]
+slot = "bytes.slice.end"
+class = "bound"
+probe = 'show_b(bytes.slice(bytes.from_list([1, 2, 3]), 0, N))'
+
+[[cell]]
+slot = "bytes.chunk.n"
+class = "size"
+probe = 'int.to_string(list.len(bytes.chunk(bytes.from_list([1, 2, 3]), N)))'
+
+[[cell]]
+slot = "bytes.window.n"
+class = "size"
+probe = 'int.to_string(list.len(bytes.window(bytes.from_list([1, 2, 3]), N)))'
+
+[[cell]]
+slot = "matrix.zeros.rows"
+class = "count"
+probe = 'show_m(matrix.zeros(N, 2))'
+
+[[cell]]
+slot = "matrix.zeros.cols"
+class = "count"
+probe = 'show_m(matrix.zeros(2, N))'
+
+[[cell]]
+slot = "matrix.ones.rows"
+class = "count"
+probe = 'show_m(matrix.ones(N, 2))'
+
+[[cell]]
+slot = "matrix.ones.cols"
+class = "count"
+probe = 'show_m(matrix.ones(2, N))'
+
+[[cell]]
+slot = "matrix.split_cols_even.n"
+class = "count"
+probe = 'int.to_string(list.len(matrix.split_cols_even(matrix.ones(2, 4), N)))'
+
+[[cell]]
+slot = "matrix.slice_rows.start"
+class = "bound"
+probe = 'show_m(matrix.slice_rows(matrix.ones(3, 1), N, 2))'
+
+[[cell]]
+slot = "matrix.slice_rows.end"
+class = "bound"
+probe = 'show_m(matrix.slice_rows(matrix.ones(3, 1), 0, N))'
+
+[outside]
+# index: an element index: out of range (a negative one included) is none, the default, a no-op or an append, never a clamp to 0
+index = [
+  "list.get.i",
+  "list.set.i",
+  "list.swap.i",
+  "list.swap.j",
+  "list.update.i",
+  "list.insert.i",
+  "list.remove_at.i",
+  "string.get.i",
+  "string.insert.i",
+  "string.remove_at.i",
+  "bytes.get.i",
+  "bytes.insert.i",
+  "bytes.remove_at.i",
+  "bytes.set.i",
+  "matrix.get.row",
+  "matrix.get.col",
+  "matrix.dot_row.r",
+  "matrix.row_dot.r",
+]
+# position: a read or write position in a buffer, or a signed offset added to one (bytes.skip's n, C-337): a position outside the buffer answers the documented out-of-range result (none, empty, unchanged, clamped or a no-op)
+position = [
+  "bytes.copy_from.dst_off",
+  "bytes.copy_from.src_off",
+  "bytes.is_eof.pos",
+  "bytes.copy_within.src_start",
+  "bytes.copy_within.src_end",
+  "bytes.copy_within.dst",
+  "bytes.skip.pos",
+  "bytes.skip.n",
+  "bytes.get_u8.pos",
+  "bytes.next_u8.pos",
+  "bytes.put_u8.pos",
+  "bytes.get_i8.pos",
+  "bytes.next_i8.pos",
+  "bytes.put_i8.pos",
+  "bytes.get_bool.pos",
+  "bytes.next_bool.pos",
+  "bytes.put_bool.pos",
+  "bytes.get_u16_le.pos",
+  "bytes.next_u16_le.pos",
+  "bytes.get_u16_le_array.pos",
+  "bytes.put_u16_le.pos",
+  "bytes.get_u16_be.pos",
+  "bytes.next_u16_be.pos",
+  "bytes.get_u16_be_array.pos",
+  "bytes.put_u16_be.pos",
+  "bytes.get_i16_le.pos",
+  "bytes.next_i16_le.pos",
+  "bytes.get_i16_le_array.pos",
+  "bytes.put_i16_le.pos",
+  "bytes.get_i16_be.pos",
+  "bytes.next_i16_be.pos",
+  "bytes.get_i16_be_array.pos",
+  "bytes.put_i16_be.pos",
+  "bytes.get_u32_le.pos",
+  "bytes.next_u32_le.pos",
+  "bytes.get_u32_le_array.pos",
+  "bytes.put_u32_le.pos",
+  "bytes.get_u32_be.pos",
+  "bytes.next_u32_be.pos",
+  "bytes.get_u32_be_array.pos",
+  "bytes.put_u32_be.pos",
+  "bytes.get_i32_le.pos",
+  "bytes.next_i32_le.pos",
+  "bytes.get_i32_le_array.pos",
+  "bytes.put_i32_le.pos",
+  "bytes.get_i32_be.pos",
+  "bytes.next_i32_be.pos",
+  "bytes.get_i32_be_array.pos",
+  "bytes.put_i32_be.pos",
+  "bytes.get_i64_le.pos",
+  "bytes.next_i64_le.pos",
+  "bytes.get_i64_le_array.pos",
+  "bytes.put_i64_le.pos",
+  "bytes.get_i64_be.pos",
+  "bytes.next_i64_be.pos",
+  "bytes.get_i64_be_array.pos",
+  "bytes.put_i64_be.pos",
+  "bytes.get_f32_le.pos",
+  "bytes.next_f32_le.pos",
+  "bytes.get_f32_le_array.pos",
+  "bytes.put_f32_le.pos",
+  "bytes.get_f32_be.pos",
+  "bytes.next_f32_be.pos",
+  "bytes.get_f32_be_array.pos",
+  "bytes.put_f32_be.pos",
+  "bytes.get_f64_le.pos",
+  "bytes.next_f64_le.pos",
+  "bytes.get_f64_le_array.pos",
+  "bytes.put_f64_le.pos",
+  "bytes.get_f64_be.pos",
+  "bytes.next_f64_be.pos",
+  "bytes.get_f64_be_array.pos",
+  "bytes.put_f64_be.pos",
+  "bytes.get_f16_le.pos",
+  "bytes.next_f16_le.pos",
+  "bytes.get_f16_le_array.pos",
+  "bytes.get_f16_be.pos",
+  "bytes.next_f16_be.pos",
+  "bytes.get_f16_be_array.pos",
+  "bytes.put_f16_le.pos",
+  "bytes.put_f16_be.pos",
+  "bytes.next_bytes.pos",
+  "matrix.from_bytes_f32_le.offset",
+  "matrix.from_bytes_f16_le.offset",
+  "matrix.from_bytes_f64_le.offset",
+]
+# value: a value carried into the result (an element, a byte, a range endpoint, a codepoint, a step), not a count
+value = [
+  "list.range.start",
+  "list.range.end",
+  "list.range_step.start",
+  "list.range_step.end",
+  "list.range_step.step",
+  "string.from_codepoint.n",
+  "bytes.append_i16_be.x",
+  "bytes.append_i16_le.x",
+  "bytes.append_i32_be.x",
+  "bytes.append_i32_le.x",
+  "bytes.append_i64_be.x",
+  "bytes.append_i64_le.x",
+  "bytes.append_u16_be.x",
+  "bytes.append_u16_le.x",
+  "bytes.append_u32_be.x",
+  "bytes.append_u32_le.x",
+  "bytes.append_u8.x",
+  "bytes.fill.x",
+  "bytes.insert.x",
+  "bytes.pad_start.fill",
+  "bytes.pad_end.fill",
+  "bytes.push.x",
+  "bytes.set.x",
+  "bytes.put_u8.x",
+  "bytes.put_i8.x",
+  "bytes.append_i8.x",
+  "bytes.put_u16_le.x",
+  "bytes.put_u16_be.x",
+  "bytes.put_i16_le.x",
+  "bytes.put_i16_be.x",
+  "bytes.put_u32_le.x",
+  "bytes.put_u32_be.x",
+  "bytes.put_i32_le.x",
+  "bytes.put_i32_be.x",
+  "bytes.put_i64_le.x",
+  "bytes.put_i64_be.x",
+  "bytes.intersperse.sep",
+]
+# checked: a checked reader that answers none unless its whole window fits (string.byte_slice, bytes.next_bytes, bytes.get_*_array): a negative count or offset is a window that does not fit, so the answer is none, never a partial or a whole read
+checked = [
+  "string.byte_slice.start",
+  "string.byte_slice.end",
+  "bytes.get_u16_le_array.count",
+  "bytes.get_u16_be_array.count",
+  "bytes.get_i16_le_array.count",
+  "bytes.get_i16_be_array.count",
+  "bytes.get_u32_le_array.count",
+  "bytes.get_u32_be_array.count",
+  "bytes.get_i32_le_array.count",
+  "bytes.get_i32_be_array.count",
+  "bytes.get_i64_le_array.count",
+  "bytes.get_i64_be_array.count",
+  "bytes.get_f32_le_array.count",
+  "bytes.get_f32_be_array.count",
+  "bytes.get_f64_le_array.count",
+  "bytes.get_f64_be_array.count",
+  "bytes.get_f16_le_array.count",
+  "bytes.get_f16_be_array.count",
+  "bytes.next_bytes.n",
+]
+# raw-memory: a raw-pointer length under `import ffi`: outside the memory-safety guarantee, where the caller promises the length
+raw_memory = [
+  "bytes.copy_to_ptr.cap",
+  "bytes.from_raw_ptr.len",
+]
+# shape-read: a matrix shape or offset that describes data already in a byte buffer; a shape the data cannot fill is zero-filled or refused, as documented
+shape_read = [
+  "matrix.from_bytes_f32_le.rows",
+  "matrix.from_bytes_f32_le.cols",
+  "matrix.from_bytes_f16_le.rows",
+  "matrix.from_bytes_f16_le.cols",
+  "matrix.from_bytes_f64_le.rows",
+  "matrix.from_bytes_f64_le.cols",
+]

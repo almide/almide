@@ -621,6 +621,12 @@ fn fmt_roundtrip_idempotency_all_spec_files() {
     assert!(tested > 0, "no spec files were tested");
 }
 
+/// The repo-relative key of a corpus path, for the CI slice.
+fn corpus_key(path: &std::path::Path) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned()
+}
+
 /// Recursively collect all .almd files under a directory.
 fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut results = Vec::new();
@@ -774,7 +780,10 @@ fn fmt_unused_import_verdict_agrees_with_checker_on_all_spec_files() {
     };
     let mut failures = Vec::new();
     let mut tested = 0u32;
-    for path in walkdir(root.join("spec").as_path()) {
+    // The CI slice (ALMIDE_CI_SLICE) of spec/ off a full run; the `tested > 50`
+    // coverage floor counts the whole corpus, so it is a full-run judgement.
+    let files = almide_corpus::select(walkdir(root.join("spec").as_path()), "fmt::unused_import_verdict", |p| corpus_key(p));
+    for path in files {
         let Ok(source) = std::fs::read_to_string(&path) else { continue };
         let Ok(mut prog) = Parser::new(Lexer::tokenize(&source)).parse() else { continue };
         // A recovered parse is out of scope for both verdicts (E060 stays
@@ -806,7 +815,7 @@ fn fmt_unused_import_verdict_agrees_with_checker_on_all_spec_files() {
     assert!(failures.is_empty(),
         "fmt/checker unused-import disagreement in {} of {} file(s):\n{}",
         failures.len(), tested, failures.join("\n"));
-    assert!(tested > 50, "gate coverage collapsed: only {} files tested", tested);
+    assert!(tested > 50 || !almide_corpus::full_run(), "gate coverage collapsed: only {} files tested", tested);
 }
 
 #[test]
@@ -840,6 +849,9 @@ fn fmt_output_typechecks_single_file_specs() {
     let mut files = walkdir(root.join("spec/lang").as_path());
     files.extend(walkdir(root.join("spec/stdlib").as_path()));
     files.extend(walkdir(root.join("spec/wasm_cross").as_path()));
+    // The CI slice (ALMIDE_CI_SLICE) off a full run; `tested > 100` counts the
+    // whole corpus, so it is a full-run judgement.
+    let files = almide_corpus::select(files, "fmt::output_typechecks_single_file", |p| corpus_key(p));
 
     let dir = tempfile::tempdir().unwrap();
     let mut failures = Vec::new();
@@ -875,7 +887,7 @@ fn fmt_output_typechecks_single_file_specs() {
     assert!(failures.is_empty(),
         "fmt semantic-preservation gate: {} of {} file(s) failed:\n\n{}",
         failures.len(), tested, failures.join("\n\n"));
-    assert!(tested > 100, "gate coverage collapsed: only {} files tested", tested);
+    assert!(tested > 100 || !almide_corpus::full_run(), "gate coverage collapsed: only {} files tested", tested);
 }
 
 #[test]
@@ -1019,4 +1031,38 @@ fn fmt_check_exits_nonzero_on_unformatted_input_and_recurses_directories() {
         String::from_utf8_lossy(&dry.stdout).contains("fn add"),
         "--dry-run must print the formatted text"
     );
+}
+
+// #4192: a dependency module named like a name an existing import already
+// binds (`import self.lexer` binds `lexer`) is not added — the use is
+// resolved, and the edit would make `lexer` ambiguous.
+fn fmt_with_dep_submodule(input: &str, name: &str, full: &str) -> (Vec<String>, String) {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let subs: std::collections::HashMap<String, String> =
+        [(name.to_string(), full.to_string())].into_iter().collect();
+    let msgs = fmt::auto_imports(&mut prog, input, &[], &subs);
+    (msgs, fmt::format_program(&prog))
+}
+
+#[test]
+fn fmt_does_not_add_a_dep_module_a_self_import_already_binds() {
+    let src = "import self.lexer\n\n// a comment\neffect fn main() -> Unit = {\n  println(lexer.twice(\"a\"))\n}\n";
+    let (msgs, out) = fmt_with_dep_submodule(src, "lexer", "gramide_typescript.lexer");
+    assert!(msgs.is_empty(), "no import edit expected, got {msgs:?}");
+    assert!(!out.contains("gramide_typescript"), "a dep import was added:\n{out}");
+    assert!(out.contains("// a comment\neffect fn main"), "the comment left its fn:\n{out}");
+}
+
+// #4192: an import fmt does add takes its own empty comment slot, so the first
+// declaration's comment stays above that declaration.
+#[test]
+fn fmt_added_import_does_not_take_the_first_decls_comment() {
+    let src = "import self.util\n\n// a comment\neffect fn main() -> Unit = {\n  println(util.f(lexer.twice(\"a\")))\n}\n";
+    let (msgs, out) = fmt_with_dep_submodule(src, "lexer", "gramide_typescript.lexer");
+    assert_eq!(msgs, vec!["Added `import gramide_typescript.lexer`".to_string()]);
+    assert!(out.contains("import gramide_typescript.lexer\n"), "{out}");
+    assert!(out.contains("// a comment\neffect fn main"), "the comment left its fn:\n{out}");
+    assert!(!out.contains("// a comment\nimport"), "the comment moved onto the import:\n{out}");
 }

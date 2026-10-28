@@ -10,11 +10,14 @@
 //! of the registry text (scripts/lib/impl-count-enumerate.py) reads them the
 //! same way.
 //!
-//! Each row also records whether its file reaches `prim.` anywhere. A file
-//! that does not builds every value through stdlib surface the wasm emitter
-//! lowers itself, so its bodies cannot couple to a foreign block layout: the
-//! property the emitter's hand-audited admission tiers certify one name at a
-//! time (crates/almide-wasm/src/whitelist.rs). The emitter admits such bodies
+//! Each declared body also records whether it reaches `prim.`: its own lines,
+//! or those of any function of its file it calls, transitively (#4204 — the
+//! file was the unit before, so one prim-using helper in a file kept every
+//! other body of that file out). A body that does not builds every value
+//! through stdlib surface the wasm emitter lowers itself, so it cannot couple
+//! to a foreign block layout: the property the emitter's hand-audited
+//! admission tiers certify one name at a time
+//! (crates/almide-wasm/src/whitelist.rs). The emitter admits such bodies
 //! without a list entry.
 //!
 //! A text scan, as the other tables here are: the attribute lines directly
@@ -29,6 +32,58 @@ struct Decl {
     stem: String,
     impl_fn: String,
     surface: String,
+    prim_free: bool,
+}
+
+/// The file's top-level functions as `(name, body lines)`, comment lines
+/// dropped: a function runs from its `fn` line to the next top-level one.
+fn fn_bodies(src: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in src.lines() {
+        let t = line.trim();
+        if t.starts_with("//") {
+            continue;
+        }
+        let top = !line.starts_with(' ') && !line.starts_with('\t');
+        match fn_name(line).filter(|_| top) {
+            Some(name) => out.push((name, format!("{line}\n"))),
+            None => {
+                if let Some(last) = out.last_mut() {
+                    last.1.push_str(line);
+                    last.1.push('\n');
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Does `name` reach `prim.`, through its own body or a same-file callee?
+fn reaches_prim(bodies: &[(String, String)], name: &str) -> bool {
+    let mut todo = vec![name.to_string()];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(n) = todo.pop() {
+        if !seen.insert(n.clone()) {
+            continue;
+        }
+        let Some((_, body)) = bodies.iter().find(|(f, _)| *f == n) else { continue };
+        if body.contains("prim.") {
+            return true;
+        }
+        for (f, _) in bodies {
+            if !seen.contains(f) && calls(body, f) {
+                todo.push(f.clone());
+            }
+        }
+    }
+    false
+}
+
+/// Does `body` call `f` (`f(` with no identifier character before it)?
+fn calls(body: &str, f: &str) -> bool {
+    body.match_indices(&format!("{f}(")).any(|(i, _)| {
+        !body[..i].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+    })
 }
 
 /// `@implements("m.f")` -> Some("m.f").
@@ -48,19 +103,16 @@ fn fn_name(line: &str) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
-fn scan(path: &Path) -> (Vec<Decl>, bool) {
+fn scan(path: &Path) -> Vec<Decl> {
     let stem = path.file_stem().expect("stem").to_string_lossy().to_string();
     let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let mut out = Vec::new();
     let mut pending: Option<String> = None;
-    let mut reaches_prim = false;
+    let bodies = fn_bodies(&src);
     for line in src.lines() {
         let t = line.trim();
         if t.starts_with("//") {
             continue;
-        }
-        if t.contains("prim.") {
-            reaches_prim = true;
         }
         if let Some(surface) = implements_arg(t) {
             pending = Some(surface);
@@ -72,13 +124,14 @@ fn scan(path: &Path) -> (Vec<Decl>, bool) {
         if let Some(surface) = pending.take() {
             let impl_fn = fn_name(t)
                 .unwrap_or_else(|| panic!("{}: @implements(\"{surface}\") is not above a `fn`: {t}", path.display()));
-            out.push(Decl { stem: stem.clone(), impl_fn, surface });
+            let prim_free = !reaches_prim(&bodies, &impl_fn);
+            out.push(Decl { stem: stem.clone(), impl_fn, surface, prim_free });
         }
     }
     if let Some(surface) = pending {
         panic!("{}: @implements(\"{surface}\") is not above a `fn`", path.display());
     }
-    (out, reaches_prim)
+    out
 }
 
 /// Does `stdlib/<module>.almd` declare `fn <func>`?
@@ -91,11 +144,11 @@ fn declares(stdlib: &Path, module: &str, func: &str) -> bool {
 
 pub fn generate(root: &Path, files: &[PathBuf], out_path: &Path) {
     let stdlib = root.join("stdlib");
-    let mut rows: Vec<(String, Vec<Decl>, bool)> = Vec::new();
+    let mut rows: Vec<(String, Vec<Decl>)> = Vec::new();
     for f in files {
-        let (decls, reaches_prim) = scan(f);
+        let decls = scan(f);
         if !decls.is_empty() {
-            rows.push((decls[0].stem.clone(), decls, !reaches_prim));
+            rows.push((decls[0].stem.clone(), decls));
         }
     }
     rows.sort_by(|a, b| a.0.cmp(&b.0));
@@ -117,18 +170,14 @@ pub fn generate(root: &Path, files: &[PathBuf], out_path: &Path) {
         "// @generated by crates/almide-types/buildscript/implements.rs from the stdlib's @implements declarations — do not edit.\n\n",
     );
     out.push_str("pub const DECLARED: &[(&str, &[(&str, &str)])] = &[\n");
-    for (stem, decls, _) in &rows {
+    for (stem, decls) in &rows {
         let pairs: Vec<String> = decls.iter().map(|d| format!("({:?}, {:?})", d.impl_fn, d.surface)).collect();
         writeln!(out, "    (crate::embedded::SRC_{}, &[{}]),", stem.to_uppercase(), pairs.join(", ")).expect("write");
     }
-    out.push_str("];\n\n/// The declared impl fns whose file never reaches `prim.`.\n");
+    out.push_str("];\n\n/// The declared impl fns that never reach `prim.`, through their own body or a same-file callee.\n");
     out.push_str("pub const PRIM_FREE: &[&str] = &[\n");
-    for (_, decls, prim_free) in &rows {
-        if *prim_free {
-            for d in decls {
-                writeln!(out, "    {:?},", d.impl_fn).expect("write");
-            }
-        }
+    for d in rows.iter().flat_map(|r| &r.1).filter(|d| d.prim_free) {
+        writeln!(out, "    {:?},", d.impl_fn).expect("write");
     }
     out.push_str("];\n");
     super::in_checkout::write_if_changed(out_path, &out);

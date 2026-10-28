@@ -114,7 +114,9 @@ pub(super) struct ParCtx {
     engine: wasmtime::Engine,
     module: wasmtime::Module,
     linker: wasmtime::Linker<Host>,
-    max_memory_bytes: Option<usize>,
+    /// The run's ONE linear-memory budget (#4135): every worker meters
+    /// against it, so N workers can never hold N × the run's cap.
+    budget: Arc<super::budget::Budget>,
     /// The run has a watchdog: set once its epoch tick fired. A worker
     /// traps on the same tick; after it, nothing is offered (the guest's
     /// sequential run meets its own deadline).
@@ -132,18 +134,30 @@ pub(super) struct ParCtx {
 impl ParCtx {
     pub(super) fn new(
         (engine, module, linker): (wasmtime::Engine, wasmtime::Module, wasmtime::Linker<Host>),
-        max_memory_bytes: Option<usize>,
+        budget: Arc<super::budget::Budget>,
         ticked: Option<Arc<AtomicBool>>,
         args: Vec<String>,
         allowed_ops: super::AllowedOps,
     ) -> Self {
-        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, allowed_ops, pool: Mutex::new(Vec::new()), crew: Mutex::default(), history: Mutex::default() }
+        ParCtx { engine, module, linker, budget, ticked, args, allowed_ops, pool: Mutex::new(Vec::new()), crew: Mutex::default(), history: Mutex::default() }
     }
 
     /// The run's compiled module and bounds — what an abort-site child
     /// (`testing.assert_aborts`, ADR-0029) is started from.
-    pub(super) fn compiled(&self) -> (&wasmtime::Engine, &wasmtime::Module, Option<usize>, &[String], &super::AllowedOps) {
-        (&self.engine, &self.module, self.max_memory_bytes, &self.args, &self.allowed_ops)
+    pub(super) fn compiled(&self) -> (&wasmtime::Engine, &wasmtime::Module, Arc<super::budget::Budget>, &[String], &super::AllowedOps) {
+        (&self.engine, &self.module, Arc::clone(&self.budget), &self.args, &self.allowed_ops)
+    }
+
+    /// Drop every pooled (idle) worker, giving its memory back to the run's
+    /// budget. Called from the run's own instance when a growth would
+    /// otherwise be refused, and before an abort-site child starts — never
+    /// during an offer (the guest is stopped in the offer's host call then).
+    pub(super) fn release_pool(&self) {
+        let idle = match self.pool.lock() {
+            Ok(mut pool) => std::mem::take(&mut *pool),
+            Err(_) => return,
+        };
+        drop(idle);
     }
 }
 
@@ -295,13 +309,19 @@ pub(super) fn serve(
     (b_ptr, b_len): (i32, i32),
 ) -> wasmtime::Result<i64> {
     let Some(ctx) = caller.data().par.clone() else { return Ok(0) };
-    let mem = caller.get_export("memory").and_then(|e| e.into_memory()).expect("exported memory");
-    let mut a = vec![0u8; a_len as u32 as usize];
-    mem.read(&*caller, a_ptr as u32 as usize, &mut a)?;
+    let mem = super::guest_memory(caller)?;
+    let a = super::read_guest(caller, mem, a_ptr, a_len)?;
     let Some(req) = parse(&a) else { return Ok(0) };
     let width = req.fields.len().max(1);
-    if b_len as u32 as usize != 8 * width * req.n {
+    // the answer room is checked BEFORE the offer runs (#4135): its size is
+    // what the result buffer is sized from, so a forged one cannot make the
+    // host reserve memory the guest does not have
+    let room = 8usize.checked_mul(width).and_then(|w| w.checked_mul(req.n));
+    if room != Some(b_len as u32 as usize) {
         return Ok(0);
+    }
+    if !super::guest_span_fits(caller, mem, b_ptr, b_len as u32 as usize) {
+        return Err(wasmtime::Trap::MemoryOutOfBounds.into());
     }
     let site = req.site.clone();
     let n = req.n;
@@ -589,12 +609,10 @@ fn add(cell: &[AtomicU64; 2], ns: u64, n: u64) {
     cell[1].fetch_add(n, Ordering::Relaxed);
 }
 
-/// A fresh worker: a new store with the run's bounds and its own captures.
+/// A fresh worker: a new store metered against the run's budget, with its
+/// own captures. A worker the budget cannot hold fails to instantiate, and
+/// the offer runs sequentially.
 fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
-    let limits = match ctx.max_memory_bytes {
-        Some(cap) => wasmtime::StoreLimitsBuilder::new().memory_size(cap).build(),
-        None => wasmtime::StoreLimits::default(),
-    };
     let host = Host {
         out: Arc::default(),
         err: Arc::default(),
@@ -602,7 +620,7 @@ fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
         fs_buf: Arc::default(),
         stdin: Arc::new(Mutex::new(StdinSource::Buf(Vec::new()))),
         args: ctx.args.clone(),
-        limits,
+        meter: super::budget::Meter::new(Arc::clone(&ctx.budget)),
         calls: Arc::default(),
         serve: Arc::default(),
         net: Arc::default(),
@@ -611,9 +629,17 @@ fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
         par: None,
         abort_site: -1,
         allowed_ops: ctx.allowed_ops.clone(),
+        contain: Arc::default(),
     };
     let mut store = wasmtime::Store::new(&ctx.engine, host);
-    store.limiter(|h| &mut h.limits);
+    store.limiter(|h| h as &mut dyn wasmtime::ResourceLimiter);
+    // Under the test harness's watchdog the engine interrupts on epochs, and
+    // a fresh store's deadline is the CURRENT epoch: without this the
+    // instantiation itself trapped with `interrupt`, so no offer of a
+    // watchdog-armed run was ever served (`arm` sets it again per offer).
+    if ctx.ticked.is_some() {
+        store.set_epoch_deadline(1);
+    }
     let instance = ctx.linker.instantiate(&mut store, &ctx.module)?;
     let memory = instance.get_memory(&mut store, "memory").ok_or_else(|| anyhow::anyhow!("no memory"))?;
     Ok(Worker { store, instance, memory })

@@ -81,7 +81,11 @@ diff against the file or its complete new text (`kind`: `auto` / `patch` /
 `test` blocks of those files, and the native⇄wasm run of every reached
 `// @contract:` fixture. Each diagnostic / test / contract comes back in one of
 `unchanged`, `newly_broken`, `newly_fixed`, `removed`; `survives` is `true`
-when no error, test or contract is newly broken. The file is never written.
+when no error, test or contract is newly broken and no test or contract is
+removed (#4267 — deleting the guarding test is not surviving it; the CLI's
+`--allow-removed` admits a deliberate removal, and this tool never passes it).
+A test that loses every assertion reading a value (`assert(true)`, an empty
+body) is newly broken, `after: "hollowed"`. The file is never written.
 
 A diagnostic's `before` / `after` is the object `almide check --json` printed,
 carried verbatim, so every field that output grows reaches the agent unchanged.

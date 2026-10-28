@@ -115,12 +115,4 @@ heap.count(h: Heap[A], f: (A) -> Bool) -> Int
 heap.filter(h: Heap[A], f: (A) -> Bool) -> Heap[A]
 ```
 
-## Type index (1 types)
-
-```
-// A priority queue; the least element by its order comes out first.
-// @since unreleased
-type heap.Heap = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
-```
-
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -40,8 +40,8 @@ effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("xt_fallible_compound")!
   let bad = dir + "/bad.txt"
   let good = dir + "/good.txt"
-  let _w1 = fs.write(bad, "a\nb\nc\n")!
-  let _w2 = fs.write(good, "a\nc\n")!
+  let _w1 = fs.write_text(bad, "a\nb\nc\n")!
+  let _w2 = fs.write_text(good, "a\nc\n")!
   // canonical (the stripped form) — the reference
   println("fold canonical: " + show_int(fs.fold_lines(bad, 0, (acc, line) => add_row(acc, line)!)))
   // block body with a statement before the `!`

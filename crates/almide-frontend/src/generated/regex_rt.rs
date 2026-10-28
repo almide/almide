@@ -206,8 +206,10 @@ fn rx_parse_escape(chars: &[char], pos: &mut usize) -> AlmideRxNode {
         'D' => AlmideRxNode::Class(vec![('0', '9')], true),
         'w' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
         'W' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
-        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], false),
-        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], true),
+        // `\s` is the conventional ASCII whitespace set [ \t\n\v\f\r] — the
+        // one PCRE, Python, Rust, JS and POSIX [[:space:]] share (#4257).
+        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\r')], false),
+        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\r')], true),
         'b' => AlmideRxNode::WordBoundary(true),
         'B' => AlmideRxNode::WordBoundary(false),
         'n' => AlmideRxNode::Lit('\n'),
@@ -238,7 +240,7 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
             match esc {
                 'd' => { ranges.push(('0', '9')); continue; }
                 'w' => { ranges.extend_from_slice(&[('a','z'),('A','Z'),('0','9'),('_','_')]); continue; }
-                's' => { ranges.extend_from_slice(&[(' ',' '),('\t','\t'),('\n','\n'),('\r','\r')]); continue; }
+                's' => { ranges.extend_from_slice(&[(' ',' '),('\t','\r')]); continue; }
                 'D' => { /* not fully supported in class, treat as literal */ ranges.push((esc, esc)); continue; }
                 'n' => { ranges.push(('\n', '\n')); continue; }
                 't' => { ranges.push(('\t', '\t')); continue; }
@@ -1702,7 +1704,12 @@ struct AlmideRxCompiled {
 
 fn rx_compiled(pat: &str) -> AlmideRxCompiled {
     let invalid = rx_check(pat);
-    let rx = rx_compile(pat);
+    // rx_compile recurses per group with no depth limit of its own; a
+    // refused pattern (nested past ALMIDE_RX_MAX_NEST, say 50 000 deep) must
+    // never reach it, or regex.compile overflows the stack instead of
+    // returning its err (#4195). Every op aborts on `invalid` before
+    // reading `rx`, so the empty pattern stands in.
+    let rx = rx_compile(if invalid.is_none() { pat } else { "" });
     let prog = if invalid.is_none() { rx_program(&rx) } else { None };
     AlmideRxCompiled { rx, prog, pikes: std::cell::RefCell::new([None, None]), invalid }
 }

@@ -41,7 +41,7 @@ effect fn main() -> Unit = {
   let keys = ["a", "b"]
   let bump = (k: String) => {
     let cur = map.get(stats, k) ?? 0
-    map.insert(stats, k, cur + 1)
+    stats = map.set(stats, k, cur + 1)
   }
   for i in 0..<10 {
     bump(keys[i % 2])
@@ -61,11 +61,14 @@ fn closure_map_read_borrows_the_cell_in_place() {
         "expected an in-place cell borrow in the closure read:\n{out}"
     );
     // The closure body must not deep-clone the cell per read any more.
+    // The read statement is the `let cur` line; the write back (`stats =
+    // map.set(stats, ...)`) after it is a separate statement and not pinned
+    // here. The unfused `map.get(..) ?? 0` reads as one `match` line.
     let closure = out.split("Rc::new(move").nth(1).expect("closure body present");
-    let closure_body = closure.split("})").next().unwrap();
+    let read = closure.lines().find(|l| l.contains("let cur")).expect("the `let cur` read in the closure");
     assert!(
-        !closure_body.contains(".get()"),
-        "closure read still snapshots the cell:\n{closure_body}"
+        !read.contains(".get()"),
+        "closure read still snapshots the cell:\n{read}"
     );
 }
 
@@ -76,8 +79,8 @@ effect fn main() -> Unit = {
   var stats: Map[String, Acc] = map.new()
   let feed = (k: String, t: Int) => {
     match map.get(stats, k) {
-      some(s) => map.insert(stats, k, Acc { sum: s.sum + t, count: s.count + 1 }),
-      none => map.insert(stats, k, Acc { sum: t, count: 1 }),
+      some(s) => { stats[k] = Acc { sum: s.sum + t, count: s.count + 1 } },
+      none => { stats[k] = Acc { sum: t, count: 1 } },
     }
   }
   feed("x", 3)
@@ -103,10 +106,10 @@ fn match_subject_read_is_hoisted_before_the_arms() {
 const FORIN_HEAD_READ: &str = r#"
 effect fn main() -> Unit = {
   var m: Map[String, Int] = map.new()
-  map.insert(m, "seed", 1)
+  m = map.set(m, "seed", 1)
   let sweep = () => {
     for k in map.keys(m) {
-      map.insert(m, k, 0)
+      m = map.set(m, k, 0)
     }
   }
   sweep()

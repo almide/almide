@@ -2,58 +2,6 @@
 
 Mathematical functions. import math.
 
-### `math.min(a: Int, b: Int) -> Int`
-
-Return the smaller of two integers.
-
-```almd run
-fn main() -> Unit = {
-  println("${math.min(3, 7)}")
-}
-```
-```output
-3
-```
-
-### `math.max(a: Int, b: Int) -> Int`
-
-Return the larger of two integers.
-
-```almd run
-fn main() -> Unit = {
-  println("${math.max(3, 7)}")
-}
-```
-```output
-7
-```
-
-### `math.abs(n: Int) -> Int`
-
-Return the absolute value of an integer.
-
-```almd run
-fn main() -> Unit = {
-  println("${math.abs(-5)}")
-}
-```
-```output
-5
-```
-
-### `math.pow(base: Int, exp: Int) -> Int`
-
-Raise an integer base to an integer exponent.
-
-```almd run
-fn main() -> Unit = {
-  println("${math.pow(2, 10)}")
-}
-```
-```output
-1024
-```
-
 ### `math.pi() -> Float`
 
 Return the mathematical constant pi (3.14159...).
@@ -188,61 +136,12 @@ fn main() -> Unit = {
 3.0
 ```
 
-### `math.sign(n: Int) -> Int`
-
-Return the sign of an integer: -1, 0, or 1.
-
-```almd run
-fn main() -> Unit = {
-  println("${math.sign(-42)}")
-}
-```
-```output
--1
-```
-
-### `math.fmin(a: Float, b: Float) -> Float`
-
-Return the smaller of two floats.
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(math.fmin(1.5, 2.5)))
-}
-```
-```output
-1.5
-```
-
-### `math.fmax(a: Float, b: Float) -> Float`
-
-Return the larger of two floats.
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(math.fmax(1.5, 2.5)))
-}
-```
-```output
-2.5
-```
-
-### `math.fpow(base: Float, exp: Float) -> Float`
-
-Raise a float base to a float exponent.
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(math.fpow(2.0, 0.5)))
-}
-```
-```output
-1.4142135623730951
-```
-
 ### `math.factorial(n: Int) -> Int`
 
-Return the factorial of a non-negative integer.
+Return the factorial of a non-negative integer (1 for n <= 1). The product wraps modulo 2^64
+like every Int product, so it is wrong past 20 and 0 for every n >= 66: from there on n!
+holds at least 64 factors of two (v2(66!) = 66 - popcount(66) = 64), and the answer comes
+back at once instead of after n multiplications.
 
 ```almd run
 fn main() -> Unit = {
@@ -284,13 +183,9 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (35 functions)
+## Signature index (27 functions)
 
 ```
-// Magnitude of n; min_value wraps to itself.
-// @since 0.5.0 or earlier
-math.abs(n: Int) -> Int
-
 // Arctangent in radians, within -pi/2..pi/2.
 // @since 0.30.0 or earlier
 math.atan(x: Float) -> Float
@@ -311,21 +206,9 @@ math.e() -> Float
 // @since 0.5.0 or earlier
 math.exp(x: Float) -> Float
 
-// Product 1..n; 1 for n <= 0; wraps past 20.
+// Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 // @since 0.5.13 or earlier
 math.factorial(n: Int) -> Int
-
-// Greater; a NaN operand is ignored; 0.0 > -0.0.
-// @since 0.5.13 or earlier
-math.fmax(a: Float, b: Float) -> Float
-
-// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-// @since 0.5.13 or earlier
-math.fmin(a: Float, b: Float) -> Float
-
-// base to the exp; NaN for negative base, fractional exp.
-// @since 0.5.13 or earlier
-math.fpow(base: Float, exp: Float) -> Float
 
 // Natural log; -inf at 0, NaN for negative x.
 // @since 0.5.0 or earlier
@@ -343,25 +226,9 @@ math.log2(x: Float) -> Float
 // @since 0.5.13 or earlier
 math.log_gamma(x: Float) -> Float
 
-// Greater of a and b.
-// @since 0.5.0 or earlier
-math.max(a: Int, b: Int) -> Int
-
-// Lesser of a and b.
-// @since 0.5.0 or earlier
-math.min(a: Int, b: Int) -> Int
-
 // The circle constant, 3.141592653589793.
 // @since 0.5.0 or earlier
 math.pi() -> Float
-
-// base to the exp, wrapping; negative exp aborts.
-// @since 0.5.0 or earlier
-math.pow(base: Int, exp: Int) -> Int
-
-// -1, 0 or 1 by the sign of n.
-// @since 0.5.13 or earlier
-math.sign(n: Int) -> Int
 
 // Sine of x radians; NaN for infinite x.
 // @since 0.5.0 or earlier

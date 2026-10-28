@@ -1,0 +1,12 @@
+// The real fix is `almide add almide-graphics/nn@v0.2.0 --trust github.com/almide-graphics`, `import nn.kernels` and `kernels.gelu(m)`;
+// this case checks without dependencies, so it keeps a local element-wise form.
+fn gelu_scalar(x: Float) -> Float = 0.5 * x * (1.0 + math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))
+
+fn main() -> Unit = {
+  let m = matrix.from_lists([
+    [0.5, -1.0],
+    [2.0, 0.0]
+  ])
+  let g = matrix.map(m, (x) => gelu_scalar(x))
+  println(float.to_string(matrix.get(g, 0, 0) ?? 0.0))
+}

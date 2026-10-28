@@ -1,0 +1,7 @@
+// E002 (C-435): `: Decode` derives `decode` only — an input type is never
+// written out, so it has no `encode`.
+import json
+
+type UserInput: Decode = { name: String }
+
+effect fn main() -> Unit = println(json.stringify(UserInput.encode(UserInput { name: "m" })))

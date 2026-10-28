@@ -19,7 +19,7 @@ effect fn main() -> Unit = {
 
 effect fn chat_loop(model: String, conversation: conv.Conversation) -> Unit = {
   io.print("> ")
-  let input = io.read_line()
+  let input = (io.read_line() ?? "")
   if string.trim(input) == "" then println("Bye!")
   else {
     let updated = conversation |> conv.add_user(input)

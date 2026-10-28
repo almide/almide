@@ -38,15 +38,21 @@ reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ff
 
 [[file]]
 path = "runtime/rs/src/sys.rs"
-count = 8
+count = 9
 class = "c-call"
-reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe. Checked: thread_cpu_ns under Miri (the fan corpus, scripts/miri-fan-gate.sh) and ASan; set_signal and wait_exited_or_stopped under ASan (scripts/lib/sys-ffi-asan.almd in the asan job); thread_self / thread_kill / exit_now only by tests/http_serve_cross_test.rs (functional, no sanitizer); dgemm by nothing (no build sets have_blas); the Windows handler by nothing"
+reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), kill (process.kill / is_alive, #4125: the syscall, never a `kill` on PATH), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe. Checked: thread_cpu_ns under Miri (the fan corpus, scripts/miri-fan-gate.sh) and ASan; set_signal and wait_exited_or_stopped under ASan (scripts/lib/sys-ffi-asan.almd in the asan job); send_signal only by spec/embedded_cross/process_kill_syscall.almd (functional, no sanitizer; it touches no memory); thread_self / thread_kill / exit_now only by tests/http_serve_cross_test.rs (functional, no sanitizer); dgemm by nothing (no build sets have_blas); the Windows handler by nothing"
 
 [[file]]
 path = "crates/almide-rt-core/src/net_unix_sys.rs"
 count = 5
 class = "c-call"
 reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for the unix module"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_box_body.rs"
+count = 25
+class = "emitted-prelude"
+reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its new / into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it"
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_region.rs"

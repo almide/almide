@@ -71,83 +71,83 @@ fn encode_with(b: &[u8], alphabet: &[u8; 64]) -> String {
     out.into_iter().map(char::from).collect()
 }
 
-/// Map a single Base64 character to its 0..63 value, accepting both the
-/// standard (`+`/`/`) and URL-safe (`-`/`_`) symbols for 62/63 so a decoder
-/// is liberal in what it accepts. Returns `None` for any other byte.
-fn decode_char(c: u8) -> Option<u8> {
+/// Map a single Base64 character to its 0..63 value under ONE alphabet: `s62`
+/// / `s63` are that alphabet's two final symbols (`+` `/` or `-` `_`), and the
+/// other alphabet's pair is an invalid character (#4119). Returns `None` for
+/// any byte outside the alphabet, `=` included.
+fn decode_char(c: u8, s62: u8, s63: u8) -> Option<u8> {
     match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),
         b'0'..=b'9' => Some(c - b'0' + 52),
-        b'+' | b'-' => Some(62),
-        b'/' | b'_' => Some(63),
+        _ if c == s62 => Some(62),
+        _ if c == s63 => Some(63),
         _ => None,
     }
 }
 
-// Two distinct, position-free error strings keep the WASM mirror cheap: a
-// constant invalid-character message, and a length message that only needs an
-// int-to-string of the original input length.
+// Fixed, position-free error strings keep the WASM mirror cheap: constant
+// character / padding / trailing-bit messages, and a length message that only
+// needs an int-to-string of the input length.
 const ALMIDE_ERR_CHAR: &str = "invalid base64 character";
+const ALMIDE_ERR_PAD: &str = "invalid base64 padding";
+const ALMIDE_ERR_BITS: &str = "invalid base64 trailing bits";
 
-fn decode_str(s: &str) -> Result<Vec<u8>, String> {
+/// CANONICAL decode (#4119): exactly the padded form `encode_with` emits, so
+/// one byte string has exactly one accepted spelling. Checked in this order,
+/// the first failure wins:
+///   1. the length is a multiple of 4      → `invalid base64 length: <len>`
+///   2. at most two trailing `=`           → `invalid base64 padding`
+///   3. every other byte is in THIS alphabet (a `=` before the trailing run,
+///      or the other alphabet's `+/` / `-_`) → `invalid base64 character`
+///   4. the bits the padding drops are zero → `invalid base64 trailing bits`
+///
+/// Before this the decoder stripped any number of `=`, accepted no padding,
+/// read both alphabets in both functions, and ignored the dropped bits, so
+/// `QQ==`, `QR==`, `QQ`, `QQ========` all decoded to `A` (RFC 4648 §12's
+/// malleability). Go's `Encoding.Strict()` refuses the same set.
+fn decode_str(s: &str, s62: u8, s63: u8) -> Result<Vec<u8>, String> {
     let bytes = s.as_bytes();
-    // Strip canonical trailing '=' padding (0, 1, or 2 chars), then decode the
-    // significant chars. A '=' anywhere before the trailing run is invalid and
-    // is rejected as a normal invalid character by `decode_char` below.
-    let mut end = bytes.len();
-    while end > 0 && bytes[end - 1] == ALMIDE_PAD {
-        end -= 1;
-    }
-    let body = &bytes[..end];
-
-    // After stripping padding, length % 4 == 1 is impossible for valid Base64
-    // (a single trailing 6-bit symbol cannot encode any whole byte). Report the
-    // ORIGINAL input length so the message is stable regardless of padding.
-    if body.len() % 4 == 1 {
+    if bytes.len() % 4 != 0 {
         return Err(format!("invalid base64 length: {}", s.len()));
     }
+    let pad = bytes.iter().rev().take_while(|&&b| b == ALMIDE_PAD).count();
+    if pad > 2 {
+        return Err(ALMIDE_ERR_PAD.to_string());
+    }
+    let body = &bytes[..bytes.len() - pad];
+    let vals = body
+        .iter()
+        .map(|&c| decode_char(c, s62, s63))
+        .collect::<Option<Vec<u8>>>()
+        .ok_or_else(|| ALMIDE_ERR_CHAR.to_string())?;
+    // One pad drops the low 2 bits of the last symbol, two pads the low 4.
+    let dropped = match pad { 1 => 0x03, 2 => 0x0f, _ => 0 };
+    if vals.last().is_some_and(|&v| v & dropped != 0) {
+        return Err(ALMIDE_ERR_BITS.to_string());
+    }
 
-    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
-    let mut chunks = body.chunks_exact(4);
-    for chunk in &mut chunks {
-        let a = nibble(chunk[0])?;
-        let b = nibble(chunk[1])?;
-        let c = nibble(chunk[2])?;
-        let d = nibble(chunk[3])?;
-        out.push((a << 2) | (b >> 4));
-        out.push((b << 4) | (c >> 2));
-        out.push((c << 6) | d);
+    let mut out = Vec::with_capacity(vals.len() / 4 * 3 + 2);
+    let mut chunks = vals.chunks_exact(4);
+    for q in &mut chunks {
+        out.push((q[0] << 2) | (q[1] >> 4));
+        out.push((q[1] << 4) | (q[2] >> 2));
+        out.push((q[2] << 6) | q[3]);
     }
     let rem = chunks.remainder();
-    match rem.len() {
-        2 => {
-            let a = nibble(rem[0])?;
-            let b = nibble(rem[1])?;
-            out.push((a << 2) | (b >> 4));
-        }
-        3 => {
-            let a = nibble(rem[0])?;
-            let b = nibble(rem[1])?;
-            let c = nibble(rem[2])?;
-            out.push((a << 2) | (b >> 4));
-            out.push((b << 4) | (c >> 2));
-        }
-        _ => {}
+    if rem.len() >= 2 {
+        out.push((rem[0] << 2) | (rem[1] >> 4));
+    }
+    if rem.len() == 3 {
+        out.push((rem[1] << 4) | (rem[2] >> 2));
     }
     Ok(out)
-}
-
-/// Decode one Base64 character to its 0..63 value, reporting `ALMIDE_ERR_CHAR` on
-/// failure (a stray `=` in the body lands here too).
-fn nibble(c: u8) -> Result<u8, String> {
-    decode_char(c).ok_or_else(|| ALMIDE_ERR_CHAR.to_string())
 }
 
 pub fn almide_rt_base64_encode(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_STD_ALPHABET); __almide_out.into() }
 
 pub fn almide_rt_base64_encode_url(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_URL_ALPHABET); __almide_out.into() }
 
-pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s, b'+', b'/') })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_base64_decode_url(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_base64_decode_url(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s, b'-', b'_') })(); __almide_r.map_err(Into::into) }

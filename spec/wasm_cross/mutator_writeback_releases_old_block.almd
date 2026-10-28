@@ -4,7 +4,7 @@
 // replaces, whatever the receiver is: a local `var`, a `mut` parameter, a
 // captured `var` (a closure cell) or a module-level `var` (#2968, #2967).
 // `string.push` / `string.clear`, `list.pop` / `list.clear`, the functional
-// `map.insert` / `map.delete` / `map.clear`, and the bytes window writers
+// `m[k] = v` / `m = map.remove(m, k)` / `map.clear`, and the bytes window writers
 // (`fill`, `clear`, `write_*`, `copy_within`, `copy_from`, the `append_*`
 // family) each orphaned the old block on every call. A `list.push` /
 // `bytes.push` through a `mut` parameter that has to GROW kept the outgrown
@@ -19,9 +19,13 @@ fn add(mut xs: List[String], s: String) -> Unit = list.push(xs, s)
 
 fn pop_last(mut xs: List[String]) -> String = list.pop(xs) ?? "-"
 
-fn put(mut m: Map[String, Int], k: String, v: Int) -> Unit = map.insert(m, k, v)
+fn put(mut m: Map[String, Int], k: String, v: Int) -> Unit = {
+  m[k] = v
+}
 
-fn drop_key(mut m: Map[String, Int], k: String) -> Unit = map.delete(m, k)
+fn drop_key(mut m: Map[String, Int], k: String) -> Unit = {
+  m = map.remove(m, k)
+}
 
 fn grow(mut b: Bytes, n: Int) -> Unit = {
   for i in 0..<n {
@@ -30,7 +34,7 @@ fn grow(mut b: Bytes, n: Int) -> Unit = {
 }
 
 fn stamp(mut b: Bytes) -> Unit = {
-  bytes.write_u32_be(b, 258)
+  bytes.append_u32_be(b, 258)
   bytes.append_u8(b, 7)
 }
 
@@ -38,7 +42,7 @@ fn show_list(xs: List[String]) -> String = "[" + list.join(xs, ",") + "]"
 
 fn show_bytes(b: Bytes) -> String = "${bytes.to_list(b)}"
 
-fn show_map(m: Map[String, Int]) -> String = map.keys(m) |> list.map((k) => k + "=" + int.to_string(map.get_or(m, k, 0))) |> list.join(",")
+fn show_map(m: Map[String, Int]) -> String = map.keys(m) |> list.map((k) => k + "=" + int.to_string(map.get(m, k) ?? 0)) |> list.join(",")
 
 effect fn main() -> Unit = {
   // Strings: push and clear on a local, an alias keeps the old text.
@@ -81,7 +85,7 @@ effect fn main() -> Unit = {
   // through `mut` params, and a captured var.
   var b = bytes.zeros(4)
   bytes.fill(b, 3)
-  bytes.write_u8(b, 513)
+  bytes.push(b, 513)
   bytes.copy_within(b, 0, 2, 3)
   let src = bytes.from_list([9, 8])
   bytes.copy_from(b, src, 1, 0, 2)
@@ -89,7 +93,7 @@ effect fn main() -> Unit = {
   bytes.clear(b)
   grow(b, 20)
   stamp(b)
-  println("b.len=" + int.to_string(bytes.len(b)) + " tail=" + int.to_string(bytes.get_or(b, 24, -1)))
+  println("b.len=" + int.to_string(bytes.len(b)) + " tail=" + int.to_string(bytes.get(b, 24) ?? -1))
   var c = bytes.zeros(3)
   let cw = () => bytes.copy_within(c, 0, 1, 1)
   cw()

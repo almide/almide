@@ -202,6 +202,14 @@ fn the_vm_runs_every_shipped_artifact_as_the_stock_runtime_does() {
         .filter(|p| p.extension().is_some_and(|x| x == "almd"))
         .collect();
     fixtures.sort();
+    // Every fixture on a full run; the CI slice (ALMIDE_CI_SLICE) plus the
+    // change's own fixtures otherwise. The blind-gate floors below count the
+    // whole corpus and are judged on a full run only; a slice must still
+    // judge at least one fixture.
+    let fixtures = almide_corpus::select(fixtures, "wasm_vm_parity", |p| {
+        format!("spec/wasm_cross/{}", p.file_name().unwrap_or_default().to_string_lossy())
+    });
+    let full = almide_corpus::full_run();
     let tmp = tempfile::tempdir().expect("tempdir");
     let bin = almide_bin();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -246,7 +254,7 @@ fn the_vm_runs_every_shipped_artifact_as_the_stock_runtime_does() {
     for t in &tracked {
         eprintln!("  ~ tracked: {t}");
     }
-    assert!(equal > 600, "only {equal} artifacts ran equal — the gate went blind");
-    assert!(critical > 250, "only {critical} Critical-clean fixtures were judged against native — the gate went blind");
+    assert!(equal > if full { 600 } else { 0 }, "only {equal} artifacts ran equal — the gate went blind");
+    assert!(!full || critical > 250, "only {critical} Critical-clean fixtures were judged against native — the gate went blind");
     assert!(wrong.is_empty(), "{} artifact(s):\n{}", wrong.len(), wrong.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
 }

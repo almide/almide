@@ -70,6 +70,9 @@ pub const HTTP_ERR_URL_SLASHES: [&str; 2] = ["expected \"//\" after \"", ":\""];
 /// `unsupported scheme "<scheme>" (…)` — the scheme lowercased (a scheme is
 /// letters, digits, `+`, `-` and `.`, so quoting it adds only the quotes).
 pub const HTTP_ERR_URL_SCHEME: [&str; 2] = ["unsupported scheme \"", "\" (only http:// and https:// are supported)"];
+/// `invalid port <quoted port> (…)` — the port text as written; the p3 shim
+/// finds it too (#4231).
+pub const HTTP_ERR_URL_PORT: [&str; 2] = ["invalid port ", " (expected a number from 1 to 65535)"];
 
 /// refused-header: `(head, tail)` around the quoted field name.
 pub const HTTP_ERR_HEADER_NAME: (&str, &str) =
@@ -113,39 +116,67 @@ pub fn http_is_framing_header(name: &str) -> bool {
 /// head, the quoted URL, middle, the wasi:http case name, tail.
 pub const HTTP_ERR_UNCLASSIFIED: [&str; 3] = ["http request to ", " failed (", ")"];
 
-/// Quote `s` in double quotes: `"` and `\` are escaped, TAB, CR, LF and NUL
-/// read `\t` `\r` `\n` `\0`, every other ASCII control (and DEL) reads
-/// `\u{<hex>}` in lowercase hex, and every other byte is copied. Equal to
-/// Rust's `{:?}` on ASCII text; the p3 shim implements the same bytes.
+/// Quote `s` in double quotes: `"` and `\` are escaped, and every character
+/// C-418 escapes (C0, DEL, C1 and the bidi controls, #4126) is written by
+/// that one rule (`almide_rt_errtext_escape`): TAB, CR, LF and NUL read `\t`
+/// `\r` `\n` `\0`, the rest `\u{<lowercase hex>}`. Every other character is
+/// copied. On ASCII text this is Rust's `{:?}`, and the p3 shim's
+/// `$http_quote` writes the same bytes for every text that reaches it (a URL
+/// that passed the request checks is ASCII).
 pub fn http_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            '\n' => out.push_str("\\n"),
-            '\0' => out.push_str("\\0"),
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
-            c => out.push(c),
-        }
+    format!("\"{}\"", almide_rt_errtext_escape(&s.replace('\\', "\\\\").replace('"', "\\\"")))
+}
+
+/// What replaces the userinfo password wherever an error quotes a URL
+/// (C-328, #4205) — Go net/http's `stripPassword` token.
+pub const HTTP_URL_PASSWORD_MASK: &str = "***";
+
+/// The byte span `[from, to)` of `url`'s userinfo password, read on the raw
+/// text the program passed, the way `http_parse_url` splits it: the
+/// authority starts past a `//` standing at the first `/`, `?` or `#` (at
+/// the start of the text when none is a `//`) and ends at the next `/`, `?`
+/// or `#`; the userinfo is
+/// what precedes the authority's LAST `@`; the password is what follows the
+/// userinfo's FIRST `:` — possibly empty. `None` when the userinfo has no
+/// `:` (or there is no `@`). The query and fragment are never inside it.
+/// The p3 shim's `$http_quote` computes the same span (wasi_p3_http_err.rs).
+pub fn http_url_password_span(url: &str) -> Option<(usize, usize)> {
+    let start = match url.find(['/', '?', '#']) {
+        Some(s) if url[s..].starts_with("//") => s + 2,
+        _ => 0,
+    };
+    let end = url[start..].find(['/', '?', '#']).map_or(url.len(), |i| start + i);
+    let at = start + url[start..end].rfind('@')?;
+    let colon = start + url[start..at].find(':')?;
+    Some((colon + 1, at))
+}
+
+/// `url` with its userinfo password (if any) replaced by
+/// `HTTP_URL_PASSWORD_MASK`; every other byte is kept — the username,
+/// scheme, host, port, path, query and fragment.
+pub fn http_redact_url(url: &str) -> String {
+    match http_url_password_span(url) {
+        Some((from, to)) => format!("{}{}{}", &url[..from], HTTP_URL_PASSWORD_MASK, &url[to..]),
+        None => url.to_string(),
     }
-    out.push('"');
-    out
+}
+
+/// Quote a URL in an error text: `http_quote` of `http_redact_url`. Every
+/// error that names the URL the program passed quotes it through here.
+pub fn http_quote_url(url: &str) -> String {
+    http_quote(&http_redact_url(url))
 }
 
 /// The text of a transport failure of `class` on a request to `url`.
 pub fn http_error_text(class: HttpErrorClass, url: &str) -> String {
     let (head, tail) = http_error_parts(class);
-    format!("{}{}{}", head, http_quote(url), tail)
+    format!("{}{}{}", head, http_quote_url(url), tail)
 }
 
 /// The text of a response past the `max`-byte limit.
 pub fn http_too_large_text(url: &str, max: usize) -> String {
     let [head, mid, tail] = HTTP_ERR_TOO_LARGE;
-    format!("{}{}{}{}{}", head, http_quote(url), mid, max, tail)
+    format!("{}{}{}{}{}", head, http_quote_url(url), mid, max, tail)
 }
 
 /// An io error on an open connection: a timeout, or a broken exchange.

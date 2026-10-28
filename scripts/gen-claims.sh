@@ -66,13 +66,13 @@ awk -v root="$ROOT_LINK" '
       # "Divergences awaiting a fix", not "Exceptions" — this block sits directly
       # under the equivalence claim, and the ratchet counts contracts flagged for
       # revision, NOT carve-outs in the law itself. The one by-design carve-out
-      # (platform-reporting env.os / env.temp_dir, C-189) is active, not flagged,
+      # (platform-reporting env.os / fs.temp_dir, C-189) is active, not flagged,
       # so a bare "Exceptions: none" read as covering it would be false.
       # NOTE: this awk program is single-quoted — no apostrophes in these strings.
       print "> **Divergences awaiting a fix: none.** Every contract in the ledger is"
       print "> `active`, carrying executable evidence of class >= `fixture`. The one"
       print "> by-design carve-out in the law — the platform-reporting fns `env.os`"
-      print "> and `env.temp_dir` — is bounded by C-189."
+      print "> and `fs.temp_dir` — is bounded by C-189."
     } else {
       printf "> **Divergences awaiting a fix (%d)** — contracts flagged for revision; the ratchet says this list may only shrink:\n", nflag
       print ">"

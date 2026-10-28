@@ -11,7 +11,7 @@
 // returning leak a megabyte-sized drift instead of an invisible one.
 import bytes
 
-effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.set_at(b, 0, v)
+effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.put_u8(b, 0, v)
 
 effect fn width(b: Bytes) -> Int = ok(bytes.len(b))
 
@@ -23,7 +23,7 @@ effect fn main() -> Unit = {
   while i < 2000 {
     var b = bytes.zeros(1024)
     poke(b, int.band(i, 255))!
-    fresh = fresh + bytes.get_or(b, 0, 0)
+    fresh = fresh + bytes.get(b, 0) ?? 0
     i = i + 1
   }
   println("fresh=${fresh}")
@@ -35,7 +35,7 @@ effect fn main() -> Unit = {
     poke(held, int.band(j, 127))!
     j = j + 1
   }
-  println("held=${bytes.get_or(held, 0, 0)}")
+  println("held=${bytes.get(held, 0) ?? 0}")
   // A plain (non-mut) heap argument through the same `!`, where the carrier is
   // typed Result and parked in a temporary — the shape that always balanced.
   var sum = 0

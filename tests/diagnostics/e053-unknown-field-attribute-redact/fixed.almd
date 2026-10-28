@@ -1,0 +1,4 @@
+// The fix: drop the attribute (or make the field a Secret[String] with `import secret`).
+type Login = { user: String, password: String }
+
+fn main() -> Unit = println("ok")

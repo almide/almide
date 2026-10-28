@@ -7,7 +7,8 @@
 // Every field is ASCII digits of any width (`2024-1-5T1:2:3` is accepted; a
 // sign, a space or a letter is not — `string.is_digit`'s rule on both legs),
 // exactly three date and three time fields ("invalid datetime format"
-// otherwise); month 1..=12, day 1..=days-in-month (proleptic Gregorian), hour
+// otherwise); year 0..=9999 (RFC 3339 4DIGIT — beyond it the calendar
+// arithmetic wrapped and answered ok with a 1969 instant, #4118); month 1..=12, day 1..=days-in-month (proleptic Gregorian), hour
 // 0..=23, minute and second 0..=59 (no leap second), offset hours 0..=23 and
 // minutes 0..=59 — each refusal names the field and the value it saw. The
 // offset is APPLIED: the answer is the UTC instant, so `…T10:30:00+09:00`
@@ -39,11 +40,6 @@ fn __dpi_sign_at(t: String) -> Int? = match (string.index_of(t, "+"), string.ind
   (none, none) => none,
 }
 
-fn __dpi_leap(y: Int) -> Bool = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
-
-fn __dpi_days_in_month(y: Int, m: Int) -> Int = if m == 2 then (if __dpi_leap(y) then 29 else 28)
-else if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31
-
 // The `±HH:MM` after the sign at `i`, in seconds (signed), or none.
 fn __dpi_offset(t: String, i: Int) -> Int? = {
   let sign = string.slice(t, i, i + 1)
@@ -62,7 +58,8 @@ fn __dpi_offset(t: String, i: Int) -> Int? = {
   }
 }
 
-// Range-check the six fields in order, then build the UTC instant.
+// Range-check the six fields in order (in `datetime.from_parts`, the one
+// place both constructors share, #4149), then apply the offset.
 fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let y = list.get(d, 0) ?? 0
   let mo = list.get(d, 1) ?? 0
@@ -70,12 +67,10 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let h = list.get(tm, 0) ?? 0
   let mi = list.get(tm, 1) ?? 0
   let s = list.get(tm, 2) ?? 0
-  if mo < 1 or mo > 12 then err("month out of range: " + int.to_string(mo))
-  else if dd < 1 or dd > __dpi_days_in_month(y, mo) then err("day out of range: " + int.to_string(dd))
-  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
-  else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
-  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
+  match datetime.from_parts(y, mo, dd, h, mi, s) {
+    ok(t) => ok(t - off),
+    err(e) => err(e),
+  }
 }
 
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {
@@ -104,7 +99,7 @@ fn datetime_parse_iso(s: String) -> Result[Int, String] = {
         none => __dpi_build(d, tm, 0),
         some(i) => match __dpi_offset(time_z, i) {
           some(off) => __dpi_build(d, tm, off),
-          none => err("invalid offset: " + string.slice(time_z, i, string.len(time_z))),
+          none => err("invalid offset: " + string.__err_text(string.slice(time_z, i, string.len(time_z)))),
         },
       },
       _ => err("invalid datetime format"),

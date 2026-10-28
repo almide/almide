@@ -51,6 +51,11 @@ almide-wasi           The `to_wasi` transform that makes build artifacts
                       re-exported as `almide_wasm_run::wasi`
 almide-wasm-run       The embedded almide.* host (wasmtime) + the p2/p3
                       component transforms
+almide-anchor-check   The byte-level translation check of #4011 (d): decodes a
+                      shipped module itself (wasmparser only, no compiler
+                      code) and holds every located bounds / init witness
+                      event to the instruction it names; run per artifact by
+                      proofs/structural-wall.sh
 almide-wasm-vm        The qualification-scoped wasm interpreter (#865): runs a
                       shipped `to_wasi` artifact with an instruction set pinned
                       to the emitter's, fixed buffers and fuel; std only.

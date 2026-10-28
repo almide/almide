@@ -17,7 +17,7 @@ fn init() -> Unit = {
   for i in 0..<count {
     let t0 = tw.create(0.0, 1.0, 1200.0)
     let t1 = tw.with_easing(t0, easings[i])
-    let t2 = tw.with_delay(t1, int.to_float(i) * 80.0)
+    let t2 = tw.with_delay(t1, float.from(i) * 80.0)
     let t3 = tw.looping(t2)
     let t4 = tw.with_direction(t3, tw.ALTERNATE)
     items = items + [t4]

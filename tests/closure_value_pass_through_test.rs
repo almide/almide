@@ -23,7 +23,7 @@ fn go(x: HttpHandler, i: Int) -> HttpHandler = if i <= 0 then x else go(http.wra
 effect fn main() -> Unit = {
   let x0: HttpHandler = (req) => http.response(200, "ok")
   let x: HttpHandler = go(x0, DEPTH)
-  println(http.body(x(http.new_request("GET", "/", "", map.new()))!))
+  println(http.body(x(http.new_request("GET", "/", "", []))!))
 }
 "#;
 
@@ -35,7 +35,7 @@ fn go(x: HttpHandler, i: Int) -> HttpHandler = if i <= 0 then x else go(http.wra
 effect fn main() -> Unit = {
   let x0: HttpHandler = (req) => http.response(200, "ok")
   let x: HttpHandler = go(x0, DEPTH)
-  println(http.body(x(http.new_request("GET", "/", "", map.new()))!))
+  println(http.body(x(http.new_request("GET", "/", "", []))!))
 }
 "#;
 

@@ -26,6 +26,15 @@ effect fn __http_serve_next() -> Result[List[String], String] = _
 
 effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
 
+// Op 75 (#4203): run `step` (the serve loop) under the host's containment.
+// The embedded host calls `step` itself; a runtime abort inside a handler
+// unwinds only that call, the host answers the request with the C-409 500
+// and one `handler aborted` stderr line, puts the instance back to its
+// state at this call and calls `step` again. ok = the loop ran to its
+// shutdown there; err = no host containment (the stock export's shim), and
+// the guest runs the loop itself.
+effect fn __http_serve_run(step: effect () -> Unit) -> Result[Unit, String] = _
+
 fn __hs_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
 fn __hs_frame(resp: List[String]) -> String = resp |> list.map((c) => __hs_cell(c)) |> list.join("")
@@ -48,23 +57,25 @@ fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
   c,
 )
 
-fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
-// The core's `http_server_quote`: `\` and `"` escaped, a control character
-// (U+0000..=U+001F, U+007F..=U+009F) as `\u{hex}`.
+// The core's `http_server_quote`: `\` and `"` escaped, a character of C-418's
+// set (C0, DEL, C1 and the bidi controls, #4126) as `\u{hex}`.
 fn __hs_quote_char(c: String) -> String = match c {
   "\\" => "\\\\",
   "\"" => "\\\"",
-  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) or __hs_bidi(__hs_cp(c)) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
 
-fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
+
+fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
 fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
 
 fn __hs_bad_header(k: String, v: String) -> String? =
-  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
-  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  if k == "" or not list.all(string.to_list(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.to_list(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
   else none
 
 fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
@@ -99,13 +110,13 @@ fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_
 // body `Internal Server Error (request <id>)` and stderr gets `http.serve:
 // request <id>: handler error: <the err, quoted>` — the core's
 // http_server_handler_error_body / _line texts. The id is 8 lowercase hex
-// digits of hash.fnv1a32(method + " " + target + "\n" + body), the core's
+// digits of hash.fnv1a32(bytes.from_string(method + " " + target + "\n" + body)), the core's
 // http_server_request_id, so a stock export instance that sees one request
 // names it as native does. A refused response is the fixed body
 // `Internal Server Error`. TODO(#4126): share that issue's escaping once it
 // lands.
 fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
-  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
+  int.to_hex(hash.fnv1a32(bytes.from_string((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? "")))),
   8,
   "0",
 )
@@ -121,6 +132,15 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
     ok(_) => (),
     err(e) => prim.die(prim.handle("Error: ${e}\n")),
   }
+  match __http_serve_run(() => __hs_loop(f)!) {
+    ok(_) => (),
+    err(_) => __hs_loop(f)!,
+  }
+}
+
+// The serve loop: one request at a time until the host answers `next` with
+// no request (a shutdown signal).
+effect fn __hs_loop(f: effect (List[String]) -> List[String]) -> Unit = {
   var serving = true
   while serving {
     let raw = __http_serve_next()!

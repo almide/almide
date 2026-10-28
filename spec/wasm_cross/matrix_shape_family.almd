@@ -11,12 +11,17 @@
 // - split_cols_even gives n parts of width cols / n (the remainder columns
 //   drop), the empty list for n = 0 or a rowless matrix;
 // - to_bytes_f64_le / from_bytes_f64_le round-trip exactly, a window past the
-//   buffer or at a negative offset is the all-zero matrix (C-229), and
-//   to_bytes_f32_le rounds each cell to the nearest f32.
+//   buffer or at a negative offset is `none` (C-341), and to_bytes_f32_le
+//   rounds each cell to the nearest f32.
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
   println("${tag}: ${s} ${l}")
+}
+
+fn show_loaded(tag: String, o: Matrix?) -> Unit = match o {
+  some(m) => show(tag, m),
+  none => println("${tag}: none"),
 }
 
 fn main() -> Unit = {
@@ -76,16 +81,16 @@ fn main() -> Unit = {
   let b64 = matrix.to_bytes_f64_le(c)
   let n64 = bytes.len(b64)
   println("bytes64: ${n64}")
-  show("rt64", matrix.from_bytes_f64_le(b64, 0, 3, 3))
-  show("rt64_off", matrix.from_bytes_f64_le(b64, 8, 2, 2))
-  show("rt64_short", matrix.from_bytes_f64_le(b64, 64, 2, 2))
-  show("rt64_negoff", matrix.from_bytes_f64_le(b64, -8, 1, 1))
+  show_loaded("rt64", matrix.from_bytes_f64_le(b64, 0, 3, 3))
+  show_loaded("rt64_off", matrix.from_bytes_f64_le(b64, 8, 2, 2))
+  show_loaded("rt64_short", matrix.from_bytes_f64_le(b64, 64, 2, 2))
+  show_loaded("rt64_negoff", matrix.from_bytes_f64_le(b64, -8, 1, 1))
   let b32 = matrix.to_bytes_f32_le(matrix.from_lists([
     [0.1, 1.0e40, -2.5]
   ]))
   let n32 = bytes.len(b32)
   println("bytes32: ${n32}")
-  show("rt32", matrix.from_bytes_f32_le(b32, 0, 1, 3))
+  show_loaded("rt32", matrix.from_bytes_f32_le(b32, 0, 1, 3))
   let eb = matrix.to_bytes_f64_le(e)
   let neb = bytes.len(eb)
   println("bytes_empty: ${neb}")

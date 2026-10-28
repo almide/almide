@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-10-17
+> Last updated: 2026-10-26
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -65,27 +65,34 @@ Contracts: C-012。
 
 ## ALS-R5 プロセス環境
 
-`env.args` は argv[0]（プログラム名）を**除いた**引数列を、`process.args`
-は argv[0] を**含む**全列を返し(0.59.1 実測: 引数 2 個で env.args は長さ 2、
-process.args は長さ 3・先頭がバイナリパス)、それぞれ両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
+`env.args` は argv[0]（プログラム名）を**除いた**引数列を返し(0.59.1 実測:
+引数 2 個で長さ 2)、両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
 観測し、存在すれば some(値)、無ければ none を両ターゲットで同一バイトで
 返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
 WASI entropy 下でも常に [a, b] 範囲内。
 
-`env.os()` と `env.temp_dir()` は等価性則の**唯一の適用除外**である。両者は
+`env.secret(name)` は `env.get(name)` と同じ値を `Secret[String]` で返す。
+`env.get(name)` が some(v) のときだけ some(secret.new(v))、none のときは none
+である。`secret.reveal` で取り出した値は `env.get` の値とバイト単位で同じで、
+空の値も同じ。値はどの描画でも `Secret(***)` と表示し（C-425）、`==` は
+取り出した文字列の定数時間比較である（C-426）。両ターゲットで一致する。
+テスト: `spec/wasm_cross/env_secret.almd`。Contracts: C-438。
+
+`env.os()` と `fs.temp_dir()` は等価性則の**唯一の適用除外**である。両者は
 実行中のホストを報告するため、native は実 OS 名と実 temp ディレクトリを、
 wasm レグは WASI サンドボックス（`wasi` / `/tmp`）を返す。両ターゲットで
 一致させることこそが欠陥であり、「今どのプラットフォームか」を問う
 プログラムには真を返さねばならない。除外は無制限ではなく、両レグで同一の
 決定的不変量（os は閉じた集合 {macos, linux, windows, wasi} の要素、
 temp_dir は非空かつ posix ホストでは絶対パス）が証明対象となる。除外は現在
-3 関数(env.os・env.temp_dir・fs.temp_dir — C-189)。第四の関数を
+2 関数(env.os・fs.temp_dir — C-189)。第三の関数を
 除外に加えるには C-189 の statement とその fixture の改訂を要する。
 
-`process.exec_status` と `process.exec_status_timeout` の起動失敗は、
-操作名とコマンド名を含む err とする。接頭辞はそれぞれ
-`process.exec_status(<quoted cmd>): ` と
-`process.exec_status_timeout(<quoted cmd>, <timeout_ms>): ` とし、
+`process.output` と `process.start` の起動失敗は、
+操作名とコマンド名を含む err とする。接頭辞は
+`process.output(<quoted cmd>): `（`process.start` も同じ形）とし、
+作業ディレクトリ `dir` を指定したときは
+`process.output(<quoted dir>, <quoted cmd>): ` とする。
 続けてホストのエラー説明を付ける。コマンド名は二重引用符で囲み、内部の
 引用符・バックスラッシュ・制御文字をエスケープする。引数列は含めない。
 存在しない実行ファイルは起動失敗であり、タイムアウトと報告してはならない。
@@ -93,9 +100,8 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 テスト: `spec/stdlib/process_timeout_test.almd`
 
 wasm ターゲットでは、埋め込みホスト（`almide run --target wasm` と `almide test`
-の wasm レグ）が子プロセス族（`process.exec`・`exec_in`・`exec_with_stdin`・
-`exec_status`・`exec_status_timeout`・`run`・`run_in`・`spawn`・
-`kill`・`is_alive`・`pid`）を native と同じ観測で提供する。捕捉した stdout と stderr、
+の wasm レグ）が子プロセス族（`process.exec`・`output`・`run`・`kill`・`pid`）を
+native と同じ観測で提供する。捕捉した stdout と stderr、
 終了コード（シグナルで終わった子は -1）、err の文字列は同一バイトである。pid は
 ホストの値であり、レグ間で比べない。単体の成果物（`almide build --target wasm`）
 は、プログラムが子プロセス操作を含むときに限り、非公開インターフェース
@@ -106,8 +112,8 @@ wasm ターゲットでは、埋め込みホスト（`almide run --target wasm` 
 （`--component`）としてのビルドは E081 で拒否する。
 テスト: `spec/embedded_cross/process_spawn_family.almd`
 
-`http.start(method, url, body, headers, limits)` は、要求を始めてすぐに呼び出し
-ハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
+`http.start(http.new_request(method, url, body, headers), limits)` は、
+要求を始めてすぐに呼び出しハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
 idle_ms }`（ミリ秒、0 は上限なし）で渡す。`total_ms` は `start` から測る壁時計で、
 接続・最初の 1 バイトまでの待ち・本文をすべて含む。`idle_ms` はバイトが届く間隔の
 上限で、最初の 1 バイトまでの待ちも含む。発火した上限は、自分の名前を示す err
@@ -120,7 +126,7 @@ err `request cancelled` で終わらせて接続を閉じる。以後 `read_new`
 返し、サーバーは接続が閉じたことを観測する。上限が発火するかどうかはホストの性質で
 ある（C-214 と同じ規律）。固定するのは、発火したときの err の形である。wasm
 ターゲットでは、埋め込みホスト（`almide run --target wasm`）が `start`・`poll`・
-`read_new`・`wait`・`cancel` と `request_stream_with_limits` を native と同じ
+`read_new`・`wait`・`cancel` を native と同じ
 観測で提供する。err の文字列、`cancel` で接続が閉じること、ハンドルの最後の写しを
 捨てると呼び出しが取り消されることも同じである。単体の成果物
 （`almide build --target wasm`）はこの族を持てず、`almide check --target wasm` は
@@ -128,7 +134,7 @@ E081 で拒否する。OpenAI と Anthropic のストリーミングクライア
 dialect epoch 14 でパッケージ almide/llm に移った（C-270）。
 テスト: `spec/stdlib/http_call_test.almd`、`spec/embedded_cross/http_call_handle_errs.almd`
 
-`http.serve(port, f)` は埋め込み wasm レーン（`almide run --target wasm`）でも
+`http.serve(port, handler)` は埋め込み wasm レーン（`almide run --target wasm`）でも
 native と同じ意味で動く。1 回の実行のすべての要求を 1 つのインスタンスが、受理順に
 1 件ずつ処理する。main は 1 回だけ走り、native と同じく `http.serve` を呼ぶ。
 ホストは `0.0.0.0:<port>` に bind し、解析済みの要求を 1 件ずつゲストに渡す。
@@ -146,8 +152,8 @@ native と同じ意味で動く。1 回の実行のすべての要求を 1 つ�
 フレーミングであり、本文はフレーミングを外して比べる）。理由句は規範に含まない。
 HTTP/2 と HTTP/3 は理由句を持たず（RFC 9113 §8.3.2、RFC 9114 §4.3.2）、ホストの
 HTTP ライブラリは自分の理由句を書く（native コアは `418 OK`、hyper は
-`418 I'm a teapot`。almide/almide#2659 の試作で測定）。`req_method`・`req_path`・
-`req_body`・`req_header`（最初の一致、ASCII 大小無視）・`query_params`（最初の
+`418 I'm a teapot`。almide/almide#2659 の試作で測定）。`method`・`path`・
+`body`・`header`（最初の一致、ASCII 大小無視）・`query_params`（最初の
 `?` 以降を `&` で分け、各組を最初の `=` で分け、`=` の無い組は捨て、`+` と `%XX`
 を復号し、後のキーが勝つ）は同じ値を返す。ハンドラの `err(m)` は本文
 `Internal error: <m>`、`Content-Type: text/plain` の `500` になる。export ホスト
@@ -263,19 +269,19 @@ Contracts: C-274。
 ## ALS-R8 HTTP レスポンスヘッダの規範
 
 `http` のレスポンス構築族（`response` / `json` / `redirect` / `with_headers` /
-`status` / `body` / `set_header` / `get_header`）は**ネットワークに触れない純
+`set_status` / `body` / `set_header` / `header`）は**ネットワークに触れない純
 データ操作**で、両ターゲットで走る。ヘッダ名の規範は3つ:
 
 - **フィールド名は大小文字を区別しない**（RFC 9110 §5.1）。畳み込みは
   **ASCII のみ**（フィールド名は `token` であり、v0 の
   `eq_ignore_ascii_case` と一致させる — Unicode の `string.to_lower` を
-  使ってはならない）。`get_header` は最初の一致を返し、無ければ none。
+  使ってはならない）。`header` は最初の一致を返し、無ければ none。
 - **1つのフィールド名につきエントリは高々1つ。** 書き込み（`set_header`・
   `with_headers`）は大小文字を無視して既存エントリの**値をその場で上書き**
   し（名前の綴りは最初に格納されたものを保つ・位置も動かない）、無ければ
-  末尾に追加する。ゆえに `get_header(set_header(r, k, v), k') == some(v)`
+  末尾に追加する。ゆえに `header(set_header(r, k, v), k') == some(v)`
   は `k` と `k'` が ASCII 大小文字違いなら常に成り立つ。
-- **`with_headers` は渡された Map そのもの**（map 順）を返し、
+- **`with_headers` は渡されたリストそのもの**（リスト順）を返し、
   `Content-Type` を勝手に**播かない**。既定の Content-Type は、名前を与える
   手段が他にない `response`（`text/plain`）と `json`
   （`application/json`）だけが持つ。`redirect` は `Location` のみを持つ。
@@ -286,9 +292,10 @@ Contracts: C-274。
 ハンドラは `HttpRequest` を受けて `HttpResponse` を返す関数
 （`HttpHandler = effect (HttpRequest) -> HttpResponse`）であり、ルーターと
 ミドルウェアを掛けたアプリもまたハンドラである。`http.new_request(method,
-target, body, headers)` はソケットなしでリクエストを作り、読み取り族
-（`req_method` / `req_path` / `req_body` / `req_header` / `query_params` /
-`param`）はそれに対して両ターゲットで同じ値を返す。`req_path` は target を
+target, body, headers)`（`headers` は `List[(String, String)]`）はソケットなしで
+リクエストを作り、読み取り族
+（`method` / `path` / `body` / `header` / `query_params` /
+`param`）はそれに対して両ターゲットで同じ値を返す。`path` は target を
 クエリ文字列ごと返す。ルーティングは両ターゲットで同じ結果になる:
 
 - ルートは `"METHOD /path"`（メソッド省略は全メソッド）で、`{name}` は 1
@@ -310,12 +317,18 @@ target, body, headers)` はソケットなしでリクエストを作り、読�
 - `http.mount(prefix, sub)` は prefix 以降のパスとクエリを `sub` に渡し、prefix
   が束縛した名前は `sub` からも読める。`http.wrap(h, [a, b])` は `a(b(h))` で
   あり、リストの先頭が最も外側になる。
-- `http.decode_json(req, decode)` は本文を JSON として読み decode に渡す。
-  失敗の `err` は理由を本文に持つ `400 Bad Request` のレスポンスである。
-  ハンドラの `err` は `err` のまま呼び出し側に返る。
+- `http.decode_json[T](req)` は本文を JSON として読み、`T.decode_strict` で
+  入力の型 `T`（`: Decode` だけの record か variant。C-435）に変換する。失敗の
+  `err` は理由を本文に持つ `400 Bad Request` のレスポンスである。どの深さでも
+  `T` の外のキー（入れ子の入力の record や variant の payload の中のキーも
+  含む）は `400 Bad Request: unknown key '<k>'` に、その record の経路
+  （`, at address`）を付けたものである。`T` が `Encode` でもある型（`Codec`）
+  と、`Codec` の record をフィールドか variant の payload に持つ型は検査時に
+  E110 である（C-436）。ハンドラの `err` は `err`
+  のまま呼び出し側に返る。
 
 テスト: `spec/stdlib/http_router_test.almd`。
-Contracts: C-275, C-368。
+Contracts: C-275, C-368, C-436。
 
 ## ALS-R9 プロセス終了コードの値域
 

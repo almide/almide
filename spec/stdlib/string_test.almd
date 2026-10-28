@@ -35,12 +35,12 @@ test "string.split empty parts" {
 }
 
 // ── join ──
-test "string.join single element" {
-  assert_eq(string.join(["hello"], ", "), "hello")
+test "list.join single element" {
+  assert_eq(list.join(["hello"], ", "), "hello")
 }
 
-test "string.join multi char separator" {
-  assert_eq(string.join(["a", "b", "c"], " | "), "a | b | c")
+test "list.join multi char separator" {
+  assert_eq(list.join(["a", "b", "c"], " | "), "a | b | c")
 }
 
 // ── len ──
@@ -179,8 +179,8 @@ test "string.get negative index" {
 test "string.lines multiline" {
   let ls = string.lines("line1\nline2\nline3")
   assert_eq(list.len(ls), 3)
-  assert_eq(list.get_or(ls, 0, ""), "line1")
-  assert_eq(list.get_or(ls, 2, ""), "line3")
+  assert_eq(list.get(ls, 0) ?? "", "line1")
+  assert_eq(list.get(ls, 2) ?? "", "line3")
 }
 
 test "string.lines single line" {
@@ -188,12 +188,12 @@ test "string.lines single line" {
 }
 
 // ── chars ──
-test "string.chars multiple" {
-  assert_eq(string.chars("hello"), ["h", "e", "l", "l", "o"])
+test "string.to_list multiple" {
+  assert_eq(string.to_list("hello"), ["h", "e", "l", "l", "o"])
 }
 
-test "string.chars single char" {
-  assert_eq(string.chars("a"), ["a"])
+test "string.to_list single char" {
+  assert_eq(string.to_list("a"), ["a"])
 }
 
 // ── index_of ──
@@ -215,8 +215,8 @@ test "string.repeat empty string" {
 }
 
 // ── from_bytes ──
-test "string.from_bytes single byte" {
-  assert_eq(string.from_bytes([72]), "H")
+test "bytes.to_string_lossy single byte" {
+  assert_eq(bytes.to_string_lossy(bytes.from_list([72])), "H")
 }
 
 // ── is_digit ──
@@ -278,16 +278,16 @@ test "string.trim_end no whitespace" {
 
 // ── count ──
 test "string.count multiple matches" {
-  assert_eq(string.count("banana", "a"), 3)
+  assert_eq(string.count_matches("banana", "a"), 3)
 }
 
 test "string.count no matches" {
-  assert_eq(string.count("hello", "x"), 0)
+  assert_eq(string.count_matches("hello", "x"), 0)
 }
 
 test "string.count empty substring" {
   // empty substring: count is len+1
-  let c = string.count("abc", "")
+  let c = string.count_matches("abc", "")
   assert(c >= 0)
 }
 

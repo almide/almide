@@ -73,8 +73,15 @@ pub(super) fn insert_clones_map_access(object: IrExpr, key: IrExpr, ty: Ty, span
 /// through the reference. Wrap the access in Clone when the field itself
 /// needs cloning.
 pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let can_move = matches!(object.kind, IrExprKind::Var { id }
-        if ctx.owned.contains(&id) && !ctx.always.contains(&id)
+    // The record may sit behind a recursive field's box (`(*c).next` of a
+    // `Cons(c)` binder, #4249): the box binder's last read moves it too.
+    let root = match &object.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Deref { expr } => match expr.kind { IrExprKind::Var { id } => Some(id), _ => None },
+        _ => None,
+    };
+    let can_move = root.is_some_and(|id|
+        ctx.owned.contains(&id) && !ctx.always.contains(&id)
             && (!ctx.in_loop || (ctx.fresh.contains(&id) && !ctx.loops.binders.contains(&id)))
             && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
     let object = if let IrExprKind::IndexAccess { object: base, index } = &object.kind

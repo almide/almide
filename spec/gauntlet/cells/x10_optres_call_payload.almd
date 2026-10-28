@@ -13,6 +13,6 @@ effect fn main() -> Unit = {
     Row { id: "a" }
   ]
   var m: Map[String, Row] = [:]
-  map.insert(m, "a", Row { id: "a" })
+  m = map.set(m, "a", Row { id: "a" })
   io.print("${pick(rows, true)!}${find(rows, "a")!}${look(m)!}")
 }

@@ -1,156 +1,55 @@
 # int32
 
-Width conversions for `Int32` (32-bit signed, -2,147,483,648 … 2,147,483,647). Auto-imported — no `import`
-needed.
+`Int32` (32-bit signed): bounds, arithmetic, bit operations, text, and the conversions
+into the type. Auto-imported — no `import` needed.
 
-Every function is a conversion and is **UFCS-dispatched**, so the method form is
-the idiomatic one:
+## Conversions
+
+A conversion is named after the type it builds (R-L0-40): `int32.from(x)` and its
+siblings take any numeric source — `Int`, a sized integer, `Float` or a sized float.
 
 ```almd
-let x: Int32 = 120000
-let wide = x.to_int64()      // resolves to int32.to_int64(x)
+let x: Int32 = int32.from(12)
+let wide = int.from(x)                 // leaving Int32: the destination's `from`
+let low = int32.from_wrapping(2147483692)// -2147483604: the low 32 bits, two's complement
+let fits = int32.from_checked(2147483648)// none: 2147483648 is not an Int32
+let top = int32.from_saturating(float.infinity()) // 2147483647: clamped to the range
 let text = x.to_string()
 ```
 
-> **Convert to `Int` before passing to an `Int`-taking function.** A narrower
-> result (`x.to_int32()`) is not implicitly widened, and the checker currently
-> accepts the mismatch where the generated code does not build ([#867]).
-> `x.to_int64()` is the idiom that works on both targets.
+| Function | Behaviour |
+|---|---|
+| `int32.from(x)` | x toward zero; NaN, an infinity or a value outside Int32 aborts |
+| `int32.from_checked(x)` | `some` when Int32 holds x exactly, else `none` (a fraction, NaN, out of range) |
+| `int32.from_saturating(x)` | x toward zero, clamped to Int32's range; NaN is 0 |
+| `int32.from_wrapping(x)` | integer sources only: the low 32 bits, two's complement |
+
+To leave `Int32`, call the destination's family — `int.from(x)`, `float.from(x)`,
+`int16.from_wrapping(x)` and so on. `from` is the right call wherever the
+destination holds every value the source can carry; a narrowing destination
+chooses abort, `none`, clamp or wrap by name, never silently.
+
+> **Convert to `Int` before passing to an `Int`-taking function.** A sized value
+> is not implicitly widened, and the checker currently accepts the mismatch
+> where the generated code does not build ([#867]). `int.from(x)` is the idiom
+> that works on both targets.
 
 [#867]: https://github.com/almide/almide/issues/867
-
-## Conversion semantics
-
-The bodies are pure Almide, routed through canonical `Int` (i64) as a dimensional
-pivot: `int.from_int32(x)` widens, then `int.to_<dst>(...)` narrows or re-widens.
-Both hops collapse — Rust folds the double cast, and the wasm renderer resolves
-them inline — so this costs nothing at runtime and both targets agree by
-construction.
-
-The rules match Rust's `as`:
-
-| Direction | Behaviour |
-|---|---|
-| Narrowing an integer | WRAPS (two's complement truncation), never traps |
-| Widening a signed integer | Sign-extends |
-| Widening an unsigned integer | Zero-extends |
-| Float → integer | Saturating truncation (NaN → 0, out-of-range → the nearest bound) |
-| Integer → float | Nearest representable, ties to even |
-
-Because narrowing wraps rather than trapping, convert deliberately: check the
-range first when a value must round-trip.
-
-## Functions
-
-`to_int8`, `to_int16`, `to_int32`, `to_int64`, `to_uint8`, `to_uint16`,
-`to_uint32`, `to_uint64`, `to_float32`, `to_float64` and `to_string`, minus the
-identity conversion for this module's own type. The exact set is the machine-owned
-signature index below.
 
 Literals of a sized type are range-checked at compile time — `let a: Int32 = 3000000000`
 is an E024 error, not a silent fold.
 
-## Checked / saturating narrowings and bounds
-
-Every **lossy** pair (source range does not fit the destination) also has
-`to_<dst>_checked` (`None` on overflow) and `to_<dst>_saturating` (clamp to the
-destination range); lossless pairs deliberately have only the plain form — an
-always-`Some` checked variant would be noise. `min_value()` / `max_value()`
-give this type's bounds. The whole surface is derived from the range table and
-machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
+`min_value()` / `max_value()` give this type's bounds. The exact surface is the
+machine-owned signature index below.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (58 functions)
+## Signature index (37 functions)
 
 ```
-// Wraps to 8 bits; 128 becomes -128.
-// @since 0.15.0 or earlier
-int32.to_int8(x: Int32) -> Int8
-
-// Wraps to 16 bits; 32768 becomes -32768.
-// @since 0.15.0 or earlier
-int32.to_int16(x: Int32) -> Int16
-
-// Sign-extending widen; always exact.
-// @since 0.15.0 or earlier
-int32.to_int64(x: Int32) -> Int64
-
-// Wraps to 8 bits; -1 becomes 255.
-// @since 0.15.0 or earlier
-int32.to_uint8(x: Int32) -> UInt8
-
-// Wraps to 16 bits; -1 becomes 65535.
-// @since 0.15.0 or earlier
-int32.to_uint16(x: Int32) -> UInt16
-
-// Wraps to 32 bits; -1 becomes 2^32-1.
-// @since 0.15.0 or earlier
-int32.to_uint32(x: Int32) -> UInt32
-
-// Wraps to 64 bits; -1 becomes 2^64-1.
-// @since 0.15.0 or earlier
-int32.to_uint64(x: Int32) -> UInt64
-
-// Float32 value; may round when abs(x) > 2^24.
-// @since 0.15.0 or earlier
-int32.to_float32(x: Int32) -> Float32
-
-// Same value as Float64; always exact.
-// @since 0.15.0 or earlier
-int32.to_float64(x: Int32) -> Float64
-
 // Decimal digits, with - when negative.
 // @since 0.15.0 or earlier
 int32.to_string(x: Int32) -> String
-
-// some(x), or none if outside -128..127.
-// @since 0.38.0
-int32.to_int8_checked(x: Int32) -> Option[Int8]
-
-// Clamps x to -128..127.
-// @since 0.38.0
-int32.to_int8_saturating(x: Int32) -> Int8
-
-// some(x), or none if outside -32768..32767.
-// @since 0.38.0
-int32.to_int16_checked(x: Int32) -> Option[Int16]
-
-// Clamps x to -32768..32767.
-// @since 0.38.0
-int32.to_int16_saturating(x: Int32) -> Int16
-
-// some(x), or none if outside 0..255.
-// @since 0.38.0
-int32.to_uint8_checked(x: Int32) -> Option[UInt8]
-
-// Clamps x to 0..255.
-// @since 0.38.0
-int32.to_uint8_saturating(x: Int32) -> UInt8
-
-// some(x), or none if outside 0..65535.
-// @since 0.38.0
-int32.to_uint16_checked(x: Int32) -> Option[UInt16]
-
-// Clamps x to 0..65535.
-// @since 0.38.0
-int32.to_uint16_saturating(x: Int32) -> UInt16
-
-// some(x), or none if x is negative.
-// @since 0.38.0
-int32.to_uint32_checked(x: Int32) -> Option[UInt32]
-
-// Negative x clamps to 0.
-// @since 0.38.0
-int32.to_uint32_saturating(x: Int32) -> UInt32
-
-// some(x), or none if x is negative.
-// @since 0.38.0
-int32.to_uint64_checked(x: Int32) -> Option[UInt64]
-
-// Negative x clamps to 0.
-// @since 0.38.0
-int32.to_uint64_saturating(x: Int32) -> UInt64
 
 // Smallest Int32: -2147483648.
 // @since 0.38.0
@@ -268,7 +167,7 @@ int32.rotate_right(a: Int32, n: Int) -> Int32
 // @since unreleased
 int32.bit_length(x: Int32) -> Int
 
-// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+// Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
 // @since unreleased
 int32.parse(s: String) -> Result[Int32, String]
 

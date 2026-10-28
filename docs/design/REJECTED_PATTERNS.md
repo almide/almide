@@ -45,7 +45,7 @@
 
 ### implicit type conversion
 
-**却下理由**: `int.to_string(n)`, `float.to_int(x)` で明示変換。暗黙の変換は Python 2→3 の `/` 演算子 (int→float) のような silent な挙動変更を引き起こす。
+**却下理由**: `int.to_string(n)`, `int.from_saturating(x)` で明示変換。暗黙の変換は Python 2→3 の `/` 演算子 (int→float) のような silent な挙動変更を引き起こす。
 
 ### operator overloading
 

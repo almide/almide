@@ -6,7 +6,6 @@ pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
-pub fn almide_rt_list_get_or<T: Clone>(xs: &[T], i: i64, default: T) -> T { xs.get(i as usize).cloned().unwrap_or(default) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
 pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = xs.join(sep); __almide_out.into() }
@@ -19,7 +18,7 @@ pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.
 // instead of the `Ord`-bounded generics (IntrinsicLoweringPass swaps the
 // symbol). This is the ORDERING twin of the wasm sign-magnitude bit trick and
 // matches the interp's `total_cmp`. NOTE: this list-min/max totalOrder is a
-// DIFFERENT contract from the SCALAR `float.min`/`max`/`math.fmin`/`fmax`,
+// DIFFERENT contract from the SCALAR `float.min`/`max`,
 // which keep their C-049 NaN-IGNORING semantics. See C-055.
 pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(|a, b| a.total_cmp(b)); v }
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(|a, b| a.total_cmp(b)) }
@@ -43,13 +42,12 @@ pub fn almide_rt_list_product(xs: &[i64]) -> i64 { xs.iter().fold(1i64, |a, &b| 
 pub fn almide_rt_list_product_float(xs: &[f64]) -> f64 { xs.iter().product() }
 pub fn almide_rt_list_min<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().min().cloned() }
 pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max().cloned() }
-// chunk/windows are TOTAL (ALS-T4): a NEGATIVE n keeps the historical `as usize`
-// wrap (huge → chunk: whole-as-one-chunk / windows: empty), now normative; n == 0
-// aborts with the ALS-T6 form (`Error: …` + exit 1) instead of leaking Rust's raw
-// `chunks(0)`/`windows(0)` panic (exit 101) — wasm previously even returned len+1
-// EMPTY windows silently for `windows(xs, 0)`.
-pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
-pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("window size must be positive"); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
+// chunk/windows (ALS-T4): a size of 0 or less aborts with the ALS-T6 form
+// (`Error: …` + exit 1) instead of leaking Rust's raw `chunks(0)`/`windows(0)`
+// panic (exit 101). A NEGATIVE size is read as 0 like every count (#4147); it
+// used to keep the `as usize` wrap (chunk: the whole list as one chunk,
+// windows: empty).
+pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n <= 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
 // The seen set is an `AlmideMap` (#3704): it hashes only the exact-equality
 // key types (Int, String, Bool, their pairs, List[Int] / List[String]) and
@@ -82,8 +80,8 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
 // consuming the outer list bought nothing — and it made `flatten` unusable
 // alongside a borrow of the same binding in one expression:
-// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
-// `get_or` borrowed it, so `check` accepted and rustc rejected with E0505
+// `list.get(xs, 0)` beside `list.flatten(xs)` moved `xs` into `flatten` while
+// `get` borrowed it, so `check` accepted and rustc rejected with E0505
 // (differential fuzz). A slice parameter takes a borrow like every other
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
@@ -115,8 +113,12 @@ pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs:
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, String> = (|| { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
-pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(n as usize).cloned().collect() }
-pub fn almide_rt_list_drop<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().skip(n as usize).cloned().collect() }
+// A negative count is read as 0 (#4147): `take(xs, -1)` is `[]` and `drop(xs, -1)`
+// is `xs`. It used to go through `n as usize`, so `take(rows, -1)` returned every
+// row and a `?limit=-1` lifted a cap. `almide_list_count` is the one spelling of the rule.
+pub fn almide_list_count(n: i64) -> usize { n.max(0) as usize }
+pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(almide_list_count(n)).cloned().collect() }
+pub fn almide_rt_list_drop<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().skip(almide_list_count(n)).cloned().collect() }
 pub fn almide_rt_list_take_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().take_while(|x| f((*x).clone())).cloned().collect() }
 pub fn almide_rt_list_drop_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().skip_while(|x| f((*x).clone())).cloned().collect() }
 pub fn almide_rt_list_partition<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> (Vec<A>, Vec<A>) { let f = move |a| f(a); xs.into_iter().partition(|x| f(x.clone())) }
@@ -143,7 +145,8 @@ pub fn almide_rt_list_group_count<A, B: PartialEq + 'static>(xs: Vec<A>, f: std:
     }
     m
 }
-pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
+// Range bounds clamp into [0, len] (#4147): a negative bound is 0, like string.slice.
+pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> { let s = almide_list_count(start); let e = almide_list_count(end).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
 pub fn almide_rt_list_insert<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { let idx = (i as usize).min(xs.len()); xs.insert(idx, x); xs }
 pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
 pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dyn Fn(A) -> A>) -> Vec<A> { let f = move |a| f(a); if let Some(s) = xs.get_mut(i as usize) { *s = f(s.clone()); } xs }
@@ -180,7 +183,7 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
     let count = end.saturating_sub(start).max(0) as usize;
     let mut v: Vec<i64> = Vec::new();
     if v.try_reserve_exact(count).is_err() {
-        almide_abort("out of memory");
+        almide_abort_oom();
     }
     v.extend(start..end);
     v
@@ -192,11 +195,11 @@ pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn 
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
-    let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
+    let start = xs.len() - almide_list_count(n).min(xs.len());
     xs[start..].to_vec()
 }
 pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
-    let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
+    let end = xs.len() - almide_list_count(n).min(xs.len());
     xs[..end].to_vec()
 }
 
@@ -206,14 +209,14 @@ pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
 // keeps the elements it returns by moving them instead of cloning each one.
 // Same results as the borrowing op for every argument (negative counts and
 // out-of-range bounds included); the twin table is `owned_source.rs`.
-pub fn almide_rt_list_take_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { xs.truncate(n as usize); xs }
-pub fn almide_rt_list_drop_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let k = (n as usize).min(xs.len()); xs.drain(..k); xs }
+pub fn almide_rt_list_take_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { xs.truncate(almide_list_count(n)); xs }
+pub fn almide_rt_list_drop_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let k = almide_list_count(n).min(xs.len()); xs.drain(..k); xs }
 pub fn almide_rt_list_take_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.truncate(k); xs }
 pub fn almide_rt_list_drop_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.drain(..k); xs }
 pub fn almide_rt_list_find_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let i = xs.iter().position(|x| f(x.clone()))?; Some(xs.swap_remove(i)) }
-pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
-pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.drain(..start); xs }
-pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.truncate(end); xs }
+pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = almide_list_count(start); let e = almide_list_count(end).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
+pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = xs.len() - almide_list_count(n).min(xs.len()); xs.drain(..start); xs }
+pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = xs.len() - almide_list_count(n).min(xs.len()); xs.truncate(end); xs }
 // The point writes (#3533): `xs = list.set(xs, i, v)` wrote into a copy of the
 // whole list every step; the twin writes into the source it owns.
 pub fn almide_rt_list_set_owned<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { if let Some(s) = xs.get_mut(i as usize) { *s = x; } xs }
@@ -236,26 +239,12 @@ pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f:
     }
     result
 }
-pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
-    for i in (1..xs.len()).rev() {
-        let mut h = DefaultHasher::new();
-        seed.hash(&mut h);
-        i.hash(&mut h);
-        let j = (h.finish() as usize) % (i + 1);
-        xs.swap(i, j);
-        seed = seed.wrapping_add(1);
-    }
-    xs
-}
-// Same ALS-T6 guard as `almide_rt_list_windows`: n == 0 aborts with the
+// Same ALS-T6 guard as `almide_rt_list_chunk`: n <= 0 aborts with the
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
-// panic exit 101 the wasm leg never shows). n > len returns empty like the
-// plural twin instead of leaking std's behavior.
+// panic exit 101 the wasm leg never shows). n > len returns empty instead of
+// leaking std's behavior.
 pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> {
-    if n == 0 { almide_abort("window size must be positive"); }
+    if n <= 0 { almide_abort("window size must be positive"); }
     if (n as usize) > xs.len() { return vec![]; }
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
 }
@@ -1269,6 +1258,3 @@ pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 
-pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
-    xs.binary_search(&target).ok().map(|i| i as i64)
-}

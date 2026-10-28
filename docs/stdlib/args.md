@@ -16,36 +16,11 @@ Program arguments come after `--`:
 almide run app.almd -- --verbose --output=out.txt input.csv
 ```
 
-### `args.raw() -> List[String]`
-
-The argument list as given, argv[0] included.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  let all = args.raw()!
-  println("${all}")
-}
-```
-
-### `args.flag(name: String) -> Bool`
-
-True when either the long form `--name` or the short form `-n` (the first
-character of `name`) is present.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  if args.flag("verbose")! then println("loud") else ()
-}
-```
-
 ### `args.option(name: String) -> Option[String]`
 
 The value of `--name`, accepting both spellings — `--name=value` and
-`--name value`. `none` when the flag is absent or has no value after it.
+`--name value`, before `--`. `none` when the flag is absent or has no value
+after it.
 
 ```almd check
 import args
@@ -54,29 +29,19 @@ import fs
 effect fn main() -> Unit = {
   let body = "report body"
   match args.option("output")! {
-    some(path) => fs.write(path, body)!,
+    some(path) => fs.write_text(path, body)!,
     none => println(body),
   }
 }
 ```
 
-### `args.option_or(name: String, fallback: String) -> String`
+### `args.positional(options: List[String]) -> List[String]`
 
-`args.option` with a default.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  let out = args.option_or("output", "out.txt")!
-  println(out)
-}
-```
-
-### `args.positional() -> List[String]`
-
-Arguments that are not flags, with argv[0] dropped. Note that this filters on a
-leading `-`, so a value supplied as `--name value` stays in the list.
+Arguments that are not flags, with argv[0] dropped, followed by every argument
+after `--`. `options` names every option the program reads with `args.option`:
+the argument after `--name` is that option's value, not a positional, so
+`--out report.txt input.txt` with `["out"]` gives `["input.txt"]`. Pass `[]`
+when the program reads no options.
 
 ```almd check
 import args
@@ -84,55 +49,28 @@ import args
 fn process(file: String) -> Unit = println("processing ${file}")
 
 effect fn main() -> Unit = {
-  for file in args.positional()! { process(file) }
-}
-```
-
-### `args.positional_at(i: Int) -> Option[String]`
-
-The i-th positional argument, or `none` when there are fewer.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  let input = args.positional_at(0)! ?? "-"
-  println(input)
+  let out = args.option("out")! ?? "report.txt"
+  for file in args.positional(["out"])! { process(file) }
+  println("writing ${out}")
 }
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (7 functions)
+## Signature index (3 functions)
 
 ```
-// Same as env.args; argv[0] excluded.
-// @since 0.2.0 or earlier
-effect args.raw() -> List[String]
-
-// True on --name or -<first letter of name>.
-// @since 0.2.0 or earlier
-effect args.flag(name: String) -> Bool
-
-// True on --name; a one-letter name also matches -name. No short form is derived.
+// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
 // @since unreleased
 effect args.has_flag(name: String) -> Bool
 
-// Value of --name=v or --name v; none if absent.
+// Value of --name=v or --name v before `--`; none if absent.
 // @since 0.2.0 or earlier
 effect args.option(name: String) -> Option[String]
 
-// option(name), or fallback when absent.
+// Args before `--` that are not flags or values of the named options, then all after `--`.
 // @since 0.2.0 or earlier
-effect args.option_or(name: String, fallback: String) -> String
-
-// Args not starting with -; option values too.
-// @since 0.2.0 or earlier
-effect args.positional() -> List[String]
-
-// i-th positional arg; none if out of range.
-// @since 0.2.0 or earlier
-effect args.positional_at(i: Int) -> Option[String]
+effect args.positional(options: List[String]) -> List[String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

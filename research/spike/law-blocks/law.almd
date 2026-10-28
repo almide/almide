@@ -52,7 +52,7 @@ let law_string: LawGen[String] = {
   make: (s, size) =>
     list.range(0, law_pick(s, 0, size))
       |> list.map((i) => ["a", "b", "c", " ", "z"][law_pick(law_mix(s, i), 0, 4)])
-      |> string.join(""),
+      |> list.join(""),
   shrink: (v) => {
     let n = string.len(v)
     list.range(0, n) |> list.map((i) => string.slice(v, 0, i) + string.slice(v, i + 1, n))
@@ -73,7 +73,7 @@ fn law_list[T](g: LawGen[T]) -> LawGen[List[T]] = {
     let half = list.len(xs) / 2
     ([[], list.take(xs, half), list.drop(xs, half), together] + removals + smaller) |> list.filter((c) => c != xs)
   },
-  show: (xs) => "[" + (xs |> list.map((x) => g.show(x)) |> string.join(", ")) + "]",
+  show: (xs) => "[" + (xs |> list.map((x) => g.show(x)) |> list.join(", ")) + "]",
 }
 
 // `law_named` makes a counterexample read as bindings: `xs = [0, 1]`.

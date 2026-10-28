@@ -1,6 +1,6 @@
 # ALS — コレクション（Collections）
 
-> Last updated: 2026-08-20
+> Last updated: 2026-10-24
 
 コレクション型（List / Map / Set / タプル / レコード）の観測規範。参照方法は
 [strings.md](strings.md) 冒頭と同じ（契約台帳の `spec` キーから参照される）。
@@ -24,15 +24,21 @@ Contracts: C-014。
 Option/Result・ネストした複合値は、要素ごとに再帰的に比較される。参照
 （ポインタ）比較は不適合。Float 成分は IEEE-754 ビット比較でなく数値比較
 （NaN != NaN）。
-Contracts: C-015。
+`Secret[String]` と `Secret[Bytes]` の `==` は中身を定数時間で比べる（ALS-T31）。
+それ以外の `Secret[A]`、Secret を含む variant・Map・Set の `==` は検査時のエラー
+E103 で拒否する（`spec/wasm_cross/secret_eq_and_decode.almd`）。
+Contracts: C-015, C-426。
 
 ## ALS-C4 範囲外アクセスの縮退規則
 
 読み取り系の範囲外は**安全に縮退**する: `list.get` は none、`slice` は
-範囲を clamp、`take`/`drop` は空/全体へ縮退。負値の扱いは
-`list_slice_oob.almd` が固定する: `slice` は**負の start → 空**・負の end →
-len、`take(xs, 負)` は全体・`drop(xs, 負)` は空(start<0 を 0 へ clamp する
-挙動は #1532 が「発明されたバグ」と裁定した不適合)。逆転した範囲は空。
+範囲を clamp、`take`/`drop` は空/全体へ縮退。負値は **0 として読む**
+（ALS-T16 の負の個数規則、almide/almide#4147）: `slice` の負の start・負の
+end はどちらも 0、`take(xs, 負)` は空・`drop(xs, 負)` は全体。
+`list_slice_oob.almd` と `negative_count_rule.almd` が固定する（以前の
+「負の start → 空・負の end → len・`take(xs, 負)` は全体」は `as usize` の
+再解釈から来たもので、`?limit=-1` が件数の上限を外したため撤回した）。
+逆転した範囲は空。
 いずれもヒープ外アクセスや trap を起こしてはならない
 （`xs[i]` 添字**構文**の範囲外 abort は ALS-T6 が別途規定する）。
 Contracts: C-034。
@@ -64,7 +70,7 @@ Contracts: C-036。
 狭窄**される(C-038 は域内リテラルの表現狭窄を約束する)。宣言域を超える
 リテラルは **E024** で拒否される — ラップしない(ALS-M14 の域規律)。
 読み出しは宣言幅の値そのもの(`Int8` は `Int8`)で、暗黙の数値拡大は無い —
-`Int` が要る位置へは `int.from_int8` 等で明示変換する(0.59.1 実測)。
+`Int` が要る位置へは `int.from(x)` で明示変換する(0.59.1 実測)。
 Contracts: C-038。
 
 ## ALS-C9 順序系コンビネータの全域性

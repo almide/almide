@@ -19,7 +19,7 @@ effect fn main() -> Unit = {
   println("tup.swap      = " + list.join(list.map(list.swap(tup, 0, 3), cell), ","))
   println("tup.take_end  = " + list.join(list.map(list.take_end(tup, 2), cell), ","))
   println("tup.drop_end  = " + list.join(list.map(list.drop_end(tup, 1), cell), ","))
-  println("tup.tail      = " + list.join(list.map(list.tail(tup), cell), ","))
+  println("tup.tail      = " + list.join(list.map(list.drop(tup, 1), cell), ","))
   println("tup.src       = " + list.join(list.map(tup, cell), ","))
   // `update` takes a FUNCTION, not a replacement value — a distinct twin from `set`.
   println("tup.update    = " + list.join(list.map(list.update(tup, 1, (p) => (8.0, true)), cell), ","))
@@ -31,7 +31,7 @@ effect fn main() -> Unit = {
   ]
   println("rec.remove_at = " + list.join(list.map(list.remove_at(recs, 1), pshow), ","))
   println("rec.set       = " + list.join(list.map(list.set(recs, 0, Pt { x: 9, tag: "z" }), pshow), ","))
-  println("rec.tail      = " + list.join(list.map(list.tail(recs), pshow), ","))
+  println("rec.tail      = " + list.join(list.map(list.drop(recs, 1), pshow), ","))
   println("rec.src       = " + list.join(list.map(recs, pshow), ","))
   let nested: List[List[Int]] = [
     [1, 2],

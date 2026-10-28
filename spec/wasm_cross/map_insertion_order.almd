@@ -3,7 +3,7 @@
 // Every line below reveals key/value ORDER (not just counts), so a regression to
 // hash-order iteration on either target would break the byte-for-byte comparison.
 fn show(label: String, m: Map[String, Int]) -> String = {
-  let parts = map.entries(m) |> list.map((e) => {
+  let parts = map.to_list(m) |> list.map((e) => {
     let (k, v) = e
     "${k}=${int.to_string(v)}"
   })
@@ -33,7 +33,7 @@ fn main() -> Unit = {
   // insert (mutable, in-place) preserves order across its own grow.
   var mp: Map[String, Int] = [:]
   for n in list.range(0, 20) {
-    map.insert(mp, "i${int.to_string(n)}", n)
+    mp = map.set(mp, "i${int.to_string(n)}", n)
   }
   println("insert-keys: [${list.join(map.keys(mp), ",")}]")
   // remove preserves the survivors' order.

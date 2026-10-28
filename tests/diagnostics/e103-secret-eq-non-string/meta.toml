@@ -1,0 +1,3 @@
+expects_code = "E103"
+expects_error = "Secret[Int]"
+hint_substring = "secret.reveal(a) == secret.reveal(b)"

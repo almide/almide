@@ -123,14 +123,14 @@ const CORPUS: &[(&str, &str)] = &[
     //    of `s` onto itself keeps the concat. ──
     ("string_push_alias", "effect fn main() -> Unit = {\n  var s = \"start:\"\n  let t = s\n  var i = 0\n  var mid = \"\"\n  while i < 12 {\n    string.push(s, int.to_string(i))\n    if i == 5 then mid = s else ()\n    i = i + 1\n  }\n  println(t)\n  println(mid)\n  println(s)\n  var w = \"ab\"\n  string.push(w, w)\n  w = w + w\n  println(w)\n  var p = \"p\"\n  let q = p\n  var j = 0\n  while j < 5 {\n    p = p + \"-\"\n    j = j + 1\n  }\n  println(q)\n  println(p)\n}\n"),
     ("tail_accumulator_rebound_per_arm","fn go(n: Int, acc: String) -> String =\n  if n == 0 then acc\n  else if n % 2 == 0 then go(n - 1, acc + \"y\")\n  else go(n - 1, acc + \"x\")\n\nfn main() -> Unit = println(go(5, \"\"))\n"),
-    // ── #4006: the bool.to_string / string.replace / string.slice / math.pow
+    // ── #4006: the bool.to_string / string.replace / string.slice / int.pow
     //    floor rows — empty pattern, reversed and out-of-range slice bounds
     //    over multi-byte text, a wrapping power. ──
-    ("floor_4006_shims", "fn main() -> Unit = {\n  println(bool.to_string(1 < 2))\n  println(bool.to_string(3 < 2))\n  println(string.replace(\"a-b-c\", \"-\", \"+\"))\n  println(string.replace(\"abc\", \"\", \"-\"))\n  println(string.slice(\"h\u{e9}llo w\u{f6}rld\", 1, 7))\n  println(string.slice(\"abc\", 2, 1))\n  println(string.slice(\"abc\", -3, 99))\n  println(int.to_string(math.pow(3, 5)))\n  println(int.to_string(math.pow(2, 64)))\n}\n"),
-    // ── #4006: the string predicate / take / capitalize / from_codepoint and
+    ("floor_4006_shims", "fn main() -> Unit = {\n  println(bool.to_string(1 < 2))\n  println(bool.to_string(3 < 2))\n  println(string.replace(\"a-b-c\", \"-\", \"+\"))\n  println(string.replace(\"abc\", \"\", \"-\"))\n  println(string.slice(\"h\u{e9}llo w\u{f6}rld\", 1, 7))\n  println(string.slice(\"abc\", 2, 1))\n  println(string.slice(\"abc\", -3, 99))\n  println(int.to_string(int.pow(3, 5)))\n  println(int.to_string(int.pow(2, 64)))\n}\n"),
+    // ── #4006: the string predicate / take / capitalize and
     //    float.to_bits floor rows — empty, non-alphabetic and multi-byte text,
-    //    an over-long take, an invalid codepoint, a NaN's canonical bits. ──
-    ("floor_4006_shims_b", "fn main() -> Unit = {\n  println(bool.to_string(string.is_empty(\"\")))\n  println(bool.to_string(string.is_alpha(\"\u{e9}t\u{e9}\")))\n  println(bool.to_string(string.is_alpha(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"\")))\n  println(string.capitalize(\"\u{df}tra\u{df}e\"))\n  println(string.take(\"h\u{e9}llo\", 3))\n  println(string.take(\"ab\", 9))\n  println(string.from_codepoint(955) + string.from_codepoint(-1) + \"|\")\n  println(int.to_string(float.to_bits(1.5)))\n  println(int.to_string(float.to_bits(0.0 / 0.0)))\n}\n"),
+    //    an over-long take, a NaN's canonical bits. ──
+    ("floor_4006_shims_b", "fn main() -> Unit = {\n  println(bool.to_string(string.is_empty(\"\")))\n  println(bool.to_string(string.is_alpha(\"\u{e9}t\u{e9}\")))\n  println(bool.to_string(string.is_alpha(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"\")))\n  println(string.capitalize(\"\u{df}tra\u{df}e\"))\n  println(string.take(\"h\u{e9}llo\", 3))\n  println(string.take(\"ab\", 9))\n  println(int.to_string(float.to_bits(1.5)))\n  println(int.to_string(float.to_bits(0.0 / 0.0)))\n}\n"),
     // ── #4006: immutable top-level lets whose initializers cannot abort,
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──

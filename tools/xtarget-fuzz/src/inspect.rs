@@ -940,7 +940,7 @@ fn projected_top_wall(d: &Delta, grow: u64, span: u64) -> Duration {
 /// every size is O(1) outright: it cannot hold a linear term, and what is
 /// left is the run's own jitter, which a relative fit reads as no class at
 /// all. Measured:
-/// - `int.to_int16_saturating` at k = 1M read 7.8e5 / 147 / 579 / 82 / 48
+/// - a sized-int saturating conversion at k = 1M read 7.8e5 / 147 / 579 / 82 / 48
 ///   instructions, which a relative fit called 1789% off every class.
 /// - wasm `string.drop`'s loop at k = 16 read 177 / 159 / 127 / 243 / 335
 ///   per call (rms 17.5%).
@@ -1309,7 +1309,7 @@ mod run_tests {
         assert!(!counted_calibrated_t(&d(1e3, 1e3)));
         assert!(counted_calibrated_t(&d(3e7, 0.0)));
         assert!(counted_calibrated_t(&d(1e3, 3e8)));
-        // fs.write at n = 20000 calibrated to k = 65536 on instructions and
+        // fs.write_text at n = 20000 calibrated to k = 65536 on instructions and
         // timed out at 60 s: its bytes go to the kernel.
         assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3), base_wall: Duration::ZERO }));
     }

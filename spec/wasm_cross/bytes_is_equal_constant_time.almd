@@ -1,0 +1,99 @@
+// @contract: C-423
+// #4106: bytes.is_equal_constant_time / string.is_equal_constant_time answer
+// exactly what == answers — true iff same length and same bytes — on every
+// leg: equal, a difference at the first byte, at the last byte, a length
+// mismatch either way (false at once: lengths are public), both empty, one
+// empty, and a multi-byte UTF-8 string against its NFC-different spelling
+// (bytes, not characters, are compared). The timing half of the contract (no
+// early exit) is held by tests/constant_time_compare_structure_test.rs.
+fn b(xs: List[Int]) -> Bytes = bytes.from_list(xs)
+
+fn main() -> Unit = {
+  let a = b([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ])
+  println("bytes equal ${bytes.is_equal_constant_time(
+    a,
+    b([
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]),
+  )}")
+  println("bytes first ${bytes.is_equal_constant_time(
+    a,
+    b([
+      0,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]),
+  )}")
+  println("bytes last ${bytes.is_equal_constant_time(
+    a,
+    b([
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      9
+    ]),
+  )}")
+  println("bytes shorter ${bytes.is_equal_constant_time(
+    a,
+    b([
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]),
+  )}")
+  println("bytes longer ${bytes.is_equal_constant_time(
+    a,
+    b([
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      0
+    ]),
+  )}")
+  println("bytes empty ${bytes.is_equal_constant_time(b([]), b([]))}")
+  println("bytes one-empty ${bytes.is_equal_constant_time(b([]), b([0]))}")
+  println("bytes high ${bytes.is_equal_constant_time(b([255, 128]), b([255, 128]))}")
+  println("bytes high-diff ${bytes.is_equal_constant_time(b([255, 128]), b([127, 128]))}")
+  println("string equal ${string.is_equal_constant_time("sha256=abc", "sha256=abc")}")
+  println("string first ${string.is_equal_constant_time("sha256=abc", "Sha256=abc")}")
+  println("string last ${string.is_equal_constant_time("sha256=abc", "sha256=abd")}")
+  println("string length ${string.is_equal_constant_time("abc", "abcd")}")
+  println("string empty ${string.is_equal_constant_time("", "")}")
+  println("string utf8 ${string.is_equal_constant_time("é", "é")}")
+  println("string nfc ${string.is_equal_constant_time("é", "e\u{301}")}")
+  println("agrees-with-eq ${bytes.is_equal_constant_time(a, a) == (a == a)}")
+}

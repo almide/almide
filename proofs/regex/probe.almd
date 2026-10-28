@@ -28,7 +28,7 @@ effect fn main() -> Unit = {
   let lines = string.split(io.read_all(), "\n")
   let out = lines |> list.filter((l) => l != "") |> list.map((l) => {
     let f = string.split(l, "\t")
-    answer(list.get_or(f, 0, ""), list.get_or(f, 1, ""), list.get_or(f, 2, ""))
+    answer(list.get(f, 0) ?? "", list.get(f, 1) ?? "", list.get(f, 2) ?? "")
   })
   println(list.join(out, "\n"))
 }

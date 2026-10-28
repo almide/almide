@@ -144,7 +144,7 @@ mod tco {
                     IrStmtKind::Expr { expr } => contains_while(expr),
                     IrStmtKind::Bind { value, .. } => contains_while(value),
                     _ => false,
-                }) || tail.as_ref().map_or(false, |e| contains_while(e))
+                }) || tail.as_ref().is_some_and(|e| contains_while(e))
             }
             IrExprKind::If { then, else_, .. } => contains_while(then) || contains_while(else_),
             _ => false,
@@ -165,7 +165,7 @@ mod tco {
                     IrStmtKind::Expr { expr } => contains_self_call(expr, fn_name),
                     IrStmtKind::Bind { value, .. } => contains_self_call(value, fn_name),
                     _ => false,
-                }) || tail.as_ref().map_or(false, |e| contains_self_call(e, fn_name))
+                }) || tail.as_ref().is_some_and(|e| contains_self_call(e, fn_name))
             }
             IrExprKind::While { cond, body } => {
                 contains_self_call(cond, fn_name) || body.iter().any(|s| match &s.kind {
@@ -524,7 +524,7 @@ mod clone_insertion {
                     IrStmtKind::Bind { value, .. } => contains_clone(value),
                     IrStmtKind::Expr { expr } => contains_clone(expr),
                     _ => false,
-                }) || tail.as_ref().map_or(false, |e| contains_clone(e))
+                }) || tail.as_ref().is_some_and(|e| contains_clone(e))
             }
             _ => false,
         }
@@ -1244,11 +1244,10 @@ mod fan_nested_closure_boxing {
         struct Find(Option<IrExpr>);
         impl IrVisitor for Find {
             fn visit_expr(&mut self, e: &IrExpr) {
-                if let IrExprKind::RuntimeCall { symbol, args } = &e.kind {
-                    if symbol.as_str() == "almide_rt_list_map" && self.0.is_none() {
+                if let IrExprKind::RuntimeCall { symbol, args } = &e.kind
+                    && symbol.as_str() == "almide_rt_list_map" && self.0.is_none() {
                         self.0 = args.last().cloned();
                     }
-                }
                 walk_expr(self, e);
             }
         }

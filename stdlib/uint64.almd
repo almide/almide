@@ -1,114 +1,33 @@
-// uint64 — bundled-Almide sized-numeric conversion module.
-//
-// See `int8.almd` for the routing rationale (dimensional pivot via
-// canonical `int`).
-/// Wraps to 8 bits; 255 becomes -1.
-fn to_int8(x: UInt64) -> Int8 = int.to_int8(int.from_uint64(x))
-
-/// Wraps to 16 bits; 65535 becomes -1.
-fn to_int16(x: UInt64) -> Int16 = int.to_int16(int.from_uint64(x))
-
-/// Wraps to 32 bits; 2^32-1 becomes -1.
-fn to_int32(x: UInt64) -> Int32 = int.to_int32(int.from_uint64(x))
-
-/// Wraps to 64 bits; 2^64-1 becomes -1.
-fn to_int64(x: UInt64) -> Int64 = int.to_int64(int.from_uint64(x))
-
-/// Wraps to 8 bits; 256 becomes 0.
-fn to_uint8(x: UInt64) -> UInt8 = int.to_uint8(int.from_uint64(x))
-
-/// Wraps to 16 bits; 65536 becomes 0.
-fn to_uint16(x: UInt64) -> UInt16 = int.to_uint16(int.from_uint64(x))
-
-/// Wraps to 32 bits; 2^32 becomes 0.
-fn to_uint32(x: UInt64) -> UInt32 = int.to_uint32(int.from_uint64(x))
-
 // The upper half (`x > i64::MAX`) cannot pivot through the signed `Int`
 // reinterpret — see stdlib/uint64_convert.almd for the split (#872).
 /// Float32 value; may round when x > 2^24.
-fn to_float32(x: UInt64) -> Float32 =
-  if int.from_uint64(x) >= 0 then int.to_float32(int.from_uint64(x))
+fn __raw_to_float32(x: UInt64) -> Float32 =
+  if int.__from_uint64(x) >= 0 then int.__raw_to_float32(int.__from_uint64(x))
   else {
-    let hf = int.to_float(int.from_uint64(x / 2))
-    float.to_float32(hf + hf + int.to_float(int.from_uint64(x % 2)))
+    let hf = int.__raw_to_float(int.__from_uint64(x / 2))
+    float.__raw_to_float32(hf + hf + int.__raw_to_float(int.__from_uint64(x % 2)))
   }
 
 /// Float64 value; may round when x > 2^53.
-fn to_float64(x: UInt64) -> Float64 =
-  if int.from_uint64(x) >= 0 then int.to_float64(int.from_uint64(x))
+fn __to_float64(x: UInt64) -> Float64 =
+  if int.__from_uint64(x) >= 0 then int.__to_float64(int.__from_uint64(x))
   else {
-    let hf = int.to_float(int.from_uint64(x / 2))
-    float.to_float64(hf + hf + int.to_float(int.from_uint64(x % 2)))
+    let hf = int.__raw_to_float(int.__from_uint64(x / 2))
+    float.__to_float64(hf + hf + int.__raw_to_float(int.__from_uint64(x % 2)))
   }
 
 /// Decimal digits, no sign; exact up to 2^64-1.
 fn to_string(x: UInt64) -> String =
-  if int.from_uint64(x) >= 0 then int.to_string(int.from_uint64(x)) else int.to_string(int.from_uint64(x / 10)) + int.to_string(int.from_uint64(x % 10))
+  if int.__from_uint64(x) >= 0 then int.to_string(int.__from_uint64(x)) else int.to_string(int.__from_uint64(x / 10)) + int.to_string(int.__from_uint64(x % 10))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
-/// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt64) -> Int8? =
-  if int.from_uint64(x) >= 0 then int.to_int8_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt64) -> Int8 =
-  if int.from_uint64(x) >= 0 then int.to_int8_saturating(int.from_uint64(x)) else int.to_int8(127)
-
-/// some(x), or none if x exceeds 32767.
-fn to_int16_checked(x: UInt64) -> Int16? =
-  if int.from_uint64(x) >= 0 then int.to_int16_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 32767.
-fn to_int16_saturating(x: UInt64) -> Int16 =
-  if int.from_uint64(x) >= 0 then int.to_int16_saturating(int.from_uint64(x)) else int.to_int16(32767)
-
-/// some(x), or none if x exceeds 2^31-1.
-fn to_int32_checked(x: UInt64) -> Int32? =
-  if int.from_uint64(x) >= 0 then int.to_int32_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 2^31-1.
-fn to_int32_saturating(x: UInt64) -> Int32 =
-  if int.from_uint64(x) >= 0 then int.to_int32_saturating(int.from_uint64(x)) else int.to_int32(2147483647)
-
-/// some(x), or none if x exceeds 2^63-1.
-fn to_int64_checked(x: UInt64) -> Int64? =
-  if int.from_uint64(x) >= 0 then some(int.to_int64(int.from_uint64(x))) else none
-
-/// Clamps x to at most 2^63-1.
-fn to_int64_saturating(x: UInt64) -> Int64 =
-  if int.from_uint64(x) >= 0 then int.to_int64(int.from_uint64(x)) else int.to_int64(9223372036854775807)
-
-/// some(x), or none if x exceeds 255.
-fn to_uint8_checked(x: UInt64) -> UInt8? =
-  if int.from_uint64(x) >= 0 then int.to_uint8_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 255.
-fn to_uint8_saturating(x: UInt64) -> UInt8 =
-  if int.from_uint64(x) >= 0 then int.to_uint8_saturating(int.from_uint64(x)) else int.to_uint8(255)
-
-/// some(x), or none if x exceeds 65535.
-fn to_uint16_checked(x: UInt64) -> UInt16? =
-  if int.from_uint64(x) >= 0 then int.to_uint16_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 65535.
-fn to_uint16_saturating(x: UInt64) -> UInt16 =
-  if int.from_uint64(x) >= 0 then int.to_uint16_saturating(int.from_uint64(x)) else int.to_uint16(65535)
-
-/// some(x), or none if x exceeds 2^32-1.
-fn to_uint32_checked(x: UInt64) -> UInt32? =
-  if int.from_uint64(x) >= 0 then int.to_uint32_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 2^32-1.
-fn to_uint32_saturating(x: UInt64) -> UInt32 =
-  if int.from_uint64(x) >= 0 then int.to_uint32_saturating(int.from_uint64(x)) else int.to_uint32(4294967295)
-
 // ── Bounds ──
 /// Smallest UInt64: 0.
-fn min_value() -> UInt64 = int.to_uint64(0)
+fn min_value() -> UInt64 = int.__to_uint64(0)
 
 // -1 reinterprets to the all-ones lane = 2^64 - 1 (truncating `to_uint64`).
 /// Largest UInt64: 2^64-1.
-fn max_value() -> UInt64 = int.to_uint64(-1)
+fn max_value() -> UInt64 = int.__to_uint64(-1)
 
 // ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -125,9 +44,9 @@ fn max(a: UInt64, b: UInt64) -> UInt64 = if a >= b then a else b
 fn clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64 = unbias(int.clamp(bias(x), bias(lo), bias(hi)))
 
 // The top bit flipped: unsigned order becomes Int's signed order.
-local fn bias(x: UInt64) -> Int = int.bxor(int.from_uint64(x), int.bshl(1, 63))
+local fn bias(x: UInt64) -> Int = int.bxor(int.__from_uint64(x), int.bshl(1, 63))
 
-local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
+local fn unbias(n: Int) -> UInt64 = int.__to_uint64(int.bxor(n, int.bshl(1, 63)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
@@ -136,32 +55,32 @@ fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
 fn modulo(a: UInt64, b: UInt64) -> UInt64 = a % b
 
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
-fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
+fn pow(base: UInt64, exp: Int) -> UInt64 = int.__to_uint64(math.__pow(int.__from_uint64(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
+fn is_even(x: UInt64) -> Bool = int.__from_uint64(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
+fn is_odd(x: UInt64) -> Bool = int.__from_uint64(x) % 2 != 0
 
 // ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
 /// Bitwise AND.
-fn band(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.band(int.from_uint64(a), int.from_uint64(b)))
+fn band(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.band(int.__from_uint64(a), int.__from_uint64(b)))
 
 /// Bitwise OR.
-fn bor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bor(int.from_uint64(a), int.from_uint64(b)))
+fn bor(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.bor(int.__from_uint64(a), int.__from_uint64(b)))
 
 /// Bitwise XOR.
-fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bxor(int.from_uint64(a), int.from_uint64(b)))
+fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.bxor(int.__from_uint64(a), int.__from_uint64(b)))
 
 /// Bitwise complement of all 64 bits.
-fn bnot(x: UInt64) -> UInt64 = int.to_uint64(int.bnot(int.from_uint64(x)))
+fn bnot(x: UInt64) -> UInt64 = int.__to_uint64(int.bnot(int.__from_uint64(x)))
 
 /// a shifted left by n bits; n is taken mod 64.
-fn bshl(a: UInt64, n: Int) -> UInt64 = int.to_uint64(int.bshl(int.from_uint64(a), shift_count(n)))
+fn bshl(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(int.bshl(int.__from_uint64(a), shift_count(n)))
 
 /// Zero-filling right shift; n is taken mod 64.
-fn bshr(a: UInt64, n: Int) -> UInt64 = int.to_uint64(shift_right_zero(int.from_uint64(a), shift_count(n)))
+fn bshr(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(shift_right_zero(int.__from_uint64(a), shift_count(n)))
 
 // A right shift of the 64-bit pattern that fills with zeros (k in 0..63).
 local fn shift_right_zero(v: Int, k: Int) -> Int = if k == 0 then v
@@ -174,35 +93,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
-fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.from_uint64(x))
+fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.__from_uint64(x))
 
 /// Zero bits below the lowest set bit; 64 for 0.
 fn count_trailing_zeros(x: UInt64) -> Int = int.min(
-  int.count_trailing_zeros(int.from_uint64(x)),
+  int.count_trailing_zeros(int.__from_uint64(x)),
   64,
 )
 
 /// Number of set bits among the 64.
-fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
+fn count_ones(x: UInt64) -> Int = int.count_ones(int.__from_uint64(x))
 
 /// The 8 bytes in reverse order (endian flip).
-fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
+fn byte_swap(x: UInt64) -> UInt64 = int.__to_uint64(int.byte_swap(int.__from_uint64(x)))
 
 // ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
 /// a + b wrapped to 64 bits.
-fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) + int.from_uint64(b))
+fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.__from_uint64(a) + int.__from_uint64(b))
 
 /// a - b wrapped to 64 bits.
-fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) - int.from_uint64(b))
+fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.__from_uint64(a) - int.__from_uint64(b))
 
 /// a * b wrapped to 64 bits.
-fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) * int.from_uint64(b))
+fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.__from_uint64(a) * int.__from_uint64(b))
 
 /// The 64 bits of a rotated left by n; n is taken mod 64.
-fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(n)))
+fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(rotate_bits(int.__from_uint64(a), rotate_count(n)))
 
 /// The 64 bits of a rotated right by n; n is taken mod 64.
-fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(rotate_bits(int.__from_uint64(a), rotate_count(0 - rotate_count(n))))
 
 // The low 64 bits v rotated left by k (k in 0..63); bits above 64 are dropped by the narrowing.
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -214,14 +133,14 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0.
-fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
+fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.__from_uint64(x))
 
-/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+/// Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
 fn parse(s: String) -> Result[UInt64, String] = {
-  let t = string.trim(s)
+  let t = trim_ascii_ws(s)
   if string.starts_with(t, "-") then err("invalid digit found in string")
   else match int.parse(t) {
-    ok(n) => ok(int.to_uint64(n)),
+    ok(n) => ok(int.__to_uint64(n)),
     err(e) => match parse_upper(t) {
       some(u) => ok(u),
       none => err(e),
@@ -234,7 +153,7 @@ fn parse(s: String) -> Result[UInt64, String] = {
 local fn parse_upper(t: String) -> UInt64? = {
   let n = string.len(t)
   match (int.parse(string.slice(t, 0, n - 1)), int.parse(string.slice(t, n - 1, n))) {
-    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.to_uint64(head) * int.to_uint64(10) + int.to_uint64(digit))
+    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.__to_uint64(head) * int.__to_uint64(10) + int.__to_uint64(digit))
     else none,
     _ => none,
   }
@@ -243,12 +162,12 @@ local fn parse_upper(t: String) -> UInt64? = {
 // ── Integer: radix text (R-sized-06) ──
 /// Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
 fn to_string_radix(x: UInt64, radix: Int) -> String =
-  if int.from_uint64(x) >= 0 then int.to_string_radix(int.from_uint64(x), radix)
+  if int.__from_uint64(x) >= 0 then int.to_string_radix(int.__from_uint64(x), radix)
   else {
     // 2^63 and above: the quotient by radix (>= 2) fits Int, and the remainder is one digit.
-    let r = int.to_uint64(radix)
-    int.to_string_radix(int.from_uint64(x / r), radix) + int.to_string_radix(
-      int.from_uint64(x % r),
+    let r = int.__to_uint64(radix)
+    int.to_string_radix(int.__from_uint64(x / r), radix) + int.to_string_radix(
+      int.__from_uint64(x % r),
       radix,
     )
   }
@@ -259,7 +178,7 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt64, String] = {
   let t = string.trim(s)
   if string.starts_with(t, "-") then err("invalid digit found in string")
   else match parsed {
-    ok(n) => ok(int.to_uint64(n)),
+    ok(n) => ok(int.__to_uint64(n)),
     err(e) => if e == "number too large to fit in target type" then parse_radix_upper(t, radix) ?? err(e)
     else err(e),
   }
@@ -274,9 +193,9 @@ local fn parse_radix_upper(t: String, radix: Int) -> Result[UInt64, String]? = {
     radix,
   )) {
     (ok(head), ok(digit)) => {
-      let r = int.to_uint64(radix)
-      let d = int.to_uint64(digit)
-      if int.to_uint64(head) <= (max_value() - d) / r then some(ok(int.to_uint64(head) * r + d)) else none
+      let r = int.__to_uint64(radix)
+      let d = int.__to_uint64(digit)
+      if int.__to_uint64(head) <= (max_value() - d) / r then some(ok(int.__to_uint64(head) * r + d)) else none
     },
     _ => none,
   }
@@ -298,40 +217,40 @@ fn from_saturating[S: Numeric](x: S) -> UInt64 = x.__uint64_sat()
 /// The low 64 bits of integer x as UInt64 (two's complement).
 fn from_wrapping[S: Integer](x: S) -> UInt64 = {
   let b = x.__bits64()
-  if b >= 0 then int.to_uint64(b)
-  else int.to_uint64(int.band(b, 9223372036854775807)) + int.to_uint64(4611686018427387904) * int.to_uint64(2)
+  if b >= 0 then int.__to_uint64(b)
+  else int.__to_uint64(int.band(b, 9223372036854775807)) + int.__to_uint64(4611686018427387904) * int.__to_uint64(2)
 }
 
 // ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
 //    family reads through a type variable, and the receiver-less sum and
 //    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
-fn __int_exact(x: UInt64) -> Int? = int.from_uint64_checked(x)
+fn __int_exact(x: UInt64) -> Int? = int.__from_uint64_checked(x)
 
 fn __uint64_exact(x: UInt64) -> UInt64? = some(x)
 
 fn __trunc(x: UInt64) -> UInt64 = x
 
-fn __int_sat(x: UInt64) -> Int = int.from_uint64_saturating(x)
+fn __int_sat(x: UInt64) -> Int = int.__from_uint64_saturating(x)
 
 fn __uint64_sat(x: UInt64) -> UInt64 = x
 
-fn __to_float(x: UInt64) -> Float = float.from_float64(uint64.to_float64(x))
+fn __to_float(x: UInt64) -> Float = float.__from_float64(uint64.__to_float64(x))
 
 fn __to_float_exact(x: UInt64) -> Float? = {
   let f = uint64.__to_float(x)
   if float.__uint64_exact(f) == some(x) then some(f) else none
 }
 
-fn __to_float32(x: UInt64) -> Float32 = uint64.to_float32(x)
+fn __to_float32(x: UInt64) -> Float32 = uint64.__raw_to_float32(x)
 
 fn __to_float32_exact(x: UInt64) -> Float32? = {
-  let f = uint64.to_float32(x)
-  if float.__uint64_exact(float.from_float32(f)) == some(x) then some(f) else none
+  let f = uint64.__raw_to_float32(x)
+  if float.__uint64_exact(float.__from_float32(f)) == some(x) then some(f) else none
 }
 
 fn __decimal_exact(x: UInt64) -> String? = some(uint64.to_string(x))
 
-fn __bits64(x: UInt64) -> Int = int.from_uint64(x)
+fn __bits64(x: UInt64) -> Int = int.__from_uint64(x)
 
 fn __sum(xs: List[UInt64]) -> UInt64 = {
   let zero: UInt64 = 0
@@ -341,4 +260,17 @@ fn __sum(xs: List[UInt64]) -> UInt64 = {
 fn __product(xs: List[UInt64]) -> UInt64 = {
   let one: UInt64 = 1
   list.fold(xs, one, (a, b) => a * b)
+}
+
+// int.parse's trim (C-413): ASCII TAB LF FF CR SPACE only, so "\u{a0}5" stays junk here too.
+local fn is_ascii_ws(c: String) -> Bool = match c {
+  " " | "\t" | "\n" | "\r" => true,
+  _ => c == (string.from_codepoint(12) ?? ""),
+}
+
+local fn trim_ascii_ws(s: String) -> String = {
+  let n = string.len(s)
+  if n > 0 and is_ascii_ws(string.take(s, 1)) then trim_ascii_ws(string.drop(s, 1))
+  else if n > 0 and is_ascii_ws(string.slice(s, n - 1, n)) then trim_ascii_ws(string.take(s, n - 1))
+  else s
 }

@@ -30,7 +30,7 @@ fn main() -> Unit = {
   let gs = groups(3)
   println(int.to_string(list.len(gs)))
   // Read back through both levels so a wrong element handle would show.
-  let inner = list.get_or(gs, 2, [])
+  let inner = list.get(gs, 2) ?? []
   println(int.to_string(list.len(inner)))
-  println(int.to_string(list.get_or(ps, 2, { x: -1, y: -1, on: false }).y))
+  println(int.to_string((list.get(ps, 2) ?? ({ x: -1, y: -1, on: false })).y))
 }

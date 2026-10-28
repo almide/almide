@@ -4,7 +4,7 @@
 // argument does (result_param_not_first). The auto-`?` desugar kept an
 // argument's Result only where the callee DECLARED the parameter Result /
 // Option, so in an effect fn `id(int.parse("7"))`, a fold seeded with a
-// Result call, or `map.get_or(m, k, int.parse(s))` lowered with a `?` on
+// Result call, or `map.get(m, k) ?? int.parse(s)` lowered with a `?` on
 // the argument — rustc E0308 natively, an E082 ty-mismatch wall on wasm —
 // though `almide check` accepted the program. Found by the counted stdlib
 // inspection (#3646).
@@ -28,9 +28,9 @@ effect fn main() -> Unit = {
   let c: Result[Int, String] = list.fold([1, 2], mk(5), (acc, x) => acc)
   println(show("fold", c))
   let m: Map[String, Result[Int, String]] = map.new()
-  let d: Result[Int, String] = map.get_or(m, "k", int.parse("x"))
-  println(show("map.get_or", d))
-  let e: Result[Int, String] = list.get_or([mk(1)], 3, mk(9))
+  let d: Result[Int, String] = map.get(m, "k") ?? int.parse("x")
+  println(show("map.get ??", d))
+  let e: Result[Int, String] = list.get([mk(1)], 3) ?? mk(9)
   println(show("get_or", e))
   let f: Result[Int, String] = id(step(-2))
   println(show("id-effect", f))

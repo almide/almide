@@ -7,42 +7,54 @@
 import http
 
 effect fn main() -> Unit = {
-  match http.request("POST", "http://127.0.0.1:1/x", "body", ["K": "v"]) {
+  match http.request("POST", "http://127.0.0.1:1/x", "body", [("K", "v")]) {
     ok(_) => println("request:unexpected-ok"),
     err(e) => println("request:${e}"),
   }
-  match http.request_status("GET", "http://127.0.0.1:1/", "", map.new()) {
-    ok(_) => println("rstatus:unexpected-ok"),
-    err(e) => println("rstatus:${e}"),
+  match http.send(http.new_request("GET", "http://127.0.0.1:1/", "", [])) {
+    ok(_) => println("send:unexpected-ok"),
+    err(e) => println("send:${e}"),
   }
-  match http.get_status("http://127.0.0.1:1/") {
-    ok(_) => println("gstatus:unexpected-ok"),
-    err(e) => println("gstatus:${e}"),
+  match http.get_response("http://127.0.0.1:1/") {
+    ok(_) => println("gresponse:unexpected-ok"),
+    err(e) => println("gresponse:${e}"),
   }
-  match http.get_bytes("http://127.0.0.1:1/") {
+  match (http.get_response("http://127.0.0.1:1/") |> result.map((r) => http.body_bytes(r))) {
     ok(_) => println("gbytes:unexpected-ok"),
     err(e) => println("gbytes:${e}"),
   }
-  match http.request_bytes("PUT", "http://127.0.0.1:1/", "12345", map.new()) {
+  match (http.send(http.new_request("PUT", "http://127.0.0.1:1/", "12345", [])) |> result.map((r) => http.body_bytes(r))) {
     ok(_) => println("rbytes:unexpected-ok"),
     err(e) => println("rbytes:${e}"),
   }
-  match http.get_status("not-a-url") {
+  match http.get_response("not-a-url") {
     ok(_) => println("badurl:unexpected-ok"),
     err(e) => println("badurl:${e}"),
   }
-  // #2821 / #2822: an unsupported scheme, an out-of-range port and a CR/LF
+  // #2821 / #2822: an unsupported scheme and a CR/LF
   // in a header value are refused before any dial, with the same text on
   // both lanes (the frame carries the CR/LF to the host intact).
-  match http.get_bytes("ftp://127.0.0.1:1/") {
+  match (http.get_response("ftp://127.0.0.1:1/") |> result.map((r) => http.body_bytes(r))) {
     ok(_) => println("scheme:unexpected-ok"),
     err(e) => println("scheme:${e}"),
   }
-  match http.get_status("http://127.0.0.1:99999/") {
-    ok(_) => println("port:unexpected-ok"),
-    err(e) => println("port:${e}"),
+  // #4231: a port outside 1..=65535 (or not digits) is rt-core's
+  // `invalid port` text on both lanes — the wasm lane's framed client
+  // reaches wasi:http, so its shim checks the port before the host does.
+  for url in [
+    "http://127.0.0.1:99999/",
+    "http://127.0.0.1:0/",
+    "http://127.0.0.1:8a/",
+    "http://u:pw@127.0.0.1:65536/p?q",
+    "http://[::1]:70000/",
+    "http://127.0.0.1:000000000000000000080x/"
+  ] {
+    match http.get_response(url) {
+      ok(_) => println("port:unexpected-ok"),
+      err(e) => println("port:${e}"),
+    }
   }
-  match http.request("GET", "http://127.0.0.1:1/x", "", ["X-A": "1\r\nX-B: 2"]) {
+  match http.request("GET", "http://127.0.0.1:1/x", "", [("X-A", "1\r\nX-B: 2")]) {
     ok(_) => println("inject:unexpected-ok"),
     err(e) => println("inject:${e}"),
   }

@@ -181,7 +181,7 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// `[profile.release]` (`lto = true`, `codegen-units = 1`), spelled for rustc.
 const FAST_PATH_RELEASE_ARGS: [&str; 4] = ["-C", "lto=fat", "-C", "codegen-units=1"];
 
-fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<std::path::PathBuf> {
+fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
     // The runtime is built for the same CPU as the main crate: fat LTO does
     // not inline across functions whose target features differ.
@@ -212,7 +212,7 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     }
     let output = cmd.output().ok()?;
     if output.status.success() {
-        Some(bin_path)
+        Some(source_still_ours(&rs_path, &slim).map(|()| bin_path))
     } else {
         // else: fall through to the self-contained cargo build
         None
@@ -332,14 +332,36 @@ pub(super) fn cargo_build_generated_with_native(
         && !uses_matrix && !needs_runtime_crates(rs_code)
         && native_deps.is_empty() && source_root.is_none()
     {
-        if let Some(bin_path) = try_rlib_fast_build(rs_code, project_dir, release) {
-            return Ok(bin_path);
+        if let Some(built) = try_rlib_fast_build(rs_code, project_dir, release) {
+            return built;
         }
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
+    let src_dir = write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
+    let written = std::fs::read_to_string(src_dir.join("main.rs"))
+        .map_err(|e| format!("failed to read back {}: {}", src_dir.join("main.rs").display(), e))?;
 
-    run_cargo_build_and_locate_binary(project_dir, release)
+    let bin_path = run_cargo_build_and_locate_binary(project_dir, release)?;
+    source_still_ours(&src_dir.join("main.rs"), &written)?;
+    Ok(bin_path)
+}
+
+/// Is the generated source the build compiled still the one this process
+/// wrote (#4269)? The scratch dir is shared and every writer holds its
+/// `BuildDirLock`, but a process outside that protocol (another almide
+/// version, a manual edit, a cache sweep) that rewrites the file while
+/// rustc runs makes the binary someone else's program — and the build used
+/// to report `Built` for it with exit 0. A changed file is a failed build:
+/// the caller says so and exits non-zero instead of installing it.
+pub(super) fn source_still_ours(path: &std::path::Path, written: &str) -> Result<(), String> {
+    match std::fs::read_to_string(path) {
+        Ok(now) if now == written => Ok(()),
+        _ => Err(format!(
+            "the generated source {} changed while it was being compiled — another process wrote to the \
+             shared build directory. Nothing was installed; run the build again",
+            path.display()
+        )),
+    }
 }
 
 /// Scrub rustc output when our codegen produces invalid Rust — replaces
@@ -455,7 +477,7 @@ fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Resu
     let flags = RUNTIME_RLIB_CODEGEN_ARGS.join(" ");
     let llvm_key = if llvm.is_empty() { String::new() } else { format!("|llvm={}", llvm.join(" ")) };
     let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021{cpu_key}|{flags}{llvm_key}").as_bytes()));
-    let dir = std::env::temp_dir().join(format!("almide-rtlib-{key}"));
+    let dir = super::build_dir::cache_base().join(format!("almide-rtlib-{key}"));
     let rlib = dir.join("libalmide_rt.rlib");
     if rlib.exists() {
         return Ok(rlib);
@@ -625,19 +647,23 @@ fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Res
         return Err(wrap_codegen_leak(combined));
     }
 
-    // Parse the JSON output to find the test binary path
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-            if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact") {
-                if let Some(exe) = json.get("executable").and_then(|e| e.as_str()) {
-                    return Ok(std::path::PathBuf::from(exe));
-                }
-            }
-        }
-    }
+    locate_test_binary(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| "could not determine test binary path from cargo output".to_string())
+}
 
-    Err("could not determine test binary path from cargo output".to_string())
+/// The libtest harness among `cargo test --no-run --message-format=json`'s
+/// artifacts: the one built with `profile.test == true`. `cargo test` also
+/// builds the crate's plain `bin` (an executable too, whose `main` runs no
+/// test), and taking the first executable artifact handed that one back —
+/// every test file on the cargo route (a runtime crate: http, zlib, …) ran
+/// zero tests and exited 0.
+fn locate_test_binary(cargo_json: &str) -> Option<std::path::PathBuf> {
+    cargo_json
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|json| json.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact"))
+        .filter(|json| json.pointer("/profile/test").and_then(|t| t.as_bool()) == Some(true))
+        .find_map(|json| json.get("executable").and_then(|e| e.as_str()).map(std::path::PathBuf::from))
 }
 
 pub(super) fn cargo_build_test_with_native(
@@ -704,6 +730,20 @@ mod tests {
     fn ignores_3_digit_almide_code() {
         assert!(!contains_rustc_error_code("error[E001]: type mismatch"));
         assert!(!contains_rustc_error_code("error[E013]: ..."));
+    }
+
+    /// `cargo test --no-run` lists the plain bin before the test harness; the
+    /// harness (profile.test) is the binary a test run executes.
+    #[test]
+    fn the_test_binary_is_the_profile_test_artifact() {
+        let json = concat!(
+            r#"{"reason":"compiler-artifact","target":{"kind":["lib"],"name":"flate2"},"profile":{"test":false},"executable":null}"#, "\n",
+            r#"{"reason":"compiler-artifact","target":{"kind":["bin"],"name":"almide-out"},"profile":{"test":false},"executable":"/t/debug/almide-out"}"#, "\n",
+            r#"{"reason":"compiler-artifact","target":{"kind":["bin"],"name":"almide-out"},"profile":{"test":true},"executable":"/t/debug/deps/almide_out-abc"}"#, "\n",
+            r#"{"reason":"build-finished","success":true}"#, "\n",
+        );
+        assert_eq!(super::locate_test_binary(json), Some(std::path::PathBuf::from("/t/debug/deps/almide_out-abc")));
+        assert_eq!(super::locate_test_binary(r#"{"reason":"compiler-artifact","profile":{"test":false},"executable":"/t/debug/almide-out"}"#), None);
     }
 
     #[test]

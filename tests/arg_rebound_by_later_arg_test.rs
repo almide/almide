@@ -60,9 +60,9 @@ fn main_with(body: &str) -> String {
 fn a_fold_init_that_rebinds_the_source_folds_the_old_value() {
     let cases = [
         ("set_fold", "  var st = set.from_list([1, 2, 3])\n  let r = st |> set.fold({\n    st = set.from_list([0])\n    0\n  }, (a, x) => a + x)\n  println(\"${r} ${set.len(st)}\")", "6 1"),
-        ("map_fold", "  var m = [\"a\": 1, \"b\": 2]\n  let r = m |> map.fold({\n    m = [\"z\": 9]\n    0\n  }, (a, k, v) => a + v)\n  println(\"${r} ${map.len(m)}\")", "3 1"),
+        ("map_fold", "  var m = [\"a\": 1, \"b\": 2]\n  let r = m |> map.fold({\n    m = [\"z\": 9]\n    0\n  }, (a, (k, v)) => a + v)\n  println(\"${r} ${map.len(m)}\")", "3 1"),
         ("set_fold_read_first", "  var st = set.from_list([\"a\", \"b\"])\n  let r = st |> set.fold({\n    let n = set.len(st)\n    st = set.from_list([\"z\"])\n    \"${n}:\"\n  }, (a, x) => a + x)\n  println(\"${r} ${set.len(st)}\")", "2:ab 1"),
-        ("map_fold_read_first", "  var m = [\"a\": \"1\"]\n  let r = m |> map.fold({\n    let n = map.len(m)\n    m = [\"z\": \"9\", \"y\": \"8\"]\n    \"${n}:\"\n  }, (a, k, v) => a + k + v)\n  println(\"${r} ${map.len(m)}\")", "1:a1 2"),
+        ("map_fold_read_first", "  var m = [\"a\": \"1\"]\n  let r = m |> map.fold({\n    let n = map.len(m)\n    m = [\"z\": \"9\", \"y\": \"8\"]\n    \"${n}:\"\n  }, (a, (k, v)) => a + k + v)\n  println(\"${r} ${map.len(m)}\")", "1:a1 2"),
     ];
     for (name, body, want) in cases {
         assert_eq!(run_both(name, &main_with(body)), want, "{name}");
@@ -126,6 +126,6 @@ fn the_v1_walled_operand_shapes_see_the_old_value() {
 
 #[test]
 fn a_fold_lines_init_that_rebinds_the_path_reads_the_old_path() {
-    let src = "import fs\n\neffect fn main() -> Unit = {\n  fs.write(\"in.txt\", \"a\\nb\\n\")!\n  var p = \"in.txt\"\n  let r = fs.fold_lines(p, {\n    p = \"missing.txt\"\n    \"\"\n  }, (a, l) => a + l)!\n  println(\"${r} ${p}\")\n}\n";
+    let src = "import fs\n\neffect fn main() -> Unit = {\n  fs.write_text(\"in.txt\", \"a\\nb\\n\")!\n  var p = \"in.txt\"\n  let r = fs.fold_lines(p, {\n    p = \"missing.txt\"\n    \"\"\n  }, (a, l) => a + l)!\n  println(\"${r} ${p}\")\n}\n";
     assert_eq!(run_both("fold_lines", src), "ab missing.txt");
 }

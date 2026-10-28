@@ -79,17 +79,42 @@ pub(crate) fn case_field_is_boxed(ctx: &RenderContext, ty: Option<&Ty>, ctor: &s
     }
 }
 
+/// Is field `field` of a record typed `ty` an `AlmideBox` — a field closing a
+/// cycle of a recursive record (#4251)? (`CodegenAnnotations::record_field_is_boxed`)
+pub(crate) fn record_field_is_boxed(ctx: &RenderContext, ty: &Ty, field: &str) -> bool {
+    ctx.ann.record_field_is_boxed(ty, field)
+}
+
 /// The enum the variant case `ctor` of a value typed `ty` belongs to (#3176).
 /// The value's own type answers first when it is an enum with that case:
 /// `ctor_to_enum` is keyed by the bare case name program-wide, so of two
 /// modules' `| Pair` it holds only the last registered, and a construction of
 /// the other one — typed by the checker with its own enum — was spelled
 /// against the wrong enum (rustc E0061/E0308).
+///
+/// A value typed by an opaque NEWTYPE whose constructor is `ctor` is that
+/// newtype's own tuple struct, never an enum case: the bare-name fallback
+/// handed the stdlib's `Path(steps)` (`value.Path`) to a user's `| Path(..)`
+/// case, and the stdlib's own match was spelled `Arg::Path(steps)` (#4275).
 pub(crate) fn ctor_enum_for(ctx: &RenderContext, ctor: &str, ty: Option<&Ty>) -> Option<String> {
     match ty {
         Some(Ty::Named(n, _)) if ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)) => Some(n.to_string()),
+        Some(Ty::Named(n, _)) if is_newtype_ctor_of(ctx, ctor, n.as_str()) => None,
         _ => ctx.ann.ctor_to_enum.get(ctor).cloned(),
     }
+}
+
+/// Is `ctor` the constructor of the opaque newtype `ty_name` — the type the
+/// program declares as a tuple struct under that name?
+pub(crate) fn is_newtype_ctor_of(ctx: &RenderContext, ctor: &str, ty_name: &str) -> bool {
+    ctor == ty_name && ctx.newtype_ctors.contains_key(&almide_base::intern::sym(ty_name))
+}
+
+/// Is a value typed `ty` a case `ctor` of an enum the program renders — the
+/// checker's own answer for a construction, which no same-spelled newtype or
+/// other enum's case overrides (#3176, #4275)?
+pub(crate) fn is_enum_case_of(ctx: &RenderContext, ctor: &str, ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(n, _) if ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)))
 }
 
 /// Prefix that renames the four keywords rustc refuses to raw-escape.

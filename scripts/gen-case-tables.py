@@ -16,13 +16,25 @@ Regenerate whenever the Rust toolchain bumps its Unicode version — the tables
 are dumped FROM the oracle, so v0/v1 cannot drift.
 """
 
+import sys
+
 # parse the Rust dump
 upper = {}   # cp -> [cps]
 lower = {}
+held = []    # (kind, cp, targets) dropped by the C-412 no-ASCII-fold filter
 for line in open(sys.argv[1]):
     parts = line.split()
     kind, cp, targets = parts[0], int(parts[1], 16), [int(x, 16) for x in parts[2:]]
+    # C-412 (#4121): a non-ASCII scalar whose Unicode mapping contains an ASCII
+    # scalar (ı→I, ſ→S, ﬁ→FI, K→k, İ→i̇, …) is left UNCHANGED — dropping its row
+    # makes the walk copy it verbatim. ASCII rows never reach the table (the
+    # walk's arithmetic fast path), so the filter is exactly the native rule.
+    if cp >= 128 and any(t < 128 for t in targets):
+        held.append((kind, cp, targets))
+        continue
     (upper if kind == 'U' else lower)[cp] = targets
+for kind, cp, targets in held:
+    print(f"held back ({kind}): U+{cp:04X} -> " + " ".join(f"U+{t:04X}" for t in targets), file=sys.stderr)
 
 def build(mapping):
     """entries: (cp, val) with val = target cp, or 0xF00000+idx into specials"""
@@ -42,6 +54,7 @@ def build(mapping):
 
 def emit(name, rust_name, mapping, ascii_lo, ascii_hi, ascii_delta, sigma=None):
     tbl, sp, n = build(mapping)
+    nheld = sum(1 for k, _, _ in held if k == ('U' if name == 'to_upper' else 'L'))
     if sigma:
         cased_n, ci_n = sigma
         sig_params = ", st: Int, ch: Int, ih: Int"
@@ -66,9 +79,13 @@ def emit(name, rust_name, mapping, ascii_lo, ascii_hi, ascii_delta, sigma=None):
         sig_locals = ""
         sig_entry = ""
     return f'''// {name} — SELF-HOSTED `string.{name}(s)` for v1: FULL Unicode case mapping,
-// byte-identical to v0's `str::{rust_name}()`. The mapping table is GENERATED
+// NORMATIVE SPEC: ALS-T5 (docs/specs/als/text-and-numbers.md §T5) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
+// byte-identical to v0's `str::{rust_name}()` MINUS every row that would fold a
+// non-ASCII scalar into ASCII (C-412: such a scalar stays unchanged; {nheld} rows
+// held back). The mapping table is GENERATED
 // FROM RUST ITSELF (scratch casedump: every codepoint where {rust_name} != identity,
-// {n} entries incl. 1:N SpecialCasing like ß→SS) so the two implementations
+// {n} entries incl. 1:N SpecialCasing like ΐ→Ϊ́) so the two implementations
 // cannot drift — regenerate with scripts/gen-case-tables.py when the Rust
 // toolchain's Unicode version changes. Encoding: a sorted fixed-width hex
 // string, 12 hex chars per entry = [cp:6][target:6]; target >= 0xF00000 is an

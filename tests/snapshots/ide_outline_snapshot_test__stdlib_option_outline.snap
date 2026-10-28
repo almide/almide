@@ -2,13 +2,14 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/option\"])"
 ---
+fn option.__collect[T](xs: List[Option[T]]) -> Option[List[T]]
 fn option.__fallible_filter[A, E](o: Option[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
 fn option.__fallible_flat_map[A, B, E](o: Option[A], f: fn(A) -> Result[Option[B], E]) -> Result[Option[B], E]
 fn option.__fallible_map[A, B, E](o: Option[A], f: fn(A) -> Result[B, E]) -> Result[Option[B], E]
 fn option.__fallible_or_else[A, E](o: Option[A], f: fn() -> Result[Option[A], E]) -> Result[Option[A], E]
 fn option.__fallible_unwrap_or_else[A, E](o: Option[A], f: fn() -> Result[A, E]) -> Result[A, E]
-fn option.collect[T](xs: List[Option[T]]) -> Option[List[T]]
-fn option.collect_map[T, U](xs: List[T], f: fn(T) -> Option[U]) -> Option[List[U]]
+fn option.collect[A](xs: List[Option[A]]) -> Option[List[A]]
+fn option.collect_map[A, B](xs: List[A], f: fn(A) -> Option[B]) -> Option[List[B]]
 fn option.filter[A](o: Option[A], f: fn(A) -> Bool) -> Option[A]
 fn option.flat_map[A, B](o: Option[A], f: fn(A) -> Option[B]) -> Option[B]
 fn option.flatten[A](o: Option[Option[A]]) -> Option[A]

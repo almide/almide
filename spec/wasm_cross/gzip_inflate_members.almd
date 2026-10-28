@@ -15,7 +15,7 @@ fn bits(pos: Int, buf: Int, cnt: Int, inp: Bytes, need: Int) -> (Int, Int, Int, 
   var b = buf
   var c = cnt
   while c < need {
-    b = int.bor(b, int.bshl(bytes.get_or(inp, p, 0), c))
+    b = int.bor(b, int.bshl(bytes.get(inp, p) ?? 0, c))
     p = p + 1
     c = c + 8
   }
@@ -259,7 +259,7 @@ fn codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: List
     }
     var k = 0
     while k < clen {
-      bytes.push(out, bytes.get_or(out, bytes.len(out) - dist, 0))
+      bytes.push(out, bytes.get(out, bytes.len(out) - dist) ?? 0)
       k = k + 1
     }
   }
@@ -376,14 +376,14 @@ fn dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int, In
 
 // (status, pos, 0, 0) — stored blocks are byte-aligned
 fn stored(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
-  let len = int.bor(bytes.get_or(inp, pos, 0), int.bshl(bytes.get_or(inp, pos + 1, 0), 8))
-  let nlen = int.bor(bytes.get_or(inp, pos + 2, 0), int.bshl(bytes.get_or(inp, pos + 3, 0), 8))
+  let len = int.bor(bytes.get(inp, pos) ?? 0, int.bshl(bytes.get(inp, pos + 1) ?? 0, 8))
+  let nlen = int.bor(bytes.get(inp, pos + 2) ?? 0, int.bshl(bytes.get(inp, pos + 3) ?? 0, 8))
   let start = pos + 4
   let bad = if int.bxor(len, nlen) != 65535 or start + len > bytes.len(inp) then 1 else 0
   let n = if bad == 1 then 0 else len
   var k = 0
   while k < n {
-    bytes.push(out, bytes.get_or(inp, start + k, 0))
+    bytes.push(out, bytes.get(inp, start + k) ?? 0)
     k = k + 1
   }
   (0 - bad, start + n, 0, 0)
@@ -437,35 +437,34 @@ fn crc32(t: List[Int], b: Bytes, start: Int) -> Int = {
   var i = start
   let n = bytes.len(b)
   while i < n {
-    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get(b, i) ?? 0), 255)], int.bshr(cc, 8))
     i = i + 1
   }
   int.bxor(cc, 4294967295)
 }
 
 fn u32_le(b: Bytes, p: Int) -> Int = int.bor(
-  int.bor(bytes.get_or(b, p, 0), int.bshl(bytes.get_or(b, p + 1, 0), 8)),
-  int.bor(int.bshl(bytes.get_or(b, p + 2, 0), 16), int.bshl(bytes.get_or(b, p + 3, 0), 24)),
+  int.bor(bytes.get(b, p) ?? 0, int.bshl(bytes.get(b, p + 1) ?? 0, 8)),
+  int.bor(int.bshl(bytes.get(b, p + 2) ?? 0, 16), int.bshl(bytes.get(b, p + 3) ?? 0, 24)),
 )
 
-fn skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p + 1 else skip_zstr(
+fn skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get(b, p) ?? 0 == 0 then p + 1 else skip_zstr(
   b,
   p + 1,
 )
 
 // Position of the deflate stream after the gzip member header at `pos`, or -1 if not a gzip member.
 fn header_end(inp: Bytes, pos: Int) -> Int = {
-  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(
+  if (bytes.get(inp, pos) ?? 0) != 31 or (bytes.get(inp, pos + 1) ?? 0) != 139 or (bytes.get(
     inp,
     pos + 2,
-    0,
-  ) != 8 then 0 - 1
+  ) ?? 0) != 8 then 0 - 1
   else {
-    let flg = bytes.get_or(inp, pos + 3, 0)
+    let flg = bytes.get(inp, pos + 3) ?? 0
     let p0 = pos + 10
     let p1 = if int.band(flg, 4) != 0 then p0 + 2 + int.bor(
-      bytes.get_or(inp, p0, 0),
-      int.bshl(bytes.get_or(inp, p0 + 1, 0), 8),
+      bytes.get(inp, p0) ?? 0,
+      int.bshl(bytes.get(inp, p0 + 1) ?? 0, 8),
     )
     else p0
     let p2 = if int.band(flg, 8) != 0 then skip_zstr(inp, p1) else p1

@@ -1,0 +1,45 @@
+// @contract: C-439
+// env.vars lists the program's environment as a Map keyed and ordered by
+// name, with the program's own env.set / env.remove applied; env.remove
+// unsets a name (an unset name is ok) and refuses the names env.set refuses
+// with the same err family under its own name (#3908). Only facts that hold
+// in any inherited environment are printed — never the environment itself.
+// Names are fixture-unique.
+import env
+
+effect fn try_remove(label: String, name: String) -> String = match env.remove(name) {
+  ok(_) => "${label}: ok",
+  err(e) => "${label}: ${e}",
+}
+
+effect fn listed(name: String) -> String = {
+  let all = env.vars()!
+  match all[name] {
+    some(v) => "listed ${v}",
+    none => "absent",
+  }
+}
+
+effect fn main() -> Unit = {
+  env.set("ALMIDE_C439_KEEP", "a=b")!
+  env.set("ALMIDE_C439_DROP", "v")!
+  println("keep: ${listed("ALMIDE_C439_KEEP")!}")
+  println("drop before: ${listed("ALMIDE_C439_DROP")!}")
+  println(try_remove("remove set", "ALMIDE_C439_DROP")!)
+  println("drop after: ${listed("ALMIDE_C439_DROP")!}")
+  println("get after: ${env.get("ALMIDE_C439_DROP") ?? "unset"}")
+  println(try_remove("remove unset", "ALMIDE_C439_NEVER")!)
+  println(try_remove("empty name", "")!)
+  println(try_remove("eq in name", "ALMIDE_C439=EQ")!)
+  println(try_remove("nul in name", "ALMIDE_C439\u{0}N")!)
+  env.set("ALMIDE_C439_DROP", "back")!
+  println("set again: ${listed("ALMIDE_C439_DROP")!}")
+  let all = env.vars()!
+  let names = map.keys(all)
+  println("ordered by name: ${names == list.sort(names)}")
+  var disagree = 0
+  for (name, value) in all {
+    disagree = disagree + (if env.get(name) == some(value) then 0 else 1)
+  }
+  println("disagreeing with env.get: ${disagree}")
+}

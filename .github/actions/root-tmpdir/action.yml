@@ -1,0 +1,24 @@
+name: "Temp dir on the root volume"
+description: >-
+  Point TMPDIR at the runner's root volume for the rest of the job. On the
+  current ubuntu-latest image /tmp is a ~7.9 GB tmpfs while / has ~87 GB free
+  (df in run 40618688174, 2026-10-28). The compiler keeps its build caches under
+  std::env::temp_dir() (`<temp>/almide-<uid>/…`), the test archive's listings
+  unpack there, and the native test builds filled the tmpfs: "Disk quota
+  exceeded (os error 122)" on all 566 spec files of the compiler-driven gates
+  and on every archive unpack. Every job that compiles or tests runs this step
+  right after its checkout, so no job drifts back to the tmpfs. Linux only: the
+  macOS and Windows runners keep their own temp dirs.
+
+runs:
+  using: "composite"
+  steps:
+    - name: TMPDIR on the root volume
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        df -h / /tmp
+        mkdir -p "$RUNNER_TEMP/tmp"
+        echo "TMPDIR=$RUNNER_TEMP/tmp" >> "$GITHUB_ENV"
+        echo "TMPDIR=$RUNNER_TEMP/tmp"
+        df -h "$RUNNER_TEMP"

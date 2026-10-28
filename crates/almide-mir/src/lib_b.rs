@@ -46,8 +46,8 @@ pub enum PrimKind {
     /// scalar address computation, no ownership; verify_ownership live-checks the list (#3259).
     ElemAddr,
     /// Abort: write the String-block message to STDERR and proc_exit(1) — the
-    /// self-host arm of the §13 termination convention (math.pow negative
-    /// exponent, int.rotate nonpositive width). Never returns.
+    /// self-host arm of the §13 termination convention (math.__pow negative
+    /// exponent). Never returns.
     Die,
     /// ── T5-1 wall-clock deadline prims (fan.timeout, oracle tier) ────────
     /// `dst = saved deadline` — computes `min(now + args[0] ns, outer)` as the
@@ -105,8 +105,8 @@ pub enum PrimKind {
     /// The `clock_time_get` WASI host call — `args = [clock_id, precision, time_ptr]`, dst =
     /// the i64 errno; writes the current clock value (nanoseconds) as an i64 at `time_ptr`.
     /// A SCALAR-dst sandbox exit (like [`RandomGet`] — NO heap result, NO ownership event),
-    /// reached only by the self-hosted `env.unix_timestamp` (which reads `time_ptr` and
-    /// divides by 1e9 to seconds). Carries [`Capability::Clock`] — a DISTINCT capability
+    /// reached by the self-hosted `datetime.now` / `datetime.monotonic_ns` (clock_now.almd,
+    /// which read `time_ptr`; `now` divides by 1e9 to seconds). Carries [`Capability::Clock`] — a DISTINCT capability
     /// (a clock read is neither a filesystem nor an entropy effect; the cap_witness counts
     /// it exactly like `RandomGet` → Entropy), so a function using it is caps-verified ONLY
     /// if it declares Clock — never accept-but-unsafe. NON-DETERMINISTIC (no byte-match).
@@ -122,11 +122,6 @@ pub enum PrimKind {
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's
     /// scope-end drop (a recursive `DropListStr` over the owned element Strings).
     ArgsGetList,
-    /// The SAME WASI args floor as [`ArgsGetList`] but INCLUDING argv[0] (the program
-    /// path) — `process.args()` = native `std::env::args()`. Renders as
-    /// `(call $args_get_list (i32.const 0))` (the one parameterized bridge, skip=0);
-    /// same fresh OWNED `List[String]` dst, same [`Capability::CliArgs`] accounting.
-    ArgsGetListFull,
     /// The WASI `environ_sizes_get` + `environ_get` lookup, packaged as ONE high-level
     /// HEAP-RESULT prim — `args = [name]` (a BORROWED `String` handle), dst = a fresh
     /// OWNED `Option[String]`: a 0-slot block (none) or a 1-slot block whose @12 holds
@@ -192,7 +187,7 @@ pub enum PrimKind {
     /// A plain `[path]` names `fs.read_text` / `fs.read_bytes` from the static prefix rows.
     ReadTextFile,
     /// [`ReadTextFile`]'s raw-bytes twin (`prim.read_bytes_file`, reached by the self-hosted
-    /// `fs.read_bytes_raw` / `fs.read_bytes` / `_if_exists` kin): the SAME WASI floor, Result
+    /// `fs.read_bytes` / `_if_exists` kin): the SAME WASI floor, Result
     /// block, capability and drop shape, MINUS the UTF-8 validation — native `std::fs::read`
     /// hands back whatever bytes are on disk, so this must too (#1506).
     ReadBytesFile,
@@ -311,7 +306,7 @@ pub enum PrimKind {
     /// so its ownership cert is EMPTY (a `Prim` is a no-op in verify_ownership) — like `string_eq`.
     /// REUSES the proven `$rc_dec` (no new WAT func). args = [addr], no dst (Unit). TRUSTED like the
     /// inline DropListStr's per-element rc_dec — its leak/double-free safety is the differential
-    /// test's burden (a value.stringify round-trip), NOT the ownership cert. Use is contained to the
+    /// test's burden (a value.__stringify round-trip), NOT the ownership cert. Use is contained to the
     /// drop routine.
     RcDec,
     /// Acquire one reference of a RAW heap handle (`(call $rc_inc …)`) — the self-host `value.array`
@@ -326,7 +321,7 @@ pub enum PrimKind {
     /// f64 category for self-host over `prim.fabs` / `prim.fadd` / `prim.f2i` / etc.
     FloatUn(FUnOp),
     FloatBin(FBinOp),
-    /// `float.from_int(x)` — the sitofp floor (#806 step 2): ONE
+    /// `float.__from_int(x)` — the sitofp floor (#806 step 2): ONE
     /// `f64.convert_i64_s` (bits-reinterpreted into the i64-uniform float
     /// slot), replacing the self-host runtime CALL that dominated inlined hot
     /// loops. `args = [int_value]`, dst = the f64 BITS. A pure scalar
@@ -337,7 +332,7 @@ pub enum PrimKind {
     FloatToInt,
     /// `reinterpret(f64.convert_i64_s(x))` — Int → Float.
     IntToFloat,
-    /// IDENTITY — the raw f64↔i64 BIT reinterpret (`float.to_bits` / `int.bits_to_float`):
+    /// IDENTITY — the raw f64↔i64 BIT reinterpret (`float.to_bits` / `float.from_bits`):
     /// the i64-uniform value ALREADY holds the f64 bits, so this is a no-op pass-through.
     FloatBits,
     /// `f32.demote_f64` — Float (f64) → Float32. The narrower f32 value is held as its 32-bit
@@ -553,7 +548,7 @@ pub enum Capability {
     /// `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
     FsWrite,
     /// Reading the host WALL CLOCK — the WASI `clock_time_get` floor
-    /// ([`PrimKind::ClockTimeGet`]), reached by the self-hosted `env.unix_timestamp`. The
+    /// ([`PrimKind::ClockTimeGet`]), reached by the self-hosted `datetime.now`. The
     /// sixth sandbox exit. A clock read is neither a filesystem effect nor an entropy draw,
     /// so it is a DISTINCT capability with its own id — never aliased to FsRead/FsWrite or
     /// Entropy. Accounted exactly like Entropy/FsRead: a pure `fn` declares ∅ and so can

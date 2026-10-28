@@ -403,7 +403,7 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_bin(op, d, args, tys, out, indent)?,
-        // `float.from_int` — int (i64) to f64, carried per the float floor.
+        // `float.__from_int` — int (i64) to f64, carried per the float floor.
         Op::Prim {
             kind: crate::PrimKind::F64FromInt,
             dst: Some(d),

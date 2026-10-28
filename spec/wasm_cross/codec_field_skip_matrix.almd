@@ -1,0 +1,68 @@
+// @contract: C-428, C-429
+// #4108 — the Codec field-skip matrix. Rows: a field that is plain,
+// `@skip` (neither decoded nor encoded) or `@skip_decode` (never decoded,
+// still encoded). Columns: the input has the field's key absent, present with
+// a non-default value, or carries an unknown key, each through `T.decode`
+// (unknown keys dropped) and `T.decode_strict` (unknown keys refused, a
+// skipped field's key included); then `T.encode`. Every leg prints this table
+// byte for byte. The cell this exists for: `@skip_decode is_admin` with input
+// `"is_admin": true` decodes to admin=false.
+import json
+
+type Plain: Codec = { name: String, is_admin: Bool = false }
+
+type Skip: Codec = { name: String, @skip is_admin: Bool = false }
+
+type SkipDecode: Codec = { name: String, @skip_decode is_admin: Bool = false }
+
+// A skip attribute composes with the alias syntax: the wire key is `role_name`.
+type Aliased: Codec = { name: String, @skip_decode role as "role_name": String = "user" }
+
+fn doc(s: String) -> Value = json.parse(s) ?? value.null()
+
+fn show_plain(r: Result[Plain, String]) -> String = match r {
+  ok(u) => "ok name=${u.name} admin=${u.is_admin}",
+  err(e) => "err ${e}",
+}
+
+fn show_skip(r: Result[Skip, String]) -> String = match r {
+  ok(u) => "ok name=${u.name} admin=${u.is_admin}",
+  err(e) => "err ${e}",
+}
+
+fn show_skip_decode(r: Result[SkipDecode, String]) -> String = match r {
+  ok(u) => "ok name=${u.name} admin=${u.is_admin}",
+  err(e) => "err ${e}",
+}
+
+fn main() -> Unit = {
+  let inputs = [("absent", "{\"name\": \"m\"}"), ("present", "{\"name\": \"m\", \"is_admin\": true}"), ("unknown", "{\"name\": \"m\", \"unknown\": 1}")]
+  for (label, text) in inputs {
+    println("plain       ${label} decode        ${show_plain(Plain.decode(doc(text)))}")
+    println("plain       ${label} decode_strict ${show_plain(Plain.decode_strict(doc(text)))}")
+    println("skip        ${label} decode        ${show_skip(Skip.decode(doc(text)))}")
+    println("skip        ${label} decode_strict ${show_skip(Skip.decode_strict(doc(text)))}")
+    println("skip_decode ${label} decode        ${show_skip_decode(SkipDecode.decode(doc(text)))}")
+    println("skip_decode ${label} decode_strict ${show_skip_decode(SkipDecode.decode_strict(doc(text)))}")
+  }
+  println("plain       encode ${json.stringify(Plain.encode(Plain { name: "m", is_admin: true }))}")
+  println("skip        encode ${json.stringify(Skip.encode(Skip { name: "m", is_admin: true }))}")
+  println("skip_decode encode ${json.stringify(SkipDecode.encode(SkipDecode { name: "m", is_admin: true }))}")
+  // decode_strict checks keys BEFORE any field: the unknown key is reported,
+  // not the missing `name`; the first unknown key in document order wins.
+  println("order       decode_strict ${show_plain(Plain.decode_strict(doc("{\"zeta\": 1, \"alpha\": 2}")))}")
+  println("order       decode        ${show_plain(Plain.decode(doc("{\"zeta\": 1, \"alpha\": 2}")))}")
+  // Alias: the input's `role_name` is ignored by decode, refused by
+  // decode_strict, and written by encode.
+  let a = Aliased.decode(doc("{\"name\": \"m\", \"role_name\": \"admin\"}"))
+  println("alias       decode        ${match a {
+    ok(x) => "ok role=${x.role}",
+    err(e) => "err ${e}",
+  }}")
+  let s = Aliased.decode_strict(doc("{\"name\": \"m\", \"role_name\": \"admin\"}"))
+  println("alias       decode_strict ${match s {
+    ok(x) => "ok role=${x.role}",
+    err(e) => "err ${e}",
+  }}")
+  println("alias       encode ${json.stringify(Aliased.encode(Aliased { name: "m", role: "admin" }))}")
+}

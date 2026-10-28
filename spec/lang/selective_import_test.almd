@@ -7,6 +7,6 @@ test "selective import resolves bare call to module function" {
 }
 
 test "selective import + module-qualified still works" {
-  let v = value.str("world")
+  let v = value.string("world")
   assert_eq(stringify(v), '"world"')
 }

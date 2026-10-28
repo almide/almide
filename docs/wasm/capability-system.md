@@ -39,15 +39,13 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `fs.read_text(path)` | `(String) -> Result[String, String]` | Read file as UTF-8 string |
-| `fs.read_bytes(path)` | `(String) -> Result[List[Int], String]` | Read file as byte list |
+| `fs.read_bytes(path)` | `(String) -> Result[Bytes, String]` | Read file as Bytes |
 | `fs.read_lines(path)` | `(String) -> Result[List[String], String]` | Read file as list of lines |
 | `fs.exists(path)` | `(String) -> Bool` | Check if path exists |
 | `fs.is_dir(path)` | `(String) -> Bool` | Check if path is directory |
 | `fs.is_file(path)` | `(String) -> Bool` | Check if path is regular file |
 | `fs.is_symlink(path)` | `(String) -> Bool` | Check if path is symbolic link |
 | `fs.stat(path)` | `(String) -> Result[{size, is_dir, is_file, modified}, String]` | File metadata |
-| `fs.file_size(path)` | `(String) -> Result[Int, String]` | File size in bytes |
-| `fs.modified_at(path)` | `(String) -> Result[Int, String]` | Modification timestamp |
 | `fs.list_dir(path)` | `(String) -> Result[List[String], String]` | List directory entries |
 | `fs.walk(dir)` | `(String) -> Result[List[String], String]` | Recursive file listing |
 | `fs.glob(pattern)` | `(String) -> Result[List[String], String]` | Glob pattern matching |
@@ -77,9 +75,10 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `fs.write(path, content)` | `(String, String) -> Result[Unit, String]` | Write string to file |
-| `fs.write_bytes(path, bytes)` | `(String, List[Int]) -> Result[Unit, String]` | Write bytes to file |
-| `fs.append(path, content)` | `(String, String) -> Result[Unit, String]` | Append string to file |
+| `fs.write_text(path, content)` | `(String, String) -> Result[Unit, String]` | Write string to file |
+| `fs.write_bytes(path, data)` | `(String, Bytes) -> Result[Unit, String]` | Write bytes to file |
+| `fs.append_text(path, content)` | `(String, String) -> Result[Unit, String]` | Append string to file |
+| `fs.append_bytes(path, data)` | `(String, Bytes) -> Result[Unit, String]` | Append bytes to file |
 | `fs.mkdir_p(path)` | `(String) -> Result[Unit, String]` | Create directory tree |
 | `fs.remove(path)` | `(String) -> Result[Unit, String]` | Delete a file |
 | `fs.remove_all(path)` | `(String) -> Result[Unit, String]` | Recursively delete directory |
@@ -112,14 +111,13 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `http.get(url)` | `(String) -> Result[String, String]` | HTTP GET |
-| `http.post(url, body)` | `(String, String) -> Result[String, String]` | HTTP POST |
-| `http.put(url, body)` | `(String, String) -> Result[String, String]` | HTTP PUT |
-| `http.patch(url, body)` | `(String, String) -> Result[String, String]` | HTTP PATCH |
-| `http.delete(url)` | `(String) -> Result[String, String]` | HTTP DELETE |
-| `http.request(method, url, body, headers)` | `(String, String, String, Map[String, String]) -> Result[String, String]` | Custom HTTP request |
+| `http.get(url)` | `(String) -> Result[String, String]` | HTTP GET, the body |
+| `http.request(method, url, body, headers)` | `(String, String, String, List[(String, String)]) -> Result[String, String]` | Any method (`"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`, ...), the body |
+| `http.get_response(url)` | `(String) -> Result[HttpResponse, String]` | HTTP GET, the whole response |
+| `http.send(req)` | `(HttpRequest) -> Result[HttpResponse, String]` | Sends a request built with `http.new_request`, the whole response |
+| `http.start(req, limits)` | `(HttpRequest, HttpLimits) -> Result[HttpCall, String]` | Begins a request and returns a call handle at once |
 
-Note: Pure response builder functions (`http.response`, `http.json`, `http.redirect`, `http.with_headers`) and request accessor functions (`http.req_method`, `http.req_path`, `http.req_body`, `http.req_header`, `http.query_params`) do not require `Net.fetch` because they operate on in-memory data structures, not the network.
+Note: Pure response builder functions (`http.response`, `http.json`, `http.redirect`, `http.with_headers`) and request functions (`http.new_request`, `http.method`, `http.path`, `http.header`, `http.headers`, `http.body`, `http.query_params`) do not require `Net.fetch` because they operate on in-memory data structures, not the network.
 
 **WASI imports:**
 
@@ -141,7 +139,7 @@ Networking is not part of WASI snapshot preview 1. Almide uses a host-provided `
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `http.serve(port, handler)` | `(Int, (Request) -> Response) -> Unit` | Start HTTP server |
+| `http.serve(port, handler)` | `(Int, effect (HttpRequest) -> HttpResponse) -> Unit` | Start HTTP server |
 
 **WASI imports:**
 
@@ -171,8 +169,6 @@ artifacts refuse it at build time (#2659).
 | `env.args()` | `() -> List[String]` | Command-line arguments |
 | `env.cwd()` | `() -> Result[String, String]` | Current working directory |
 | `env.os()` | `() -> String` | Operating system name |
-| `env.temp_dir()` | `() -> String` | System temp directory |
-| `process.args()` | `() -> List[String]` | Command-line arguments (process module) |
 
 **WASI imports:**
 
@@ -224,9 +220,8 @@ Setting environment variables is not part of WASI preview 1. The host must provi
 | `process.exec_status_timeout(cmd, args, ms)` | `(String, List[String], Int) -> Result[ProcessStatus, String]` | `exec_status`, killed at the deadline |
 | `process.run(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Run on this terminal; exit code |
 | `process.run_in(dir, cmd, args)` | `(String, String, List[String]) -> Result[Int, String]` | `run` in `dir` |
-| `process.spawn(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Start in the background; pid |
+| `process.start(c)` | `(ProcessCommand) -> Result[ProcessChild, String]` | Start in the background; a handle to poll, wait on or stop |
 | `process.kill(pid, signal)` | `(Int, Int) -> Result[Unit, String]` | Signal a process |
-| `process.is_alive(pid)` | `(Int) -> Bool` | Whether the process exists |
 | `process.pid()` | `() -> Int` | This program's pid |
 
 Process execution is the most dangerous capability. An agent with `Proc` can execute arbitrary shell commands, which can bypass all other capability restrictions at the OS level.
@@ -252,14 +247,19 @@ proc = ["git", "cargo"]
 
 - The compiler checks every call that starts a child (`exec`, `exec_in`,
   `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `run`, `run_in`,
-  `spawn`, and the deprecated `exec_attached`): its command must be a string literal on the list. A literal off the
+  `start`, and the deprecated `exec_attached`): its command must be a string literal on the list. A literal off the
   list is refused with ``process.exec("make") (line N): `make` is not in
   [permissions] proc``. A command computed at run time, or a spawning fn passed
   as a value, cannot be checked and is refused too (`cli::check_proc_allowlist`:
   `run`, `build` and `test` on both targets; `almide check` sees the direct
   calls).
+- `process.kill` starts no child but reaches processes, so
+  the list bounds it as the `kill` command (#4125): without `kill` on it it
+  is refused with ``process.kill("kill") (line N): `kill` is not in
+  [permissions] proc``.
 - The embedded wasm host holds the same list and answers a command outside it
-  with an err naming the command, before anything runs.
+  with an err naming the command, before anything runs (`kill`
+  outside it: the same err).
 - Without the key nothing is bounded. `proc = []` allows no command.
 
 #### On wasm: the private `almide:process/spawn` import
@@ -301,8 +301,7 @@ ABI on stock runtimes) and states its bounds and falsifiers.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `datetime.now()` | `() -> Int` | Current Unix timestamp (seconds) |
-| `env.millis()` | `() -> Int` | Milliseconds since epoch |
-| `env.unix_timestamp()` | `() -> Int` | Unix timestamp (seconds) |
+| `datetime.now_ms()` | `() -> Int` | Milliseconds since epoch |
 | `env.sleep_ms(ms)` | `(Int) -> Unit` | Sleep for milliseconds |
 
 Note: Pure datetime functions (`datetime.format`, `datetime.year`, `datetime.add_days`, etc.) do NOT require `Time` because they operate on integer timestamps, not the system clock.
@@ -371,7 +370,6 @@ None. Fan is implemented internally using `std::thread::scope` (Rust target) or 
 |----------|-----------|-------------|
 | `io.read_line()` | `() -> String` | Read one line from stdin |
 | `io.read_all()` | `() -> String` | Read all of stdin |
-| `process.stdin_lines()` | `() -> Result[List[String], String]` | Read all stdin lines |
 
 **WASI imports:**
 
@@ -499,7 +497,7 @@ module_to_capabilities("datetime", "now")  -> {Time}
 module_to_capabilities("random", "int")    -> {Rand}
 ```
 
-The mapping is per-function, not per-module: `fs.read_text` requires `FS.read` while `fs.write` requires `FS.write`, even though both are in the `fs` module.
+The mapping is per-function, not per-module: `fs.read_text` requires `FS.read` while `fs.write_text` requires `FS.write`, even though both are in the `fs` module.
 
 **Step 2: Transitive closure via fixpoint iteration.**
 
@@ -527,12 +525,12 @@ for each function F in the program:
 
 ### Transitive Checking
 
-If function `A` calls function `B`, and `B` calls `fs.write`, then `A` transitively requires `FS.write`. The user does not need to annotate `A` -- the compiler infers it.
+If function `A` calls function `B`, and `B` calls `fs.write_text`, then `A` transitively requires `FS.write`. The user does not need to annotate `A` -- the compiler infers it.
 
 ```almide
 // This function directly requires FS.write
 effect fn save(path: String, data: String) -> Result[Unit, String] =
-  fs.write(path, data)
+  fs.write_text(path, data)
 
 // This function transitively requires FS.write (through save)
 effect fn process_and_save(input: String) -> Result[Unit, String] = {
@@ -544,7 +542,7 @@ effect fn process_and_save(input: String) -> Result[Unit, String] = {
 // Error on process_and_save, not just save
 ```
 
-The error message traces the full chain: `process_and_save -> save -> fs.write`.
+The error message traces the full chain: `process_and_save -> save -> fs.write_text`.
 
 ### Lambda and Closure Handling
 
@@ -621,10 +619,10 @@ Even with `FS.read` allowed, the agent can only read `/workspace`. WASI pre-open
 ### Error 1: Direct stdlib call violation
 
 ```
-error[E010]: capability violation: fs.write requires FS.write
+error[E010]: capability violation: fs.write_text requires FS.write
   --> agent.almd:12:3
    |
-12 |   fs.write("output.txt", result)
+12 |   fs.write_text("output.txt", result)
    |   ^^^^^^^^
    = note: [permissions] allows: FS.read, IO.stdout
    = hint: add "FS.write" to [permissions].allow in almide.toml
@@ -639,7 +637,7 @@ error[E010]: capability violation: function 'deploy' transitively requires Net.f
 20 |   deploy(artifact_url)
    |   ^^^^^^
    |
-   = note: call chain: deploy -> upload -> http.post
+   = note: call chain: deploy -> upload -> http.request
    = note: [permissions] allows: FS.read, FS.write, IO.stdout
    = hint: add "Net.fetch" to [permissions].allow in almide.toml
 ```
@@ -664,7 +662,7 @@ error[E010]: capability violation: dependency 'analytics' uses Proc
 error[E010]: 3 capability violations in agent.almd
   --> agent.almd
   |
-  | error 1/3: fs.write("out.txt", data) requires FS.write (line 15)
+  | error 1/3: fs.write_text("out.txt", data) requires FS.write (line 15)
   | error 2/3: http.get(api_url) requires Net.fetch (line 22)
   | error 3/3: random.int(1, 100) requires Rand (line 31)
   |

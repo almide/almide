@@ -67,13 +67,13 @@ fn http_status(steps: u32) -> String {
 fn a1() -> Int = 201
 
 effect fn main() -> Unit = {{
-  var x = http.with_headers(200, \"b\", list.range(0, 2000) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{i}}\", \"v\")))
+  var x = http.with_headers(200, \"b\", list.range(0, 2000) |> list.map((i) => (\"k${{i}}\", \"v\")))
   var i = 0
   while i < {steps} {{
-    x = http.status(x, a1())
+    x = http.set_status(x, a1())
     i = i + 1
   }}
-  println(\"${{http.status_code(x)}} ${{map.len(http.headers(x))}}\")
+  println(\"${{http.status(x)}} ${{list.len(http.headers(x))}}\")
 }}
 "
     )
@@ -101,7 +101,7 @@ fn a_user_fn_rebind_moves_the_dying_list_at_rolled_and_unrolled_bounds() {
 fn an_http_status_rebind_moves_the_dying_response_at_rolled_and_unrolled_bounds() {
     for steps in [1000, 4096] {
         let b = per_step(http_status, steps, "201 2000\n", "200 2000\n");
-        assert!(b < 256, "{b} bytes per `x = http.status(x, a1())` step at bound {steps} — the step copies the headers");
+        assert!(b < 256, "{b} bytes per `x = http.set_status(x, a1())` step at bound {steps} — the step copies the headers");
     }
 }
 
@@ -112,17 +112,17 @@ const ALIAS: &str = r#"import http
 fn a1() -> Int = 201
 
 effect fn main() -> Unit = {
-  var x = http.with_headers(200, "b", map.set(map.new(), "k", "v"))
+  var x = http.with_headers(200, "b", [("k", "v")])
   let old = x
   var bad = 0
   var i = 0
   while i < 2048 {
     let before = x
-    x = http.status(x, a1() + i)
-    if http.status_code(before) != (if i == 0 then 200 else 200 + i) then bad = bad + 1 else ()
+    x = http.set_status(x, a1() + i)
+    if http.status(before) != (if i == 0 then 200 else 200 + i) then bad = bad + 1 else ()
     i = i + 1
   }
-  println("${bad} ${http.status_code(old)} ${http.status_code(x)} ${http.get_header(x, "k") ?? ""}")
+  println("${bad} ${http.status(old)} ${http.status(x)} ${http.header(x, "k") ?? ""}")
 }
 "#;
 
@@ -166,12 +166,12 @@ fn http_tail(depth: u32) -> String {
 
 fn a1() -> Int = 201
 
-fn go(x: HttpResponse, i: Int) -> HttpResponse = if i <= 0 then x else go(http.status(x, a1()), i - 1)
+fn go(x: HttpResponse, i: Int) -> HttpResponse = if i <= 0 then x else go(http.set_status(x, a1()), i - 1)
 
 effect fn main() -> Unit = {{
-  let x0: HttpResponse = http.with_headers(200, \"b\", list.range(0, 2000) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{i}}\", \"v\")))
+  let x0: HttpResponse = http.with_headers(200, \"b\", list.range(0, 2000) |> list.map((i) => (\"k${{i}}\", \"v\")))
   let x: HttpResponse = go(x0, {depth})
-  println(\"${{http.status_code(x)}} ${{map.len(http.headers(x))}}\")
+  println(\"${{http.status(x)}} ${{list.len(http.headers(x))}}\")
 }}
 "
     )
@@ -189,7 +189,7 @@ fn a_user_fn_tail_call_moves_its_dying_param_into_the_inner_call() {
 fn an_http_status_tail_call_moves_its_dying_param_into_the_inner_call() {
     for depth in [100, 4096] {
         let b = per_step(http_tail, depth, "201 2000\n", "200 2000\n");
-        assert!(b < 256, "{b} bytes per `go(http.status(x, a1()), i - 1)` step at depth {depth} — the step copies the headers");
+        assert!(b < 256, "{b} bytes per `go(http.set_status(x, a1()), i - 1)` step at depth {depth} — the step copies the headers");
     }
 }
 
@@ -202,7 +202,7 @@ fn a1() -> Int = 201
 
 fn st(r: List[String], c: Int) -> List[String] = list.set(r, 0, int.to_string(c))
 
-fn go(x: HttpResponse, i: Int) -> HttpResponse = if i <= 0 then x else go(http.status(x, a1() + i), i - 1)
+fn go(x: HttpResponse, i: Int) -> HttpResponse = if i <= 0 then x else go(http.set_status(x, a1() + i), i - 1)
 
 fn keep(x: List[String], olds: List[String], i: Int) -> List[String] =
   if i <= 0 then x + olds
@@ -214,12 +214,12 @@ fn keep(x: List[String], olds: List[String], i: Int) -> List[String] =
 fn pair(x: List[String], i: Int) -> (List[String], List[String]) = if i <= 0 then (x, x) else (st(x, i), x)
 
 effect fn main() -> Unit = {
-  let x0: HttpResponse = http.with_headers(200, "b", map.set(map.new(), "k", "v"))
+  let x0: HttpResponse = http.with_headers(200, "b", [("k", "v")])
   let x = go(x0, 3)
   let l0 = ["a", "b"]
   let l = keep(l0, [], 3)
   let (p, q) = pair(l0, 7)
-  println("${http.status_code(x0)} ${http.status_code(x)} ${http.get_header(x, "k") ?? ""} ${l0} ${l} ${p} ${q}")
+  println("${http.status(x0)} ${http.status(x)} ${http.header(x, "k") ?? ""} ${l0} ${l} ${p} ${q}")
 }
 "#;
 

@@ -322,7 +322,7 @@ why = "Unconditional payload@12 read; sole caller emits it inside the Ok (Else) 
 
 [[arm]]
 file = "control_p2_e.rs"
-fn = "try_lower_variant_value_match"
+fn = "try_lower_variant_value_match_direct"
 loads = 1
 verdict = "TAG_DISPATCHED"
 why = "HOISTED-LOAD pattern: both arm payloads loaded before IfThen(tag), consumption strictly branch-confined (then-bind used only in the then arm, else-bind only in the else arm). Sound because LoadHandle is a pure i32.load (render_wasm_p2_b.rs:423 — no rc mutation) and sum blocks are sized so +12 is in-bounds on every arm (Init::OptNone sized like OptSome, binds_p4_b.rs:546) — the untaken arm's load is inert bits in a dead local."

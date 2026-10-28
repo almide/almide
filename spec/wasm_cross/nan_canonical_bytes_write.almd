@@ -19,7 +19,7 @@ effect fn main() -> Unit = {
   // (sign-set) NaN, and an arithmetic NaN (sign-set by x86's default, not by
   // aarch64's) must collapse too, through all four append fns: f64 le/be,
   // then f32 le/be.
-  let payload = int.bits_to_float(0 - 256)
+  let payload = float.from_bits(0 - 256)
   let arith = 0.0 - nan_div
   for (name, x) in [("payload", payload), ("negated", -nan_div), ("arith", arith)] {
     var c = bytes.zeros(0)

@@ -359,7 +359,7 @@ impl LowerCtx {
         // A UNIT body (`let f = () => { list.push(g, 7) }; f()` — an effect
         // closure): lower it through the STATEMENT machinery — the same
         // dispatcher a fn body uses — so the functional-rebind group
-        // (list.push / map.insert / clear) fires. Routing it through
+        // (list.push / clear) fires. Routing it through
         // `lower_scalar_value` treated the unit-call tail as a scalar CALL
         // OPERAND and emitted the raw unlinked `list.push` (the
         // closure-over-global wall class). The call site discards a Unit

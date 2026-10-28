@@ -981,8 +981,14 @@ impl Checker {
     fn infer_expr_g3_unwrap_or(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::UnwrapOr { expr: inner, fallback, .. } = &mut expr.kind else { unreachable!() };
         let t = self.infer_expr(inner);
-        if let Some(payload) = resolve_ty(&t, &self.uf).option_inner().or_else(|| resolve_ty(&t, &self.uf).result_ok_ty()) {
-            self.expect_expr(fallback, &payload);
+        let payload = resolve_ty(&t, &self.uf).option_inner().or_else(|| resolve_ty(&t, &self.uf).result_ok_ty());
+        if let Some(payload) = &payload {
+            self.expect_expr(fallback, payload);
+        }
+        if let Some(slot) = self.qq_fallback_expect.remove(&fallback.id)
+            && !payload.as_ref().is_some_and(|p| self.holds_pure_fn(&resolve_ty(p, &self.uf)))
+        {
+            self.expect_expr(fallback, &slot);
         }
         let ft = self.infer_expr(fallback);
         let resolved = resolve_ty(&t, &self.uf);
@@ -1424,7 +1430,7 @@ impl Checker {
 
     /// #2704: `!` on a NEVER-ERR effect call (a stdlib `@intrinsic` effect fn
     /// whose declared return is not a `Result`, e.g. `random.int`,
-    /// `env.millis`) is the silent no-op of #1049 in every effect-fn body:
+    /// `datetime.now_ms`) is the silent no-op of #1049 in every effect-fn body:
     /// an `effect fn` body (where `auto_unwrap` already accepts it) and an
     /// `effect (…) -> …` slot lambda such as an `http.serve` handler, which
     /// #1055 gives effect-fn body ergonomics. ADR-0002 §D6: a stdlib
@@ -1625,6 +1631,7 @@ impl Checker {
         // line of ANOTHER FILE checked earlier (#3401: `src/a.almd:6:11` in a
         // 3-line file was the entry program's `println` argument).
         let left_span = left.span;
+        let right_span = right.span;
         match &right.kind {
             ExprKind::Call { callee, args, .. } if args.is_empty() => {
                 self.reject_exit_literal(callee, left);
@@ -1700,10 +1707,15 @@ impl Checker {
                 self.pending_call_ret = None;
                 self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
+                let callee_span = callee.span;
                 match &mut callee.kind {
                     ExprKind::Ident { name, .. } => {
                         self.check_effect_alias_call(name);
                         self.check_named_call(name, &all_arg_tys)
+                    }
+                    ExprKind::Member { object, field, .. } if self.local_shadows_module(object) => {
+                        let written: Vec<ast::Expr> = std::iter::once((**left).clone()).chain(args.iter().cloned()).collect();
+                        self.check_call_target_member(object, field, &written, &all_arg_tys, callee_span)
                     }
                     ExprKind::Member { object, field, .. } => {
                         let module_key = self.resolve_module_call(object, field);
@@ -1730,6 +1742,12 @@ impl Checker {
                 self.arg_spans = vec![left_span];
                 self.check_named_call(name, &all_arg_tys)
             }
+            // `xs |> list.len` with a local `list` (#4254): the written call
+            // `list.len(xs)`, which goes THROUGH the local (#2345 / #2348).
+            ExprKind::Member { object, field, .. } if self.local_shadows_module(object) => {
+                let written = vec![(**left).clone()];
+                self.check_call_target_member(object, field, &written, &[left_ty], right_span)
+            }
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
             ExprKind::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
@@ -1751,6 +1769,19 @@ impl Checker {
         }
     }
 
+}
+
+impl Checker {
+    /// #4254: the pipe's callee `m.f` names a LOCAL `m` that also spells a
+    /// module. The written call `m.f(x)` goes through the local (#2345 /
+    /// #2348) and so does the lowering of `x |> m.f`; the pipe's own module
+    /// resolution ran ahead of the local, so `check` typed the module call
+    /// while both legs compiled the method call on the local — invalid Rust
+    /// natively, E082 on wasm. The pipe now takes the written call's route.
+    fn local_shadows_module(&self, object: &ast::Expr) -> bool {
+        self.object_shadowed_by_local(object)
+            && matches!(&object.kind, ExprKind::Ident { name, .. } if self.env.import_table.resolve(name.as_str()).is_some())
+    }
 }
 
 /// Source spelling of a call's callee, for diagnostics that quote it back

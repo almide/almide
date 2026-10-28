@@ -901,13 +901,24 @@ pub fn http_server_handler_error_line(id: &str, err: &str) -> String {
     format!("http.serve: request {id}: handler error: {}", http_server_quote(err))
 }
 
+/// The stderr line for a runtime ABORT inside the handler (#4203): the request
+/// is answered with the same fixed 500 as an err, and the server keeps
+/// serving. `abort` is the text the abort would have printed after `Error: `
+/// (or after `PANIC: ` for a `panic(msg)`, which keeps that prefix).
+pub fn http_server_handler_abort_line(id: &str, abort: &str) -> String {
+    format!("http.serve: request {id}: handler aborted: {}", http_server_quote(abort))
+}
+
 pub fn http_server_quote(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
-            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            // C-418's set (#4126): the C0 and C1 controls, DEL and the bidi
+            // controls, every one as `\u{hex}` — a bidi control in a handler's
+            // err no longer reorders the stderr line.
+            c if almide_rt_errtext_is_escaped(c) => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
             c => out.push(c),
         }
     }

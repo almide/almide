@@ -2,7 +2,7 @@
 // correctly rounded binary64 of values computed to 70 decimal digits
 // (Decimal exp/ln/sqrt, Taylor sin/cos; pow = exp(y ln x)). ulp distance =
 // |to_bits(x) - to_bits(ref)| for same-signed doubles.
-fn ulp_from(x: Float, reference_bits: Int) -> Int = math.abs(float.to_bits(x) - reference_bits)
+fn ulp_from(x: Float, reference_bits: Int) -> Int = int.abs(float.to_bits(x) - reference_bits)
 
 test "sqrt is correctly rounded" {
   assert_eq(ulp_from(math.sqrt(2.0), 4609047870845172685), 0)
@@ -43,7 +43,7 @@ test "sin, cos, tan within 1 ulp" {
 }
 
 test "fpow within 1 ulp" {
-  assert(ulp_from(math.fpow(2.0, 0.5), 4609047870845172685) <= 1)
-  assert(ulp_from(math.fpow(3.0, 2.5), 4624965139347756608) <= 1)
-  assert(ulp_from(math.fpow(10.0, -3.0), 4562254508917369340) <= 1)
+  assert(ulp_from(float.pow(2.0, 0.5), 4609047870845172685) <= 1)
+  assert(ulp_from(float.pow(3.0, 2.5), 4624965139347756608) <= 1)
+  assert(ulp_from(float.pow(10.0, -3.0), 4562254508917369340) <= 1)
 }

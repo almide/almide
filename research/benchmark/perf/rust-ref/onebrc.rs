@@ -1,5 +1,5 @@
 // onebrc — handwritten Rust reference, same shape as onebrc/onebrc.almd:
-// same LCG, chunked appends (one open per append, like fs.append), a
+// same LCG, chunked appends (one open per append, like fs.append_text), a
 // streaming BufReader line walk (like fs.for_each_line, C-220),
 // integer-tenths math, identical output bytes. This ref answers "what does
 // the same program cost in Rust", not "what is optimal" — mmap/SIMD/parallel

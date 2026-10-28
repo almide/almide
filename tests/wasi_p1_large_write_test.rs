@@ -10,7 +10,7 @@
 //! and advances by the call's count.
 //!
 //! 160 MiB is past that bound and small enough for a test. Measured against
-//! 0.64.0 (`ALMIDE_BIN`): the run failed at `fs.write` after both 160 MiB
+//! 0.64.0 (`ALMIDE_BIN`): the run failed at `fs.write_text` after both 160 MiB
 //! writes to stdout had printed nothing. Skipped without wasmtime on PATH.
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -39,8 +39,8 @@ import io
 effect fn main() -> Unit = {{
   let s = string.pad_start("wide", {N}, " ")
   println(s)
-  io.write(bytes.from_string(s))
-  fs.write("big.txt", s)!
+  io.write(io.stdout()!, bytes.from_string(s))!
+  fs.write_text("big.txt", s)!
   let t = fs.read_text("big.txt")!
   println("")
   println(int.to_string(string.len(t)))

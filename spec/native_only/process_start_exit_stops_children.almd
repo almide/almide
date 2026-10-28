@@ -1,0 +1,62 @@
+// @contract: C-437
+// A program that started a child with `process.start` and neither waited on
+// nor stopped it stops that child when it exits — main returns,
+// `process.exit`, or an effect error ends main (almide/almide#4214). The
+// start family is native-only (E081 on every wasm leg), so no cross-target
+// runner executes this file; `almide run` runs it on native and
+// tests/process_start_unwaited_child_stopped_test.rs in almide/almide pins
+// its stdout.
+//
+// Run with its own binary's path as the one argument it is the OBSERVER: for
+// each exit route it runs that binary as the PARENT, which starts `sleep 30`, prints the
+// child's pid and that the child is still running, and exits by that route.
+// Once the parent has ended, the observer asks whether the pid still exists
+// (`process.kill(pid, 0)`). A stopped child has been reaped by its parent, so
+// it is gone at once; a child that outlived the parent is an orphan sleeping
+// for 30 s, which the observer reports as `outlived` and then kills.
+import process
+import env
+
+effect fn fail() -> Int = err("boom")
+
+effect fn parent(route: String) -> Unit = {
+  let c = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
+  println(int.to_string(process.child_pid(c)!))
+  println(match process.poll(c)! {
+    none => "running",
+    some(_) => "ended",
+  })
+  match route {
+    "exit" => process.exit(3),
+    "error" => println(int.to_string(fail()!)),
+    _ => (),
+  }
+}
+
+effect fn observe(self_path: String, route: String) -> Unit = {
+  let st = process.output(process.ProcessCommand { cmd: self_path, args: ["parent", route] })!
+  let lines = string.lines(st.stdout)
+  let pid = int.parse(list.get(lines, 0) ?? "")!
+  let state = list.get(lines, 1) ?? ""
+  let child = match process.kill(pid, 0) {
+    ok(_) => {
+      let _ = process.kill(pid, 9)
+      "outlived"
+    },
+    err(_) => "stopped",
+  }
+  println("${route}: exit ${st.code}, stderr [${string.trim(st.stderr)}], child ${state} at exit, then ${child}")
+}
+
+effect fn main() -> Unit = {
+  let argv = env.args()
+  match list.get(argv, 0) {
+    some("parent") => parent(list.get(argv, 1) ?? "return")!,
+    _ => {
+      let self_path = list.get(argv, 0) ?? ""
+      observe(self_path, "return")!
+      observe(self_path, "exit")!
+      observe(self_path, "error")!
+    },
+  }
+}

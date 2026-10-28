@@ -7,7 +7,8 @@
 // the wasm leg synthesizes its runner in almide-mir and must select exactly the
 // same tests. When the two spellings drifted apart the filter was simply dropped
 // on the wasm side and nothing noticed (#2085), so the rule now has one home and
-// `test_name_matches_filter` is the only admitted way to ask the question.
+// `test_name_matches_filter` is the only admitted way to ask which tests
+// `--run` selects; it reads the test's source name, not this spelling (#4264).
 
 /// Sanitize an IR function name into a Rust-emittable identifier.
 ///
@@ -74,16 +75,18 @@ pub fn is_type_side_name(name: &str) -> bool {
     name.chars().next().is_some_and(char::is_uppercase) || is_caseless_name(name)
 }
 
-/// Does the test whose IR name is `ir_name` run under `--run <pattern>`?
+/// Does the test labelled `label` run under `--run <pattern>`?
 ///
-/// The native leg's answer is the Rust test harness's: a case-sensitive
-/// substring test against the EMITTED fn name, so the pattern is compared
-/// against `rust_safe_fn_name(ir_name)` and not against the `test "…"` label.
-/// A pattern spelled with the label's spaces therefore selects nothing on both
-/// legs — surprising, but identically surprising, which is the property the
-/// wasm leg has to reproduce.
-pub fn test_name_matches_filter(ir_name: &str, pattern: &str) -> bool {
-    rust_safe_fn_name(ir_name).contains(pattern)
+/// `label` is the test's SOURCE name — the string in `test "…"` (a `where`
+/// case's label included), the name every report prints — and the pattern is
+/// a case-sensitive substring of it (#4264). It used to be matched against
+/// the mangled Rust fn name, the only spelling libtest can match, so a name
+/// with a space or punctuation, or one in a non-ASCII script (folded and
+/// hashed), could not be selected by its own name at all. The native leg now
+/// resolves the selection here and hands libtest the exact paths, so both legs
+/// read this one predicate.
+pub fn test_name_matches_filter(label: &str, pattern: &str) -> bool {
+    label.contains(pattern)
 }
 
 #[cfg(test)]
@@ -117,17 +120,16 @@ mod tests {
         assert!(rust_safe_fn_name("cafe\u{301}").starts_with("cafe__"));
     }
 
-    // The filter contract both legs implement. `beta fails` selecting nothing is
-    // not a bug to fix here: it is what the native harness already does, and
-    // #2085 is about the two legs agreeing, not about redefining the pattern.
+    // The filter contract both legs implement (#4264): the pattern is a
+    // substring of the test's own name, spaces and scripts included.
     #[test]
-    fn the_pattern_is_matched_against_the_emitted_name() {
-        let n = "__test_almd_beta fails";
+    fn the_pattern_is_matched_against_the_source_name() {
+        let n = "beta fails";
         assert!(test_name_matches_filter(n, "beta"));
-        assert!(test_name_matches_filter(n, "beta_fails"));
-        assert!(test_name_matches_filter(n, "__test_almd_"));
-        assert!(!test_name_matches_filter(n, "beta fails"));
+        assert!(test_name_matches_filter(n, "beta fails"));
+        assert!(!test_name_matches_filter(n, "beta_fails"));
         assert!(!test_name_matches_filter(n, "BETA"));
+        assert!(test_name_matches_filter("値を取る旗に値が無ければ断る", "値が無ければ"));
     }
 }
 

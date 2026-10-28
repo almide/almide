@@ -22,7 +22,7 @@ effect fn io_read_line_opt() -> String? = {
     }
   }
   var end = bytes.len(buf)
-  while end > 0 and bytes.get_or(buf, end - 1, 0) == 13 {
+  while end > 0 and bytes.get(buf, end - 1) ?? 0 == 13 {
     end = end - 1
   }
   if got == 0 then none
