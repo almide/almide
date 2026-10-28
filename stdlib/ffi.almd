@@ -26,7 +26,6 @@
 // this file reaches memory without passing a bounds check first. Native
 // implements them in runtime/rs/src/ffi.rs; wasm in stdlib/ffi_bridge.almd
 // (`@implements`).
-
 /// A view of memory: base, length, permission and owner (ADR-0031 D1).
 mod type Region = { owner: Bytes, base: Handle, len: Int, writable: Bool, keep: () -> Unit }
 
