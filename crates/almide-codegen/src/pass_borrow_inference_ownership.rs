@@ -179,7 +179,7 @@ fn consumes(u: &Use) -> bool {
         Site::Arg(SlotMode::Borrow | SlotMode::Mut) | Site::Callee
         | Site::Iterable { consumed: false } | Site::Borrow { .. } | Site::Clone
         | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Deref | Site::Operand | Site::Compare
-        | Site::Assigned | Site::Reassign | Site::InPlace => false,
+        | Site::StrView | Site::Assigned | Site::Reassign | Site::InPlace => false,
     }
 }
 
@@ -225,17 +225,8 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
 /// payload out, so any binding keeps the conservative verdict.
 fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    use crate::use_kind::pattern_binds_nothing as binds_nothing;
     struct Scan { var: VarId, ok: bool }
-    fn binds_nothing(p: &IrPattern) -> bool {
-        match p {
-            IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
-            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binds_nothing(inner),
-            IrPattern::Constructor { args, .. } => args.iter().all(binds_nothing),
-            IrPattern::Tuple { elements } => elements.iter().all(binds_nothing),
-            IrPattern::List { elements, rest } => elements.iter().all(binds_nothing) && rest.as_deref().map_or(true, binds_nothing),
-            IrPattern::Bind { .. } | IrPattern::RecordPattern { .. } | IrPattern::As { .. } => false,
-        }
-    }
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Match { subject, arms } = &e.kind

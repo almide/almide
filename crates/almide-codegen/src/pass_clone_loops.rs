@@ -169,15 +169,18 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
 /// Is every occurrence of `v` in `body` one the Rust walker renders the same
 /// for a `&T` binder as for a `T` one: `&v` (a shared `Borrow`, which coerces
 /// from `&&T`), `v.field` (auto-deref), or `v.clone()` (resolves to
-/// `T::clone` through the reference)? A bare occurrence (a move), a `&mut`,
-/// a match subject, an interpolation, or any use inside a closure / fused
-/// iterator chain (whose captures must own) says no.
+/// `T::clone` through the reference), or the subject of a literal `match`
+/// that binds nothing (`Site::StrView`: `MatchSubject` spells it `&*x`, and
+/// `BorrowLowering` `x.as_str()` for a borrowed binder, #4294)? A bare
+/// occurrence (a move), a `&mut`, a binding match subject, an
+/// interpolation, or any use inside a closure / fused iterator chain (whose
+/// captures must own) says no.
 fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
     // A fused chain's lambda runs inside the iteration and never outlives it
     // (`scope_lambda`: depth stays 0), so a read there is a borrow like any
     // other (#3216); a chain that keeps the binder uses it at an owning site.
     UseSites::of_stmts(body, &ExplicitBorrows).of(v).all(|u| {
-        u.depth == 0 && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone)
+        u.depth == 0 && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone | Site::StrView)
     })
 }
 
