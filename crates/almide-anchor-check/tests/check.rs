@@ -577,7 +577,7 @@ fn consuming(main: &str, events: &str) -> Result<RcReport, String> {
     let releases = [0u32].into_iter().collect();
     let mut r = RcReport::default();
     // The whole of main is one arm window.
-    check_rc(&bodies, 0, None, &releases, &[], &[(3, events.to_string())], &[vec![(3, 0, 1)], vec![]], &mut r).map(|()| r)
+    check_rc(&bodies, 0, None, &releases, &[], &[(3, events.to_string())], &[vec![(3, 0, usize::MAX)], vec![]], &mut r).map(|()| r)
 }
 
 #[test]
