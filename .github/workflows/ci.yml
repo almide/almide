@@ -143,6 +143,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
 
       - id: classify
         name: Classify the change set (scripts/check-docs-only.sh)
@@ -193,6 +194,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       - name: Check every commit in the range
         run: |
           set -euo pipefail
@@ -289,6 +291,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -332,11 +335,17 @@ jobs:
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
-        run: cargo nextest archive --workspace --cargo-profile ci-test --archive-file /tmp/almide-tests.tar.zst
+        # On $RUNNER_TEMP (the root volume), not the ~7.9 GB /tmp tmpfs: the
+        # archive is 3.0 GB (see .github/actions/fetch-test-archive).
+        run: |
+          df -h / /tmp "$RUNNER_TEMP"
+          cargo nextest archive --workspace --cargo-profile ci-test --archive-file "$RUNNER_TEMP/almide-tests.tar.zst"
+          ls -la "$RUNNER_TEMP/almide-tests.tar.zst"
+          df -h / /tmp "$RUNNER_TEMP"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: almide-tests-archive
-          path: /tmp/almide-tests.tar.zst
+          path: ${{ runner.temp }}/almide-tests.tar.zst
           retention-days: 1
           # nextest already zstd-compressed the archive; a second gzip pass
           # over incompressible bytes only costs upload-artifact time.
@@ -391,6 +400,7 @@ jobs:
           echo "::error::Test Rust (solo …) result is '${{ needs.test-rust-solo.result }}' — a solo corpus gate failed or did not run; this gate refuses to certify coverage over it"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -407,19 +417,8 @@ jobs:
           sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       # Each `nextest list --archive-file` below unpacks the whole archive
-      # (839 binaries from a 3.0 GB download on 2026-10-28) beside the download
-      # itself; on one runner the first unpack hit "Disk quota exceeded" while
-      # the same archive listed fine on another. The preinstalled SDKs this job
-      # never uses are the margin.
-      - name: Free runner disk for the archive's unpacks
-        run: |
-          df -h / /tmp
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
-          df -h / /tmp
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: almide-tests-archive
-          path: /tmp/almide-archive
+      # into $TMPDIR, which root-tmpdir (after checkout) put on the root volume.
+      - uses: ./.github/actions/fetch-test-archive
       - name: Union of shards + solo legs == full target set
         # #2381: the five solo targets run in `Test Rust (solo …)` jobs, one
         # per giant, so the union is the four shards PLUS the solo rows, each
@@ -428,7 +427,7 @@ jobs:
         # diff here, not a silently empty job.
         run: |
           set -euo pipefail
-          A=/tmp/almide-archive/almide-tests.tar.zst
+          A="$TEST_ARCHIVE_FILE"
           bash scripts/ci-test-shard.sh --list-all-archive "$A" | sort > /tmp/all.txt
           : > /tmp/union.txt
           for i in 0 1 2 3; do
@@ -460,7 +459,7 @@ jobs:
         # test added to the binary cannot fall outside the leg.
         run: |
           set -euo pipefail
-          A=/tmp/almide-archive/almide-tests.tar.zst
+          A="$TEST_ARCHIVE_FILE"
           bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_ledger "$A" > /tmp/leg_a.txt
           cargo nextest list --archive-file "$A" --workspace-remap . --message-format json -E 'binary_id(=almide::wasm_runtime_interp_ledger)' \
             | python3 -c '
@@ -493,11 +492,11 @@ jobs:
       - name: Corpus shards cover every fixture (∪ walked lists == ls spec/wasm_cross, no duplicates)
         run: bash scripts/ci-corpus-shards.sh --coverage /tmp/corpus-shard 2
       - name: Merge the shard partials — run_parity ceilings summed, bridge-fallback names unioned — and judge the whole
-        run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 "$TEST_ARCHIVE_FILE"
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
-            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst | wc -l | tr -d ' ')"
+            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$TEST_ARCHIVE_FILE" | wc -l | tr -d ' ')"
           done
 
   test-rust:
@@ -542,6 +541,8 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.DOCS_ONLY != 'true'
+      - uses: ./.github/actions/root-tmpdir
         if: env.DOCS_ONLY != 'true'
       - name: CI slice — the change's own files (a full run does nothing)
         if: env.DOCS_ONLY != 'true'
@@ -590,7 +591,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 "$TEST_ARCHIVE_FILE"
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each
@@ -651,6 +652,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.DOCS_ONLY != 'true'
+      - uses: ./.github/actions/root-tmpdir
+        if: env.DOCS_ONLY != 'true'
       - name: CI slice — the change's own files (a full run does nothing)
         if: env.DOCS_ONLY != 'true'
         run: bash scripts/ci-slice-prepare.sh
@@ -689,7 +692,7 @@ jobs:
           # is `scripts/gen-corpus-weights.sh --from-ci <run-id>` over these
           # artifacts; the weekly ratchet in shard-balance.yml says when.
           ALMIDE_CORPUS_WEIGHTS_DIR: /tmp/corpus-shard
-        run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} "$TEST_ARCHIVE_FILE"
 
       # The walked-fixture list and the partial counts / names, for the
       # coverage job. Uploaded on failure too, so a red shard's partial
@@ -739,6 +742,7 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
 
@@ -952,6 +956,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -990,6 +995,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
@@ -1009,6 +1015,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1068,6 +1075,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -1157,6 +1165,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -1255,6 +1264,7 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -1345,6 +1355,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       # Two complementary checks — both are required for the "proven" claim:
       # 1. grep for `sorry`: `lake build` only WARNS on sorry, so the grep is what
@@ -1479,6 +1490,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       - name: Relevance — skip when nothing measured changed
         id: rel
         run: |
@@ -1561,6 +1573,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1890,6 +1903,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       # rustc/cargo: the ratchet compiles the handwritten references and the
       # generated Rust of each benchmark with the same toolchain — STABLE,
@@ -1991,6 +2005,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
@@ -2027,6 +2042,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -2158,6 +2174,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -2210,6 +2227,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -2303,6 +2321,7 @@ jobs:
     timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -2357,6 +2376,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -2409,6 +2429,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -2482,6 +2503,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -2581,6 +2603,7 @@ jobs:
         with:
           # The incremental scope diffs against the PR base ref.
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       # #2381: this job runs on pull_request only, so the default per-job
       # rust-cache key was written by no develop run and every PR started
       # cold ("No cache found" on the v0.63.0-rc3 PR: 7m08s to the first
