@@ -1,0 +1,5 @@
+// The value-level copy: a Bytes built from the text, no Region to write into.
+fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  println(int.to_string(bytes.len(b)))
+}
