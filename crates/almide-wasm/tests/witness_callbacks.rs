@@ -70,9 +70,10 @@ fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // and moves it in (`am` on the element's view line).
     assert!(w["same"].contains("am\n"), "{:?}", w["same"]);
     // A heap accumulator is a loop-carried owner: born with the seed, the
-    // step's fresh result replaces it (the old value's `d` closes each
-    // activation), and the final value moves out.
-    assert_eq!(w["joined"], "ibd\nim\n\nibd\n\n\nim\nim\n");
+    // dying accumulator moves into `$str_append` each activation (#4261:
+    // extended in place, no fresh copy and no `d` of the old value), and the
+    // final value moves out.
+    assert_eq!(w["joined"], "ibd\nim\n\nim\n\n\nim\nim\n");
     // `find`'s hit is a branch: the element's view shares into the fresh
     // some-cell (`am`), the other arm carries nothing.
     assert!(w["first"].contains("{|am}\n"), "{:?}", w["first"]);
