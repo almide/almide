@@ -1,0 +1,6 @@
+// Served as JSON instead, the data needs no markup builder.
+import http
+
+fn feed(items: List[String]) -> HttpResponse = http.response(200, value.array(items |> list.map((s) => value.string(s))))
+
+fn main() -> Unit = println(http.body(feed(["a", "b"])))

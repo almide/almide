@@ -1,0 +1,5 @@
+// E118 (ADR-0032 Q15): an opaque wrapper over String declaring `Body` would
+// be a second SafeHtml with none of html's builders behind it.
+mod type Markup: Body = String
+
+fn main() -> Unit = println("markup")

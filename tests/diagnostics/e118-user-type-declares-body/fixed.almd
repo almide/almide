@@ -1,0 +1,8 @@
+// A user type converts to one of the stdlib's bodies at the response.
+import http
+
+type Page = { text: String }
+
+fn serve(p: Page) -> HttpResponse = http.response(200, p.text)
+
+fn main() -> Unit = println(http.body(serve(Page { text: "ok" })))

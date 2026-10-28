@@ -1,0 +1,7 @@
+// HTML is built with the html builders; its type serves text/html.
+import html
+import http
+
+fn page(name: String) -> HttpResponse = http.response(200, html.concat(html.raw("<h1>"), html.concat(html.escape(name), html.raw("</h1>"))))
+
+fn main() -> Unit = println(http.body(page("guest")))

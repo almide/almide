@@ -1,0 +1,6 @@
+// The body says what it is: a CSV body is `http.typed`.
+import http
+
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Report", "1")])
+
+fn main() -> Unit = println(http.body(report("a,b")))
