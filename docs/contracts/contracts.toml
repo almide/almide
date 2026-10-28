@@ -5752,6 +5752,8 @@ since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_vars_remove.almd", class = "fixture" },
+]
+
 [[contract]]
 id        = "C-440"
 spec      = "ALS-I4"
