@@ -9,8 +9,15 @@
 #   post-batch release-fix 0ff4366bc       6.65    27.3   <- fails both rows
 #   this tree (the #4289 fixes)            5.10    22.5
 #
-# The remaining check gap to the pre-batch tree is int's radix functions
-# (to_string_radix, parse_radix), new in the batch, whose bodies call bytes:
-# a program that reaches int now also loads bytes.
-check 5.10
-wasm 22.5
+# Re-anchored after int's radix functions stopped calling bytes (a program
+# reaching int loaded bytes), on a second n2-standard-16 (asia-northeast1-b),
+# same corpus, one domain-edge sweep running on one of its 16 cores:
+#
+#   pre-batch develop 3d7a1ab70            4.82    22.6
+#   before the int rewrite 5f0652ec0       5.38    23.4
+#   this tree                              4.63    20.5
+#
+# The rows read lower than the first VM's, so anchor on the second VM's
+# reading of this tree; release-fix's 6.65 / 27.3 stays far over the ceiling.
+check 4.63
+wasm 20.6
