@@ -4,7 +4,10 @@
 //!
 //! The other half: recursion at the SAME type, a cycle that only swaps type
 //! parameters, mutual recursion at one type and acyclic growth are all
-//! accepted, and run with the same output on the native and the wasm leg.
+//! accepted, and run with the same output on the native and the wasm leg. A
+//! self-call that swaps or rotates type arguments is a different instance of
+//! the fn: monomorphization used to point it at the caller's own instance, an
+//! ill-typed call both backends refused after `check` accepted.
 //!
 //! Skips cleanly when the `almide` binary is unavailable; the wasm leg also
 //! needs wasmtime.
@@ -92,6 +95,16 @@ const ACCEPTED: &[(&str, &str, &str)] = &[
         "5\n",
     ),
     (
+        "rotate-three",
+        "fn rot[A, B, C](a: A, b: B, c: C, n: Int) -> String =\n  if n <= 0 then \"${a}\" else rot(b, c, a, n - 1)\n\neffect fn main() -> Unit = {\n  println(rot(1, \"x\", true, 4))\n  println(rot(1, \"x\", true, 5))\n}\n",
+        "x\ntrue\n",
+    ),
+    (
+        "bounded-swap",
+        "fn show_alt[A: Hash, B: Hash](a: A, b: B, n: Int) -> String =\n  if n <= 0 then \"${a}\" else show_alt(b, a, n - 1)\n\neffect fn main() -> Unit = {\n  println(show_alt(1, \"x\", 3))\n}\n",
+        "x\n",
+    ),
+    (
         "mutual-same-type",
         "fn ping[T](x: T, n: Int) -> Int =\n  if n <= 0 then 0 else 1 + pong(x, n - 1)\n\nfn pong[U](y: U, n: Int) -> Int =\n  if n <= 0 then 0 else 1 + ping(y, n - 1)\n\neffect fn main() -> Unit = {\n  println(int.to_string(ping(\"a\", 6)))\n}\n",
         "6\n",
@@ -145,4 +158,43 @@ fn bounded_recursion_runs_alike_on_both_legs() {
             assert_eq!(w, native, "{name}: wasm output differs from native");
         }
     }
+}
+
+/// The same two shapes inside a package module: the growing one is E114 in
+/// the module's file, the swapping one runs alike on both legs.
+#[test]
+fn module_fns_are_judged_the_same() {
+    if !tool_available() {
+        eprintln!("skip: almide binary unavailable");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("almide-polyrec-{}-module", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("almide.toml"), "[package]\nname = \"modp\"\nversion = \"0.1.0\"\n").unwrap();
+    let main = dir.join("src/main.almd");
+    std::fs::write(&main, "import self.util\n\neffect fn main() -> Unit = {\n  println(int.to_string(util.alt(1, \"x\", 5)))\n}\n").unwrap();
+    let util = dir.join("src/util.almd");
+    let alt = "pub fn alt[A, B](a: A, b: B, n: Int) -> Int =\n  if n <= 0 then 0 else 1 + alt(b, a, n - 1)\n";
+    let almide = |args: &[&str]| {
+        let out = Command::new(almide_bin()).args(args).current_dir(&dir).output().expect("failed to spawn almide");
+        (out.status.success(), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+    let main_s = main.to_str().unwrap();
+
+    std::fs::write(&util, format!("{alt}\npub fn depth[T](x: T, n: Int) -> Int =\n  if n <= 0 then 0 else 1 + depth([x], n - 1)\n")).unwrap();
+    let (ok, out, err) = almide(&["check", main_s]);
+    let all = format!("{out}{err}");
+    assert!(!ok && all.contains("E114") && all.contains("util.almd"), "module growth not refused:\n{all}");
+
+    std::fs::write(&util, alt).unwrap();
+    let (ok, native, err) = almide(&["run", main_s]);
+    assert!(ok, "module swap: native run failed:\n{err}");
+    assert_eq!(native, "5\n");
+    if wasmtime_available() {
+        let (ok, w, err) = almide(&["run", main_s, "--target", "wasm"]);
+        assert!(ok, "module swap: wasm run failed:\n{err}");
+        assert_eq!(w, native);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
