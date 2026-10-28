@@ -272,14 +272,14 @@ first spelling and its last value.
 import http
 
 fn main() -> Unit = {
-  let body = "<h1>Hello</h1>"
-  let resp = http.with_headers(200, body, [("Content-Type", "text/html")])
+  let body = "id,name\n1,ada"
+  let resp = http.with_headers(200, body, [("Content-Type", "text/csv")])
   println(http.header(resp, "Content-Type") ?? "none")
   println(http.header(resp, "X-Nope") ?? "none")
 }
 ```
 ```output
-text/html
+text/csv
 none
 ```
 
@@ -397,14 +397,14 @@ ignore case.
 import http
 
 fn main() -> Unit = {
-  let resp = http.with_headers(200, "", [("X-Frame-Options", "DENY"), ("Content-Type", "text/html")])
+  let resp = http.with_headers(200, "", [("X-Frame-Options", "DENY"), ("Content-Type", "text/csv")])
   let lines = http.headers(resp) |> list.map(((k, v)) => "${k}: ${v}")
   println(list.join(lines, "\n"))
 }
 ```
 ```output
 X-Frame-Options: DENY
-Content-Type: text/html
+Content-Type: text/csv
 ```
 
 ### `http.body(m) -> String`
@@ -458,13 +458,13 @@ import http
 
 fn main() -> Unit = {
   let resp = http.with_headers(200, "hi", [("Content-Type", "text/plain")])
-  let tagged = http.set_header(http.set_header(resp, "X-Custom", "value"), "content-type", "text/html")
+  let tagged = http.set_header(http.set_header(resp, "X-Custom", "value"), "content-type", "text/csv")
   let lines = http.headers(tagged) |> list.map(((k, v)) => "${k}: ${v}")
   println(list.join(lines, "\n"))
 }
 ```
 ```output
-Content-Type: text/html
+Content-Type: text/csv
 X-Custom: value
 ```
 
