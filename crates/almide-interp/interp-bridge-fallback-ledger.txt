@@ -54,6 +54,6 @@ string.slice  codec_decode_error_surface  floor: consumed inside a self-hosted b
 string.split  datetime_from_parts_strict  floor: consumed inside a self-hosted body
 string.starts_with  codec_decode_error_surface  floor: consumed inside a self-hosted body
 string.take  json_path_edges  floor: consumed inside a self-hosted body
-string.to_list  codec_decode_errors  floor: consumed inside a self-hosted body
+string.to_list  assert_abort_eq  floor: consumed inside a self-hosted body
 string.to_upper  string_case_no_ascii_fold  floor: consumed inside a self-hosted body
 string.trim  datetime_from_parts_strict  floor: consumed inside a self-hosted body

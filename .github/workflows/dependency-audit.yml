@@ -30,6 +30,6 @@ jobs:
         with:
           prefix-key: "dep-audit"
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --locked --version 0.22.2
       - name: Audit the lockfile
         run: cargo audit

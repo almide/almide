@@ -276,6 +276,13 @@ fn field_displayable(ty: &Ty, registry: &RecordLayouts) -> bool {
         // holds the value its own `float32.to_string_compound` leaf reads (#3086).
         Ty::Float32 | Ty::Float64 => true,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => !is_heap_ty(&a[0]),
+        // An `Option[<scalar>]` slot (`bytes.next_u16_le`'s `(Int?, Int)` — the in-test
+        // assert shows its bound operands, #4262): the slot holds the variant block the
+        // typed `==` already reads by its tag, and the leaf is the scalar Option
+        // display the top-level `${o}` uses (`interp_option_to_string_scalar`).
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+            interp_option_to_string_scalar(&a[0]).is_some()
+        }
         Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..) => match resolve_aggregate(ty, registry) {
             // A NESTED aggregate must be SCALAR-ONLY (the construction's `lower_owned_heap_field`
             // admits only a scalar-only nested block — a heap-in-nested field would leak).

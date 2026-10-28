@@ -210,6 +210,60 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
         }
         changed
     }
+
+    /// The frontend's in-test assert (#4262): `{ let __assert_0 = a; …;
+    /// assert(cond, msg); () }` — the operand binds, then the harness assert.
+    fn is_harness_assert_block(e: &IrExpr) -> bool {
+        use almide_ir::IrStmtKind;
+        let IrExprKind::Block { stmts, expr: Some(tail) } = &e.kind else { return false };
+        let Some((last, binds)) = stmts.split_last() else { return false };
+        matches!(tail.kind, IrExprKind::Unit)
+            && binds.iter().all(|s| matches!(s.kind, IrStmtKind::Bind { .. }))
+            && matches!(&last.kind, IrStmtKind::Expr { expr } if matches!(&expr.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if name.as_str() == "assert" && args.len() == 2))
+    }
+
+    /// Splice a statement-position (or Unit-tail) harness assert block into the
+    /// enclosing statement list, as `splice_assert_stmts` splices the direct
+    /// form's operand hoist: the `!`-resolvers and the bind-shape seeders read
+    /// DIRECT statements only, so the operand binds must be siblings — exactly
+    /// where the direct `assert_eq(a, b)` left its operands. Every VarId is
+    /// unique, so lifting the binds one scope out renames nothing.
+    fn flatten_harness_asserts(
+        stmts: &mut Vec<almide_ir::IrStmt>,
+        tail: Option<&mut Option<Box<IrExpr>>>,
+    ) -> bool {
+        use almide_ir::IrStmtKind;
+        let mut changed = false;
+        let nested = |s: &almide_ir::IrStmt| {
+            matches!(&s.kind, IrStmtKind::Expr { expr } if is_harness_assert_block(expr))
+        };
+        if stmts.iter().any(nested) {
+            let mut out: Vec<almide_ir::IrStmt> = Vec::with_capacity(stmts.len());
+            for s in stmts.drain(..) {
+                match s.kind {
+                    IrStmtKind::Expr { expr } if is_harness_assert_block(&expr) => {
+                        let IrExprKind::Block { stmts: inner, .. } = expr.kind else { unreachable!() };
+                        out.extend(inner);
+                    }
+                    kind => out.push(almide_ir::IrStmt { kind, span: s.span }),
+                }
+            }
+            *stmts = out;
+            changed = true;
+        }
+        if let Some(tail) = tail {
+            if tail.as_deref().is_some_and(is_harness_assert_block) {
+                let b = tail.take().expect("checked Some above");
+                let IrExprKind::Block { stmts: inner, expr } = b.kind else { unreachable!() };
+                stmts.extend(inner);
+                *tail = expr;
+                changed = true;
+            }
+        }
+        changed
+    }
 /// `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0 wasm
 /// form: prefix + message, then halt). The message expr is evaluated only on
 /// the abort path, like the computed assert message. `None` when the call is
@@ -244,6 +298,17 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
 
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            // #4262: lift the harness assert blocks' operand binds into this
+            // statement list BEFORE the walk, so the walk below rewrites their
+            // `assert` as a direct statement of this list.
+            let flattened = match &mut e.kind {
+                IrExprKind::Block { stmts, expr } => flatten_harness_asserts(stmts, Some(expr)),
+                IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => {
+                    flatten_harness_asserts(body, None)
+                }
+                _ => false,
+            };
+            self.changed |= flattened;
             walk_expr_mut(self, e);
             // #1191: SPLICE statement-position (and Unit-tail) asserts whose
             // operands carry an unwrap — their binds must land as SIBLING

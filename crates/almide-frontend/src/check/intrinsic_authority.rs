@@ -167,11 +167,13 @@ impl Checker {
     }
 
     /// #4008: record where this user file leaves the memory-safety guarantee
-    /// (`outside_guarantee`). An `@extern` fn's body is foreign code. A raw
-    /// pointer is the one value the `ffi` functions and the deprecated
-    /// `bytes` raw-pointer spellings take or give, so judging by TYPE finds
-    /// every spelling of them (call, method call, alias, fn value, a helper's
-    /// parameter). The stdlib's own sources, and a source whose origin is
+    /// (`outside_guarantee`). An `@extern` fn's body is foreign code, and a
+    /// `@region(len = …)` clause on one is the binding's unchecked word for a
+    /// foreign buffer's length (ADR-0031). A `Handle` is the opaque foreign
+    /// token only foreign code reads through, so judging by TYPE finds every
+    /// spelling of one (call, alias, fn value, a helper's parameter). A
+    /// `Region` access is bounds-checked against the length its mint knew,
+    /// so `ffi.read` / `ffi.write` alone are not recorded. The stdlib's own sources, and a source whose origin is
     /// unknown (the language server), are not recorded.
     pub(super) fn record_outside_guarantee(&mut self, program: &crate::ast::Program) {
         if self.stdlib_authority() != Some(false) {
@@ -181,10 +183,15 @@ impl Checker {
         let at = |span: Option<Span>| span.map(|s| format!("{file}:{}", s.line)).unwrap_or_else(|| file.clone());
         let mut found = Vec::new();
         for decl in &program.decls {
-            if let Decl::Fn { name, extern_attrs, span, .. } = decl
+            if let Decl::Fn { name, extern_attrs, attrs, span, .. } = decl
                 && !extern_attrs.is_empty()
             {
                 found.push(format!("@extern fn `{name}` ({})", at(*span)));
+                // ADR-0031 D2: a `@region(len = …)` clause is the binding's
+                // word for a foreign buffer's length — trusted, so counted.
+                if attrs.iter().any(|a| a.name.as_str() == almide_lang::stdlib_info::REGION_ATTR) {
+                    found.push(format!("@region length of `{name}` ({})", at(*span)));
+                }
             }
             let (label, body) = match decl {
                 Decl::Fn { name, body: Some(b), .. } => (format!("fn `{name}`"), b),
@@ -205,7 +212,7 @@ impl Checker {
                 }
             });
             if let Some(span) = first {
-                found.push(format!("a raw pointer in {label} ({})", at(span)));
+                found.push(format!("a Handle in {label} ({})", at(span)));
             }
         }
         self.outside_guarantee.extend(found);
@@ -219,7 +226,16 @@ impl Checker {
         if self.env.lookup_var(module.as_str()).is_some() {
             return;
         }
-        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else { return };
+        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else {
+            // A stdlib module the file never imported (`b |> ffi.region`
+            // without `import ffi`): a spelling that reaches it anyway — a
+            // pipe stage resolves the stage by name — is still the module's
+            // fn, and still needs the opt-in.
+            if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) || almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                self.reject_unopted_memory_unsafe(module.as_str(), field.as_str(), span);
+            }
+            return;
+        };
         if !self.env.import_table.resolves_to_stdlib(module.as_str(), canonical.as_str()) {
             return;
         }
@@ -253,8 +269,8 @@ impl Checker {
         }
     }
 
-    /// E100 (#4043): a `@memory_unsafe` stdlib fn (`ffi.*`, the deprecated
-    /// `bytes` raw-pointer spellings) called from a file that did not write
+    /// E100 (#4043): a `@memory_unsafe` stdlib fn (the `ffi` surface) called
+    /// from a file that did not write
     /// `import ffi`. The import is the opt-in, the one line a reader looks at
     /// to learn that a file reads or writes memory outside its values, so a
     /// file with neither `import ffi` nor `@extern` stays inside the
@@ -293,7 +309,7 @@ impl Checker {
             None => format!("add `import {MEMORY_UNSAFE_OPT_IN}` to this file"),
         };
         let hint = format!(
-            "`{key}` reads or writes memory at a raw address with a length nothing checks; `import {MEMORY_UNSAFE_OPT_IN}` is the opt-in that marks a file as leaving the memory-safety guarantee — {rewrite}. Without raw memory, use the bounded `bytes` functions (`bytes.slice`, `bytes.get`, `bytes.copy_from`)"
+            "`{key}` reaches memory outside Almide's values — a Region over memory foreign code can also reach; `import {MEMORY_UNSAFE_OPT_IN}` is the opt-in that marks a file as leaving the memory-safety guarantee — {rewrite}. Without raw memory, use the bounded `bytes` functions (`bytes.slice`, `bytes.get`, `bytes.copy_from`)"
         );
         let mut diagnostic = err(
             format!("`{key}` is outside the memory-safety guarantee and needs `import {MEMORY_UNSAFE_OPT_IN}` in this file"),

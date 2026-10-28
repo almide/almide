@@ -1,0 +1,10 @@
+// E100 (#4008): `--profile critical` refuses every `ffi` call, a bounds- and
+// permission-checked write into a fresh Region included, whatever `--allow`
+// grants: a critical program writes no memory outside its values.
+import ffi
+
+effect fn main() -> Unit = {
+  let r = ffi.alloc(3)!
+  ffi.write(r, 0, bytes.from_string("abc"))!
+  println(int.to_string(ffi.len(r)))
+}

@@ -74,7 +74,9 @@ pub enum Ty {
     Unit,
     Bytes,
     Matrix,
-    /// Raw pointer for C FFI (`*mut u8`). Used only in @extern(c, ...) declarations.
+    /// The opaque foreign token `Handle` (ADR-0031 D1): `*mut u8` on native,
+    /// an address scalar on wasm. Only passed back to an `@extern` fn; no
+    /// user-reachable fn reads or writes through it or turns it into an Int.
     RawPtr,
     /// Parameterized type constructor: List[T], Option[T], Result[T,E], Map[K,V], Set[T], etc.
     /// Phase 4 of HKT Foundation — unifies all container types.
@@ -323,7 +325,7 @@ impl Ty {
             Ty::Unit => "Unit",
             Ty::Bytes => "Bytes",
             Ty::Matrix => "Matrix",
-            Ty::RawPtr => "RawPtr",
+            Ty::RawPtr => "Handle",
             Ty::Never => "Never",
             Ty::Unknown => "Unknown",
             _ => return None,
@@ -669,7 +671,7 @@ impl Ty {
             Ty::Unit => Some("Unit"),
             Ty::Bytes => Some("Bytes"),
             Ty::Matrix => Some("Matrix"),
-            Ty::RawPtr => Some("RawPtr"),
+            Ty::RawPtr => Some("Handle"),
             Ty::Applied(id, _) => Some(match id {
                 TypeConstructorId::List => "List",
                 TypeConstructorId::Option => "Option",

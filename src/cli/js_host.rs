@@ -106,7 +106,7 @@ impl HostSurface {
             let name = almide_ir::user_fn_source_name(f.name.as_str());
             let sig = || HostFn {
                 name: name.to_string(),
-                params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
+                params: import_params(f),
                 ret: f.ret_ty.clone(),
                 is_effect: f.is_effect,
             };
@@ -168,7 +168,7 @@ impl HostSurface {
             }
             let sig = HostFn {
                 name: f.name.as_str().to_string(),
-                params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
+                params: import_params(f),
                 ret: f.ret_ty.clone(),
                 is_effect: f.is_effect,
             };
@@ -185,6 +185,24 @@ impl HostSurface {
             self.async_imports.push(import.to_string());
         }
     }
+}
+
+/// A fn's parameters as the host sees them. A `Region` crosses an import as
+/// two numbers, its base and its length (ADR-0031 D3; the structural leg's
+/// `extern_region` split), and an export never takes one, so the expansion is
+/// the same for both.
+fn import_params(f: &almide_ir::IrFunction) -> Vec<(String, Ty)> {
+    f.params
+        .iter()
+        .flat_map(|p| {
+            let name = p.name.as_str();
+            if almide_lang::types::extern_abi::is_region(&p.ty) {
+                vec![(format!("{name}_base"), Ty::Int), (format!("{name}_len"), Ty::Int)]
+            } else {
+                vec![(name.to_string(), p.ty.clone())]
+            }
+        })
+        .collect()
 }
 
 /// The marshalled kinds — the five the host converts today.

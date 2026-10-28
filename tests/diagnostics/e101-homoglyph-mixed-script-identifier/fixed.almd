@@ -1,0 +1,2 @@
+fn admin() -> String = "real"
+effect fn main() -> Unit = println(admin())

@@ -156,6 +156,51 @@ jobs:
             gh issue create --title "Miri nightly: undefined behaviour" --label miri --label A-runtime --body-file /tmp/body.md
           fi
 
+  loom-fan:
+    # Security row 6: Miri above samples the fan gate's schedules (one per
+    # seed per preemption rate); this enumerates them. Loom runs the gate
+    # protocol's own source (tools/loom-fan-gate extracts it from
+    # runtime/rs/src/list.rs) after two controls that must come back with a
+    # causality violation.
+    name: Loom, fan gate protocol
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: The fan gate protocol under loom
+        run: |
+          set -o pipefail
+          bash scripts/loom-fan-gate.sh 2>&1 | tee /tmp/loom-fan.log
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: loom-fan
+          path: /tmp/loom-fan.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Post the red night to the open miri issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          { echo "Miri nightly is red (fan gate under loom): $RUN_URL"; echo; echo '```'; grep -E '^(::error::|    |  |thread |Causality)' /tmp/loom-fan.log | head -80 || true; echo '```'; } > /tmp/body.md
+          N="$(gh issue list --state open --label miri --json number -q '.[0].number' || true)"
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --body-file /tmp/body.md
+          else
+            gh label create miri --color F9D0C4 --description "Miri over generated Rust: undefined behaviour findings (#4009)" 2>/dev/null || true
+            gh issue create --title "Miri nightly: undefined behaviour" --label miri --label A-runtime --body-file /tmp/body.md
+          fi
+
   asan:
     name: AddressSanitizer, shard ${{ matrix.shard }}/2
     runs-on: ubuntu-latest

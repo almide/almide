@@ -48,6 +48,7 @@ pub mod record_shape;
 pub mod mono_name;
 pub mod runtime_use;
 pub mod meter_plan;
+pub mod declared_repr;
 
 mod wasm_repr;
 

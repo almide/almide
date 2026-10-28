@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 768  implementations = 1732
+# holes = 759  implementations = 1715
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -139,20 +139,6 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "as_mut_ptr"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "bytes"
-name     = "as_ptr"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "bytes"
 name     = "__chunks"
 native   = 1
 emitter  = 0
@@ -195,20 +181,6 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "copy_to_ptr"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "bytes"
-name     = "data_ptr"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "bytes"
 name     = "ends_with"
 native   = 1
 emitter  = 0
@@ -234,13 +206,6 @@ name     = "from_list"
 native   = 1
 emitter  = 1
 selfhost = 0
-total    = 2
-[[hole]]
-module   = "bytes"
-name     = "from_raw_ptr"
-native   = 1
-emitter  = 0
-selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
@@ -1057,34 +1022,6 @@ total    = 1
 [[hole]]
 module   = "env"
 name     = "os"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "ffi"
-name     = "address"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "ffi"
-name     = "to_int"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "ffi"
-name     = "read"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "ffi"
-name     = "write"
 native   = 1
 emitter  = 0
 selfhost = 1

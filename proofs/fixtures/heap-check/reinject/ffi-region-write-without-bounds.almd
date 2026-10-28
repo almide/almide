@@ -1,0 +1,15 @@
+import ffi
+
+// ADR-0031: a Region write is checked against the region's length. With the
+// check removed, 16 bytes land in a 4-byte allocation: the 12 past its end
+// overwrite the heap beyond it, silently unless the allocator keeps a canary.
+effect fn overrun() -> Unit = {
+  let src = bytes.from_list([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7])
+  let small = ffi.alloc(4)!
+  ffi.write(small, 0, src)!
+}
+
+effect fn main() -> Unit = {
+  overrun()!
+  println("wrote")
+}

@@ -249,6 +249,15 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The name the route binds: the probes run inside its handler, the
     // routed request filling `req` ([`ROUTED`]), so the lookup hits.
     Recipe { func: "http.param", size: "req", args: &[("name", "\"id\"")] },
+    // An attribute name is valid only by its doc comment (a name, not a URL or
+    // event-handler attribute): the generic "aéaé…" name aborts before the
+    // value is escaped. The value (the URL) is the size.
+    Recipe { func: "html.attr", size: "value", args: &[("name", "\"title\""), ("value", "string.repeat(\"aé\", {n})")] },
+    Recipe {
+        func: "html.url_attr",
+        size: "url",
+        args: &[("name", "\"href\""), ("url", "\"https://example.com/\" + string.repeat(\"aé\", {n})")],
+    },
     // n pass-through middleware: what `wrap` composes.
     Recipe { func: "http.wrap", size: "middleware", args: &[("middleware", "list.range(0, {n}) |> list.map((i) => (next) => next)")] },
     // A pattern is not a needle (SEARCH_PARAMS): n copies of every directive.

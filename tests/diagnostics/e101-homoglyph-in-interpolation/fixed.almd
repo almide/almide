@@ -1,0 +1,5 @@
+type User = { name: String }
+effect fn main() -> Unit = {
+  let u = User { name: "ann" }
+  println("hello ${u.name}")
+}

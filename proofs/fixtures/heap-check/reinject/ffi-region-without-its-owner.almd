@@ -1,0 +1,11 @@
+import ffi
+
+// ADR-0031: a Region holds the buffer it views. With the owner dropped, the
+// buffer of `ffi.alloc` is freed as `alloc` returns, the region's base
+// dangles, and the write below lands in a freed block.
+effect fn main() -> Unit = {
+  let r = ffi.alloc(40)!
+  ffi.write(r, 0, bytes.from_list([9, 9, 9, 9, 9, 9, 9, 9]))!
+  let c = bytes.zeros(40)
+  println("wrote; reused ${bytes.len(c)}")
+}

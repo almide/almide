@@ -93,6 +93,15 @@ jobs:
           ALMIDE_BUILD_SHA: ${{ github.sha }}
         run: cargo build --release --target ${{ matrix.target }}
 
+      # Security row 25 (#4129): the artifact itself locks the build-changing
+      # switches with no flag. Run wherever the runner can execute the target
+      # (the aarch64 Linux build is cross-compiled); a failure stops the
+      # release before anything is packaged.
+      - name: The release binary locks inherited switches by default
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: bash scripts/check-release-switch-lock.sh "target/${{ matrix.target }}/release/almide${{ runner.os == 'Windows' && '.exe' || '' }}"
+
       # #2152: the archive carries BOTH binaries. `almide verify` execs the
       # independently versioned `almide-verify` from next to itself and has no
       # linked fallback, so an archive without it would ship a command that

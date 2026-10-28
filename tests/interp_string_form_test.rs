@@ -88,8 +88,8 @@ fn a_value_with_no_string_form_is_rejected_at_the_segment() {
         "a Matrix value",
     );
     assert_e089(
-        "import ffi\n\neffect fn main() -> Unit = {\n  let b = bytes.from_list([1, 2])\n  let p = ffi.address(b)\n  println(\"p=${p}\")\n}\n",
-        "a raw pointer",
+        "@extern(c, \"c\", \"tmpfile\")\nfn tmpfile() -> Handle\n\neffect fn main() -> Unit = {\n  let p = tmpfile()\n  println(\"p=${p}\")\n}\n",
+        "a Handle",
     );
     assert_e089(
         "effect fn main() -> Unit = {\n  let f = (x: Int) => x + 1\n  println(\"f=${f}\")\n}\n",

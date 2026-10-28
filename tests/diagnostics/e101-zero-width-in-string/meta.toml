@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "U+200B FORMAT CHARACTER (invisible)"
+hint_substring = "u{200B}` if the character is intended"
+expects_line_col = "4:16"

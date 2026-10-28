@@ -4,13 +4,27 @@
 # Usage:
 #   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh
 #   curl --proto '=https' --tlsv1.2 -fsSL ... | sh -s -- v0.12.3          # specific version
+#   curl --proto '=https' --tlsv1.2 -fsSL ... | sh -s -- --skip-attestation  # no `gh`: checksum only
 #   ALMIDE_INSTALL=~/bin sh install.sh          # custom install dir
+#
+# The release attestation is verified with the GitHub CLI (`gh`). Without it
+# the installer refuses (security row 16), as `almide self-update` does:
+# `--skip-attestation` installs on the checksum alone, which proves the
+# archive is the one the release lists, not who built it.
 
 set -eu
 
 REPO="almide/almide"
 INSTALL_DIR="${ALMIDE_INSTALL:-${HOME}/.local/bin}"
-VERSION="${1:-latest}"
+VERSION="latest"
+SKIP_ATTESTATION=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-attestation) SKIP_ATTESTATION=1 ;;
+    -*) echo "error: unknown option: $arg" >&2; exit 1 ;;
+    *) VERSION="$arg" ;;
+  esac
+done
 
 # --- Detect platform ---
 
@@ -103,17 +117,22 @@ fi
 
 # --- Verify origin ---
 # The checksum came from the same place as the archive: integrity, not origin
-# (#4127). Every release asset carries a Sigstore attestation (#1534); verify
-# it when the GitHub CLI is here, and say how to otherwise.
-if command -v gh >/dev/null 2>&1; then
+# (#4127). Every release asset carries a Sigstore attestation (#1534). Fail
+# closed (security row 16): no `gh` means no install unless the command line
+# says `--skip-attestation`.
+if [ "$SKIP_ATTESTATION" = 1 ]; then
+  echo "warning: --skip-attestation: installing without verifying the release attestation (the checksum proves integrity, not origin)" >&2
+elif command -v gh >/dev/null 2>&1; then
   echo "Verifying the release attestation..."
   if ! gh attestation verify "$ARCHIVE" -R "$REPO" >/dev/null; then
     echo "error: the release attestation did not verify; refusing to install" >&2
     exit 1
   fi
 else
-  echo "note: gh not found, so the release attestation was not verified (the checksum proves integrity, not origin)" >&2
-  echo "      to verify: gh attestation verify ${ARCHIVE} -R ${REPO}" >&2
+  echo "error: gh not found, so the release attestation cannot be verified; refusing to install" >&2
+  echo "       install the GitHub CLI (https://cli.github.com) and run this again, or pass" >&2
+  echo "       --skip-attestation (sh -s -- --skip-attestation) to install on the checksum alone" >&2
+  exit 1
 fi
 
 # --- Install ---

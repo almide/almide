@@ -60,14 +60,13 @@ fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
 fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 // The core's `http_server_quote`: `\` and `"` escaped, a character of C-418's
-// set (C0, DEL, C1 and the bidi controls, #4126) as `\u{hex}`.
+// set as `\u{hex}`. The set is the escaper's own (#4265): a character
+// `string.__err_text` changes is one it escapes.
 fn __hs_quote_char(c: String) -> String = match c {
   "\\" => "\\\\",
   "\"" => "\\\"",
-  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) or __hs_bidi(__hs_cp(c)) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+  _ => if string.__err_text(c) != c then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
-
-fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
 
 fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 

@@ -89,15 +89,10 @@ SIZED_FLOATS = {"Float32", "Float64"}
 STRING_TVARS = {"E", "F"}
 
 # Cells the interface JSON renders as `{"kind": "unknown"}` — types its
-# emitter does not model (the raw-pointer FFI surface, the Never return). Keyed "mod.fn" -> {param name | "return": type node}. A NEW
+# emitter does not model (the Never return). Keyed "mod.fn" -> {param name | "return": type node}. A NEW
 # unknown cell outside this table is an ERROR line, never a guess.
-RAWPTR = {"kind": "named", "name": "RawPtr"}
 NEVER = {"kind": "never"}
 UNMODELED = {
-    "bytes.as_mut_ptr": {"return": RAWPTR},
-    "bytes.as_ptr": {"return": RAWPTR},
-    "bytes.copy_to_ptr": {"ptr": RAWPTR},
-    "bytes.from_raw_ptr": {"ptr": RAWPTR},
     "process.exit": {"return": NEVER},
 }
 
@@ -138,6 +133,9 @@ NOMINAL = {
     "Deque": ("deque.from_list([{0}])", "deque.from_list", None),
     "Heap": ("heap.from_list([{0}])", "heap.from_list", None),
     "ProcessChild": ('process.start(process.ProcessCommand { cmd: "true", args: [] })!', "process.start", "process"),
+    # ADR-0031: a writable Region is a fresh allocation; only `ffi.alloc`
+    # (and the read-only `ffi.region` over a Bytes) makes one.
+    "Region": ("ffi.alloc(8)!", "ffi.alloc", "ffi"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
 
@@ -272,9 +270,6 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             return ctx.hoist(name, "0")
         if name in SIZED_FLOATS:
             return ctx.hoist(name, "0.0")
-        if name == "RawPtr":
-            ctx.ctors.add("bytes.as_ptr")
-            return f"bytes.as_ptr({dummy({'kind': 'bytes'}, ctx, types)})"
         if name == "HttpRequest":
             # #2588: a request is built in code — no http.serve handler (and
             # no listener the legs cannot bind) stands between the probe and
