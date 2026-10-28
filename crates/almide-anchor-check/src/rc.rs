@@ -51,8 +51,16 @@
 //! store writes the same slot; and a release or +1 counts as `consumed` only
 //! by a call inside an arm or routine window whose callee's own body takes
 //! ownership of that parameter on EVERY path to its exits (a callee that
-//! takes it on some paths only is refused — a draft pending the owner's
-//! ruling).
+//! takes it on some paths only is refused — the every-path rule, adopted
+//! 2026-10-28). When a runtime routine fails that rule the routine is the
+//! bug and is fixed, never the rule: `$list_push` and `$bytes_push` released
+//! their outgrown block only when uniquely owned, and now release it on
+//! every grow path.
+//!
+//! The four counted classes (arm-internal, routine-internal, element,
+//! consumed) are debts to #4278's per-helper certificates — a declared
+//! per-path effect for each helper, checked against its body. They may only
+//! shrink; a new trusted class is an owner decision, not a checker edit.
 //!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
