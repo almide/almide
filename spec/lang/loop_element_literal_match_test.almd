@@ -85,7 +85,7 @@ fn rename_loop(xs: List[String]) -> List[String] = {
   out
 }
 
-fn normalize(s: String) -> String = match s {
+fn canon(s: String) -> String = match s {
   "a" => "A",
   other => other,
 }
@@ -163,9 +163,9 @@ test "an arm binding the matched element copies it out" {
 
 test "a String param matched with a binding arm" {
   let s = "z"
-  assert_eq(normalize("a"), "A")
-  assert_eq(normalize(s), "z")
-  assert_eq(normalize(s) + s, "zz")
+  assert_eq(canon("a"), "A")
+  assert_eq(canon(s), "z")
+  assert_eq(canon(s) + s, "zz")
   assert_eq(shout("a"), "a")
   assert_eq(shout("abc"), "abc!")
   assert_eq(shout(s), "z?")
