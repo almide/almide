@@ -542,8 +542,8 @@ impl Checker {
         if let ast::Decl::Fn { name, params, return_type, extern_attrs, attrs, span, .. } = &*decl
             && !extern_attrs.is_empty()
         {
-            self.check_region_clause(name.as_str(), params, return_type, attrs, *span);
-            self.reject_extern_c_types(name.as_str(), params, return_type, extern_attrs, *span);
+            let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
+            self.reject_extern_c_types(sig, extern_attrs, attrs);
         }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the

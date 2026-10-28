@@ -22,32 +22,22 @@ use almide_lang::types::Ty;
 
 const HINT_SHIM: &str = "bind it through an `@extern(rust, \"crate::host\", \"f\")` fn in `native/*.rs` instead, which takes Almide values (`&[u8]`, `&[T]`, `&str`, records, …) and can call the C function itself";
 
+/// The parts of an `@extern` fn declaration its C ABI check reads.
+pub(super) struct ExternSig<'a> {
+    pub name: &'a str,
+    pub params: &'a [Param],
+    pub return_type: &'a TypeExpr,
+    pub span: Option<Span>,
+}
+
 impl Checker {
-    /// A `@region(…)` clause on an `@extern` declaration, judged against the
-    /// declared return (ADR-0031 D2, D6).
-    pub(super) fn check_region_clause(
-        &mut self,
-        fn_name: &str,
-        params: &[Param],
-        return_type: &TypeExpr,
-        attrs: &[Attribute],
-        decl_span: Option<Span>,
-    ) {
-        if let Some(attr) = attrs.iter().find(|a| a.name.as_str() == REGION_ATTR) {
-            let declared_ret = self.resolve_type_expr(return_type);
+    pub(super) fn reject_extern_c_types(&mut self, sig: ExternSig<'_>, extern_attrs: &[ExternAttr], attrs: &[Attribute]) {
+        let ExternSig { name: fn_name, params, return_type, span: decl_span } = sig;
+        let region = attrs.iter().find(|a| a.name.as_str() == REGION_ATTR);
+        let declared_ret = self.resolve_type_expr(return_type);
+        if let Some(attr) = region {
             self.check_region_attr(fn_name, params, &declared_ret, attr, decl_span);
         }
-    }
-
-    pub(super) fn reject_extern_c_types(
-        &mut self,
-        fn_name: &str,
-        params: &[Param],
-        return_type: &TypeExpr,
-        extern_attrs: &[ExternAttr],
-        decl_span: Option<Span>,
-    ) {
-        let declared_ret = self.resolve_type_expr(return_type);
         // The native build binds the FIRST attr naming a native kind.
         let first = extern_attrs.iter().find_map(|a| native_extern_kind(a.target.as_str()));
         if first != Some(NativeExtern::C) {
