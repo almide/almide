@@ -1,5 +1,11 @@
 # Security Policy
 
+## Security lead
+
+Hiromi Motodera (本寺 広海), Representative Director of Aid-On Inc.
+(株式会社Aid-On), which develops Almide, is the security lead. Reports go
+through the private channel below, not to a personal address.
+
 ## Reporting a vulnerability
 
 Report privately via **GitHub Security Advisories**:
