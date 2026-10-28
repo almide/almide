@@ -73,8 +73,9 @@ fn temporaries_witness_exactly_and_unhooked_shapes_decline() {
         // outer moves into take.
         ("nest_deep", "id\nim\n"),
         // `s` is only read (borrowed: no credit, an empty stream); the inner
-        // concat is bound (`i` … `d`), the outer one moves out.
-        ("cat", "\nibd\nim\n"),
+        // concat is a dying temporary that moves into the in-place append
+        // (`im`, #4261), and the outer result moves out.
+        ("cat", "\nim\nim\n"),
         // The borrowed param shares into the payload slot; the cell moves out.
         ("wrap", "am\nim\n"),
         // mk's result moves into the slot, the cell moves out.
