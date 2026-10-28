@@ -260,12 +260,27 @@ mod fs_beneath_imp {
     fn checked(dir: &str, segs: &[&str]) -> Result<std::path::PathBuf, FsBeneathError> {
         let mut p = std::path::PathBuf::from(dir);
         for seg in segs {
+            // A segment must be ONE plain name on this OS. On Windows `C:` is a
+            // prefix and `\` a separator, and `PathBuf::push` of a prefixed or
+            // rooted segment REPLACES the path, so `C:/elsewhere` would leave
+            // the root (the Almide side only knows `/`).
+            if !segment_is_one_name(seg) {
+                return Err(FsBeneathError::Escape);
+            }
             p.push(seg);
             if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
                 return Err(FsBeneathError::Escape);
             }
         }
         Ok(p)
+    }
+
+    fn segment_is_one_name(seg: &str) -> bool {
+        let mut cs = std::path::Path::new(seg).components();
+        matches!(
+            (cs.next(), cs.next()),
+            (Some(std::path::Component::Normal(n)), None) if n == std::ffi::OsStr::new(seg)
+        )
     }
 
     fn all<'a>(parents: &[&'a str], last: &'a str) -> Vec<&'a str> {
