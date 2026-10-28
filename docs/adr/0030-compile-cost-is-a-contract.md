@@ -1,6 +1,6 @@
 # ADR-0030: Compile cost is a contract — every phase has a counted budget, the source cannot raise it, and exceeding it is a defined diagnostic
 
-- **Status**: Proposed. The direction is the owner's ruling of 2026-10-24 (○): "treat the compiler as a program that processes untrusted input, and promise its resource use as a contract".
+- **Status**: Accepted (2026-10-28, the owner's ruling Q5: accepted once the GCE round on the implementing branch was green). The direction is the owner's ruling of 2026-10-24 (○): "treat the compiler as a program that processes untrusted input, and promise its resource use as a contract".
 - **Date**: 2026-10-24
 - **Scope**: the budgets of `almide check` / `build` / `fmt` / `lsp` / `ide` over their input (source files, `almide.toml`, `almide.lock`), the diagnostics for exceeding them, and the gate that keeps them true. Not covered: the run time of the compiled program, which `docs/roadmap/active/security-by-construction.md` row 9 owns.
 - **Implementation**: #4136.
