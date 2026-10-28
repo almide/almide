@@ -444,16 +444,18 @@ tamper_structural greet '3s/^ibd$/ib/' "#2755 concat operand"
 # more as per-site `{a|b}` / `{a x|b}` items. `pick` hands its list to
 # `take` on one arm only (`{ibm|id}`: the arm's tail call takes the dying
 # list, `m` = the move-in; `b` = the read, #3259); `label` keeps a string alive across
-# a match, returning its share on one arm (`{|am}`). Drills: drop the
-# release on the arm that took the share, and the move-out on the arm that
-# returned it (on `pick`, drop the move-in, so the arm keeps a credit it
-# never releases) — each arm is checked on its own, so each leak is seen.
+# a match: the `some` arm shares it into an in-place append and releases its
+# own credit (`ibamd`, #4261), the `none` arm moves the dying param out
+# (`im`) — one line `{ibamd|im}`. Drills: drop the move-in on `pick`'s
+# arm, and the move-out on the arm of `label` that returned the string —
+# each arm then keeps a credit it never releases, and each arm is checked
+# on its own, so each leak is seen.
 echo
 echo "== structural leg, branch frames  ⊳  proven checker (#2756) =="
 run_structural spec/wasm_cross/witness_straightline.almd pick 0
 run_structural spec/wasm_cross/witness_straightline.almd label 0
 tamper_structural pick 's/^{ibm|id}$/{ib|id}/' "#2756 if arm"
-tamper_structural label 's/^{|am}$/{|a}/' "#2756 match arm"
+tamper_structural label 's/^{ibamd|im}$/{ibamd|i}/' "#2756 match arm"
 
 # ── #2757: a SELF TAIL CALL (loop-converted by tco.rs) certified as the next
 # activation of the frame: `count_down` shares its list into the next
