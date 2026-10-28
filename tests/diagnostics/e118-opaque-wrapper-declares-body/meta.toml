@@ -1,0 +1,3 @@
+expects_code = "E118"
+expects_error = "type `Markup` declares `Body`"
+hint_substring = "`html.*` or `svg.*`"

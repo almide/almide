@@ -1,0 +1,6 @@
+// A String body already is text/plain; charset=utf-8.
+import http.{with_headers}
+
+fn report(rows: String) -> HttpResponse = with_headers(200, rows, [("X-Report", "1")])
+
+fn main() -> Unit = println(http.body(report("a,b")))
