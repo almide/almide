@@ -70,24 +70,32 @@ impl IrMutVisitor for MatchSubjectVisitor {
     }
 }
 
+/// Is a match on a subject of type `ty` with these arms rendered over a
+/// `&str` view of the subject (`match &*s { "lit" => .. }`)? A `String`
+/// subject with a top-level string-literal pattern is. The use-kind walk
+/// reads the same predicate (`use_kind`'s `Match` case, #4294), so the borrow
+/// verdict — which runs before this pass rewrites the subject — sees the
+/// subject read through that view exactly as the ownership certifier sees
+/// the rewritten `Borrow` afterwards.
+pub(crate) fn matches_through_str_view(ty: &Ty, arms: &[IrMatchArm]) -> bool {
+    matches!(ty, Ty::String) && arms.iter().any(|a| {
+        matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
+    })
+}
+
 /// Insert `.as_str()` or `.as_deref()` on match subjects when needed.
 fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
     // String subject with string literal patterns → wrap with Borrow { as_str: true }
-    if matches!(&subject.ty, Ty::String) {
-        let has_str_pat = arms.iter().any(|a| {
-            matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
-        });
-        if has_str_pat {
-            let inner = std::mem::replace(
-                subject.as_mut(),
-                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-            );
-            **subject = IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
-                ty: Ty::String, // type is still String for downstream
-                span: subject.span, def_id: None,
-            };
-        }
+    if matches_through_str_view(&subject.ty, arms) {
+        let inner = std::mem::replace(
+            subject.as_mut(),
+            IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+        );
+        **subject = IrExpr {
+            kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
+            ty: Ty::String, // type is still String for downstream
+            span: subject.span, def_id: None,
+        };
     }
 
     // A `Some("literal")` payload was previously reconciled here by wrapping the

@@ -1,0 +1,104 @@
+// #4294: a loop element that is only matched against literals is READ — a
+// `String` subject matched against string literals renders over a `&str`
+// view — so the list param it comes from is borrowed. A mixed body that also
+// moves the element (collects it, or binds it in an arm) keeps the param
+// owned. The ownership certifier's C4 refused the owned `classify`.
+type Tag = { name: String, weight: Int }
+
+fn classify(xs: List[String]) -> Int = {
+  var n = 0
+  for x in xs {
+    n = n + match x {
+      "a" => 1,
+      "b" => 10,
+      _ => 100,
+    }
+  }
+  n
+}
+
+fn score(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    n = n + match x {
+      0 => 1,
+      1 => 10,
+      _ => 100,
+    }
+  }
+  n
+}
+
+fn classify_chain(xs: List[String]) -> List[Int] = xs
+  |> list.map((x) => match x {
+    "a" => 1,
+    _ => 0,
+  })
+
+fn tag_weight(ts: List[Tag]) -> Int = {
+  var n = 0
+  for t in ts {
+    n = n + match t.name {
+      "heavy" => t.weight * 2,
+      _ => t.weight,
+    }
+  }
+  n
+}
+
+// Mixed: the element is matched against literals AND collected, so the
+// param stays owned and each element moves into the result.
+fn keep_unknown(xs: List[String]) -> List[String] = {
+  var out: List[String] = []
+  for x in xs {
+    let known = match x {
+      "a" => true,
+      "b" => true,
+      _ => false,
+    }
+    if known then () else { out = out + [x] }
+  }
+  out
+}
+
+// Mixed: an arm binds the element and returns it.
+fn rename(xs: List[String]) -> List[String] = xs
+  |> list.map((x) => match x {
+    "a" => "A",
+    other => other,
+  })
+
+test "a List[String] element matched only against literals" {
+  let xs = ["a", "b", "c", "a"]
+  assert_eq(classify(xs), 112)
+  // `xs` is still live: the callee borrowed it.
+  assert_eq(classify(xs), 112)
+  assert_eq(list.len(xs), 4)
+  assert_eq(classify([]), 0)
+}
+
+test "a List[Int] element matched only against literals" {
+  let xs = [0, 1, 2, 0]
+  assert_eq(score(xs), 112)
+  assert_eq(score(xs), 112)
+}
+
+test "a chain element matched only against literals" {
+  let xs = ["a", "z", "a"]
+  assert_eq(classify_chain(xs), [1, 0, 1])
+  assert_eq(classify_chain(xs), [1, 0, 1])
+}
+
+test "a record element's field matched only against literals" {
+  let ts = [{ name: "heavy", weight: 3 }, { name: "light", weight: 4 }]
+  assert_eq(tag_weight(ts), 10)
+  assert_eq(tag_weight(ts), 10)
+}
+
+test "an element matched and collected stays owned" {
+  let xs = ["a", "q", "b", "r"]
+  assert_eq(keep_unknown(xs), ["q", "r"])
+  assert_eq(keep_unknown(xs), ["q", "r"])
+  assert_eq(rename(xs), ["A", "q", "b", "r"])
+  assert_eq(rename(xs), ["A", "q", "b", "r"])
+}

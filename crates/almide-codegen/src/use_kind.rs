@@ -459,7 +459,22 @@ impl<'a> Walk<'a> {
             }
             IrExprKind::Match { subject, arms } => {
                 self.held.push(place_root(subject).into_iter().collect());
-                self.expr(subject, Site::Scrutinee);
+                // #4294: a `String` subject matched against string literals
+                // with no arm binding anything is read through a `&str` view
+                // (`MatchSubject` renders `match &*s { "a" => .. }`): the same
+                // read a `==` against a literal is. Recorded as that read here,
+                // BEFORE `MatchSubject` spells the `Borrow`, so the borrow
+                // verdict, the clone pass and the certifier read one rule — a
+                // loop binder only matched this way borrows its source.
+                let site = if crate::pass_match_subject::matches_through_str_view(&subject.ty, arms)
+                    && arms.iter().all(|a| pattern_binds_nothing(&a.pattern))
+                    && stable_string_operand(subject)
+                {
+                    Site::Compare
+                } else {
+                    Site::Scrutinee
+                };
+                self.expr(subject, site);
                 for arm in arms {
                     let parent = self.arm;
                     self.next_arm += 1;
@@ -749,6 +764,20 @@ fn stable_string_operand(e: &IrExpr) -> bool {
     }
 }
 
+/// Does a pattern bind nothing — literal, wildcard and nullary patterns only?
+/// A match whose every arm is such a pattern only compares its subject; a
+/// binding may move a payload out.
+pub(crate) fn pattern_binds_nothing(p: &IrPattern) -> bool {
+    match p {
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => pattern_binds_nothing(inner),
+        IrPattern::Constructor { args, .. } => args.iter().all(pattern_binds_nothing),
+        IrPattern::Tuple { elements } => elements.iter().all(pattern_binds_nothing),
+        IrPattern::List { elements, rest } => elements.iter().all(pattern_binds_nothing) && rest.as_deref().map_or(true, pattern_binds_nothing),
+        IrPattern::Bind { .. } | IrPattern::RecordPattern { .. } | IrPattern::As { .. } => false,
+    }
+}
+
 /// The element type of a `List[T]` iterable, `None` for anything else.
 fn list_element_ty(ty: &Ty) -> Option<&Ty> {
     match ty {
@@ -764,7 +793,8 @@ fn list_element_ty(ty: &Ty) -> Option<&Ty> {
 /// occurrence, at closure depth 0 and outside any `&mut`, is a borrowed call
 /// slot, a shared borrow, a clone, a field read whose value is not itself
 /// moved on, a nested borrowed iteration, or — for a `String` — an
-/// interpolation part or a `&str` comparison. Anything else (returned,
+/// interpolation part or a `&str` comparison (a `==` against a literal, or a
+/// `match` on string literals that binds nothing, #4294). Anything else (returned,
 /// concatenated, built into a value, handed to an owned slot, bound to a
 /// local, matched, captured, mutated) demands the element owned, and the
 /// borrow verdict owns the SOURCE for it: an owned source moves the element
