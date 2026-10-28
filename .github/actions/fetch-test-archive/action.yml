@@ -1,21 +1,12 @@
 name: "Fetch the test archive"
 description: >-
   Download the build job's nextest archive (almide-tests-archive) onto the
-  runner's root volume and say where it is. The ONE place every job that
-  unpacks the archive gets it from, so the location cannot drift between them.
-
-  Why not /tmp: on the current ubuntu-latest image /tmp is a ~7.9 GB tmpfs,
-  while / has ~87 GB free (df in run 40618688174). The archive is a 3.0 GB
-  download that `cargo nextest list --archive-file` unpacks in full (839
-  binaries) into $TMPDIR — download plus unpack overran the tmpfs, and every
-  shard and the coverage job died with "Disk quota exceeded (os error 122)".
-  The archive and the listing unpacks now live under $RUNNER_TEMP on /.
-  The tests themselves keep the job's own TMPDIR: only the listings are
-  redirected (ALMIDE_ARCHIVE_TMP), so no test sees a different temp dir.
-
-  Exports:
-    ALMIDE_TEST_ARCHIVE  the archive file
-    ALMIDE_ARCHIVE_TMP   the scratch dir nextest's listing unpacks go to
+  runner's root volume and export its path as TEST_ARCHIVE_FILE. The ONE place
+  every job that unpacks the archive gets it from, so the location cannot drift
+  between them. Not /tmp: on the current ubuntu-latest image /tmp is a ~7.9 GB
+  tmpfs (df in run 40618688174), and the 3.0 GB download plus its 839-binary
+  unpack overran it ("Disk quota exceeded"). The unpacks themselves go to
+  $TMPDIR, which .github/actions/root-tmpdir moves to the root volume.
 
 runs:
   using: "composite"
@@ -30,8 +21,6 @@ runs:
     - name: Export the archive's location
       shell: bash
       run: |
-        mkdir -p "$RUNNER_TEMP/nextest-list"
-        echo "ALMIDE_TEST_ARCHIVE=$RUNNER_TEMP/almide-archive/almide-tests.tar.zst" >> "$GITHUB_ENV"
-        echo "ALMIDE_ARCHIVE_TMP=$RUNNER_TEMP/nextest-list" >> "$GITHUB_ENV"
+        echo "TEST_ARCHIVE_FILE=$RUNNER_TEMP/almide-archive/almide-tests.tar.zst" >> "$GITHUB_ENV"
         ls -la "$RUNNER_TEMP/almide-archive"
         df -h / /tmp "$RUNNER_TEMP"
