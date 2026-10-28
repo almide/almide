@@ -6,8 +6,8 @@ test "http.response creates plain text response" {
   assert_eq(http.body(resp), "Hello")
 }
 
-test "http.html serves SafeHtml as text/html (#4120)" {
-  let resp = http.html(200, html.escape("<b>hi</b>"))
+test "http.response serves SafeHtml as text/html (ADR-0032)" {
+  let resp = http.response(200, html.escape("<b>hi</b>"))
   assert_eq(http.body(resp), "&lt;b&gt;hi&lt;/b&gt;")
   assert_eq(http.header(resp, "Content-Type"), some("text/html; charset=utf-8"))
   assert_eq(http.status(resp), 200)
@@ -23,13 +23,9 @@ test "http.json creates json response" {
 }
 
 test "http.set_header overwrites existing header" {
-  let resp = http.response(200, "hi")
-  let updated = http.set_header(resp, "Content-Type", "text/csv")
-  let ct = http.header(updated, "Content-Type")
-  match ct {
-    some(v) => assert_eq(v, "text/csv"),
-    none => assert(false),
-  }
+  let resp = http.set_header(http.response(200, "hi"), "X-Kind", "a")
+  let updated = http.set_header(resp, "X-Kind", "b")
+  assert_eq(http.header(updated, "X-Kind"), some("b"))
 }
 
 test "http.redirect creates redirect response" {
@@ -64,33 +60,29 @@ test "http.set_status rebind leaves an earlier alias at its old status" {
 }
 
 test "http.with_headers creates response with custom headers" {
-  let headers = [("X-Custom", "value"), ("Content-Type", "text/csv")]
-  let resp = http.with_headers(200, "hi", headers)
-  let ct = http.header(resp, "Content-Type")
-  match ct {
-    some(v) => assert_eq(v, "text/csv"),
-    none => assert(false),
-  }
+  let resp = http.with_headers(200, http.typed("text/csv", bytes.from_string("a,b")), [("X-Custom", "value")])
+  assert_eq(http.header(resp, "Content-Type"), some("text/csv"))
+  assert_eq(http.header(resp, "X-Custom"), some("value"))
+  assert_eq(http.body(resp), "a,b")
 }
 
-// ALS-R8 / C-275 — the three header rulings, asserted on the native leg too.
-test "http.with_headers seeds nothing the caller did not pass" {
+// ALS-R8 / C-275 — the header rulings, asserted on the native leg too.
+test "http.with_headers writes the body's Content-Type, then the caller's headers" {
   let resp = http.with_headers(200, "hi", [("X-A", "1")])
-  assert_eq(http.header(resp, "Content-Type") ?? "none", "none")
-  assert_eq(http.header(resp, "X-A") ?? "none", "1")
+  assert_eq(http.headers(resp), [("Content-Type", "text/plain; charset=utf-8"), ("X-A", "1")])
 }
 
 test "http header names are case-insensitive" {
   let resp = http.response(200, "hi")
-  assert_eq(http.header(resp, "content-type") ?? "none", "text/plain")
-  assert_eq(http.header(resp, "CONTENT-TYPE") ?? "none", "text/plain")
+  assert_eq(http.header(resp, "content-type") ?? "none", "text/plain; charset=utf-8")
+  assert_eq(http.header(resp, "CONTENT-TYPE") ?? "none", "text/plain; charset=utf-8")
   assert_eq(http.header(resp, "X-Nope") ?? "none", "none")
 }
 
 test "http.set_header round-trips under any spelling" {
-  let resp = http.set_header(http.response(200, "hi"), "content-type", "text/csv")
-  assert_eq(http.header(resp, "content-type") ?? "none", "text/csv")
-  assert_eq(http.header(resp, "Content-Type") ?? "none", "text/csv")
+  let resp = http.set_header(http.response(200, "hi"), "x-kind", "a")
+  assert_eq(http.header(resp, "x-kind") ?? "none", "a")
+  assert_eq(http.header(resp, "X-KIND") ?? "none", "a")
 }
 
 test "http.headers lists every header in order, repeats kept" {
@@ -98,13 +90,14 @@ test "http.headers lists every header in order, repeats kept" {
     "x-a",
     "3",
   )
-  assert_eq(http.headers(resp), [("X-A", "3"), ("X-B", "2")])
+  assert_eq(http.headers(resp), [("Content-Type", "text/plain; charset=utf-8"), ("X-A", "3"), ("X-B", "2")])
 }
 
 test "body_bytes and set_body_bytes carry the body as bytes" {
   let resp = http.set_body_bytes(http.response(200, ""), bytes.from_string("héllo"))
   assert_eq(http.body(resp), "héllo")
   assert_eq(bytes.to_list(http.body_bytes(resp)), bytes.to_list(bytes.from_string("héllo")))
+  assert_eq(http.header(resp, "Content-Type"), some("application/octet-stream"))
 }
 
 test "a request reads and replaces headers and body through the same functions" {

@@ -1,44 +1,45 @@
 // @contract: C-275
 // ALS-R8 (docs/specs/als/runtime.md): the http response-header surface.
 // Field names are case-insensitive (RFC 9110 §5.1, ASCII fold), a response
-// carries at most one entry per field name, `with_headers` yields EXACTLY the
-// caller's list with no seeded Content-Type, and set-then-get round-trips under
-// any spelling. #1352 found nine divergent cells here: native
-// (runtime/rs/src/http.rs) seeded a Content-Type in `with_headers` and matched
-// case-insensitively in `get_header`, while the self-host
-// (stdlib/http_response.almd) seeded nothing and matched with `==`.
+// carries at most one entry per field name, and set-then-get round-trips under
+// any spelling. ADR-0032: a response's Content-Type is its body's type —
+// `with_headers` writes it first, then exactly the caller's list. #1352 found
+// nine divergent cells here: native (runtime/rs/src/http.rs) seeded a
+// Content-Type in `with_headers` and matched case-insensitively in
+// `get_header`, while the self-host (stdlib/http_response.almd) seeded nothing
+// and matched with `==`.
 import http
 
 fn hdr(resp: HttpResponse, key: String) -> String = http.header(resp, key) ?? "none"
 
 effect fn main() -> Unit = {
-  // with_headers: exactly the caller's headers — no seeded Content-Type,
-  // and every spelling of a name the caller DID pass resolves.
+  // with_headers: the body's Content-Type, then exactly the caller's headers,
+  // and every spelling of a name the caller passed resolves.
   let a = http.with_headers(200, "b", [("X-A", "1")])
   println("${hdr(a, "Content-Type")} ${hdr(a, "X-A")} ${hdr(a, "x-a")} ${hdr(a, "X-a")}")
   let empty: List[(String, String)] = []
   println("${hdr(http.with_headers(204, "", empty), "Content-Type")}")
-  // A caller-supplied name wins under any spelling, and two case-variant keys
-  // upsert into ONE entry (last value in list order wins).
-  let c = http.with_headers(200, "b", [("content-type", "text/csv")])
-  println("${hdr(c, "content-type")} ${hdr(c, "Content-Type")}")
-  let d = http.with_headers(200, "b", [("Content-Type", "a/b"), ("content-type", "c/d")])
-  println("${hdr(d, "Content-Type")} ${hdr(d, "content-type")}")
-  // response / json seed their own Content-Type (the caller has no other way
-  // to name one); redirect seeds only Location. All lookups case-insensitive,
+  // Two case-variant keys upsert into ONE entry (last value in list order wins).
+  let c = http.with_headers(200, "b", [("x-kind", "a/b"), ("X-Kind", "c/d")])
+  println("${hdr(c, "x-kind")} ${hdr(c, "X-KIND")} ${list.len(http.headers(c))}")
+  // Each body type writes its own Content-Type; all lookups case-insensitive,
   // a miss is none.
   let r = http.response(200, "b")
   println("${hdr(r, "Content-Type")} ${hdr(r, "content-type")} ${hdr(r, "CONTENT-TYPE")} ${hdr(r, "X-Nope")}")
   let j = http.json(200, "{}")
   println("${hdr(j, "Content-Type")} ${hdr(j, "content-type")}")
+  let bs = http.response(200, bytes.from_string("b"))
+  println("${hdr(bs, "Content-Type")}")
   let rd = http.redirect("/x")
   println("${hdr(rd, "Location")} ${hdr(rd, "location")} ${hdr(rd, "Content-Type")} '${http.body(rd)}'")
   // set_header round-trips under ANY spelling, and does not disturb the rest.
-  let s1 = http.set_header(http.response(200, "b"), "content-type", "text/csv")
-  println("${hdr(s1, "content-type")} ${hdr(s1, "Content-Type")}")
+  let s1 = http.set_header(http.response(200, "b"), "x-kind", "v1")
+  println("${hdr(s1, "x-kind")} ${hdr(s1, "X-Kind")} ${hdr(s1, "Content-Type")}")
   let s2 = http.set_header(http.response(200, "b"), "X-New", "v")
   println("${hdr(s2, "X-New")} ${hdr(s2, "x-new")} ${hdr(s2, "Content-Type")}")
-  // status / body leave the header list alone.
+  // status leaves the header list alone; set_body replaces the body and its type.
   let t = http.set_status(http.response(201, "hi"), 404)
   println("${http.body(t)} ${hdr(t, "Content-Type")}")
+  let u = http.set_body_bytes(http.response(200, "hi"), bytes.from_string("yo"))
+  println("${http.body(u)} ${hdr(u, "Content-Type")}")
 }
