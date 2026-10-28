@@ -28,6 +28,10 @@
 //! to the access no call other than a judge is handed the block and no store
 //! writes its count word.
 //!
+//! Dominance is structural: the path from a read to a later one may leave
+//! a `block` or `loop` by falling out of it (unless a branch before the read
+//! lands at that block's end), never an `if`.
+//!
 //! Two leaf reads are the same value when they read the same local (or
 //! global), the earlier dominates the later, and nothing writes it between —
 //! where "between" includes the whole of every loop around the later read
@@ -44,7 +48,7 @@ use std::collections::HashSet;
 
 use wasmparser::Operator as Op;
 
-use crate::decode::{is_load, store_width, Body};
+use crate::decode::{branch_target, is_load, store_width, Body};
 
 /// almide-layout `LEN.offset` and `PAYLOAD` — the block ABI the shipped
 /// bytes and the runtime share.
@@ -241,11 +245,55 @@ impl<'b, 'a> Flow<'b, 'a> {
         if p > q {
             return false;
         }
-        let d0 = self.b.depth[p];
-        (p + 1..=q).all(|k| {
-            let d = self.b.depth[k];
-            d > d0 || (d == d0 && !matches!(self.b.ops[k], Op::End | Op::Else))
-        })
+        // The constructs `p` sits in that `q` does not: the path leaves each
+        // through its `end`. Leaving an `if` is refused (the other arm, or no
+        // arm, reaches its end without `p`); a `block` or `loop` is left by
+        // falling through, so `p` is on every path out unless a branch
+        // BEFORE `p` inside it lands at the end of an exited `block`.
+        let chain = |mut c: Option<usize>| {
+            let mut v = Vec::new();
+            while let Some(s) = c {
+                v.push(s);
+                c = self.parent[s];
+            }
+            v
+        };
+        let (cp, cq) = (chain(self.parent[p]), chain(self.parent[q]));
+        let exited: Vec<usize> = cp.iter().copied().filter(|s| !cq.contains(s)).collect();
+        if exited.iter().any(|&s| !matches!(self.b.ops[s], Op::Block { .. } | Op::Loop { .. })) {
+            return false;
+        }
+        // Inner depth of each exited `block` (a branch to a `loop` goes to
+        // its start, from which the path passes `p` again).
+        let block_depths: Vec<u32> = exited
+            .iter()
+            .filter(|&&s| matches!(self.b.ops[s], Op::Block { .. }))
+            .map(|&s| self.b.depth[s] + 1)
+            .collect();
+        if let Some(&outer) = exited.last() {
+            for j in outer + 1..p {
+                if let Some(t) = branch_target(&self.b.ops[j], self.b.depth[j]) {
+                    let all: Vec<u32> = match &self.b.ops[j] {
+                        Op::BrTable { targets } => targets
+                            .targets()
+                            .filter_map(Result::ok)
+                            .chain(std::iter::once(targets.default()))
+                            .map(|r| self.b.depth[j].saturating_sub(r))
+                            .collect(),
+                        _ => vec![t],
+                    };
+                    if all.iter().any(|t| block_depths.contains(t)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        // Within the construct both share, `p` precedes `q` at its own level
+        // or inside constructs that end before `q`: no `else` switches arms
+        // at that level.
+        let shared = cq.iter().copied().find(|s| cp.contains(s));
+        let d_shared = shared.map_or(0, |s| self.b.depth[s] + 1);
+        !(p + 1..=q).any(|k| self.b.depth[k] == d_shared && matches!(self.b.ops[k], Op::Else))
     }
 
     /// The instructions that may run after `from` and before `to` reaches

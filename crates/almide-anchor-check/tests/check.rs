@@ -482,3 +482,15 @@ fn a_variables_release_inside_its_judge_is_matched() -> Result<(), String> {
     assert!(check_rc(&bodies, None, &releases, &[], &[(1, "d0".into())], &[], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+#[test]
+fn a_write_inside_a_block_left_by_falling_through_still_defines_the_read() -> Result<(), String> {
+    // The hold local is written inside a block that has no early exit.
+    let r = rc("(block local.get 0 local.set 1) local.get 1 call $alloc drop", "d0")?;
+    assert_eq!(r.calls, 1);
+    // A branch out of the block before the write: the read may see another value.
+    assert!(rc("(block local.get 0 i32.eqz br_if 0 local.get 0 local.set 1) local.get 1 call $alloc drop", "d0").is_err());
+    // Written in one arm of an `if`: not on every path.
+    assert!(rc("local.get 0 (if (then local.get 0 local.set 1)) local.get 1 call $alloc drop", "d0").is_err());
+    Ok(())
+}
