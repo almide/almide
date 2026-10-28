@@ -12,9 +12,10 @@
 //! apart: the witness does not record it by design (#4278).
 //!
 //! An owner rebind's release of the old block (`o`, the recorder's DecOld)
-//! is a release call, or happens inside the copy-on-write judge the
-//! anchor file's `judges` line locates (the judge releases its argument when
-//! it copies): it matches either, read through its local; a DecOld on a
+//! and a variable's release (`d` on a local) is a release call, or happens
+//! inside the copy-on-write judge the anchor file's `judges` line locates
+//! (the judge releases its argument when it copies): it matches either, read
+//! through its local, a release call first; a DecOld on a
 //! local that held nothing on its path has no instruction, so an unmatched
 //! `o` is counted (`rebind_unmatched`), not refused, and a judge call no `o`
 //! takes is counted (`judges_unmatched`) — both #4278's to settle.
@@ -162,7 +163,13 @@ pub fn check_rc(
         // Named events next: each takes a call of its kind read through its local.
         for &(kind, local) in evs.iter().filter(|e| e.1.is_some() && e.0 != 'o') {
             let l = local.unwrap_or(u32::MAX);
-            match (0..calls.len()).find(|&i| !used[i] && calls[i].1 == kind && calls[i].2.contains(&l)) {
+            let on = |i: usize, k: char| !used[i] && calls[i].1 == k && calls[i].2.contains(&l);
+            // A release a copy-on-write judge performs on the variable's old
+            // block (it copied a shared one) is recorded as that variable's `d`.
+            let found = (0..calls.len()).find(|&i| on(i, kind)).or_else(|| {
+                (kind == 'd').then(|| (0..calls.len()).find(|&i| on(i, 'j'))).flatten()
+            });
+            match found {
                 Some(i) => used[i] = true,
                 None => unmatched.push(format!("{kind}{l}")),
             }

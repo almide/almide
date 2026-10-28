@@ -470,3 +470,15 @@ fn an_rc_call_inside_an_arm_window_is_the_arms_own() -> Result<(), String> {
     assert!(check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[(1, 2, 2)], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+#[test]
+fn a_variables_release_inside_its_judge_is_matched() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc local.set 0");
+    let bodies = decode(&bytes)?;
+    let releases = std::collections::HashSet::new();
+    let mut r = RcReport::default();
+    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "d0".into())], &[], &mut r)?;
+    // Without the judge there is no instruction for it.
+    assert!(check_rc(&bodies, None, &releases, &[], &[(1, "d0".into())], &[], &mut RcReport::default()).is_err());
+    Ok(())
+}
