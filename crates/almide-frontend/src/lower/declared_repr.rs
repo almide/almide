@@ -49,9 +49,9 @@ pub(super) fn explicit_convention_fn(env: &TypeEnv, explicit: &HashSet<Sym>, ty:
         // `repr` defined in ANOTHER module was silently skipped and the
         // value fell through to the derived `AlmideRepr` impl — printing
         // the variant name with no error anywhere (#1087).
-        let held = crate::canonicalize::registration::convention_fn_key(env, &type_name.to_string(), convention)?;
+        let held = crate::canonicalize::registration::convention_fn_key(env, type_name.as_str(), convention)?;
         if env.explicit_convention_fns.contains(&held) {
-            return crate::canonicalize::registration::convention_emit_key(env, &type_name.to_string(), convention);
+            return crate::canonicalize::registration::convention_emit_key(env, type_name.as_str(), convention);
         }
     }
     None

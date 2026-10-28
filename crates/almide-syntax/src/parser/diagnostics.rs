@@ -180,8 +180,8 @@ impl Parser {
     /// rustc's `mixed_script_confusables` / `confusable_idents` do:
     ///
     /// - restriction level: a non-ASCII identifier must be at most UTS #39
-    ///   §5.2 Moderately Restrictive — one script; Latin with Han + Hiragana
-    ///   + Katakana, Han + Bopomofo or Han + Hangul; or Latin with one other
+    ///   §5.2 Moderately Restrictive — one script; Latin with Han, Hiragana
+    ///   and Katakana, Han + Bopomofo or Han + Hangul; or Latin with one other
     ///   Recommended script except Cyrillic and Greek — and every character
     ///   must be General Security Profile `Allowed`. `pаypal` with a Cyrillic
     ///   `а` (U+0430) is Latin + Cyrillic: refused.

@@ -150,6 +150,7 @@ impl<'a> LowerCtx<'a> {
     /// Returns the fully qualified function name if:
     /// - The function is explicitly defined in env.functions, OR
     /// - The type declares `deriving <Convention>` (auto-derive will generate the function)
+    ///
     /// A convention method the user wrote EXPLICITLY (not one auto-derive will
     /// synthesize). String interpolation of a record/variant uses this — when no
     /// explicit `repr` exists it falls through to the codegen `AlmideRepr` impl,

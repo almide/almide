@@ -74,7 +74,7 @@ impl Checker {
             if region.is_none() {
                 self.emit_extern_c(
                     format!("@extern(c) fn '{fn_name}': a Region return needs the length the foreign function returns"),
-                    format!(
+                    String::from(
                         "state it on the declaration: `@region(len = n, release = \"free_fn\")`, with `n` a parameter or an integer, \
                          and `free_fn` the C function that frees the buffer — or return `Handle` and read it through accessor functions (ADR-0031 D2)"
                     ),

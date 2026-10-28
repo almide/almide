@@ -23,7 +23,7 @@ pub fn init_color() {
 /// echoed source line shows it as its escape `\u{202E}` instead, as rustc does
 /// for the bidi controls.
 fn escape_bidi(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.chars().any(|c| almide_lang::lexer::is_hidden_source_char(c)) {
+    if !text.chars().any(almide_lang::lexer::is_hidden_source_char) {
         return std::borrow::Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len() + 16);
