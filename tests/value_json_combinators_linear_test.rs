@@ -239,17 +239,62 @@ fn native_bodies_stay_fast_at_the_issue_sizes() {
     // Old native times at these sizes: merge 13.7 s, merge-self ~20 s at
     // 160,000 (4.6 s at 80,000), pick/omit 11.8 s, the object fold 18 s, the
     // array fold ~14 s at 80,000 (3.4 s at 40,000).
-    for ((name, src, want), size) in [
-        (MERGE, 80_000),
-        (MERGE_SELF, 160_000),
-        (PICK_OMIT, 80_000),
-        (SET_OBJ, 40_000),
-        (SET_ARR, 80_000),
+    // `growth` is the full/quarter bound: 8 for a linear body (linear ~4x,
+    // quadratic ~16x). The object fold keeps 32: a native Object is a vector
+    // of pairs (C-401) and set_path finds its key by a linear scan, so a fold
+    // of n inserts is n^2/2 key compares by representation — measured 14.6x
+    // at 40,000 against 10,000 on release-fix 0ff4366bc and on this tree alike
+    // (2.7 s / 0.19 s, GCE n2-standard-16). Its bound catches growth past
+    // quadratic; its constant is the open cost, not a regression (#4289).
+    for ((name, src, want), size, growth) in [
+        (MERGE, 80_000, 8),
+        (MERGE_SELF, 160_000, 8),
+        (PICK_OMIT, 80_000, 8),
+        (SET_OBJ, 40_000, 32),
+        (SET_ARR, 80_000, 8),
     ] {
-        let (got, took) = native(dir.path(), &src(size));
-        assert_eq!(got, want(size), "{name} native answer");
-        assert!(took < Duration::from_secs(8), "{name} took {took:?} on native at {size} — quadratic again?");
+        // The bound is RELATIVE, the way set_map_wasm_linear_test and
+        // list_unique_wasm_linear_test do it: the same cell at a quarter of the
+        // size, built once and timed interleaved on the same runner. Linear
+        // work grows ~4x, quadratic ~16x. An absolute 8 s bound failed CI at
+        // 8.5 s (the object fold, develop and #4295 alike) with the bodies
+        // unchanged — a loaded runner, not a regression (#4289).
+        let quarter = size / 4;
+        let full_bin = built(dir.path(), "full", &src(size));
+        let small_bin = built(dir.path(), "quarter", &src(quarter));
+        let (mut full, mut small) = (Duration::MAX, Duration::MAX);
+        for _ in 0..2 {
+            let (got, took) = run_bin(&small_bin);
+            assert_eq!(got, want(quarter), "{name} native answer at {quarter}");
+            small = small.min(took);
+            let (got, took) = run_bin(&full_bin);
+            assert_eq!(got, want(size), "{name} native answer at {size}");
+            full = full.min(took);
+        }
+        assert!(
+            full < small * growth,
+            "{name} took {full:?} on native at {size} against {small:?} at {quarter} — quadratic again?"
+        );
     }
+}
+
+/// Build `src` natively to `<dir>/<stem>.bin`.
+fn built(dir: &Path, stem: &str, src: &str) -> std::path::PathBuf {
+    let file = format!("{stem}.almd");
+    let bin = format!("{stem}.bin");
+    std::fs::write(dir.join(&file), src).expect("write");
+    let b = almide(dir, &["build", &file, "-o", &bin]);
+    assert!(b.status.success(), "native build failed:\n{}", String::from_utf8_lossy(&b.stderr));
+    dir.join(bin)
+}
+
+/// Run a built binary: its stdout and wall time.
+fn run_bin(bin: &Path) -> (String, Duration) {
+    let t = Instant::now();
+    let o = Command::new(bin).output().expect("spawn native");
+    let took = t.elapsed();
+    assert!(o.status.success(), "native run failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    (String::from_utf8(o.stdout).expect("utf8"), took)
 }
 
 /// The interp runs the self-host prim bodies (stdlib/value_core.almd

@@ -1990,6 +1990,12 @@ jobs:
       - name: Edit-loop cost stays scale-independent (#1383 / #1396)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-edit-loop-scale.sh
 
+      # #4289: the cost of compiling a small program relative to lexing and
+      # parsing what it loads, same process, same runner — the edit-loop gate
+      # imports the whole stdlib and cannot see a program loading more of it.
+      - name: Compile-time ratio (#4289)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-compile-time-ratio.sh
+
       # #2098: the cost of the spelling the DOCS recommend, against the
       # spelling they tell writers to avoid — one program, one leg, one
       # round-robin run, so the ratio cancels this runner the way the

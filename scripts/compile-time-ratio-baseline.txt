@@ -1,0 +1,23 @@
+# compile-time ratios (see scripts/check-compile-time-ratio.sh, #4289)
+#
+# Measured 2026-10-28 on one GCE n2-standard-16 (Intel Cascade Lake), release
+# builds, the script's 24-file corpus, min of 3, two rounds each (the rounds
+# agreed to 0.6%):
+#
+#   tree                                   check   wasm
+#   pre-batch develop 3d7a1ab70            4.52    21.2
+#   post-batch release-fix 0ff4366bc       6.65    27.3   <- fails both rows
+#   this tree (the #4289 fixes)            5.10    22.5
+#
+# Re-anchored after int's radix functions stopped calling bytes (a program
+# reaching int loaded bytes), on a second n2-standard-16 (asia-northeast1-b),
+# same corpus, one domain-edge sweep running on one of its 16 cores:
+#
+#   pre-batch develop 3d7a1ab70            4.82    22.6
+#   before the int rewrite 5f0652ec0       5.38    23.4
+#   this tree                              4.63    20.5
+#
+# The rows read lower than the first VM's, so anchor on the second VM's
+# reading of this tree; release-fix's 6.65 / 27.3 stays far over the ceiling.
+check 4.63
+wasm 20.6

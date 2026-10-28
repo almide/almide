@@ -333,12 +333,12 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
-  let bytes = bytes.to_list(bytes.from_string(string.trim(s)))
-  match bytes {
+  let codes = bytes.to_list(bytes.from_string(string.trim(s)))
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
     [43, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, false),
-    _ => read_digits(strip_radix_prefix(bytes, radix), radix, false),
+    _ => read_digits(strip_radix_prefix(codes, radix), radix, false),
   }
 }
 
@@ -11537,9 +11537,8 @@ local fn shift_count(n: Int) -> Int = {
 fn to_string_radix(x: Int, radix: Int) -> String = {
   check_radix(radix)
 
-  let digits = radix_digits(if x < 0 then x else 0 - x, radix, [])
-  bytes.to_string_lossy(bytes.from_list(if x < 0 then [45] + digits
-  else digits))
+  let digits = radix_digits(if x < 0 then x else 0 - x, radix, "")
+  if x < 0 then "-" + digits else digits
 }
 
 /// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
@@ -11547,12 +11546,14 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)
-  let bytes = bytes.to_list(bytes.from_string(t))
-  match bytes {
+
+
+  let codes = string.to_list(t) |> list.map((c) => string.to_codepoint(c) ?? 0)
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
     [43, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, false),
-    _ => accumulate_negative(strip_radix_prefix(bytes, radix), radix, 0, false),
+    _ => accumulate_negative(strip_radix_prefix(codes, radix), radix, 0, false),
   }
 }
 
@@ -11560,14 +11561,20 @@ local fn check_radix(radix: Int) -> Unit =
   if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
 
 
-local fn radix_digits(n: Int, radix: Int, acc: List[Int]) -> List[Int] = {
+
+
+local fn radix_digits(n: Int, radix: Int, acc: String) -> String = {
   let q = n / radix
-  let digits = [digit_byte(0 - n % radix)] + acc
+  let digits = digit_char(0 - n % radix) + acc
   if q == 0 then digits
   else radix_digits(q, radix, digits)
 }
 
-local fn digit_byte(d: Int) -> Int = if d < 10 then 48 + d else 87 + d
+local fn digit_char(d: Int) -> String = string.slice(
+  "0123456789abcdefghijklmnopqrstuvwxyz",
+  d,
+  d + 1,
+)
 
 
 local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
@@ -11576,10 +11583,10 @@ else if b >= 65 and b <= 90 then b - 55
 else 99
 
 
-local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+local fn strip_radix_prefix(codes: List[Int], radix: Int) -> List[Int] = match codes {
   [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
-  else bytes,
-  _ => bytes,
+  else codes,
+  _ => codes,
 }
 
 local fn prefix_radix(b: Int) -> Int = match b {
