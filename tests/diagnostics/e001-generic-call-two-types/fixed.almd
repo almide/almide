@@ -1,4 +1,4 @@
-// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// E001 (#4018, security row 11b): a generic compare binds its type parameter once.
 // A generic compare instantiated at two types: the call binds T once.
 fn same[T](a: T, b: T) -> Bool = a == b
 
