@@ -22,7 +22,11 @@ test "http.html serves SafeHtml as text/html, escaped" {
 test "set_header refuses an HTML Content-Type, in every spelling a browser reads as HTML" {
   testing.assert_aborts(
     "http.set_header: an HTML Content-Type is served only from SafeHtml",
-    () => http.set_header(http.response(200, "<script>alert(1)</script>"), "Content-Type", ct("text/html")),
+    () => http.set_header(
+      http.response(200, "<script>alert(1)</script>"),
+      "Content-Type",
+      ct("text/html"),
+    ),
   )
   testing.assert_aborts(
     "http.set_header: an HTML Content-Type is served only from SafeHtml",
@@ -49,7 +53,11 @@ test "with_headers refuses an HTML Content-Type anywhere in its list" {
   )
   testing.assert_aborts(
     "http.with_headers: an HTML Content-Type is served only from SafeHtml",
-    () => http.with_headers(200, "x", [("X-A", "1"), ("content-type", ct("text/html")), ("Content-Type", "text/plain")]),
+    () => http.with_headers(
+      200,
+      "x",
+      [("X-A", "1"), ("content-type", ct("text/html")), ("Content-Type", "text/plain")],
+    ),
   )
 }
 
@@ -60,7 +68,10 @@ test "set_body refuses a String body on an HTML response" {
   )
   testing.assert_aborts(
     "http.set_body: this response is text/html, so its body is SafeHtml",
-    () => http.set_body_bytes(http.html(200, html.escape("x")), bytes.from_string("<script>alert(1)</script>")),
+    () => http.set_body_bytes(
+      http.html(200, html.escape("x")),
+      bytes.from_string("<script>alert(1)</script>"),
+    ),
   )
 }
 
@@ -84,7 +95,11 @@ test "an HTML response keeps its other writes: headers, status and an empty body
 }
 
 test "a request is not served, so it may carry any Content-Type" {
-  let req = http.set_header(http.new_request("POST", "/pages", "<p>draft</p>", []), "Content-Type", ct("text/html"))
+  let req = http.set_header(
+    http.new_request("POST", "/pages", "<p>draft</p>", []),
+    "Content-Type",
+    ct("text/html"),
+  )
   assert_eq(http.header(req, "Content-Type"), some("text/html"))
   assert_eq(http.body(http.set_body(req, "<p>v2</p>")), "<p>v2</p>")
 }
