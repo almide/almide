@@ -39,7 +39,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 fn response(status: Int, body: String) -> HttpResponse = _
 
 /// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
+fn html(status: Int, body: SafeHtml) -> HttpResponse = http.__http_response_put_header(
   response(status, html.to_string(body)),
   "Content-Type",
   "text/html; charset=utf-8",
@@ -49,15 +49,19 @@ fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
+/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value; aborts on an HTML Content-Type.
+@content_type_guard(headers, media = "__http_response_html_types")
 fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
+  for h in headers {
+    __http_response_html_refusal("http.with_headers", h.0, h.1)
+  }
   let flat = __flat(headers)
   http.__with_headers(status, body, flat)
 }
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
-fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
 /// 302 with Location url and empty body.
 @intrinsic("almide_rt_http_redirect")
@@ -90,13 +94,13 @@ fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 /// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
-/// m with header name set, any case: the first match replaced in place, else appended.
+/// m with header name set, any case: the first match replaced in place, else appended; a response aborts on an HTML Content-Type.
 fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
   name,
   value,
 )
 
-/// m with its body replaced.
+/// m with its body replaced; a text/html response aborts on a non-empty body.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
 /// m with its body replaced by body, decoded as lossy UTF-8.
@@ -125,13 +129,53 @@ fn __http_response_body(m: HttpResponse) -> String = _
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
 
+// Row 11e: a response serves HTML only from `SafeHtml`. `http.html` is the
+// one writer of an HTML Content-Type; a String header write naming an HTML
+// media type aborts, and so does a non-empty String body written into a
+// response that is already HTML. The refusal is read off the header's value,
+// never off which function wrote it, and the checker refuses the same write
+// when both operands are literals (E115, `@content_type_guard`, which names
+// the media-type list below so the two cannot drift).
+@content_type_guard(name, value, media = "__http_response_html_types")
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = {
+  __http_response_html_refusal("http.set_header", name, value)
+  http.__http_response_put_header(m, name, value)
+}
+
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse =
+  if body != "" and (http.__http_response_header_values(m, "Content-Type") |> list.any((v) => __http_response_names_html(v))) then panic(
+    "http.set_body: this response is text/html, so its body is SafeHtml: build the page with the html builders and answer with http.html(status, page)",
+  )
+  else http.__http_response_put_body(m, body)
+
+// The raw writers. Local: only the guarded writers above and `http.html`,
+// whose body is `SafeHtml`, reach them.
 @intrinsic("almide_http_set_header")
 @consume(m)
-fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+local fn __http_response_put_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
 
 @intrinsic("almide_http_set_body")
 @consume(m)
-fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
+
+// The media types a browser parses as an HTML document.
+local fn __http_response_html_types() -> List[String] = ["text/html", "application/xhtml+xml"]
+
+// Does a Content-Type value name an HTML media type? Each comma-separated
+// entry is read as a browser reads one: the part before `;`, trimmed, in any
+// case. A browser takes the last valid entry, so any entry counts.
+local fn __http_response_names_html(value: String) -> Bool = string.split(value, ",") |> list.any(
+  (entry) => list.contains(
+    __http_response_html_types(),
+    string.to_lower(string.trim(list.first(string.split(entry, ";")) ?? "")),
+  ),
+)
+
+local fn __http_response_html_refusal(op: String, name: String, value: String) -> Unit =
+  if string.to_lower(name) == "content-type" and __http_response_names_html(value) then panic(
+    "${op}: an HTML Content-Type is served only from SafeHtml: build the page with the html builders and answer with http.html(status, page)",
+  )
+  else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
   m,
