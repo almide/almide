@@ -33,7 +33,14 @@ fn zero() -> Float = float.parse("0") ?? 1.0
 fn nan_row(name: String, v: Float) -> Unit = {
   let lo = list.min([v, 1.0]) ?? 0.0
   let hi = list.max([1.0, v]) ?? 0.0
-  let by = list.sort_by([R { name: "nan", v: v }, R { name: "one", v: 1.0 }, R { name: "neg", v: -1.0 }], (r) => r.v)
+  let by = list.sort_by(
+    [
+      R { name: "nan", v: v },
+      R { name: "one", v: 1.0 },
+      R { name: "neg", v: -1.0 }
+    ],
+    (r) => r.v,
+  )
   println("${name}: sort=${fmtf(list.sort([1.0, v, -1.0]))} min=${float.to_string(lo)} max=${float.to_string(hi)} sort_by=${fmtr(by)}")
 }
 
