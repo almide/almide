@@ -48,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
 
@@ -193,6 +194,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
 
