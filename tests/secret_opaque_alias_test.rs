@@ -260,3 +260,23 @@ fn a_user_mod_type_is_open_inside_its_project() {
     let (ok, out) = dep_project("same_project", main, Some(notes));
     assert!(ok, "a `mod type` is open to its own project:\n{out}");
 }
+
+/// #4241's bare-spelling rule names a user `mod type` only where no module's
+/// own type of that name is in scope: the bundled `heap` reading its own
+/// `Heap` beside a user module's copy of it stays the bundled record. Before,
+/// the bundled heap's comparator read resolved to the user record, its fn
+/// type was lost, and E109 charged `heap.__before` with http's dispatch (the
+/// editloop-scale corpus: a copy of stdlib/heap.almd beside `import http`).
+#[test]
+fn a_user_module_copy_of_a_bundled_type_leaves_the_bundled_one_its_own() {
+    // Outside the repository, so no almide.toml above it makes it a package.
+    let d = std::env::temp_dir().join(format!("almide-user-heap-copy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    let heap = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/heap.almd")).unwrap();
+    std::fs::write(d.join("src/m064.almd"), heap).unwrap();
+    std::fs::write(d.join("src/main.almd"), "import http\nimport m064\n\neffect fn main() -> Unit = {\n  println(\"x\")\n}\n").unwrap();
+    let (ok, out) = run(&d, "check", "src/main.almd");
+    let _ = std::fs::remove_dir_all(&d);
+    assert!(ok && !out.contains("E109"), "a user copy of the bundled heap beside `import http` must check clean:\n{out}");
+}
