@@ -1,4 +1,4 @@
 check_target = "wasm"
 expects_code = "E112"
 expects_error = "too many generic instances"
-hint_substring = "Recurse on the same type"
+hint_substring = "Pass the same type on"

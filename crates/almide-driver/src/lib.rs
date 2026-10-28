@@ -113,10 +113,10 @@ pub fn budget_refusal() -> Option<almide_base::Diagnostic> {
                 budget::limit(BudgetId::GenericInstances),
                 budget::limit(BudgetId::TypeSize),
             ),
-            "A generic fn that calls itself with a larger type argument (`f((x, x))` inside `f[T]`) needs a new \
-             instance for every call depth, and each one's type is larger than the last. Recurse on the same type \
-             (pass a list, or count the depth in an Int). The budget is the compiler's, not the program's: the \
-             source cannot raise it (ADR-0030); `--budget generic_instances=N` on the command line can.",
+            "A generic fn that passes a larger type argument on (`g((x, x))` inside `f[T]`) needs a new instance \
+             for every step, each one's type larger than the last. Pass the same type on (collect the values in a \
+             list, or count the steps in an Int). The budget is the compiler's, not the program's: the source \
+             cannot raise it (ADR-0030); `--budget generic_instances=N` on the command line can.",
             "monomorphization",
         )
         .with_code("E112"),

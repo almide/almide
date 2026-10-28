@@ -1,0 +1,17 @@
+// E112 (ADR-0030): each fn of the chain passes `some` of a pair of its argument to the next, so
+// main's one call needs twelve instances, each type twice the last. The
+// twelfth passes the type-size budget; monomorphization stops there.
+fn l0[T: Hash](x: T) -> Int = l1(some((x, x)))
+fn l1[T: Hash](x: T) -> Int = l2(some((x, x)))
+fn l2[T: Hash](x: T) -> Int = l3(some((x, x)))
+fn l3[T: Hash](x: T) -> Int = l4(some((x, x)))
+fn l4[T: Hash](x: T) -> Int = l5(some((x, x)))
+fn l5[T: Hash](x: T) -> Int = l6(some((x, x)))
+fn l6[T: Hash](x: T) -> Int = l7(some((x, x)))
+fn l7[T: Hash](x: T) -> Int = l8(some((x, x)))
+fn l8[T: Hash](x: T) -> Int = l9(some((x, x)))
+fn l9[T: Hash](x: T) -> Int = l10(some((x, x)))
+fn l10[T: Hash](x: T) -> Int = l11(some((x, x)))
+fn l11[T: Hash](x: T) -> Int = 1
+
+effect fn main() -> Unit = println("${l0(1)}")

@@ -1,0 +1,16 @@
+// Each fn of the chain passes its argument on unchanged: one instance
+// type for the whole chain.
+fn l0[T: Hash](x: T) -> Int = l1(x)
+fn l1[T: Hash](x: T) -> Int = l2(x)
+fn l2[T: Hash](x: T) -> Int = l3(x)
+fn l3[T: Hash](x: T) -> Int = l4(x)
+fn l4[T: Hash](x: T) -> Int = l5(x)
+fn l5[T: Hash](x: T) -> Int = l6(x)
+fn l6[T: Hash](x: T) -> Int = l7(x)
+fn l7[T: Hash](x: T) -> Int = l8(x)
+fn l8[T: Hash](x: T) -> Int = l9(x)
+fn l9[T: Hash](x: T) -> Int = l10(x)
+fn l10[T: Hash](x: T) -> Int = l11(x)
+fn l11[T: Hash](x: T) -> Int = 1
+
+effect fn main() -> Unit = println("${l0(1)}")
