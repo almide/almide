@@ -58,8 +58,21 @@ fn content_type_guard_of(module: &str, func: &str) -> Option<ContentTypeGuard> {
 fn names_media(value: &str, media: &[String]) -> bool {
     value.split(',').any(|entry| {
         let t = entry.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
-        media.iter().any(|m| *m == t)
+        media.iter().any(|p| media_matches(&t, p))
     })
+}
+
+/// A media type against one pattern of the guard's list, as the run time
+/// reads it: `type/subtype`, where `*` matches any type and a subtype pattern
+/// `*<suffix>` matches a longer subtype ending with `<suffix>` (the `+xml`
+/// structured suffix, RFC 6839).
+fn media_matches(t: &str, pattern: &str) -> bool {
+    let (Some((tt, ts)), Some((pt, ps))) = (t.split_once('/'), pattern.split_once('/')) else { return false };
+    let subtype = match ps.strip_prefix('*') {
+        Some(suffix) => ts.chars().count() > suffix.chars().count() && ts.ends_with(suffix),
+        None => ps == ts,
+    };
+    (pt == "*" || pt == tt) && subtype
 }
 
 /// A literal header field `(name, value)` that the guard refuses.
@@ -127,7 +140,7 @@ impl Checker {
         for_each_body(program, &mut on);
         for (callee, value, span) in found {
             let mut d = Diagnostic::error(
-                format!("`{callee}` serves `Content-Type: {value}`, an HTML media type, with a String body; HTML is served only from SafeHtml"),
+                format!("`{callee}` serves `Content-Type: {value}`, an HTML or XML media type, with a String body; HTML is served only from SafeHtml"),
                 "build the page as SafeHtml with the html builders (html.escape for text, html.attr / html.url_attr for attributes, html.script_json for data in <script>) and answer with http.html(status, page); trusted markup goes through html.raw(s)".to_string(),
                 format!("the Content-Type written by {callee}"),
             )

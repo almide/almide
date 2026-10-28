@@ -143,7 +143,7 @@ fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> H
 }
 
 fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse =
-  if body != "" and (http.__http_response_header_values(m, "Content-Type") |> list.any((v) => __http_response_names_html(v))) then panic("http.set_body: this response is text/html, so its body is SafeHtml: build the page with the html builders and answer with http.html(status, page)")
+  if body != "" and (http.__http_response_header_values(m, "Content-Type") |> list.any((v) => __http_response_names_html(v))) then panic("http.set_body: this response serves HTML or XML, so its body is SafeHtml: build the page with the html builders and answer with http.html(status, page)")
   else http.__http_response_put_body(m, body)
 
 // The raw writers. Local: only the guarded writers above and `http.html`,
@@ -156,8 +156,27 @@ local fn __http_response_put_header(m: HttpResponse, name: String, value: String
 @consume(m)
 local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
-// The media types a browser parses as an HTML document.
-local fn __http_response_html_types() -> List[String] = ["text/html", "application/xhtml+xml"]
+// The media types a browser opens as a document that can run script, as
+// patterns over `type/subtype`: HTML itself, XML (`*/xml`: `application/xml`,
+// `text/xml`), and every subtype with the `+xml` structured suffix (RFC 6839:
+// `application/xhtml+xml`, `image/svg+xml`, …). `*` matches any type; a
+// subtype pattern `*<suffix>` matches a subtype longer than the suffix that
+// ends with it.
+local fn __http_response_html_types() -> List[String] = ["text/html", "*/xml", "*/*+xml"]
+
+local fn __http_response_subtype_matches(ts: String, ps: String) -> Bool = if string.starts_with(ps, "*") then {
+  let suffix = string.slice(ps, 1, string.len(ps))
+  string.len(ts) > string.len(suffix) and string.ends_with(ts, suffix)
+}
+else ps == ts
+
+local fn __http_response_media_matches(t: String, pattern: String) -> Bool = match string.split_once(t, "/") {
+  some((tt, ts)) => match string.split_once(pattern, "/") {
+    some((pt, ps)) => (pt == "*" or pt == tt) and __http_response_subtype_matches(ts, ps),
+    none => false,
+  },
+  none => false,
+}
 
 // ASCII case fold, as header names and media types are compared (RFC 9110
 // §5.1, §8.3.1): no Unicode case table is needed for a token.
@@ -169,15 +188,15 @@ local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.m
 // Does a Content-Type value name an HTML media type? Each comma-separated
 // entry is read as a browser reads one: the part before `;`, trimmed, in any
 // case. A browser takes the last valid entry, so any entry counts.
-local fn __http_response_names_html(value: String) -> Bool = string.split(value, ",") |> list.any((entry) => list.contains(
-  __http_response_html_types(),
-  __http_response_fold(string.trim(list.first(string.split(entry, ";")) ?? "")),
-))
+local fn __http_response_names_html(value: String) -> Bool = string.split(value, ",") |> list.any((entry) => {
+  let t = __http_response_fold(string.trim(list.first(string.split(entry, ";")) ?? ""))
+  __http_response_html_types() |> list.any((p) => __http_response_media_matches(t, p))
+})
 
 local fn __http_response_is_content_type(name: String) -> Bool = string.len(name) == 12 and __http_response_fold(name) == "content-type"
 
 local fn __http_response_html_refusal(op: String, name: String, value: String) -> Unit =
-  if __http_response_is_content_type(name) and __http_response_names_html(value) then panic("${op}: an HTML Content-Type is served only from SafeHtml: build the page with the html builders and answer with http.html(status, page)")
+  if __http_response_is_content_type(name) and __http_response_names_html(value) then panic("${op}: an HTML or XML Content-Type is served only from SafeHtml: build the page with the html builders and answer with http.html(status, page)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
