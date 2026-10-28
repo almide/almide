@@ -1,8 +1,9 @@
 // #4294: a loop element that is only matched against literals is READ — a
 // `String` subject matched against string literals renders over a `&str`
-// view — so the list param it comes from is borrowed. A mixed body that also
-// moves the element (collects it, or binds it in an arm) keeps the param
-// owned. The ownership certifier's C4 refused the owned `classify`.
+// view, and an arm's binder is a `&str` into it — so the list param it comes
+// from is borrowed. A mixed body that also moves the element (collects it)
+// keeps the param owned. The ownership certifier's C4 refused the owned
+// `classify`.
 type Tag = { name: String, weight: Int }
 
 fn classify(xs: List[String]) -> Int = {
@@ -61,7 +62,8 @@ fn keep_unknown(xs: List[String]) -> List[String] = {
   out
 }
 
-// Mixed: an arm binds the element and returns it.
+// An arm binds the matched element and returns it: the binder is a `&str`
+// view of it, copied out where it is returned, so the source is still read.
 fn rename(xs: List[String]) -> List[String] = xs
   |> list.map((x) => match x {
     "a" => "A",
@@ -99,6 +101,11 @@ test "an element matched and collected stays owned" {
   let xs = ["a", "q", "b", "r"]
   assert_eq(keep_unknown(xs), ["q", "r"])
   assert_eq(keep_unknown(xs), ["q", "r"])
-  assert_eq(rename(xs), ["A", "q", "b", "r"])
-  assert_eq(rename(xs), ["A", "q", "b", "r"])
+  assert_eq(list.len(xs), 4)
+}
+
+test "an arm binding the matched element reads it" {
+  let xs = ["a", "q", "b"]
+  assert_eq(rename(xs), ["A", "q", "b"])
+  assert_eq(rename(xs), ["A", "q", "b"])
 }
