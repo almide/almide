@@ -68,19 +68,20 @@ fn keep_unknown(xs: List[String]) -> List[String] = {
   out
 }
 
-fn rename(xs: List[String]) -> List[String] = xs
-  |> list.map((x) => match x {
-    "a" => "A",
-    other => other,
-  })
+fn rename(xs: List[String]) -> List[String] = xs |> list.map((x) => match x {
+  "a" => "A",
+  other => other,
+})
 
 fn rename_loop(xs: List[String]) -> List[String] = {
   var out: List[String] = []
   for x in xs {
-    out = out + [match x {
-      "a" => "A",
-      other => other,
-    }]
+    out = out + [
+      match x {
+        "a" => "A",
+        other => other,
+      }
+    ]
   }
   out
 }
@@ -101,11 +102,10 @@ fn measure(xs: List[String]) -> Int = {
   n
 }
 
-fn tag_names(ts: List[Tag]) -> List[String] = ts
-  |> list.map((t) => match t.name {
-    "heavy" => "H",
-    n => n,
-  })
+fn tag_names(ts: List[Tag]) -> List[String] = ts |> list.map((t) => match t.name {
+  "heavy" => "H",
+  n => n,
+})
 
 fn shout(s: String) -> String = match s {
   "a" => s,
