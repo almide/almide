@@ -39,20 +39,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1297 | 408 | 713 | 88 | 88 | 417 |
+| 1001 | 1300 | 408 | 716 | 88 | 88 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,297 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,300 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 796 | 166 |
 | 値の型だけが持つ関数 | 297 | 297 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 204 | 204 |
-| 計 | 1297 | 667 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 207 | 207 |
+| 計 | 1300 | 670 |
 
 ## モジュールごとの数
 
@@ -69,7 +69,7 @@
 | [`duration`](#duration) | 7 | 1 | 0 | 0 | 0 | [L2-duration.md](L2-duration.md) |
 | [`env`](#env) | 9 | 3 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
 | `error`（モジュールごと撤去） | 0 | 0 | 0 | 0 | 3 | [L2-error.md](L2-error.md) |
-| [`ffi`](#ffi)（新しいモジュール） | 4 | 4 | 0 | 0 | 0 | [L2-ffi.md](L2-ffi.md) |
+| [`ffi`](#ffi)（新しいモジュール） | 7 | 7 | 0 | 0 | 0 | [L2-ffi.md](L2-ffi.md) |
 | [`float`](#float) | 26 | 12 | 1 | 0 | 32 | [L2-float.md](L2-float.md) |
 | [`float32`](#float32) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`float64`](#float64) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -372,11 +372,11 @@
 
 | 関数 | 代わり | 案 |
 |---|---|---|
-| `as_mut_ptr` | `ffi.address` | R-bytes-06 |
-| `as_ptr` | `ffi.address` | R-bytes-06 |
+| `as_mut_ptr` | `ffi.alloc` | R-bytes-06 |
+| `as_ptr` | `ffi.region` | R-bytes-06 |
 | `concat` | `+` | R-bytes-16 |
 | `copy_to_ptr` | `ffi.write` | R-bytes-06 |
-| `data_ptr` | `ffi.address` | R-bytes-06 |
+| `data_ptr` | `ffi.region` | R-bytes-06 |
 | `from_raw_ptr` | `ffi.read` | R-bytes-06 |
 | `get_or` | `get(b, i) ?? d` | R-bytes-07 |
 | `heap_restore` | 内部の名前にする | R-bytes-14 |
@@ -569,10 +569,15 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `address` | `fn ffi.address(b: Bytes) -> RawPtr` | 新規。`bytes.as_ptr`・`as_mut_ptr` から | R-ffi-01 |
-| `read` | `effect fn ffi.read(ptr: RawPtr, len: Int) -> Bytes` | 新規。`bytes.from_raw_ptr` から | R-ffi-01 |
-| `to_int` | `fn ffi.to_int(p: RawPtr) -> Int` | 新規。`bytes.data_ptr` の役割 | R-ffi-01 |
-| `write` | `effect fn ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int` | 新規。`bytes.copy_to_ptr` から。書き込む先を先に | R-ffi-01、R-ffi-03 |
+| `alloc` | `effect fn ffi.alloc(n: Int) -> Region` | 新規。`bytes.as_mut_ptr` から。長さつきの書ける領域 | R-ffi-01、ADR-0031 |
+| `is_writable` | `fn ffi.is_writable(r: Region) -> Bool` | 新規 | ADR-0031 |
+| `len` | `fn ffi.len(r: Region) -> Int` | 新規 | ADR-0031 |
+| `read` | `effect fn ffi.read(r: Region, off: Int, n: Int) -> Bytes` | 新規。`bytes.from_raw_ptr` から。範囲の外は err | R-ffi-01、ADR-0031 |
+| `region` | `fn ffi.region(b: Bytes) -> Region` | 新規。`bytes.as_ptr`・`data_ptr` から。読むだけの領域 | R-ffi-01、ADR-0031 |
+| `to_bytes` | `effect fn ffi.to_bytes(r: Region) -> Bytes` | 新規 | ADR-0031 |
+| `write` | `effect fn ffi.write(r: Region, off: Int, b: Bytes) -> Unit` | 新規。`bytes.copy_to_ptr` から。書き込む先を先に | R-ffi-01、R-ffi-03、ADR-0031 |
+
+アドレスを数で持つ `RawPtr`（`ffi.address`・`ffi.to_int`）は、ADR-0031（表の行 5 の裁定）で長さつきの `Region` に置き換えました。
 
 ## float
 
