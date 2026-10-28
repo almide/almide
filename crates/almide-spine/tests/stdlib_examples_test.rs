@@ -16,7 +16,7 @@ fn workspace_root() -> PathBuf {
 
 /// Modules that are NOT auto-imported and need an explicit `import` line in
 /// the generated example program. Extended as modules gain examples.
-const NEEDS_IMPORT: &[&str] = &["url", "json", "fs", "http", "env", "io", "random", "regex", "process", "testing", "net", "zlib", "html"];
+const NEEDS_IMPORT: &[&str] = &["url", "json", "fs", "http", "env", "io", "random", "regex", "process", "testing", "net", "zlib", "html", "svg"];
 
 #[test]
 fn every_stdlib_example_evaluates_to_true() {
