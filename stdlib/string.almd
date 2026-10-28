@@ -498,3 +498,9 @@ fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 // the module's surface.
 @intrinsic("almide_rt_string___err_text")
 fn __err_text(s: String) -> String = _
+
+// ADR-0032: string is a response Body (the builtin protocol in
+// crates/almide-frontend/src/canonicalize/protocols.rs).
+fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
+
+fn __string_to_bytes(s: String) -> Bytes = bytes.from_string(s)

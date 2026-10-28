@@ -267,3 +267,9 @@ local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> V
     err(_) => v,
   },
 }
+
+// ADR-0032: value is a response Body (the builtin protocol in
+// crates/almide-frontend/src/canonicalize/protocols.rs).
+fn __value_media_type(v: Value) -> String = "application/json"
+
+fn __value_to_bytes(v: Value) -> Bytes = bytes.from_string(__stringify(v))
