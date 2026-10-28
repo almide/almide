@@ -1,0 +1,3 @@
+expects_code = "E115"
+expects_error = "`http.with_headers` serves `Content-Type: text/plain, text/html`, an HTML media type, with a String body"
+hint_substring = "trusted markup goes through html.raw(s)"
