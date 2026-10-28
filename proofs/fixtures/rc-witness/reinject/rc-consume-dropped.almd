@@ -1,0 +1,13 @@
+// #4277 drill: `$bytes_push` stops freeing the outgrown block on its grow
+// path. The frame's event still reads as the push consuming the buffer;
+// the RC byte check holds a consumed release to the callee taking ownership
+// of that parameter.
+effect fn main() -> Unit = {
+  var b = bytes.zeros(0)
+  var i = 0
+  while i < 40 {
+    bytes.push(b, i)
+    i = i + 1
+  }
+  println("${bytes.len(b)}")
+}

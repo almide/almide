@@ -1,0 +1,17 @@
+diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
+index a40b0371d..77a5ddc5f 100644
+--- a/crates/almide-wasm/src/calls_modules.rs
++++ b/crates/almide-wasm/src/calls_modules.rs
+@@ -36,6 +36,12 @@ impl Emitter<'_> {
+         let arm_from = self.f.byte_len();
+         let lowered = self.arm_scope(|em| {
+             let l = em.lower_module_call_dispatch(target, args, tail, ret_hint)?;
++            // RE-INJECTED (#4277 drill): an extra release of a frame-owned
++            // local, inside the arm's window.
++            if let Some(&x) = em.rc_owned.iter().next() {
++                let d = em.dec_fn_of_local(x);
++                em.f.instructions().local_get(x).call(d);
++            }
+             // The witness audit (#1696 step 4): the arm fired one argument
+             // hook per argument, and declared no droppable View — or the
+             // frame declines, before the promotion below adds a +1.
