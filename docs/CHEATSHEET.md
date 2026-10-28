@@ -1125,9 +1125,11 @@ error E053, never silently ignored.
 is the one way to answer `text/html`; build `page` with `html.escape` (text),
 `html.attr` / `html.url_attr` (attributes) or `html.script_json` (data in
 `<script>`), and `html.raw(s)` only for trusted markup. `http.set_header` /
-`http.with_headers` with a `Content-Type` naming `text/html` or
-`application/xhtml+xml` aborts (E115 when written as literals), and so does
-`http.set_body` with a non-empty String on an HTML response:
+`http.with_headers` with a `Content-Type` naming `text/html`, an XML type
+(`application/xml`, `text/xml`) or a `+xml` subtype such as `image/svg+xml`
+aborts (E115 when written as literals), and so does `http.set_body` with a
+non-empty String on such a response; a fetched response re-served unchanged
+(a proxy) is allowed:
 
 ```almide check
 import html
