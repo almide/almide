@@ -39,6 +39,11 @@
 //! call whose argument was read through that global, or loaded out of the
 //! block cell local `l` holds.
 //!
+//! A variable's recorded release with no release call of its own matches a
+//! call inside a stdlib arm's or a compound routine's window that takes the
+//! variable as an argument — the arm or routine consumes it — counted
+//! (`consumed`).
+//!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
 //! keeps the balance its ownership declaration states; that a compound
@@ -64,6 +69,7 @@ pub struct RcReport {
     pub arm_internal: usize,
     pub routine_internal: usize,
     pub element: usize,
+    pub consumed: usize,
 }
 
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
@@ -199,6 +205,9 @@ pub fn check_rc(
         rep.events += evs.len();
         let mut used = vec![false; calls.len()];
         let mut unmatched: Vec<String> = Vec::new();
+        // Named events no RC call took: a release may be the consumption of
+        // the variable by a stdlib arm or a compound routine (below).
+        let mut pending: Vec<(char, u32)> = Vec::new();
         // Rebind releases first: a release or a judge call on their local.
         for &(_, local) in evs.iter().filter(|e| e.0 == 'o') {
             let l = local.unwrap_or(u32::MAX);
@@ -218,7 +227,7 @@ pub fn check_rc(
             });
             match found {
                 Some(i) => used[i] = true,
-                None => unmatched.push(format!("{kind}{l}")),
+                None => pending.push((kind, l)),
             }
         }
         for &(kind, _) in evs.iter().filter(|e| e.1.is_none()) {
@@ -229,6 +238,23 @@ pub fn check_rc(
         }
         rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
         let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
+        // A variable's release that is an arm's or a routine's consumption of
+        // it: a call inside its window takes the variable as an argument (the
+        // arm's ownership declaration says it consumes; #4278 trusts that).
+        for (kind, l) in pending {
+            let consumed = kind == 'd'
+                && b.ops.iter().enumerate().any(|(k, op)| {
+                    matches!(op, Op::Call { .. })
+                        && !dead[k]
+                        && (inside(&windows[0], k) || inside(&windows[1], k))
+                        && (0..b.args[k].len()).any(|j| names(&fl.arg(k, j, FUEL)).contains(&l))
+                });
+            if consumed {
+                rep.consumed += 1;
+            } else {
+                unmatched.push(format!("{kind}{l}"));
+            }
+        }
         for i in 0..calls.len() {
             if used[i] || calls[i].1 == 'j' {
                 continue;

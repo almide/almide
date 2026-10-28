@@ -534,3 +534,17 @@ fn an_event_on_a_cell_holder_matches_the_release_of_its_occupant() -> Result<(),
     assert!(rc("local.get 1 i32.load offset=12 call $alloc drop", &format!("d{}", 0xA000_0000u32)).is_err());
     Ok(())
 }
+
+#[test]
+fn a_release_an_arm_consumes_is_matched_inside_its_window() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    // `$alloc` here is no release routine: it is the arm consuming local 0.
+    let none = std::collections::HashSet::new();
+    let mut r = RcReport::default();
+    check_rc(&bodies, None, &none, &[], &[(1, "d0".into())], &[vec![(1, 0, 2)], vec![]], &mut r)?;
+    assert_eq!(r.consumed, 1);
+    // Outside any window it is a release with no instruction.
+    assert!(check_rc(&bodies, None, &none, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
