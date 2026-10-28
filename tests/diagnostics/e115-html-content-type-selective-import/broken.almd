@@ -1,8 +1,9 @@
 // E115 (row 11e): a bare `with_headers` brought in by a selective import, and
 // a Content-Type whose first entry is text/plain. A browser reads the last
-// valid entry of a comma list, so `text/html` still makes the body a page.
+// valid entry of a comma list, so `image/svg+xml` makes the body an SVG
+// document, whose `<script>` and `onload` run like a page's.
 import http.{with_headers}
 
-fn report(rows: String) -> HttpResponse = with_headers(200, rows, [("CONTENT-TYPE", "text/plain, text/html")])
+fn report(rows: String) -> HttpResponse = with_headers(200, rows, [("CONTENT-TYPE", "text/plain, image/svg+xml")])
 
 fn main() -> Unit = println(http.body(report("a,b")))

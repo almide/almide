@@ -1,8 +1,9 @@
 // @contract: C-275
 // Security row 11e: a response serves HTML only from SafeHtml. `http.html`
-// is the one writer of an HTML Content-Type; a String header write naming an
-// HTML media type aborts, and so does a non-empty String body written into a
-// response that is already HTML. The header values here are computed (`ct`),
+// is the one writer of an HTML Content-Type; a String header write naming a
+// type a browser renders with script (HTML, `*/xml`, any `+xml` subtype such
+// as SVG) aborts, and so does a non-empty String body written into a response
+// that already holds one. The header values here are computed (`ct`),
 // so the check-time refusal (E115, which needs literals) stays out of the way
 // and the run-time refusal is what runs. Every assertion holds on native and
 // on wasm alike.
@@ -21,7 +22,7 @@ test "http.html serves SafeHtml as text/html, escaped" {
 
 test "set_header refuses an HTML Content-Type, in every spelling a browser reads as HTML" {
   testing.assert_aborts(
-    "http.set_header: an HTML Content-Type is served only from SafeHtml",
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.set_header(
       http.response(200, "<script>alert(1)</script>"),
       "Content-Type",
@@ -29,30 +30,30 @@ test "set_header refuses an HTML Content-Type, in every spelling a browser reads
     ),
   )
   testing.assert_aborts(
-    "http.set_header: an HTML Content-Type is served only from SafeHtml",
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.set_header(http.response(200, "x"), "content-type", ct(" TEXT/HTML ; charset=utf-8")),
   )
   testing.assert_aborts(
-    "http.set_header: an HTML Content-Type is served only from SafeHtml",
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.set_header(http.response(200, "x"), "CONTENT-TYPE", ct("application/xhtml+xml")),
   )
   testing.assert_aborts(
-    "http.set_header: an HTML Content-Type is served only from SafeHtml",
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.set_header(http.response(200, "x"), "Content-Type", ct("text/plain, text/html")),
   )
   testing.assert_aborts(
-    "http.set_header: an HTML Content-Type is served only from SafeHtml",
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.set_header(http.html(200, html.escape("x")), "Content-Type", ct("text/html")),
   )
 }
 
 test "with_headers refuses an HTML Content-Type anywhere in its list" {
   testing.assert_aborts(
-    "http.with_headers: an HTML Content-Type is served only from SafeHtml",
+    "http.with_headers: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.with_headers(200, "<script>alert(1)</script>", [("Content-Type", ct("text/html"))]),
   )
   testing.assert_aborts(
-    "http.with_headers: an HTML Content-Type is served only from SafeHtml",
+    "http.with_headers: an HTML or XML Content-Type is served only from SafeHtml",
     () => http.with_headers(
       200,
       "x",
@@ -63,15 +64,34 @@ test "with_headers refuses an HTML Content-Type anywhere in its list" {
 
 test "set_body refuses a String body on an HTML response" {
   testing.assert_aborts(
-    "http.set_body: this response is text/html, so its body is SafeHtml",
+    "http.set_body: this response serves HTML or XML, so its body is SafeHtml",
     () => http.set_body(http.html(200, html.escape("x")), "<script>alert(1)</script>"),
   )
   testing.assert_aborts(
-    "http.set_body: this response is text/html, so its body is SafeHtml",
+    "http.set_body: this response serves HTML or XML, so its body is SafeHtml",
     () => http.set_body_bytes(
       http.html(200, html.escape("x")),
       bytes.from_string("<script>alert(1)</script>"),
     ),
+  )
+}
+
+test "set_header and with_headers refuse SVG and the XML types a browser renders with script" {
+  testing.assert_aborts(
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
+    () => http.set_header(http.response(200, "<svg onload=alert(1)/>"), "Content-Type", ct("image/svg+xml")),
+  )
+  testing.assert_aborts(
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
+    () => http.set_header(http.response(200, "x"), "Content-Type", ct("Application/XML; charset=utf-8")),
+  )
+  testing.assert_aborts(
+    "http.set_header: an HTML or XML Content-Type is served only from SafeHtml",
+    () => http.set_header(http.response(200, "x"), "Content-Type", ct("text/xml")),
+  )
+  testing.assert_aborts(
+    "http.with_headers: an HTML or XML Content-Type is served only from SafeHtml",
+    () => http.with_headers(200, "x", [("Content-Type", ct("application/atom+xml"))]),
   )
 }
 
@@ -82,6 +102,10 @@ test "control: the same writes with a media type that is not HTML pass" {
   assert_eq(http.header(b, "content-type"), some("text/markdown; charset=utf-8"))
   let c = http.set_header(http.response(200, "<b>"), "X-Note", ct("text/html"))
   assert_eq(http.header(c, "X-Note"), some("text/html"))
+  let e = http.set_header(http.response(200, "<b>"), "Content-Type", ct("application/json"))
+  assert_eq(http.header(e, "Content-Type"), some("application/json"))
+  let f = http.set_header(http.response(200, "<b>"), "Content-Type", ct("application/+xml"))
+  assert_eq(http.header(f, "Content-Type"), some("application/+xml"))
   let d = http.set_body(http.response(200, "a"), "<b>")
   assert_eq(http.body(d), "<b>")
 }
