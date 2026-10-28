@@ -116,6 +116,6 @@ reason = "the rooted fs family and every fs call under [permissions] fs by descr
 
 [[file]]
 path = "runtime/rs/src/random.rs"
-count = 4
+count = 6
 class = "c-call"
-reason = "random.bytes (#3938): the getrandom(2) and getentropy(3) declarations and calls that fill a caller-owned buffer from the OS CSPRNG; each call's pointer and length come from one live &mut [u8]"
+reason = "random.bytes (#3938): the getrandom(2), getentropy(3) and Windows BCryptGenRandom (system-preferred RNG, null algorithm handle) declarations and calls that fill a caller-owned buffer from the OS CSPRNG; each call's pointer and length come from one live &mut [u8]"
