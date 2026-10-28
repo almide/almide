@@ -39,10 +39,10 @@
 //! call whose argument was read through that global, or loaded out of the
 //! block cell local `l` holds.
 //!
-//! A variable's recorded release with no release call of its own matches a
-//! call inside a stdlib arm's or a compound routine's window that takes the
-//! variable as an argument — the arm or routine consumes it — counted
-//! (`consumed`).
+//! A variable's recorded release (or +1) with no RC call of its own matches
+//! a call inside a stdlib arm's or a compound routine's window that takes
+//! the variable as an argument — the arm or routine consumes it, or takes
+//! the +1 its argument guard prepays — counted (`consumed`).
 //!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
@@ -242,7 +242,7 @@ pub fn check_rc(
         // it: a call inside its window takes the variable as an argument (the
         // arm's ownership declaration says it consumes; #4278 trusts that).
         for (kind, l) in pending {
-            let consumed = kind == 'd'
+            let consumed = matches!(kind, 'd' | 'a')
                 && b.ops.iter().enumerate().any(|(k, op)| {
                     matches!(op, Op::Call { .. })
                         && !dead[k]
