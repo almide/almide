@@ -269,7 +269,10 @@ mod tests {
         let ledger: toml::Value = toml::from_str(LEDGER).unwrap();
         let e15 = ledger["epoch"].as_array().unwrap().iter().find(|e| e["n"].as_integer() == Some(15)).unwrap();
         for b in e15["breaks"].as_array().unwrap().iter().filter_map(|b| b.as_str()) {
-            let shaped = b.contains("` → `import ") || b.contains("` → delete the call") || b.contains("` → rewrite as `");
+            // A removal names its spelling first (`parse_break`'s own rule);
+            // an entry that opens with prose (`the type `RawPtr` → …`) is not one.
+            let shaped = b.starts_with('`')
+                && (b.contains("` → `import ") || b.contains("` → delete the call") || b.contains("` → rewrite as `"));
             assert!(!shaped || parse_break(15, b).is_some(), "a removal-shaped break that does not parse: {b}");
         }
         for name in ["matrix.mul", "int.to_int8", "list.get_or", "bytes.concat", "path.trusted", "matrix.conv1d", "process.spawn"] {
