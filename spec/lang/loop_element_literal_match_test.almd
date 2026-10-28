@@ -29,11 +29,10 @@ fn score(xs: List[Int]) -> Int = {
   n
 }
 
-fn classify_chain(xs: List[String]) -> List[Int] = xs
-  |> list.map((x) => match x {
-    "a" => 1,
-    _ => 0,
-  })
+fn classify_chain(xs: List[String]) -> List[Int] = xs |> list.map((x) => match x {
+  "a" => 1,
+  _ => 0,
+})
 
 fn tag_weight(ts: List[Tag]) -> Int = {
   var n = 0
@@ -56,7 +55,10 @@ fn keep_unknown(xs: List[String]) -> List[String] = {
       "b" => true,
       _ => false,
     }
-    if known then () else { out = out + [x] }
+    if known then ()
+    else {
+      out = out + [x]
+    }
   }
   out
 }
@@ -83,7 +85,10 @@ test "a chain element matched only against literals" {
 }
 
 test "a record element's field matched only against literals" {
-  let ts = [{ name: "heavy", weight: 3 }, { name: "light", weight: 4 }]
+  let ts = [
+    { name: "heavy", weight: 3 },
+    { name: "light", weight: 4 }
+  ]
   assert_eq(tag_weight(ts), 10)
   assert_eq(tag_weight(ts), 10)
 }
