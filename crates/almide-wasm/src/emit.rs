@@ -59,6 +59,10 @@ pub fn emit_library_with_ops(
 fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
     // Transparent newtypes erase FIRST, so both passes read one tree
     // (#1423 stage 4: the html SafeHtml row).
+    // ADR-0031 D3: a Region argument of an `@extern(wasm)` import is split
+    // into (base, len) before anything reads the program.
+    let split = crate::extern_region::split_region_params(ir);
+    let ir = split.as_ref().unwrap_or(ir);
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
     let desugared = front_desugar::desugar(ir);

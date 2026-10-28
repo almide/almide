@@ -97,6 +97,9 @@ fn implements_arg(line: &str) -> Option<String> {
 fn fn_name(line: &str) -> Option<String> {
     let t = line.trim();
     let t = t.strip_prefix("pub ").unwrap_or(t);
+    // `local fn` / `mod fn`: a module-private surface (ffi's raw operations,
+    // ADR-0031) is still a function the module declares.
+    let t = t.strip_prefix("local ").or_else(|| t.strip_prefix("mod ")).unwrap_or(t);
     let t = t.strip_prefix("effect ").unwrap_or(t);
     let after = t.strip_prefix("fn ")?;
     let name: String = after.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();

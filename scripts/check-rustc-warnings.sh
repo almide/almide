@@ -30,11 +30,12 @@
 # actually saw the workspace, so a broken invocation fails loudly instead of
 # going green.
 #
-# OUT OF SCOPE, on purpose: the five manifests `Cargo.toml` excludes
+# OUT OF SCOPE, on purpose: the manifests `Cargo.toml` excludes
 # (crates/almide-kernel, research/benchmark/stdlib/rust_wasm_compare,
-# tools/wasmgen-harness, tools/wasmgen-harness-uu, tools/xtarget-fuzz). They are
+# tools/wasmgen-harness, tools/wasmgen-harness-uu, tools/xtarget-fuzz, and
+# tools/loom-fan-gate, a loom model scripts/loom-fan-gate.sh builds). They are
 # not part of the workspace build this gate protects, so their warnings never
-# reach the build log this gate is about. All five were measured warning-free on
+# reach the build log this gate is about. The first five were measured warning-free on
 # 2026-08-13; covering them needs one cargo invocation each and can be added
 # here when one of them starts costing something.
 set -euo pipefail

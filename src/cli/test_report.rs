@@ -520,14 +520,7 @@ pub const DECLARED_REPR: &str = "(declared repr)";
 /// itself declares its repr the pair is never field-diffed: a field diff is
 /// the structural renderer, which that type opted out of.
 fn repr_assert(file: &str, payload: &[String]) -> Option<TestFailure> {
-    let head = payload.first()?.as_str();
-    let (op, own) = match head {
-        "assert_eq" => ("assert_eq", false),
-        "assert_ne" => ("assert_ne", false),
-        "assert_eq (declared repr)" => ("assert_eq", true),
-        "assert_ne (declared repr)" => ("assert_ne", true),
-        _ => return None,
-    };
+    let (op, own) = harness_head(payload.first()?.as_str())?;
     let rest: Vec<&str> = payload[1..].iter().map(|l| l.as_str()).collect();
     let e = rest.iter().position(|l| l.starts_with("  expected: "))?;
     let v = rest.iter().position(|l| l.starts_with("  found: "))?;
@@ -549,6 +542,18 @@ fn repr_assert(file: &str, payload: &[String]) -> Option<TestFailure> {
         found: Some(found),
         message: if own { DECLARED_REPR.to_string() } else { String::new() },
     })
+}
+
+/// The header of the harness form's message: `(op, the type itself declares
+/// its repr)`, or None for any other line.
+fn harness_head(head: &str) -> Option<(&'static str, bool)> {
+    match head {
+        "assert_eq" => Some(("assert_eq", false)),
+        "assert_ne" => Some(("assert_ne", false)),
+        "assert_eq (declared repr)" => Some(("assert_eq", true)),
+        "assert_ne (declared repr)" => Some(("assert_ne", true)),
+        _ => None,
+    }
 }
 
 /// `(op, message)` for a panic payload's first line. The site marker the
@@ -626,6 +631,14 @@ fn parse_t18(file: &str, output: &str) -> Vec<TestFailure> {
             found: None,
             message: l.trim_start_matches("Error: ").to_string(),
         };
+        // The harness form of an in-test `assert_eq` / `assert_ne` (#4262) on
+        // a wasm test lane: `Error: assertion failed: assert_eq[ (declared
+        // repr)]`, its `at:` line after `found:`. It reads back as the record
+        // the native lane's payload gives (`repr_assert`).
+        if let Some((hop, own)) = l.strip_prefix("Error: assertion failed: ").and_then(harness_head) {
+            f.op = hop.into();
+            f.message = if own { DECLARED_REPR.to_string() } else { String::new() };
+        }
         fill_t18_fields(&mut f, &lines[i + 1..]);
         out.push(f);
     }
@@ -669,8 +682,11 @@ fn fill_t18_fields(f: &mut TestFailure, rest: &[&str]) {
     if v < e {
         return;
     }
+    // `found` ends at a trailing `  at: line N` (the harness form puts the
+    // site last); the operands are C-418-escaped, so no value spans lines.
+    let found_end = body[v..].iter().position(|l| l.starts_with("  at: line ")).map_or(body.len(), |k| v + k);
     f.expected = Some(join_field(&body[e..v], "  expected: "));
-    f.found = Some(join_field(&body[v..], "  found: "));
+    f.found = Some(join_field(&body[v..found_end], "  found: "));
     if f.expected.as_deref().is_some_and(|s| s.starts_with("!= ")) {
         f.op = "assert_ne".into();
     }
@@ -795,6 +811,11 @@ fn units(v: &str) -> Option<(&'static str, Vec<String>)> {
     }
     if let Some(inner) = record_body(t) {
         return Some(("field", split_top_level(inner)));
+    }
+    // An assert operand is C-418-escaped (#4262): a multi-line string reads
+    // `one\ntwo` on one line, and still diffs line by line.
+    if !v.contains('\n') && v.contains("\\n") {
+        return Some(("line", v.split("\\n").map(|l| l.to_string()).collect()));
     }
     v.contains('\n').then(|| ("line", lines_of(v)))
 }
@@ -1029,9 +1050,38 @@ mod tests {
         assert_eq!(parse("m.almd", "", out)[0].op, "assert_ne");
     }
 
+    /// #4262: an in-test `assert_eq` reaches the report as the harness form on
+    /// both test lanes, a libtest payload on native and a T18-shaped block on
+    /// wasm; both read back as one record, operands as printed (escaped).
+    #[test]
+    fn the_harness_form_reads_back_alike_on_both_test_lanes() {
+        let native = "---- tests::__test_almd_0000_t stdout ----\n\
+thread 'tests::__test_almd_0000_t' panicked at src/main.rs:9:5:\n\
+assert_eq\n  expected: x\n  found: A\\u{1b}[31mB\\u{202e}C\\nD (at line 3)\n";
+        let wasm = "Error: assertion failed: assert_eq\n  expected: x\n  found: A\\u{1b}[31mB\\u{202e}C\\nD\n  at: line 3\n";
+        let n = parse("t_test.almd", "", native);
+        let w = parse("t_test.almd", "", wasm);
+        assert_eq!(n.len(), 1, "{n:?}");
+        assert_eq!(w.len(), 1, "{w:?}");
+        for f in [&n[0], &w[0]] {
+            assert_eq!(f.op, "assert_eq");
+            assert_eq!(f.line, Some(3));
+            assert_eq!(f.expected.as_deref(), Some("x"));
+            assert_eq!(f.found.as_deref(), Some("A\\u{1b}[31mB\\u{202e}C\\nD"));
+            assert_eq!(f.message, "");
+        }
+    }
+
     #[test]
     fn multiline_strings_diff_by_line() {
         let d = Diff::of("\"a\\nB\\nc\"", "\"a\\nb\\nc\"").expect("line diff");
+        assert_eq!(d.hint(), "line 2 differs");
+        assert_eq!(d.render(), "      a\n    - B\n    + b\n      c\n");
+    }
+
+    #[test]
+    fn escaped_multiline_strings_diff_by_line() {
+        let d = Diff::of("a\\nB\\nc", "a\\nb\\nc").expect("line diff");
         assert_eq!(d.hint(), "line 2 differs");
         assert_eq!(d.render(), "      a\n    - B\n    + b\n      c\n");
     }

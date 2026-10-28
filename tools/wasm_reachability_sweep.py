@@ -99,14 +99,14 @@ def stdlib_modules():
     return rust_str_list("STDLIB_MODULES")
 
 
-def surface(module_filter=None):
+def surface(module_filter=None, modules=None):
     """Every PUBLIC stdlib fn, from the module-interface JSON — not the
     @intrinsic regex: the old enumeration missed every self-host-only fn
     (list.group_by, map.upsert, result.partition, ...), which is exactly the
     class most likely to lack a wasm body. `__`-prefixed internal carriers
     (E043) are not surface."""
     out = []
-    for module in stdlib_modules():
+    for module in (modules if modules is not None else stdlib_modules()):
         if module_filter and module not in module_filter:
             continue
         rc = subprocess.run([ALMIDE, "compile", module, "--json"],
@@ -420,7 +420,11 @@ def main():
     ap.add_argument("--json", help="write the raw result rows here")
     a = ap.parse_args()
     every = surface()
-    index_constructors(every)
+    # A constructor may live in a bundled module outside the probed surface
+    # (`html.escape` builds the `SafeHtml` that `http.html` takes): index those
+    # too, read from the same declaration the resolver reads (BUNDLED_MODULES).
+    bundled = [m for m in rust_str_list("BUNDLED_MODULES") if m not in stdlib_modules()]
+    index_constructors(every + surface(modules=bundled))
     wanted = set(a.modules) if a.modules else None
     fns = ci_slice([f for f in every if wanted is None or f["module"] in wanted])
     rows, counts = [], {"PARITY": 0, "GAP": 0, "UNPROBEABLE": 0}

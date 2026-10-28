@@ -108,6 +108,25 @@ impl Checker {
     /// The plain E029 for an undeclared `name`, located at its annotation
     /// (searched from `span`) and naming the nearest declared type.
     fn unknown_type_diag(&self, name: &str, span: Option<crate::ast::Span>, ctx: String) -> Diagnostic {
+        // A type spelling a dialect epoch removed (`RawPtr` → `Handle`,
+        // ADR-0031): the ledger names the new spelling, and renaming the
+        // token is the whole edit, so `almide fix` applies it.
+        if let Some((epoch, to, repair)) = crate::removed_spellings::removed_type(name) {
+            let hint = format!("the type `{name}` was removed at dialect epoch {epoch}: {repair}");
+            let mut diag = err(format!("unknown type '{}'", name), hint, ctx).with_code("E029");
+            let Some(sp) = span else { return diag };
+            diag.file = self.source_file.clone();
+            diag.line = Some(sp.line);
+            diag.col = Some(sp.col);
+            if let Some((line, col)) = self.locate_type_name(sp.line, sp.col, name) {
+                let end_col = col + name.chars().count();
+                diag.line = Some(line);
+                diag.col = Some(col);
+                diag.end_col = Some(end_col);
+                diag = diag.with_machine_fix(line, col, end_col, to);
+            }
+            return diag;
+        }
         let near = self.nearest_declared_type(name);
         let hint = match &near {
             Some(t) => format!(

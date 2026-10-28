@@ -1,210 +1,139 @@
 // @contract: C-062, C-376
 import ffi
-// Cross-target differential fixture: the RawPtr / linear-memory bridge
-// (`bytes.as_ptr` / `as_mut_ptr` / `from_raw_ptr` / `copy_to_ptr`, #440).
-//
-// A RawPtr is a real `*mut u8` on native and an i32 linear-memory offset on
-// wasm — the pointer VALUE differs per target by nature and is never printed.
-// Only the bytes moved through it are observed, so stdout is byte-identical.
-// Read side: as_ptr + from_raw_ptr copies a buffer. Write side: copy_to_ptr
-// writes through as_mut_ptr into a fresh buffer, with capacity clamping.
-import ffi
 
-fn row(b: Bytes) -> String = int.to_string(bytes.get(b, 0) ?? 0) + "," + int.to_string(bytes.get(b, 1) ?? 0) + "," + int.to_string(bytes.get(b, 2) ?? 0) + "," + int.to_string(bytes.get(b, 3) ?? 0)
-
-// #3420: a RawPtr BORROWS the Bytes it points into, so the block outlives
-// the call the pointer is handed to. On wasm each `round_trip*` shape freed
-// the block before `copy_out` read it — a tail call whose last argument was
-// the block's last use released the frame's blocks before the jump, and a
-// temporary whose only reader was `as_ptr` was released when `as_ptr`
-// returned — and the copy came back with the free-list header over its
-// first four bytes. Native keeps the block to the end of the scope (or of
-// the statement, for the temporary).
-fn copy_out(p: RawPtr, n: Int) -> Bytes = bytes.from_raw_ptr(p, n)
-
-fn round_trip(s: String) -> Bytes = {
-  let b = bytes.from_string(s)
-  copy_out(bytes.as_ptr(b), bytes.len(b))
-}
-
-fn round_trip_temp(s: String) -> Bytes = copy_out(bytes.as_ptr(bytes.from_string(s)), string.len(s))
-
-fn round_trip_held(s: String) -> Bytes = {
-  let b = bytes.from_string(s)
-  let p = bytes.as_ptr(b)
-  let n = bytes.len(b)
-  let other = bytes.from_string("a block allocated in between")
-  copy_out(p, n + bytes.len(other) - 28)
-}
-
-fn pointer_of(b: Bytes) -> RawPtr = if bytes.len(b) > 1000000 then bytes.as_ptr(bytes.zeros(0)) else bytes.as_ptr(b)
-
-fn round_trip_helper(s: String) -> Bytes = {
-  let b = bytes.from_string(s)
-  copy_out(pointer_of(b), bytes.len(b))
-}
-
-fn show_bytes(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(",")
-
-// #4153: a let-bound address of a `var` keeps the block it points into for
-// as long as the binding can be used, even after the var is rebound or grown
-// in place. Before the fix, `b = …` released the old block under the live
-// address: on native a later allocation took the freed bytes and a write
-// through the address overwrote a live filler (`corrupted 1`); on wasm a read
-// through it showed the free-list header (`0,0,0,0,…`). The pointer value is
-// never printed; only the bytes moved through it are.
-fn fillers(tag: String) -> List[Bytes] = list.range(0, 50) |> list.map((i) => bytes.from_string("AAAAAAAAAAAAAAAAAAAAAAA${tag}${i}"))
-
-fn corrupted(fs: List[Bytes]) -> Int = fs |> list.filter((f) => bytes.to_string(f) ?? "" |> string.starts_with("PWNED")) |> list.len
-
+// Cross-target differential fixture: the Region bridge (ADR-0031). A Region
+// carries base, length, permission and owner; every `ffi.read` / `ffi.write`
+// is checked against the region's own length before it touches memory, so
+// an access outside it is an err on both targets, and a region made from a
+// Bytes value refuses every write. The base address differs per target and
+// is never printed; only the bytes moved through a region, and the errs, are
+// observed, so stdout is byte-identical.
 fn show(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(",")
 
-// The issue's probe: rebind, allocate, then write and read through the address.
-effect fn rebind_then_write() -> Unit = {
+fn read_text(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok " + show(b),
+  err(e) => "err " + e,
+}
+
+fn write_text(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+// #3420, by ownership: a Region holds its Bytes, so the block outlives every
+// view of it — a tail call whose last argument is the block's last use, a
+// temporary built inside the argument, a view held in a `let` while another
+// block is allocated, and a view that comes out of a helper fn. Each read
+// sees the block's own bytes, never a free-list header.
+effect fn copy_out(r: Region, n: Int) -> Bytes = ffi.read(r, 0, n)!
+
+effect fn round_trip(s: String) -> Bytes = {
+  let b = bytes.from_string(s)
+  copy_out(ffi.region(b), bytes.len(b))!
+}
+
+effect fn round_trip_temp(s: String) -> Bytes = copy_out(
+  ffi.region(bytes.from_string(s)),
+  string.len(s),
+)!
+
+effect fn round_trip_held(s: String) -> Bytes = {
+  let r = ffi.region(bytes.from_string(s))
+  let other = bytes.from_string("a block allocated in between")
+  copy_out(r, ffi.len(r) + bytes.len(other) - 28)!
+}
+
+fn view_of(b: Bytes) -> Region = if bytes.len(b) > 1000000 then ffi.region(bytes.new()) else ffi.region(b)
+
+effect fn round_trip_helper(s: String) -> Bytes = {
+  let b = bytes.from_string(s)
+  copy_out(view_of(b), bytes.len(b))!
+}
+
+fn fillers(tag: String) -> List[Bytes] = list.range(0, 50) |> list.map((i) => bytes.from_string("AAAAAAAAAAAAAAAAAAAAAAA${tag}${i}"))
+
+// #4153, by ownership: rebinding the var a region was made from leaves the
+// region's block alone — the region keeps it — and the region stays the
+// var's OLD bytes, read-only. Before Regions an address outlived its block
+// here and a write through it overwrote a live filler.
+effect fn rebind_then_read() -> Unit = {
   var b = bytes.from_string("secret-token-0123456789")
-  let p = ffi.address(b)
+  let r = ffi.region(b)
   b = bytes.from_string("x")
   let filler = fillers("a")
-  let before = ffi.read(p, 8)!
-  let n = ffi.write(p, bytes.from_string("PWNED"), 5)!
-  let after = ffi.read(p, 8)!
-  println("rebind: wrote ${n}; corrupted ${corrupted(filler)}; b=${bytes.len(b)}")
-  println("rebind: before ${show(before)}")
-  println("rebind: after ${show(after)}")
+  println("rebind: ${read_text(ffi.read(r, 0, 8))}; ${list.len(filler)}; b=${bytes.len(b)}")
+  println("rebind: ${write_text(ffi.write(r, 0, bytes.from_string("PWNED")))}")
 }
 
-// The deprecated spelling takes the same rule.
-effect fn rebind_as_ptr() -> Unit = {
-  var b = bytes.from_string("legacy-pointer-abcdefgh")
-  let p = bytes.as_ptr(b)
-  b = bytes.from_string("y")
-  let filler = fillers("b")
-  let back = bytes.from_raw_ptr(p, 6)
-  println("as_ptr: ${bytes.to_string(back) ?? "?"} ${list.len(filler)} ${bytes.len(b)}")
-}
-
-// `as_mut_ptr` makes its receiver unique before handing out the address, so
-// the hold must share the block AFTER that: a write through the address is
-// the var's own until the var is rebound.
-effect fn as_mut_ptr_write() -> Unit = {
-  var d = bytes.zeros(4)
-  let p = bytes.as_mut_ptr(d)
-  let n = bytes.copy_to_ptr(bytes.from_list([65, 66, 67, 68]), p, 4)
-  println("as_mut_ptr: ${n} ${show(d)}")
-  d = bytes.zeros(1)
-  let filler = fillers("f")
-  let m = bytes.copy_to_ptr(bytes.from_string("PWNED"), p, 4)
-  println("as_mut_ptr: ${m} corrupted ${corrupted(filler)} ${show(bytes.from_raw_ptr(p, 4))} ${bytes.len(d)}")
-}
-
-// Before any rebinding the address is still the var's own block: a write
-// through it is seen by the var.
-effect fn write_seen_by_var() -> Unit = {
-  var b = bytes.from_string("0123456789abcdef")
-  let p = ffi.address(b)
-  let _n = ffi.write(p, bytes.from_string("ZZ"), 2)!
-  println("shared: ${bytes.to_string(b) ?? "?"}")
-  b = bytes.from_string("z")
-  let filler = fillers("c")
-  let r = ffi.read(p, 4)!
-  println("shared: ${show(r)} ${list.len(filler)} ${bytes.len(b)}")
-}
-
-// Rebound many times in a loop under one address.
+// Rebound many times in a loop under one region.
 effect fn rebind_in_loop() -> Unit = {
   var b = bytes.from_string("loop-held-block-0123456")
-  let p = ffi.address(b)
+  let r = ffi.region(b)
   var i = 0
   while i < 20 {
     b = bytes.from_string("AAAAAAAAAAAAAAAAAAAAAAA${i}")
     i = i + 1
   }
   let filler = fillers("d")
-  let n = ffi.write(p, bytes.from_string("PWNED"), 5)!
-  let r = ffi.read(p, 9)!
-  println("loop: wrote ${n}; corrupted ${corrupted(filler)}; ${show(r)}; b=${bytes.to_string(b) ?? "?"}")
+  println("loop: ${read_text(ffi.read(r, 0, 9))}; ${list.len(filler)}; b=${bytes.to_string(b) ?? "?"}")
 }
 
-// Grown in place: the var moves to a fresh block, the address keeps the old one.
+// Grown in place: the var moves to a fresh block, the region keeps the old one.
 effect fn grow_in_place() -> Unit = {
   var b = bytes.from_string("grow")
-  let p = ffi.address(b)
+  let r = ffi.region(b)
   var i = 0
   while i < 64 {
     bytes.append_i64_le(b, i)
     i = i + 1
   }
   let filler = fillers("e")
-  let n = ffi.write(p, bytes.from_string("PWNED"), 4)!
-  let r = ffi.read(p, 4)!
-  println("grow: wrote ${n}; corrupted ${corrupted(filler)}; ${show(r)}; b=${bytes.len(b)}")
+  println("grow: ${read_text(ffi.read(r, 0, 4))}; ${read_text(ffi.read(r, 0, 5))}; ${list.len(filler)}; b=${bytes.len(b)}")
 }
 
-// #4169: an address ASSIGNED to an outer `var` is held for that var's scope,
-// not just for the branch the assignment sits in.
-effect fn assigned_to_outer_var(take: Bool) -> Unit = {
-  var b = bytes.from_string("outer-var-address-01234")
-  var p = ffi.address(bytes.zeros(0))
-  if take then {
-    p = ffi.address(b)
-  } else ()
-  b = bytes.from_string("x")
-  let filler = fillers("g")
-  let before = ffi.read(p, 8)!
-  let n = ffi.write(p, bytes.from_string("PWNED"), 5)!
-  println("outer: wrote ${n}; corrupted ${corrupted(filler)}; ${show(before)}; b=${bytes.len(b)}")
+// #3966, by construction: the only writable region is a fresh allocation, so
+// a write can never reach a `let`.
+effect fn write_reaches_no_let() -> Unit = {
+  let b = bytes.from_list([1, 2, 3, 4])
+  let w = ffi.alloc(4)!
+  println("alloc: ${write_text(ffi.write(w, 0, b))}; ${write_text(ffi.write(w, 2, bytes.from_list([9])))}")
+  println("alloc: ${read_text(ffi.read(w, 0, 4))}; let ${show(b)}")
+  println("alloc: ${write_text(ffi.write(ffi.region(b), 0, bytes.from_list([9])))}; let ${show(b)}")
 }
 
-// #4169: a `mut` parameter rebound inside the callee releases the caller's
-// block; an address taken from it is held like a `var`'s.
-effect fn mut_param(mut b: Bytes) -> Unit = {
-  let p = ffi.address(b)
-  b = bytes.from_string("y")
-  let filler = fillers("h")
-  let before = ffi.read(p, 8)!
-  let n = ffi.write(p, bytes.from_string("PWNED"), 5)!
-  println("param: wrote ${n}; corrupted ${corrupted(filler)}; ${show(before)}; b=${bytes.len(b)}")
+// The bounds check, at every edge: past the end, at the length, a negative
+// offset or count, an offset near i64::MAX (no wrap), and an empty region.
+effect fn edges() -> Unit = {
+  let r = ffi.region(bytes.from_list([65, 66, 67, 68]))
+  println("edge: ${read_text(ffi.read(r, 0, 4))}")
+  println("edge: ${read_text(ffi.read(r, 1, 4))}")
+  println("edge: ${read_text(ffi.read(r, 4, 1))}")
+  println("edge: ${read_text(ffi.read(r, 4, 0))}")
+  println("edge: ${read_text(ffi.read(r, -1, 1))}")
+  println("edge: ${read_text(ffi.read(r, 0, -1))}")
+  println("edge: ${read_text(ffi.read(r, 9223372036854775807, 1))}")
+  let w = ffi.alloc(3)!
+  println("edge: ${write_text(ffi.write(w, 1, bytes.from_list([1, 2, 3])))}")
+  println("edge: ${write_text(ffi.write(w, -9223372036854775807, bytes.from_list([1])))}")
+  println("edge: ${read_text(ffi.read(w, 0, 3))}")
+  let e = ffi.region(bytes.zeros(-1))
+  println("empty: ${ffi.len(e)} ${read_text(ffi.read(e, 0, 0))} ${read_text(ffi.read(e, 0, 1))}")
+  let neg = match ffi.alloc(-1) {
+    ok(_) => "ok",
+    err(e) => "err " + e,
+  }
+  println("alloc: ${neg}")
 }
 
 effect fn main() -> Unit = {
-  let src = bytes.from_list([65, 66, 67, 68])
-  // read side: copy via a raw offset
-  let copy = bytes.from_raw_ptr(bytes.as_ptr(src), 4)
-  println("copy:" + row(copy))
-  // write side: copy_to_ptr through as_mut_ptr
-  var dst = bytes.zeros(4)
-  let n = bytes.copy_to_ptr(copy, bytes.as_mut_ptr(dst), 4)
-  println("n:" + int.to_string(n))
-  println("dst:" + row(dst))
-  // capacity clamp: only 2 of 4 bytes land
-  var small = bytes.zeros(4)
-  let m = bytes.copy_to_ptr(src, bytes.as_mut_ptr(small), 2)
-  println("m:" + int.to_string(m))
-  println("small01:" + int.to_string(bytes.get(small, 0) ?? 0) + "," + int.to_string(bytes.get(small, 1) ?? 0))
-  // EMPTY buffer: as_ptr/as_mut_ptr return NULL (no data region exists), and
-  // every bridge op through null moves nothing. Before, native handed out
-  // Vec's DANGLING sentinel and copy_to_ptr through it was UB (silent heap
-  // corruption, the process died with no output) while the wasm self-host
-  // handed out a real address past the 0-len block and overwrote the NEXT
-  // allocation (differential fuzz, 2026-08-10 night).
-  var empty = bytes.zeros(-1)
-  let z = bytes.copy_to_ptr(src, bytes.as_mut_ptr(empty), 2)
-  println("z:" + int.to_string(z))
-  let back = bytes.from_raw_ptr(bytes.as_ptr(empty), 3)
-  println("back:" + int.to_string(bytes.len(back)))
-  println(show_bytes(round_trip("hello, world")))
-  println(show_bytes(round_trip("añb")))
-  println(show_bytes(round_trip_temp("a temporary")))
-  println(show_bytes(round_trip_held("held")))
-  println(show_bytes(round_trip_helper("helper")))
-  rebind_then_write()!
-  rebind_as_ptr()!
-  as_mut_ptr_write()!
-  write_seen_by_var()!
+  println(show(round_trip("hello, world")!))
+  println(show(round_trip("añb")!))
+  println(show(round_trip_temp("a temporary")!))
+  println(show(round_trip_held("held")!))
+  println(show(round_trip_helper("helper")!))
+  rebind_then_read()!
   rebind_in_loop()!
   grow_in_place()!
-  assigned_to_outer_var(true)!
-  var c = bytes.from_string("mut-param-address-56789")
-  mut_param(c)!
-  println("caller: ${bytes.to_string(c) ?? "?"}")
+  write_reaches_no_let()!
+  edges()!
 }

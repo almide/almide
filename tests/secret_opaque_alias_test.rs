@@ -146,3 +146,137 @@ fn an_own_type_named_secret_is_its_own_type() {
     );
     assert!(ok, "a module's own `type Secret` must check:\n{out}");
 }
+
+fn assert_refused(name: &str, src: &str, code: &str, needle: &str) {
+    let (ok, out) = check_single(name, src);
+    assert!(!ok, "{name}: check passed, but the Secret crossed its boundary:\n{out}");
+    assert!(out.contains(code), "{name}: expected {code}, got:\n{out}");
+    assert!(out.contains(needle), "{name}: expected `{needle}`, got:\n{out}");
+}
+
+fn assert_checks(name: &str, src: &str) {
+    let (ok, out) = check_single(name, src);
+    assert!(ok, "{name}: must check:\n{out}");
+}
+
+const READS: &str = "cannot use opaque type 'Secret' as another record type outside its module 'secret'";
+const FORGES: &str = "cannot use another record type as opaque type 'Secret' outside its module 'secret'";
+
+/// A structural record type is no way into an opaque one (row 21): a Secret
+/// never fills `{ hidden: .. }`, an open row, a structural bound, a user
+/// record of the same shape — at the top of a slot or inside it — and no
+/// such record fills a Secret slot.
+#[test]
+fn a_structural_record_type_is_no_way_into_a_secret() {
+    assert_refused("param_closed", "import secret\nfn peek(r: { hidden: String }) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_open_row", "import secret\nfn peek(r: { hidden: String, .. }) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_bound", "import secret\nfn peek[T: { hidden: String, .. }](r: T) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_user_record", "import secret\ntype Fake = { hidden: String }\nfn peek(r: Fake) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_in_list", "import secret\nfn peek(rs: List[{ hidden: String }]) -> String = rs |> list.map((r) => r.hidden) |> list.join(\",\")\nfn main() -> Unit = println(peek([secret.new(\"pw\")]))\n", "E033", READS);
+    assert_refused("let_annotation", "import secret\nfn main() -> Unit = {\n  let r: { hidden: String } = secret.new(\"pw\")\n  println(r.hidden)\n}\n", "E033", READS);
+    assert_refused("forge_user_record", "import secret\ntype Fake = { hidden: String }\nfn main() -> Unit = {\n  let f = Fake { hidden: \"x\" }\n  println(secret.reveal(f))\n}\n", "E033", FORGES);
+    // Control: the same shapes on a plain record check.
+    assert_checks("param_plain", "type Plain = { hidden: String }\nfn peek(r: { hidden: String }) -> String = r.hidden\nfn main() -> Unit = println(peek(Plain { hidden: \"x\" }))\n");
+}
+
+/// Every spread copies the base's fields: E033 with or without an override,
+/// and when the base's type is only known after the solve.
+#[test]
+fn every_spread_of_a_secret_is_e033() {
+    let msg = "cannot build a record update of opaque type 'Secret' outside its module 'secret'";
+    assert_refused("spread_bare", "import secret\nfn main() -> Unit = {\n  let s = secret.new(\"pw\")\n  let t = { ...s }\n  println(\"${t}\")\n}\n", "E033", msg);
+    assert_refused("spread_override", "import secret\nfn main() -> Unit = {\n  let s = secret.new(\"pw\")\n  let t = { ...s, hidden: \"x\" }\n  println(\"${t}\")\n}\n", "E033", msg);
+    assert_refused("spread_in_lambda", "import secret\nfn main() -> Unit = {\n  let xs = [secret.new(\"pw\")] |> list.map((x) => { ...x })\n  println(\"${xs}\")\n}\n", "E033", msg);
+    // A base still open where the spread is inferred: the lambda's parameter
+    // is fixed to Secret only by the later call, so only the check deferred
+    // past the solve sees it.
+    assert_refused("spread_on_a_later_fixed_param", "import secret\nfn main() -> Unit = {\n  let f = (x) => { ...x }\n  let t = f(secret.new(\"pw\"))\n  println(\"${t}\")\n}\n", "E033", msg);
+}
+
+/// #4239: a generic `==` is structural, so no instantiation may hold a
+/// Secret — whatever it holds, directly or through a generic caller, and
+/// through a stdlib fn's equality bound.
+#[test]
+fn a_secret_never_reaches_a_generic_compare() {
+    let msg = "a generic `==` is structural";
+    assert_refused("eq_int", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(secret.new(1), secret.new(2))}\")\n", "E103", msg);
+    assert_refused("eq_string", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(secret.new(\"a\"), secret.new(\"b\"))}\")\n", "E103", msg);
+    assert_refused("eq_nested", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same([secret.new(\"a\")], [secret.new(\"b\")])}\")\n", "E103", msg);
+    assert_refused("eq_through_caller", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn also[B](a: B, b: B) -> Bool = same(a, b)\nfn main() -> Unit = println(\"${also(secret.new(\"a\"), secret.new(\"b\"))}\")\n", "E103", msg);
+    assert_refused("eq_stdlib", "import secret\nfn main() -> Unit = {\n  let k = secret.new(\"a\")\n  println(\"${list.contains([k], k)}\")\n}\n", "E103", "its compare is generic and structural");
+    // Controls: the generic over plain values, and the concrete constant-time `==`.
+    assert_checks("eq_plain", "fn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(1, 2)} ${same(\"a\", \"a\")}\")\n");
+    assert_checks("eq_concrete", "import secret\nfn main() -> Unit = println(\"${secret.new(\"a\") == secret.new(\"b\")}\")\n");
+}
+
+/// A dependency package `vaultlib` declaring `mod type Vault`, and an app
+/// whose entry is `main`. `(check ok, output)` of `almide check` in the app.
+fn dep_project(name: &str, main: &str, app_mod: Option<&str>) -> (bool, String) {
+    let root = scratch(name);
+    let lib = root.join("vaultlib");
+    std::fs::create_dir_all(lib.join("src")).unwrap();
+    std::fs::write(lib.join("almide.toml"), "[package]\nname = \"vaultlib\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        lib.join("src/mod.almd"),
+        "mod type Vault = { key: String }\n\npub fn make(s: String) -> Vault = { key: s }\n\npub fn key_len(v: Vault) -> Int = string.len(v.key)\n",
+    )
+    .unwrap();
+    let app = root.join("app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(app.join("almide.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nvaultlib = { path = \"../vaultlib\" }\n").unwrap();
+    std::fs::write(app.join("src/main.almd"), main).unwrap();
+    if let Some(m) = app_mod {
+        std::fs::write(app.join("src/notes.almd"), m).unwrap();
+    }
+    run(&app, "check", "src/main.almd")
+}
+
+/// #4241: a USER `mod type` record is opaque outside its project by the
+/// same rule as the bundled Secret — read off the declaration, not a name.
+#[test]
+fn a_user_mod_type_is_opaque_outside_its_project() {
+    let cases = [
+        ("user_update_forge", "import vaultlib\neffect fn main() -> Unit = {\n  let v = { ...vaultlib.make(\"a\"), key: \"forged\" }\n  println(\"${vaultlib.key_len(v)}\")\n}\n", "cannot build a record update of opaque type 'Vault' outside its module 'vaultlib'"),
+        ("user_spread_copy", "import vaultlib\neffect fn main() -> Unit = {\n  let v = { ...vaultlib.make(\"a\") }\n  println(\"${vaultlib.key_len(v)}\")\n}\n", "cannot build a record update of opaque type 'Vault' outside its module 'vaultlib'"),
+        ("user_field_read", "import vaultlib\neffect fn main() -> Unit = println(vaultlib.make(\"a\").key)\n", "cannot read field 'key' of opaque type 'Vault' outside its module 'vaultlib'"),
+        ("user_structural_param", "import vaultlib\nfn peek(r: { key: String }) -> String = r.key\neffect fn main() -> Unit = println(peek(vaultlib.make(\"a\")))\n", "cannot use opaque type 'Vault' as another record type outside its module 'vaultlib'"),
+        ("user_structural_forge", "import vaultlib\neffect fn main() -> Unit = {\n  let r = { key: \"forged\" }\n  println(\"${vaultlib.key_len(r)}\")\n}\n", "outside its module 'vaultlib'"),
+    ];
+    for (name, main, needle) in cases {
+        let (ok, out) = dep_project(name, main, None);
+        assert!(!ok && out.contains("E033") && out.contains(needle), "{name}: expected E033 `{needle}`, got (ok={ok}):\n{out}");
+    }
+    // Control: through the module's API it checks.
+    let (ok, out) = dep_project("user_api", "import vaultlib\neffect fn main() -> Unit = println(\"${vaultlib.key_len(vaultlib.make(\"a\"))}\")\n", None);
+    assert!(ok, "the API route must check:\n{out}");
+}
+
+/// Inside its own project a `mod type` stays open: a sibling module of the
+/// declaring one reads, destructures and updates it.
+#[test]
+fn a_user_mod_type_is_open_inside_its_project() {
+    let notes = "mod type Note = { body: String }\n\nmod fn note(s: String) -> Note = { body: s }\n";
+    let main = "import self.notes\neffect fn main() -> Unit = {\n  let n = notes.note(\"a\")\n  let m = { ...n, body: \"b\" }\n  let { body } = m\n  println(n.body)\n  println(body)\n}\n";
+    let (ok, out) = dep_project("same_project", main, Some(notes));
+    assert!(ok, "a `mod type` is open to its own project:\n{out}");
+}
+
+/// #4241's bare-spelling rule names a user `mod type` only where no module's
+/// own type of that name is in scope: the bundled `heap` reading its own
+/// `Heap` beside a user module's copy of it stays the bundled record. Before,
+/// the bundled heap's comparator read resolved to the user record, its fn
+/// type was lost, and E109 charged `heap.__before` with http's dispatch (the
+/// editloop-scale corpus: a copy of stdlib/heap.almd beside `import http`).
+#[test]
+fn a_user_module_copy_of_a_bundled_type_leaves_the_bundled_one_its_own() {
+    // Outside the repository, so no almide.toml above it makes it a package.
+    let d = std::env::temp_dir().join(format!("almide-user-heap-copy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    let heap = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/heap.almd")).unwrap();
+    std::fs::write(d.join("src/m064.almd"), heap).unwrap();
+    std::fs::write(d.join("src/main.almd"), "import http\nimport m064\n\neffect fn main() -> Unit = {\n  println(\"x\")\n}\n").unwrap();
+    let (ok, out) = run(&d, "check", "src/main.almd");
+    let _ = std::fs::remove_dir_all(&d);
+    assert!(ok && !out.contains("E109"), "a user copy of the bundled heap beside `import http` must check clean:\n{out}");
+}

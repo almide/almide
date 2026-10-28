@@ -1,0 +1,6 @@
+// E101 (#4266): `асе` is written wholly in Cyrillic (U+0430 U+0441 U+0435),
+// one script, but its UTS #39 skeleton is `ace`: a second name that reads as
+// the first.
+fn ace() -> Int = 1
+fn асе() -> Int = 2
+effect fn main() -> Unit = println(int.to_string(асе()))

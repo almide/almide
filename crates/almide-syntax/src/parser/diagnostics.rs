@@ -145,34 +145,115 @@ impl Parser {
         self.errors.extend(diags);
     }
 
-    /// E101 (#4092): refuse every raw bidirectional control character
-    /// (U+202A..U+202E, U+2066..U+2069) anywhere in the file — comments,
+    /// E101 (#4092, #4266): refuse every raw hidden character
+    /// (`lexer::is_hidden_source_char`: the bidi controls, U+2028 / U+2029,
+    /// the zero-width and other Cf characters, the Tags block, raw C0 / C1
+    /// controls other than TAB / LF / CR) anywhere in the file — comments,
     /// string literals, heredocs, stray characters. With one in the source,
     /// the text a reviewer reads is not the text the compiler reads (Trojan
-    /// Source, CVE-2021-42574). The escape `\u{202E}` is unaffected: its
-    /// spelling is ASCII.
-    pub(crate) fn report_bidi_controls(&mut self) {
-        let found = std::mem::take(&mut self.bidi_controls);
+    /// Source, CVE-2021-42574; ASCII smuggling). The escape `\u{202E}` is
+    /// unaffected: its spelling is ASCII.
+    pub(crate) fn report_hidden_chars(&mut self) {
+        let found = std::mem::take(&mut self.hidden_chars);
         for (ch, line, col) in found {
-            let name = crate::lexer::bidi_control_name(ch).unwrap_or("BIDIRECTIONAL CONTROL");
             let message = format!(
-                "raw bidirectional control character U+{:04X} {} at line {}, column {}",
-                ch as u32, name, line, col
+                "raw hidden character U+{:04X} {} at line {}, column {}",
+                ch as u32,
+                crate::lexer::hidden_char_name(ch),
+                line,
+                col
             );
             let hint = format!(
                 "this character makes the source display differently from how it compiles \
-                 (Trojan Source). Remove it from a comment; inside a string literal, write \
-                 the escape `\\u{{{:04X}}}` if the character is intended",
+                 (Trojan Source), or hides text from a reader that a model still reads. Remove it \
+                 from a comment; inside a string literal, write the escape `\\u{{{:04X}}}` if \
+                 the character is intended",
                 ch as u32
             );
-            let mut d = Diagnostic::error(message, hint, "source text")
-                .with_code("E101");
-            if let Some(f) = &self.file { d.file = Some(f.clone()); }
-            d.line = Some(line);
-            d.col = Some(col);
-            d.end_col = Some(col + 1);
-            self.errors.push(d);
+            self.push_e101(message, hint, line, col, 1);
         }
+    }
+
+    /// E101 (#4266): an identifier a reader cannot tell from another
+    /// (CVE-2021-42694, homoglyph identifiers). Two rules, both from UTS #39
+    /// and judged only for identifiers holding a non-ASCII character, as
+    /// rustc's `mixed_script_confusables` / `confusable_idents` do:
+    ///
+    /// - restriction level: a non-ASCII identifier must be at most UTS #39
+    ///   §5.2 Moderately Restrictive — one script; Latin with Han, Hiragana
+    ///   and Katakana, Han + Bopomofo or Han + Hangul; or Latin with one other
+    ///   Recommended script except Cyrillic and Greek — and every character
+    ///   must be General Security Profile `Allowed`. `pаypal` with a Cyrillic
+    ///   `а` (U+0430) is Latin + Cyrillic: refused.
+    /// - confusables: two distinct spellings in one file with the same UTS #39
+    ///   skeleton, at least one non-ASCII (`асе` all-Cyrillic beside `ace`).
+    ///   The later spelling's first occurrence is the error and names the
+    ///   earlier one.
+    pub(crate) fn report_confusable_idents(&mut self) {
+        use unicode_security::{RestrictionLevel, RestrictionLevelDetection};
+        let idents = std::mem::take(&mut self.idents);
+        let mut judged: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut by_skeleton: std::collections::HashMap<String, (String, usize)> = std::collections::HashMap::new();
+        for (name, line, col) in idents {
+            if !judged.insert(name.clone()) {
+                continue;
+            }
+            let width = name.chars().count();
+            let non_ascii = !name.is_ascii();
+            if non_ascii
+                && matches!(
+                    name.as_str().detect_restriction_level(),
+                    RestrictionLevel::MinimallyRestrictive | RestrictionLevel::Unrestricted
+                )
+            {
+                let message = format!(
+                    "identifier `{}` mixes scripts a reader cannot tell apart at line {}, column {}",
+                    name, line, col
+                );
+                let hint = format!(
+                    "its non-ASCII characters are {}. An identifier must be written in one script, or \
+                     in a combination UTS #39 calls moderately restrictive (Latin with Han, Hiragana, \
+                     Katakana, Hangul or Bopomofo, or Latin with one other script except Cyrillic and \
+                     Greek); a look-alike letter from another script makes a second name that reads \
+                     like the first (homoglyph identifiers, CVE-2021-42694). Write the letter from \
+                     the name's own script",
+                    describe_non_ascii(&name)
+                );
+                self.push_e101(message, hint, line, col, width);
+                continue;
+            }
+            let skeleton: String = unicode_security::skeleton(&name).collect();
+            match by_skeleton.get(&skeleton) {
+                Some((first, first_line)) if non_ascii || !first.is_ascii() => {
+                    let message = format!(
+                        "identifier `{}` at line {}, column {} looks the same as `{}` (line {})",
+                        name, line, col, first, first_line
+                    );
+                    let odd = if non_ascii { &name } else { first };
+                    let hint = format!(
+                        "the two names are different identifiers that display alike (UTS #39 \
+                         confusables; homoglyph identifiers, CVE-2021-42694), so a reader cannot \
+                         tell which one a use names. `{}` holds {}. Rename one of them",
+                        odd,
+                        describe_non_ascii(odd)
+                    );
+                    self.push_e101(message, hint, line, col, width);
+                }
+                Some(_) => {}
+                None => {
+                    by_skeleton.insert(skeleton, (name, line));
+                }
+            }
+        }
+    }
+
+    fn push_e101(&mut self, message: String, hint: String, line: usize, col: usize, width: usize) {
+        let mut d = Diagnostic::error(message, hint, "source text").with_code("E101");
+        if let Some(f) = &self.file { d.file = Some(f.clone()); }
+        d.line = Some(line);
+        d.col = Some(col);
+        d.end_col = Some(col + width.max(1));
+        self.errors.push(d);
     }
 
     pub(crate) fn string_to_diagnostic(&self, msg: &str) -> Diagnostic {
@@ -213,4 +294,19 @@ impl Parser {
         d.col = col;
         d
     }
+}
+
+/// `` `а` U+0430 (Cyrillic), … `` for each distinct non-ASCII character of `name`.
+fn describe_non_ascii(name: &str) -> String {
+    use unicode_script::UnicodeScript;
+    let mut seen = Vec::new();
+    for c in name.chars().filter(|c| !c.is_ascii()) {
+        if !seen.contains(&c) {
+            seen.push(c);
+        }
+    }
+    seen.iter()
+        .map(|c| format!("`{}` U+{:04X} ({})", c, *c as u32, c.script().full_name()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

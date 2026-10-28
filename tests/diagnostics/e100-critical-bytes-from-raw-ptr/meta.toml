@@ -1,4 +1,0 @@
-expects_code = "E100"
-expects_error = "`bytes.from_raw_ptr` is outside the memory-safety guarantee"
-hint_substring = "memory-safety guarantee"
-check_profile = "critical"

@@ -1880,26 +1880,44 @@
 },
 {
 "mod": "ffi",
-"name": "address",
-"sig": "fn ffi.address(b: Bytes) -> RawPtr",
+"name": "region",
+"sig": "fn ffi.region(b: Bytes) -> Region",
 "kind": "追加"
 },
 {
 "mod": "ffi",
-"name": "to_int",
-"sig": "fn ffi.to_int(p: RawPtr) -> Int",
+"name": "alloc",
+"sig": "effect fn ffi.alloc(n: Int) -> Region",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "len",
+"sig": "fn ffi.len(r: Region) -> Int",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "is_writable",
+"sig": "fn ffi.is_writable(r: Region) -> Bool",
 "kind": "追加"
 },
 {
 "mod": "ffi",
 "name": "read",
-"sig": "effect fn ffi.read(ptr: RawPtr, len: Int) -> Bytes",
+"sig": "effect fn ffi.read(r: Region, off: Int, n: Int) -> Bytes",
 "kind": "追加"
 },
 {
 "mod": "ffi",
 "name": "write",
-"sig": "effect fn ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int",
+"sig": "effect fn ffi.write(r: Region, off: Int, b: Bytes) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "to_bytes",
+"sig": "effect fn ffi.to_bytes(r: Region) -> Bytes",
 "kind": "追加"
 },
 {
@@ -7805,11 +7823,11 @@
 "bytes": [
 {
 "name": "as_mut_ptr",
-"to": "`ffi.address`"
+"to": "`ffi.alloc`"
 },
 {
 "name": "as_ptr",
-"to": "`ffi.address`"
+"to": "`ffi.region`"
 },
 {
 "name": "concat",
@@ -7821,7 +7839,7 @@
 },
 {
 "name": "data_ptr",
-"to": "`ffi.address`"
+"to": "`ffi.region`"
 },
 {
 "name": "from_raw_ptr",

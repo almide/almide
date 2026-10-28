@@ -322,14 +322,15 @@ fn desugar_assert_outside_test(
         return None;
     }
     if ctx.in_test {
-        // Inside a test the harness forms report the assert. An operand whose
-        // type declares its repr somewhere (#4107) would print structurally
-        // there, so that assert becomes the harness `assert(cond, msg)` with
-        // the operands rendered through the declaration — the test still
-        // fails alone and the run goes on (`test_report::repr_assert`).
-        if matches!(n, "assert_eq" | "assert_ne")
-            && ir_args.iter().any(|a| ctx.holds_declared_repr(&a.ty, &mut Vec::new()))
-        {
+        // Inside a test the harness forms report the assert, so the test
+        // fails alone and the run goes on. An `assert_eq` / `assert_ne` becomes
+        // the harness `assert(cond, msg)` with its operands shown as every
+        // other route shows them (`assert_shown`): through a declared repr
+        // (#4107), escaped by C-418 (#4262). Left to the leg, native's
+        // `assert_eq!` printed Rust `Debug` (quoted, and not C-418's escape)
+        // while the wasm test lane printed the operands raw
+        // (`test_report::repr_assert` reads the harness form back).
+        if matches!(n, "assert_eq" | "assert_ne") {
             return Some(declared_repr_test_assert(ctx, n, ir_args.to_vec(), span));
         }
         return None;
@@ -607,9 +608,9 @@ fn strip_result_ok(ty: &Ty) -> Ty {
     }
 }
 
-/// An in-test `assert_eq` / `assert_ne` over a type that declares its repr
-/// (#4107): `assert(<comparison>, "assert_eq\n  expected: <r>\n  found: <l>")`,
-/// the operands bound once and rendered through their declared repr.
+/// An in-test `assert_eq` / `assert_ne` (#4107, #4262):
+/// `assert(<comparison>, "assert_eq\n  expected: <r>\n  found: <l>")`, the
+/// operands bound once and shown by `assert_shown` (declared repr, C-418).
 fn declared_repr_test_assert(
     ctx: &mut LowerCtx,
     name: &str,
@@ -634,9 +635,9 @@ fn declared_repr_test_assert(
     let own = if ctx.find_explicit_convention_fn(&vars[0].ty, "repr").is_some() { " (declared repr)" } else { "" };
     let parts = vec![
         IrStringPart::Lit { value: format!("{name}{own}\n  expected: {}", if negate { "!= " } else { "" }) },
-        IrStringPart::Expr { expr: ctx.render_declared(expected) },
+        IrStringPart::Expr { expr: assert_shown(ctx, expected, span) },
         IrStringPart::Lit { value: "\n  found: ".into() },
-        IrStringPart::Expr { expr: ctx.render_declared(found) },
+        IrStringPart::Expr { expr: assert_shown(ctx, found, span) },
     ];
     let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
     let call = ctx.mk(
@@ -714,9 +715,9 @@ fn desugar_assert_abort(
     let parts: Vec<IrStringPart> = match name {
         "assert_eq" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
-            IrStringPart::Expr { expr: ctx.render_declared(vars[1].clone()) },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[1].clone(), span) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[0].clone(), span) },
         ],
         // The snapshot block (#1314): same field order as assert_eq — `found`
         // LAST so the accept step can take it verbatim to the end of the
@@ -730,9 +731,9 @@ fn desugar_assert_abort(
         ],
         "assert_ne" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: != ") },
-            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[0].clone(), span) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[0].clone(), span) },
         ],
         _ if vars.len() >= 2 => {
             let mut p = vec![

@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "identifier `nаme` mixes scripts"
+hint_substring = "Write the letter from the name"
+expects_line_col = "7:22"

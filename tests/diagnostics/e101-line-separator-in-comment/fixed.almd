@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  let admin = false
+  // admins only
+  println(if admin then "granted" else "denied")
+}

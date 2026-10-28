@@ -492,13 +492,45 @@ pub fn validate_literal_escapes(raw: &str) -> Vec<EscapeIssue> {
     issues
 }
 
-// ── Bidirectional control characters (#4092, E101) ─────────────
+// ── Hidden characters (#4092, #4266, E101) ─────────────────────
 //
-// A raw U+202A..U+202E or U+2066..U+2069 makes the text a reviewer sees differ
-// from the text the compiler reads (Trojan Source, CVE-2021-42574). rustc denies
-// them in comments and literals; Almide refuses them anywhere in a source file.
-// Only the RAW character is refused: the escape `\u{202E}` in a string literal
-// is plain ASCII in the source and still decodes to the character.
+// A raw character that moves, hides or breaks text when displayed makes the
+// text a reviewer sees differ from the text the compiler reads (Trojan Source,
+// CVE-2021-42574): a bidi control reorders a line, U+2028 / U+2029 break it
+// in an editor or web view while the lexer keeps one line, and a zero-width
+// or Tags-block character (U+E0000..=U+E007F) is invisible on GitHub and in a
+// terminal while a model reading the source reads it as text. rustc denies the
+// bidi controls in comments and literals; Almide refuses the whole set
+// anywhere in a source file.
+//
+// The set is not a second list: it is C-418's escape table
+// (`almide_base::err_text::ALMIDE_RT_ERRTEXT_ESCAPED`: C0, DEL, C1, General
+// Category Cf / Zl / Zp, the Tags block) minus the three whitespace controls
+// source text is made of (TAB, LF, CR). The characters a runtime error text
+// must escape are exactly the ones a source file must not hold raw. Only the
+// RAW character is refused: the escape `\u{202E}` in a string literal is plain
+// ASCII in the source and still decodes to the character. A leading BOM is
+// stripped by `Lexer::tokenize` before this scan sees the text.
+
+/// True for a character E101 refuses raw in a source file.
+pub fn is_hidden_source_char(ch: char) -> bool {
+    !matches!(ch, '\t' | '\n' | '\r') && almide_base::err_text::almide_rt_errtext_is_escaped(ch)
+}
+
+/// How E101 names a refused character: the Unicode name of a bidi control,
+/// else the class the C-418 table row it falls in belongs to.
+pub fn hidden_char_name(ch: char) -> &'static str {
+    if let Some(name) = bidi_control_name(ch) {
+        return name;
+    }
+    match ch as u32 {
+        0x2028 => "LINE SEPARATOR",
+        0x2029 => "PARAGRAPH SEPARATOR",
+        0xE0000..=0xE007F => "TAG CHARACTER (invisible)",
+        0x00..=0x1F | 0x7F..=0x9F => "CONTROL CHARACTER",
+        _ => "FORMAT CHARACTER (invisible)",
+    }
+}
 
 /// The Unicode name of a bidirectional control character, or `None` when `ch`
 /// is not one of the nine E101 refuses.
@@ -517,19 +549,19 @@ pub fn bidi_control_name(ch: char) -> Option<&'static str> {
     })
 }
 
-/// One raw bidirectional control character found in a token's verbatim text,
+/// One raw E101 character found in a token's verbatim text,
 /// located the way `EscapeIssue` is: `line_offset` newlines past the token's
 /// first character, `col_offset` characters past the token's first character
 /// (line 0) or past the last newline (later lines).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BidiControl {
+pub struct HiddenChar {
     pub ch: char,
     pub line_offset: usize,
     pub col_offset: usize,
 }
 
-/// Every raw bidirectional control character in `text`.
-pub fn find_bidi_controls(text: &str) -> Vec<BidiControl> {
+/// Every raw E101 character in `text`.
+pub fn find_hidden_chars(text: &str) -> Vec<HiddenChar> {
     let mut found = Vec::new();
     let (mut line, mut col) = (0, 0);
     for ch in text.chars() {
@@ -538,8 +570,8 @@ pub fn find_bidi_controls(text: &str) -> Vec<BidiControl> {
             col = 0;
             continue;
         }
-        if bidi_control_name(ch).is_some() {
-            found.push(BidiControl { ch, line_offset: line, col_offset: col });
+        if is_hidden_source_char(ch) {
+            found.push(HiddenChar { ch, line_offset: line, col_offset: col });
         }
         col += 1;
     }
@@ -1159,16 +1191,34 @@ mod tests {
             assert!(bidi_control_name(c).is_some(), "U+{:04X}", c as u32);
         }
         assert_eq!(bidi_control_name('\u{200F}'), None); // RLM is not an embedding/override/isolate
-        let found = find_bidi_controls("ab\u{202E}\ncd\u{2066}");
+        let found = find_hidden_chars("ab\u{202E}\ncd\u{2066}");
         assert_eq!(
             found,
             vec![
-                BidiControl { ch: '\u{202E}', line_offset: 0, col_offset: 2 },
-                BidiControl { ch: '\u{2066}', line_offset: 1, col_offset: 2 },
+                HiddenChar { ch: '\u{202E}', line_offset: 0, col_offset: 2 },
+                HiddenChar { ch: '\u{2066}', line_offset: 1, col_offset: 2 },
             ]
         );
-        assert!(find_bidi_controls("\"a\\u{202E}b\"").is_empty());
+        assert!(find_hidden_chars("\"a\\u{202E}b\"").is_empty());
         assert_eq!(lex_string_value("let x = \"a\\u{202E}b\"\n"), "a\u{202E}b");
+    }
+
+    // #4266: the rest of the family — line/paragraph separators, zero-width and
+    // other Cf characters, the Tags block, raw C0/C1 controls — is refused raw;
+    // TAB / LF / CR (what source text is made of) and visible non-ASCII are not.
+    #[test]
+    fn hidden_characters_beyond_bidi_are_found_raw() {
+        for c in ['\u{2028}', '\u{2029}', '\u{200B}', '\u{200D}', '\u{2060}', '\u{FEFF}', '\u{AD}', '\u{E0001}', '\u{E0049}', '\u{E007F}', '\u{1B}', '\u{7F}', '\u{85}'] {
+            assert!(is_hidden_source_char(c), "U+{:04X}", c as u32);
+        }
+        for c in ['\t', '\n', '\r', ' ', 'a', '\u{A0}', '\u{301}', '\u{E0080}', '日', '🎉'] {
+            assert!(!is_hidden_source_char(c), "U+{:04X}", c as u32);
+        }
+        assert_eq!(hidden_char_name('\u{2028}'), "LINE SEPARATOR");
+        assert_eq!(hidden_char_name('\u{E0049}'), "TAG CHARACTER (invisible)");
+        assert_eq!(hidden_char_name('\u{200B}'), "FORMAT CHARACTER (invisible)");
+        assert_eq!(hidden_char_name('\u{202E}'), "RIGHT-TO-LEFT OVERRIDE");
+        assert_eq!(find_hidden_chars("a\u{E0049}\u{E0047}").len(), 2);
     }
 
     // Regression (#1457): a backtick escape enclosing no identifier character
