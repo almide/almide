@@ -20,7 +20,9 @@ impl Checker {
     fn validate_after_solve(&mut self, program: &ast::Program) {
         self.validate_map_key_types();
         self.validate_result_interpolations();
+        let new_generic_calls = self.generic_calls.len();
         self.validate_interp_instantiations();
+        self.validate_polymorphic_recursion(new_generic_calls);
         self.validate_ord_elem_types();
         self.validate_eq_operand_types();
         self.validate_unknown_named_types();

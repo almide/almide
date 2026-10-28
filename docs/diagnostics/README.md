@@ -72,6 +72,7 @@ equal to the set of codes the compiler emits.
 | [E104](E104.md) | A record field marked `@skip` or `@skip_decode` has no default, so `T.decode` has no value for it (#4108) |
 | [E109](E109.md) | A pure fn runs an `effect fn` it reached through a function value — a record field, a list element, a callback handed down through pure helpers (#4151) |
 | [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22) |
+| [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
