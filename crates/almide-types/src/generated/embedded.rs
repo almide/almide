@@ -333,12 +333,12 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
-  let bytes = bytes.to_list(bytes.from_string(string.trim(s)))
-  match bytes {
+  let codes = bytes.to_list(bytes.from_string(string.trim(s)))
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
     [43, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, false),
-    _ => read_digits(strip_radix_prefix(bytes, radix), radix, false),
+    _ => read_digits(strip_radix_prefix(codes, radix), radix, false),
   }
 }
 
@@ -11547,12 +11547,12 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)
-  let bytes = bytes.to_list(bytes.from_string(t))
-  match bytes {
+  let codes = bytes.to_list(bytes.from_string(t))
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
     [43, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, false),
-    _ => accumulate_negative(strip_radix_prefix(bytes, radix), radix, 0, false),
+    _ => accumulate_negative(strip_radix_prefix(codes, radix), radix, 0, false),
   }
 }
 
