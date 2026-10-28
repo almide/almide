@@ -32,7 +32,7 @@ fn command(text: String) -> String = match Command.decode_strict(doc(text)) {
   err(e) => "err " + e,
 }
 
-fn post(text: String) -> String = match http.decode_json[Order](http.new_request("POST", "/orders", text, [:])) {
+fn post(text: String) -> String = match http.decode_json[Order](http.new_request("POST", "/orders", text, [])) {
   ok(_) => "ok",
   err(bad) => "${bad}",
 }
