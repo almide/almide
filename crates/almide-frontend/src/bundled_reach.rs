@@ -611,6 +611,17 @@ mod tests {
     }
 
     #[test]
+    fn a_binding_spelled_like_a_module_in_the_stdlib_does_not_fan_out() {
+        // `int.parse_radix` once bound its code list as `bytes`, so its
+        // `bytes.to_list(..)` read as a UFCS `to_list` and reached every
+        // module declaring one (#4289). Pinned on the closure of one call.
+        let r = reached("fn f(x: Int) -> String = int.to_string(x)\n");
+        for m in ["option", "result", "set", "deque", "heap"] {
+            assert!(!r.contains(&m), "{m} reached: {r:?}");
+        }
+    }
+
+    #[test]
     fn a_param_named_like_a_generic_fn_does_not_name_it() {
         // `from` here is the parameter, not `int.from[S: Numeric]`.
         let r = reached("fn f(from: Int) -> Int = int.abs(from)\n");
