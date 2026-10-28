@@ -1096,7 +1096,7 @@ http.html(status: Int, body: SafeHtml) -> HttpResponse
 // @since 0.5.0 or earlier
 http.json(status: Int, body: String) -> HttpResponse
 
-// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
+// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value; aborts on an HTML Content-Type.
 // @since 0.5.0 or earlier
 http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse
 
@@ -1132,11 +1132,11 @@ http.body(m: M) -> String
 // @since unreleased
 http.body_bytes(m: M) -> Bytes
 
-// m with header name set, any case: the first match replaced in place, else appended.
+// m with header name set, any case: the first match replaced in place, else appended; a response aborts on an HTML Content-Type.
 // @since 0.6.0 or earlier
 http.set_header(m: M, name: String, value: String) -> M
 
-// m with its body replaced.
+// m with its body replaced; a text/html response aborts on a non-empty body.
 // @since unreleased
 http.set_body(m: M, body: String) -> M
 

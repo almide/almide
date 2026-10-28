@@ -633,7 +633,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
 - `http.html(status: Int, body: SafeHtml) -> HttpResponse` — Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
-- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
+- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value; aborts on an HTML Content-Type.
 - `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.
 - `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
 - `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
@@ -642,8 +642,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
 - `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
 - `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
-- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
-- `http.set_body(m: M, body: String) -> M` — m with its body replaced.
+- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended; a response aborts on an HTML Content-Type.
+- `http.set_body(m: M, body: String) -> M` — m with its body replaced; a text/html response aborts on a non-empty body.
 - `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
 - `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
 - `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
