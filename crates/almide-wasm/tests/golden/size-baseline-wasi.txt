@@ -29,7 +29,7 @@
 5823	spec/wasm_cross/bang_in_record_literal_field.almd
 5135	spec/wasm_cross/base64_decode_canonical.almd
 3255	spec/wasm_cross/base64_encode.almd
-15431	spec/wasm_cross/bigint_text_and_pow_limits.almd
+14852	spec/wasm_cross/bigint_text_and_pow_limits.almd
 5361	spec/wasm_cross/binary_operators.almd
 4123	spec/wasm_cross/binary_search_duplicate_keys.almd
 890	spec/wasm_cross/binding_stmts.almd
@@ -151,7 +151,7 @@
 4400	spec/wasm_cross/early_return_control_flow.almd
 4123	spec/wasm_cross/edge_closure_matrix.almd
 12991	spec/wasm_cross/edge_float_formatting.almd
-7630	spec/wasm_cross/edge_int_boundaries.almd
+7929	spec/wasm_cross/edge_int_boundaries.almd
 8027	spec/wasm_cross/edge_map_order.almd
 57811	spec/wasm_cross/edge_string_unicode.almd
 2900	spec/wasm_cross/effect_assign_unwrap.almd
@@ -189,7 +189,7 @@
 1969	spec/wasm_cross/env_sleep_pause.almd
 15258	spec/wasm_cross/env_vars_remove.almd
 3825	spec/wasm_cross/err_arm_takes_let_match_type.almd
-34266	spec/wasm_cross/err_text_operand_escape_families.almd
+34265	spec/wasm_cross/err_text_operand_escape_families.almd
 2045	spec/wasm_cross/error_operators.almd
 2126	spec/wasm_cross/exit_code_out_of_range.almd
 340	spec/wasm_cross/expr_stmt_comment.almd
@@ -340,7 +340,7 @@
 25750	spec/wasm_cross/heap_result_if_bind.almd
 2345	spec/wasm_cross/heap_result_if_bind_chain.almd
 25233	spec/wasm_cross/heap_result_if_eq_cond.almd
-9649	spec/wasm_cross/heap_result_if_match_arm_frame.almd
+10145	spec/wasm_cross/heap_result_if_match_arm_frame.almd
 3760	spec/wasm_cross/heap_result_if_option_aggregate.almd
 2019	spec/wasm_cross/heap_result_if_record_arm.almd
 4901	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
@@ -375,7 +375,7 @@
 1001	spec/wasm_cross/int_div_mod_ok.almd
 823	spec/wasm_cross/int_div_overflow.almd
 5810	spec/wasm_cross/int_float_ops.almd
-5984	spec/wasm_cross/int_from_hex.almd
+6480	spec/wasm_cross/int_from_hex.almd
 804	spec/wasm_cross/int_mod_by_zero.almd
 823	spec/wasm_cross/int_mod_overflow.almd
 3929	spec/wasm_cross/int_parse_overflow.almd
@@ -630,7 +630,7 @@
 5361	spec/wasm_cross/nested_list_list_string.almd
 4145	spec/wasm_cross/nested_list_option_result.almd
 6147	spec/wasm_cross/nested_map_list_values.almd
-6345	spec/wasm_cross/nested_match_heap_arm.almd
+6841	spec/wasm_cross/nested_match_heap_arm.almd
 2125	spec/wasm_cross/nested_payload_guard.almd
 11366	spec/wasm_cross/nested_place_assign.almd
 2683	spec/wasm_cross/nested_scalar_record_append.almd
@@ -997,7 +997,7 @@
 21689	spec/wasm_cross/zlib_output_bound.almd
 27275	spec/wasm_cross/zlib_selfhost.almd
 9279	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
-13198	spec/wasm_fail/bigint_to_string_limit_aborts.almd
+12821	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 3313	spec/wasm_fail/effect_err_aborts_both_legs.almd
 3482	spec/wasm_fail/int_parse_err_propagates.almd
 3227	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
