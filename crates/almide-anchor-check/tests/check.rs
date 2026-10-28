@@ -515,3 +515,13 @@ fn routine_and_element_rc_are_counted_apart() -> Result<(), String> {
     assert_eq!(r.element, 1);
     Ok(())
 }
+
+#[test]
+fn an_if_whose_arms_both_yield_one_local_is_that_local() -> Result<(), String> {
+    let joined = "local.get 1 (if (result i32) (then local.get 0) (else local.get 0)) local.set 1 local.get 1 call $alloc drop";
+    let r = rc(joined, "d0")?;
+    assert_eq!(r.calls, 1);
+    // Arms yielding different locals: not a read of either.
+    assert!(rc(&joined.replace("(else local.get 0)", "(else local.get 1)"), "d0").is_err());
+    Ok(())
+}

@@ -371,6 +371,10 @@ impl<'b, 'a> Flow<'b, 'a> {
                 site: p,
                 args: (0..self.b.args[p].len()).map(|k| self.arg(p, k, f)).collect(),
             },
+            // An `if` whose two arms both yield a read of one local, written
+            // by neither arm after that read: its value is that local's at
+            // the `end`.
+            Op::End => self.joined(p).map_or(T::Opaque(p), |l| T::Local(l, p)),
             o if is_load(o) => {
                 let (name, off, _) = load_name(o);
                 T::Load { name, off, addr: Box::new(self.arg(p, 0, f)), site: p }
@@ -380,6 +384,23 @@ impl<'b, 'a> Flow<'b, 'a> {
                 None => T::Opaque(p),
             },
         }
+    }
+
+    /// The local both arms of the `if` closed at `end` yield (module header
+    /// of `term`), if they do.
+    fn joined(&self, end: usize) -> Option<u32> {
+        let s = (0..end).rev().find(|&s| self.close[s] == end)?;
+        if !matches!(self.b.ops[s], Op::If { .. }) {
+            return None;
+        }
+        let e = (s + 1..end).find(|&k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else))?;
+        let arm = |at: usize| -> Option<u32> {
+            let q = self.b.args.get(at)?.first().copied().flatten()?;
+            let Op::LocalGet { local_index } = self.b.ops[q] else { return None };
+            (!(q + 1..at).any(|k| self.writes(k, Src::Local(local_index)))).then_some(local_index)
+        };
+        let (a, b) = (arm(e)?, arm(end)?);
+        (a == b).then_some(a)
     }
 
     /// No write of `src` between reads `u` and `v`, the earlier dominating.
