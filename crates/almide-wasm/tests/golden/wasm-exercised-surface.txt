@@ -192,7 +192,6 @@ call:env.set
 call:env.sleep_ms
 call:env.vars
 call:eprintln
-call:error.context
 call:fan.map
 call:ffi.alloc
 call:ffi.len
