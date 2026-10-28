@@ -1121,15 +1121,17 @@ exactly `@skip`, `@skip_decode` (and WGSL's `@builtin`/`@location`); serde- or
 pydantic-style spellings (`@serde(skip)`, `@json_ignore`, `@redact`) are the
 error E053, never silently ignored.
 
-**Rule 6 — HTML is served only from `SafeHtml`.** `http.html(status, page)`
-is the one way to answer `text/html`; build `page` with `html.escape` (text),
-`html.attr` / `html.url_attr` (attributes) or `html.script_json` (data in
-`<script>`), and `html.raw(s)` only for trusted markup. `http.set_header` /
-`http.with_headers` with a `Content-Type` naming `text/html`, an XML type
-(`application/xml`, `text/xml`) or a `+xml` subtype such as `image/svg+xml`
-aborts (E115 when written as literals), and so does `http.set_body` with a
-non-empty String on such a response; a fetched response re-served unchanged
-(a proxy) is allowed:
+**Rule 6 — a response's Content-Type is its body's type.** `http.response(status, body)`
+takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
+`application/octet-stream`, a `Value` `application/json`, `html.*` builds
+`text/html` and `svg.*` `image/svg+xml`. Build HTML with `html.escape` (text),
+`html.attr` / `html.url_attr` (attributes) and `html.script_json` (data in
+`<script>`), and `html.raw(s)` only for trusted markup. Any other media type is
+`http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
+computed one, or for HTML / XML / SVG). Content-Type is never written by name:
+`set_header` / `with_headers` refuse it (E116), and `set_body` /
+`http.with_body(resp, body)` replace the body and its type together. A
+fetched response keeps the type it arrived with:
 
 ```almide check
 import html
@@ -1137,8 +1139,10 @@ import http
 
 fn greet(req: HttpRequest) -> HttpResponse = {
   let name = http.param(req, "name") ?? "guest"
-  http.html(200, html.escape("Hello, ${name}"))
+  http.response(200, html.escape("Hello, ${name}"))
 }
+
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Rows", "1")])
 ```
 
 Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
