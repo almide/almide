@@ -63,11 +63,13 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // that is not also `Encode` — or the call is E110 (crates/almide-frontend
     // check/input_sink.rs)
     "input_sink",
-    // Writes header fields into a response it serves, refusing a
-    // Content-Type that names one of the listed HTML media types (row 11e):
-    // the body aborts at run time, and a literal field is E115 at check time
-    // (crates/almide-frontend check/content_type_guard.rs)
-    "content_type_guard",
+    // ADR-0032 (row 11e), read by crates/almide-frontend check/body_rules.rs:
+    // a header writer and the list of names the body owns (E116); a
+    // parameter taken only as a literal media type (E117); the media-type
+    // patterns a body type's media fn owns, so no other way builds them
+    "header_write",
+    "literal_media",
+    "media_owns",
     // Scheduling and placement
     "schedule",
     "location",
