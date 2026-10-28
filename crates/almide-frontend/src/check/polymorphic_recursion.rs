@@ -54,7 +54,7 @@ impl Checker {
             // path's calls name the fns the cycle runs through.
             let Some(path) = find_path(&adj, *to, *from) else { continue };
             let call = &self.generic_calls[*i];
-            let key = call.site.span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
+            let key = call.call_span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
             if !reported.insert(key) {
                 continue;
             }
@@ -94,7 +94,7 @@ impl Checker {
                 "polymorphic recursion",
             ).with_code("E114");
             diag.file = call.site.file.clone();
-            if let Some(s) = call.site.span {
+            if let Some(s) = call.call_span {
                 diag.line = Some(s.line);
                 diag.col = Some(s.col);
             }
