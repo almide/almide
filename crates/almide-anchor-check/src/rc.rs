@@ -6,10 +6,12 @@
 //! kind, and every recorded event one such call: an event that names a local
 //! matches only a call whose argument was read through that local
 //! (operands.rs `chain`); a temporary's event (`-`) matches any call of its
-//! kind. A call in dead code (after an unconditional branch in its block) or
-//! in an aborting arm is not live. A release whose block then aborts (only
-//! calls, constants and local reads between it and `unreachable`) is counted
-//! apart: the witness does not record it by design (#4278).
+//! kind. A call in dead code (after an unconditional branch in its block) is
+//! not live. A call on a path that aborts (in an aborting arm, or a release
+//! whose block then reaches `unreachable` through only calls, constants and
+//! local reads) is matched like any other; left over, it is counted
+//! (`pre_abort`), not refused — the process ends there, and the witness does
+//! not record every such release (#4278).
 //!
 //! An owner rebind's release of the old block (`o`, the recorder's DecOld)
 //! and a variable's release (`d` on a local) is a release call, or happens
@@ -110,8 +112,11 @@ pub fn check_rc(
         let b = bodies.get(*pos).ok_or_else(|| format!("rc: no defined function at position {pos}"))?;
         let fl = Flow::new(b, HashSet::new());
         let dead = dead(b);
-        // The live RC calls: (instruction, kind, the locals its argument was read through).
+        // The live RC calls: (instruction, kind, the locals its argument was
+        // read through). Those on a path that aborts take part in matching;
+        // left over, they are counted, not refused (#4278).
         let mut calls: Vec<(usize, char, Vec<u32>)> = Vec::new();
+        let mut aborting: HashSet<usize> = HashSet::new();
         for (k, op) in b.ops.iter().enumerate() {
             let Op::Call { function_index } = op else { continue };
             let kind = if Some(*function_index) == inc {
@@ -123,12 +128,11 @@ pub fn check_rc(
             } else {
                 continue;
             };
-            if dead[k] || fl.in_abort_arm(k) {
+            if dead[k] {
                 continue;
             }
-            if kind == 'd' && before_abort(b, k) {
-                rep.pre_abort += 1;
-                continue;
+            if fl.in_abort_arm(k) || (kind == 'd' && before_abort(b, k)) {
+                aborting.insert(k);
             }
             let locals = chain(&fl.arg(k, 0, FUEL))
                 .into_iter()
@@ -186,6 +190,9 @@ pub fn check_rc(
             if !used[i] && calls[i].1 != 'j' && in_arm(calls[i].0) {
                 used[i] = true;
                 rep.arm_internal += 1;
+            } else if !used[i] && calls[i].1 != 'j' && aborting.contains(&calls[i].0) {
+                used[i] = true;
+                rep.pre_abort += 1;
             }
         }
         let extra: Vec<String> = (0..calls.len())

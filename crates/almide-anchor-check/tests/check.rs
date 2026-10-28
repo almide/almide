@@ -439,6 +439,9 @@ fn dead_and_pre_abort_releases_are_not_live_events() -> Result<(), String> {
     rc("return local.get 0 call $alloc drop", "")?;
     let r = rc("local.get 0 call $alloc drop unreachable", "")?;
     assert_eq!(r.pre_abort, 1);
+    // Recorded, the release before the abort is matched, not merely counted.
+    let r = rc("local.get 0 call $alloc drop unreachable", "d0")?;
+    assert_eq!((r.pre_abort, r.calls), (0, 1));
     Ok(())
 }
 
