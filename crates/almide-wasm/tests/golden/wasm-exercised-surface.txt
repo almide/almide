@@ -210,6 +210,7 @@ call:float.from_bits
 call:float.is_nan
 call:float.max
 call:float.min
+call:float.nan
 call:float.parse
 call:float.pow
 call:float.round

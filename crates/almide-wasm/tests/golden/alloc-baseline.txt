@@ -459,7 +459,7 @@
 86960	spec/wasm_cross/list_find_map_short_circuit.almd
 66096	spec/wasm_cross/list_flatten_borrow.almd
 66224	spec/wasm_cross/list_float_equality_family.almd
-67632	spec/wasm_cross/list_float_total_order.almd
+68240	spec/wasm_cross/list_float_total_order.almd
 214128	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 66928	spec/wasm_cross/list_head_read_borrows.almd
 68608	spec/wasm_cross/list_heap_ops_release_temporaries.almd

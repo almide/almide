@@ -459,7 +459,7 @@
 28870	spec/wasm_cross/list_find_map_short_circuit.almd
 3291	spec/wasm_cross/list_flatten_borrow.almd
 3776	spec/wasm_cross/list_float_equality_family.almd
-8889	spec/wasm_cross/list_float_total_order.almd
+16853	spec/wasm_cross/list_float_total_order.almd
 7636	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 6700	spec/wasm_cross/list_head_read_borrows.almd
 9304	spec/wasm_cross/list_heap_ops_release_temporaries.almd
@@ -789,7 +789,7 @@
 2981	spec/wasm_cross/sized_numeric_literals.almd
 21620	spec/wasm_cross/sized_tail_literal_matrix.almd
 3233	spec/wasm_cross/snapshot_mismatch_abort.almd
-3985	spec/wasm_cross/sort_by_call_count.almd
+4061	spec/wasm_cross/sort_by_call_count.almd
 11284	spec/wasm_cross/sort_by_compound_key.almd
 5691	spec/wasm_cross/sort_by_str_key_heap.almd
 3420	spec/wasm_cross/split_empty_sep.almd
@@ -798,7 +798,7 @@
 13597	spec/wasm_cross/statement_after_tail_walker_bang.almd
 42528	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
 11129	spec/wasm_cross/stdlib_call_temporaries_release.almd
-27209	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
+27437	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 34973	spec/wasm_cross/stdlib_opaque_shadow.almd
 75282	spec/wasm_cross/stdlib_type_shadow.almd
 2962	spec/wasm_cross/str_result_heap_bind.almd
