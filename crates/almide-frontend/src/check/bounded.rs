@@ -111,7 +111,7 @@ impl Checker {
 const BOUNDED_PURE_MODULES: &[&str] = &[
     "int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float",
     "float32", "float64", "bool", "string", "list", "map", "set", "math", "option", "result", "value",
-    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "path",
+    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "svg", "hash", "path",
 ];
 
 /// Effect / host-reaching modules E076 rejects outright (ALS-B9); `io` is
