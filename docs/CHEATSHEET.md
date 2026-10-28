@@ -1121,6 +1121,24 @@ exactly `@skip`, `@skip_decode` (and WGSL's `@builtin`/`@location`); serde- or
 pydantic-style spellings (`@serde(skip)`, `@json_ignore`, `@redact`) are the
 error E053, never silently ignored.
 
+**Rule 6 — HTML is served only from `SafeHtml`.** `http.html(status, page)`
+is the one way to answer `text/html`; build `page` with `html.escape` (text),
+`html.attr` / `html.url_attr` (attributes) or `html.script_json` (data in
+`<script>`), and `html.raw(s)` only for trusted markup. `http.set_header` /
+`http.with_headers` with a `Content-Type` naming `text/html` or
+`application/xhtml+xml` aborts (E115 when written as literals), and so does
+`http.set_body` with a non-empty String on an HTML response:
+
+```almide check
+import html
+import http
+
+fn greet(req: HttpRequest) -> HttpResponse = {
+  let name = http.param(req, "name") ?? "guest"
+  http.html(200, html.escape("Hello, ${name}"))
+}
+```
+
 Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
 types, and any nesting of `Option`/`List` over those (`List[Option[Int]]`
 keeps element nulls; `Option[List[T]]` omits when none). Rejected at
