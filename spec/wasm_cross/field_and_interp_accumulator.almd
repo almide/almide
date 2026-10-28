@@ -93,7 +93,9 @@ fn rebuild_keep(n: Int) -> (Acc, Acc) = {
 fn rebuild_twice(n: Int) -> Acc = {
   var r = Acc { xs: [1], s: "a", m: [:], n: 0 }
   for _ in 0..<n {
-    r = { ...r, xs: r.xs + [list.len(r.xs)], s: r.s + r.s }
+    r = { ...r, xs: r.xs + [
+      list.len(r.xs)
+    ], s: r.s + r.s }
   }
   r
 }
@@ -103,7 +105,11 @@ fn rebuild_reread(r: Acc) -> (Acc, Acc) = {
   (next, r)
 }
 
-fn fold_rec(n: Int) -> Acc = list.fold(list.range(0, n), empty_acc(), (acc, i) => { ...acc, xs: acc.xs + [i], s: acc.s + "f" })
+fn fold_rec(n: Int) -> Acc = list.fold(
+  list.range(0, n),
+  empty_acc(),
+  (acc, i) => { ...acc, xs: acc.xs + [i], s: acc.s + "f" },
+)
 
 fn fold_str(n: Int) -> String = list.fold(list.range(0, n), "", (acc, i) => acc + "${i},")
 
