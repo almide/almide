@@ -137,6 +137,14 @@ pub(crate) fn is_loaded(t: &T) -> bool {
     matches!(pl(t), T::Load { .. })
 }
 
+/// A loaded value's address and memarg offset.
+pub(crate) fn load_parts(t: &T) -> Option<(&T, u64)> {
+    match pl(t) {
+        T::Load { addr, off, .. } => Some((addr, *off)),
+        _ => None,
+    }
+}
+
 /// The address a loaded value was read from.
 pub(crate) fn loaded_from(t: &T) -> Option<&T> {
     match pl(t) {

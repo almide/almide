@@ -44,6 +44,14 @@
 //! the variable as an argument — the arm or routine consumes it, or takes
 //! the +1 its argument guard prepays — counted (`consumed`).
 //!
+//! The windows and the element class are confined (sec-rows-2-3-4, the
+//! drills of proofs/fixtures/rc-witness/reinject/): a leftover call counts
+//! as an arm's, a routine's or an element's only if its argument names no
+//! variable the frame's events name; an element release only if a later
+//! store writes the same slot; and a release or +1 counts as `consumed` only
+//! by a call inside an arm or routine window whose callee's own body takes
+//! ownership of that parameter.
+//!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
 //! keeps the balance its ownership declaration states; that a compound
@@ -54,7 +62,7 @@ use std::collections::HashSet;
 
 use wasmparser::Operator as Op;
 
-use crate::decode::Body;
+use crate::decode::{store_width, Body};
 use crate::operands::{chain, Flow, Src, FUEL};
 
 /// What the RC check saw.
@@ -147,9 +155,46 @@ fn names(arg: &crate::operands::T) -> Vec<u32> {
     v
 }
 
-/// Check the `rc` lines (`frames` as `(position, events)`) over `bodies`.
+/// Does function `f` take ownership of its parameter `j`: release it, store
+/// it into a block, return it, or hand it to a callee that does (followed
+/// `depth` calls deep)? An imported function holds no credit.
+fn consumes(bodies: &[Body<'_>], imports: u32, releases: &HashSet<u32>, f: u32, j: u32, depth: u32) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return false };
+    let fl = Flow::new(b, HashSet::new());
+    let last = b.ops.len().saturating_sub(1);
+    b.ops.iter().enumerate().any(|(k, op)| {
+        let takes = |a: usize| names(&fl.arg(k, a, FUEL)).contains(&j);
+        match op {
+            Op::Call { function_index: g } | Op::ReturnCall { function_index: g } => (0..b.args[k].len())
+                .any(|a| takes(a) && (releases.contains(g) || consumes(bodies, imports, releases, *g, a as u32, depth - 1))),
+            Op::Return => (0..b.args[k].len()).any(takes),
+            Op::End if k == last => (0..b.args[k].len()).any(takes),
+            o if store_width(o).is_some() => takes(1),
+            _ => false,
+        }
+    })
+}
+
+/// The release at `k` of a value loaded out of a slot replaces it: a later
+/// store writes the same slot (the container's element is swapped, its old
+/// credit released).
+fn replaces(fl: &Flow<'_, '_>, b: &Body<'_>, k: usize) -> bool {
+    let arg = fl.arg(k, 0, FUEL);
+    let Some((addr, off)) = crate::operands::load_parts(&arg) else { return false };
+    (k + 1..b.ops.len()).any(|k2| match store_width(&b.ops[k2]) {
+        Some((_, o)) => o == off && fl.same(addr, &fl.arg(k2, 0, FUEL)),
+        None => false,
+    })
+}
+
+/// Check the `rc` lines (`frames` as `(position, events)`) over `bodies`
+/// (`imports`: the function imports before them in the index space).
 pub fn check_rc(
     bodies: &[Body<'_>],
+    imports: u32,
     inc: Option<u32>,
     releases: &HashSet<u32>,
     judges: &[crate::At],
@@ -208,6 +253,10 @@ pub fn check_rc(
         // Named events no RC call took: a release may be the consumption of
         // the variable by a stdlib arm or a compound routine (below).
         let mut pending: Vec<(char, u32)> = Vec::new();
+        // Every variable the frame's events name: an arm's, a routine's or a
+        // container's own RC never touches one of these (that would be the
+        // frame's credit, which its events must account).
+        let witnessed: HashSet<u32> = evs.iter().filter_map(|e| e.1).collect();
         // Rebind releases first: a release or a judge call on their local.
         for &(_, local) in evs.iter().filter(|e| e.0 == 'o') {
             let l = local.unwrap_or(u32::MAX);
@@ -238,16 +287,19 @@ pub fn check_rc(
         }
         rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
         let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
-        // A variable's release that is an arm's or a routine's consumption of
-        // it: a call inside its window takes the variable as an argument (the
-        // arm's ownership declaration says it consumes; #4278 trusts that).
+        // A variable's release (or prepaid +1) that is an arm's or a routine's
+        // consumption of it: a call INSIDE an arm or routine window takes the
+        // variable as argument `j`, and the callee's own body takes ownership
+        // of parameter `j` (releases, stores, returns or passes it on).
         for (kind, l) in pending {
             let consumed = matches!(kind, 'd' | 'a')
                 && b.ops.iter().enumerate().any(|(k, op)| {
-                    matches!(op, Op::Call { .. })
-                        && !dead[k]
+                    let Op::Call { function_index: g } = op else { return false };
+                    !dead[k]
                         && (inside(&windows[0], k) || inside(&windows[1], k))
-                        && (0..b.args[k].len()).any(|j| names(&fl.arg(k, j, FUEL)).contains(&l))
+                        && (0..b.args[k].len()).any(|j| {
+                            names(&fl.arg(k, j, FUEL)).contains(&l) && consumes(bodies, imports, releases, *g, j as u32, 4)
+                        })
                 });
             if consumed {
                 rep.consumed += 1;
@@ -260,11 +312,14 @@ pub fn check_rc(
                 continue;
             }
             let k = calls[i].0;
-            let slot = if inside(&windows[0], k) {
+            // A frame variable's credit is never an arm's, a routine's or an
+            // element's: such a call stays unaccounted.
+            let frame_owned = calls[i].2.iter().any(|n| witnessed.contains(n));
+            let slot = if !frame_owned && inside(&windows[0], k) {
                 &mut rep.arm_internal
-            } else if inside(&windows[1], k) {
+            } else if !frame_owned && inside(&windows[1], k) {
                 &mut rep.routine_internal
-            } else if elements.contains(&k) {
+            } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
                 &mut rep.element
             } else if aborting.contains(&k) {
                 &mut rep.pre_abort

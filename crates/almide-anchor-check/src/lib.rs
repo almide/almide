@@ -57,7 +57,7 @@ mod operands;
 mod rc;
 pub use rc::{check_rc, RcReport};
 use decode::{branch_target, is_load};
-pub use decode::{decode, store_width, Body};
+pub use decode::{decode, function_imports, store_width, Body};
 
 /// A located event: a defined function's position and an instruction index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -778,7 +778,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
     if let Some((inc, decs, frames, arms, routines)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
+        check_rc(&bodies, function_imports(wasm), inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

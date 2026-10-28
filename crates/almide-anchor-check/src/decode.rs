@@ -86,6 +86,22 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
     Ok(out)
 }
 
+/// How many functions the module imports (they precede the defined ones in
+/// the function index space).
+pub fn function_imports(bytes: &[u8]) -> u32 {
+    let mut n = 0;
+    for payload in Parser::new(0).parse_all(bytes).flatten() {
+        if let wasmparser::Payload::ImportSection(r) = payload {
+            n += r
+                .into_imports()
+                .flatten()
+                .filter(|i| matches!(i.ty, wasmparser::TypeRef::Func(_)))
+                .count() as u32;
+        }
+    }
+    n
+}
+
 /// A store's width in bytes and its static offset.
 pub fn store_width(op: &Op<'_>) -> Option<(u32, u64)> {
     Some(match op {
