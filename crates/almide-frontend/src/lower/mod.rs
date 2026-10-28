@@ -658,12 +658,29 @@ fn operator_requirement_targets(
     let methods: Vec<&str> = OPERATOR_REQUIREMENTS.iter().map(|(_, m)| *m)
         .chain([NEG_REQUIREMENT, ORDER_REQUIREMENT])
         .collect();
-    let mut names: Vec<almide_base::intern::Sym> = env.type_protocols.keys().copied().collect();
-    names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    // Only a type one of whose protocols requires an operator method can
+    // answer one, and most conforming types (every Eq / Repr / Hash
+    // conformer) require none: read each type's protocols once and keep the
+    // operator methods they require, instead of resolving every (type,
+    // method) pair — this ran for every module lowered (#4289).
+    let required_ops = |name: &str| -> Vec<&str> {
+        let bare = name.rsplit_once('.').map_or(name, |(_, b)| b);
+        let protos: Vec<&almide_base::intern::Sym> = [name, bare].iter()
+            .filter_map(|n| env.type_protocols.get(&sym(n)))
+            .flatten()
+            .collect();
+        methods.iter().copied().filter(|m| protos.iter().any(|p| {
+            env.protocols.get(*p).is_some_and(|d| d.methods.iter().any(|x| x.name.as_str() == *m))
+        })).collect()
+    };
+    let mut names: Vec<(almide_base::intern::Sym, Vec<&str>)> = env.type_protocols.keys()
+        .filter_map(|n| { let ops = required_ops(n.as_str()); (!ops.is_empty()).then_some((*n, ops)) })
+        .collect();
+    names.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     let mut out = std::collections::HashMap::new();
-    for name in names {
+    for (name, ops) in names {
         let ty = Ty::Named(name, vec![]);
-        for method in &methods {
+        for method in &ops {
             let Some(target) = expressions::requirement_call_target(ctx, &ty, method) else { continue };
             let bare = name.as_str().rsplit_once('.').map_or(name.as_str(), |(_, b)| b);
             out.insert((name, sym(method)), target.clone());
