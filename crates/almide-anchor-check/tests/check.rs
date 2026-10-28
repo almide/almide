@@ -581,7 +581,7 @@ fn a_consumed_release_needs_a_callee_that_takes_the_parameter_on_every_path() ->
 
 /// The `$bytes_push` / `$list_push` shape: the fast path hands the block back,
 /// the grow path must release it. Released only under a uniqueness judge (the
-/// pre-fix runtime), the shared grow path kept the caller's share, and the
+/// pre-fix runtime, #4304), the shared grow path kept the caller's share, and the
 /// every-path rule refuses it.
 #[test]
 fn a_push_routine_takes_its_block_on_every_path_only_when_the_grow_path_releases_it() -> Result<(), String> {

@@ -601,7 +601,7 @@ pub(crate) fn emit_list_push(s: Scalar) -> Function {
     // growth CHAIN was the churn gate's whole leak), only drops the
     // caller's share when the block is shared, and ignores a static.
     // The old `rc == 1 → $free` judge kept the caller's share of a shared
-    // block forever. A shared block of 4-byte slots also hands its
+    // block forever (#4304). A shared block of 4-byte slots also hands its
     // element handles to `base`, so those copies are new references
     // (`$inc` ignores Bool slots and statics, both below the heap floor);
     // a unique block's elements MOVE and need none.
@@ -663,7 +663,7 @@ pub(crate) fn emit_bytes_push() -> Function {
     i.local_get(base).local_get(la).i32_const(1).i32_add().i32_store(word(almide_layout::LEN.offset));
     // RC-3: release the outgrown block on every path, as $list_push and
     // $str_append do — freed when uniquely owned, the caller's share
-    // dropped when shared, a static left alone.
+    // dropped when shared, a static left alone (#4304).
     i.local_get(b).call(F_DEC_FLAT);
     i.local_get(base);
     i.end();

@@ -5,7 +5,7 @@ index 592e5c2cf..e770a05d6 100644
 @@ -664,7 +664,8 @@ pub(crate) fn emit_bytes_push() -> Function {
      // RC-3: release the outgrown block on every path, as $list_push and
      // $str_append do — freed when uniquely owned, the caller's share
-     // dropped when shared, a static left alone.
+     // dropped when shared, a static left alone (#4304).
 -    i.local_get(b).call(F_DEC_FLAT);
 +    // RE-INJECTED (#4277 drill): the grow path no longer releases the
 +    // outgrown block it consumed.
