@@ -1,9 +1,9 @@
 diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
-index 47ecc8167..5be692536 100644
+index 8ae92437a..f4be2db7d 100644
 --- a/crates/almide-wasm/src/list_order.rs
 +++ b/crates/almide-wasm/src/list_order.rs
-@@ -210,7 +210,7 @@ impl Emitter<'_> {
-                             i.i64_xor();
+@@ -226,7 +226,7 @@ impl Emitter<'_> {
+                             crate::list_sort::push_float_order_key(&mut i, l);
                          }
                          if is_min {
 -                            i.i64_lt_s();
