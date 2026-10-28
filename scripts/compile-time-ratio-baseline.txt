@@ -1,0 +1,16 @@
+# compile-time ratios (see scripts/check-compile-time-ratio.sh, #4289)
+#
+# Measured 2026-10-28 on one GCE n2-standard-16 (Intel Cascade Lake), release
+# builds, the script's 24-file corpus, min of 3, two rounds each (the rounds
+# agreed to 0.6%):
+#
+#   tree                                   check   wasm
+#   pre-batch develop 3d7a1ab70            4.52    21.2
+#   post-batch release-fix 0ff4366bc       6.65    27.3   <- fails both rows
+#   this tree (the #4289 fixes)            5.10    22.5
+#
+# The remaining check gap to the pre-batch tree is int's radix functions
+# (to_string_radix, parse_radix), new in the batch, whose bodies call bytes:
+# a program that reaches int now also loads bytes.
+check 5.10
+wasm 22.5
