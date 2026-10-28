@@ -24,10 +24,10 @@ test "http.json creates json response" {
 
 test "http.set_header overwrites existing header" {
   let resp = http.response(200, "hi")
-  let updated = http.set_header(resp, "Content-Type", "text/html")
+  let updated = http.set_header(resp, "Content-Type", "text/csv")
   let ct = http.header(updated, "Content-Type")
   match ct {
-    some(v) => assert_eq(v, "text/html"),
+    some(v) => assert_eq(v, "text/csv"),
     none => assert(false),
   }
 }
@@ -64,11 +64,11 @@ test "http.set_status rebind leaves an earlier alias at its old status" {
 }
 
 test "http.with_headers creates response with custom headers" {
-  let headers = [("X-Custom", "value"), ("Content-Type", "text/html")]
+  let headers = [("X-Custom", "value"), ("Content-Type", "text/csv")]
   let resp = http.with_headers(200, "hi", headers)
   let ct = http.header(resp, "Content-Type")
   match ct {
-    some(v) => assert_eq(v, "text/html"),
+    some(v) => assert_eq(v, "text/csv"),
     none => assert(false),
   }
 }
@@ -88,9 +88,9 @@ test "http header names are case-insensitive" {
 }
 
 test "http.set_header round-trips under any spelling" {
-  let resp = http.set_header(http.response(200, "hi"), "content-type", "text/html")
-  assert_eq(http.header(resp, "content-type") ?? "none", "text/html")
-  assert_eq(http.header(resp, "Content-Type") ?? "none", "text/html")
+  let resp = http.set_header(http.response(200, "hi"), "content-type", "text/csv")
+  assert_eq(http.header(resp, "content-type") ?? "none", "text/csv")
+  assert_eq(http.header(resp, "Content-Type") ?? "none", "text/csv")
 }
 
 test "http.headers lists every header in order, repeats kept" {

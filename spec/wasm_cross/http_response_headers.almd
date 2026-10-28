@@ -20,7 +20,7 @@ effect fn main() -> Unit = {
   println("${hdr(http.with_headers(204, "", empty), "Content-Type")}")
   // A caller-supplied name wins under any spelling, and two case-variant keys
   // upsert into ONE entry (last value in list order wins).
-  let c = http.with_headers(200, "b", [("content-type", "text/html")])
+  let c = http.with_headers(200, "b", [("content-type", "text/csv")])
   println("${hdr(c, "content-type")} ${hdr(c, "Content-Type")}")
   let d = http.with_headers(200, "b", [("Content-Type", "a/b"), ("content-type", "c/d")])
   println("${hdr(d, "Content-Type")} ${hdr(d, "content-type")}")
@@ -34,7 +34,7 @@ effect fn main() -> Unit = {
   let rd = http.redirect("/x")
   println("${hdr(rd, "Location")} ${hdr(rd, "location")} ${hdr(rd, "Content-Type")} '${http.body(rd)}'")
   // set_header round-trips under ANY spelling, and does not disturb the rest.
-  let s1 = http.set_header(http.response(200, "b"), "content-type", "text/html")
+  let s1 = http.set_header(http.response(200, "b"), "content-type", "text/csv")
   println("${hdr(s1, "content-type")} ${hdr(s1, "Content-Type")}")
   let s2 = http.set_header(http.response(200, "b"), "X-New", "v")
   println("${hdr(s2, "X-New")} ${hdr(s2, "x-new")} ${hdr(s2, "Content-Type")}")
