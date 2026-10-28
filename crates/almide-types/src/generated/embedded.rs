@@ -970,19 +970,6 @@ fn append_u32_le(mut b: Bytes, x: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_append_u8")
 fn append_u8(mut b: Bytes, x: Int) -> Unit = _
 
-/// Mutable address of the data; null if empty.
-@deprecated(since=15, use="ffi.address")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_as_mut_ptr")
-@mutating
-fn as_mut_ptr(b: Bytes) -> RawPtr = _
-
-/// Address of the data; null if empty.
-@deprecated(since=15, use="ffi.address")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_as_ptr")
-fn as_ptr(b: Bytes) -> RawPtr = _
-
 /// size-byte pieces, last may be short; [] if size <= 0.
 @intrinsic("almide_rt_bytes_chunks")
 fn __chunks(b: Bytes, size: Int) -> List[Bytes] = _
@@ -1007,18 +994,6 @@ fn contains(b: Bytes, needle: Bytes) -> Bool = _
 @intrinsic("almide_rt_bytes_copy_from")
 fn copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
-/// Writes up to cap bytes to ptr; count, 0 if null.
-@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_copy_to_ptr")
-fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
-
-/// Address of the data as an Int; target-specific.
-@deprecated(since=15, use="ffi.address", note="write `ffi.to_int(ffi.address(b))`, which is 0 for an empty b")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_data_ptr")
-fn data_ptr(b: Bytes) -> Int = _
-
 /// True if b ends with suffix, or suffix is empty.
 @intrinsic("almide_rt_bytes_ends_with")
 fn ends_with(b: Bytes, suffix: Bytes) -> Bool = _
@@ -1034,12 +1009,6 @@ fn fill(mut b: Bytes, x: Int) -> Unit = _
 /// xs as bytes, low 8 bits each; -1 becomes 255.
 @intrinsic("almide_rt_bytes_from_list")
 fn from_list(xs: List[Int]) -> Bytes = _
-
-/// Copy of len bytes at ptr; empty if null or len <= 0.
-@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_from_raw_ptr")
-fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
 /// UTF-8 encoding of s.
 @intrinsic("almide_rt_bytes_from_string")
@@ -2487,11 +2456,6 @@ fn bytes_from_string(s: String) -> Bytes = {
 }
 
 fn bytes_len(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
-
-
-
-
-fn bytes_data_ptr(b: Bytes) -> Int = prim.handle(b) + 12
 
 fn bytes_is_empty(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -4029,71 +3993,6 @@ fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int)
   else 0)
   else 0
 }
-"#;
-pub const SRC_BYTES_RAWPTR: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn bytes_as_ptr(b: Bytes) -> RawPtr = {
-  let h = prim.handle(b)
-  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = {
-  let h = prim.handle(b)
-  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dst + i, prim.load8(src + i))
-  __brp_copy(dst, src, n, i + 1)
-}
-
-
-
-fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
-  let src = prim.ptr_to_int(p)
-  if src == 0 or n <= 0 then prim.alloc_bytes(0)
-  else {
-    let out = prim.alloc_bytes(n)
-    let oh = prim.handle(out)
-    let _c = __brp_copy(oh + 12, src, n, 0)
-    out
-  }
-}
-
-fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
-  let dst = prim.ptr_to_int(ptr)
-  let h = prim.handle(b)
-  let len = if dst == 0 then 0 else prim.load32(h + 4)
-
-
-
-
-
-  let capped = if cap < 0 then len else cap
-  let n = if len < capped then len else capped
-  let _c = __brp_copy(dst, h + 12, n, 0)
-  n
-}
-
-
-@implements("ffi.to_int")
-fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)
 "#;
 pub const SRC_BYTES_SPLIT: &str = r#"
 
@@ -5727,25 +5626,88 @@ pub const SRC_FFI: &str = r#"
 
 
 
-/// Address of b's first byte; null if b is empty.
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A view of memory: base, length, permission and owner (ADR-0031 D1).
+mod type Region = { owner: Bytes, base: Handle, len: Int, writable: Bool, keep: () -> Unit }
+
+/// A read-only view of b; b lives as long as the view.
+@memory_unsafe
+fn region(b: Bytes) -> Region = {
+  let base = __address(b)
+  { owner: b, base: base, len: bytes.len(b), writable: false, keep: () => () }
+}
+
+/// A fresh writable region of n zero bytes; err if n is negative.
+@memory_unsafe
+effect fn alloc(n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.alloc: negative length ${n}")
+  else {
+    let buf = bytes.zeros(n)
+    let base = __address(buf)
+    ok({ owner: buf, base: base, len: n, writable: true, keep: () => () })
+  }
+
+/// The region's length in bytes.
+@memory_unsafe
+fn len(r: Region) -> Int = r.len
+
+/// True if write may change the region (ffi.alloc and writable foreign regions).
+@memory_unsafe
+fn is_writable(r: Region) -> Bool = r.writable
+
+/// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("ffi.read: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok(__load(r.base, off, n))
+
+/// Writes b at off; err if the region is read-only or b does not fit.
+@memory_unsafe
+effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
+  if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
+  else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else {
+    __store(r.base, off, b)
+    ok(())
+  }
+
+/// A copy of the whole region as Bytes.
+@memory_unsafe
+effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, 0, r.len))
+
+/// `Region(<len> bytes)`: the base address differs per target and is never shown.
+mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
+
+
+
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
-fn address(b: Bytes) -> RawPtr = _
+local fn __address(b: Bytes) -> Handle = _
 
-/// The address as an Int; null is 0.
-@memory_unsafe
-@intrinsic("almide_rt_ffi_to_int")
-fn to_int(p: RawPtr) -> Int = _
 
-/// Copy of len bytes at ptr; empty if null or len <= 0.
-@memory_unsafe
-@intrinsic("almide_rt_ffi_read")
-effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
 
-/// Writes up to cap bytes of b to ptr; the count, 0 if null.
 @memory_unsafe
-@intrinsic("almide_rt_ffi_write")
-effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+@intrinsic("almide_rt_ffi_load")
+local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
+
+
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_store")
+local effect fn __store(base: Handle, off: Int, b: Bytes) -> Unit = _
 "#;
 pub const SRC_FFI_BRIDGE: &str = r#"
 
@@ -5755,14 +5717,45 @@ pub const SRC_FFI_BRIDGE: &str = r#"
 
 
 
-@implements("ffi.address")
-fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
 
-@implements("ffi.read")
-fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
 
-@implements("ffi.write")
-fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
+
+
+
+
+
+@implements("ffi.__address")
+fn ffi_address(b: Bytes) -> Handle = {
+  let h = prim.handle(b)
+  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
+
+fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __ffi_copy(dst, src, n, i + 1)
+}
+
+@implements("ffi.__load")
+fn ffi_load(base: Handle, off: Int, n: Int) -> Bytes = {
+  let src = prim.ptr_to_int(base)
+  if src == 0 or n <= 0 then prim.alloc_bytes(0)
+  else {
+    let out = prim.alloc_bytes(n)
+    let oh = prim.handle(out)
+    let _c = __ffi_copy(oh + 12, src + off, n, 0)
+    out
+  }
+}
+
+@implements("ffi.__store")
+fn ffi_store(base: Handle, off: Int, b: Bytes) -> Unit = {
+  let dst = prim.ptr_to_int(base)
+  let h = prim.handle(b)
+  let n = if dst == 0 then 0 else prim.load32(h + 4)
+  let _c = __ffi_copy(dst + off, h + 12, n, 0)
+  ()
+}
 "#;
 pub const SRC_FLOAT: &str = r#"
 
@@ -9824,15 +9817,21 @@ fn hex_decode(s: String) -> Result[Bytes, String] = {
   }
 }
 "#;
-pub const SRC_HTML: &str = r#"
+pub const SRC_HTML: &str = r##"
 
 
 
+
+
+
+import json
 
 mod type SafeHtml = String
 
 
-/// s with & < > " ' turned into HTML entities.
+
+
+/// s with & < > " ' turned into HTML entities; text context only.
 fn escape(s: String) -> SafeHtml = {
   let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(
     ">",
@@ -9863,7 +9862,117 @@ fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
 
 /// SafeHtml of the empty string.
 fn empty() -> SafeHtml = SafeHtml("")
-"#;
+
+
+
+
+
+fn __html_ascii(c: String) -> Bool = (string.to_codepoint(c) ?? 128) < 128
+
+
+
+fn __html_blank(c: String) -> Bool = (string.to_codepoint(c) ?? 0) <= 32
+
+
+
+
+fn __html_name_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "-" or c == "_" or c == ":" or c == ".")
+
+fn __html_name_ok(name: String) -> Bool = match list.first(string.to_list(name)) {
+  some(c) => __html_ascii(c) and string.is_alpha(c) and list.all(
+    string.to_list(name),
+    (x) => __html_name_char(x),
+  ),
+  none => false,
+}
+
+
+
+
+fn __html_url_attr_name(n: String) -> Bool = match n {
+  "href" => true,
+  "src" => true,
+  "action" => true,
+  "formaction" => true,
+  "srcset" => true,
+  "xlink:href" => true,
+  "poster" => true,
+  "cite" => true,
+  "data" => true,
+  "background" => true,
+  "ping" => true,
+  "manifest" => true,
+  "codebase" => true,
+  "longdesc" => true,
+  "usemap" => true,
+  "icon" => true,
+  _ => false,
+}
+
+fn __html_active_attr_name(n: String) -> Bool = string.starts_with(n, "on") or n == "style" or n == "srcdoc"
+
+
+
+fn __html_attr_value(v: String) -> String = to_string(escape(v))
+
+/// name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+fn attr(name: String, value: String) -> SafeHtml = {
+  let n = string.to_lower(name)
+  if not __html_name_ok(name) then panic("html.attr: `${name}` is not an attribute name")
+  else if __html_url_attr_name(n) then panic("html.attr: `${name}` takes a URL; use html.url_attr")
+  else if __html_active_attr_name(n) then panic("html.attr: `${name}` runs script or styles; no builder writes it")
+  else SafeHtml("${name}=\"${__html_attr_value(value)}\"")
+}
+
+fn __html_scheme_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == ".")
+
+
+
+
+
+
+
+fn __html_scheme(url: String) -> String? = {
+  let cs = string.to_list(url)
+  let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
+  let head = list.take(cs, i)
+  let colon = list.get(cs, i) == some(":")
+  if colon and not list.is_empty(head) and list.all(head, (c) => __html_scheme_char(c)) then some(string.to_lower(list.join(head, "")))
+  else if colon or list.any(head, (c) => __html_blank(c)) then some("")
+  else none
+}
+
+
+
+fn __html_blocked_url() -> String = "about:invalid#almide-blocked"
+
+/// name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+fn url_attr(name: String, url: String) -> SafeHtml = {
+  if not __html_name_ok(name) then panic("html.url_attr: `${name}` is not an attribute name")
+  else if __html_active_attr_name(string.to_lower(name)) then panic("html.url_attr: `${name}` runs script or styles; no builder writes it")
+  else {
+    let kept = match __html_scheme(url) {
+      none => url,
+      some(s) => match s {
+        "http" => url,
+        "https" => url,
+        "mailto" => url,
+        _ => __html_blocked_url(),
+      },
+    }
+    SafeHtml("${name}=\"${__html_attr_value(kept)}\"")
+  }
+}
+
+/// json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
+fn script_json(v: Value) -> SafeHtml = {
+  let s = json.stringify(v) |> string.replace("<", "\\u003c") |> string.replace(">", "\\u003e") |> string.replace(
+    "&",
+    "\\u0026",
+  ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
+  SafeHtml(s)
+}
+"##;
 pub const SRC_HTTP: &str = r#"
 
 
@@ -9889,6 +9998,7 @@ pub const SRC_HTTP: &str = r#"
 
 
 
+import html
 import json
 import url
 
@@ -9903,8 +10013,12 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 @intrinsic("almide_rt_http_response")
 fn response(status: Int, body: String) -> HttpResponse = _
 
-
-
+/// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
+fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
+  response(status, html.to_string(body)),
+  "Content-Type",
+  "text/html; charset=utf-8",
+)
 
 /// Reply with Content-Type application/json.
 @intrinsic("almide_rt_http_json")
@@ -11040,13 +11154,12 @@ fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 
 
+
 fn __hs_quote_char(c: String) -> String = match c {
   "\\" => "\\\\",
   "\"" => "\\\"",
-  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) or __hs_bidi(__hs_cp(c)) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+  _ => if string.__err_text(c) != c then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
-
-fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
 
 fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
@@ -30007,11 +30120,13 @@ fn path_exists(path: String) -> Bool = _
 
 
 
+
+
 @intrinsic("almide_rt_prim_ptr_to_int")
-fn ptr_to_int(p: RawPtr) -> Int = _
+fn ptr_to_int(p: Handle) -> Int = _
 
 @intrinsic("almide_rt_prim_int_to_ptr")
-fn int_to_ptr(a: Int) -> RawPtr = _
+fn int_to_ptr(a: Int) -> Handle = _
 
 
 
@@ -36890,7 +37005,34 @@ pub const SRC_STRING_ERR_TEXT: &str = r#"
 
 
 
-fn __et_escaped(n: Int) -> Bool = n <= 31 or (n >= 127 and n <= 159) or n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
+
+
+
+fn __et_in(n: Int, lo: Int, hi: Int) -> Bool = n >= lo and n <= hi
+
+fn __et_escaped(n: Int) -> Bool =
+  __et_in(n, 0, 31)
+  or __et_in(n, 127, 159)
+  or __et_in(n, 173, 173)
+  or __et_in(n, 1536, 1541)
+  or __et_in(n, 1564, 1564)
+  or __et_in(n, 1757, 1757)
+  or __et_in(n, 1807, 1807)
+  or __et_in(n, 2192, 2193)
+  or __et_in(n, 2274, 2274)
+  or __et_in(n, 6158, 6158)
+  or __et_in(n, 8203, 8207)
+  or __et_in(n, 8232, 8238)
+  or __et_in(n, 8288, 8292)
+  or __et_in(n, 8294, 8303)
+  or __et_in(n, 65279, 65279)
+  or __et_in(n, 65529, 65531)
+  or __et_in(n, 69821, 69821)
+  or __et_in(n, 69837, 69837)
+  or __et_in(n, 78896, 78911)
+  or __et_in(n, 113824, 113827)
+  or __et_in(n, 119155, 119162)
+  or __et_in(n, 917504, 917631)
 
 fn __et_char(c: String, n: Int) -> String = match n {
   10 => "\\n",
@@ -36901,7 +37043,7 @@ fn __et_char(c: String, n: Int) -> String = match n {
 }
 
 @implements("string.__err_text")
-fn string_err_text(s: String) -> String =
+fn err_text_escape(s: String) -> String =
   if string.to_list(s) |> list.any((c) => __et_escaped(string.to_codepoint(c) ?? 0)) then string.to_list(s) |> list.map((c) => __et_char(c, string.to_codepoint(c) ?? 0)) |> list.join("")
   else s
 "#;
@@ -43630,7 +43772,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "bytes_cursor" => Some(SRC_BYTES_CURSOR),
         "bytes_f16" => Some(SRC_BYTES_F16),
         "bytes_mutate" => Some(SRC_BYTES_MUTATE),
-        "bytes_rawptr" => Some(SRC_BYTES_RAWPTR),
         "bytes_split" => Some(SRC_BYTES_SPLIT),
         "bytes_string" => Some(SRC_BYTES_STRING),
         "clock_now" => Some(SRC_CLOCK_NOW),
