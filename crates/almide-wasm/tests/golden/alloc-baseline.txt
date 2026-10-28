@@ -352,7 +352,7 @@
 ~	spec/wasm_cross/host_floor_string_alloc.almd
 72816	spec/wasm_cross/http_decode_json_input_type.almd
 68048	spec/wasm_cross/http_query_params_decoder.almd
-67648	spec/wasm_cross/http_response_headers.almd
+67936	spec/wasm_cross/http_response_headers.almd
 65648	spec/wasm_cross/i64_min_literal.almd
 65776	spec/wasm_cross/if_block_forms.almd
 65760	spec/wasm_cross/if_let_forms.almd
@@ -769,7 +769,7 @@
 66496	spec/wasm_cross/result_uoe_float.almd
 66960	spec/wasm_cross/result_value_int_tuple.almd
 66976	spec/wasm_cross/result_wall_escalations.almd
-70880	spec/wasm_cross/runtime_backed_value_repr.almd
+71168	spec/wasm_cross/runtime_backed_value_repr.almd
 67984	spec/wasm_cross/runtime_backed_variant_repr.almd
 65888	spec/wasm_cross/scalar_if_arm_effects.almd
 66240	spec/wasm_cross/scan_heap_acc.almd

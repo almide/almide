@@ -352,7 +352,7 @@
 ~	spec/wasm_cross/host_floor_string_alloc.almd
 2053	1960	26915	2053	spec/wasm_cross/http_decode_json_input_type.almd
 1075	1030	9197	1075	spec/wasm_cross/http_query_params_decoder.almd
-1877	1820	10558	1877	spec/wasm_cross/http_response_headers.almd
+2087	2030	12066	2087	spec/wasm_cross/http_response_headers.almd
 0	0	0	0	spec/wasm_cross/i64_min_literal.almd
 0	0	0	0	spec/wasm_cross/if_block_forms.almd
 1	0	8	1	spec/wasm_cross/if_let_forms.almd
