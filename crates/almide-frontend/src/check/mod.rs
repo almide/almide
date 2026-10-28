@@ -1529,6 +1529,7 @@ include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
 include!("regex_literal_check.rs");
+include!("content_type_guard.rs");
 include!("abort_site_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");
