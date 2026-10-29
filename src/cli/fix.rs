@@ -505,7 +505,11 @@ fn apply_ast_family(file: &str, source: &str) -> (String, Vec<String>, usize) {
     // Almide never defined these comparison functions; LLMs reach for them
     // from Go-ish / Java-ish training data. Mechanically substituting to
     // `a > b` etc. turns the error case into working code.
-    let operator_count = rewrite_comparison_calls(&mut program) + rewrite_unwrap_or_calls(&mut program) + rewrite_regex_pattern_calls(&mut program);
+    let mut built = std::collections::HashSet::new();
+    let operator_count = rewrite_comparison_calls(&mut program, &mut built)
+        + rewrite_unwrap_or_calls(&mut program, &mut built)
+        + rewrite_regex_pattern_calls(&mut program);
+    group_built_operators(&mut program, &built);
     // The rewrite can land INSIDE a `${…}` interpolation hole, and a string
     // literal reprints its own source text verbatim (#1263) — which would
     // reprint the pre-rewrite hole and silently drop the fix. Dropping the
@@ -605,8 +609,9 @@ fn take_two_args(args: &mut Vec<Expr>) -> Option<(Expr, Expr)> {
 
 /// Walk the program and rewrite every `<m>.<op>(a, b)` call whose
 /// `(module, func)` resolves via `comparison_fn_to_operator` into a
-/// `Binary` expression. Returns the number of rewrites performed.
-fn rewrite_comparison_calls(program: &mut ast::Program) -> usize {
+/// `Binary` expression. Returns the number of rewrites performed; the new
+/// nodes' ids go into `built` for [`group_built_operators`].
+fn rewrite_comparison_calls(program: &mut ast::Program, built: &mut std::collections::HashSet<ast::ExprId>) -> usize {
     let mut count = 0;
     ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
         let (op_sym, left_box, right_box) = match &mut expr.kind {
@@ -628,6 +633,7 @@ fn rewrite_comparison_calls(program: &mut ast::Program) -> usize {
             left: left_box,
             right: right_box,
         };
+        built.insert(expr.id);
         count += 1;
     });
     count
@@ -640,13 +646,13 @@ fn rewrite_comparison_calls(program: &mut ast::Program) -> usize {
 /// pipe stage `a |> m.unwrap_or(d)` — into `a ?? d` (`ExprKind::UnwrapOr`,
 /// `≡ unwrap_or_else` per the spec: the default is evaluated only on the
 /// fallback path, which is the one observable difference and the reason
-/// the eager form is going away). Returns the number of rewrites.
-fn rewrite_unwrap_or_calls(program: &mut ast::Program) -> usize {
+/// the eager form is going away). Returns the number of rewrites; the new
+/// nodes' ids go into `built` for [`group_built_operators`].
+fn rewrite_unwrap_or_calls(program: &mut ast::Program, built: &mut std::collections::HashSet<ast::ExprId>) -> usize {
     fn is_unwrap_or(callee: &Expr) -> bool {
         matches!(extract_module_call(callee), Some((m, f)) if (m == "option" || m == "result") && f == "unwrap_or")
     }
     let mut count = 0;
-    let mut rewritten: std::collections::HashSet<ast::ExprId> = std::collections::HashSet::new();
     ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
         let (value, fallback) = match &mut expr.kind {
             ExprKind::Call { callee, args, named_args, type_args } => {
@@ -668,40 +674,38 @@ fn rewrite_unwrap_or_calls(program: &mut ast::Program) -> usize {
             _ => return,
         };
         expr.kind = ExprKind::UnwrapOr { expr: Box::new(value), fallback: Box::new(fallback) };
-        rewritten.insert(expr.id);
+        built.insert(expr.id);
         count += 1;
     });
-    // `??` is an INFIX spelling where the call was a primary: as the object
-    // of a postfix access (`unwrap_or(o, d).0` → `(o ?? d).0`), the callee
-    // of a call, the operand of a prefix op, or the LEFT side of another
-    // `??` (`unwrap_or(o, none) ?? "d"` → `(o ?? none) ?? "d"`, since a bare
-    // chain nests to the right), the rewritten node needs the parentheses
-    // the call form never needed. The formatter prints an explicit `Paren`
-    // node as written, so the grouping is made here, once, in the tree.
-    let mut fresh = u32::MAX;
-    let mut wrap = |child: &mut Expr| {
-        if !rewritten.contains(&child.id) {
-            return;
-        }
-        fresh -= 1;
-        let inner = std::mem::replace(child, Expr::new(ast::ExprId(fresh), child.span, ExprKind::Unit));
-        child.kind = ExprKind::Paren { expr: Box::new(inner) };
-    };
-    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| match &mut expr.kind {
-        ExprKind::Member { object, .. }
-        | ExprKind::TupleIndex { object, .. }
-        | ExprKind::IndexAccess { object, .. } => wrap(object),
-        ExprKind::Call { callee, .. } => wrap(callee),
-        ExprKind::OptionalChain { expr: e, .. }
-        | ExprKind::Unwrap { expr: e }
-        | ExprKind::Try { expr: e }
-        | ExprKind::ToOption { expr: e }
-        | ExprKind::TypeAscription { expr: e, .. }
-        | ExprKind::UnwrapOr { expr: e, .. } => wrap(e),
-        ExprKind::Unary { operand, .. } => wrap(operand),
-        _ => {}
-    });
     count
+}
+
+/// #4319: an operator node built from a call's sub-trees puts each argument
+/// next to an operator where the call kept it between commas, and puts the
+/// node itself where the call was a primary. `option.unwrap_or(x, 0 - 1)`
+/// printed as `x ?? 0 - 1` re-parses as `(x ?? 0) - 1`; `bool.eq(a or b, c)`
+/// as `a or b == c` re-parses as `a or (b == c)`; `option.unwrap_or(o, d).0`
+/// as `o ?? d.0`. The formatter prints a `Paren` node as written and adds
+/// none of its own, so the grouping is made here, in the tree: every operand
+/// of a built node, and every built node in its parent's operand slot, is
+/// parenthesized when the parser's own binding powers say it would not
+/// re-parse in place (`almide::parser::grouping`).
+fn group_built_operators(program: &mut ast::Program, built: &std::collections::HashSet<ast::ExprId>) {
+    use almide::parser::grouping::{needs_parens, operand_slots_mut};
+    if built.is_empty() {
+        return;
+    }
+    let mut fresh = u32::MAX;
+    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
+        let parent_built = built.contains(&expr.id);
+        for (child, slot) in operand_slots_mut(expr) {
+            if (parent_built || built.contains(&child.id)) && needs_parens(child, slot) {
+                fresh -= 1;
+                let inner = std::mem::replace(child, Expr::new(ast::ExprId(fresh), child.span, ExprKind::Unit));
+                child.kind = ExprKind::Paren { expr: Box::new(inner) };
+            }
+        }
+    });
 }
 
 /// R-regex-02 / R-regex-01 (#3942, #3940): a regex operation takes a `Regex`,

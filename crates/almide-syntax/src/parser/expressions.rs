@@ -83,7 +83,7 @@ impl Parser {
 
     /// Binding powers for infix operators.
     /// Returns (left_bp, right_bp). left_bp < right_bp = left-assoc.
-    fn infix_bp(tt: &TokenType) -> Option<(u8, u8)> {
+    pub(crate) fn infix_bp(tt: &TokenType) -> Option<(u8, u8)> {
         match tt {
             //                             left  right
             TokenType::Or               => Some((2,  3)),   // left-assoc

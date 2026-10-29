@@ -16,6 +16,7 @@ mod fn_decls;
 mod expressions;
 mod fan;
 pub use fan::renamed_fan_head_text;
+pub mod grouping;
 pub mod hints;
 mod helpers;
 mod patterns;
