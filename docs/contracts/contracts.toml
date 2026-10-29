@@ -5782,3 +5782,24 @@ evidence  = [
   { path = "tests/compile_budget_test.rs", name = "the_doubling_chain_shares_its_types_with_the_budget_lifted", class = "fixture" },
   { path = "tests/compile_budget_test.rs", name = "the_dependency_and_manifest_budgets_refuse_before_fetching", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-442"
+spec      = "ALS-R5"
+title     = "net udp and lookup_host: binding, datagram boundaries, the max-bytes rule, the sender's address and loopback name lookup agree on native and the embedded wasm lane"
+statement = "ALS-R5 (almide/almide#4306): `net.udp_bind`, `net.udp_local_port`, `net.udp_send_to`, `net.udp_recv_from`, `io.close` of a `UdpSocket` and `net.lookup_host` answer byte-identically on the native leg and the EMBEDDED wasm lane (`almide run --target wasm`). `udp_bind(host, 0)` binds a port the OS chooses and `udp_local_port` answers it, in 1..=65535 and distinct for each socket bound. `udp_send_to(sock, data, host, port)` sends `data` as ONE datagram, and fails unless every byte went out in it; `udp_recv_from(sock, max)` waits for the next datagram and answers exactly one: its first `max` bytes at most (the rest of THAT datagram is dropped, never delivered to a later call), the sender's IP as text (`127.0.0.1` on IPv4 loopback) and the sender's port. Datagrams arrive one per call in the order sent on loopback; an empty datagram is a datagram of 0 bytes; bytes that are not UTF-8 ride exactly; a socket may send to its own port. `io.close` of a UdpSocket is ok, and ok again on a closed one. `lookup_host(host)` answers an IP literal (IPv4, IPv6, or IPv6 in brackets) as itself without consulting a resolver, and a name as the addresses the resolver gives, each once in the resolver's order; `localhost` answers at least one address and only loopback ones."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/net_udp_loopback.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-443"
+spec      = "ALS-R5"
+title     = "net udp and lookup_host: every failure reads as errno-free classified text from net's one table, identical on native and the embedded wasm lane"
+statement = "ALS-R5 (almide/almide#4306): every failure of `net.udp_bind`, `net.udp_local_port`, `net.udp_send_to`, `net.udp_recv_from` and `net.lookup_host` is an `err` whose text comes from the one table C-378 states for the tcp family and is identical on native and the EMBEDDED wasm lane; no text carries an OS errno or the OS's own wording. `udp_bind` and `udp_send_to` read `<fn>(<host>:<port>): <text>` for a failure of the address they were given (`port out of range 0..=65535` for a port outside that range, `cannot resolve host \"<host>\"` for a name that resolves to nothing, the empty name included) and `udp_bind` for its bind's transport failure (`udp_bind(127.0.0.1:<port>): address already in use` for a bound port); `lookup_host` reads `lookup_host(<host>:0): <text>`; every other call reads `<fn>: <text>`. These texts are decided in Almide before any transport call, the same on every leg: `udp_recv_from: negative length N` for a negative max, and `UdpSocket handle N is closed` from `udp_local_port`, `udp_send_to` and `udp_recv_from` on a closed socket (`io.close` answers ok). A closed socket's port is free to bind again."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/net_udp_errors.almd", class = "fixture" },
+]

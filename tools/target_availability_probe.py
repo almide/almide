@@ -125,7 +125,9 @@ NOMINAL = {
     # closed one answers its err at once (an answered err is service).
     "TcpListener": ('{ let l = net.tcp_listen("127.0.0.1", 0)!\n  io.close(l)!\n  l }', "net.tcp_listen", "net,io"),
     "TcpStream": ('net.tcp_connect("127.0.0.1", 1)!', "net.tcp_connect", "net"),
-    "UdpSocket": ('net.udp_bind("127.0.0.1", 0)!', "net.udp_bind", "net"),
+    # A CLOSED udp socket too (#4306): an open one would block
+    # `udp_recv_from` forever; a closed one answers its err at once.
+    "UdpSocket": ('{ let u = net.udp_bind("127.0.0.1", 0)!\n  io.close(u)!\n  u }', "net.udp_bind", "net,io"),
     "IpAddr": ('net.parse_ip("127.0.0.1")!', "net.parse_ip", "net"),
     "Fd": ("unix.shm_create(8)!", "unix.shm_create", "unix"),
     "Uuid": ('uuid.parse("00000000-0000-0000-0000-000000000000")!', "uuid.parse", "uuid"),

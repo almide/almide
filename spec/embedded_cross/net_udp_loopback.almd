@@ -1,0 +1,74 @@
+// @contract: C-442
+// net udp loopback and name lookup inside one program (#4306): bind two
+// sockets on 127.0.0.1 port 0, read the OS-assigned ports with
+// `net.udp_local_port`, and exchange datagrams. Each send is one datagram and
+// each recv answers exactly one, with its sender's address and port; a recv
+// takes at most `max` bytes of the next datagram and the rest of THAT
+// datagram is dropped; an empty datagram is a datagram. `net.lookup_host`
+// answers an IP literal as itself without the resolver, and `localhost` as
+// loopback addresses only. Every line is a value native and the embedded
+// lane (`almide run --target wasm`) print byte for byte: the ports differ
+// per run, so they are printed only as predicates. Payloads stay small: a
+// macOS datagram is at most 9216 bytes by default.
+import net
+import io
+
+fn show_packet(r: Result[net.UdpPacket, String], from: Int) -> String = match r {
+  ok(p) => "ok ${bytes.len(p.data)} [${bytes.to_string(p.data) ?? "<not utf-8>"}] from ${p.host} sender-port=${p.port == from}",
+  err(e) => "err ${e}",
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+fn show_ips(r: Result[List[net.IpAddr], String]) -> String = match r {
+  ok(ips) => "ok [${ips |> list.map((ip) => net.ip_to_string(ip)) |> list.join(", ")}]",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let a = net.udp_bind("127.0.0.1", 0)!
+  let b = net.udp_bind("127.0.0.1", 0)!
+  let pa = net.udp_local_port(a)!
+  let pb = net.udp_local_port(b)!
+  println("a port in 1..=65535: ${pa >= 1 and pa <= 65535}")
+  println("b port distinct: ${pb != pa and pb >= 1 and pb <= 65535}")
+  // Datagram boundaries: two sends are two recvs, in order.
+  println("send ab: ${show_unit(net.udp_send_to(a, bytes.from_string("ab"), "127.0.0.1", pb))}")
+  println("send cde: ${show_unit(net.udp_send_to(a, bytes.from_string("cde"), "127.0.0.1", pb))}")
+  println("b recv 16: ${show_packet(net.udp_recv_from(b, 16), pa)}")
+  println("b recv 16: ${show_packet(net.udp_recv_from(b, 16), pa)}")
+  // The size rule: at most max bytes; the datagram's remainder is dropped.
+  println("send 10: ${show_unit(net.udp_send_to(b, bytes.from_string("0123456789"), "127.0.0.1", pa))}")
+  println("send next: ${show_unit(net.udp_send_to(b, bytes.from_string("next"), "127.0.0.1", pa))}")
+  println("a recv 4: ${show_packet(net.udp_recv_from(a, 4), pb)}")
+  println("a recv 16: ${show_packet(net.udp_recv_from(a, 16), pb)}")
+  // An empty datagram, and bytes that are not UTF-8, ride exactly.
+  println("send empty: ${show_unit(net.udp_send_to(a, bytes.from_list([]), "127.0.0.1", pb))}")
+  println("b recv empty: ${show_packet(net.udp_recv_from(b, 16), pa)}")
+  println("send raw: ${show_unit(net.udp_send_to(a, bytes.from_list([0, 255, 10, 128]), "127.0.0.1", pb))}")
+  println("b recv raw: ${show_packet(net.udp_recv_from(b, 16), pa)}")
+  // A socket sending to itself.
+  println("send self: ${show_unit(net.udp_send_to(a, bytes.from_string("me"), "127.0.0.1", pa))}")
+  println("a recv self: ${show_packet(net.udp_recv_from(a, 16), pa)}")
+  // Close is ok twice; a socket bound after it works as the first did.
+  println("close a: ${show_unit(io.close(a))}")
+  println("close a twice: ${show_unit(io.close(a))}")
+  let c = net.udp_bind("127.0.0.1", 0)!
+  let pc = net.udp_local_port(c)!
+  println("send to c: ${show_unit(net.udp_send_to(b, bytes.from_string("again"), "127.0.0.1", pc))}")
+  println("c recv 16: ${show_packet(net.udp_recv_from(c, 16), pb)}")
+  println("close b: ${show_unit(io.close(b))}")
+  println("close c: ${show_unit(io.close(c))}")
+  // Name lookup: literals answer themselves; localhost is loopback only.
+  println("lookup 127.0.0.1: ${show_ips(net.lookup_host("127.0.0.1"))}")
+  println("lookup ::1: ${show_ips(net.lookup_host("::1"))}")
+  println("lookup [::1]: ${show_ips(net.lookup_host("[::1]"))}")
+  let names = net.lookup_host("localhost")!
+  println("localhost non-empty: ${list.len(names) >= 1}")
+  println("localhost all loopback: ${names |> list.all((ip) => net.is_loopback(ip))}")
+  println("localhost each once: ${list.len(list.unique(names |> list.map((ip) => net.ip_to_string(ip)))) == list.len(names)}")
+  println("done")
+}

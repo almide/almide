@@ -154,6 +154,7 @@ fn operation_name(op: i32) -> &'static str {
             // Interim embedded-only ops (#3620): WASI has neither Unix-domain
             // sockets nor shared memory; they retire at ADR-0023 step 7.
             104..=116 => "the unix-socket and shared-memory core (net.unix_* / net.shm_*)",
+            140..=145 => "the net core's udp and name lookup (net.udp_* / net.lookup_host)",
             _ => "unknown operation",
         })
 }
