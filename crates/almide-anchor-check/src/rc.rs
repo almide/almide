@@ -291,9 +291,6 @@ pub fn check_rc(
         rep.events += evs.len();
         let mut used = vec![false; calls.len()];
         let mut unmatched: Vec<String> = Vec::new();
-        // Named events no RC call took: a release may be the consumption of
-        // the variable by a stdlib arm or a compound routine (below).
-        let mut pending: Vec<(char, u32)> = Vec::new();
         // Every variable the frame's events name: an arm's, a routine's or a
         // container's own RC never touches one of these (that would be the
         // frame's credit, which its events must account).
@@ -324,7 +321,43 @@ pub fn check_rc(
         // through the callee (a tail call) with no release here;
         // each event tries the calls outside every arm and routine window
         // before those inside one.
+        // - a named `a` / `d` may instead be an arm's or a routine's
+        //   consumption of the variable: a call INSIDE an arm or routine
+        //   window (no RC call itself) takes the variable's value at that
+        //   call as argument `j`, and the callee's own body takes ownership
+        //   of parameter `j` on every path (releases, stores, returns or
+        //   passes it on). Each such argument is one node of the matching,
+        //   so it accounts for ONE event.
+        let nc = calls.len();
+        let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
+        let rc_call: HashSet<usize> = calls.iter().map(|c| c.0).collect();
+        let mut takers: Vec<(usize, usize, u32)> = Vec::new();
+        for (k, op) in b.ops.iter().enumerate() {
+            let Op::Call { function_index: g } = op else { continue };
+            if dead[k] || rc_call.contains(&k) || !(inside(&windows[0], k) || inside(&windows[1], k)) {
+                continue;
+            }
+            for j in 0..b.args[k].len() {
+                takers.push((k, j, *g));
+            }
+        }
+        let verdicts: std::cell::RefCell<std::collections::HashMap<(u32, usize), (bool, bool)>> = Default::default();
+        let verdict = |g: u32, j: usize| -> (bool, bool) {
+            *verdicts.borrow_mut().entry((g, j)).or_insert_with(|| takes(bodies, imports, releases, g, j as u32, 4))
+        };
+        let holds = |l: u32, t: usize| -> bool {
+            let (k, j, _) = takers[t];
+            let arg = fl.arg(k, j, FUEL);
+            names(&arg).contains(&l) || fl.same(&arg, &fl.local_value(l, k, FUEL))
+        };
         let fits = |e: usize, i: usize| -> bool {
+            if i >= nc {
+                let t = i - nc;
+                return match evs[e] {
+                    ('a' | 'd', Some(l)) => holds(l, t) && verdict(takers[t].2, takers[t].1).1,
+                    _ => false,
+                };
+            }
             let (k, names_of) = (calls[i].1, &calls[i].2);
             match evs[e] {
                 ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
@@ -341,12 +374,14 @@ pub fn check_rc(
             .chain((0..evs.len()).filter(|&e| !matches!(evs[e].0, 'o' | 'm')))
             .chain((0..evs.len()).filter(|&e| evs[e].0 == 'm'))
             .collect();
-        // A call inside an arm or routine window is tried last: left over,
-        // it is that arm's or routine's own; one outside has no such reading.
+        // A call inside an arm or routine window is tried after those
+        // outside (left over, it is that arm's or routine's own; one outside
+        // has no such reading), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
-        let mut by_pref: Vec<usize> = (0..calls.len()).collect();
+        let mut by_pref: Vec<usize> = (0..nc).collect();
         by_pref.sort_by_key(|&i| (in_window(calls[i].0), calls[i].0));
-        let mut owner: Vec<Option<usize>> = vec![None; calls.len()];
+        by_pref.extend(nc..nc + takers.len());
+        let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
         fn augment(
             e: usize,
             by_pref: &[usize],
@@ -367,30 +402,31 @@ pub fn check_rc(
             false
         }
         for &e in &order {
-            let mut seen = vec![false; calls.len()];
+            let mut seen = vec![false; owner.len()];
             augment(e, &by_pref, &fits, &mut seen, &mut owner);
         }
         // A move's credit is released by the arm on some of its paths: one
         // release per path. Releases of it that no run passes through two of
         // (the two arms of one `if`) are all that one move's.
         for e in (0..evs.len()).filter(|&e| evs[e].0 == 'm') {
-            let mut held: Vec<usize> = (0..calls.len()).filter(|&i| owner[i] == Some(e)).collect();
-            for &i in &by_pref {
+            let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
+            for &i in by_pref.iter().filter(|&&i| i < nc) {
                 if owner[i].is_none() && fits(e, i) && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0)) {
                     owner[i] = Some(e);
                     held.push(i);
                 }
             }
         }
-        // Who holds a call can change along an augmenting path; read the
+        // Who holds a node can change along an augmenting path; read the
         // final matching.
         let mut got = vec![false; evs.len()];
         for o in owner.iter().flatten() {
             got[*o] = true;
         }
-        for (i, o) in owner.iter().enumerate() {
-            used[i] = o.is_some();
+        for i in 0..nc {
+            used[i] = owner[i].is_some();
         }
+        rep.consumed += owner[nc..].iter().filter(|o| o.is_some()).count();
         for (e, &(kind, local)) in evs.iter().enumerate() {
             if got[e] {
                 continue;
@@ -398,63 +434,16 @@ pub fn check_rc(
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
                 ('m', _) => {}
-                // Named events no RC call took: a release may be the
-                // consumption of the variable by a stdlib arm or a compound
-                // routine (below).
-                (k, Some(l)) => pending.push((k, l)),
+                // The every-path rule (adopted 2026-10-28): a callee that
+                // takes the parameter on some paths but not all is refused.
+                (k @ ('a' | 'd'), Some(l)) if (0..takers.len()).any(|t| holds(l, t) && verdict(takers[t].2, takers[t].1) == (true, false)) => {
+                    unmatched.push(format!("{k}{l} (its consuming callee takes it on some paths only)"))
+                }
+                (k, Some(l)) => unmatched.push(format!("{k}{l}")),
                 (k, None) => unmatched.push(format!("{k}-")),
             }
         }
-        rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
-        let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
-        // A variable's release (or prepaid +1) that is an arm's or a routine's
-        // consumption of it: a call INSIDE an arm or routine window takes the
-        // variable's value at that call as argument `j`, and the callee's own
-        // body takes ownership of parameter `j` (releases, stores, returns or
-        // passes it on). Each such argument accounts for ONE event, and never
-        // a call an event above already matched (a judge's release): two
-        // consumptions need two taking arguments.
-        let matched: HashSet<usize> = (0..calls.len()).filter(|&i| used[i]).map(|i| calls[i].0).collect();
-        let mut taken: HashSet<(usize, usize)> = HashSet::new();
-        for (kind, l) in pending {
-            // The first free taking argument, or else whether any took it on
-            // some paths only.
-            let mut partial = false;
-            let mut chosen = None;
-            if matches!(kind, 'd' | 'a') {
-                'calls: for (k, op) in b.ops.iter().enumerate() {
-                    let Op::Call { function_index: g } = op else { continue };
-                    if dead[k] || matched.contains(&k) || !(inside(&windows[0], k) || inside(&windows[1], k)) {
-                        continue;
-                    }
-                    for j in 0..b.args[k].len() {
-                        if taken.contains(&(k, j)) {
-                            continue;
-                        }
-                        let arg = fl.arg(k, j, FUEL);
-                        if !(names(&arg).contains(&l) || fl.same(&arg, &fl.local_value(l, k, FUEL))) {
-                            continue;
-                        }
-                        let (some, all) = takes(bodies, imports, releases, *g, j as u32, 4);
-                        if all {
-                            chosen = Some((k, j));
-                            break 'calls;
-                        }
-                        partial |= some;
-                    }
-                }
-            }
-            if let Some(kj) = chosen {
-                taken.insert(kj);
-            }
-            match (partial, chosen.is_some()) {
-                (_, true) => rep.consumed += 1,
-                // The every-path rule (adopted 2026-10-28): a callee that
-                // takes the parameter on some paths but not all is refused.
-                (true, false) => unmatched.push(format!("{kind}{l} (its consuming callee takes it on some paths only)")),
-                _ => unmatched.push(format!("{kind}{l}")),
-            }
-        }
+        rep.judges_unmatched += (0..nc).filter(|&i| !used[i] && calls[i].1 == 'j').count();
         for i in 0..calls.len() {
             if used[i] || calls[i].1 == 'j' {
                 continue;
