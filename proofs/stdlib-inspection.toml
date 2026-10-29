@@ -9351,6 +9351,12 @@ class = "pure"
 status = "uninspected"
 
 [[fn]]
+name = "ffi.slice"
+sig = "(r: Region, off: Int, n: Int) -> Result[Region, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
 name = "ffi.to_bytes"
 sig = "effect (r: Region) -> Bytes ! String"
 class = "effect"
