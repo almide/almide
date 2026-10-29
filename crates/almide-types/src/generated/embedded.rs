@@ -2134,6 +2134,12 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
 else list.len(bytes.split(b, needle)) - 1
+
+
+
+fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
+
+fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -9825,7 +9831,7 @@ pub const SRC_HTML: &str = r##"
 
 import json
 
-mod type SafeHtml = String
+mod type SafeHtml: Body = String
 
 
 
@@ -9971,6 +9977,16 @@ fn script_json(v: Value) -> SafeHtml = {
   ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
   SafeHtml(s)
 }
+
+
+
+
+
+
+@media_owns("text/html", "*/xml", "*/*+xml")
+fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
+
+fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)
 "##;
 pub const SRC_HTTP: &str = r#"
 
@@ -9997,7 +10013,6 @@ pub const SRC_HTTP: &str = r#"
 
 
 
-import html
 import json
 import url
 
@@ -10008,38 +10023,70 @@ import url
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
-/// Reply with Content-Type text/plain.
-@intrinsic("almide_rt_http_response")
-fn response(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-fn html(status: Int, body: SafeHtml) -> HttpResponse = http.__http_response_put_header(
-  response(status, html.to_string(body)),
-  "Content-Type",
-  "text/html; charset=utf-8",
+
+
+
+
+
+
+
+
+/// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__with_headers(
+  status,
+  body.__self_to_text(),
+  ["Content-Type", body.__self_media_type()],
 )
 
-/// Reply with Content-Type application/json.
+/// Reply with Content-Type application/json; body is JSON text.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value; aborts on an HTML Content-Type.
-@content_type_guard(headers, media="__http_response_html_types")
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
+/// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+@header_write(headers, owned="__http_response_body_headers")
+fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse = {
   for h in headers {
-    __http_response_html_refusal("http.with_headers", h.0, h.1)
+    __http_response_owned_refusal("http.with_headers", h.0)
   }
-  let flat = __flat(headers)
-  http.__with_headers(status, body, flat)
+  http.__with_headers(
+    status,
+    body.__self_to_text(),
+    ["Content-Type", body.__self_media_type()] + __flat(headers),
+  )
 }
+
+/// resp with its body replaced by body and its Content-Type by body's type.
+fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http_response_put_header(
+  http.__http_response_put_body(resp, body.__self_to_text()),
+  "Content-Type",
+  body.__self_media_type(),
+)
+
+/// A body of media type media_type; a literal, never one a safe module owns (html, svg).
+@literal_media(media_type)
+fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
+  media_type: media_type,
+  bytes: body,
+}
+
+/// A body of a declared media type, built only by `http.typed`.
+mod type TypedBody: Body = { media_type: String, bytes: Bytes }
+
+fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
+
+fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
 local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
-/// 302 with Location url and empty body.
-@intrinsic("almide_rt_http_redirect")
-fn redirect(url: String) -> HttpResponse = _
+/// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
+fn redirect(url: String) -> HttpResponse = http.__with_headers(
+  302,
+  "",
+  ["Location", url, "Content-Type", string.__string_media_type("")],
+)
 
 
 /// resp with code set; not range-checked.
@@ -10068,16 +10115,16 @@ fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 /// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
-/// m with header name set, any case: the first match replaced in place, else appended; a response aborts on an HTML Content-Type.
+/// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
 fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
   name,
   value,
 )
 
-/// m with its body replaced; a text/html response aborts on a non-empty body.
+/// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8.
+/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -10103,23 +10150,15 @@ fn __http_response_body(m: HttpResponse) -> String = _
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
 
-
-
-
-
-
-
-
-@content_type_guard(name, value, media="__http_response_html_types")
+@header_write(name, value, owned="__http_response_body_headers")
 fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = {
-  __http_response_html_refusal("http.set_header", name, value)
+  __http_response_owned_refusal("http.set_header", name)
   http.__http_response_put_header(m, name, value)
 }
 
-fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse =
-  if body != "" and (http.__http_response_header_values(m, "Content-Type") |> list.any((v) => __http_response_names_html(v))) then panic("http.set_body: this response is text/html, so its body is SafeHtml: build the page with the html builders and answer with http.html(status, page)")
-  else http.__http_response_put_body(m, body)
 
+
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = with_body(m, body)
 
 
 @intrinsic("almide_http_set_header")
@@ -10131,8 +10170,7 @@ local fn __http_response_put_header(m: HttpResponse, name: String, value: String
 local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
 
-local fn __http_response_html_types() -> List[String] = ["text/html", "application/xhtml+xml"]
-
+local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
 
 local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.map((c) => match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
@@ -10140,24 +10178,13 @@ local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.m
   none => c,
 }) |> list.join("")
 
-
-
-
-local fn __http_response_names_html(value: String) -> Bool = string.split(value, ",") |> list.any((entry) => list.contains(
-  __http_response_html_types(),
-  __http_response_fold(string.trim(list.first(string.split(entry, ";")) ?? "")),
-))
-
-local fn __http_response_is_content_type(name: String) -> Bool = string.len(name) == 12 and __http_response_fold(name) == "content-type"
-
-local fn __http_response_html_refusal(op: String, name: String, value: String) -> Unit =
-  if __http_response_is_content_type(name) and __http_response_names_html(value) then panic("${op}: an HTML Content-Type is served only from SafeHtml: build the page with the html builders and answer with http.html(status, page)")
+local fn __http_response_owned_refusal(op: String, name: String) -> Unit = {
+  let folded = __http_response_fold(name)
+  if __http_response_body_headers() |> list.any((h) => __http_response_fold(h) == folded) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
+}
 
-fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
-  m,
-  bytes.to_string_lossy(body),
-)
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
 
 @intrinsic("almide_http_req_header")
@@ -10633,7 +10660,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
       )
       else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__http_response_set_body(res, "") else res
+        if via_get then http.__http_response_put_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -11016,17 +11043,10 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
-fn http_response(status: Int, body: String) -> List[String] = {
-  let st = int.to_string(status)
-  [st, body, "Content-Type", "text/plain"]
-}
-
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
   [st, body, "Content-Type", "application/json"]
 }
-
-fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 
 
 
@@ -36735,6 +36755,12 @@ fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 @intrinsic("almide_rt_string___err_text")
 fn __err_text(s: String) -> String = _
+
+
+
+fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
+
+fn __string_to_text(s: String) -> String = s
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -38882,6 +38908,130 @@ fn string_trim_end(s: String) -> String = {
   buf
 }
 "#;
+pub const SRC_SVG: &str = r##"
+
+
+
+
+
+
+
+/// SVG markup that is safe to serve; built only by this module.
+mod type SafeSvg: Body = String
+
+/// s with & < > " ' turned into entities; text context only.
+fn escape(s: String) -> SafeSvg = SafeSvg(s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(">", "&gt;") |> string.replace(
+  '"',
+  "&quot;",
+) |> string.replace("'", "&#39;"))
+
+/// s as SafeSvg, unescaped; trusted input only.
+fn raw(s: String) -> SafeSvg = SafeSvg(s)
+
+/// SVG text inside h, as-is.
+fn to_string(h: SafeSvg) -> String = match h {
+  SafeSvg(s) => s
+}
+
+/// a then b as one SafeSvg; nothing re-escaped.
+fn concat(a: SafeSvg, b: SafeSvg) -> SafeSvg = SafeSvg(to_string(a) + to_string(b))
+
+/// SafeSvg of the empty string.
+fn empty() -> SafeSvg = SafeSvg("")
+
+fn __svg_ascii(c: String) -> Bool = (string.to_codepoint(c) ?? 128) < 128
+
+
+
+fn __svg_name_ok(name: String) -> Bool = match list.first(string.to_list(name)) {
+  some(c) => __svg_ascii(c) and string.is_alpha(c) and list.all(
+    string.to_list(name),
+    (x) => __svg_ascii(x) and (string.is_alphanumeric(x) or x == "-" or x == "_" or x == ":" or x == "."),
+  ),
+  none => false,
+}
+
+
+fn __svg_url_attr_name(n: String) -> Bool = n == "href" or n == "xlink:href" or n == "src"
+
+
+fn __svg_active_attr_name(n: String) -> Bool = string.starts_with(n, "on") or n == "style"
+
+
+
+
+fn __svg_active_element(n: String) -> Bool = match n {
+  "script" => true,
+  "foreignobject" => true,
+  "set" => true,
+  "animate" => true,
+  "animatemotion" => true,
+  "animatetransform" => true,
+  "handler" => true,
+  "listener" => true,
+  _ => false,
+}
+
+fn __svg_attr_value(v: String) -> String = to_string(escape(v))
+
+/// name="value" with value escaped; aborts on a URL, event-handler, style or malformed name.
+fn attr(name: String, value: String) -> SafeSvg = {
+  let n = string.to_lower(name)
+  if not __svg_name_ok(name) then panic("svg.attr: `${name}` is not an attribute name")
+  else if __svg_url_attr_name(n) then panic("svg.attr: `${name}` takes a URL; use svg.url_attr")
+  else if __svg_active_attr_name(n) then panic("svg.attr: `${name}` runs script or styles; no builder writes it")
+  else SafeSvg("${name}=\"${__svg_attr_value(value)}\"")
+}
+
+
+
+fn __svg_scheme(url: String) -> String? = {
+  let cs = string.to_list(url)
+  let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
+  let head = list.take(cs, i)
+  let colon = list.get(cs, i) == some(":")
+  if colon and not list.is_empty(head) and list.all(
+    head,
+    (c) => __svg_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == "."),
+  ) then some(string.to_lower(list.join(head, "")))
+  else if colon or list.any(head, (c) => (string.to_codepoint(c) ?? 0) <= 32) then some("")
+  else none
+}
+
+/// name="url" escaped, url kept only if relative or http / https; else about:invalid#almide-blocked.
+fn url_attr(name: String, url: String) -> SafeSvg = {
+  if not __svg_name_ok(name) then panic("svg.url_attr: `${name}` is not an attribute name")
+  else if __svg_active_attr_name(string.to_lower(name)) then panic("svg.url_attr: `${name}` runs script or styles; no builder writes it")
+  else {
+    let kept = match __svg_scheme(url) {
+      none => url,
+      some(s) => match s {
+        "http" => url,
+        "https" => url,
+        _ => "about:invalid#almide-blocked",
+      },
+    }
+    SafeSvg("${name}=\"${__svg_attr_value(kept)}\"")
+  }
+}
+
+/// <name attrs…>children…</name>; aborts on a malformed name or an element that runs script (script, foreignObject, set, animate…).
+fn element(name: String, attrs: List[SafeSvg], children: List[SafeSvg]) -> SafeSvg = {
+  if not __svg_name_ok(name) then panic("svg.element: `${name}` is not an element name")
+  else if __svg_active_element(string.to_lower(name)) then panic("svg.element: `${name}` runs script or rewrites attributes; no builder writes it")
+  else {
+    let a = attrs |> list.map((x) => " " + to_string(x)) |> list.join("")
+    let c = children |> list.map((x) => to_string(x)) |> list.join("")
+    SafeSvg("<${name}${a}>${c}</${name}>")
+  }
+}
+
+
+@media_owns("image/svg+xml")
+fn __safe_svg_media_type(h: SafeSvg) -> String = "image/svg+xml"
+
+fn __safe_svg_to_text(h: SafeSvg) -> String = to_string(h)
+"##;
 pub const SRC_TESTING: &str = r#"
 
 
@@ -41093,6 +41243,12 @@ local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> V
     err(_) => v,
   },
 }
+
+
+
+fn __value_media_type(v: Value) -> String = "application/json"
+
+fn __value_to_text(v: Value) -> String = __stringify(v)
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 
@@ -44100,6 +44256,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "string_to_lower" => Some(SRC_STRING_TO_LOWER),
         "string_to_upper" => Some(SRC_STRING_TO_UPPER),
         "string_trim" => Some(SRC_STRING_TRIM),
+        "svg" => Some(SRC_SVG),
         "testing" => Some(SRC_TESTING),
         "testing_assert" => Some(SRC_TESTING_ASSERT),
         "uint16" => Some(SRC_UINT16),
