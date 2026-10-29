@@ -30,6 +30,22 @@ is expanded through the step's shell assignments and `${{ env.X }}` /
 be a line of .github/pinned-downloads.txt — or, with `--attested <owner/repo>`,
 a release asset of <owner/repo>. The manifest itself must be well formed.
 
+Fetches by other clients (check_sources):
+  git clone          must be followed in its unit by a `git checkout` of a
+                     40-hex commit (expanded through the step / job env), or
+                     carry `# supply: head-tracked — <why>` on the line above
+                     (a clone whose moving head IS the subject: the canary,
+                     the grammar drift check);
+  actions/checkout   of another `repository:` needs a 40-hex `ref:`;
+  elan               `toolchain install` / `update` / `default <tc>` and
+                     elan-init with a toolchain are refused — elan checks no
+                     pinned digest; the archive goes through fetch-pinned.sh;
+  opam               `init` / `repo add|set-url` must name
+                     git+https://…#<40-hex>: the commit's opam files carry
+                     every source archive's checksum;
+  actions            every third-party action is declared in the manifest
+                     (`action <owner/repo> <what it fetches at run time>`).
+
 Usage: download_pins.py <root>
 Exit 0 clean, 1 on a finding, 2 on a usage error.
 """
@@ -39,7 +55,7 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from action_supply import resolve, workflow_files  # noqa: E402
+from action_supply import env_values, resolve, step_inputs, workflow_files  # noqa: E402
 
 MANIFEST = ".github/pinned-downloads.txt"
 HELPER = "scripts/fetch-pinned.sh"
@@ -51,6 +67,8 @@ WRITES = re.compile(r"(^|\s)(-[A-Za-z]*[oO][A-Za-z]*|--output|--remote-name|-Out
 HEX64 = re.compile(r"\b[0-9a-f]{64}\b")
 SHA = re.compile(r"\bsha256sum\b|\bshasum\s+-a\s*256\b")
 ATTEST = re.compile(r"gh\s+attestation\s+verify\b[^\n]*?(?:--repo|-R)[ =]+['\"]?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)")
+ACTIONS = {}  # owner/repo -> what it fetches at run time (manifest `action` lines)
+SHA40 = re.compile(r"^[0-9a-f]{40}$")
 STEP_START = re.compile(r"^\s*-\s+(name|uses|run|id|if|shell|env|with|working-directory|timeout-minutes|continue-on-error):")
 
 
@@ -63,9 +81,13 @@ def load_manifest(root, bad):
         s = ln.strip()
         if not s or s.startswith("#"):
             continue
+        am = re.fullmatch(r"action\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s+(\S.*)", s)
+        if am:
+            ACTIONS[am.group(1)] = am.group(2)
+            continue
         m = re.fullmatch(r"([0-9a-f]{64})  (https://\S+)", s)
         if not m:
-            bad.append(f"{MANIFEST}:{n}  not `<sha256>  <https url>`: {s}")
+            bad.append(f"{MANIFEST}:{n}  not `<sha256>  <https url>` or `action <owner/repo> <what it fetches>`: {s}")
             continue
         if m.group(2) in urls:
             bad.append(f"{MANIFEST}:{n}  {m.group(2)} is listed twice")
@@ -173,19 +195,21 @@ def expand(root, f, lines, text, value, depth=0, loose=False):
             if v is None:
                 out.append((None, why))
             else:
-                out.extend(expand(root, f, lines, text, value[:m.start()] + v + value[m.end():], depth + 1, loose))
+                out.extend(expand(root, f, lines, text, value.replace(m.group(0), v), depth + 1, loose))
         return out
     m = re.search(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", value)
     if m:
         name = m.group(1) or m.group(2)
-        vals = shell_vars(text).get(name)
+        vals = shell_vars(text).get(name) or env_values(lines, name)
         if not vals and loose:
             vals = ["<?>"]
         if not vals:
             return [(None, f"`${name}` is not assigned in the step")]
         out = []
         for v in vals:
-            out.extend(expand(root, f, lines, text, value[:m.start()] + v + value[m.end():], depth + 1, loose))
+            # One value per name: every occurrence of the variable takes it.
+            sub = re.sub(r"\$\{" + name + r"\}|\$" + name + r"(?![A-Za-z0-9_])", lambda _m: v, value)
+            out.extend(expand(root, f, lines, text, sub, depth + 1, loose))
         return out
     return [(value, None)]
 
@@ -267,13 +291,71 @@ def main(root):
                         bad.append(f"{at}  {HELPER} --attested {repo} {v} — not a release asset of {repo}")
                 elif v not in manifest:
                     bad.append(f"{at}  {HELPER} {v} — no line in {MANIFEST}")
+    m = check_sources(root, bad)
     for b in bad:
         print("UNPINNED-DOWNLOAD " + b, file=sys.stderr)
     if bad:
-        print(f"download-pins: {len(bad)} finding(s) ({n} download(s) checked) — a fetched binary or archive must be checked against a pinned sha256.", file=sys.stderr)
+        print(f"download-pins: {len(bad)} finding(s) ({n} download(s), {m} other fetch site(s) checked) — a fetched binary or archive must be checked against a pinned sha256, a fetched source pinned to a commit.", file=sys.stderr)
         return 1
-    print(f"download-pins: OK — {n} download(s) of a binary or archive, every one checked against a pinned sha256 or a first-party attestation")
+    print(f"download-pins: OK — {n} download(s) of a binary or archive, every one checked against a pinned sha256 or a first-party attestation; {m} other fetch site(s) (git clone, a checkout of another repository, elan, opam, a third-party action) pinned to a commit, marked head-tracked, or declared")
     return 0
+
+
+HEAD_TRACKED = re.compile(r"#\s*supply:\s*head-tracked\s*[—-]+\s*\S")
+ELAN_FETCH = re.compile(r"(?<![\w-])elan[\"']?\s+(toolchain\s+install|update|default\s+(?!none\b))|elan-init\b[^\n]*--default-toolchain[ =](?!none\b)")
+
+
+def check_sources(root, bad):
+    """Fetches by other clients: `git clone` of a moving branch, an
+    `actions/checkout` of another repository, elan's toolchain fetch, an opam
+    repository at its head, and a third-party action not declared with what
+    it fetches. Returns the number of sites checked."""
+    n = 0
+    for f, lines, text, first in units(root):
+        rel = os.path.relpath(f, root)
+        raw = text.splitlines()
+        for ln, s in logical_lines(text):
+            at = f"{rel}:{first + ln - 1}"
+            prev = raw[ln - 2] if ln >= 2 else ""
+            # A command inside a single-quoted string is text (a message, an
+            # expected-output pattern), not a command this step runs.
+            s = re.sub(r"'[^'\n]*'", "''", s)
+            for m in re.finditer(r"(?<![\w-])git\s+clone\b", s):
+                n += 1
+                if HEAD_TRACKED.search(prev) or HEAD_TRACKED.search(s):
+                    continue
+                cos = re.findall(r"git\s+(?:-C\s+\S+\s+)?checkout\s+(?:-\S+\s+)*([\"']?[^\s;&|]+)", text)
+                shas = [v for c in cos for v, _ in expand(root, f, lines, text, c.strip("\"'")) if v and SHA40.match(v)]
+                if not shas:
+                    bad.append(f"{at}  {s.strip()[:120]} — a clone of a moving branch: check out a 40-hex commit after it (or mark the line `# supply: head-tracked — <why>`)")
+            if ELAN_FETCH.search(s):
+                n += 1
+                bad.append(f"{at}  {s.strip()[:120]} — elan fetches the toolchain against no pinned digest: unpack the release archive through {HELPER}")
+            if re.search(r"(?<![\w-])opam\s+(init|repo(sitory)?\s+(add|set-url))\b", s):
+                n += 1
+                urls = [t.strip("\"'") for t in s.split() if "git+https://" in t]
+                vals = [v for u in urls for v, _ in expand(root, f, lines, text, u)]
+                if not vals or not all(v and re.fullmatch(r"git\+https://\S+#[0-9a-f]{40}", v) for v in vals):
+                    bad.append(f"{at}  {s.strip()[:120]} — an opam repository at its moving head: name it as git+https://…#<40-hex commit>")
+    for f in workflow_files(root):
+        rel = os.path.relpath(f, root)
+        lines = open(f, encoding="utf-8").read().splitlines()
+        if True:
+            for i, ln in enumerate(lines):
+                um = re.match(r"^\s*(-\s+)?uses:\s*['\"]?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(/[^@\s'\"]*)?@", ln)
+                if not um:
+                    continue
+                n += 1
+                if um.group(2) not in ACTIONS:
+                    bad.append(f"{rel}:{i + 1}  uses: {um.group(2)} — not declared in {MANIFEST} (`action {um.group(2)} <what it fetches at run time>`)")
+                if um.group(2) == "actions/checkout":
+                    ins = step_inputs(lines, i)
+                    if "repository" in ins:
+                        ref = ins.get("ref", (None, None))[0]
+                        vals = [v for v, _ in expand(root, f, lines, "", ref)] if ref else [None]
+                        if not vals or any(v is None or not SHA40.match(v) for v in vals):
+                            bad.append(f"{rel}:{i + 1}  actions/checkout of {ins['repository'][0]} at `{ref}` — not a 40-hex commit")
+    return n
 
 
 if __name__ == "__main__":

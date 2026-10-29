@@ -237,6 +237,60 @@ PY
   sed -i.bak '/not a digest line/d' "$tmp/.github/pinned-downloads.txt"; rm -f "$tmp/.github/pinned-downloads.txt.bak"
   dlpins "$tmp" >/dev/null || { echo "self-test: the download rule refused the pinned tree" >&2; dlpins "$tmp" >&2; exit 1; }
 
+  # Fetches by other clients (row 16): a clone of a moving branch, another
+  # repository checked out at a branch, elan's and opam's own fetches, and a
+  # third-party action nobody declared.
+  src="$tmp/src"; mkdir -p "$src/.github/workflows" "$src/scripts"
+  printf '# none yet\n' > "$src/.github/pinned-downloads.txt"
+  cat > "$src/.github/workflows/src.yml" <<'EOF'
+on: push
+env:
+  TOOL_SHA: 1111111111111111111111111111111111111111
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ex/undeclared@2222222222222222222222222222222222222222 # v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ex/project
+          ref: main
+      - name: clone at the head
+        run: git clone --depth 1 https://github.com/ex/tool /tmp/tool
+      - name: clone at a pinned commit
+        run: |
+          git clone -q https://github.com/ex/tool /tmp/tool2
+          git -C /tmp/tool2 checkout -q --detach "$TOOL_SHA"
+      - name: toolchains
+        run: |
+          elan toolchain install leanprover/lean4:v4.29.1
+          opam init --bare --disable-sandboxing -y
+EOF
+  printf '#!/bin/sh\n# supply: head-tracked\ngit clone https://github.com/ex/grammar /tmp/g\n' > "$src/scripts/get.sh"
+  set +e; out=$(dlpins "$src" 2>&1); rc=$?; set -e
+  expect_refusal "the source rule" "$out" "$rc" \
+    'src.yml:8  uses: ex/undeclared' 'src.yml:9  uses: actions/checkout — not declared' \
+    'actions/checkout of ex/project at `main`' 'src.yml:14  run: git clone --depth 1' \
+    'src.yml:21  elan toolchain install' 'src.yml:22  opam init' 'get.sh:3  git clone' '7 finding(s)'
+  /usr/bin/grep -qF 'git clone -q https://github.com/ex/tool /tmp/tool2' <<< "$out" \
+    && { echo "self-test: the source rule refused a clone checked out at a 40-hex commit" >&2; echo "$out" >&2; exit 1; }
+  python3 -I - "$src/.github/workflows/src.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+for a, b in [("ref: main", "ref: 3333333333333333333333333333333333333333"),
+             ("run: git clone --depth 1 https://github.com/ex/tool /tmp/tool\n",
+              "run: git clone https://github.com/ex/tool /tmp/tool && git -C /tmp/tool checkout 4444444444444444444444444444444444444444\n"),
+             ("          elan toolchain install leanprover/lean4:v4.29.1\n", ""),
+             ("opam init --bare --disable-sandboxing -y", 'opam init --bare -y default "git+https://github.com/ocaml/opam-repository.git#${TOOL_SHA}"')]:
+    assert a in s, a
+    s = s.replace(a, b, 1)
+open(p, "w").write(s)
+PY
+  printf 'action ex/undeclared  nothing (a forged declaration)\naction actions/checkout  the forged project at a 40-hex ref\n' >> "$src/.github/pinned-downloads.txt"
+  printf '#!/bin/sh\n# supply: head-tracked — the forged head is the subject\ngit clone https://github.com/ex/grammar /tmp/g\n' > "$src/scripts/get.sh"
+  dlpins "$src" >/dev/null || { echo "self-test: the source rule refused the pinned tree" >&2; dlpins "$src" >&2; exit 1; }
+
   # The helper at run time: a wrong digest aborts the step and leaves no file.
   asset="$tmp/asset.tar.gz"; printf 'release bytes\n' > "$asset"
   url="file://$asset"; man="$tmp/manifest.txt"
@@ -254,7 +308,7 @@ PY
   set +e; PINNED_DOWNLOADS_MANIFEST="$man" bash "$tmp/scripts/fetch-pinned.sh" "file://$tmp/other" "$tmp/x" >/dev/null 2>&1; rc=$?; set -e
   [ "$rc" = 1 ] || { echo "self-test: the helper fetched a URL with no pinned digest (exit $rc)" >&2; exit 1; }
 
-  echo "check-action-pins self-test: OK — refused a tag pin, a branch pin, seven moving toolchain / runtime / installer names and a composite's nested tag, six unpinned downloads and a malformed manifest line, and a wrong digest at run time; passed the fixed trees"
+  echo "check-action-pins self-test: OK — refused a tag pin, a branch pin, seven moving toolchain / runtime / installer names and a composite's nested tag, six unpinned downloads and a malformed manifest line, seven fetches by other clients (a moving clone, an unreasoned head-tracked mark, a checkout of another repository at a branch, elan, opam at its head, two undeclared actions), and a wrong digest at run time; passed the fixed trees"
   exit 0
 fi
 
