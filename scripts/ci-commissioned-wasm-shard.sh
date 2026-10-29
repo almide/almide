@@ -20,7 +20,8 @@
 # shards own, read from the one table below, so a test is in a named shard or
 # in `rest`. A renamed or deleted gate stops matching both its shard's filter
 # and `rest`'s skip, so it runs in `rest`; `verify` then fails the named
-# shard, whose log no longer shows it pass.
+# shard, whose log no longer shows it pass. `verify rest` fails when the
+# workflow's matrix and this table name different shards.
 #
 #   bash scripts/ci-commissioned-wasm-shard.sh args   <shard>   libtest args
 #   bash scripts/ci-commissioned-wasm-shard.sh verify <shard> <log>
@@ -65,7 +66,16 @@ case "${1:-}" in
     ;;
   verify)
     shard="${2:?shard}"; log="${3:?log}"
-    [ "$shard" = rest ] && { echo "rest: nothing named to verify"; exit 0; }
+    if [ "$shard" = rest ]; then
+      # `rest` skips every named shard's tests, so a named shard the matrix
+      # does not run would leave its gates in NO job. The matrix must list
+      # exactly the shards this table has.
+      want="[$(echo $NAMED rest | sed 's/ /, /g')]"
+      got="$(grep -E '^ +shard: \[' "$(dirname "$0")/../.github/workflows/ci.yml" | grep -E 'ratchet|rest' | sed -E 's/^ +shard: //')"
+      [ "$got" = "$want" ] || { echo "::error::the commissioned-wasm-gates matrix is \`$got\`, this table's shards are \`$want\`"; exit 1; }
+      echo "rest: the matrix runs every shard ($want)"
+      exit 0
+    fi
     tests="$(shard_tests "$shard")" || { echo "unknown shard: $shard" >&2; exit 2; }
     missing=0
     for t in $tests; do

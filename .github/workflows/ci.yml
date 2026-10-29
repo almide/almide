@@ -2451,6 +2451,8 @@ jobs:
           set -euo pipefail
           ARGS="$(bash scripts/ci-commissioned-wasm-shard.sh args ${{ matrix.shard }})"
           echo "libtest filter: $ARGS"
+          # The runner's CPU, so a slower step can be told apart from slower code.
+          lscpu | grep -E '^(Model name|CPU\(s\)):' || true
           # shellcheck disable=SC2086 # the filter is a word list on purpose
           cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout -- $ARGS 2>&1 | tee "$RUNNER_TEMP/shard.log"
           bash scripts/ci-commissioned-wasm-shard.sh verify ${{ matrix.shard }} "$RUNNER_TEMP/shard.log"
