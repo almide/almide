@@ -57,7 +57,7 @@ equal to the set of codes the compiler emits.
 | [E086](E086.md) | `scoped`: a value would outlive its scoped allocation (ALS-E31) |
 | [E087](E087.md) | `scoped`: an operation not permitted in a scoped region (ALS-E31) |
 | [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
-| [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
+| [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one, unless its type declares `fn T.repr`) — including through a generic instantiation |
 | [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
 | [E092](E092.md) | A `@pure` fn is not pure: it is an `effect fn` or an `@extern`, or it reaches output, a `panic` / `assert*`, a stdlib call with an effect category, or an `@extern` |
 | [E093](E093.md) | A type written with brackets is applied to a different number of type arguments than its declaration has parameters (a generic alias, record or variant, a type declared without parameters, or a builtin: `List[Int, Int]`, `Map[String]`) |

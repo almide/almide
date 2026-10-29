@@ -6,14 +6,16 @@
 // http.get_response / http.send answer the whole response for any complete
 // response; Err is transport-only. The record (#1791) carries — status, every header line (repeats kept), body —
 // pinned below by a loopback round-trip against a canned raw response
-// served over `net`: the listener is bound BEFORE the `fan` so the client's
-// dial is queued in the backlog until the server arm accepts. Probes follow the net_test.almd
+// served over `net`: the listener is bound on port 0 BEFORE the `fan` (a
+// fixed port collides with whatever else holds it, #4313), the server arm
+// accepts on it (the net handle tables are the program's, C-377) and the
+// client arm dials the port the OS chose, its dial queued in the backlog
+// until the server arm accepts. Probes follow the net_test.almd
 // discipline: the effectful call is BOUND first and the pure local is matched,
 // so branch-lift synthesizes no real fn (the walled-real ratchet stays empty).
 // The closed-local-port probe exercises the transport-Err path with no
 // external network; the status-code unit is declared out-of-band in
 // docs/stdlib/semantics-manifest.toml.
-import env
 import io
 import http
 import net
@@ -49,11 +51,8 @@ test "send of a built request to a closed local port is a transport err" {
   }
 }
 
-// The server arm owns listen + accept + answer: the `net` handle tables are
-// thread-local, and each `fan` arm is its own thread. The client arm dials
-// until the listener is up (bounded retries, 20 ms apart).
-effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
-  let server = net.tcp_listen("127.0.0.1", port)!
+// The server arm accepts on the test's listener and answers once.
+effect fn answer_once(server: net.TcpListener, reply: String) -> Result[Unit, String] = {
   let peer = net.tcp_accept(server)!
   let _ = io.read(peer, 4096)!
   io.write(peer, bytes.from_string(reply))!
@@ -62,29 +61,13 @@ effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
   ok(())
 }
 
-effect fn fetch_retry(method: String, url: String, headers: List[(String, String)], left: Int) -> Result[HttpResponse, String] = match http.send(http.new_request(method, url, "", headers)) {
-  ok(resp) => ok(resp),
-  err(e) => if left == 0 then err(e)
-  else {
-    env.sleep_ms(20)
-    fetch_retry(method, url, headers, left - 1)
-  },
-}
-
-effect fn get_retry(url: String, left: Int) -> Result[HttpResponse, String] = match http.get_response(url) {
-  ok(resp) => ok(resp),
-  err(e) => if left == 0 then err(e)
-  else {
-    env.sleep_ms(20)
-    get_retry(url, left - 1)
-  },
-}
-
 test "send keeps status, every header and the body of a 3xx" {
   let reply = "HTTP/1.1 302 Found\r\nLocation: /next\r\nSet-Cookie: a=1; HttpOnly\r\nSet-Cookie: b=2; Secure\r\nX-Frame-Options: DENY\r\nContent-Length: 5\r\n\r\nmoved"
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(server)!
   let (_, resp) = fan {
-    answer_once(39190, reply)
-    fetch_retry("GET", "http://127.0.0.1:39190/old", [("User-Agent", "almide-test")], 100)
+    answer_once(server, reply)
+    http.send(http.new_request("GET", "http://127.0.0.1:${port}/old", "", [("User-Agent", "almide-test")]))
   }
   assert_eq(http.status(resp), 302)
   assert_eq(http.body(resp), "moved")
@@ -99,9 +82,11 @@ test "send keeps status, every header and the body of a 3xx" {
 
 test "get_response is the GET cell of the family and a 404 is Ok" {
   let reply = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\ngone"
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(server)!
   let (_, resp) = fan {
-    answer_once(39191, reply)
-    get_retry("http://127.0.0.1:39191/missing", 100)
+    answer_once(server, reply)
+    http.get_response("http://127.0.0.1:${port}/missing")
   }
   assert_eq(http.status(resp), 404)
   assert_eq(http.body(resp), "gone")

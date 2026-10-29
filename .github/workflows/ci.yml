@@ -2433,7 +2433,21 @@ jobs:
   # v47 pin elsewhere is the embedded host's, and the two are not the same
   # instrument, so they are not unified here).
   commissioned-wasm-gates:
-    name: Commissioned wasm gates (structural leg, release)
+    # Five shards of the one release-shape step (2026-10-29, release PR
+    # #4286): the step ran its test binaries one after another, and its
+    # corpus gates are one single-threaded #[test] each, so it took their
+    # SUM — 21 min of tests on 2026-10-24, 58 min on 2026-10-29, cancelled at
+    # the 70-minute timeout. Every shard runs the SAME `cargo test` command
+    # (one build shape, one shared rust-cache entry) with a libtest filter
+    # from scripts/ci-commissioned-wasm-shard.sh: a named shard runs only its
+    # gates (and `verify` fails it if one of them stopped running), `rest`
+    # skips exactly those names, so the five are a partition of the step.
+    name: Commissioned wasm gates (structural leg, release, ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in step with `shards` in scripts/ci-commissioned-wasm-shard.sh.
+        shard: [ratchet, ledgers, parity, wasi, rest]
     # `build` too (#2381): the probe jobs below drive the almide CLI, which
     # this job used to build for itself a second time (`cargo build
     # --release --locked --bin almide`, 426–432 s on every develop run) — the
@@ -2454,7 +2468,10 @@ jobs:
     # step alone took 42 min of 45 on 2026-10-23 before it was cancelled. (The
     # separate double-free trap sweep #4081 added is gone: the trap is in every
     # wasm build since #4023, so the carried-gates step runs under it.)
-    timeout-minutes: 70
+    # 45 since the shards: the heaviest shard measured 851 s of tests on the
+    # unsharded 2026-10-29 run (ledgers), plus a 9.8 min warm build; the cold
+    # build is the rest of the margin.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -2490,16 +2507,25 @@ jobs:
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
-      - name: Carried gates in release shape
-        run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      - name: Carried gates in release shape (this shard's tests)
+        run: |
+          set -euo pipefail
+          ARGS="$(bash scripts/ci-commissioned-wasm-shard.sh args ${{ matrix.shard }})"
+          echo "libtest filter: $ARGS"
+          # The runner's CPU, so a slower step can be told apart from slower code.
+          lscpu | grep -E '^(Model name|CPU\(s\)):' || true
+          # shellcheck disable=SC2086 # the filter is a word list on purpose
+          cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout -- $ARGS 2>&1 | tee "$RUNNER_TEMP/shard.log"
+          bash scripts/ci-commissioned-wasm-shard.sh verify ${{ matrix.shard }} "$RUNNER_TEMP/shard.log"
       # #2141: the stdlib-LINKING size ladder (crates/almide-wasm/tests/
-      # size_ladder.rs, golden/size-ladder.txt) already ran inside the step
-      # above; this run prints its table — rung / program / shipped / pinned
+      # size_ladder.rs, golden/size-ladder.txt) already ran inside the `rest`
+      # shard's step above; this run prints its table — rung / program / shipped / pinned
       # / delta — into the log on every push, so a reader sees which rung
       # grew without a diff. The manifest-wide size_ratchet pins 700 programs
       # that link almost nothing; the ladder pins the Map / String / JSON /
       # regex programs where the size story is actually decided.
       - name: Stdlib-linking wasm size ladder (#2141 — a shrink-only ceiling per rung, the table in the log)
+        if: matrix.shard == 'rest'
         run: cargo test --release --locked -p almide-wasm --test size_ladder -- --nocapture
 
   commissioned-wasm-gates-root:

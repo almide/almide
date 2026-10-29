@@ -627,7 +627,9 @@ Numbers, `Bool` and `String` print their value; a `List`, `Map`, `Set`,
 (`[1, 2]`, `["a": 1]`, `some(3)`, `P { n: 1 }`). A value with no string form —
 `Bytes`, `Unit`, `Matrix`, a Handle, a function value, or a container
 holding one — is [E089](diagnostics/E089.md): interpolate what you mean
-(`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`).
+(`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`). A type that
+declares `fn T.repr` prints through it whatever it holds, so a record with a
+function field interpolates once it declares one.
 
 ### String escapes
 ```
