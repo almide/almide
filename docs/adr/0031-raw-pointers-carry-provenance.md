@@ -180,8 +180,10 @@ A read-only view of the `n` bytes at `off` inside `r`. The answer is `err` unles
 `0 <= off` and `off + n <= ffi.len(r)`, and a negative count is `err` too. The view
 reads the parent's memory, so a later write to a writable parent shows through it. It
 holds the parent's owner (and its release guard), so the memory outlives the view. It is
-never writable, even when the parent is. It mints no new provenance: the new base is
-computed only after the bounds check (`__offset`, a `local` intrinsic). It removes the
+never writable, even when the parent is. It mints no new provenance and does no address
+arithmetic: a Region carries the offset of its view in its block (`off`, 0 for
+every mint), `read` / `write` add it after their own bounds check, and an
+`@extern` is handed `base + off`. It removes the
 per-frame outbound sub-range copies in nendo and ceangal, because a slice handed to an
 `@extern` is a sub-range with no copy. C-062 is amended to state it.
 

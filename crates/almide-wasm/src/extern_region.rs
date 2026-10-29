@@ -83,7 +83,13 @@ fn split_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
             let field = |name: &str, ty: Ty| {
                 expr(IrExprKind::Member { object: Box::new(var.clone()), field: almide_base::intern::sym(name) }, ty)
             };
-            args.push(field("base", Ty::RawPtr));
+            // A slice's view starts `off` bytes past its block's base.
+            let start = IrExprKind::BinOp {
+                op: almide_ir::BinOp::AddInt,
+                left: Box::new(field("base", Ty::RawPtr)),
+                right: Box::new(field("off", Ty::Int)),
+            };
+            args.push(expr(start, Ty::Int));
             args.push(field("len", Ty::Int));
         }
         let mut stub = f.clone();

@@ -147,7 +147,7 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
         if abi.conv == CConv::Region {
             c_params.push(format!("{name}: *mut u8, {name}_len: usize"));
             wrapper_params.push(format!("{name}: {}", render_type(ctx, &p.ty)));
-            call_args.push(format!("{name}.base, {name}.len.max(0) as usize"));
+            call_args.push(format!("{name}.base.wrapping_add({name}.off.max(0) as usize), {name}.len.max(0) as usize"));
             continue;
         }
         c_params.push(format!("{name}: {}", abi.c_ty));
@@ -234,7 +234,7 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
     let release_call = format!("|__almide_q: *mut u8| unsafe {{ {release}(__almide_q) }}");
     let keep = format!("almide_rt_ffi_release_guard(__almide_p, {release_call})");
     format!(
-        "{n}    {region_ty} {{ owner: Vec::<u8>::new().into(), base: __almide_p, len: __almide_n, writable: false, keep: {keep} }}\n"
+        "{n}    {region_ty} {{ owner: Vec::<u8>::new().into(), base: __almide_p, off: 0, len: __almide_n, writable: false, keep: {keep} }}\n"
     )
 }
 
@@ -351,7 +351,7 @@ fn export_c_out_params(func: &IrFunction) -> Vec<String> {
 /// the call.
 fn render_lent_region(region_ty: &str, name: &str, writable: bool) -> String {
     format!(
-        "{region_ty} {{ owner: Vec::<u8>::new().into(), base: {name} as *mut u8, \
+        "{region_ty} {{ owner: Vec::<u8>::new().into(), base: {name} as *mut u8, off: 0, \
          len: if {name}.is_null() {{ 0 }} else {{ i64::try_from({name}_len).unwrap_or(i64::MAX) }}, \
          writable: {writable}, keep: almide_rt_ffi_lent_keep() }}"
     )
