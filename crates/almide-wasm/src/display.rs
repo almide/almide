@@ -327,6 +327,57 @@ impl Emitter<'_> {
                 self.f.instructions().drop();
                 self.append_lit("()");
             }
+            // A Bytes displays as the list of its byte values, `[97, 98]` —
+            // the oracle's form (a Bytes is a List of Ints there) and native's
+            // Debug of the byte vector. The block is byte-packed (len = byte
+            // count), so the walk is the List one at stride 1, each byte read
+            // unsigned and printed through the Int path.
+            SliceTy::Scalar(Scalar::Bytes) => {
+                let hb = self.hold_i32()?;
+                let end = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.append_lit("[");
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(hb)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(cur);
+                    i.local_get(cur)
+                        .local_get(hb)
+                        .i32_load(len_memarg())
+                        .i32_add()
+                        .local_set(end);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                    i.local_get(cur)
+                        .local_get(hb)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .i32_ne()
+                        .if_(BlockType::Empty);
+                }
+                self.append_lit(", ");
+                self.f.instructions().end();
+                self.f
+                    .instructions()
+                    .local_get(cur)
+                    .i32_load8_u(crate::bytes::byte_at())
+                    .i64_extend_i32_u();
+                self.emit_int_display(false);
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(cur).i32_const(1).i32_add().local_set(cur);
+                    i.br(0);
+                    i.end();
+                    i.end();
+                }
+                self.append_lit("]");
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+            }
             other => return unsup(&format!("interp-part:{other:?}")),
         }
         Ok(())
