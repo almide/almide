@@ -554,7 +554,9 @@ pub fn check_rc(
                     (k == kind || (kind == 'd' && k == 'j'))
                         && (names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l))))
                 }
-                (kind, None) => k == kind,
+                // A temporary's event logged inside an arm or routine window
+                // is an instruction emitted inside it: a call in that window.
+                (kind, None) => k == kind && evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z),
             }
         };
         let order: Vec<usize> = (0..evs.len())

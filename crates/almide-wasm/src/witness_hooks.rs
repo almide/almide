@@ -540,6 +540,16 @@ impl Emitter<'_> {
         }
     }
 
+    /// #4277: a temporary's credit, held in `local`, moved into the open
+    /// routine window — an `m<local>` for the RC byte check only (the
+    /// ownership witness already logged the temporary moved, `im`): the
+    /// routine's release of that local, one per path, is that credit's.
+    pub(crate) fn witness_rc_hold_move(&mut self, local: u32) {
+        if self.witness.as_ref().is_some_and(|w| !w.dead()) {
+            crate::witness::rc::event('m', Some(local));
+        }
+    }
+
     /// The anchored forms (`rc::site_window`): the `if` of `lower_if_arms`.
     pub(crate) fn witness_branch_open_at(&mut self, anchor: u64) {
         if let Some(w) = self.witness.as_mut() {
