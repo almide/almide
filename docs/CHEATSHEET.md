@@ -1124,11 +1124,13 @@ error E053, never silently ignored.
 **Rule 6 — a response's Content-Type is its body's type.** `http.response(status, body)`
 takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
 `application/octet-stream`, a `Value` `application/json`, `html.*` builds
-`text/html` and `svg.*` `image/svg+xml`. Build HTML with `html.escape` (text),
+`text/html`. Build HTML with `html.escape` (text),
 `html.attr` / `html.url_attr` (attributes) and `html.script_json` (data in
 `<script>`), and `html.raw(s)` only for trusted markup. Any other media type is
 `http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
-computed one, or for HTML / XML / SVG). Content-Type is never written by name:
+computed one, or for HTML / XML / SVG: SVG comes from a package such as
+almide/svg, which the application grants in `almide.toml` with `[trust]
+media = { "almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
 `set_header` / `with_headers` refuse it (E116), and `set_body` /
 `http.with_body(resp, body)` replace the body and its type together. A
 fetched response keeps the type it arrived with:

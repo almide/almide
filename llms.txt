@@ -347,11 +347,13 @@ depth. Field attributes are only `@skip` /
 
 `http.response(status, body)` takes a `Body`: a String is
 `text/plain; charset=utf-8`, Bytes `application/octet-stream`, a `Value`
-`application/json`, `html.*` builds `text/html` and `svg.*` `image/svg+xml`
+`application/json`, `html.*` builds `text/html`
 (`html.escape` / `html.attr` / `html.url_attr` / `html.script_json`, or
 `html.raw(s)` for trusted markup). Any other media type is
 `http.typed("text/csv", bytes)` with a literal type (E117 for a computed one,
-or for HTML / XML / SVG). Content-Type is never written by name: `set_header` /
+or for HTML / XML / SVG). SVG comes from a package such as almide/svg, which
+the application grants in `almide.toml`: `[trust]` `media = { "almide/svg" =
+["image/svg+xml"] }` (E118 without it). Content-Type is never written by name: `set_header` /
 `with_headers` refuse it (E116); `set_body` / `http.with_body(resp, body)`
 replace the body and its type together. `http.html` is gone (`almide fix`
 rewrites it to `http.response`).
@@ -401,9 +403,9 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
 | E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
 | E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), an input type holding a `Codec` record (a field or a variant payload), or a forwarded type parameter | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
-| E116 | `http.set_header` / `http.with_headers` writes `Content-Type` on a response | Pass the body as its type: String, Bytes, a `Value`, `html.*`, `svg.*`, or `http.typed("text/csv", bytes)` |
-| E117 | `http.typed`'s media type is computed, malformed, or HTML / XML / SVG | Write the type as a literal; build HTML with `html.*` and SVG with `svg.*` |
-| E118 | A user type declares `Body` | Convert to a String, Bytes, `Value`, `html.*`, `svg.*` or `http.typed` body at the response |
+| E116 | `http.set_header` / `http.with_headers` writes `Content-Type` on a response | Pass the body as its type: String, Bytes, a `Value`, `html.*`, a package's safe type, or `http.typed("text/csv", bytes)` |
+| E117 | `http.typed`'s media type is computed, malformed, or HTML / XML / SVG | Write the type as a literal; build HTML with `html.*`, and SVG with a package such as almide/svg granted in `[trust] media` |
+| E118 | A dependency owns a script-capable media type (`@media_owns`) without the root's `[trust] media` grant, a grant names an undeclared type, two owners overlap, or a body type's media type is not a literal | Grant it — `[trust]` `media = { "almide/svg" = ["image/svg+xml"] }` — only if you trust it; write the media type as a literal |
 | E114 | Generic fn calls itself (directly or through other generic fns) at a growing type, e.g. `depth((x, x), n - 1)` inside `depth[T]` | Recurse at the type the fn was called with: collect values in a `List[T]`, or count levels in an `Int` |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
