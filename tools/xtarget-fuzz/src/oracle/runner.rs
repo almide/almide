@@ -110,10 +110,15 @@ impl Toolchain {
         for profile in ["debug", "release"] {
             let dir = self.scratch.join("target").join(profile);
             for (sub, prefix) in [(dir.clone(), "almide-"), (dir.join("deps"), "almide_out-")] {
-                let Ok(entries) = std::fs::read_dir(&sub) else { continue };
+                let Ok(entries) = std::fs::read_dir(&sub) else {
+                    continue;
+                };
                 for e in entries.flatten() {
                     let is_file = e.file_type().map(|t| t.is_file()).unwrap_or(false);
-                    if is_file && e.file_name().to_string_lossy().starts_with(prefix) && std::fs::remove_file(e.path()).is_ok() {
+                    if is_file
+                        && e.file_name().to_string_lossy().starts_with(prefix)
+                        && std::fs::remove_file(e.path()).is_ok()
+                    {
                         removed += 1;
                     }
                 }
@@ -189,8 +194,10 @@ impl Toolchain {
 
 /// `cmd` with no inherited environment: `env`, then what `cmd` set itself.
 fn isolated(mut cmd: Command, env: &[(String, String)]) -> Command {
-    let own: Vec<(std::ffi::OsString, std::ffi::OsString)> =
-        cmd.get_envs().filter_map(|(k, v)| Some((k.to_os_string(), v?.to_os_string()))).collect();
+    let own: Vec<(std::ffi::OsString, std::ffi::OsString)> = cmd
+        .get_envs()
+        .filter_map(|(k, v)| Some((k.to_os_string(), v?.to_os_string())))
+        .collect();
     cmd.env_clear();
     cmd.envs(env.iter().map(|(k, v)| (k, v)));
     cmd.envs(own);
@@ -204,11 +211,20 @@ impl Toolchain {
     /// embedded host is `almide` itself, so what it needs its guest sees),
     /// and the harness's own `PATH` and `HOME`, the same value on every leg.
     fn guest_env(&self, dir: &Path) -> Vec<(String, String)> {
-        let mut env: Vec<(String, String)> = super::sandbox::ENV.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let mut env: Vec<(String, String)> = super::sandbox::ENV
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         env.extend(super::fixture::env().iter().cloned());
-        env.push(("TMPDIR".into(), super::sandbox::tmp_of(dir).to_string_lossy().into_owned()));
+        env.push((
+            "TMPDIR".into(),
+            super::sandbox::tmp_of(dir).to_string_lossy().into_owned(),
+        ));
         env.push(("NO_COLOR".into(), "1".into()));
-        env.push(("ALMIDE_RUN_PROJECT_DIR".into(), absolute(&self.scratch).to_string_lossy().into_owned()));
+        env.push((
+            "ALMIDE_RUN_PROJECT_DIR".into(),
+            absolute(&self.scratch).to_string_lossy().into_owned(),
+        ));
         for k in ["PATH", "HOME"] {
             if let Ok(v) = std::env::var(k) {
                 env.push((k.into(), v));
@@ -251,7 +267,13 @@ fn native_memory_cap(cmd: &mut Command) {
 /// `p` resolved against the current directory: a sandboxed child runs in
 /// another cwd, where a relative program or module path would not resolve.
 fn absolute(p: &Path) -> PathBuf {
-    if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|d| d.join(p)).unwrap_or_else(|_| p.to_path_buf()) }
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|d| d.join(p))
+            .unwrap_or_else(|_| p.to_path_buf())
+    }
 }
 
 impl Toolchain {
@@ -272,7 +294,11 @@ impl Toolchain {
     /// `wasmtime <wasm>` — execute the WASM build.
     pub fn run_wasm(&self, wasm: &Path) -> ProcResult {
         let wasm = absolute(wasm);
-        if let Some(src) = std::fs::read(&wasm).ok().and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.strip_prefix(EMBEDDED_LEG).map(String::from)) {
+        if let Some(src) = std::fs::read(&wasm)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+            .and_then(|s| s.strip_prefix(EMBEDDED_LEG).map(String::from))
+        {
             // Absolute: the run's cwd is its sandbox.
             let almide = absolute(&self.almide);
             return self.run_sandboxed(|_, _| {
@@ -308,7 +334,11 @@ impl Toolchain {
         // under a `<root>/almide.toml`: almide resolves the manifest — and
         // its path dependencies — from the working directory, so run there.
         // A loose single file (no `src/` + manifest pair) runs as before.
-        if let Some(root) = args.iter().find(|a| a.ends_with(".almd")).and_then(|f| project_root(Path::new(f))) {
+        if let Some(root) = args
+            .iter()
+            .find(|a| a.ends_with(".almd"))
+            .and_then(|f| project_root(Path::new(f)))
+        {
             cmd.current_dir(root);
         }
         cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
@@ -434,7 +464,10 @@ impl Toolchain {
     /// read their process's environment, a stock runtime's guest its
     /// `--env` list, and `env.vars()` must answer the same on all of them.
     /// What `build` sets itself (a counter switch) comes on top.
-    fn run_sandboxed(&self, build: impl FnOnce(&Path, &[(String, String)]) -> Command) -> ProcResult {
+    fn run_sandboxed(
+        &self,
+        build: impl FnOnce(&Path, &[(String, String)]) -> Command,
+    ) -> ProcResult {
         let Ok((dir, stdin)) = super::sandbox::create(&self.scratch) else {
             let env = self.guest_env(&self.scratch);
             return self.spawn_timed(isolated(build(&self.scratch, &env), &env));
@@ -457,7 +490,9 @@ fn project_root(file: &Path) -> Option<PathBuf> {
         return None;
     }
     let root = src.parent()?;
-    root.join("almide.toml").is_file().then(|| root.to_path_buf())
+    root.join("almide.toml")
+        .is_file()
+        .then(|| root.to_path_buf())
 }
 
 /// Polling granularity while waiting on a child. Small enough that a
@@ -466,7 +501,9 @@ const POLL_INTERVAL_MS: u64 = 10;
 
 /// Whether `wasm` is an embedded-lane artifact (it names the checked source).
 pub fn is_embedded_artifact(wasm: &Path) -> bool {
-    std::fs::read(wasm).map(|b| b.starts_with(EMBEDDED_LEG.as_bytes())).unwrap_or(false)
+    std::fs::read(wasm)
+        .map(|b| b.starts_with(EMBEDDED_LEG.as_bytes()))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -497,7 +534,10 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let r = tc().run_native_bin(&script);
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(String::from_utf8_lossy(&r.stdout).trim(), (NATIVE_MEMORY_CAP_BYTES / 1024).to_string());
+        assert_eq!(
+            String::from_utf8_lossy(&r.stdout).trim(),
+            (NATIVE_MEMORY_CAP_BYTES / 1024).to_string()
+        );
     }
 
     #[test]
@@ -511,8 +551,12 @@ mod tests {
             duration: Duration::ZERO,
             tree: None,
         };
-        assert!(native_hit_memory_cap(&run("memory allocation of 4294967296 bytes failed\n")));
-        assert!(!native_hit_memory_cap(&run("thread 'main' panicked at 'index out of bounds'\n")));
+        assert!(native_hit_memory_cap(&run(
+            "memory allocation of 4294967296 bytes failed\n"
+        )));
+        assert!(!native_hit_memory_cap(&run(
+            "thread 'main' panicked at 'index out of bounds'\n"
+        )));
         assert!(!native_hit_memory_cap(&run("")));
     }
 }

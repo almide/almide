@@ -64,7 +64,11 @@ enum Leg {
 }
 
 pub fn cmd_inspect(args: &[String]) {
-    let Some(name) = args.iter().find(|a| !a.starts_with("--") && a.contains('.')).cloned() else {
+    let Some(name) = args
+        .iter()
+        .find(|a| !a.starts_with("--") && a.contains('.'))
+        .cloned()
+    else {
         eprintln!("usage: xtarget-fuzz inspect <module.fn> [--order 1|log|n|nlogn|n2] [--order-rebind ..] [--n N] [--count C] [--seed S] [--emit DIR]");
         std::process::exit(2);
     };
@@ -81,7 +85,11 @@ pub fn cmd_inspect(args: &[String]) {
         dir,
         icount,
         max_k: MAX_K,
-        calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) { 10.0 } else { 1.0 },
+        calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) {
+            10.0
+        } else {
+            1.0
+        },
     };
     let engine = Engine::with_family(&repo, Family::Synthesis);
     // A function that serves until stopped is inspected as sessions the
@@ -118,7 +126,9 @@ pub fn cmd_inspect(args: &[String]) {
         (false, true) => 20_000,
         (false, false) => 200_000,
     };
-    let n: u64 = super::flag_value(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(default_n);
+    let n: u64 = super::flag_value(args, "--n")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default_n);
     let order_rebind = super::flag_value(args, "--order-rebind");
     // `--emit DIR`: write the probe programs at size n and stop, so a row's
     // evidence can be re-run by hand on both legs (#3666's audit).
@@ -126,11 +136,19 @@ pub fn cmd_inspect(args: &[String]) {
         let root = Path::new(out);
         let mut files = probe_files(&target, n);
         if let Some(Ok(h)) = &heap {
-            files.extend(probe_files(h, n).into_iter().map(|(p, src)| (format!("heap/{p}"), src)));
+            files.extend(
+                probe_files(h, n)
+                    .into_iter()
+                    .map(|(p, src)| (format!("heap/{p}"), src)),
+            );
         }
         for (path, src) in files {
             let file = root.join(path);
-            if let Err(e) = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&file, src)) {
+            if let Err(e) = file
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|_| std::fs::write(&file, src))
+            {
                 eprintln!("{}: {e}", file.display());
                 std::process::exit(2);
             }
@@ -145,15 +163,27 @@ pub fn cmd_inspect(args: &[String]) {
         match &heap {
             None => f(&target),
             Some(Ok(h)) => both_labelled(&target.vars, &f(&target), &h.vars, &f(h)),
-            Some(Err(e)) => format!("FAIL: [vars=String] the heap instantiation does not build: {e}"),
+            Some(Err(e)) => {
+                format!("FAIL: [vars=String] the heap instantiation does not build: {e}")
+            }
         }
     };
-    verdicts.push(("complexity", per_inst(&|t| complexity(&ctx, t, n, order, order_rebind))));
+    verdicts.push((
+        "complexity",
+        per_inst(&|t| complexity(&ctx, t, n, order, order_rebind)),
+    ));
     verdicts.push(("alloc", per_inst(&|t| alloc(&ctx, t, n))));
     verdicts.push(("diamond", per_inst(&|t| diamond(&ctx, t, n))));
 
     let all_pass = verdicts.iter().all(|(_, v)| v.starts_with("PASS"));
-    println!("# {name} — {}", if all_pass { "all criteria PASS (stampable)" } else { "NOT stampable" });
+    println!(
+        "# {name} — {}",
+        if all_pass {
+            "all criteria PASS (stampable)"
+        } else {
+            "NOT stampable"
+        }
+    );
     for (k, v) in &verdicts {
         println!("{k} = {}", toml_str(v));
     }
@@ -172,15 +202,32 @@ fn absolute(p: PathBuf) -> PathBuf {
 
 fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
     let mut files = vec![("call.almd".to_string(), t.direct_program(n, 3, true))];
-    files.extend(t.rebind_programs(n, 3).into_iter().map(|(shape, src)| (format!("{shape}.almd"), src)));
+    files.extend(
+        t.rebind_programs(n, 3)
+            .into_iter()
+            .map(|(shape, src)| (format!("{shape}.almd"), src)),
+    );
     // Paths that run alone are emitted as the projects that run.
     if t.diamond_runs_paths_alone() {
-        for (path, project) in ["d", "l", "r"].into_iter().zip(t.diamond_path_projects(n.min(64))) {
-            files.extend(project.files.into_iter().map(|(p, src)| (format!("diamond-{path}/{p}"), src)));
+        for (path, project) in ["d", "l", "r"]
+            .into_iter()
+            .zip(t.diamond_path_projects(n.min(64)))
+        {
+            files.extend(
+                project
+                    .files
+                    .into_iter()
+                    .map(|(p, src)| (format!("diamond-{path}/{p}"), src)),
+            );
         }
         return files;
     }
-    files.extend(t.diamond_project(n.min(64)).files.into_iter().map(|(p, src)| (format!("diamond/{p}"), src)));
+    files.extend(
+        t.diamond_project(n.min(64))
+            .files
+            .into_iter()
+            .map(|(p, src)| (format!("diamond/{p}"), src)),
+    );
     files
 }
 
@@ -196,7 +243,12 @@ fn both_instantiations(int: &str, heap: &str) -> String {
 fn both_labelled(a_vars: &str, a: &str, b_vars: &str, b: &str) -> String {
     let body = |v: &str| v.split_once(": ").map_or(v, |(_, r)| r).to_string();
     let ok = a.starts_with("PASS") && b.starts_with("PASS");
-    format!("{}: [vars={a_vars}] {} || [vars={b_vars}] {}", if ok { "PASS" } else { "FAIL" }, body(a), body(b))
+    format!(
+        "{}: [vars={a_vars}] {} || [vars={b_vars}] {}",
+        if ok { "PASS" } else { "FAIL" },
+        body(a),
+        body(b)
+    )
 }
 
 fn toml_str(s: &str) -> String {
@@ -206,21 +258,44 @@ fn toml_str(s: &str) -> String {
 /// Criteria 1 and 4: a fresh `--focus` campaign through the full ladder.
 fn parity(ctx: &Ctx, name: &str, args: &[String]) -> String {
     let count = super::flag_value(args, "--count").unwrap_or("200");
-    let seed = super::flag_value(args, "--seed").map(String::from).unwrap_or_else(|| {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default()
-    });
+    let seed = super::flag_value(args, "--seed")
+        .map(String::from)
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_default()
+        });
     let out = Command::new(std::env::current_exe().expect("self"))
-        .args(["run", "--family", "synthesis", "--focus", name, "--count", count, "--seed", &seed, "--jobs", "4"])
+        .args([
+            "run",
+            "--family",
+            "synthesis",
+            "--focus",
+            name,
+            "--count",
+            count,
+            "--seed",
+            &seed,
+            "--jobs",
+            "4",
+        ])
         .arg("--almide")
         .arg(&ctx.almide)
         .arg("--out")
         .arg(ctx.dir.join("findings"))
         .output();
-    let Ok(out) = out else { return "SKIP: could not start the campaign".into() };
+    let Ok(out) = out else {
+        return "SKIP: could not start the campaign".into();
+    };
     let err = String::from_utf8_lossy(&out.stderr);
     let findings = err
         .lines()
-        .find_map(|l| l.trim().strip_prefix("unique findings").map(|r| r.trim_start_matches([' ', '=']).trim().to_string()))
+        .find_map(|l| {
+            l.trim()
+                .strip_prefix("unique findings")
+                .map(|r| r.trim_start_matches([' ', '=']).trim().to_string())
+        })
         .unwrap_or_else(|| "?".into());
     let focus = err
         .lines()
@@ -228,8 +303,16 @@ fn parity(ctx: &Ctx, name: &str, args: &[String]) -> String {
         .and_then(|l| l.split_once('=').map(|(_, r)| r.trim().to_string()))
         .unwrap_or_else(|| "no program called it".into());
     // "<hits> program(s) call it, <clean> of them clean on every leg"
-    let clean = focus.split(", ").nth(1).and_then(|c| c.split_whitespace().next()?.parse::<u64>().ok()).unwrap_or(0);
-    let verdict = if findings.starts_with('0') && clean > 0 { "PASS" } else { "FAIL" };
+    let clean = focus
+        .split(", ")
+        .nth(1)
+        .and_then(|c| c.split_whitespace().next()?.parse::<u64>().ok())
+        .unwrap_or(0);
+    let verdict = if findings.starts_with('0') && clean > 0 {
+        "PASS"
+    } else {
+        "FAIL"
+    };
     format!("{verdict}: seed {seed}, {count} programs; {focus}; unique findings {findings}")
 }
 
@@ -238,12 +321,23 @@ fn parity(ctx: &Ctx, name: &str, args: &[String]) -> String {
 /// at size 16: the digest after 4 steps against the start.
 fn grows_per_step(ctx: &Ctx, t: &Target) -> Option<String> {
     let at = |k: u64| -> Option<i64> {
-        let src = t.rebind_programs(16, k).into_iter().find(|(s, _)| *s == "loop")?.1;
+        let src = t
+            .rebind_programs(16, k)
+            .into_iter()
+            .find(|(s, _)| *s == "loop")?
+            .1;
         let art = build(ctx, &src, Leg::Native).ok()?;
-        run_artifact(ctx, &art, Leg::Native).ok()?.trim().parse().ok()
+        run_artifact(ctx, &art, Leg::Native)
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
     };
-    let (Some(a), Some(b)) = (at(0), at(4)) else { return None };
-    (b > 2 * a + 8).then(|| format!("the value grows geometrically per step ({a} -> {b} after 4 steps)"))
+    let (Some(a), Some(b)) = (at(0), at(4)) else {
+        return None;
+    };
+    (b > 2 * a + 8)
+        .then(|| format!("the value grows geometrically per step ({a} -> {b} after 4 steps)"))
 }
 
 fn expected_ratio(order: &str) -> Option<f64> {
@@ -259,7 +353,13 @@ fn expected_ratio(order: &str) -> Option<f64> {
 
 /// Criterion 2. The plain call is judged against `--order`; every rebind
 /// shape against `--order-rebind`. An undeclared order is reported, not passed.
-fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: Option<&str>) -> String {
+fn complexity(
+    ctx: &Ctx,
+    t: &Target,
+    n: u64,
+    order: Option<&str>,
+    order_rebind: Option<&str>,
+) -> String {
     let mut parts = Vec::new();
     let mut ok = true;
     // A stdin reader is sized by its stdin (`stdin_for`), not a parameter.
@@ -267,7 +367,9 @@ fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: 
         return "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)".into();
     }
     let direct = |n: u64, k: u64, on: bool| t.direct_program(n, k, on);
-    match judge(ctx, "call", order, n, &|n, k| (direct(n, k, true), direct(n, k, false))) {
+    match judge(ctx, "call", order, n, &|n, k| {
+        (direct(n, k, true), direct(n, k, false))
+    }) {
         Ok(s) => parts.push(s),
         Err(s) => {
             ok = false;
@@ -283,8 +385,18 @@ fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: 
             break;
         }
         let pick = |n: u64, k: u64| {
-            let p = t.rebind_programs(n, k).into_iter().find(|(s, _)| *s == shape).map(|(_, p)| p).unwrap_or_default();
-            let base = t.rebind_programs(n, 0).into_iter().find(|(s, _)| *s == shape).map(|(_, p)| p).unwrap_or_default();
+            let p = t
+                .rebind_programs(n, k)
+                .into_iter()
+                .find(|(s, _)| *s == shape)
+                .map(|(_, p)| p)
+                .unwrap_or_default();
+            let base = t
+                .rebind_programs(n, 0)
+                .into_iter()
+                .find(|(s, _)| *s == shape)
+                .map(|(_, p)| p)
+                .unwrap_or_default();
             (p, base)
         };
         match judge(ctx, shape, order_rebind, n, &pick) {
@@ -309,7 +421,8 @@ fn judge(
     if ctx.icount {
         return judge_counted(ctx, label, order, n, programs);
     }
-    judge_timed(ctx, label, order, n, programs).map_err(|e| format!("{e} [meter=wall-time, no PMU: not stampable]"))
+    judge_timed(ctx, label, order, n, programs)
+        .map_err(|e| format!("{e} [meter=wall-time, no PMU: not stampable]"))
         .and_then(|ok| Err(format!("{ok} [meter=wall-time, no PMU: not stampable]")))
 }
 
@@ -365,17 +478,29 @@ fn judge_timed(
         // Every timing sat under the noise floor at the largest k: the call
         // costs at most floor/k at every size, which bounds it, not grows it.
         let bound = NOISE_FLOOR.as_secs_f64() / k as f64 * 1e9;
-        line.push_str(&format!(" (under the {}ms floor at every size: <= {bound:.1} ns/call)", NOISE_FLOOR.as_millis()));
+        line.push_str(&format!(
+            " (under the {}ms floor at every size: <= {bound:.1} ns/call)",
+            NOISE_FLOOR.as_millis()
+        ));
         return match order {
             Some("1" | "log") => Ok(format!("{line} (order {} ok)", order.unwrap_or("?"))),
-            Some(o) => Err(format!("{line} (declared order {o} is not visible at this n — raise --n)")),
+            Some(o) => Err(format!(
+                "{line} (declared order {o} is not visible at this n — raise --n)"
+            )),
             None => Err(format!("{line} (order undeclared)")),
         };
     }
     match order.and_then(expected_ratio) {
-        None => Err(format!("{line} (order undeclared: measured worst x{worst:.2})")),
-        Some(e) if worst <= e * 1.35 + 0.15 => Ok(format!("{line} (order {} ok)", order.unwrap_or("?"))),
-        Some(_) => Err(format!("{line} (order {} exceeded: worst x{worst:.2})", order.unwrap_or("?"))),
+        None => Err(format!(
+            "{line} (order undeclared: measured worst x{worst:.2})"
+        )),
+        Some(e) if worst <= e * 1.35 + 0.15 => {
+            Ok(format!("{line} (order {} ok)", order.unwrap_or("?")))
+        }
+        Some(_) => Err(format!(
+            "{line} (order {} exceeded: worst x{worst:.2})",
+            order.unwrap_or("?")
+        )),
     }
 }
 
@@ -437,8 +562,14 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     // A served probe's wasm leg is the embedded lane too: the counted judge
     // has two legs, and the stock `wasmtime serve` leg is compared in the
     // served parity campaign (`serve::parity`).
-    if matches!(leg, Leg::Wasm) && (crate::generator::needs_embedded(src) || serve_plan(src).is_some()) {
-        let art = file.with_extension(if canonical { "canonical.embedded.almd" } else { "embedded.almd" });
+    if matches!(leg, Leg::Wasm)
+        && (crate::generator::needs_embedded(src) || serve_plan(src).is_some())
+    {
+        let art = file.with_extension(if canonical {
+            "canonical.embedded.almd"
+        } else {
+            "embedded.almd"
+        });
         std::fs::write(&art, src).map_err(|e| e.to_string())?;
         return Ok(art);
     }
@@ -472,7 +603,16 @@ const RUN_CAP: Duration = Duration::from_secs(60);
 /// The program an artifact was built from: `build_as` writes `p<hash>.almd`
 /// and names every artifact of it `p<hash>.<kind>`.
 fn source_of(art: &Path) -> String {
-    let stem = art.file_name().map(|f| f.to_string_lossy().split('.').next().unwrap_or("").to_string()).unwrap_or_default();
+    let stem = art
+        .file_name()
+        .map(|f| {
+            f.to_string_lossy()
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_string()
+        })
+        .unwrap_or_default();
     std::fs::read_to_string(art.with_file_name(format!("{stem}.almd"))).unwrap_or_default()
 }
 
@@ -548,7 +688,10 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
 /// than a pipe buffer holds (64 KiB on Linux): the child blocked on the full
 /// pipe, and the cap reported the block as a timeout (`io.write` /
 /// `io.write_bytes`, every call shape). Returns the output and the wall time.
-fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::process::Output, Duration), String> {
+fn wait_capped(
+    mut child: std::process::Child,
+    cap: Duration,
+) -> Result<(std::process::Output, Duration), String> {
     use std::io::Read;
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
@@ -559,8 +702,18 @@ fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::pr
             buf
         })
     };
-    let out_t = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let err_t = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let out_t = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err_t = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
@@ -575,9 +728,20 @@ fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::pr
         std::thread::sleep(Duration::from_millis(5));
     };
     let wall = start.elapsed();
-    let stdout = out_t.join().map_err(|_| "stdout reader panicked".to_string())?;
-    let stderr = err_t.join().map_err(|_| "stderr reader panicked".to_string())?;
-    Ok((std::process::Output { status, stdout, stderr }, wall))
+    let stdout = out_t
+        .join()
+        .map_err(|_| "stdout reader panicked".to_string())?;
+    let stderr = err_t
+        .join()
+        .map_err(|_| "stderr reader panicked".to_string())?;
+    Ok((
+        std::process::Output {
+            status,
+            stdout,
+            stderr,
+        },
+        wall,
+    ))
 }
 
 /// Why a probe run failed: its exit and its first error line — or, when the
@@ -587,15 +751,31 @@ fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::pr
 /// (#3671). Every verdict reads a failed run through this, so such a run is
 /// never timed, counted or matched.
 fn run_failure(out: &std::process::Output) -> String {
-    format!("exit {:?}: {}", out.status.code(), failure_reason(&out.stderr))
+    format!(
+        "exit {:?}: {}",
+        out.status.code(),
+        failure_reason(&out.stderr)
+    )
 }
 
 fn failure_reason(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     // The wasm allocator's exit report (`__ALMD_WASM_ALLOC ...`) can follow
     // the panic message on the same line.
-    let reason = |rest: &str| rest.split("__ALMD_").next().unwrap_or("").trim_start_matches(':').trim().to_string();
-    let marked = |marker: &str| text.lines().find_map(|l| l.split_once(marker).map(|(_, rest)| reason(rest).chars().take(160).collect::<String>()));
+    let reason = |rest: &str| {
+        rest.split("__ALMD_")
+            .next()
+            .unwrap_or("")
+            .trim_start_matches(':')
+            .trim()
+            .to_string()
+    };
+    let marked = |marker: &str| {
+        text.lines().find_map(|l| {
+            l.split_once(marker)
+                .map(|(_, rest)| reason(rest).chars().take(160).collect::<String>())
+        })
+    };
     if let Some(why) = marked(ERR_PATH) {
         format!("took the error path (the probed call returned err: {why})")
     } else if let Some(what) = marked(OFF_DOMAIN) {
@@ -612,7 +792,12 @@ fn first_error(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let first = lines.clone().next().unwrap_or("");
-    lines.find(|l| l.contains("error")).unwrap_or(first).chars().take(200).collect()
+    lines
+        .find(|l| l.contains("error"))
+        .unwrap_or(first)
+        .chars()
+        .take(200)
+        .collect()
 }
 
 fn hash(s: &str) -> u64 {
@@ -643,10 +828,16 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
             Err(e) => return format!("SKIP: {e}"),
         };
         let mut cmd = Command::new(&ctx.almide);
-        cmd.arg("run").arg(&file).args(["--target", "wasm", "--"]).args(sandbox::ARGS).env("ALMIDE_WASM_ALLOC_COUNT", "1");
+        cmd.arg("run")
+            .arg(&file)
+            .args(["--target", "wasm", "--"])
+            .args(sandbox::ARGS)
+            .env("ALMIDE_WASM_ALLOC_COUNT", "1");
         world.enter(&mut cmd);
         let out = cmd.output();
-        let Ok(out) = out else { return "SKIP: could not run almide".into() };
+        let Ok(out) = out else {
+            return "SKIP: could not run almide".into();
+        };
         let (pass, part) = alloc_part_exiting(label, &out, t.expected_exit());
         ok &= pass;
         parts.push(part);
@@ -666,14 +857,28 @@ fn alloc_part(label: &str, out: &std::process::Output) -> (bool, String) {
 /// `-> Never` call's, `Target::expected_exit`; 0 for every other).
 fn alloc_part_exiting(label: &str, out: &std::process::Output, expected: i32) -> (bool, String) {
     if out.status.code() != Some(expected) {
-        return (false, format!("{label} exit {:?} ({})", out.status.code(), failure_reason(&out.stderr)));
+        return (
+            false,
+            format!(
+                "{label} exit {:?} ({})",
+                out.status.code(),
+                failure_reason(&out.stderr)
+            ),
+        );
     }
     let err = String::from_utf8_lossy(&out.stderr);
-    let live = err.lines().find_map(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")).map(String::from));
+    let live = err.lines().find_map(|l| {
+        l.split_whitespace()
+            .find_map(|w| w.strip_prefix("live="))
+            .map(String::from)
+    });
     match live.as_deref() {
         Some("0") => (true, format!("{label} live=0")),
         Some(v) => (false, format!("{label} live={v}")),
-        None => (false, format!("{label} no count ({})", first_error(&out.stderr))),
+        None => (
+            false,
+            format!("{label} no count ({})", first_error(&out.stderr)),
+        ),
     }
 }
 
@@ -683,13 +888,21 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
     if !t.ret_is_observable() {
         return "SKIP: the return type is not printable".into();
     }
-    let projects = if t.diamond_runs_paths_alone() { t.diamond_path_projects(n.min(64)) } else { vec![t.diamond_project(n.min(64))] };
+    let projects = if t.diamond_runs_paths_alone() {
+        t.diamond_path_projects(n.min(64))
+    } else {
+        vec![t.diamond_project(n.min(64))]
+    };
     let root = ctx.dir.join("diamond");
     let mut legs = [Vec::new(), Vec::new()];
     for project in projects {
-        let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
+        let Ok(entry) = project.write_to(&root) else {
+            return "SKIP: scratch write failed".into();
+        };
         for (i, wasm) in [false, true].into_iter().enumerate() {
-            let Ok(out) = run_diamond(ctx, &root, &entry, wasm) else { return "SKIP: could not run almide".into() };
+            let Ok(out) = run_diamond(ctx, &root, &entry, wasm) else {
+                return "SKIP: could not run almide".into();
+            };
             legs[i].push(out);
         }
     }
@@ -700,8 +913,17 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
 
 /// One diamond project's run. The project resolves from its own directory,
 /// so the run stays there; it still gets the sandbox's argv, env and stdin.
-fn run_diamond(ctx: &Ctx, root: &Path, entry: &Path, wasm: bool) -> std::io::Result<std::process::Output> {
-    let world = World::for_program(&ctx.dir, &std::fs::read_to_string(entry).unwrap_or_default()).map_err(std::io::Error::other)?;
+fn run_diamond(
+    ctx: &Ctx,
+    root: &Path,
+    entry: &Path,
+    wasm: bool,
+) -> std::io::Result<std::process::Output> {
+    let world = World::for_program(
+        &ctx.dir,
+        &std::fs::read_to_string(entry).unwrap_or_default(),
+    )
+    .map_err(std::io::Error::other)?;
     let mut c = Command::new(&ctx.almide);
     c.arg("run").arg(entry);
     if wasm {
@@ -715,7 +937,11 @@ fn run_diamond(ctx: &Ctx, root: &Path, entry: &Path, wasm: bool) -> std::io::Res
 /// Paths run one project each, read as one run: their outputs in order,
 /// failing as the first one that did not exit `expected` did.
 fn joined(outs: Vec<std::process::Output>, expected: i32) -> std::process::Output {
-    let mut all = outs.iter().find(|o| o.status.code() != Some(expected)).unwrap_or(&outs[0]).clone();
+    let mut all = outs
+        .iter()
+        .find(|o| o.status.code() != Some(expected))
+        .unwrap_or(&outs[0])
+        .clone();
     all.stdout = outs.iter().flat_map(|o| o.stdout.clone()).collect();
     all
 }
@@ -730,15 +956,34 @@ fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> St
 
 /// [`diamond_verdict`] for paths that must each end with exit code
 /// `expected` (a `-> Never` call's; 0 for every other).
-fn diamond_verdict_exiting(nat: &std::process::Output, was: &std::process::Output, expected: i32) -> String {
+fn diamond_verdict_exiting(
+    nat: &std::process::Output,
+    was: &std::process::Output,
+    expected: i32,
+) -> String {
     if nat.status.code() != Some(expected) || was.status.code() != Some(expected) {
-        return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), failure_reason(&nat.stderr), was.status.code(), failure_reason(&was.stderr));
+        return format!(
+            "FAIL: native exit {:?} ({}), wasm exit {:?} ({})",
+            nat.status.code(),
+            failure_reason(&nat.stderr),
+            was.status.code(),
+            failure_reason(&was.stderr)
+        );
     }
-    let (a, b) = (String::from_utf8_lossy(&nat.stdout).into_owned(), String::from_utf8_lossy(&was.stdout).into_owned());
+    let (a, b) = (
+        String::from_utf8_lossy(&nat.stdout).into_owned(),
+        String::from_utf8_lossy(&was.stdout).into_owned(),
+    );
     // `render_print` writes `<name> = <value>`: compare the values.
-    let lines: Vec<&str> = a.lines().map(|l| l.split_once(" = ").map(|(_, v)| v).unwrap_or(l)).collect();
+    let lines: Vec<&str> = a
+        .lines()
+        .map(|l| l.split_once(" = ").map(|(_, v)| v).unwrap_or(l))
+        .collect();
     let thirds = lines.len() / 3;
-    let same_three = thirds > 0 && lines.len() % 3 == 0 && lines[..thirds] == lines[thirds..2 * thirds] && lines[..thirds] == lines[2 * thirds..];
+    let same_three = thirds > 0
+        && lines.len() % 3 == 0
+        && lines[..thirds] == lines[thirds..2 * thirds]
+        && lines[..thirds] == lines[2 * thirds..];
     match (same_three, a == b) {
         (true, true) if expected != 0 => format!("PASS: direct = via left = via right on both legs ({thirds} line(s) each, each path exit {expected})"),
         (true, true) => format!("PASS: direct = via left = via right on both legs ({} line(s) each)", thirds),
@@ -800,16 +1045,24 @@ fn judge_counted(
     let calibrate = |leg: Leg| -> Result<u64, String> {
         calibrate_k(n, ctx.max_k, ctx.calibrate_scale, &mut |m, k| {
             let (p, b) = marginal(m, k);
-            counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={m}: {e}", leg_tag(leg)))
+            counted_delta(ctx, &p, &b, leg)
+                .map_err(|e| format!("{label} {} calibrating k={k} at n={m}: {e}", leg_tag(leg)))
         })
     };
-    let ks = [(Leg::Native, calibrate(Leg::Native)?), (Leg::Wasm, calibrate(Leg::Wasm)?)];
+    let ks = [
+        (Leg::Native, calibrate(Leg::Native)?),
+        (Leg::Wasm, calibrate(Leg::Wasm)?),
+    ];
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
     let k_both = ks[0].1.min(ks[1].1);
     for &m in &sizes {
-        legs_agree(ctx, &programs(m, k_both).0).map_err(|e| format!("{label} k={k_both} n={m}: {e}"))?;
+        legs_agree(ctx, &programs(m, k_both).0)
+            .map_err(|e| format!("{label} k={k_both} n={m}: {e}"))?;
     }
-    let mut line = format!("{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}", n << 4);
+    let mut line = format!(
+        "{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}",
+        n << 4
+    );
     let mut worst = 0usize;
     let mut unexplained = false;
     for (leg, k) in ks {
@@ -820,7 +1073,8 @@ fn judge_counted(
             let (p, b) = marginal(m, k);
             // Which leg, k and size failed is the first thing a timeout's
             // diagnosis needs (value.as_array timed out with none of it).
-            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?;
+            let d = counted_delta(ctx, &p, &b, leg)
+                .map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?;
             ys.push(d.instructions);
             bs.push(d.moved);
             ts.push(d.wall);
@@ -830,8 +1084,16 @@ fn judge_counted(
         worst = worst.max(class).max(bclass);
         unexplained |= rms > FIT_TOLERANCE || brms > FIT_TOLERANCE;
         let tag = leg_tag(leg);
-        let sci = |v: &[f64]| v.iter().map(|y| format!("{:.3e}", y)).collect::<Vec<_>>().join("/");
-        let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
+        let sci = |v: &[f64]| {
+            v.iter()
+                .map(|y| format!("{:.3e}", y))
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        let times: Vec<String> = ts
+            .iter()
+            .map(|t| format!("{:.3}", t.as_secs_f64()))
+            .collect();
         line.push_str(&format!(
             " {tag} k={k}..{} {} fit {} (rms {:.1}%) moved {}B fit {} (rms {:.1}%) wall {}s",
             2 * k,
@@ -848,21 +1110,35 @@ fn judge_counted(
     // the best-fitting class of such a series can be anything, O(1)
     // included, so it never passes.
     if unexplained {
-        return Err(format!("{line} (unexplained: a series fits no class within {:.0}%)", FIT_TOLERANCE * 100.0));
+        return Err(format!(
+            "{line} (unexplained: a series fits no class within {:.0}%)",
+            FIT_TOLERANCE * 100.0
+        ));
     }
     if ctx.memshim.is_none() {
-        return Err(format!("{line} [meter=instructions only, no bytes-moved meter: not stampable]"));
+        return Err(format!(
+            "{line} [meter=instructions only, no bytes-moved meter: not stampable]"
+        ));
     }
     let measured = CLASSES[worst].0;
     match order.and_then(|o| CLASSES.iter().position(|(c, _)| *c == o)) {
         None => Err(format!("{line} (order undeclared: measured {measured})")),
-        Some(declared) if worst <= declared => Ok(format!("{line} (order {} ok)", CLASSES[declared].0)),
-        Some(declared) => Err(format!("{line} (order {} exceeded: measured {measured})", CLASSES[declared].0)),
+        Some(declared) if worst <= declared => {
+            Ok(format!("{line} (order {} ok)", CLASSES[declared].0))
+        }
+        Some(declared) => Err(format!(
+            "{line} (order {} exceeded: measured {measured})",
+            CLASSES[declared].0
+        )),
     }
 }
 
 fn leg_tag(leg: Leg) -> &'static str {
-    if matches!(leg, Leg::Native) { "native" } else { "wasm" }
+    if matches!(leg, Leg::Native) {
+        "native"
+    } else {
+        "wasm"
+    }
 }
 
 /// Whether the counted judge's k is large enough for one leg: either meter
@@ -880,7 +1156,9 @@ fn counted_calibrated(d: &Delta, scale: f64) -> bool {
     // few user instructions: k stops on the wall clock too, before a run
     // reaches the cap. Only k's growth reads it; the fit stays on the counts.
     const CALIBRATE_WALL: Duration = Duration::from_secs(2);
-    d.instructions >= CALIBRATE_INSTRUCTIONS * scale || d.moved >= CALIBRATE_BYTES * scale || d.wall >= CALIBRATE_WALL
+    d.instructions >= CALIBRATE_INSTRUCTIONS * scale
+        || d.moved >= CALIBRATE_BYTES * scale
+        || d.wall >= CALIBRATE_WALL
 }
 
 /// The size span the counted judge measures over: n..16n.
@@ -911,7 +1189,12 @@ const CALIBRATE_TOP_WALL: Duration = Duration::from_secs(RUN_CAP.as_secs() / 2);
 /// (process.run's wall grows 1.8x over 16x, not 16x). A call whose cost the
 /// counters see is never measured at 16n here, so its k is the
 /// instruction/byte threshold's alone.
-fn calibrate_k(n: u64, max_k: u64, scale: f64, measure: &mut dyn FnMut(u64, u64) -> Result<Delta, String>) -> Result<u64, String> {
+fn calibrate_k(
+    n: u64,
+    max_k: u64,
+    scale: f64,
+    measure: &mut dyn FnMut(u64, u64) -> Result<Delta, String>,
+) -> Result<u64, String> {
     let mut k = 1u64;
     loop {
         let d = measure(n, k)?;
@@ -982,7 +1265,11 @@ fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
     let mut best = (0usize, f64::MAX);
     for (i, (name, f)) in CLASSES.iter().enumerate() {
         let xs: Vec<f64> = sizes.iter().map(|&m| f(m as f64)).collect();
-        let rms = if *name == "nlogn" { fit_nlogn(sizes, ys, floor) } else { fit_rms(&xs, ys, floor) };
+        let rms = if *name == "nlogn" {
+            fit_nlogn(sizes, ys, floor)
+        } else {
+            fit_rms(&xs, ys, floor)
+        };
         if rms <= FIT_TOLERANCE {
             return (i, rms);
         }
@@ -1009,7 +1296,9 @@ fn fit_nlogn(sizes: &[u64], ys: &[f64], floor: f64) -> f64 {
     let (n0, n1) = (ns[0], ns[ns.len() - 1]);
     // Columns scaled to 1 at n0 keep the normal equations well conditioned.
     let cols = |n: f64| [1.0, n / n0, (n * n.ln()) / (n0 * n0.ln())];
-    let Some([a, b, c]) = least_squares_3(&ns, ys, cols) else { return f64::MAX };
+    let Some([a, b, c]) = least_squares_3(&ns, ys, cols) else {
+        return f64::MAX;
+    };
     let curve = |n: f64| {
         let x = cols(n);
         b * x[1] + c * x[2]
@@ -1019,7 +1308,11 @@ fn fit_nlogn(sizes: &[u64], ys: &[f64], floor: f64) -> f64 {
     if curve(n0) <= 0.0 || curve(n1) <= 0.0 || (curve(n1) / curve(n0)).ln() / span > cap {
         return f64::MAX;
     }
-    let sq: f64 = ns.iter().zip(ys).map(|(&n, y)| ((y - (a + curve(n))) / y.abs().max(floor)).powi(2)).sum();
+    let sq: f64 = ns
+        .iter()
+        .zip(ys)
+        .map(|(&n, y)| ((y - (a + curve(n))) / y.abs().max(floor)).powi(2))
+        .sum();
     (sq / ns.len() as f64).sqrt()
 }
 
@@ -1066,7 +1359,11 @@ fn fit_rms(xs: &[f64], ys: &[f64], floor: f64) -> f64 {
     let sxy: f64 = xs.iter().zip(ys).map(|(x, y)| (x - mx) * (y - my)).sum();
     let c = if sxx > 0.0 { sxy / sxx } else { 0.0 };
     let a = my - c * mx;
-    let sq: f64 = xs.iter().zip(ys).map(|(x, y)| ((y - (a + c * x)) / y.abs().max(floor)).powi(2)).sum();
+    let sq: f64 = xs
+        .iter()
+        .zip(ys)
+        .map(|(x, y)| ((y - (a + c * x)) / y.abs().max(floor)).powi(2))
+        .sum();
     (sq / n).sqrt()
 }
 
@@ -1103,7 +1400,11 @@ struct Counts {
 /// the timed judge makes: deterministic, and equal across legs.
 fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<Counts, String> {
     let art = build_as(ctx, src, leg, true)?;
-    let mut best = Counts { instructions: u64::MAX, moved: u64::MAX, wall: Duration::MAX };
+    let mut best = Counts {
+        instructions: u64::MAX,
+        moved: u64::MAX,
+        wall: Duration::MAX,
+    };
     let mut first: Option<String> = None;
     for _ in 0..2 {
         let (out, c) = run_counted(ctx, &art, leg)?;
@@ -1151,7 +1452,14 @@ fn build_memshim(dir: &Path) -> Option<PathBuf> {
     let so = dir.join("memshim.so");
     std::fs::write(&src, MEMSHIM_C).ok()?;
     let ok = Command::new("cc")
-        .args(["-O2", "-fno-tree-loop-distribute-patterns", "-fno-builtin", "-shared", "-fPIC", "-o"])
+        .args([
+            "-O2",
+            "-fno-tree-loop-distribute-patterns",
+            "-fno-builtin",
+            "-shared",
+            "-fPIC",
+            "-o",
+        ])
         .arg(&so)
         .arg(&src)
         .arg("-ldl")
@@ -1170,7 +1478,9 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     let _ = std::fs::remove_file(&moved_file);
     let world = World::for_program(&ctx.dir, &source_of(art))?;
     let mut cmd = Command::new("perf");
-    cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
+    cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"])
+        .arg(&stat)
+        .arg("--");
     if let Some(shim) = &ctx.memshim {
         cmd.arg("env")
             .arg(format!("LD_PRELOAD={}", shim.display()))
@@ -1204,7 +1514,11 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         // 41.7M against 4.46M), and parallel compilation adds worker-thread
         // spinning. A fresh compile is the same work at every n, so the fit's
         // intercept absorbs it.
-        Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).args(world.wasmtime_args()).arg(art),
+        Leg::Wasm => cmd
+            .arg(&ctx.wasmtime)
+            .args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"])
+            .args(world.wasmtime_args())
+            .arg(art),
     };
     if test_leg.is_none() {
         cmd.args(sandbox::ARGS);
@@ -1215,7 +1529,13 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         // SIGTERM goes to perf's child, the server, so perf reports.
         Some(plan) => {
             let s = crate::oracle::serve::drive_socket(&mut cmd, &plan, true)?;
-            (std::process::Output { stdout: s.transcript.into_bytes(), ..s.output }, s.wall)
+            (
+                std::process::Output {
+                    stdout: s.transcript.into_bytes(),
+                    ..s.output
+                },
+                s.wall,
+            )
         }
         None => {
             let child = cmd
@@ -1230,7 +1550,10 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         return Err(run_failure(&out));
     }
     let out = match test_leg {
-        Some(_) => std::process::Output { stdout: aborts::output_transcript(&out).into_bytes(), ..out },
+        Some(_) => std::process::Output {
+            stdout: aborts::output_transcript(&out).into_bytes(),
+            ..out
+        },
         None => out,
     };
     let instructions = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
@@ -1240,9 +1563,19 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         Some(_) => std::fs::read_to_string(&moved_file)
             .ok()
             .and_then(|t| t.trim().parse().ok())
-            .ok_or_else(|| "the bytes-moved shim wrote no count (is the binary dynamically linked?)".to_string())?,
+            .ok_or_else(|| {
+                "the bytes-moved shim wrote no count (is the binary dynamically linked?)"
+                    .to_string()
+            })?,
     };
-    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), Counts { instructions, moved, wall }))
+    Ok((
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        Counts {
+            instructions,
+            moved,
+            wall,
+        },
+    ))
 }
 
 /// The count of the `instructions:u` row of `perf stat -x,` output.
@@ -1265,7 +1598,8 @@ fn icount_available() -> bool {
         .args(["--", "true"])
         .output()
         .is_ok_and(|o| o.status.success())
-        && parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default()).is_some_and(|c| c > 0);
+        && parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
+            .is_some_and(|c| c > 0);
     let _ = std::fs::remove_dir_all(&dir);
     ok
 }
@@ -1281,7 +1615,10 @@ mod run_tests {
     #[test]
     fn a_run_that_writes_more_than_a_pipe_holds_finishes() {
         let child = Command::new("sh")
-            .args(["-c", "head -c 300000 /dev/zero; head -c 200000 /dev/zero >&2"])
+            .args([
+                "-c",
+                "head -c 300000 /dev/zero; head -c 200000 /dev/zero >&2",
+            ])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -1312,19 +1649,33 @@ mod run_tests {
     #[test]
     fn calibration_stops_on_bytes_moved_as_well_as_instructions() {
         let counted_calibrated_t = |d: &Delta| counted_calibrated(d, 1.0);
-        let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO, base_wall: Duration::ZERO };
+        let d = |instructions: f64, moved: f64| Delta {
+            instructions,
+            moved,
+            wall: Duration::ZERO,
+            base_wall: Duration::ZERO,
+        };
         assert!(!counted_calibrated_t(&d(1e3, 1e3)));
         assert!(counted_calibrated_t(&d(3e7, 0.0)));
         assert!(counted_calibrated_t(&d(1e3, 3e8)));
         // fs.write_text at n = 20000 calibrated to k = 65536 on instructions and
         // timed out at 60 s: its bytes go to the kernel.
-        assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3), base_wall: Duration::ZERO }));
+        assert!(counted_calibrated_t(&Delta {
+            instructions: 1e3,
+            moved: 0.0,
+            wall: Duration::from_secs(3),
+            base_wall: Duration::ZERO
+        }));
     }
 
     /// A synthetic leg: `instr(m)` user instructions and `secs(m)` wall per
     /// call at size m, a fixed `fixed` seconds per program; returns the
     /// marginal [`calibrate_k`] reads and the sizes it was asked about.
-    fn synthetic(instr: fn(u64) -> f64, secs: fn(u64) -> f64, fixed: f64) -> impl FnMut(u64, u64) -> Result<Delta, String> {
+    fn synthetic(
+        instr: fn(u64) -> f64,
+        secs: fn(u64) -> f64,
+        fixed: f64,
+    ) -> impl FnMut(u64, u64) -> Result<Delta, String> {
         move |m, k| {
             let marginal = secs(m) * k as f64;
             Ok(Delta {
@@ -1353,7 +1704,10 @@ mod run_tests {
         let mut measure = synthetic(|_| 70.0, secs, 0.05);
         let k = calibrate_k(n, MAX_K, 1.0, &mut measure).unwrap();
         let top = top_run(k, n, secs, 0.05);
-        assert!(top < CALIBRATE_TOP_WALL.as_secs_f64(), "k={k}: the 2k run at 16n takes {top:.1}s");
+        assert!(
+            top < CALIBRATE_TOP_WALL.as_secs_f64(),
+            "k={k}: the 2k run at 16n takes {top:.1}s"
+        );
         assert_eq!(k, 262_144, "the last k whose longest run fits the budget");
     }
 
@@ -1372,7 +1726,10 @@ mod run_tests {
         };
         let k = calibrate_k(n, MAX_K, 1.0, &mut measure).unwrap();
         assert_eq!(k, 1024, "the instruction threshold's k (2e4 x 1024 >= 2e7)");
-        assert!(sizes.contains(&(n * SIZE_SPAN)), "the 16n probe read the true growth: {sizes:?}");
+        assert!(
+            sizes.contains(&(n * SIZE_SPAN)),
+            "the 16n probe read the true growth: {sizes:?}"
+        );
     }
 
     /// A call whose cost the counters see — list.reverse at ~3 instructions
@@ -1429,7 +1786,12 @@ mod run_tests {
         )
         .unwrap();
         let exe = dir.join("driver");
-        let ok = Command::new("cc").args(["-O0", "-o"]).arg(&exe).arg(&driver).status().is_ok_and(|s| s.success());
+        let ok = Command::new("cc")
+            .args(["-O0", "-o"])
+            .arg(&exe)
+            .arg(&driver)
+            .status()
+            .is_ok_and(|s| s.success());
         assert!(ok, "cc builds the driver");
         let count = |dirn: &str| -> u64 {
             let stat = dir.join(format!("{dirn}.csv"));
@@ -1451,7 +1813,11 @@ mod run_tests {
         // 64 MiB copied each way: a one-instruction-per-byte difference is
         // 6.7e7, so 1% of either count is far under it and far over jitter.
         let diff = down.abs_diff(up) as f64 / down.max(up) as f64;
-        assert!(diff < 0.01, "forward copy {down} instructions, backward {up}: the directions differ by {:.1}%", diff * 100.0);
+        assert!(
+            diff < 0.01,
+            "forward copy {down} instructions, backward {up}: the directions differ by {:.1}%",
+            diff * 100.0
+        );
     }
 }
 
@@ -1473,12 +1839,28 @@ mod verdict_tests {
     /// `live=` read off an aborted run counts blocks the abort left behind.
     #[test]
     fn alloc_reports_the_exit_of_a_failed_run_not_its_live_count() {
-        let (ok, part) = alloc_part("call", &output(1, "", "error: matrix shape mismatch\nalloc: live=3 peak=9\n"));
+        let (ok, part) = alloc_part(
+            "call",
+            &output(
+                1,
+                "",
+                "error: matrix shape mismatch\nalloc: live=3 peak=9\n",
+            ),
+        );
         assert!(!ok);
         assert!(!part.contains("live="), "{part}");
-        assert!(part.contains("exit Some(1)") && part.contains("matrix shape mismatch"), "{part}");
-        assert_eq!(alloc_part("call", &output(0, "1\n", "alloc: live=0 peak=9\n")), (true, "call live=0".to_string()));
-        assert_eq!(alloc_part("loop", &output(0, "1\n", "alloc: live=2 peak=9\n")), (false, "loop live=2".to_string()));
+        assert!(
+            part.contains("exit Some(1)") && part.contains("matrix shape mismatch"),
+            "{part}"
+        );
+        assert_eq!(
+            alloc_part("call", &output(0, "1\n", "alloc: live=0 peak=9\n")),
+            (true, "call live=0".to_string())
+        );
+        assert_eq!(
+            alloc_part("loop", &output(0, "1\n", "alloc: live=2 peak=9\n")),
+            (false, "loop live=2".to_string())
+        );
     }
 
     /// #3666: a probe that stopped because the probed call returned `err`
@@ -1488,19 +1870,31 @@ mod verdict_tests {
     fn a_run_that_took_the_error_path_is_reported_as_such() {
         let stderr = format!("PANIC: {ERR_PATH}: invalid base64 character\nalloc: live=0 peak=9\n");
         let want = "took the error path (the probed call returned err: invalid base64 character)";
-        assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
+        assert_eq!(
+            run_failure(&output(1, "", &stderr)),
+            format!("exit Some(1): {want}")
+        );
         let (ok, part) = alloc_part("call", &output(1, "", &stderr));
-        assert!(!ok && part.contains(want) && !part.contains("live="), "{part}");
+        assert!(
+            !ok && part.contains(want) && !part.contains("live="),
+            "{part}"
+        );
         // On wasm the allocator's exit report follows the panic message on
         // the same line (measured: `...string__ALMD_WASM_ALLOC allocs=5 ...
         // live=3`); it is not part of the reason.
         let wasm = format!("PANIC: {ERR_PATH}: invalid base64 character__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
         let (ok, part) = alloc_part("call", &output(1, "", &wasm));
-        assert!(!ok && part.ends_with(&format!("({want})")) && !part.contains("live="), "{part}");
+        assert!(
+            !ok && part.ends_with(&format!("({want})")) && !part.contains("live="),
+            "{part}"
+        );
         let v = diamond_verdict(&output(1, "", &stderr), &output(1, "", &stderr));
         assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
         // Any other failure keeps its own first error line.
-        assert_eq!(run_failure(&output(2, "", "warning: x\nerror: boom\n")), "exit Some(2): error: boom");
+        assert_eq!(
+            run_failure(&output(2, "", "warning: x\nerror: boom\n")),
+            "exit Some(2): error: boom"
+        );
     }
 
     /// #3671: a probe that stopped because a call given an in-domain input
@@ -1510,10 +1904,18 @@ mod verdict_tests {
     fn a_run_that_refused_its_in_domain_input_is_reported_as_such() {
         let stderr = format!("PANIC: {OFF_DOMAIN}: none\nalloc: live=0 peak=9\n");
         let want = "refused its in-domain input (the probed call returned none)";
-        assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
-        let wasm = format!("PANIC: {OFF_DOMAIN}: false__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
+        assert_eq!(
+            run_failure(&output(1, "", &stderr)),
+            format!("exit Some(1): {want}")
+        );
+        let wasm =
+            format!("PANIC: {OFF_DOMAIN}: false__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
         let (ok, part) = alloc_part("call", &output(1, "", &wasm));
-        assert!(!ok && part.ends_with("(refused its in-domain input (the probed call returned false))") && !part.contains("live="), "{part}");
+        assert!(
+            !ok && part.ends_with("(refused its in-domain input (the probed call returned false))")
+                && !part.contains("live="),
+            "{part}"
+        );
         let v = diamond_verdict(&output(1, "", &stderr), &output(1, "", &stderr));
         assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
     }
@@ -1525,7 +1927,14 @@ mod verdict_tests {
         let t = crate::generator::inspect_gen::tests::target("result.map");
         let files = probe_files(&t, 100);
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-        for want in ["call.almd", "loop.almd", "tail.almd", "fold.almd", "diamond/app/almide.toml", "diamond/app/src/main.almd"] {
+        for want in [
+            "call.almd",
+            "loop.almd",
+            "tail.almd",
+            "fold.almd",
+            "diamond/app/almide.toml",
+            "diamond/app/src/main.almd",
+        ] {
             assert!(paths.contains(&want), "{want}: {paths:?}");
         }
     }
@@ -1537,7 +1946,12 @@ mod verdict_tests {
     fn a_unit_diamond_prints_its_value_on_each_path() {
         let t = crate::generator::inspect_gen::tests::target("testing.assert_gt");
         let project = t.diamond_project(10);
-        let main = project.files.iter().find(|(p, _)| p.ends_with("main.almd")).map(|(_, s)| s.clone()).unwrap();
+        let main = project
+            .files
+            .iter()
+            .find(|(p, _)| p.ends_with("main.almd"))
+            .map(|(_, s)| s.clone())
+            .unwrap();
         for v in ["d", "l", "r"] {
             assert!(main.contains(&format!("println(\"{v} = ()\")")), "{main}");
         }
@@ -1608,7 +2022,9 @@ mod fit_tests {
         // The wall-time failure this judge replaces: linear, with one x1.5
         // jump between two sizes. Counted instructions never show it, but
         // the fit must not over-read a modest bump either.
-        let ys: Vec<f64> = sizes().iter().enumerate()
+        let ys: Vec<f64> = sizes()
+            .iter()
+            .enumerate()
             .map(|(i, &n)| 40.0 * n as f64 * if i >= 2 { 1.05 } else { 1.0 })
             .collect();
         assert_eq!(CLASSES[fit_class(&sizes(), &ys).0].0, "n");
@@ -1647,7 +2063,10 @@ mod fit_tests {
         // (64 bytes per instruction), plus a constant. It crosses the floor
         // and is fitted as n.
         for k in [1u64, 64, 1 << 20] {
-            let ys: Vec<f64> = sizes().iter().map(|&m| (m as f64 / 64.0 + 100.0) * k as f64).collect();
+            let ys: Vec<f64> = sizes()
+                .iter()
+                .map(|&m| (m as f64 / 64.0 + 100.0) * k as f64)
+                .collect();
             assert_ne!(fit_series(&sizes(), &ys, k), (0, 0.0), "k = {k}");
             assert_eq!(CLASSES[fit_series(&sizes(), &ys, k).0].0, "n", "k = {k}");
         }
@@ -1655,7 +2074,13 @@ mod fit_tests {
 
     #[test]
     fn perf_csv_is_parsed() {
-        assert_eq!(parse_instructions("135023,,instructions:u,362206,100.00,,\n"), Some(135023));
-        assert_eq!(parse_instructions("<not counted>,,instructions:u,0,0.00,,\n"), None);
+        assert_eq!(
+            parse_instructions("135023,,instructions:u,362206,100.00,,\n"),
+            Some(135023)
+        );
+        assert_eq!(
+            parse_instructions("<not counted>,,instructions:u,0,0.00,,\n"),
+            None
+        );
     }
 }

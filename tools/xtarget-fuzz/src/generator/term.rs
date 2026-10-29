@@ -107,8 +107,12 @@ impl<'a> Builder<'a> {
     /// `let` (reading it later observes the mutation).
     fn hoist_var(&mut self, ty: &GenType, value_src: String) -> String {
         let name = self.fresh_name();
-        self.stmts.push(format!("var {name}: {} = {value_src}", ty.render()));
-        self.scope.push(ScopeVar { name: name.clone(), ty: ty.clone() });
+        self.stmts
+            .push(format!("var {name}: {} = {value_src}", ty.render()));
+        self.scope.push(ScopeVar {
+            name: name.clone(),
+            ty: ty.clone(),
+        });
         name
     }
 }
@@ -119,7 +123,11 @@ impl<'a> Builder<'a> {
 /// must stay unchanged: value semantics is part of what is tested); a
 /// `Unit`-returning mutator runs as a statement and the expression is the
 /// mutated var.
-fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType>) -> Option<String> {
+fn render_call(
+    b: &mut Builder,
+    sig: &Signature,
+    subst: &HashMap<String, GenType>,
+) -> Option<String> {
     let mut args = Vec::with_capacity(sig.params.len());
     // Half the calls of a function with an inspection shape recipe take the
     // recipe's in-domain operands at a small size: generated values never
@@ -163,7 +171,9 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
             Some(a) => args.push(a),
             None => {
                 let a = gen_arg(b, p, name, subst)?;
-                let bounded = (sig.module == "net").then(|| super::net_unix_args::int_domain(&sig.func, name)).flatten();
+                let bounded = (sig.module == "net")
+                    .then(|| super::net_unix_args::int_domain(&sig.func, name))
+                    .flatten();
                 args.push(bounded.map_or(a.clone(), |d| d.replace("{x}", &a)));
             }
         }
@@ -217,7 +227,13 @@ fn render_verdict_call(
     subst: &HashMap<String, GenType>,
 ) -> Option<String> {
     let mut bound: Vec<(String, String)> = Vec::new();
-    for (i, ((name, p), a)) in sig.param_names.iter().zip(&sig.params).zip(args).enumerate() {
+    for (i, ((name, p), a)) in sig
+        .param_names
+        .iter()
+        .zip(&sig.params)
+        .zip(args)
+        .enumerate()
+    {
         let ty = p.instantiate(subst)?;
         let a = match v.domain.iter().find(|(d, _)| d == name) {
             Some((_, tmpl)) => super::verdicts::fill(tmpl, &[(name, &a)]),
@@ -226,13 +242,29 @@ fn render_verdict_call(
         // Out of scope like the raw result: a domain operand can be a host
         // choice too (`process.kill`'s pid is a fresh child's).
         // The written operand is a `var` (E032): a `mut` / `@mutating` receiver.
-        let kw = if Some(i) == sig.mut_param { "var" } else { "let" };
+        let kw = if Some(i) == sig.mut_param {
+            "var"
+        } else {
+            "let"
+        };
         let v = b.fresh_name();
         b.stmts.push(format!("{kw} {v}: {} = {a}", ty.render()));
         bound.push((name.clone(), v));
     }
-    let names: Vec<(&str, &str)> = bound.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
-    let call = format!("{}.{}({})", sig.module, sig.func, bound.iter().map(|(_, e)| e.as_str()).collect::<Vec<_>>().join(", "));
+    let names: Vec<(&str, &str)> = bound
+        .iter()
+        .map(|(p, e)| (p.as_str(), e.as_str()))
+        .collect();
+    let call = format!(
+        "{}.{}({})",
+        sig.module,
+        sig.func,
+        bound
+            .iter()
+            .map(|(_, e)| e.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let ty = sig.effective_ret().instantiate(subst)?;
     if sig.effect {
         b.effect = true;
@@ -247,7 +279,10 @@ fn render_verdict_call(
     b.stmts.push(format!("let {r}: {} = {call}", ty.render()));
     let holds = super::verdicts::fill(v.holds, &names);
     let canon = super::verdicts::fill(v.canon, &names);
-    let broke = format!("panic(\"verdict: {}.{} broke its declared property\")", sig.module, sig.func);
+    let broke = format!(
+        "panic(\"verdict: {}.{} broke its declared property\")",
+        sig.module, sig.func
+    );
     let checked = match ty {
         // The error names what the host chose too (a temp path, its clock
         // suffix), so only that the call failed is compared.
@@ -257,12 +292,23 @@ fn render_verdict_call(
     Some(b.hoist(&ty, checked))
 }
 
-const HTTP_PATHS: &[&str] = &["/echo", "/status/404", "/status/500", "/bytes/16", "/chunked/3", "/sse/2", "/missing"];
+const HTTP_PATHS: &[&str] = &[
+    "/echo",
+    "/status/404",
+    "/status/500",
+    "/bytes/16",
+    "/chunked/3",
+    "/sse/2",
+    "/missing",
+];
 const HTTP_METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 /// `http://<the fixture>/<path>`, read from the run's env.
 fn fixture_url(path: &str) -> String {
-    format!("\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + {}", render_string_literal(path))
+    format!(
+        "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + {}",
+        render_string_literal(path)
+    )
 }
 
 /// An Int argument of a net function that names the fixture's port, a
@@ -291,14 +337,31 @@ fn net_int_arg(sig: &Signature, name: &str) -> Option<String> {
 /// tree, an env var of the fixed env, an argv flag. `None`: generate as usual.
 fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) -> Option<String> {
     const PATHS: &[&str] = &[
-        "data.txt", "empty.txt", "bin.dat", "sub/nested.txt", "sub", "sub/deeper", "empty_dir",
-        "missing.txt", "out.txt", "sub/new.txt", "made/inner", "*.txt", "sub/*",
+        "data.txt",
+        "empty.txt",
+        "bin.dat",
+        "sub/nested.txt",
+        "sub",
+        "sub/deeper",
+        "empty_dir",
+        "missing.txt",
+        "out.txt",
+        "sub/new.txt",
+        "made/inner",
+        "*.txt",
+        "sub/*",
     ];
     const ENV_NAMES: &[&str] = &["XF_GREETING", "XF_EMPTY", "XF_UNSET"];
     const ARG_NAMES: &[&str] = &["flag", "opt", "alpha", "beta", "missing"];
     // ADR-0027 D4: a fixed command set, present at these paths on linux and
     // macos, and no shell: a generated argument list is data, never code.
-    const COMMANDS: &[&str] = &["/bin/echo", "/bin/cat", "/usr/bin/true", "/usr/bin/false", "/no/such/command"];
+    const COMMANDS: &[&str] = &[
+        "/bin/echo",
+        "/bin/cat",
+        "/usr/bin/true",
+        "/usr/bin/false",
+        "/no/such/command",
+    ];
     const DIRS: &[&str] = &["sub", "empty_dir", ".", "missing_dir"];
     if !sig.effect || *param != SigType::String {
         return None;
@@ -449,7 +512,11 @@ fn nominal_literal(b: &mut Builder, k: &str) -> String {
 /// nominal has one.
 fn pure_nominal_literal(b: &mut Builder, k: &str) -> String {
     let leaves = super::nominal::get(k).map_or(&[][..], |n| n.leaves);
-    let pure: Vec<&str> = leaves.iter().copied().filter(|l| !calls_effect(b.catalogue, l)).collect();
+    let pure: Vec<&str> = leaves
+        .iter()
+        .copied()
+        .filter(|l| !calls_effect(b.catalogue, l))
+        .collect();
     if pure.is_empty() {
         return nominal_literal(b, k);
     }
@@ -459,14 +526,21 @@ fn pure_nominal_literal(b: &mut Builder, k: &str) -> String {
 /// `src` calls an effect function of the catalogue (`module.func(`), read
 /// off each signature's own `effect` flag.
 fn calls_effect(catalogue: &[Signature], src: &str) -> bool {
-    catalogue.iter().any(|s| s.effect && src.contains(&format!("{}.{}(", s.module, s.func)))
+    catalogue
+        .iter()
+        .any(|s| s.effect && src.contains(&format!("{}.{}(", s.module, s.func)))
 }
 
 fn matrix_literal(b: &mut Builder) -> String {
-    let (r, c) = (1 + *b.rng.pick(&[0usize, 1, 2]), 1 + *b.rng.pick(&[0usize, 1, 2]));
+    let (r, c) = (
+        1 + *b.rng.pick(&[0usize, 1, 2]),
+        1 + *b.rng.pick(&[0usize, 1, 2]),
+    );
     let rows: Vec<String> = (0..r)
         .map(|_| {
-            let cells: Vec<String> = (0..c).map(|_| render_float_literal(*b.rng.pick(pools::FLOAT_POOL))).collect();
+            let cells: Vec<String> = (0..c)
+                .map(|_| render_float_literal(*b.rng.pick(pools::FLOAT_POOL)))
+                .collect();
             format!("[{}]", cells.join(", "))
         })
         .collect();
@@ -478,17 +552,31 @@ fn matrix_literal(b: &mut Builder) -> String {
 /// `omit` hit and miss and the case converters have something to rewrite.
 fn value_literal(b: &mut Builder, depth: u32) -> String {
     const KEYS: &[&str] = &["a", "k", "snake_case", "camelCase", "ünï"];
-    let kinds: &[u8] = if depth >= 2 { &[0, 1, 2, 3, 4] } else { &[0, 1, 2, 3, 4, 5, 6] };
+    let kinds: &[u8] = if depth >= 2 {
+        &[0, 1, 2, 3, 4]
+    } else {
+        &[0, 1, 2, 3, 4, 5, 6]
+    };
     match *b.rng.pick(kinds) {
         0 => format!("value.int({})", b.rng.pick(pools::INT_POOL)),
-        1 => format!("value.float({})", render_float_literal(*b.rng.pick(pools::FLOAT_POOL))),
-        2 => format!("value.string({})", render_string_literal(b.rng.pick(pools::STRING_POOL))),
+        1 => format!(
+            "value.float({})",
+            render_float_literal(*b.rng.pick(pools::FLOAT_POOL))
+        ),
+        2 => format!(
+            "value.string({})",
+            render_string_literal(b.rng.pick(pools::STRING_POOL))
+        ),
         3 => format!("value.bool({})", b.rng.pick(pools::BOOL_POOL)),
         4 => "value.null()".to_string(),
         5 => {
             let n = *b.rng.pick(&[0usize, 1, 2]);
             let items: Vec<String> = (0..n).map(|_| value_literal(b, depth + 1)).collect();
-            if n == 0 { "value.array(list.drop([value.null()], 1))".to_string() } else { format!("value.array([{}])", items.join(", ")) }
+            if n == 0 {
+                "value.array(list.drop([value.null()], 1))".to_string()
+            } else {
+                format!("value.array([{}])", items.join(", "))
+            }
         }
         _ => {
             let n = *b.rng.pick(&[0usize, 1, 2]);
@@ -498,7 +586,11 @@ fn value_literal(b: &mut Builder, depth: u32) -> String {
                     format!("({k}, {})", value_literal(b, depth + 1))
                 })
                 .collect();
-            if n == 0 { "value.object(list.drop([(\"a\", value.null())], 1))".to_string() } else { format!("value.object([{}])", pairs.join(", ")) }
+            if n == 0 {
+                "value.object(list.drop([(\"a\", value.null())], 1))".to_string()
+            } else {
+                format!("value.object([{}])", pairs.join(", "))
+            }
         }
     }
 }
@@ -518,8 +610,7 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Bytes
         | GenType::Matrix
         | GenType::Value => gen_leaf(b, goal),
-        | GenType::Nominal(_)
-        | GenType::Secret(_) => gen_leaf(b, goal),
+        GenType::Nominal(_) | GenType::Secret(_) => gen_leaf(b, goal),
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -569,7 +660,12 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
             // A tuple literal is unambiguous from its element exprs.
             format!("({}, {})", gen_expr(b, a), gen_expr(b, b2))
         }
-        GenType::Tuple3(a, b2, c) => format!("({}, {}, {})", gen_expr(b, a), gen_expr(b, b2), gen_expr(b, c)),
+        GenType::Tuple3(a, b2, c) => format!(
+            "({}, {}, {})",
+            gen_expr(b, a),
+            gen_expr(b, b2),
+            gen_expr(b, c)
+        ),
         GenType::Map(v) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -668,7 +764,10 @@ pub fn gen_final_call(b: &mut Builder, idx: usize) -> Option<String> {
             None => a,
         };
         let v = b.fresh_name();
-        b.stmts.push(format!("let {v}: {} = {a}", p.instantiate(&subst)?.render()));
+        b.stmts.push(format!(
+            "let {v}: {} = {a}",
+            p.instantiate(&subst)?.render()
+        ));
         args.push(v);
     }
     if sig.effect {
@@ -684,8 +783,8 @@ pub fn gen_final_call(b: &mut Builder, idx: usize) -> Option<String> {
 /// that buries real divergences. These are the count-like names the
 /// stdlib actually uses.
 const COUNT_LIKE_PARAM_NAMES: &[&str] = &[
-    "n", "count", "len", "times", "size", "decimals", "width", "k", "i", "j", "index",
-    "start", "end", "lo", "hi",
+    "n", "count", "len", "times", "size", "decimals", "width", "k", "i", "j", "index", "start",
+    "end", "lo", "hi",
 ];
 
 /// Concrete types a free (parameter-only) type variable may take. Kept
@@ -833,7 +932,12 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Tuple2(a, c) => {
             format!("({}, {})", gen_lambda_body(b, a), gen_lambda_body(b, c))
         }
-        GenType::Tuple3(a, c, d) => format!("({}, {}, {})", gen_lambda_body(b, a), gen_lambda_body(b, c), gen_lambda_body(b, d)),
+        GenType::Tuple3(a, c, d) => format!(
+            "({}, {}, {})",
+            gen_lambda_body(b, a),
+            gen_lambda_body(b, c),
+            gen_lambda_body(b, d)
+        ),
         GenType::Map(v) => {
             // Single-entry map literal is inline-safe.
             format!("[\"k\": {}]", gen_lambda_body(b, v))

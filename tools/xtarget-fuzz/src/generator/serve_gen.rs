@@ -23,7 +23,8 @@ use super::types::GenType;
 use crate::rng::SplitMix64;
 
 /// The app of the complexity probe: constant work per request.
-pub const CONSTANT_APP: &str = "fn app(req: HttpRequest) -> Result[HttpResponse, String] = ok(http.response(200, \"ok\"))\n";
+pub const CONSTANT_APP: &str =
+    "fn app(req: HttpRequest) -> Result[HttpResponse, String] = ok(http.response(200, \"ok\"))\n";
 
 /// The app of the alloc and diamond probes: every reader, a header set
 /// from a request header, a status outside the reason table, and an err.
@@ -76,7 +77,10 @@ pub fn diamond_projects(header: &str, app: &str) -> Vec<super::Project> {
             };
             super::Project {
                 files: vec![
-                    ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
+                    (
+                        "app/almide.toml".to_string(),
+                        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string(),
+                    ),
                     ("app/src/base.almd".to_string(), base.clone()),
                     ("app/src/left.almd".to_string(), path.clone()),
                     ("app/src/right.almd".to_string(), path.clone()),
@@ -94,9 +98,20 @@ const READERS: &[(&str, &str, fn() -> GenType)] = &[
     ("method", "http.method(req)", || GenType::String),
     ("path", "http.path(req)", || GenType::String),
     ("body", "http.body(req)", || GenType::String),
-    ("token", "http.header(req, \"x-token\") ?? \"none\"", || GenType::String),
-    ("ctype", "http.header(req, \"Content-Type\") ?? \"\"", || GenType::String),
-    ("query", "http.query_params(req) ?? []", || GenType::List(Box::new(GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::String))))),
+    ("token", "http.header(req, \"x-token\") ?? \"none\"", || {
+        GenType::String
+    }),
+    (
+        "ctype",
+        "http.header(req, \"Content-Type\") ?? \"\"",
+        || GenType::String,
+    ),
+    ("query", "http.query_params(req) ?? []", || {
+        GenType::List(Box::new(GenType::Tuple2(
+            Box::new(GenType::String),
+            Box::new(GenType::String),
+        )))
+    }),
 ];
 
 /// Goal types of the extra bindings a handler computes before its answer.
@@ -120,7 +135,12 @@ pub fn handler_catalogue(catalogue: &[Signature]) -> Vec<Signature> {
     const HOST_MODULES: &[&str] = &["net", "process", "fs", "env", "io", "args", "random"];
     catalogue
         .iter()
-        .filter(|s| !s.effect && s.observed_through.is_none() && s.verdict.is_none() && !HOST_MODULES.contains(&s.module))
+        .filter(|s| {
+            !s.effect
+                && s.observed_through.is_none()
+                && s.verdict.is_none()
+                && !HOST_MODULES.contains(&s.module)
+        })
         .cloned()
         .collect()
 }
@@ -129,11 +149,20 @@ pub fn handler_catalogue(catalogue: &[Signature]) -> Vec<Signature> {
 /// table and out of it, the bodyless ones (1xx, 204, 304) and a redirect.
 /// The rest of the time the status is a generated Int, whatever it is: the
 /// handler's domain is every `HttpResponse` the stdlib can build.
-const STATUSES: &[i64] = &[200, 201, 204, 301, 304, 400, 404, 418, 422, 299, 500, 503, 599, 103];
+const STATUSES: &[i64] = &[
+    200, 201, 204, 301, 304, 400, 404, 418, 422, 299, 500, 503, 599, 103,
+];
 
 /// Header names a `set_header` uses most of the time (tokens, in mixed
 /// case, one a host manages); the rest of the time a generated String.
-const HEADER_NAMES: &[&str] = &["x-a", "X-Token", "content-type", "Cache-Control", "x-é-not-token", "Content-Length"];
+const HEADER_NAMES: &[&str] = &[
+    "x-a",
+    "X-Token",
+    "content-type",
+    "Cache-Control",
+    "x-é-not-token",
+    "Content-Length",
+];
 
 /// The response: a catalogue-directed term (a third of the time), or
 /// `http.response` / `http.with_headers` over a status and terms of the
@@ -164,7 +193,13 @@ fn gen_response(b: &mut Builder) -> String {
             b.fuel = START_FUEL;
             let body = gen_expr(b, &GenType::String);
             b.fuel = START_FUEL;
-            let headers = gen_expr(b, &GenType::List(Box::new(GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::String)))));
+            let headers = gen_expr(
+                b,
+                &GenType::List(Box::new(GenType::Tuple2(
+                    Box::new(GenType::String),
+                    Box::new(GenType::String),
+                ))),
+            );
             format!("http.with_headers({s}, {body}, {headers})")
         }
     };
@@ -192,7 +227,10 @@ pub fn synthesize_handler(rng: &mut SplitMix64, catalogue: &[Signature]) -> Stri
     let mut b = Builder {
         rng,
         catalogue,
-        scope: vec![ScopeVar { name: "req".into(), ty: GenType::Nominal("HttpRequest") }],
+        scope: vec![ScopeVar {
+            name: "req".into(),
+            ty: GenType::Nominal("HttpRequest"),
+        }],
         stmts: Vec::new(),
         fuel: 0,
         fresh: 0,
@@ -201,8 +239,12 @@ pub fn synthesize_handler(rng: &mut SplitMix64, catalogue: &[Signature]) -> Stri
     for (name, expr, ty) in READERS {
         if b.rng.chance(1, 2) {
             let ty = ty();
-            b.stmts.push(format!("let {name}: {} = {expr}", ty.render()));
-            b.scope.push(ScopeVar { name: (*name).into(), ty });
+            b.stmts
+                .push(format!("let {name}: {} = {expr}", ty.render()));
+            b.scope.push(ScopeVar {
+                name: (*name).into(),
+                ty,
+            });
         }
     }
     for _ in 0..b.rng.below(3) {
@@ -246,7 +288,10 @@ mod tests {
     fn a_served_program_is_serve_shaped_and_carries_its_plan() {
         let src = served_program(&Plan::Sized { k: 4, n: 64 }.header(), CONSTANT_APP);
         assert_eq!(plan_of(&src), Some(Plan::Sized { k: 4, n: 64 }));
-        assert!(src.contains("import env\n") && src.contains("import http\n"), "{src}");
+        assert!(
+            src.contains("import env\n") && src.contains("import http\n"),
+            "{src}"
+        );
         assert!(src.ends_with("effect fn main() -> Unit = {\n  let port = env.get(\"XF_SERVE_PORT\") ?? \"0\"\n  http.serve(int.parse(port) ?? 0, app)!\n}\n"), "{src}");
     }
 
@@ -254,10 +299,24 @@ mod tests {
     fn each_diamond_path_reaches_serve_through_its_own_wrapper() {
         let ps = diamond_projects(&Plan::Script.header(), PROBE_APP);
         assert_eq!(ps.len(), 3);
-        let main = |i: usize| ps[i].files.iter().find(|(p, _)| p == "app/src/main.almd").unwrap().1.clone();
+        let main = |i: usize| {
+            ps[i]
+                .files
+                .iter()
+                .find(|(p, _)| p == "app/src/main.almd")
+                .unwrap()
+                .1
+                .clone()
+        };
         assert!(main(0).contains("  http.serve(int.parse(port) ?? 0, app)!\n"));
-        assert!(main(1).contains("import self.left\n") && main(1).contains("  left.call(int.parse(port) ?? 0, app)!\n"));
-        assert!(main(2).contains("import self.right\n") && main(2).contains("  right.call(int.parse(port) ?? 0, app)!\n"));
+        assert!(
+            main(1).contains("import self.left\n")
+                && main(1).contains("  left.call(int.parse(port) ?? 0, app)!\n")
+        );
+        assert!(
+            main(2).contains("import self.right\n")
+                && main(2).contains("  right.call(int.parse(port) ?? 0, app)!\n")
+        );
         for i in 0..3 {
             assert_eq!(plan_of(&main(i)), Some(Plan::Script));
         }
@@ -268,17 +327,32 @@ mod tests {
         let all = super::super::build_catalogue();
         let cat = handler_catalogue(&all);
         assert!(cat.iter().all(|s| !s.effect));
-        assert!(cat.iter().any(|s| s.module == "http" && s.func == "with_headers"), "the response builders are pure and drawn");
+        assert!(
+            cat.iter()
+                .any(|s| s.module == "http" && s.func == "with_headers"),
+            "the response builders are pure and drawn"
+        );
         let gen = |seed| synthesize_handler(&mut SplitMix64::for_program(7, seed), &cat);
         assert_eq!(gen(3), gen(3));
         let many: Vec<String> = (0..400).map(gen).collect();
         // A pure handler reaches no effect, not even through a nominal's
         // template (the fixture address is read with `env.get`).
         for h in &many {
-            assert!(!h.contains("env.") && !h.contains("http.start(") && !h.contains("net."), "an effect in a pure handler:\n{h}");
+            assert!(
+                !h.contains("env.") && !h.contains("http.start(") && !h.contains("net."),
+                "an effect in a pure handler:\n{h}"
+            );
         }
-        assert!(many.iter().all(|h| h.starts_with("fn app(req: HttpRequest) -> Result[HttpResponse, String] = {\n") && h.contains("  let resp: HttpResponse = ")));
-        assert!(many.iter().any(|h| h.contains(" then err(")), "some handlers take the err path");
-        assert!(many.iter().any(|h| h.contains("http.body(req)")), "handlers read the request");
+        assert!(many.iter().all(|h| h
+            .starts_with("fn app(req: HttpRequest) -> Result[HttpResponse, String] = {\n")
+            && h.contains("  let resp: HttpResponse = ")));
+        assert!(
+            many.iter().any(|h| h.contains(" then err(")),
+            "some handlers take the err path"
+        );
+        assert!(
+            many.iter().any(|h| h.contains("http.body(req)")),
+            "handlers read the request"
+        );
     }
 }

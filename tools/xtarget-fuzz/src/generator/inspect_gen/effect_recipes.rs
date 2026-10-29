@@ -33,7 +33,13 @@ macro_rules! dir_of_n_files {
 /// A fresh one-byte file per step.
 macro_rules! fresh_file {
     ($stem:literal) => {
-        concat!("{ fs.write_text(\"", $stem, "${{i}}.txt\", \"x\")!\n  \"", $stem, "${{i}}.txt\" }")
+        concat!(
+            "{ fs.write_text(\"",
+            $stem,
+            "${{i}}.txt\", \"x\")!\n  \"",
+            $stem,
+            "${{i}}.txt\" }"
+        )
     };
 }
 
@@ -174,10 +180,26 @@ pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
 /// module-wide cap below never applies to it.
 pub fn max_k(func: &str, effect: bool) -> Option<u64> {
     match func.split_once('.') {
-        Some(("net", f)) if matches!(f, "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener") => Some(64),
+        Some(("net", f))
+            if matches!(
+                f,
+                "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener"
+            ) =>
+        {
+            Some(64)
+        }
         // A descriptor (or three) held per call (#3620).
         Some(("net", f))
-            if matches!(f, "unix_connect" | "unix_listen" | "unix_accept" | "unix_recv" | "unix_take_fds" | "unix_close" | "shm_create") =>
+            if matches!(
+                f,
+                "unix_connect"
+                    | "unix_listen"
+                    | "unix_accept"
+                    | "unix_recv"
+                    | "unix_take_fds"
+                    | "unix_close"
+                    | "shm_create"
+            ) =>
         {
             Some(64)
         }
@@ -202,7 +224,7 @@ pub fn max_k(func: &str, effect: bool) -> Option<u64> {
 
 const SIZED_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))";
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
-const ECHO_URL: &str ="\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
+const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
 /// A POST of n bytes to the fixture's echo, with one header.
 const ECHO_REQUEST: &str = "http.new_request(\"POST\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\", string.repeat(\"a\", {n}), [(\"x-k\", \"v\")])";
@@ -225,10 +247,17 @@ macro_rules! call_of {
 /// A call answering n bytes, in flight.
 const CALL: &str = call_of!("/bytes/{n}", "[]");
 /// A call answering n bytes, ended before the probe reads it.
-const ENDED_CALL: &str = concat!("{ let hc = ", call_of!("/bytes/{n}", "[]"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
+const ENDED_CALL: &str = concat!(
+    "{ let hc = ",
+    call_of!("/bytes/{n}", "[]"),
+    "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }"
+);
 /// [`ENDED_CALL`], a new one every step (`{i}` names the step).
-const FRESH_ENDED_CALL: &str =
-    concat!("{ let hc = ", call_of!("/bytes/{n}", "[(\"x-step\", \"${{i}}\")]"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
+const FRESH_ENDED_CALL: &str = concat!(
+    "{ let hc = ",
+    call_of!("/bytes/{n}", "[(\"x-step\", \"${{i}}\")]"),
+    "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }"
+);
 /// A call answering 16 bytes, a new one every step.
 const FRESH_CALL: &str = call_of!("/bytes/16", "[(\"x-step\", \"${{i}}\")]");
 

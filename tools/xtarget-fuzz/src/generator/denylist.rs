@@ -31,14 +31,14 @@ pub struct NamedDenylist;
 /// This mirrors the synthesis path's choice to omit these modules from
 /// `BUNDLED_MODULES` — the two are the same decision, expressed once.
 const DENIED_MODULES: &[&str] = &[
-    "fs",       // filesystem reads/writes — host state
-    "process",  // subprocess exec, exit codes — host state
-    "http",     // network I/O — host + remote state
-    "net",      // raw sockets — host + remote state
-    "io",       // stdin and other stream I/O — host state
-    "env",      // environment variables — host state
-    "clock",    // wall-clock time — nondeterministic
-    "random",   // RNG — nondeterministic by definition
+    "fs",      // filesystem reads/writes — host state
+    "process", // subprocess exec, exit codes — host state
+    "http",    // network I/O — host + remote state
+    "net",     // raw sockets — host + remote state
+    "io",      // stdin and other stream I/O — host state
+    "env",     // environment variables — host state
+    "clock",   // wall-clock time — nondeterministic
+    "random",  // RNG — nondeterministic by definition
 ];
 
 /// Specific `(module, function)` pairs that are nondeterministic even
@@ -52,9 +52,9 @@ const DENIED_MODULES: &[&str] = &[
 /// stdlib module; its scheduling-order-dependent combinators are
 /// nondeterministic and are denied here for the mutation path.
 const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
-    ("list", "sample"),  // randomized subset — not input-determined
-    ("fan", "min"),      // least-by-clock pick — wall-clock arms are run-dependent
-    ("fan", "timeout"),  // wall-clock deadline — nondeterministic
+    ("list", "sample"), // randomized subset — not input-determined
+    ("fan", "min"),     // least-by-clock pick — wall-clock arms are run-dependent
+    ("fan", "timeout"), // wall-clock deadline — nondeterministic
     // `datetime` is a pure calendar over Int timestamps except its clocks.
     ("datetime", "now"),          // wall clock
     ("datetime", "now_ms"),       // wall clock
@@ -62,12 +62,12 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
     // Inside the sandboxed effect modules (tier E1), what the sandbox does
     // not fix: the host's own paths, the target's name, the clock, and
     // random names.
-    ("env", "cwd"),              // the sandbox's host path — differs per leg
-    ("env", "os"),               // the target's OS name — differs per leg by design
-    ("fs", "temp_dir"),          // the host's temp dir — differs per leg
-    ("env", "sleep_ms"),         // wall clock
-    ("fs", "create_temp_dir"),   // random name
-    ("fs", "create_temp_file"),  // random name
+    ("env", "cwd"),             // the sandbox's host path — differs per leg
+    ("env", "os"),              // the target's OS name — differs per leg by design
+    ("fs", "temp_dir"),         // the host's temp dir — differs per leg
+    ("env", "sleep_ms"),        // wall clock
+    ("fs", "create_temp_dir"),  // random name
+    ("fs", "create_temp_file"), // random name
 ];
 
 /// Functions whose Int result is a **host address** — the semantics
@@ -239,7 +239,9 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("env.get(\"X\")").is_some());
         assert!(NamedDenylist::source_references_denied_surface("datetime.now()").is_some());
         assert!(NamedDenylist::source_references_denied_surface("random.int(0, 9)").is_some());
-        assert!(NamedDenylist::source_references_denied_surface("datetime.monotonic_ns()").is_some());
+        assert!(
+            NamedDenylist::source_references_denied_surface("datetime.monotonic_ns()").is_some()
+        );
         // the calendar over Int timestamps is deterministic and a valid seed
         assert!(NamedDenylist::source_references_denied_surface("datetime.year(0)").is_none());
     }
@@ -263,7 +265,9 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("fan.map(xs, f)").is_none());
         assert!(NamedDenylist::source_references_denied_surface("fan { a(); b() }").is_none());
         // Substrings inside longer identifiers must NOT match.
-        assert!(NamedDenylist::source_references_denied_surface("let prefs = 1\nreshuffled").is_none());
+        assert!(
+            NamedDenylist::source_references_denied_surface("let prefs = 1\nreshuffled").is_none()
+        );
         assert!(NamedDenylist::source_references_denied_surface("let fsx = io_free()").is_none());
         // A prose sentence ending in a denied module word (dot followed by
         // whitespace, not an identifier) must NOT match — an incidental
@@ -286,16 +290,25 @@ mod tests {
     /// fn fails here until someone decides which it is.
     #[test]
     fn address_unit_matrix_matches_the_semantics_manifest() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/stdlib/semantics-manifest.toml");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/stdlib/semantics-manifest.toml"
+        );
         let text = std::fs::read_to_string(path).expect("read semantics-manifest.toml");
         let mut manifest: Vec<(String, String)> = Vec::new();
         let (mut module, mut name) = (String::new(), String::new());
         let mut fns_parsed = 0usize;
         for line in text.lines().map(str::trim) {
-            if let Some(m) = line.strip_prefix("[[").and_then(|l| l.strip_suffix(".fn]]")) {
+            if let Some(m) = line
+                .strip_prefix("[[")
+                .and_then(|l| l.strip_suffix(".fn]]"))
+            {
                 module = m.to_string();
                 name.clear();
-            } else if let Some(n) = line.strip_prefix("name = \"").and_then(|l| l.strip_suffix('"')) {
+            } else if let Some(n) = line
+                .strip_prefix("name = \"")
+                .and_then(|l| l.strip_suffix('"'))
+            {
                 name = n.to_string();
                 fns_parsed += 1;
             } else if line == "index_unit = \"address\"" {
@@ -305,7 +318,11 @@ mod tests {
         let mut tables: Vec<(String, String)> = HOST_ADDRESS_FUNCTIONS
             .iter()
             .map(|&(m, f)| (m, f))
-            .chain(ADDRESS_UNIT_PINNED_BY_CONTRACT.iter().map(|&(m, f, _)| (m, f)))
+            .chain(
+                ADDRESS_UNIT_PINNED_BY_CONTRACT
+                    .iter()
+                    .map(|&(m, f, _)| (m, f)),
+            )
             .map(|(m, f)| (m.to_string(), f.to_string()))
             .collect();
         manifest.sort();
@@ -313,6 +330,9 @@ mod tests {
         // Since ADR-0031 no stdlib fn returns an address, so the set may be
         // empty; the parse itself must still have read the manifest's fns.
         assert!(fns_parsed > 0, "no fn parsed from {path}");
-        assert_eq!(manifest, tables, "address-unit fns vs HOST_ADDRESS_FUNCTIONS + ADDRESS_UNIT_PINNED_BY_CONTRACT");
+        assert_eq!(
+            manifest, tables,
+            "address-unit fns vs HOST_ADDRESS_FUNCTIONS + ADDRESS_UNIT_PINNED_BY_CONTRACT"
+        );
     }
 }

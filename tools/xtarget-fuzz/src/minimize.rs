@@ -57,7 +57,10 @@ pub fn minimize(
     // Parse once; if the source does not parse (shouldn't happen for a
     // finding past the check rung, except fmt-instability), return as-is.
     let Some(mut program) = parse(source) else {
-        return Minimized { source: source.to_string(), finding: None };
+        return Minimized {
+            source: source.to_string(),
+            finding: None,
+        };
     };
 
     // Every shrink below mutates the tree and re-renders it. A literal that
@@ -73,12 +76,26 @@ pub fn minimize(
         let before = best.clone();
 
         // Pass 1: try removing each top-level statement.
-        program =
-            shrink_statements(tc, program, target_kind, work_dir, reference, &mut best, &mut best_finding);
+        program = shrink_statements(
+            tc,
+            program,
+            target_kind,
+            work_dir,
+            reference,
+            &mut best,
+            &mut best_finding,
+        );
 
         // Pass 2: try simplifying expressions to minimal leaves.
-        program =
-            shrink_expressions(tc, program, target_kind, work_dir, reference, &mut best, &mut best_finding);
+        program = shrink_expressions(
+            tc,
+            program,
+            target_kind,
+            work_dir,
+            reference,
+            &mut best,
+            &mut best_finding,
+        );
 
         // Fixed point: no change this round ⇒ done.
         if best == before {
@@ -86,7 +103,10 @@ pub fn minimize(
         }
     }
 
-    Minimized { source: best, finding: best_finding }
+    Minimized {
+        source: best,
+        finding: best_finding,
+    }
 }
 
 /// Try deleting each top-level statement of every `fn` body; keep a
@@ -227,7 +247,10 @@ pub fn minimize_plan(
                 _ => unreachable!(),
             }),
             Box::new(|p| match p {
-                FamilyPlan::Identity(p) => identity::shrink(p).into_iter().map(FamilyPlan::Identity).collect(),
+                FamilyPlan::Identity(p) => identity::shrink(p)
+                    .into_iter()
+                    .map(FamilyPlan::Identity)
+                    .collect(),
                 _ => unreachable!(),
             }),
         ),
@@ -237,9 +260,10 @@ pub fn minimize_plan(
                 _ => unreachable!(),
             }),
             Box::new(|p| match p {
-                FamilyPlan::Composition(p) => {
-                    composition::shrink(p).into_iter().map(FamilyPlan::Composition).collect()
-                }
+                FamilyPlan::Composition(p) => composition::shrink(p)
+                    .into_iter()
+                    .map(FamilyPlan::Composition)
+                    .collect(),
                 _ => unreachable!(),
             }),
         ),
@@ -266,7 +290,10 @@ pub fn minimize_plan(
         }
     }
 
-    Minimized { source: best, finding: best_finding }
+    Minimized {
+        source: best,
+        finding: best_finding,
+    }
 }
 
 // ── AST surgery helpers ──
@@ -282,7 +309,10 @@ fn parse(src: &str) -> Option<Program> {
 fn top_level_stmt_positions(program: &Program) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     for (di, decl) in program.decls.iter().enumerate() {
-        if let Decl::Fn { body: Some(expr), .. } = decl {
+        if let Decl::Fn {
+            body: Some(expr), ..
+        } = decl
+        {
             if let ExprKind::Block { stmts, .. } = &expr.kind {
                 for si in 0..stmts.len() {
                     out.push((di, si));
@@ -296,7 +326,10 @@ fn top_level_stmt_positions(program: &Program) -> Vec<(usize, usize)> {
 /// Remove the statement at `(fn_idx, stmt_idx)`. Returns `false` if the
 /// position is no longer valid.
 fn remove_stmt(program: &mut Program, fn_idx: usize, stmt_idx: usize) -> bool {
-    let Some(Decl::Fn { body: Some(expr), .. }) = program.decls.get_mut(fn_idx) else {
+    let Some(Decl::Fn {
+        body: Some(expr), ..
+    }) = program.decls.get_mut(fn_idx)
+    else {
         return false;
     };
     let ExprKind::Block { stmts, .. } = &mut expr.kind else {
@@ -314,7 +347,10 @@ fn remove_stmt(program: &mut Program, fn_idx: usize, stmt_idx: usize) -> bool {
 fn count_simplifiable(program: &Program) -> usize {
     let mut n = 0;
     for decl in &program.decls {
-        if let Decl::Fn { body: Some(expr), .. } = decl {
+        if let Decl::Fn {
+            body: Some(expr), ..
+        } = decl
+        {
             count_simplifiable_expr(expr, &mut n);
         }
     }
@@ -339,7 +375,10 @@ fn simplify_nth(program: &mut Program, target: usize) -> bool {
         if done {
             break;
         }
-        if let Decl::Fn { body: Some(expr), .. } = decl {
+        if let Decl::Fn {
+            body: Some(expr), ..
+        } = decl
+        {
             simplify_expr(expr, target, &mut counter, &mut done);
         }
     }

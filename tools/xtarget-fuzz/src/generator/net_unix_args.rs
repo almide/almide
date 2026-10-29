@@ -37,7 +37,9 @@ fn shm() -> String {
 
 /// A listener at `p` with one connection pending.
 fn pending_listener(p: &str) -> String {
-    format!("{{ let ul: Int = unix.listen({p}) ?? -1\n let _uc: Int = unix.connect({p}) ?? -1\n ul }}")
+    format!(
+        "{{ let ul: Int = unix.listen({p}) ?? -1\n let _uc: Int = unix.connect({p}) ?? -1\n ul }}"
+    )
 }
 
 /// A socket holding "hello world" and one shared-memory descriptor, its
@@ -60,13 +62,21 @@ pub(super) fn arg(b: &mut Builder, func: &str, name: &str) -> Option<String> {
     }
     let a = match (func, name) {
         ("unix_connect", "path") => {
-            if b.rng.below(4) == 0 { "\"missing.sock\"".into() } else { SINK.into() }
+            if b.rng.below(4) == 0 {
+                "\"missing.sock\"".into()
+            } else {
+                SINK.into()
+            }
         }
         ("unix_listen", "path") => socket_name(b),
         ("unix_accept", "listener") => pending_listener(&socket_name(b)),
         ("unix_send", "sock") => sink_stream(),
         ("unix_send", "fds") => {
-            if b.rng.below(2) == 0 { "[]".into() } else { format!("[{}]", shm()) }
+            if b.rng.below(2) == 0 {
+                "[]".into()
+            } else {
+                format!("[{}]", shm())
+            }
         }
         ("unix_recv" | "unix_take_fds", "sock") => pending_socket(&socket_name(b)),
         ("unix_poll" | "unix_close", "fd") => match b.rng.below(3) {
