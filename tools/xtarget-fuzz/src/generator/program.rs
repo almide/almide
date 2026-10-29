@@ -174,7 +174,10 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
     }
     body.extend(last);
 
-    let source = render_main(&body, builder.effect);
+    // An observation through an effect fn (`ffi.to_bytes(r)!`) needs an
+    // effect body as much as an effect call does.
+    let effect = builder.effect || observables.iter().any(|(_, t)| t.observe_calls_effect());
+    let source = render_main(&body, effect);
 
     Generated::plain(source, Origin::Synthesis)
 }
