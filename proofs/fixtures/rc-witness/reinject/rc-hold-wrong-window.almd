@@ -1,0 +1,12 @@
+// #4277 drill: a routine's hold move is recorded against the window after
+// the one it was moved into. The ownership witness is unchanged; the first
+// routine's release of the key it was handed (the key is present) has no
+// hold move of its own window, so the RC byte check must refuse it.
+effect fn main() -> Unit = {
+  var m: Map[String, Int] = ["a": 1, "b": 2]
+  let k = string.repeat("a", 1)
+  m[k] = 3
+  let j = string.repeat("b", 1)
+  m[j] = 4
+  println("${int.to_string(map.len(m))} ${k} ${j}")
+}

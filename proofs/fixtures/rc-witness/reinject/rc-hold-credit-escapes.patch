@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 1aeb7d133..a371c1319 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -347,6 +347,10 @@ impl Emitter<'_> {
+             // parameter, a metered frame's var.
+             IrStmtKind::MapInsert { target, key, value } => {
+                 if self.routine(|r: &bool| *r, |em| em.try_map_set_in_place(target, key, value))? {
++                    // RE-INJECTED (#4277 drill): the key's hold is released again past the window.
++                    let kh = self.hold_i32()?;
++                    self.release_i32();
++                    self.f.instructions().local_get(kh).call(crate::F_DEC_FLAT);
+                     return Ok(());
+                 }
+                 // The write-back is a compound routine too: the key's credit
