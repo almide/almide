@@ -151,6 +151,7 @@ impl Branches {
             s.arms += 1;
             if s.logged {
                 log.push(Ev::Arm);
+                crate::witness::rc::mark('|');
             }
         } else {
             s.started = true;

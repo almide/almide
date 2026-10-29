@@ -428,6 +428,23 @@ impl<'b, 'a> Flow<'b, 'a> {
         }
     }
 
+    /// The values the two arms of the `if` closed at `end` yield, when it
+    /// is an `if` with an `else` (each arm's last value).
+    pub(crate) fn arm_values(&self, end: usize, fuel: u32) -> Vec<T> {
+        let Some(s) = (0..end).rev().find(|&s| self.close[s] == end) else { return Vec::new() };
+        if !matches!(self.b.ops[s], Op::If { .. }) {
+            return Vec::new();
+        }
+        let Some(e) = (s + 1..end).find(|&k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else)) else {
+            return Vec::new();
+        };
+        [e, end]
+            .iter()
+            .filter_map(|&at| self.b.args.get(at)?.first().copied().flatten())
+            .map(|q| self.term(q, fuel))
+            .collect()
+    }
+
     /// The local both arms of the `if` closed at `end` yield (module header
     /// of `term`), if they do.
     fn joined(&self, end: usize) -> Option<u32> {

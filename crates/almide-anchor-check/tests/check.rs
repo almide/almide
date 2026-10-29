@@ -767,3 +767,28 @@ fn a_move_may_be_released_by_an_enclosing_window() -> Result<(), String> {
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// Events logged in the two arms of one branch site never happen on one
+/// path: the one `+1` past the join, on the value either arm chose, is each
+/// one's. Logged outside the site, two events need two calls.
+#[test]
+fn events_in_two_arms_of_one_site_share_the_call_past_the_join() -> Result<(), String> {
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "( a0 | a1 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a1".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
+
+/// An event on a path that aborts may name an unreachable release; an
+/// unreachable release with no event is never refused.
+#[test]
+fn an_unreachable_release_is_never_refused_and_may_carry_an_event() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let bytes = module("(local i32 i32)", "unreachable local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    Ok(())
+}

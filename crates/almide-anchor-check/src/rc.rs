@@ -343,6 +343,7 @@ pub fn check_rc(
         // Calls whose argument is a value loaded out of a heap block's slot.
         let mut elements: HashSet<usize> = HashSet::new();
         let mut aborting: HashSet<usize> = HashSet::new();
+        let mut dead_calls: Vec<(usize, char, Vec<u32>)> = Vec::new();
         for (k, op) in b.ops.iter().enumerate() {
             let Op::Call { function_index } = op else { continue };
             let kind = if Some(*function_index) == inc {
@@ -355,6 +356,10 @@ pub fn check_rc(
                 continue;
             };
             if dead[k] {
+                // An unreachable RC call: never run, so never refused; an
+                // event the recorder logged on a path that cannot reach it
+                // (an arm that aborts) may still name it, last of all.
+                dead_calls.push((k, kind, names(&fl.arg(k, 0, FUEL))));
                 continue;
             }
             if fl.in_abort_arm(k) || (kind == 'd' && before_abort(b, k)) {
@@ -364,29 +369,56 @@ pub fn check_rc(
             if crate::operands::is_loaded(&arg) {
                 elements.insert(k);
             }
-            calls.push((k, kind, names_through(bodies, imports, b, &arg, 2)));
+            let mut named = names_through(bodies, imports, b, &arg, 2);
+            // A value an `if` chose: either arm's value (the `+1` past the join
+            // is that of whichever variable the arm yielded).
+            if let crate::operands::T::Opaque(p) = crate::operands::pl(&arg) {
+                for t in fl.arm_values(*p, FUEL) {
+                    for n in names_through(bodies, imports, b, &t, 2) {
+                        if !named.contains(&n) {
+                            named.push(n);
+                        }
+                    }
+                }
+            }
+            calls.push((k, kind, named));
         }
         rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
+        // The unreachable calls follow the live ones.
+        let live = calls.len();
+        calls.extend(dead_calls);
         // Each event, and for a move `m<local>@<from>-<to>` the window of
         // the arm or routine the credit moved into.
         let mut evwin: Vec<Option<(usize, usize)>> = Vec::new();
         // Each event's depth in the recorder's branch sites (`(` … `)`): at
         // depth 0 it happens once on every path through the frame.
         let mut evdepth: Vec<usize> = Vec::new();
-        let mut depth = 0usize;
+        // Each event's path through the recorder's branch sites: per open
+        // site, its id and the arm the event is in (`|` starts the next arm).
+        let mut evpath: Vec<Vec<(usize, usize)>> = Vec::new();
+        let mut open_sites: Vec<(usize, usize)> = Vec::new();
+        let mut next_site = 0usize;
         let evs: Vec<(char, Option<u32>)> = events
             .split_whitespace()
             .filter(|t| match *t {
                 "(" => {
-                    depth += 1;
+                    next_site += 1;
+                    open_sites.push((next_site, 0));
+                    false
+                }
+                "|" => {
+                    if let Some(s) = open_sites.last_mut() {
+                        s.1 += 1;
+                    }
                     false
                 }
                 ")" => {
-                    depth = depth.saturating_sub(1);
+                    open_sites.pop();
                     false
                 }
                 _ => {
-                    evdepth.push(depth);
+                    evdepth.push(open_sites.len());
+                    evpath.push(open_sites.clone());
                     true
                 }
             })
@@ -534,13 +566,16 @@ pub fn check_rc(
         // (an arm's or routine's, a replaced element's, one before an abort)
         // is tried after the calls that have none.
         let fallback = |i: usize| {
+            if i >= live {
+                return true;
+            }
             let k = calls[i].0;
             let frame_owned = calls[i].2.iter().any(|n| witnessed.contains(n));
             (!frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)))))
                 || aborting.contains(&k)
         };
         let mut by_pref: Vec<usize> = (0..nc).collect();
-        by_pref.sort_by_key(|&i| (fallback(i), in_window(calls[i].0), calls[i].0));
+        by_pref.sort_by_key(|&i| (i >= live, fallback(i), in_window(calls[i].0), calls[i].0));
         by_pref.extend(nc..nc + takers.len());
         let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
         fn augment(
@@ -656,6 +691,34 @@ pub fn check_rc(
         for o in owner.iter().flatten() {
             got[*o] = true;
         }
+        // Events the recorder logged in different arms of one branch site
+        // never happen on one path: one call past the join (the `+1` on the
+        // value the arms chose) is each such event's, never two on a path.
+        let exclusive_events = |x: usize, y: usize| {
+            for (p, q) in evpath[x].iter().zip(evpath[y].iter()) {
+                if p.0 != q.0 {
+                    return false;
+                }
+                if p.1 != q.1 {
+                    return true;
+                }
+            }
+            false
+        };
+        let mut co: Vec<Vec<usize>> = vec![Vec::new(); nc];
+        for e in 0..evs.len() {
+            if got[e] || !matches!(evs[e].0, 'a' | 'd') {
+                continue;
+            }
+            if let Some(c) = (0..nc).find(|&c| {
+                fits(e, c)
+                    && owner[c].is_some_and(|o| exclusive_events(e, o))
+                    && co[c].iter().all(|&o| exclusive_events(e, o))
+            }) {
+                co[c].push(e);
+                got[e] = true;
+            }
+        }
         for i in 0..nc {
             used[i] = owner[i].is_some();
         }
@@ -676,9 +739,9 @@ pub fn check_rc(
                 (k, None) => unmatched.push(format!("{k}-")),
             }
         }
-        rep.judges_unmatched += (0..nc).filter(|&i| !used[i] && calls[i].1 == 'j').count();
+        rep.judges_unmatched += (0..live).filter(|&i| !used[i] && calls[i].1 == 'j').count();
         for i in 0..calls.len() {
-            if used[i] || calls[i].1 == 'j' {
+            if used[i] || calls[i].1 == 'j' || i >= live {
                 continue;
             }
             let k = calls[i].0;
@@ -699,7 +762,7 @@ pub fn check_rc(
             *slot += 1;
             used[i] = true;
         }
-        let extra: Vec<String> = (0..calls.len())
+        let extra: Vec<String> = (0..live)
             .filter(|&i| !used[i] && calls[i].1 != 'j')
             .map(|i| format!("{}@{} on {:?}", calls[i].1, calls[i].0, calls[i].2))
             .collect();
