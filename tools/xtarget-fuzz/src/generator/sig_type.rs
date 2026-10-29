@@ -100,9 +100,7 @@ impl SigType {
             TypeExpr::Generic { name, args } => {
                 let n = name.as_str();
                 match (n, args.len()) {
-                    ("List", 1) => {
-                        Some(SigType::List(Box::new(Self::from_type_expr(&args[0])?)))
-                    }
+                    ("List", 1) => Some(SigType::List(Box::new(Self::from_type_expr(&args[0])?))),
                     // `A?` parses as `Generic { name: "?" }`: without this arm
                     // every `option.*` and every `A?`-returning `list.get` /
                     // `first` / `find` was outside the catalogue.
@@ -120,11 +118,14 @@ impl SigType {
                     // A Set is built with `set.from_list`; its element
                     // must be hashable (checked at `instantiate`).
                     ("Set", 1) => Some(SigType::Set(Box::new(Self::from_type_expr(&args[0])?))),
-                    ("Secret", 1) => Some(SigType::Secret(Box::new(Self::from_type_expr(&args[0])?))),
+                    ("Secret", 1) => {
+                        Some(SigType::Secret(Box::new(Self::from_type_expr(&args[0])?)))
+                    }
                     // A nominal spelled with arguments (`Matrix[Float32]`).
                     (_, 1) => match &args[0] {
                         TypeExpr::Simple { name: arg } => {
-                            super::nominal::get(&format!("{n}[{}]", arg.as_str())).map(|k| SigType::Nominal(k.name))
+                            super::nominal::get(&format!("{n}[{}]", arg.as_str()))
+                                .map(|k| SigType::Nominal(k.name))
                         }
                         _ => None,
                     },
@@ -161,7 +162,9 @@ impl SigType {
                     out.push(n.clone());
                 }
             }
-            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => e.collect_vars(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => {
+                e.collect_vars(out)
+            }
             SigType::Result(a, b) | SigType::Tuple2(a, b) | SigType::Map(a, b) => {
                 a.collect_vars(out);
                 b.collect_vars(out);
@@ -204,7 +207,9 @@ impl SigType {
                 bind_slot_to_string(err, out);
                 ok.collect_forced_bindings(out);
             }
-            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => e.collect_forced_bindings(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => {
+                e.collect_forced_bindings(out)
+            }
             SigType::Tuple2(a, b) => {
                 a.collect_forced_bindings(out);
                 b.collect_forced_bindings(out);
@@ -252,8 +257,12 @@ impl SigType {
             // concrete error type is outside the universe: rendered as
             // `Result[T, String]` it would be a type error, not a program.
             SigType::Result(ok, err) => match **err {
-                SigType::Var(_) | SigType::String => Some(GenType::Result(Box::new(ok.instantiate(subst)?))),
-                SigType::Nominal(k) => Some(GenType::ResultNom(Box::new(ok.instantiate(subst)?), k)),
+                SigType::Var(_) | SigType::String => {
+                    Some(GenType::Result(Box::new(ok.instantiate(subst)?)))
+                }
+                SigType::Nominal(k) => {
+                    Some(GenType::ResultNom(Box::new(ok.instantiate(subst)?), k))
+                }
                 _ => None,
             },
             SigType::Tuple2(a, b) => Some(GenType::Tuple2(
@@ -266,7 +275,9 @@ impl SigType {
                 Box::new(c.instantiate(subst)?),
             )),
             SigType::Map(_k, v) => Some(GenType::Map(Box::new(v.instantiate(subst)?))),
-            SigType::Set(e) => Some(e.instantiate(subst)?).filter(GenType::is_set_elem).map(|e| GenType::Set(Box::new(e))),
+            SigType::Set(e) => Some(e.instantiate(subst)?)
+                .filter(GenType::is_set_elem)
+                .map(|e| GenType::Set(Box::new(e))),
             // A function type is not a producible value, nor is Never.
             SigType::Fn(_, _) | SigType::Never => None,
         }
@@ -304,13 +315,19 @@ impl SigType {
             // Result error slot: goal carries no error type (fixed
             // String), so only the ok arm is unified — unless the slot
             // names a nominal, whose goal is a ResultNom of that nominal.
-            (SigType::Result(ok, err), GenType::Result(g)) => !matches!(**err, SigType::Nominal(_)) && ok.unify_with_goal(g, subst),
-            (SigType::Result(ok, err), GenType::ResultNom(g, k)) => matches!(**err, SigType::Nominal(e) if e == *k) && ok.unify_with_goal(g, subst),
+            (SigType::Result(ok, err), GenType::Result(g)) => {
+                !matches!(**err, SigType::Nominal(_)) && ok.unify_with_goal(g, subst)
+            }
+            (SigType::Result(ok, err), GenType::ResultNom(g, k)) => {
+                matches!(**err, SigType::Nominal(e) if e == *k) && ok.unify_with_goal(g, subst)
+            }
             (SigType::Tuple2(a, b), GenType::Tuple2(ga, gb)) => {
                 a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst)
             }
             (SigType::Tuple3(a, b, c), GenType::Tuple3(ga, gb, gc)) => {
-                a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst) && c.unify_with_goal(gc, subst)
+                a.unify_with_goal(ga, subst)
+                    && b.unify_with_goal(gb, subst)
+                    && c.unify_with_goal(gc, subst)
             }
             (SigType::Map(_k, v), GenType::Map(gv)) => v.unify_with_goal(gv, subst),
             (SigType::Set(e), GenType::Set(g)) => e.unify_with_goal(g, subst),

@@ -40,7 +40,14 @@ pub enum Ending {
     Returns,
 }
 
-pub const ENDINGS: [Ending; 6] = [Ending::Panic, Ending::IndexOob, Ending::DivZero, Ending::Assert, Ending::EffectErr, Ending::Returns];
+pub const ENDINGS: [Ending; 6] = [
+    Ending::Panic,
+    Ending::IndexOob,
+    Ending::DivZero,
+    Ending::Assert,
+    Ending::EffectErr,
+    Ending::Returns,
+];
 
 impl Ending {
     /// The expected text a passing call names (for `Returns`, the text its
@@ -108,7 +115,10 @@ pub struct Site {
 /// (`serve_gen::handler_catalogue`), minus `testing` — an assert there is
 /// its own abort, and `assert_aborts` inside a closure is E099.
 pub fn abort_catalogue(catalogue: &[Signature]) -> Vec<Signature> {
-    super::serve_gen::handler_catalogue(catalogue).into_iter().filter(|s| s.module != "testing").collect()
+    super::serve_gen::handler_catalogue(catalogue)
+        .into_iter()
+        .filter(|s| s.module != "testing")
+        .collect()
 }
 
 fn goal(rng: &mut SplitMix64) -> GenType {
@@ -123,8 +133,21 @@ fn goal(rng: &mut SplitMix64) -> GenType {
 /// A generated site: up to two bindings of catalogue terms, then `ending`,
 /// its tail typed `fill` (the closure's T). One in eight passing sites names
 /// [`NEVER_PRINTED`] instead of its text.
-pub fn synthesize_site(rng: &mut SplitMix64, catalogue: &[Signature], ending: Ending, fill: Fill) -> Site {
-    let mut b = Builder { rng, catalogue, scope: Vec::new(), stmts: Vec::new(), fuel: 0, fresh: 0, effect: false };
+pub fn synthesize_site(
+    rng: &mut SplitMix64,
+    catalogue: &[Signature],
+    ending: Ending,
+    fill: Fill,
+) -> Site {
+    let mut b = Builder {
+        rng,
+        catalogue,
+        scope: Vec::new(),
+        stmts: Vec::new(),
+        fuel: 0,
+        fresh: 0,
+        effect: false,
+    };
     fn term(b: &mut Builder, ty: GenType, name: &str) {
         b.fuel = START_FUEL;
         let e = gen_expr(b, &ty);
@@ -138,18 +161,27 @@ pub fn synthesize_site(rng: &mut SplitMix64, catalogue: &[Signature], ending: En
     match ending {
         Ending::Panic => {
             term(&mut b, GenType::String, "msg");
-            b.stmts.push(fill.panic_valued("\"xf-abort \" + msg", "msg"));
+            b.stmts
+                .push(fill.panic_valued("\"xf-abort \" + msg", "msg"));
         }
         // An element read is valued by the list's element type.
         Ending::IndexOob => {
-            let elem = if fill == Fill::String { GenType::String } else { GenType::Int };
+            let elem = if fill == Fill::String {
+                GenType::String
+            } else {
+                GenType::Int
+            };
             term(&mut b, GenType::List(Box::new(elem)), "xs");
             b.stmts.push("xs[list.len(xs) + 1]".into());
         }
         Ending::DivZero => {
             term(&mut b, GenType::Int, "a");
             term(&mut b, GenType::Int, "z");
-            b.stmts.push(if fill == Fill::String { "int.to_string(a / (z * 0))".into() } else { "a / (z * 0)".into() });
+            b.stmts.push(if fill == Fill::String {
+                "int.to_string(a / (z * 0))".into()
+            } else {
+                "a / (z * 0)".into()
+            });
         }
         Ending::Assert => {
             term(&mut b, GenType::String, "s");
@@ -159,7 +191,10 @@ pub fn synthesize_site(rng: &mut SplitMix64, catalogue: &[Signature], ending: En
         Ending::EffectErr => {
             term(&mut b, GenType::String, "s");
             b.stmts.push("let text = fs.read_text(\"/no/such/xf-abort-dir/probe-\" + int.to_string(string.len(s)))!".into());
-            b.stmts.push(fill.from_string("text").unwrap_or_else(|| "println(text)".into()));
+            b.stmts.push(
+                fill.from_string("text")
+                    .unwrap_or_else(|| "println(text)".into()),
+            );
         }
         Ending::Returns => {
             term(&mut b, GenType::String, "s");
@@ -167,8 +202,15 @@ pub fn synthesize_site(rng: &mut SplitMix64, catalogue: &[Signature], ending: En
             b.stmts.extend(fill.from_string("s"));
         }
     }
-    let expected = if ending != Ending::Returns && b.rng.chance(1, 8) { NEVER_PRINTED } else { ending.expected() };
-    Site { expected: expected.into(), body: b.stmts }
+    let expected = if ending != Ending::Returns && b.rng.chance(1, 8) {
+        NEVER_PRINTED
+    } else {
+        ending.expected()
+    };
+    Site {
+        expected: expected.into(),
+        body: b.stmts,
+    }
 }
 
 /// A campaign's test file: one test with 1..=3 generated sites, each ending
@@ -187,7 +229,10 @@ pub fn synthesize_test(rng: &mut SplitMix64, catalogue: &[Signature]) -> String 
 
 /// The `testing.assert_aborts(...)` call of one site, indented by `pad`.
 pub fn call(site: &Site, pad: &str) -> String {
-    let mut s = format!("{pad}testing.assert_aborts(\"{}\", () => {{\n", site.expected);
+    let mut s = format!(
+        "{pad}testing.assert_aborts(\"{}\", () => {{\n",
+        site.expected
+    );
     for line in &site.body {
         s.push_str(&format!("{pad}  {line}\n"));
     }
@@ -207,7 +252,9 @@ pub fn test_file(name: &str, sites: &[Site]) -> String {
 
 fn with_header(body: &str) -> String {
     let imports = super::catalogue::imports_for(&format!("testing.assert_aborts {body}"));
-    format!("{TEST_MARKER}// generated by xtarget-fuzz (assert_aborts inspection)\n{imports}\n{body}")
+    format!(
+        "{TEST_MARKER}// generated by xtarget-fuzz (assert_aborts inspection)\n{imports}\n{body}"
+    )
 }
 
 /// The complexity probe: `k` calls of ONE site (a loop, so the program is the
@@ -218,9 +265,16 @@ fn with_header(body: &str) -> String {
 pub fn complexity_test(n: u64, k: u64, fill: Fill) -> String {
     let site = Site {
         expected: "PANIC: xf-abort".into(),
-        body: vec![format!("let e = string.repeat(\"e\", {n})"), "eprintln(e)".into(), fill.panic_valued("\"xf-abort\"", "e")],
+        body: vec![
+            format!("let e = string.repeat(\"e\", {n})"),
+            "eprintln(e)".into(),
+            fill.panic_valued("\"xf-abort\"", "e"),
+        ],
     };
-    let body = format!("test \"sized\" {{\n  for _ in 0..<{k} {{\n{}  }}\n}}\n", call(&site, "    "));
+    let body = format!(
+        "test \"sized\" {{\n  for _ in 0..<{k} {{\n{}  }}\n}}\n",
+        call(&site, "    ")
+    );
     with_header(&body)
 }
 
@@ -233,16 +287,44 @@ pub fn alloc_test(k: u64, fill: Fill) -> String {
         Fill::String => "let xs: List[String] = [\"a\", \"b\"]",
         _ => "let xs: List[Int] = [1, 2]",
     };
-    let div = if fill == Fill::String { "int.to_string(10 / z)" } else { "10 / z" };
+    let div = if fill == Fill::String {
+        "int.to_string(10 / z)"
+    } else {
+        "10 / z"
+    };
     let fixed: Vec<Site> = [
-        ("PANIC: xf-abort", vec!["let m = \"xf-abort\"".to_string(), fill.panic_valued("m", "m")]),
-        ("index out of bounds", vec![list.to_string(), "xs[list.len(xs) + 1]".into()]),
-        ("division by zero", vec!["let z: Int = 7 * 0".into(), div.to_string()]),
-        ("Error: assertion failed", vec!["let a = \"a\"".into(), "assert_eq(a, \"b\")".into(), v("a")]),
-        ("fs.read_text", vec!["let text = fs.read_text(\"/no/such/xf-abort-dir/probe\")!".into(), v("text")]),
+        (
+            "PANIC: xf-abort",
+            vec![
+                "let m = \"xf-abort\"".to_string(),
+                fill.panic_valued("m", "m"),
+            ],
+        ),
+        (
+            "index out of bounds",
+            vec![list.to_string(), "xs[list.len(xs) + 1]".into()],
+        ),
+        (
+            "division by zero",
+            vec!["let z: Int = 7 * 0".into(), div.to_string()],
+        ),
+        (
+            "Error: assertion failed",
+            vec!["let a = \"a\"".into(), "assert_eq(a, \"b\")".into(), v("a")],
+        ),
+        (
+            "fs.read_text",
+            vec![
+                "let text = fs.read_text(\"/no/such/xf-abort-dir/probe\")!".into(),
+                v("text"),
+            ],
+        ),
     ]
     .into_iter()
-    .map(|(e, b)| Site { expected: e.into(), body: b.into_iter().filter(|l| !l.is_empty()).collect() })
+    .map(|(e, b)| Site {
+        expected: e.into(),
+        body: b.into_iter().filter(|l| !l.is_empty()).collect(),
+    })
     .collect();
     let mut body = String::from("test \"alloc\" {\n");
     for s in &fixed {
@@ -273,13 +355,26 @@ pub fn diamond_projects(fill: Fill) -> Vec<super::Project> {
         .map(|m| {
             let callee = format!("{m}.boom(\"t\")");
             let sites = [
-                Site { expected: "PANIC: xf-diamond t".into(), body: vec![callee.clone()] },
-                Site { expected: NEVER_PRINTED.into(), body: vec![callee] },
+                Site {
+                    expected: "PANIC: xf-diamond t".into(),
+                    body: vec![callee.clone()],
+                },
+                Site {
+                    expected: NEVER_PRINTED.into(),
+                    body: vec![callee],
+                },
             ];
-            let test = test_file("diamond", &sites).replacen("import testing\n", &format!("import self.{m}\nimport testing\n"), 1);
+            let test = test_file("diamond", &sites).replacen(
+                "import testing\n",
+                &format!("import self.{m}\nimport testing\n"),
+                1,
+            );
             super::Project {
                 files: vec![
-                    ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
+                    (
+                        "app/almide.toml".to_string(),
+                        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string(),
+                    ),
                     ("app/src/base.almd".to_string(), base.clone()),
                     ("app/src/left.almd".to_string(), path.clone()),
                     ("app/src/right.almd".to_string(), path.clone()),
@@ -309,15 +404,31 @@ mod tests {
         for t in &many {
             assert!(is_test_probe(t), "{t}");
             assert!(t.contains("import testing\n"), "{t}");
-            assert!(t.contains("test \"generated\" {\n  testing.assert_aborts(\""), "{t}");
+            assert!(
+                t.contains("test \"generated\" {\n  testing.assert_aborts(\""),
+                "{t}"
+            );
             // Nothing in a closure names a test local: the test body holds
             // only the calls themselves.
             assert!(!t.contains("\n  let "), "a binding outside a closure:\n{t}");
         }
-        for e in ["xs[list.len(xs) + 1]", "a / (z * 0)", "assert_eq(s, s + \"!\")", "panic(\"xf-abort \" + msg)", "fs.read_text(", NEVER_PRINTED] {
-            assert!(many.iter().any(|t| t.contains(e)), "no generated test reaches `{e}`");
+        for e in [
+            "xs[list.len(xs) + 1]",
+            "a / (z * 0)",
+            "assert_eq(s, s + \"!\")",
+            "panic(\"xf-abort \" + msg)",
+            "fs.read_text(",
+            NEVER_PRINTED,
+        ] {
+            assert!(
+                many.iter().any(|t| t.contains(e)),
+                "no generated test reaches `{e}`"
+            );
         }
-        assert!(many.iter().filter(|t| t.contains("fs.read_text(")).all(|t| t.contains("import fs\n")));
+        assert!(many
+            .iter()
+            .filter(|t| t.contains("fs.read_text("))
+            .all(|t| t.contains("import fs\n")));
     }
 
     #[test]
@@ -326,7 +437,10 @@ mod tests {
         for (i, e) in ENDINGS.into_iter().enumerate() {
             for fill in [Fill::Unit, Fill::Int, Fill::String] {
                 let s = synthesize_site(&mut SplitMix64::for_program(3, i as u64), &cat, e, fill);
-                assert!(s.expected == e.expected() || s.expected == NEVER_PRINTED, "{e:?}: {s:?}");
+                assert!(
+                    s.expected == e.expected() || s.expected == NEVER_PRINTED,
+                    "{e:?}: {s:?}"
+                );
             }
         }
     }
@@ -336,20 +450,57 @@ mod tests {
     #[test]
     fn a_fill_sets_the_closures_value_type() {
         let cat = cat();
-        let tail = |e, fill| synthesize_site(&mut SplitMix64::for_program(5, 0), &cat, e, fill).body.last().cloned().unwrap();
-        assert_eq!(tail(Ending::Panic, Fill::Unit), "panic(\"xf-abort \" + msg)");
-        assert_eq!(tail(Ending::Panic, Fill::String), "if string.len(msg) >= 0 then panic(\"xf-abort \" + msg) else msg + \"!\"");
-        assert_eq!(tail(Ending::Panic, Fill::Int), "if string.len(msg) >= 0 then panic(\"xf-abort \" + msg) else string.len(msg)");
-        assert_eq!(tail(Ending::DivZero, Fill::String), "int.to_string(a / (z * 0))");
+        let tail = |e, fill| {
+            synthesize_site(&mut SplitMix64::for_program(5, 0), &cat, e, fill)
+                .body
+                .last()
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            tail(Ending::Panic, Fill::Unit),
+            "panic(\"xf-abort \" + msg)"
+        );
+        assert_eq!(
+            tail(Ending::Panic, Fill::String),
+            "if string.len(msg) >= 0 then panic(\"xf-abort \" + msg) else msg + \"!\""
+        );
+        assert_eq!(
+            tail(Ending::Panic, Fill::Int),
+            "if string.len(msg) >= 0 then panic(\"xf-abort \" + msg) else string.len(msg)"
+        );
+        assert_eq!(
+            tail(Ending::DivZero, Fill::String),
+            "int.to_string(a / (z * 0))"
+        );
         assert_eq!(tail(Ending::Assert, Fill::String), "s + \"!\"");
         assert_eq!(tail(Ending::EffectErr, Fill::String), "text + \"!\"");
         assert_eq!(tail(Ending::Returns, Fill::Int), "string.len(s)");
-        let oob = synthesize_site(&mut SplitMix64::for_program(5, 0), &cat, Ending::IndexOob, Fill::String);
-        assert!(oob.body.iter().any(|l| l.starts_with("let xs: List[String] = ")), "{oob:?}");
+        let oob = synthesize_site(
+            &mut SplitMix64::for_program(5, 0),
+            &cat,
+            Ending::IndexOob,
+            Fill::String,
+        );
+        assert!(
+            oob.body
+                .iter()
+                .any(|l| l.starts_with("let xs: List[String] = ")),
+            "{oob:?}"
+        );
         // The campaign draws all three.
-        let many: Vec<String> = (0..300).map(|i| synthesize_test(&mut SplitMix64::for_program(11, i), &cat)).collect();
-        for t in ["else msg + \"!\"", "else string.len(msg)", "panic(\"xf-abort \" + msg)\n"] {
-            assert!(many.iter().any(|p| p.contains(t)), "no generated test has `{t}`");
+        let many: Vec<String> = (0..300)
+            .map(|i| synthesize_test(&mut SplitMix64::for_program(11, i), &cat))
+            .collect();
+        for t in [
+            "else msg + \"!\"",
+            "else string.len(msg)",
+            "panic(\"xf-abort \" + msg)\n",
+        ] {
+            assert!(
+                many.iter().any(|p| p.contains(t)),
+                "no generated test has `{t}`"
+            );
         }
     }
 
@@ -359,8 +510,15 @@ mod tests {
             let p = complexity_test(64, 5, fill);
             assert!(is_test_probe(&p));
             assert_eq!(p.matches("testing.assert_aborts(").count(), 1, "{p}");
-            assert!(p.contains("for _ in 0..<5 {") && p.contains("string.repeat(\"e\", 64)"), "{p}");
-            assert_eq!(complexity_test(64, 5, fill).len(), complexity_test(64, 7, fill).len(), "k must not change the program's size");
+            assert!(
+                p.contains("for _ in 0..<5 {") && p.contains("string.repeat(\"e\", 64)"),
+                "{p}"
+            );
+            assert_eq!(
+                complexity_test(64, 5, fill).len(),
+                complexity_test(64, 7, fill).len(),
+                "k must not change the program's size"
+            );
         }
         assert!(complexity_test(64, 5, Fill::String).contains("else e + \"!\"\n"));
         assert!(complexity_test(64, 5, Fill::Int).contains("else string.len(e)\n"));
@@ -370,13 +528,31 @@ mod tests {
     fn the_alloc_probe_aborts_every_way_then_loops() {
         for fill in Fill::MEASURED {
             let p = alloc_test(8, fill);
-            for e in ["PANIC: xf-abort", "index out of bounds", "division by zero", "Error: assertion failed", "fs.read_text"] {
-                assert!(p.contains(&format!("testing.assert_aborts(\"{e}\"")), "{e}: {p}");
+            for e in [
+                "PANIC: xf-abort",
+                "index out of bounds",
+                "division by zero",
+                "Error: assertion failed",
+                "fs.read_text",
+            ] {
+                assert!(
+                    p.contains(&format!("testing.assert_aborts(\"{e}\"")),
+                    "{e}: {p}"
+                );
             }
-            assert!(p.contains("for _ in 0..<8 {") && p.contains("import fs\n"), "{p}");
+            assert!(
+                p.contains("for _ in 0..<8 {") && p.contains("import fs\n"),
+                "{p}"
+            );
         }
         let s = alloc_test(8, Fill::String);
-        for v in ["List[String]", "int.to_string(10 / z)", "a + \"!\"", "text + \"!\"", "else m + \"!\""] {
+        for v in [
+            "List[String]",
+            "int.to_string(10 / z)",
+            "a + \"!\"",
+            "text + \"!\"",
+            "else m + \"!\"",
+        ] {
             assert!(s.contains(v), "{v}: {s}");
         }
     }
@@ -388,11 +564,28 @@ mod tests {
             assert_eq!(ps.len(), 3);
             for (p, m) in ps.iter().zip(["base", "left", "right"]) {
                 let test = &p.files.iter().find(|(f, _)| f == &p.entry).unwrap().1;
-                assert!(test.contains(&format!("import self.{m}\n")) && test.contains(&format!("{m}.boom(\"t\")")), "{test}");
-                assert!(test.contains(NEVER_PRINTED), "the failing call is there: {test}");
+                assert!(
+                    test.contains(&format!("import self.{m}\n"))
+                        && test.contains(&format!("{m}.boom(\"t\")")),
+                    "{test}"
+                );
+                assert!(
+                    test.contains(NEVER_PRINTED),
+                    "the failing call is there: {test}"
+                );
             }
         }
-        let base = |fill| diamond_projects(fill)[0].files.iter().find(|(f, _)| f == "app/src/base.almd").unwrap().1.clone();
-        assert!(base(Fill::String).contains("-> String = ") && base(Fill::Int).contains("-> Int = "));
+        let base = |fill| {
+            diamond_projects(fill)[0]
+                .files
+                .iter()
+                .find(|(f, _)| f == "app/src/base.almd")
+                .unwrap()
+                .1
+                .clone()
+        };
+        assert!(
+            base(Fill::String).contains("-> String = ") && base(Fill::Int).contains("-> Int = ")
+        );
     }
 }

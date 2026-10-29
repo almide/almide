@@ -49,15 +49,28 @@ pub struct Req {
 }
 
 impl Req {
-    fn new(method: &'static str, target: &str, headers: &[(&'static str, &'static str)], body: &[u8]) -> Req {
-        Req { method, target: target.to_string(), headers: headers.to_vec(), body: body.to_vec() }
+    fn new(
+        method: &'static str,
+        target: &str,
+        headers: &[(&'static str, &'static str)],
+        body: &[u8],
+    ) -> Req {
+        Req {
+            method,
+            target: target.to_string(),
+            headers: headers.to_vec(),
+            body: body.to_vec(),
+        }
     }
 
     /// The request's bytes: HTTP/1.1 with `Connection: close` (`wasmtime
     /// serve` keeps a connection alive otherwise) and a `Content-Length`
     /// for a body.
     pub fn wire(&self) -> Vec<u8> {
-        let mut head = format!("{} {} HTTP/1.1\r\nHost: t\r\nConnection: close\r\n", self.method, self.target);
+        let mut head = format!(
+            "{} {} HTTP/1.1\r\nHost: t\r\nConnection: close\r\n",
+            self.method, self.target
+        );
         for (k, v) in &self.headers {
             let _ = write!(head, "{k}: {v}\r\n");
         }
@@ -114,11 +127,20 @@ impl Plan {
 pub fn plan_of(src: &str) -> Option<Plan> {
     let line = src.lines().find_map(|l| l.strip_prefix(MARK))?;
     let (kind, rest) = line.split_once(' ').unwrap_or((line, ""));
-    let field = |name: &str| rest.split_whitespace().find_map(|w| w.strip_prefix(&format!("{name}="))?.parse::<u64>().ok());
+    let field = |name: &str| {
+        rest.split_whitespace()
+            .find_map(|w| w.strip_prefix(&format!("{name}="))?.parse::<u64>().ok())
+    };
     match kind.trim() {
         "script" => Some(Plan::Script),
-        "sized" => Some(Plan::Sized { k: field("k")?, n: field("n")? }),
-        "script+sized" => Some(Plan::ScriptThenSized { k: field("k")?, n: field("n")? }),
+        "sized" => Some(Plan::Sized {
+            k: field("k")?,
+            n: field("n")?,
+        }),
+        "script+sized" => Some(Plan::ScriptThenSized {
+            k: field("k")?,
+            n: field("n")?,
+        }),
         _ => None,
     }
 }
@@ -132,7 +154,12 @@ fn ready() -> Req {
 /// with the position so no layer can share one buffer between requests.
 fn sized(i: u64, n: u64) -> Req {
     let body: Vec<u8> = (0..n).map(|j| b'a' + ((i + j) % 26) as u8).collect();
-    Req::new("POST", &format!("/s/{i}"), &[("content-type", "text/plain")], &body)
+    Req::new(
+        "POST",
+        &format!("/s/{i}"),
+        &[("content-type", "text/plain")],
+        &body,
+    )
 }
 
 /// The fixed request set: what C-367's replay and C-375's export scripts
@@ -144,10 +171,23 @@ pub fn script() -> Vec<Req> {
     vec![
         ready(),
         Req::new("GET", "/hello?x=1&y=%E7%8C%AB&c=x+y&nokey&d=1=2", &[], b""),
-        Req::new("POST", "/echo", &[("X-Token", "abc"), ("Content-Type", "text/plain; charset=utf-8")], "日本語 ok".as_bytes()),
+        Req::new(
+            "POST",
+            "/echo",
+            &[
+                ("X-Token", "abc"),
+                ("Content-Type", "text/plain; charset=utf-8"),
+            ],
+            "日本語 ok".as_bytes(),
+        ),
         Req::new("PUT", "/a/b", &[], b"a\xffb\xe3\x81c\xf0\x9f\x98\x80"),
         Req::new("DELETE", "/users/42", &[("x-a", "1")], b""),
-        Req::new("POST", "/j", &[("content-type", "application/json")], b"[1, \"a\xc3\xa9\", {\"k\": null}]"),
+        Req::new(
+            "POST",
+            "/j",
+            &[("content-type", "application/json")],
+            b"[1, \"a\xc3\xa9\", {\"k\": null}]",
+        ),
         Req::new("GET", "/p/1?a=1", &[("X-B", "one"), ("X-B", "two")], b""),
         Req::new("GET", "/missing", &[], b""),
     ]
@@ -198,13 +238,21 @@ pub fn free_port() -> u16 {
             return port;
         }
     }
-    TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map(|a| a.port()).unwrap_or(0)
+    TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .unwrap_or(0)
 }
 
 /// [`drive`] with a fresh port per attempt: `make(port)` builds the command.
 /// A server that exits before it answered with `bind failed` lost a port
 /// race; that attempt is repeated (up to 3 times), never reported.
-pub fn drive_fresh(make: &mut dyn FnMut(u16) -> Command, host: Host, plan: &Plan, wrapped: bool) -> Result<Session, String> {
+pub fn drive_fresh(
+    make: &mut dyn FnMut(u16) -> Command,
+    host: Host,
+    plan: &Plan,
+    wrapped: bool,
+) -> Result<Session, String> {
     let mut last = String::new();
     for _ in 0..3 {
         let port = free_port();
@@ -247,7 +295,13 @@ pub fn leg_view(r: &Result<Session, String>) -> String {
 /// One session (see the module doc). `wrapped`: the spawned process is a
 /// launcher whose only child is the server (`perf stat`): the SIGTERM goes
 /// to that child, so the launcher sees the server exit and reports.
-pub fn drive(cmd: &mut Command, port: u16, host: Host, plan: &Plan, wrapped: bool) -> Result<Session, String> {
+pub fn drive(
+    cmd: &mut Command,
+    port: u16,
+    host: Host,
+    plan: &Plan,
+    wrapped: bool,
+) -> Result<Session, String> {
     if host == Host::Socket {
         cmd.env(PORT_ENV, port.to_string());
     }
@@ -257,7 +311,12 @@ pub fn drive(cmd: &mut Command, port: u16, host: Host, plan: &Plan, wrapped: boo
         cmd.process_group(0);
     }
     let start = Instant::now();
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("spawn: {e}"))?;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn: {e}"))?;
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
@@ -267,11 +326,28 @@ pub fn drive(cmd: &mut Command, port: u16, host: Host, plan: &Plan, wrapped: boo
             buf
         })
     };
-    let out_t = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let err_t = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let collect = |child: &mut Child, status: std::process::ExitStatus, out_t: std::thread::JoinHandle<Vec<u8>>, err_t: std::thread::JoinHandle<Vec<u8>>| {
+    let out_t = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err_t = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let collect = |child: &mut Child,
+                   status: std::process::ExitStatus,
+                   out_t: std::thread::JoinHandle<Vec<u8>>,
+                   err_t: std::thread::JoinHandle<Vec<u8>>| {
         let _ = child;
-        Output { status, stdout: out_t.join().unwrap_or_default(), stderr: err_t.join().unwrap_or_default() }
+        Output {
+            status,
+            stdout: out_t.join().unwrap_or_default(),
+            stderr: err_t.join().unwrap_or_default(),
+        }
     };
 
     let mut transcript = String::new();
@@ -285,18 +361,38 @@ pub fn drive(cmd: &mut Command, port: u16, host: Host, plan: &Plan, wrapped: boo
             }
             Err(Asked::Exited(status)) => {
                 let out = collect(&mut child, status, out_t, err_t);
-                return Err(format!("the server exited before answering request {i} ({} {}): exit {}{DETAIL}{}", req.method, req.target, exit_text(&out.status), first_line(&out.stderr)));
+                return Err(format!(
+                    "the server exited before answering request {i} ({} {}): exit {}{DETAIL}{}",
+                    req.method,
+                    req.target,
+                    exit_text(&out.status),
+                    first_line(&out.stderr)
+                ));
             }
             Err(Asked::Timeout(what)) => {
                 kill_group(&mut child);
-                let out = collect(&mut child, std::process::ExitStatus::default(), out_t, err_t);
-                return Err(format!("request {i} ({} {}): {what}{DETAIL}{}", req.method, req.target, first_line(&out.stderr)));
+                let out = collect(
+                    &mut child,
+                    std::process::ExitStatus::default(),
+                    out_t,
+                    err_t,
+                );
+                return Err(format!(
+                    "request {i} ({} {}): {what}{DETAIL}{}",
+                    req.method,
+                    req.target,
+                    first_line(&out.stderr)
+                ));
             }
         }
     }
 
     // Stop: one SIGTERM to the server.
-    let target = if wrapped { child_of(child.id()).unwrap_or(child.id()) } else { child.id() };
+    let target = if wrapped {
+        child_of(child.id()).unwrap_or(child.id())
+    } else {
+        child.id()
+    };
     signal(target, Signal::Term);
     let stop_deadline = Instant::now() + STOP_CAP;
     let status = loop {
@@ -311,14 +407,21 @@ pub fn drive(cmd: &mut Command, port: u16, host: Host, plan: &Plan, wrapped: boo
     let Some(status) = status else {
         kill_group(&mut child);
         let _ = (out_t.join(), err_t.join());
-        return Err(format!("still serving {}s after SIGTERM: http.serve did not return (ADR-0020 §5.6)", STOP_CAP.as_secs()));
+        return Err(format!(
+            "still serving {}s after SIGTERM: http.serve did not return (ADR-0020 §5.6)",
+            STOP_CAP.as_secs()
+        ));
     };
     let wall = start.elapsed();
     let output = collect(&mut child, status, out_t, err_t);
     if host == Host::Socket {
         let _ = writeln!(transcript, "exit {}", exit_text(&output.status));
     }
-    Ok(Session { transcript, output, wall })
+    Ok(Session {
+        transcript,
+        output,
+        wall,
+    })
 }
 
 fn exit_text(s: &std::process::ExitStatus) -> String {
@@ -340,7 +443,13 @@ fn first_line(b: &[u8]) -> String {
     let t = String::from_utf8_lossy(b);
     let mut lines = t.lines().filter(|l| !l.trim().is_empty());
     let first = lines.clone().next().unwrap_or("").to_string();
-    lines.find(|l| l.contains("rror")).map(str::to_string).unwrap_or(first).chars().take(200).collect()
+    lines
+        .find(|l| l.contains("rror"))
+        .map(str::to_string)
+        .unwrap_or(first)
+        .chars()
+        .take(200)
+        .collect()
 }
 
 enum Asked {
@@ -360,13 +469,17 @@ fn ask(port: u16, raw: &[u8], deadline: Instant, child: &mut Child) -> Result<Ve
                     return Err(Asked::Exited(status));
                 }
                 if Instant::now() >= deadline {
-                    return Err(Asked::Timeout(format!("the server never accepted on {port}: {e}")));
+                    return Err(Asked::Timeout(format!(
+                        "the server never accepted on {port}: {e}"
+                    )));
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
     };
-    let left = deadline.saturating_duration_since(Instant::now()).max(Duration::from_secs(1));
+    let left = deadline
+        .saturating_duration_since(Instant::now())
+        .max(Duration::from_secs(1));
     let _ = conn.set_read_timeout(Some(left));
     let _ = conn.set_nodelay(true);
     // A server that answers before the body is all sent (413) may close
@@ -395,10 +508,13 @@ enum Signal {
 fn signal(pid: u32, s: Signal) {
     #[cfg(unix)]
     unsafe {
-        libc::kill(pid as i32, match s {
-            Signal::Term => libc::SIGTERM,
-            Signal::Kill => libc::SIGKILL,
-        });
+        libc::kill(
+            pid as i32,
+            match s {
+                Signal::Term => libc::SIGTERM,
+                Signal::Kill => libc::SIGKILL,
+            },
+        );
     }
 }
 
@@ -406,8 +522,15 @@ fn signal(pid: u32, s: Signal) {
 /// launcher that execs nothing has none.
 fn child_of(pid: u32) -> Option<u32> {
     for _ in 0..100 {
-        let out = Command::new("pgrep").args(["-P", &pid.to_string()]).output().ok()?;
-        if let Some(p) = String::from_utf8_lossy(&out.stdout).lines().next().and_then(|l| l.trim().parse().ok()) {
+        let out = Command::new("pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+            .ok()?;
+        if let Some(p) = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .and_then(|l| l.trim().parse().ok())
+        {
             return Some(p);
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -454,14 +577,21 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
     // A `100 Continue` interim head comes before the response proper.
     // A `100` with nothing after it was the final answer, and is read as one.
     while raw.starts_with(b"HTTP/1.1 100 ") {
-        let cut = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("an interim head without its end")?;
+        let cut = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .ok_or("an interim head without its end")?;
         if cut + 4 == raw.len() {
             break;
         }
         raw = &raw[cut + 4..];
     }
-    let cut = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no end of the response head")?;
-    let head = std::str::from_utf8(&raw[..cut]).map_err(|e| format!("the head is not UTF-8: {e}"))?;
+    let cut = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("no end of the response head")?;
+    let head =
+        std::str::from_utf8(&raw[..cut]).map_err(|e| format!("the head is not UTF-8: {e}"))?;
     let rest = &raw[cut + 4..];
     let mut lines = head.split("\r\n");
     let status_line = lines.next().unwrap_or_default();
@@ -470,7 +600,9 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
     let status_token = parts.next().unwrap_or_default().to_string();
     // Any integer is read as a value: what a host wrote is compared, and
     // whether it is a status code at all is the `status` verdict.
-    let status = status_token.parse::<i128>().map_err(|_| format!("no status code in {status_line:?}"))?;
+    let status = status_token
+        .parse::<i128>()
+        .map_err(|_| format!("no status code in {status_line:?}"))?;
     let reason = parts.next().unwrap_or_default().to_string();
     let mut o = Observed {
         version,
@@ -487,11 +619,18 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
         bad_field: None,
     };
     for line in lines {
-        let (name, value) = line.split_once(':').ok_or_else(|| format!("a header line without a colon: {line:?}"))?;
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| format!("a header line without a colon: {line:?}"))?;
         // RFC 9110 §5.1 / §5.5: a field name is a token, a field value holds
         // no control byte but HTAB.
-        if o.bad_field.is_none() && (!is_token(name) || value.bytes().any(|b| (b < 0x20 && b != b'\t') || b == 0x7f)) {
-            o.bad_field = Some(format!("the field {:?}: {:?} is not a token name with a control-free value", name, value));
+        if o.bad_field.is_none()
+            && (!is_token(name) || value.bytes().any(|b| (b < 0x20 && b != b'\t') || b == 0x7f))
+        {
+            o.bad_field = Some(format!(
+                "the field {:?}: {:?} is not a token name with a control-free value",
+                name, value
+            ));
         }
         let name = name.to_ascii_lowercase();
         let value = value.trim_matches([' ', '\t']).to_string();
@@ -503,7 +642,10 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
             _ => o.headers.entry(name).or_default().push(value),
         }
     }
-    let chunked = o.transfer_encoding.iter().any(|v| v.to_ascii_lowercase().contains("chunked"));
+    let chunked = o
+        .transfer_encoding
+        .iter()
+        .any(|v| v.to_ascii_lowercase().contains("chunked"));
     // RFC 9110 §6.4.1: a 1xx, 204 or 304 has no content whatever its
     // framing fields say (a 304's Content-Length describes the selected
     // representation, §8.6); the bytes after its head are judged by the
@@ -512,7 +654,11 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
         Vec::new()
     } else if chunked {
         dechunk(rest)?
-    } else if let Some(n) = o.content_length.first().and_then(|v| v.parse::<usize>().ok()) {
+    } else if let Some(n) = o
+        .content_length
+        .first()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
         // A length the bytes do not meet is the framing verdict's to report.
         rest[..n.min(rest.len())].to_vec()
     } else {
@@ -524,15 +670,22 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
 fn dechunk(mut rest: &[u8]) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
     loop {
-        let eol = rest.windows(2).position(|w| w == b"\r\n").ok_or("a chunk size line without CRLF")?;
+        let eol = rest
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or("a chunk size line without CRLF")?;
         let size = std::str::from_utf8(&rest[..eol]).map_err(|e| format!("chunk size: {e}"))?;
-        let n = usize::from_str_radix(size.split(';').next().unwrap_or_default().trim(), 16).map_err(|e| format!("chunk size {size:?}: {e}"))?;
+        let n = usize::from_str_radix(size.split(';').next().unwrap_or_default().trim(), 16)
+            .map_err(|e| format!("chunk size {size:?}: {e}"))?;
         rest = &rest[eol + 2..];
         if n == 0 {
             return Ok(body);
         }
         body.extend_from_slice(rest.get(..n).ok_or("a chunk shorter than its size")?);
-        rest = rest.get(n..).and_then(|r| r.strip_prefix(b"\r\n")).ok_or("a chunk without its CRLF")?;
+        rest = rest
+            .get(n..)
+            .and_then(|r| r.strip_prefix(b"\r\n"))
+            .ok_or("a chunk without its CRLF")?;
     }
 }
 
@@ -545,66 +698,120 @@ impl Observed {
     /// The verdicts on the host-managed parts (ADR-0027 D3), each `ok` or
     /// what failed. `window`: the system clock just before the request was
     /// sent and just after its answer was read.
-    pub fn verdicts(&self, window: (SystemTime, SystemTime)) -> Vec<(&'static str, Result<(), String>)> {
-        let secs = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    pub fn verdicts(
+        &self,
+        window: (SystemTime, SystemTime),
+    ) -> Vec<(&'static str, Result<(), String>)> {
+        let secs = |t: SystemTime| {
+            t.duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        };
         let (lo, hi) = (secs(window.0) - 1, secs(window.1) + 1);
         let date = match self.date.as_slice() {
             [] => Ok(()),
             [d] => match imf_fixdate(d) {
                 Some(t) if (lo..=hi).contains(&t) => Ok(()),
-                Some(t) => Err(format!("date {d:?} is outside the request's window ({t} not in {lo}..={hi})")),
+                Some(t) => Err(format!(
+                    "date {d:?} is outside the request's window ({t} not in {lo}..={hi})"
+                )),
                 None => Err(format!("date {d:?} is not an IMF-fixdate")),
             },
             many => Err(format!("{} date fields", many.len())),
         };
-        let chunked = self.transfer_encoding.iter().any(|v| v.eq_ignore_ascii_case("chunked"));
-        let framing = match (self.content_length.as_slice(), self.transfer_encoding.as_slice()) {
+        let chunked = self
+            .transfer_encoding
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case("chunked"));
+        let framing = match (
+            self.content_length.as_slice(),
+            self.transfer_encoding.as_slice(),
+        ) {
             // §6.4.1 / §8.6: nothing follows a bodiless head; a 304 may carry
             // one Content-Length, a 1xx or 204 none, and none carries a
             // Transfer-Encoding.
             (cl, te) if self.bodiless() => match (self.raw_body_len, cl, te) {
                 (0, [], []) => Ok(()),
                 (0, [n], []) if self.status == 304 && n.parse::<usize>().is_ok() => Ok(()),
-                (0, cl, te) => Err(format!("a {} with content-length {cl:?} and transfer-encoding {te:?}", self.status)),
-                (extra, _, _) => Err(format!("{extra} bytes followed the head of a {}", self.status)),
+                (0, cl, te) => Err(format!(
+                    "a {} with content-length {cl:?} and transfer-encoding {te:?}",
+                    self.status
+                )),
+                (extra, _, _) => Err(format!(
+                    "{extra} bytes followed the head of a {}",
+                    self.status
+                )),
             },
             ([], []) => Ok(()),
             ([], _) if chunked && self.transfer_encoding.len() == 1 => Ok(()),
             ([], te) => Err(format!("transfer-encoding {te:?} is not chunked")),
             ([cl], []) => match cl.parse::<usize>() {
                 Ok(n) if n == self.body.len() && n == self.raw_body_len => Ok(()),
-                Ok(n) => Err(format!("content-length {n} but {} bytes followed the head", self.raw_body_len)),
+                Ok(n) => Err(format!(
+                    "content-length {n} but {} bytes followed the head",
+                    self.raw_body_len
+                )),
                 Err(_) => Err(format!("content-length {cl:?} is not a length")),
             },
-            (cl, te) => Err(format!("content-length {cl:?} with transfer-encoding {te:?}")),
+            (cl, te) => Err(format!(
+                "content-length {cl:?} with transfer-encoding {te:?}"
+            )),
         };
-        let connection = if self.connection.iter().all(|v| v.split(',').all(|t| is_token(t.trim()) || t.trim().contains('='))) {
+        let connection = if self.connection.iter().all(|v| {
+            v.split(',')
+                .all(|t| is_token(t.trim()) || t.trim().contains('='))
+        }) {
             Ok(())
         } else {
-            Err(format!("connection fields {:?} are not token lists", self.connection))
+            Err(format!(
+                "connection fields {:?} are not token lists",
+                self.connection
+            ))
         };
         // RFC 9112 §4: reason-phrase = 1*( HTAB / SP / VCHAR / obs-text ),
         // and it may be empty.
-        let reason = if self.reason.bytes().all(|b| b == b'\t' || b == b' ' || (0x21..=0x7e).contains(&b) || b >= 0x80) {
+        let reason = if self
+            .reason
+            .bytes()
+            .all(|b| b == b'\t' || b == b' ' || (0x21..=0x7e).contains(&b) || b >= 0x80)
+        {
             Ok(())
         } else {
-            Err(format!("reason phrase {:?} has a control byte", self.reason))
+            Err(format!(
+                "reason phrase {:?} has a control byte",
+                self.reason
+            ))
         };
         // RFC 9112 §4: status-code = 3DIGIT; RFC 9110 §15: values outside
         // 100..=599 are invalid, and a 1xx is interim, never the final answer
         // (the client reads on for one that never comes).
-        let status = if self.status_token.len() == 3 && self.status_token.bytes().all(|b| b.is_ascii_digit()) && (200..=599).contains(&self.status) {
+        let status = if self.status_token.len() == 3
+            && self.status_token.bytes().all(|b| b.is_ascii_digit())
+            && (200..=599).contains(&self.status)
+        {
             Ok(())
         } else {
-            Err(format!("the final status {:?} is not a 3-digit code in 200..=599", self.status_token))
+            Err(format!(
+                "the final status {:?} is not a 3-digit code in 200..=599",
+                self.status_token
+            ))
         };
         let fields = self.bad_field.clone().map_or(Ok(()), Err);
-        vec![("status", status), ("fields", fields), ("date", date), ("framing", framing), ("connection", connection), ("reason", reason)]
+        vec![
+            ("status", status),
+            ("fields", fields),
+            ("date", date),
+            ("framing", framing),
+            ("connection", connection),
+            ("reason", reason),
+        ]
     }
 }
 
 fn is_token(t: &str) -> bool {
-    !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+    !t.is_empty()
+        && t.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
 
 /// Seconds since the epoch of an IMF-fixdate (`Sun, 06 Nov 1994 08:49:37
@@ -615,12 +822,24 @@ pub fn imf_fixdate(s: &str) -> Option<i64> {
         return None;
     }
     let f: Vec<&str> = rest.split(' ').collect();
-    let [day, mon, year, time, "GMT"] = f.as_slice() else { return None };
+    let [day, mon, year, time, "GMT"] = f.as_slice() else {
+        return None;
+    };
     let day: i64 = (day.len() == 2).then(|| day.parse().ok()).flatten()?;
-    let mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().position(|m| m == mon)? as i64 + 1;
+    let mon = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    .iter()
+    .position(|m| m == mon)? as i64
+        + 1;
     let year: i64 = (year.len() == 4).then(|| year.parse().ok()).flatten()?;
-    let t: Vec<i64> = time.split(':').map(|p| if p.len() == 2 { p.parse().ok() } else { None }).collect::<Option<_>>()?;
-    let [h, m, sec] = t.as_slice() else { return None };
+    let t: Vec<i64> = time
+        .split(':')
+        .map(|p| if p.len() == 2 { p.parse().ok() } else { None })
+        .collect::<Option<_>>()?;
+    let [h, m, sec] = t.as_slice() else {
+        return None;
+    };
     if !(1..=31).contains(&day) || *h > 23 || *m > 59 || *sec > 60 {
         return None;
     }
@@ -655,29 +874,73 @@ pub fn escape(b: &[u8]) -> String {
 /// One response's transcript line: what C-367 compares as values, then the
 /// verdicts on what it leaves to the host. A body longer than 256 bytes is
 /// shown as its length and FNV-1a hash.
-pub fn transcript_line(i: usize, req: &Req, raw: &[u8], window: (SystemTime, SystemTime)) -> String {
+pub fn transcript_line(
+    i: usize,
+    req: &Req,
+    raw: &[u8],
+    window: (SystemTime, SystemTime),
+) -> String {
     let what = format!("#{i} {} {}", req.method, escape(req.target.as_bytes()));
     let o = match observe(raw) {
         Ok(o) => o,
-        Err(e) => return format!("{what} -> UNPARSEABLE ({e}): {}\n", escape(&raw[..raw.len().min(200)])),
+        Err(e) => {
+            return format!(
+                "{what} -> UNPARSEABLE ({e}): {}\n",
+                escape(&raw[..raw.len().min(200)])
+            )
+        }
     };
-    let headers: Vec<String> = o.headers.iter().map(|(k, vs)| format!("{}: {}", escape(k.as_bytes()), vs.iter().map(|v| escape(v.as_bytes())).collect::<Vec<_>>().join(" | "))).collect();
+    let headers: Vec<String> = o
+        .headers
+        .iter()
+        .map(|(k, vs)| {
+            format!(
+                "{}: {}",
+                escape(k.as_bytes()),
+                vs.iter()
+                    .map(|v| escape(v.as_bytes()))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )
+        })
+        .collect();
     let body = if o.body.len() > 256 {
-        format!("<{} bytes fnv1a {:016x}>", o.body.len(), o.body.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)))
+        format!(
+            "<{} bytes fnv1a {:016x}>",
+            o.body.len(),
+            o.body
+                .iter()
+                .fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64)
+                    .wrapping_mul(0x100000001b3))
+        )
     } else {
         escape(&o.body)
     };
-    let verdicts: Vec<String> = o.verdicts(window).into_iter().map(|(k, v)| match v {
-        Ok(()) => format!("{k} ok"),
-        Err(e) => format!("{k} FAILED: {e}"),
-    }).collect();
-    format!("{what} -> {} {} [{}] body={body} ({})\n", escape(o.version.as_bytes()), o.status, headers.join("; "), verdicts.join(", "))
+    let verdicts: Vec<String> = o
+        .verdicts(window)
+        .into_iter()
+        .map(|(k, v)| match v {
+            Ok(()) => format!("{k} ok"),
+            Err(e) => format!("{k} FAILED: {e}"),
+        })
+        .collect();
+    format!(
+        "{what} -> {} {} [{}] body={body} ({})\n",
+        escape(o.version.as_bytes()),
+        o.status,
+        headers.join("; "),
+        verdicts.join(", ")
+    )
 }
 
 /// The response lines of a transcript, without a socket host's `exit` line:
 /// what a stock host is compared on.
 pub fn responses(transcript: &str) -> String {
-    transcript.lines().filter(|l| l.starts_with('#')).map(|l| format!("{l}\n")).collect()
+    transcript
+        .lines()
+        .filter(|l| l.starts_with('#'))
+        .map(|l| format!("{l}\n"))
+        .collect()
 }
 
 /// Every verdict in the transcript held.
@@ -694,19 +957,42 @@ pub fn first_difference(a: &str, b: &str) -> Option<String> {
         if x == y {
             continue;
         }
-        let req = x.split(" -> ").next().unwrap_or(x).split(' ').take(2).collect::<Vec<_>>().join(" ");
+        let req = x
+            .split(" -> ")
+            .next()
+            .unwrap_or(x)
+            .split(' ')
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ");
         if x.starts_with("exit") || y.starts_with("exit") {
             return Some("exit".into());
         }
         let part = |l: &str| -> [String; 4] {
             let (_, r) = l.split_once(" -> ").unwrap_or(("", l));
             let status = r.split(" [").next().unwrap_or("").to_string();
-            let headers = r.split_once(" [").and_then(|(_, h)| h.split_once("] body=")).map(|(h, _)| h.to_string()).unwrap_or_default();
-            let (body, verdicts) = r.split_once("] body=").map(|(_, b)| b.rsplit_once(" (").map(|(b, v)| (b.to_string(), v.to_string())).unwrap_or((b.to_string(), String::new()))).unwrap_or_default();
+            let headers = r
+                .split_once(" [")
+                .and_then(|(_, h)| h.split_once("] body="))
+                .map(|(h, _)| h.to_string())
+                .unwrap_or_default();
+            let (body, verdicts) = r
+                .split_once("] body=")
+                .map(|(_, b)| {
+                    b.rsplit_once(" (")
+                        .map(|(b, v)| (b.to_string(), v.to_string()))
+                        .unwrap_or((b.to_string(), String::new()))
+                })
+                .unwrap_or_default();
             [status, headers, body, verdicts]
         };
         let (px, py) = (part(x), part(y));
-        let which = ["status", "headers", "body", "verdicts"].iter().zip(px.iter().zip(py.iter())).find(|(_, (p, q))| p != q).map(|(w, _)| *w).unwrap_or("line");
+        let which = ["status", "headers", "body", "verdicts"]
+            .iter()
+            .zip(px.iter().zip(py.iter()))
+            .find(|(_, (p, q))| p != q)
+            .map(|(w, _)| *w)
+            .unwrap_or("line");
         return Some(format!("{req} {which}"));
     }
     (la.len() != lb.len()).then(|| "length".to_string())
@@ -718,12 +1004,20 @@ mod tests {
 
     #[test]
     fn a_plan_round_trips_through_its_header_line() {
-        for p in [Plan::Script, Plan::Sized { k: 16, n: 4096 }, Plan::ScriptThenSized { k: 3, n: 7 }] {
+        for p in [
+            Plan::Script,
+            Plan::Sized { k: 16, n: 4096 },
+            Plan::ScriptThenSized { k: 3, n: 7 },
+        ] {
             let src = format!("{}import http\n", p.header());
             assert_eq!(plan_of(&src), Some(p));
         }
         assert_eq!(plan_of("import http\n"), None);
-        assert_eq!(plan_of("// @xf-serve sized k=1\n"), None, "a sized plan names both k and n");
+        assert_eq!(
+            plan_of("// @xf-serve sized k=1\n"),
+            None,
+            "a sized plan names both k and n"
+        );
     }
 
     #[test]
@@ -731,12 +1025,25 @@ mod tests {
         let reqs = Plan::Sized { k: 3, n: 5 }.requests();
         assert_eq!(reqs.len(), 4);
         assert_eq!(reqs[0], ready());
-        assert!(reqs[1..].iter().all(|r| r.method == "POST" && r.body.len() == 5));
-        assert_ne!(reqs[1].body, reqs[2].body, "each request carries its own bytes");
+        assert!(reqs[1..]
+            .iter()
+            .all(|r| r.method == "POST" && r.body.len() == 5));
+        assert_ne!(
+            reqs[1].body, reqs[2].body,
+            "each request carries its own bytes"
+        );
         let wire = String::from_utf8(reqs[1].wire()).unwrap();
-        assert!(wire.starts_with("POST /s/0 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n"), "{wire}");
+        assert!(
+            wire.starts_with("POST /s/0 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n"),
+            "{wire}"
+        );
         assert!(wire.ends_with("Content-Length: 5\r\n\r\nabcde"), "{wire}");
-        assert!(!String::from_utf8(ready().wire()).unwrap().contains("Content-Length"), "an empty body sends no length");
+        assert!(
+            !String::from_utf8(ready().wire())
+                .unwrap()
+                .contains("Content-Length"),
+            "an empty body sends no length"
+        );
     }
 
     fn window() -> (SystemTime, SystemTime) {
@@ -747,11 +1054,29 @@ mod tests {
 
     #[test]
     fn imf_fixdate_parses_the_rfc_example_and_refuses_other_forms() {
-        assert_eq!(imf_fixdate("Sun, 06 Nov 1994 08:49:37 GMT"), Some(784_111_777));
-        assert_eq!(imf_fixdate("Sat, 17 Oct 2026 20:38:29 GMT"), Some(1_792_269_509));
-        assert_eq!(imf_fixdate("Mon, 06 Nov 1994 08:49:37 GMT"), None, "the weekday must match the date");
-        assert_eq!(imf_fixdate("Sunday, 06-Nov-94 08:49:37 GMT"), None, "the obsolete RFC 850 form");
-        assert_eq!(imf_fixdate("Sun Nov  6 08:49:37 1994"), None, "the asctime form");
+        assert_eq!(
+            imf_fixdate("Sun, 06 Nov 1994 08:49:37 GMT"),
+            Some(784_111_777)
+        );
+        assert_eq!(
+            imf_fixdate("Sat, 17 Oct 2026 20:38:29 GMT"),
+            Some(1_792_269_509)
+        );
+        assert_eq!(
+            imf_fixdate("Mon, 06 Nov 1994 08:49:37 GMT"),
+            None,
+            "the weekday must match the date"
+        );
+        assert_eq!(
+            imf_fixdate("Sunday, 06-Nov-94 08:49:37 GMT"),
+            None,
+            "the obsolete RFC 850 form"
+        );
+        assert_eq!(
+            imf_fixdate("Sun Nov  6 08:49:37 1994"),
+            None,
+            "the asctime form"
+        );
         assert_eq!(imf_fixdate("Sun, 06 Nov 1994 08:49:37 UTC"), None);
     }
 
@@ -760,7 +1085,10 @@ mod tests {
         let raw = b"HTTP/1.1 418 I'm a teapot\r\nX-B: 1\r\nx-a: v\r\nx-b: 2\r\ndate: Sat, 17 Oct 2026 20:38:29 GMT\r\ncontent-length: 2\r\n\r\nok";
         let o = observe(raw).unwrap();
         assert_eq!(o.status, 418);
-        assert_eq!(o.headers.get("x-b"), Some(&vec!["1".to_string(), "2".to_string()]));
+        assert_eq!(
+            o.headers.get("x-b"),
+            Some(&vec!["1".to_string(), "2".to_string()])
+        );
         assert_eq!(o.headers.keys().collect::<Vec<_>>(), ["x-a", "x-b"]);
         assert_eq!(o.body, b"ok");
         let req = ready();
@@ -775,7 +1103,12 @@ mod tests {
     #[test]
     fn a_host_field_that_breaks_its_verdict_is_never_equal_to_a_sound_one() {
         let req = ready();
-        let sound = transcript_line(0, &req, b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok", window());
+        let sound = transcript_line(
+            0,
+            &req,
+            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok",
+            window(),
+        );
         for broken in [
             &b"HTTP/1.1 200 OK\r\ndate: Sun, 06 Nov 1994 08:49:37 GMT\r\ncontent-length: 2\r\n\r\nok"[..],
             b"HTTP/1.1 200 OK\r\ndate: yesterday\r\ncontent-length: 2\r\n\r\nok",
@@ -796,19 +1129,51 @@ mod tests {
     #[test]
     fn a_final_status_outside_200_to_599_or_not_three_digits_fails_its_verdict() {
         let req = ready();
-        let line = |code: &str| transcript_line(0, &req, format!("HTTP/1.1 {code} \r\ncontent-length: 0\r\n\r\n").as_bytes(), window());
+        let line = |code: &str| {
+            transcript_line(
+                0,
+                &req,
+                format!("HTTP/1.1 {code} \r\ncontent-length: 0\r\n\r\n").as_bytes(),
+                window(),
+            )
+        };
         for ok in ["200", "418", "599", "299"] {
             assert!(verdicts_hold(&line(ok)), "{}", line(ok));
         }
-        for bad in ["40", "127", "103", "1000", "-1", "-9223372036854775808", "2147483647", "600"] {
+        for bad in [
+            "40",
+            "127",
+            "103",
+            "1000",
+            "-1",
+            "-9223372036854775808",
+            "2147483647",
+            "600",
+        ] {
             let l = line(bad);
-            assert!(!verdicts_hold(&l) && l.contains(&format!("status FAILED: the final status \"{bad}\"")), "{l}");
+            assert!(
+                !verdicts_hold(&l)
+                    && l.contains(&format!("status FAILED: the final status \"{bad}\"")),
+                "{l}"
+            );
         }
         // A `100` alone is the final answer, not an interim head to skip.
-        assert!(line("100").contains("-> HTTP/1.1 100 [] body="), "{}", line("100"));
+        assert!(
+            line("100").contains("-> HTTP/1.1 100 [] body="),
+            "{}",
+            line("100")
+        );
         // An interim 100 before the final answer is skipped.
-        let both = transcript_line(0, &req, b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok", window());
-        assert!(both.contains("-> HTTP/1.1 200 [] body=ok (status ok"), "{both}");
+        let both = transcript_line(
+            0,
+            &req,
+            b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok",
+            window(),
+        );
+        assert!(
+            both.contains("-> HTTP/1.1 200 [] body=ok (status ok"),
+            "{both}"
+        );
     }
 
     #[test]
@@ -816,10 +1181,19 @@ mod tests {
         let req = ready();
         let l = |raw: &[u8]| transcript_line(0, &req, raw, window());
         // A 304 may name the representation's length; nothing follows it.
-        assert!(verdicts_hold(&l(b"HTTP/1.1 304 Not Modified\r\nContent-Length: 2\r\n\r\n")));
+        assert!(verdicts_hold(&l(
+            b"HTTP/1.1 304 Not Modified\r\nContent-Length: 2\r\n\r\n"
+        )));
         assert!(verdicts_hold(&l(b"HTTP/1.1 204 No Content\r\n\r\n")));
-        assert_eq!(l(b"HTTP/1.1 304 Not Modified\r\nContent-Length: 2\r\n\r\n"), l(b"HTTP/1.1 304 X\r\n\r\n"));
-        for bad in [&b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"[..], b"HTTP/1.1 304 N\r\n\r\nok", b"HTTP/1.1 204 N\r\ntransfer-encoding: chunked\r\n\r\n"] {
+        assert_eq!(
+            l(b"HTTP/1.1 304 Not Modified\r\nContent-Length: 2\r\n\r\n"),
+            l(b"HTTP/1.1 304 X\r\n\r\n")
+        );
+        for bad in [
+            &b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"[..],
+            b"HTTP/1.1 304 N\r\n\r\nok",
+            b"HTTP/1.1 204 N\r\ntransfer-encoding: chunked\r\n\r\n",
+        ] {
             assert!(l(bad).contains("framing FAILED"), "{}", l(bad));
         }
     }
@@ -827,16 +1201,42 @@ mod tests {
     #[test]
     fn the_first_difference_names_the_request_and_the_part() {
         let req = ready();
-        let a = transcript_line(0, &req, b"HTTP/1.1 200 OK\r\nx: 1\r\ncontent-length: 2\r\n\r\nok", window());
-        let b = transcript_line(0, &req, b"HTTP/1.1 200 OK\r\nx: 2\r\ncontent-length: 2\r\n\r\nok", window());
-        let c = transcript_line(0, &req, b"HTTP/1.1 500 OK\r\nx: 1\r\ncontent-length: 2\r\n\r\nok", window());
-        let d = transcript_line(0, &req, b"HTTP/1.1 200 OK\r\nx: 1\r\ncontent-length: 2\r\n\r\nno", window());
+        let a = transcript_line(
+            0,
+            &req,
+            b"HTTP/1.1 200 OK\r\nx: 1\r\ncontent-length: 2\r\n\r\nok",
+            window(),
+        );
+        let b = transcript_line(
+            0,
+            &req,
+            b"HTTP/1.1 200 OK\r\nx: 2\r\ncontent-length: 2\r\n\r\nok",
+            window(),
+        );
+        let c = transcript_line(
+            0,
+            &req,
+            b"HTTP/1.1 500 OK\r\nx: 1\r\ncontent-length: 2\r\n\r\nok",
+            window(),
+        );
+        let d = transcript_line(
+            0,
+            &req,
+            b"HTTP/1.1 200 OK\r\nx: 1\r\ncontent-length: 2\r\n\r\nno",
+            window(),
+        );
         assert_eq!(first_difference(&a, &a), None);
         assert_eq!(first_difference(&a, &b).as_deref(), Some("#0 GET headers"));
         assert_eq!(first_difference(&a, &c).as_deref(), Some("#0 GET status"));
         assert_eq!(first_difference(&a, &d).as_deref(), Some("#0 GET body"));
-        assert_eq!(first_difference(&format!("{a}exit 0\n"), &format!("{a}exit 1\n")).as_deref(), Some("exit"));
-        assert_eq!(first_difference(&a, &format!("{a}exit 0\n")).as_deref(), Some("length"));
+        assert_eq!(
+            first_difference(&format!("{a}exit 0\n"), &format!("{a}exit 1\n")).as_deref(),
+            Some("exit")
+        );
+        assert_eq!(
+            first_difference(&a, &format!("{a}exit 0\n")).as_deref(),
+            Some("length")
+        );
         assert_eq!(responses(&format!("{a}exit 0\n")), a);
     }
 
@@ -849,7 +1249,10 @@ mod tests {
     fn a_session_retries_until_ready_sends_each_request_and_stops_the_server() {
         // The listener binds late, as a server that compiles first does.
         let port = free_port();
-        assert!((20_000..30_000).contains(&port), "{port}: below the ephemeral ranges");
+        assert!(
+            (20_000..30_000).contains(&port),
+            "{port}: below the ephemeral ranges"
+        );
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen2 = seen.clone();
         let n = Plan::Script.requests().len();
@@ -868,10 +1271,20 @@ mod tests {
                     }
                     buf.extend_from_slice(&chunk[..k]);
                 }
-                let line = String::from_utf8_lossy(&buf).lines().next().unwrap_or("").to_string();
+                let line = String::from_utf8_lossy(&buf)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 seen2.lock().unwrap().push(line.clone());
                 let body = line.split(' ').nth(1).unwrap_or("").to_string();
-                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}", body.len()).as_bytes());
+                let _ = s.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
             }
         });
         let mut cmd = Command::new("sleep");
@@ -903,7 +1316,14 @@ mod tests {
         });
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "sleep 600; exit 7"]);
-        let s = drive(&mut cmd, port, Host::Socket, &Plan::Sized { k: 0, n: 0 }, true).expect("session");
+        let s = drive(
+            &mut cmd,
+            port,
+            Host::Socket,
+            &Plan::Sized { k: 0, n: 0 },
+            true,
+        )
+        .expect("session");
         assert!(s.transcript.ends_with("exit 7\n"), "{}", s.transcript);
     }
 
@@ -912,7 +1332,15 @@ mod tests {
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "echo 'Error: bind failed: in use' >&2; exit 1"]);
         let e = drive(&mut cmd, free_port(), Host::Socket, &Plan::Script, false).unwrap_err();
-        assert!(e.contains("exited before answering request 0") && e.contains("exit 1") && e.contains("bind failed"), "{e}");
-        assert_eq!(leg_view(&Err(e)), "FAILED the server exited before answering request 0 (GET /): exit 1\n");
+        assert!(
+            e.contains("exited before answering request 0")
+                && e.contains("exit 1")
+                && e.contains("bind failed"),
+            "{e}"
+        );
+        assert_eq!(
+            leg_view(&Err(e)),
+            "FAILED the server exited before answering request 0 (GET /): exit 1\n"
+        );
     }
 }

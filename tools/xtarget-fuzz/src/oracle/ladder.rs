@@ -6,8 +6,8 @@ use std::path::Path;
 use almide::fmt::format_program;
 
 use super::runner::{ProcResult, Toolchain};
-use crate::findings::{quoted_excerpt, SUMMARY_SIDE_CAP};
 use super::ReferenceOracle;
+use crate::findings::{quoted_excerpt, SUMMARY_SIDE_CAP};
 
 /// Which rung a program reached / failed at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,7 +291,9 @@ pub fn run_ladder(
                 let native2 = tc_confirm.run_native_bin(&native_bin);
                 if super::runner::native_hit_memory_cap(&native2) {
                     return Outcome::Skipped {
-                        reason: "native confirm re-run hit the fuzz memory cap — no divergence oracle".into(),
+                        reason:
+                            "native confirm re-run hit the fuzz memory cap — no divergence oracle"
+                                .into(),
                     };
                 }
                 if !native2.timed_out && !native2.spawn_failed {
@@ -343,8 +345,10 @@ pub fn run_ladder(
         // a locally copied string, which is how the first classifier here
         // silently rotted when #931 reworked the wall diagnostic.
         let stderr = String::from_utf8_lossy(&wasm_build.stderr);
-        if let Some(line) =
-            stderr.lines().map(str::trim).find(|l| l.starts_with(almide::WASM_WALL_MARKER))
+        if let Some(line) = stderr
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(almide::WASM_WALL_MARKER))
         {
             return Outcome::Walled {
                 reason: line[almide::WASM_WALL_MARKER.len()..].to_string(),
@@ -447,7 +451,11 @@ pub fn run_ladder(
         // that exited 0 is re-run with the allocation counters armed. A
         // program that ends by `process.exit` ends without unwinding on every
         // leg: nothing was released, so nothing leaked.
-        Outcome::Clean { native } if tc.leak_check && wasm.exit_code == Some(0) && !crate::generator::ends_without_unwinding(source) => {
+        Outcome::Clean { native }
+            if tc.leak_check
+                && wasm.exit_code == Some(0)
+                && !crate::generator::ends_without_unwinding(source) =>
+        {
             match leak_at_exit(tc, file) {
                 Some(finding) => Outcome::Finding(finding),
                 None => Outcome::Clean { native },
@@ -504,8 +512,9 @@ fn compare_runs(
     // (the native-hang doctrine: a clean sibling IS termination evidence),
     // and a killed leg that already printed output falls through too —
     // divergent prefix output is real evidence.
-    let killed_silent =
-        |r: &super::runner::ProcResult| r.exit_code.is_none() && !r.timed_out && r.stdout.is_empty();
+    let killed_silent = |r: &super::runner::ProcResult| {
+        r.exit_code.is_none() && !r.timed_out && r.stdout.is_empty()
+    };
     if (killed_silent(native) && !wasm.success()) || (killed_silent(wasm) && !native.success()) {
         return Outcome::Skipped {
             reason: "one leg was killed without a code or output while the other \
@@ -589,7 +598,10 @@ fn compare_runs(
             return Outcome::Finding(Finding {
                 rung: Rung::Run,
                 kind: FindingKind::OutputDivergence,
-                summary: format!("the files left in the sandbox differ ({})", first_line_diff(nt, wt)),
+                summary: format!(
+                    "the files left in the sandbox differ ({})",
+                    first_line_diff(nt, wt)
+                ),
                 native: Some(nat_ev),
                 wasm: Some(wasm_ev),
             });
@@ -775,7 +787,10 @@ fn embedded_wall(art: &Path, run: &ProcResult) -> Option<String> {
         return None;
     }
     let stderr = String::from_utf8_lossy(&run.stderr);
-    let line = stderr.lines().map(str::trim).find(|l| l.starts_with(almide::WASM_WALL_MARKER))?;
+    let line = stderr
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with(almide::WASM_WALL_MARKER))?;
     Some(line[almide::WASM_WALL_MARKER.len()..].to_string())
 }
 
@@ -992,41 +1007,82 @@ mod resource_class_tests {
     }
 
     const WASM_OOM: &str = "Error: out of memory\n";
-    const WASM_STACK: &str = "Error: failed to run main module\n\nCaused by:\n    0: wasm trap: call stack exhausted\n";
+    const WASM_STACK: &str =
+        "Error: failed to run main module\n\nCaused by:\n    0: wasm trap: call stack exhausted\n";
     const NATIVE_STACK: &str =
         "\nthread 'main' has overflowed its stack\nfatal runtime error: stack overflow\n";
     const NATIVE_OOM: &str = "memory allocation of 2147483647 bytes failed\n";
-    const NATIVE_CLAMP: &str = "thread 'main' panicked at src/main.rs:9:5:\nclamp requires min <= max\n";
+    const NATIVE_CLAMP: &str =
+        "thread 'main' panicked at src/main.rs:9:5:\nclamp requires min <= max\n";
 
     // ── the signals ──
 
     #[test]
     fn signals_are_per_leg_and_exact() {
-        assert_eq!(resource_limit(Leg::Wasm, &leg("", WASM_OOM, Some(1))), Some(ResourceLimit::Memory));
-        assert_eq!(resource_limit(Leg::Wasm, &leg("", WASM_STACK, Some(134))), Some(ResourceLimit::Stack));
-        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_STACK, None)), Some(ResourceLimit::Stack));
-        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_OOM, None)), Some(ResourceLimit::Memory));
+        assert_eq!(
+            resource_limit(Leg::Wasm, &leg("", WASM_OOM, Some(1))),
+            Some(ResourceLimit::Memory)
+        );
+        assert_eq!(
+            resource_limit(Leg::Wasm, &leg("", WASM_STACK, Some(134))),
+            Some(ResourceLimit::Stack)
+        );
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", NATIVE_STACK, None)),
+            Some(ResourceLimit::Stack)
+        );
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", NATIVE_OOM, None)),
+            Some(ResourceLimit::Memory)
+        );
         // A deliberate panic is a program observable, not a limit.
-        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_CLAMP, Some(1))), None);
-        assert_eq!(resource_limit(Leg::Wasm, &leg("", "Error: clamp requires min <= max\n", Some(1))), None);
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", NATIVE_CLAMP, Some(1))),
+            None
+        );
+        assert_eq!(
+            resource_limit(
+                Leg::Wasm,
+                &leg("", "Error: clamp requires min <= max\n", Some(1))
+            ),
+            None
+        );
         // `capacity overflow` is a usize computation, not the host running out.
         assert_eq!(
-            resource_limit(Leg::Native, &leg("", "thread 'main' panicked: capacity overflow\n", Some(101))),
+            resource_limit(
+                Leg::Native,
+                &leg("", "thread 'main' panicked: capacity overflow\n", Some(101))
+            ),
             None
         );
     }
 
     #[test]
     fn a_marker_on_a_successful_leg_is_not_an_abort() {
-        assert_eq!(resource_limit(Leg::Wasm, &leg("Error: out of memory\n", WASM_OOM, Some(0))), None);
-        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_STACK, Some(0))), None);
+        assert_eq!(
+            resource_limit(Leg::Wasm, &leg("Error: out of memory\n", WASM_OOM, Some(0))),
+            None
+        );
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", NATIVE_STACK, Some(0))),
+            None
+        );
     }
 
     #[test]
     fn the_wasm_marker_does_not_classify_native_and_vice_versa() {
-        assert_eq!(resource_limit(Leg::Native, &leg("", WASM_OOM, Some(1))), None);
-        assert_eq!(resource_limit(Leg::Native, &leg("", WASM_STACK, Some(134))), None);
-        assert_eq!(resource_limit(Leg::Wasm, &leg("", NATIVE_STACK, None)), None);
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", WASM_OOM, Some(1))),
+            None
+        );
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", WASM_STACK, Some(134))),
+            None
+        );
+        assert_eq!(
+            resource_limit(Leg::Wasm, &leg("", NATIVE_STACK, None)),
+            None
+        );
         assert_eq!(resource_limit(Leg::Wasm, &leg("", NATIVE_OOM, None)), None);
     }
 
@@ -1046,8 +1102,14 @@ mod resource_class_tests {
     fn one_aborts_without_a_signature_is_not_this_rule() {
         // The #1532 / #2419 shape: one leg answers, the other aborts for a
         // reason that is NOT a resource limit — a real RunFailureDivergence.
-        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("", "Error: index out of bounds\n", Some(1))).is_none());
-        assert!(resource_class(&leg("", NATIVE_CLAMP, Some(1)), &leg("a\n", "", Some(0))).is_none());
+        assert!(resource_class(
+            &leg("a\n", "", Some(0)),
+            &leg("", "Error: index out of bounds\n", Some(1))
+        )
+        .is_none());
+        assert!(
+            resource_class(&leg("", NATIVE_CLAMP, Some(1)), &leg("a\n", "", Some(0))).is_none()
+        );
     }
 
     #[test]
@@ -1056,7 +1118,9 @@ mod resource_class_tests {
         let r = resource_class(&leg("a\n", "", Some(0)), &leg("", WASM_OOM, Some(1)));
         assert!(r.as_deref().is_some_and(|s| s.contains("C-197")), "{r:?}");
         // Wave 4 finding 57 / C-196 both directions.
-        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("", WASM_STACK, Some(134))).is_some());
+        assert!(
+            resource_class(&leg("a\n", "", Some(0)), &leg("", WASM_STACK, Some(134))).is_some()
+        );
         assert!(resource_class(&leg("", NATIVE_STACK, None), &leg("a\n", "", Some(0))).is_some());
         // The reverse memory direction, now that native's std signature is named.
         assert!(resource_class(&leg("", NATIVE_OOM, None), &leg("a\n", "", Some(0))).is_some());
@@ -1066,19 +1130,33 @@ mod resource_class_tests {
     fn one_aborts_at_a_limit_after_agreeing_output_is_a_skip() {
         // wasm printed a PREFIX of native's output and then hit the ceiling:
         // nothing it printed contradicts native.
-        assert!(resource_class(&leg("a\nb\nc\n", "", Some(0)), &leg("a\nb\n", WASM_OOM, Some(1))).is_some());
+        assert!(resource_class(
+            &leg("a\nb\nc\n", "", Some(0)),
+            &leg("a\nb\n", WASM_OOM, Some(1))
+        )
+        .is_some());
     }
 
     #[test]
     fn one_aborts_at_a_limit_after_diverging_output_is_a_finding() {
         // The over-skip #2382 warns about: wasm DIVERGED and then OOMed. The
         // limit merely cut a real divergence short — this must stay a finding.
-        assert!(resource_class(&leg("a\nb\n", "", Some(0)), &leg("a\nX\n", WASM_OOM, Some(1))).is_none());
+        assert!(resource_class(
+            &leg("a\nb\n", "", Some(0)),
+            &leg("a\nX\n", WASM_OOM, Some(1))
+        )
+        .is_none());
         // The wasm leg printed MORE than native's (completed) output — also not a prefix.
-        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("a\nb\n", WASM_OOM, Some(1))).is_none());
+        assert!(
+            resource_class(&leg("a\n", "", Some(0)), &leg("a\nb\n", WASM_OOM, Some(1))).is_none()
+        );
         // Same for stack, and for native as the aborting leg.
-        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("z\n", WASM_STACK, Some(134))).is_none());
-        assert!(resource_class(&leg("z\n", NATIVE_STACK, None), &leg("a\n", "", Some(0))).is_none());
+        assert!(
+            resource_class(&leg("a\n", "", Some(0)), &leg("z\n", WASM_STACK, Some(134))).is_none()
+        );
+        assert!(
+            resource_class(&leg("z\n", NATIVE_STACK, None), &leg("a\n", "", Some(0))).is_none()
+        );
     }
 
     #[test]
@@ -1089,15 +1167,26 @@ mod resource_class_tests {
         // defined OOM line (exit 1, 0 B). Both abort, for DIFFERENT reasons,
         // and wasm's empty stdout contradicts nothing — a resource skip.
         let native_stdout = "x".repeat(91);
-        let r = resource_class(&leg(&native_stdout, NATIVE_CLAMP, Some(1)), &leg("", WASM_OOM, Some(1)));
-        assert!(r.as_deref().is_some_and(|s| s.contains("C-197") && s.contains("non-resource")), "{r:?}");
+        let r = resource_class(
+            &leg(&native_stdout, NATIVE_CLAMP, Some(1)),
+            &leg("", WASM_OOM, Some(1)),
+        );
+        assert!(
+            r.as_deref()
+                .is_some_and(|s| s.contains("C-197") && s.contains("non-resource")),
+            "{r:?}"
+        );
     }
 
     #[test]
     fn a_non_resource_abort_on_the_sibling_does_not_rescue_a_diverged_leg() {
         // native aborted at clamp AFTER printing "a"; wasm printed "b" and
         // then OOMed — the outputs contradict, the limit is not the story.
-        assert!(resource_class(&leg("a\n", NATIVE_CLAMP, Some(1)), &leg("b\n", WASM_OOM, Some(1))).is_none());
+        assert!(resource_class(
+            &leg("a\n", NATIVE_CLAMP, Some(1)),
+            &leg("b\n", WASM_OOM, Some(1))
+        )
+        .is_none());
     }
 
     #[test]
@@ -1115,10 +1204,19 @@ mod resource_class_tests {
     fn both_abort_at_the_same_limit_is_a_skip() {
         // Unbounded recursion by construction: guard page on native, depth
         // trap on wasm — different codes, same limit.
-        let r = resource_class(&leg("", NATIVE_STACK, None), &leg("", WASM_STACK, Some(134)));
-        assert!(r.as_deref().is_some_and(|s| s.contains("the same limit")), "{r:?}");
+        let r = resource_class(
+            &leg("", NATIVE_STACK, None),
+            &leg("", WASM_STACK, Some(134)),
+        );
+        assert!(
+            r.as_deref().is_some_and(|s| s.contains("the same limit")),
+            "{r:?}"
+        );
         let r = resource_class(&leg("", NATIVE_OOM, None), &leg("", WASM_OOM, Some(1)));
-        assert!(r.as_deref().is_some_and(|s| s.contains("the same limit")), "{r:?}");
+        assert!(
+            r.as_deref().is_some_and(|s| s.contains("the same limit")),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -1126,15 +1224,31 @@ mod resource_class_tests {
         // Native's 64-bit space held the allocation and the program then
         // recursed off the stack; wasm32 could not hold it at all.
         let r = resource_class(&leg("", NATIVE_STACK, None), &leg("", WASM_OOM, Some(1)));
-        assert!(r.as_deref().is_some_and(|s| s.contains("a different limit")), "{r:?}");
+        assert!(
+            r.as_deref()
+                .is_some_and(|s| s.contains("a different limit")),
+            "{r:?}"
+        );
         // Both printed an agreeing prefix first, unequal lengths.
-        assert!(resource_class(&leg("a\nb\n", NATIVE_STACK, None), &leg("a\n", WASM_OOM, Some(1))).is_some());
-        assert!(resource_class(&leg("a\n", NATIVE_OOM, None), &leg("a\nb\n", WASM_STACK, Some(134))).is_some());
+        assert!(resource_class(
+            &leg("a\nb\n", NATIVE_STACK, None),
+            &leg("a\n", WASM_OOM, Some(1))
+        )
+        .is_some());
+        assert!(resource_class(
+            &leg("a\n", NATIVE_OOM, None),
+            &leg("a\nb\n", WASM_STACK, Some(134))
+        )
+        .is_some());
     }
 
     #[test]
     fn both_abort_at_limits_after_diverging_output_is_a_finding() {
-        assert!(resource_class(&leg("a\n", NATIVE_STACK, None), &leg("b\n", WASM_OOM, Some(1))).is_none());
+        assert!(resource_class(
+            &leg("a\n", NATIVE_STACK, None),
+            &leg("b\n", WASM_OOM, Some(1))
+        )
+        .is_none());
     }
 }
 
@@ -1169,7 +1283,10 @@ mod compare_runs_tests {
             _ => panic!("a different tree must be a finding"),
         }
         was.tree = nat.tree.clone();
-        assert!(matches!(compare_runs("fn main() -> Unit = ()", &nat, &was, None, None), Outcome::Clean { .. }));
+        assert!(matches!(
+            compare_runs("fn main() -> Unit = ()", &nat, &was, None, None),
+            Outcome::Clean { .. }
+        ));
     }
 
     #[test]
@@ -1183,7 +1300,9 @@ mod compare_runs_tests {
     #[test]
     fn differing_stdout_is_an_output_divergence() {
         let out = compare_runs("", &run("a\n", "", 0), &run("b\n", "", 0), None, None);
-        let Outcome::Finding(f) = out else { panic!("expected a finding") };
+        let Outcome::Finding(f) = out else {
+            panic!("expected a finding")
+        };
         assert_eq!(f.kind, FindingKind::OutputDivergence);
     }
 
@@ -1213,7 +1332,9 @@ mod compare_runs_tests {
         ));
         // With it: a self-check failure naming BOTH legs.
         let out = compare_runs("", &both, &both, None, Some("a0=41\n"));
-        let Outcome::Finding(f) = out else { panic!("expected a finding") };
+        let Outcome::Finding(f) = out else {
+            panic!("expected a finding")
+        };
         assert_eq!(f.kind, FindingKind::SelfCheckFailure);
         assert!(f.summary.contains("both legs"), "summary: {}", f.summary);
         assert!(f.summary.contains("a0=41"), "summary: {}", f.summary);
@@ -1230,7 +1351,9 @@ mod compare_runs_tests {
             None,
             Some("a0=41\n"),
         );
-        let Outcome::Finding(f) = out else { panic!("expected a finding") };
+        let Outcome::Finding(f) = out else {
+            panic!("expected a finding")
+        };
         assert_eq!(f.kind, FindingKind::SelfCheckFailure);
         assert!(f.summary.contains("wasm"), "summary: {}", f.summary);
     }
@@ -1425,7 +1548,10 @@ mod leak_rung_tests {
 
     #[test]
     fn no_report_line_is_not_a_verdict() {
-        assert_eq!(parse_live("__ALMD_WASM_ALLOC absent (the module carries no counters)\n"), None);
+        assert_eq!(
+            parse_live("__ALMD_WASM_ALLOC absent (the module carries no counters)\n"),
+            None
+        );
         assert_eq!(parse_live(""), None);
     }
 }

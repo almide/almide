@@ -94,7 +94,13 @@ pub struct Signature {
 /// type owns and no browser runs script in (ADR-0032, E117).
 pub const LITERAL_ATTRS: &[(&str, &[&str])] = &[(
     "literal_media",
-    &["\"text/csv\"", "\"text/csv; charset=utf-8\"", "\"application/octet-stream\"", "\"image/png\"", "\"application/pdf\""],
+    &[
+        "\"text/csv\"",
+        "\"text/csv; charset=utf-8\"",
+        "\"application/octet-stream\"",
+        "\"image/png\"",
+        "\"application/pdf\"",
+    ],
 )];
 
 /// The types the grammar builds that conform to `protocol`, read off the
@@ -107,12 +113,21 @@ pub fn conformers(protocol: &str) -> Vec<GenType> {
         names.extend(p.conformers.iter().map(|t| t.display()));
         names.extend(p.named_conformers.iter().map(|n| n.to_string()));
     }
-    names.extend(declared_conformances().iter().filter(|(_, ps)| ps.iter().any(|p| p == protocol)).map(|(t, _)| t.clone()));
+    names.extend(
+        declared_conformances()
+            .iter()
+            .filter(|(_, ps)| ps.iter().any(|p| p == protocol))
+            .map(|(t, _)| t.clone()),
+    );
     let none = HashMap::new();
     let mut out: Vec<GenType> = Vec::new();
     for n in names {
-        let t = almide::ast::TypeExpr::Simple { name: almide::intern::sym(&n) };
-        let g = SigType::from_type_expr(&t).filter(|s| !matches!(s, SigType::Var(_))).and_then(|s| s.instantiate(&none));
+        let t = almide::ast::TypeExpr::Simple {
+            name: almide::intern::sym(&n),
+        };
+        let g = SigType::from_type_expr(&t)
+            .filter(|s| !matches!(s, SigType::Var(_)))
+            .and_then(|s| s.instantiate(&none));
         if let Some(g) = g.filter(|g| !out.contains(g)) {
             out.push(g);
         }
@@ -126,10 +141,20 @@ fn declared_conformances() -> &'static [(String, Vec<String>)] {
     TABLE.get_or_init(|| {
         let mut out = Vec::new();
         for &(_, source, _) in BUNDLED_MODULES {
-            let Some(program) = parse(source) else { continue };
+            let Some(program) = parse(source) else {
+                continue;
+            };
             for d in &program.decls {
-                if let Decl::Type { name, deriving: Some(ps), .. } = d {
-                    out.push((sym_str(*name).to_string(), ps.iter().map(|p| sym_str(*p).to_string()).collect()));
+                if let Decl::Type {
+                    name,
+                    deriving: Some(ps),
+                    ..
+                } = d
+                {
+                    out.push((
+                        sym_str(*name).to_string(),
+                        ps.iter().map(|p| sym_str(*p).to_string()).collect(),
+                    ));
                 }
             }
         }
@@ -142,7 +167,8 @@ fn declared_conformances() -> &'static [(String, Vec<String>)] {
 /// so their effect functions are catalogued (tier E1,
 /// docs/roadmap/active/effect-inspection-harness.md). Every other effect
 /// function stays out.
-pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args", "process", "net", "http"];
+pub const SANDBOXED_EFFECT_MODULES: &[&str] =
+    &["fs", "env", "io", "args", "process", "net", "http"];
 
 /// Modules whose functions the stock runtime cannot serve but the embedded
 /// host does (`target-availability.toml` rows whose only leg is stock-p1):
@@ -159,18 +185,24 @@ pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process", "net", "http"];
 /// reports alike (C-350; the declaration's 0..=255 holds on native only).
 /// Every catalogued `-> Never` function has a row here
 /// (`every_never_returning_function_is_classified`).
-pub const NEVER_RETURNING: &[(&str, &[(&str, &str)])] = &[("process.exit", &[("code", "({code} % 126 + 126) % 126")])];
+pub const NEVER_RETURNING: &[(&str, &[(&str, &str)])] =
+    &[("process.exit", &[("code", "({code} % 126 + 126) % 126")])];
 
 /// The [`NEVER_RETURNING`] row of `module.func`.
 pub fn never_domain(module: &str, func: &str) -> Option<&'static [(&'static str, &'static str)]> {
-    NEVER_RETURNING.iter().find(|(f, _)| f.split_once('.') == Some((module, func))).map(|(_, d)| *d)
+    NEVER_RETURNING
+        .iter()
+        .find(|(f, _)| f.split_once('.') == Some((module, func)))
+        .map(|(_, d)| *d)
 }
 
 /// `src` calls a [`NEVER_RETURNING`] function: it ends without unwinding,
 /// on every leg, so what is live when it ends was released by no one —
 /// the live-heap rung has no leak to judge there.
 pub fn ends_without_unwinding(src: &str) -> bool {
-    NEVER_RETURNING.iter().any(|(f, _)| src.contains(&format!("{f}(")))
+    NEVER_RETURNING
+        .iter()
+        .any(|(f, _)| src.contains(&format!("{f}(")))
 }
 
 /// Effect modules that reach no host: a computation that can fail, the same
@@ -226,17 +258,25 @@ impl Signature {
     /// actually construct a value of (see `gen_call`).
     /// Every bounded type variable `subst` binds is bound to a conforming type.
     pub fn admits(&self, subst: &HashMap<String, GenType>) -> bool {
-        self.bounds.iter().all(|(v, allowed)| subst.get(v).is_none_or(|t| allowed.contains(t)))
+        self.bounds
+            .iter()
+            .all(|(v, allowed)| subst.get(v).is_none_or(|t| allowed.contains(t)))
     }
 
     /// The types bounded variable `v` may take; `None` when it is unbounded.
     pub fn bound_of(&self, v: &str) -> Option<&[GenType]> {
-        self.bounds.iter().find(|(n, _)| n == v).map(|(_, a)| a.as_slice())
+        self.bounds
+            .iter()
+            .find(|(n, _)| n == v)
+            .map(|(_, a)| a.as_slice())
     }
 
     /// The literals parameter `i` is written as, when it is literal-only.
     pub fn literal_at(&self, i: usize) -> Option<&'static [&'static str]> {
-        self.literal_params.iter().find(|(j, _)| *j == i).map(|(_, l)| *l)
+        self.literal_params
+            .iter()
+            .find(|(j, _)| *j == i)
+            .map(|(_, l)| *l)
     }
 
     pub fn forced_bindings(&self) -> HashMap<String, GenType> {
@@ -267,32 +307,100 @@ impl Signature {
 ///
 /// `(module_name, source_text, needs_import)`.
 const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
-    ("string", include_str!("../../../../stdlib/string.almd"), false),
+    (
+        "string",
+        include_str!("../../../../stdlib/string.almd"),
+        false,
+    ),
     ("int", include_str!("../../../../stdlib/int.almd"), false),
-    ("float", include_str!("../../../../stdlib/float.almd"), false),
+    (
+        "float",
+        include_str!("../../../../stdlib/float.almd"),
+        false,
+    ),
     ("list", include_str!("../../../../stdlib/list.almd"), false),
     ("map", include_str!("../../../../stdlib/map.almd"), false),
     ("set", include_str!("../../../../stdlib/set.almd"), false),
-    ("option", include_str!("../../../../stdlib/option.almd"), false),
-    ("result", include_str!("../../../../stdlib/result.almd"), false),
+    (
+        "option",
+        include_str!("../../../../stdlib/option.almd"),
+        false,
+    ),
+    (
+        "result",
+        include_str!("../../../../stdlib/result.almd"),
+        false,
+    ),
     ("math", include_str!("../../../../stdlib/math.almd"), false),
     ("int8", include_str!("../../../../stdlib/int8.almd"), false),
-    ("int16", include_str!("../../../../stdlib/int16.almd"), false),
-    ("int32", include_str!("../../../../stdlib/int32.almd"), false),
-    ("int64", include_str!("../../../../stdlib/int64.almd"), false),
-    ("uint8", include_str!("../../../../stdlib/uint8.almd"), false),
-    ("uint16", include_str!("../../../../stdlib/uint16.almd"), false),
-    ("uint32", include_str!("../../../../stdlib/uint32.almd"), false),
-    ("uint64", include_str!("../../../../stdlib/uint64.almd"), false),
-    ("float32", include_str!("../../../../stdlib/float32.almd"), false),
-    ("float64", include_str!("../../../../stdlib/float64.almd"), false),
-    ("bytes", include_str!("../../../../stdlib/bytes.almd"), false),
+    (
+        "int16",
+        include_str!("../../../../stdlib/int16.almd"),
+        false,
+    ),
+    (
+        "int32",
+        include_str!("../../../../stdlib/int32.almd"),
+        false,
+    ),
+    (
+        "int64",
+        include_str!("../../../../stdlib/int64.almd"),
+        false,
+    ),
+    (
+        "uint8",
+        include_str!("../../../../stdlib/uint8.almd"),
+        false,
+    ),
+    (
+        "uint16",
+        include_str!("../../../../stdlib/uint16.almd"),
+        false,
+    ),
+    (
+        "uint32",
+        include_str!("../../../../stdlib/uint32.almd"),
+        false,
+    ),
+    (
+        "uint64",
+        include_str!("../../../../stdlib/uint64.almd"),
+        false,
+    ),
+    (
+        "float32",
+        include_str!("../../../../stdlib/float32.almd"),
+        false,
+    ),
+    (
+        "float64",
+        include_str!("../../../../stdlib/float64.almd"),
+        false,
+    ),
+    (
+        "bytes",
+        include_str!("../../../../stdlib/bytes.almd"),
+        false,
+    ),
     // Bounds-checked Regions (ADR-0031), built by the `Region` nominal
     // (`nominal.rs`); hostless, so its effect fns are drawn too.
     ("ffi", include_str!("../../../../stdlib/ffi.almd"), true),
-    ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
-    ("value", include_str!("../../../../stdlib/value.almd"), false),
-    ("base64", include_str!("../../../../stdlib/base64.almd"), true),
+    (
+        "matrix",
+        include_str!("../../../../stdlib/matrix.almd"),
+        false,
+    ),
+    (
+        "value",
+        include_str!("../../../../stdlib/value.almd"),
+        false,
+    ),
+    (
+        "base64",
+        include_str!("../../../../stdlib/base64.almd"),
+        true,
+    ),
     ("hex", include_str!("../../../../stdlib/hex.almd"), true),
     ("hash", include_str!("../../../../stdlib/hash.almd"), true),
     ("zlib", include_str!("../../../../stdlib/zlib.almd"), true),
@@ -304,18 +412,38 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("env", include_str!("../../../../stdlib/env.almd"), true),
     ("io", include_str!("../../../../stdlib/io.almd"), true),
     ("args", include_str!("../../../../stdlib/args.almd"), true),
-    ("datetime", include_str!("../../../../stdlib/datetime.almd"), false),
+    (
+        "datetime",
+        include_str!("../../../../stdlib/datetime.almd"),
+        false,
+    ),
     ("http", include_str!("../../../../stdlib/http.almd"), true),
     ("html", include_str!("../../../../stdlib/html.almd"), true),
     // An opaque holder whose renderers all print `Secret(***)` (#4107).
-    ("secret", include_str!("../../../../stdlib/secret.almd"), true),
+    (
+        "secret",
+        include_str!("../../../../stdlib/secret.almd"),
+        true,
+    ),
     // The asserts abort the same way on every leg outside a test block
     // (C-381, C-339), so a failing one is an observable, comparable outcome.
-    ("testing", include_str!("../../../../stdlib/testing.almd"), true),
+    (
+        "testing",
+        include_str!("../../../../stdlib/testing.almd"),
+        true,
+    ),
     // Host-decided results only (`verdicts.rs`): every other function of
     // these is an effect a sandbox does not reproduce.
-    ("random", include_str!("../../../../stdlib/random.almd"), true),
-    ("process", include_str!("../../../../stdlib/process.almd"), true),
+    (
+        "random",
+        include_str!("../../../../stdlib/random.almd"),
+        true,
+    ),
+    (
+        "process",
+        include_str!("../../../../stdlib/process.almd"),
+        true,
+    ),
     // Over the loopback fixtures only (`oracle/fixture.rs`, `term.rs`).
     ("net", include_str!("../../../../stdlib/net.almd"), true),
 ];
@@ -328,7 +456,9 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
 fn clock_constructors() -> Vec<Signature> {
     let mut out = Vec::new();
     for (module, ty) in almide::time_units::TIME_MODULES {
-        let Some(nominal) = super::nominal::get(ty) else { continue };
+        let Some(nominal) = super::nominal::get(ty) else {
+            continue;
+        };
         for (unit, _) in almide::time_units::TIME_UNITS {
             out.push(Signature {
                 module,
@@ -427,7 +557,10 @@ pub fn build() -> Vec<Signature> {
         for decl in &program.decls {
             if let Some(sig) = signature_from_decl(module, decl) {
                 let name = format!("{}.{}", sig.module, sig.func);
-                if !unavailable.contains(&name) || (EMBEDDED_ROUTED_MODULES.contains(&sig.module) && embedded_only().contains(&name)) {
+                if !unavailable.contains(&name)
+                    || (EMBEDDED_ROUTED_MODULES.contains(&sig.module)
+                        && embedded_only().contains(&name))
+                {
                     out.push(sig);
                 }
             }
@@ -444,7 +577,8 @@ pub fn build() -> Vec<Signature> {
 fn names_type(src: &str, name: &str) -> bool {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     src.match_indices(name).any(|(i, _)| {
-        !src[..i].chars().next_back().is_some_and(word) && !src[i + name.len()..].chars().next().is_some_and(word)
+        !src[..i].chars().next_back().is_some_and(word)
+            && !src[i + name.len()..].chars().next().is_some_and(word)
     })
 }
 
@@ -456,15 +590,26 @@ pub fn imports_for(src: &str) -> String {
         }
         let call = format!("{module}.");
         let used = src.match_indices(&call).any(|(i, _)| {
-            !src[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
-        }) || super::nominal::NOMINALS.iter().any(|n| n.module == module && names_type(src, n.name));
+            !src[..i]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        }) || super::nominal::NOMINALS
+            .iter()
+            .any(|n| n.module == module && names_type(src, n.name));
         if used {
             out.push_str(&format!("import {module}\n"));
         }
     }
     // The deprecated raw-pointer `bytes` spellings are outside the
     // memory-safety guarantee: a file calling one must `import ffi` (E100).
-    let raw_ptr = ["bytes.as_ptr(", "bytes.as_mut_ptr(", "bytes.data_ptr(", "bytes.copy_to_ptr(", "bytes.from_raw_ptr("];
+    let raw_ptr = [
+        "bytes.as_ptr(",
+        "bytes.as_mut_ptr(",
+        "bytes.data_ptr(",
+        "bytes.copy_to_ptr(",
+        "bytes.from_raw_ptr(",
+    ];
     if raw_ptr.iter().any(|c| src.contains(c)) && !out.contains("import ffi\n") {
         out.push_str("import ffi\n");
     }
@@ -521,7 +666,11 @@ fn embedded_only() -> &'static std::collections::HashSet<String> {
 pub fn needs_embedded(src: &str) -> bool {
     embedded_only()
         .iter()
-        .filter(|f| EMBEDDED_ROUTED_MODULES.iter().any(|m| f.starts_with(&format!("{m}."))))
+        .filter(|f| {
+            EMBEDDED_ROUTED_MODULES
+                .iter()
+                .any(|m| f.starts_with(&format!("{m}.")))
+        })
         .any(|f| src.contains(&format!("{f}(")))
 }
 
@@ -536,18 +685,39 @@ mod availability_tests {
         let cat = build();
         // A row the embedded host serves stays, its wasm leg run there.
         let unserved = |n: &String| unavailable.contains(n) && !embedded_only().contains(n);
-        assert!(!cat.iter().any(|s| unserved(&format!("{}.{}", s.module, s.func))));
+        assert!(!cat
+            .iter()
+            .any(|s| unserved(&format!("{}.{}", s.module, s.func))));
         // `http.start` walls only the stock artifact (stock-p1): the embedded
         // host serves the call handle, so the row stays.
-        assert!(cat.iter().any(|s| s.module == "http" && s.func == "start"), "a row the embedded host serves stays");
-        assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
+        assert!(
+            cat.iter().any(|s| s.module == "http" && s.func == "start"),
+            "a row the embedded host serves stays"
+        );
+        assert!(
+            cat.iter()
+                .any(|s| s.module == "matrix" && s.func == "dot_row"),
+            "a served matrix fn stays"
+        );
     }
 
     #[test]
     fn value_and_json_functions_over_the_grammar_are_catalogued() {
-        let names: Vec<String> = build().iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
-        for want in ["value.get", "value.pick", "value.as_object", "json.parse", "json.stringify"] {
-            assert!(names.iter().any(|n| n == want), "{want} is not in the catalogue");
+        let names: Vec<String> = build()
+            .iter()
+            .map(|s| format!("{}.{}", s.module, s.func))
+            .collect();
+        for want in [
+            "value.get",
+            "value.pick",
+            "value.as_object",
+            "json.parse",
+            "json.stringify",
+        ] {
+            assert!(
+                names.iter().any(|n| n == want),
+                "{want} is not in the catalogue"
+            );
         }
         let src = "fn main() -> Unit = {\n  let s = json.stringify(value.null())\n}\n";
         assert_eq!(imports_for(src), "import json\n");
@@ -555,8 +725,15 @@ mod availability_tests {
 
     #[test]
     fn private_helpers_are_left_out_of_the_catalogue() {
-        let private: Vec<String> = build().iter().filter(|s| s.func.starts_with("__")).map(|s| format!("{}.{}", s.module, s.func)).collect();
-        assert!(private.is_empty(), "private helpers in the catalogue: {private:?}");
+        let private: Vec<String> = build()
+            .iter()
+            .filter(|s| s.func.starts_with("__"))
+            .map(|s| format!("{}.{}", s.module, s.func))
+            .collect();
+        assert!(
+            private.is_empty(),
+            "private helpers in the catalogue: {private:?}"
+        );
     }
 
     #[test]
@@ -571,7 +748,10 @@ mod availability_tests {
         assert_eq!(imports_for("let z = string.len(\"url.\")"), "import url\n");
         let cat = build();
         for m in ["base64", "hex", "hash", "zlib", "path", "url", "regex"] {
-            assert!(cat.iter().any(|s| s.module == m), "{m} has a synthesizable function in the catalogue");
+            assert!(
+                cat.iter().any(|s| s.module == m),
+                "{m} has a synthesizable function in the catalogue"
+            );
         }
     }
 
@@ -592,8 +772,15 @@ mod availability_tests {
         }
         for (e, d) in LEG_DEPENDENT_ENCODERS {
             // The decoder is a plain fn since wave 4A: catalogued, not an effect.
-            assert!(effects.contains(&e.to_string()) && cat.iter().any(|s| format!("{}.{}", s.module, s.func) == *d), "{e} / {d} not catalogued");
-            let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
+            assert!(
+                effects.contains(&e.to_string())
+                    && cat.iter().any(|s| format!("{}.{}", s.module, s.func) == *d),
+                "{e} / {d} not catalogued"
+            );
+            let s = cat
+                .iter()
+                .find(|s| format!("{}.{}", s.module, s.func) == *e)
+                .unwrap();
             assert_eq!(s.observed_through, Some(*d));
         }
     }
@@ -607,18 +794,38 @@ mod availability_tests {
     fn a_bounded_type_variable_takes_only_its_conformers() {
         let cat = build();
         for f in ["response", "with_headers", "with_body"] {
-            let sig = cat.iter().find(|s| s.module == "http" && s.func == f).unwrap_or_else(|| panic!("http.{f} is not in the catalogue"));
-            let b = sig.bound_of("B").unwrap_or_else(|| panic!("http.{f}: B is unbounded"));
-            for t in [GenType::String, GenType::Bytes, GenType::Value, GenType::Nominal("SafeHtml"), GenType::Nominal("TypedBody")] {
-                assert!(b.contains(&t), "http.{f}: {t:?} is not a Body conformer in {b:?}");
+            let sig = cat
+                .iter()
+                .find(|s| s.module == "http" && s.func == f)
+                .unwrap_or_else(|| panic!("http.{f} is not in the catalogue"));
+            let b = sig
+                .bound_of("B")
+                .unwrap_or_else(|| panic!("http.{f}: B is unbounded"));
+            for t in [
+                GenType::String,
+                GenType::Bytes,
+                GenType::Value,
+                GenType::Nominal("SafeHtml"),
+                GenType::Nominal("TypedBody"),
+            ] {
+                assert!(
+                    b.contains(&t),
+                    "http.{f}: {t:?} is not a Body conformer in {b:?}"
+                );
             }
             assert!(!b.contains(&GenType::Int), "http.{f}: Int is not a Body");
             let mut subst = HashMap::new();
             subst.insert("B".to_string(), GenType::Int);
             assert!(!sig.admits(&subst));
         }
-        let join = cat.iter().find(|s| s.module == "list" && s.func == "join").expect("list.join");
-        assert_eq!(join.bound_of("T"), Some(&[GenType::String, GenType::Bytes][..]));
+        let join = cat
+            .iter()
+            .find(|s| s.module == "list" && s.func == "join")
+            .expect("list.join");
+        assert_eq!(
+            join.bound_of("T"),
+            Some(&[GenType::String, GenType::Bytes][..])
+        );
     }
 
     /// `@literal_media(media_type)` makes `http.typed`'s first parameter
@@ -626,49 +833,95 @@ mod availability_tests {
     #[test]
     fn a_literal_only_parameter_is_read_off_its_attribute() {
         let cat = build();
-        let typed = cat.iter().find(|s| s.module == "http" && s.func == "typed").expect("http.typed");
+        let typed = cat
+            .iter()
+            .find(|s| s.module == "http" && s.func == "typed")
+            .expect("http.typed");
         let lits = typed.literal_at(0).expect("media_type is literal-only");
         assert!(typed.literal_at(1).is_none());
         for l in lits {
-            let t = l.trim_matches('"').split(';').next().unwrap().trim().to_ascii_lowercase();
-            assert!(!almide::media_owners::script_capable().iter().any(|p| almide::media_owners::matches(&t, p)), "{l} is script-capable");
-            assert!(!almide::media_owners::stdlib_owners().iter().any(|(p, _)| almide::media_owners::matches(&t, p)), "{l} is owned");
+            let t = l
+                .trim_matches('"')
+                .split(';')
+                .next()
+                .unwrap()
+                .trim()
+                .to_ascii_lowercase();
+            assert!(
+                !almide::media_owners::script_capable()
+                    .iter()
+                    .any(|p| almide::media_owners::matches(&t, p)),
+                "{l} is script-capable"
+            );
+            assert!(
+                !almide::media_owners::stdlib_owners()
+                    .iter()
+                    .any(|(p, _)| almide::media_owners::matches(&t, p)),
+                "{l} is owned"
+            );
         }
     }
 
     #[test]
     fn every_public_ffi_function_is_catalogued() {
-        let src = BUNDLED_MODULES.iter().find(|(m, _, _)| *m == "ffi").unwrap().1;
+        let src = BUNDLED_MODULES
+            .iter()
+            .find(|(m, _, _)| *m == "ffi")
+            .unwrap()
+            .1;
         let public: Vec<String> = parse(src)
             .unwrap()
             .decls
             .iter()
             .filter_map(|d| match d {
-                Decl::Fn { name, visibility: almide::ast::Visibility::Public, .. } if !sym_str(*name).starts_with("__") => Some(sym_str(*name).to_string()),
+                Decl::Fn {
+                    name,
+                    visibility: almide::ast::Visibility::Public,
+                    ..
+                } if !sym_str(*name).starts_with("__") => Some(sym_str(*name).to_string()),
                 _ => None,
             })
             .collect();
         assert!(!public.is_empty(), "the ffi module declares no public fn");
         let cat = build();
         for f in &public {
-            assert!(cat.iter().any(|s| s.module == "ffi" && s.func == *f), "ffi.{f} is not in the catalogue");
+            assert!(
+                cat.iter().any(|s| s.module == "ffi" && s.func == *f),
+                "ffi.{f} is not in the catalogue"
+            );
         }
-        assert!(cat.iter().any(|s| s.module == "ffi" && s.effect), "no ffi effect fn is drawn");
+        assert!(
+            cat.iter().any(|s| s.module == "ffi" && s.effect),
+            "no ffi effect fn is drawn"
+        );
     }
 
     #[test]
     fn every_never_returning_function_is_classified() {
         let cat = build();
-        let never: Vec<String> = cat.iter().filter(|s| s.ret == SigType::Never).map(|s| format!("{}.{}", s.module, s.func)).collect();
+        let never: Vec<String> = cat
+            .iter()
+            .filter(|s| s.ret == SigType::Never)
+            .map(|s| format!("{}.{}", s.module, s.func))
+            .collect();
         assert!(never.contains(&"process.exit".to_string()), "{never:?}");
         for f in &never {
             let (m, n) = f.split_once('.').unwrap();
-            assert!(never_domain(m, n).is_some(), "{f}: a `-> Never` function with no NEVER_RETURNING row");
+            assert!(
+                never_domain(m, n).is_some(),
+                "{f}: a `-> Never` function with no NEVER_RETURNING row"
+            );
         }
         for (f, domain) in NEVER_RETURNING {
-            let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *f).unwrap_or_else(|| panic!("{f} is not catalogued"));
+            let s = cat
+                .iter()
+                .find(|s| format!("{}.{}", s.module, s.func) == *f)
+                .unwrap_or_else(|| panic!("{f} is not catalogued"));
             for (p, _) in *domain {
-                assert!(s.param_names.iter().any(|q| q == p), "{f}: domain names `{p}`, not a parameter");
+                assert!(
+                    s.param_names.iter().any(|q| q == p),
+                    "{f}: domain names `{p}`, not a parameter"
+                );
             }
         }
     }
@@ -718,7 +971,11 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // A host-decided result is admitted past both filters below: its calls
     // are checked and replaced by a fixed value (`verdicts.rs`).
     let verdict = super::verdicts::verdict_for(module, &func);
-    if verdict.is_none() && effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !hostless(module) {
+    if verdict.is_none()
+        && effect
+        && !SANDBOXED_EFFECT_MODULES.contains(&module)
+        && !hostless(module)
+    {
         return None;
     }
 
@@ -773,8 +1030,14 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     }
     ret.collect_vars(&mut used);
     let mut bounds = Vec::new();
-    for g in generics.iter().flatten().filter(|g| used.contains(&sym_str(g.name).to_string())) {
-        let Some(bs) = g.bounds.as_ref().filter(|bs| !bs.is_empty()) else { continue };
+    for g in generics
+        .iter()
+        .flatten()
+        .filter(|g| used.contains(&sym_str(g.name).to_string()))
+    {
+        let Some(bs) = g.bounds.as_ref().filter(|bs| !bs.is_empty()) else {
+            continue;
+        };
         let mut allowed = conformers(sym_str(bs[0]));
         for b in &bs[1..] {
             let more = conformers(sym_str(*b));
@@ -787,18 +1050,35 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     }
     let literal_params: Vec<(usize, &'static [&'static str])> = attrs
         .iter()
-        .filter_map(|a| LITERAL_ATTRS.iter().find(|(n, _)| *n == sym_str(a.name)).map(|(_, l)| (a, *l)))
+        .filter_map(|a| {
+            LITERAL_ATTRS
+                .iter()
+                .find(|(n, _)| *n == sym_str(a.name))
+                .map(|(_, l)| (a, *l))
+        })
         .flat_map(|(a, l)| {
-            a.args.iter().filter(|x| x.name.is_none()).filter_map(move |x| match &x.value {
-                almide::ast::AttrValue::Ident { name } => params.iter().position(|p| p.name == *name).map(|i| (i, l)),
-                _ => None,
-            })
+            a.args
+                .iter()
+                .filter(|x| x.name.is_none())
+                .filter_map(move |x| match &x.value {
+                    almide::ast::AttrValue::Ident { name } => {
+                        params.iter().position(|p| p.name == *name).map(|i| (i, l))
+                    }
+                    _ => None,
+                })
         })
         .collect();
 
     // Weight 0: only a campaign focused on it draws a host-decided call.
-    let weight = if verdict.is_some() { 0 } else { weight_for(module, &func) };
-    let observed_through = LEG_DEPENDENT_ENCODERS.iter().find(|(e, _)| *e == format!("{module}.{func}")).map(|(_, d)| *d);
+    let weight = if verdict.is_some() {
+        0
+    } else {
+        weight_for(module, &func)
+    };
+    let observed_through = LEG_DEPENDENT_ENCODERS
+        .iter()
+        .find(|(e, _)| *e == format!("{module}.{func}"))
+        .map(|(_, d)| *d);
 
     Some(Signature {
         module,

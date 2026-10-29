@@ -17,6 +17,7 @@
 //! Only the third can catch a bug that both backends share, because only
 //! it needs no second execution to know the right answer.
 
+pub mod aborts_gen;
 mod catalogue;
 pub mod composition;
 mod denylist;
@@ -26,14 +27,13 @@ mod mutate;
 mod net_unix_args;
 mod nominal;
 mod pools;
+mod program;
+pub mod serve_gen;
 /// The shape vocabulary of the multi-module matrix gate (#3309), shared
 /// verbatim with `tests/shape_matrix_test.rs` so the random hunt and the
 /// deterministic gate never drift apart.
 #[path = "../../../../tests/shape_matrix/gen.rs"]
 pub mod shape;
-mod program;
-pub mod aborts_gen;
-pub mod serve_gen;
 mod sig_type;
 mod term;
 mod types;
@@ -44,7 +44,10 @@ pub fn inspect_max_k(name: &str, effect: bool) -> Option<u64> {
     inspect_gen::effect_recipes::max_k(name, effect)
 }
 
-pub use catalogue::{build as build_catalogue, ends_without_unwinding, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
+pub use catalogue::{
+    build as build_catalogue, ends_without_unwinding, needs_embedded, Signature,
+    SANDBOXED_EFFECT_MODULES,
+};
 
 use crate::rng::SplitMix64;
 
@@ -166,7 +169,11 @@ pub struct Project {
 impl Project {
     /// The entry file's text (what the fmt and interp rungs see).
     pub fn entry_source(&self) -> &str {
-        self.files.iter().find(|(p, _)| *p == self.entry).map(|(_, t)| t.as_str()).unwrap_or("")
+        self.files
+            .iter()
+            .find(|(p, _)| *p == self.entry)
+            .map(|(_, t)| t.as_str())
+            .unwrap_or("")
     }
 
     /// Write every file under `root` (emptied first).
@@ -182,7 +189,10 @@ impl Project {
 
     /// Every file, each under a `// ==== <path> ====` header.
     pub fn bundle(&self) -> String {
-        self.files.iter().map(|(p, t)| format!("// ==== {p} ====\n{t}\n")).collect()
+        self.files
+            .iter()
+            .map(|(p, t)| format!("// ==== {p} ====\n{t}\n"))
+            .collect()
     }
 }
 
@@ -196,7 +206,13 @@ pub enum FamilyPlan {
 
 impl Generated {
     fn plain(source: String, origin: Origin) -> Self {
-        Generated { source, origin, expected_stdout: None, plan: None, project: None }
+        Generated {
+            source,
+            origin,
+            expected_stdout: None,
+            plan: None,
+            project: None,
+        }
     }
 }
 
@@ -259,7 +275,11 @@ impl Engine {
         self.inspect_target_filled(name, types::GenType::String)
     }
 
-    fn inspect_target_filled(&self, name: &str, fill: types::GenType) -> Result<inspect_gen::Target, String> {
+    fn inspect_target_filled(
+        &self,
+        name: &str,
+        fill: types::GenType,
+    ) -> Result<inspect_gen::Target, String> {
         let sig = self
             .catalogue
             .iter()
@@ -281,13 +301,21 @@ impl Engine {
                 self.focus.get_or_insert(i);
             }
         }
-        if self.focus.is_some() { Ok(self) } else { Err(format!("--focus {focus}: not in the generator's catalogue")) }
+        if self.focus.is_some() {
+            Ok(self)
+        } else {
+            Err(format!("--focus {focus}: not in the generator's catalogue"))
+        }
     }
 
     /// `module.fn` of every catalogued signature — the functions `--focus`
     /// and `inspect` can reach (the inspection ledger's coverage).
     pub fn catalogue_names(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.catalogue.iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
+        let mut v: Vec<String> = self
+            .catalogue
+            .iter()
+            .map(|s| format!("{}.{}", s.module, s.func))
+            .collect();
         v.sort();
         v.dedup();
         v
@@ -343,11 +371,14 @@ impl Engine {
                 // from its own stream, so every identity index keeps its
                 // program; only some former synthesis/mutation indices
                 // now belong to this family.
-                if comp.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, COMPOSITION_WEIGHT]) == 1 {
+                if comp.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, COMPOSITION_WEIGHT])
+                    == 1
+                {
                     return self.composition(&mut comp);
                 }
                 // Same discipline again, one roll later and on its own stream.
-                if shape_rng.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, SHAPE_WEIGHT]) == 1 {
+                if shape_rng.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, SHAPE_WEIGHT]) == 1
+                {
                     return Self::shape(&mut shape_rng, seed, index);
                 }
             }
@@ -377,7 +408,9 @@ impl Engine {
         let (source, expected) = identity::render(&plan);
         Generated {
             source,
-            origin: Origin::Identity { blocks: plan.size() },
+            origin: Origin::Identity {
+                blocks: plan.size(),
+            },
             expected_stdout: Some(expected),
             plan: Some(FamilyPlan::Identity(plan)),
             project: None,
@@ -390,7 +423,9 @@ impl Engine {
         let (source, expected) = composition::render(&plan);
         Generated {
             source,
-            origin: Origin::Composition { probes: plan.size() },
+            origin: Origin::Composition {
+                probes: plan.size(),
+            },
             expected_stdout: Some(expected),
             plan: Some(FamilyPlan::Composition(plan)),
             project: None,
@@ -401,10 +436,15 @@ impl Engine {
     fn shape(rng: &mut SplitMix64, seed: u64, index: u64) -> Generated {
         let mut next = || rng.next_u64();
         let cell = shape::random_cell(&mut next, &format!("shape/{seed}/{index}"));
-        let project = Project { files: cell.files, entry: cell.entry };
+        let project = Project {
+            files: cell.files,
+            entry: cell.entry,
+        };
         Generated {
             source: project.bundle(),
-            origin: Origin::Shape { files: project.files.len() },
+            origin: Origin::Shape {
+                files: project.files.len(),
+            },
             expected_stdout: Some(cell.expected),
             plan: None,
             project: Some(project),
@@ -451,7 +491,9 @@ mod tests {
     #[test]
     fn an_input_sink_is_not_catalogued() {
         let catalogue = crate::generator::catalogue::build();
-        assert!(!catalogue.iter().any(|s| s.module == "http" && s.func == "decode_json"));
+        assert!(!catalogue
+            .iter()
+            .any(|s| s.module == "http" && s.func == "decode_json"));
     }
 
     /// Synthesis-only generation must always emit parseable source. This
@@ -522,14 +564,15 @@ mod tests {
         );
         // The shape roll happens on what neither identity nor composition took.
         let shape_share = shape as f64 / (N as usize - identity - composition) as f64;
-        let shape_declared = SHAPE_WEIGHT as f64 / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + SHAPE_WEIGHT) as f64;
+        let shape_declared =
+            SHAPE_WEIGHT as f64 / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + SHAPE_WEIGHT) as f64;
         assert!(
             (shape_share - shape_declared).abs() < 0.07,
             "shape share {shape_share:.3} strayed from the declared {shape_declared:.3}"
         );
         let share = identity as f64 / N as f64;
-        let declared = IDENTITY_WEIGHT as f64
-            / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + IDENTITY_WEIGHT) as f64;
+        let declared =
+            IDENTITY_WEIGHT as f64 / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + IDENTITY_WEIGHT) as f64;
         assert!(
             (share - declared).abs() < 0.06,
             "identity share {share:.3} strayed from the declared {declared:.3}"
@@ -545,19 +588,31 @@ mod tests {
         for index in 0..100u64 {
             let a = engine.generate(3309, index);
             let b = engine.generate(3309, index);
-            assert_eq!(a.source, b.source, "non-deterministic shape program at index {index}");
+            assert_eq!(
+                a.source, b.source,
+                "non-deterministic shape program at index {index}"
+            );
             let p = a.project.as_ref().expect("a shape program is a project");
-            assert!(p.files.iter().any(|(f, _)| *f == p.entry), "the entry is one of the files");
+            assert!(
+                p.files.iter().any(|(f, _)| *f == p.entry),
+                "the entry is one of the files"
+            );
             if p.files.len() > 1 {
                 multi += 1;
             }
             for (path, text) in &p.files {
                 if path.ends_with(".almd") {
-                    assert!(parses(text), "shape program {index}: {path} did not parse:\n{text}");
+                    assert!(
+                        parses(text),
+                        "shape program {index}: {path} did not parse:\n{text}"
+                    );
                 }
             }
         }
-        assert!(multi > 50, "only {multi}/100 shape programs had more than one file");
+        assert!(
+            multi > 50,
+            "only {multi}/100 shape programs had more than one file"
+        );
     }
 
     /// `(seed, index)` must map to a byte-identical program every time —

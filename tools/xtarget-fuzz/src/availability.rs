@@ -25,7 +25,9 @@ const UNLINKED_PREFIX: &str = "unlinked stdlib/runtime call(s) with no wasm defi
 
 /// The fn names a wall reason carries, or none for every other reason class.
 pub fn unlinked_names(reason: &str) -> Vec<String> {
-    let Some(rest) = reason.strip_prefix(UNLINKED_PREFIX) else { return Vec::new() };
+    let Some(rest) = reason.strip_prefix(UNLINKED_PREFIX) else {
+        return Vec::new();
+    };
     let names = rest.split(" —").next().unwrap_or(rest);
     names
         .split(',')
@@ -37,7 +39,9 @@ pub fn unlinked_names(reason: &str) -> Vec<String> {
 /// A typed twin's public fn: strip trailing `_segment`s until `public`
 /// knows the name; a name that never resolves is returned as is.
 pub fn public_of_twin(name: &str, public: &BTreeSet<String>) -> String {
-    let Some((module, mut func)) = name.split_once('.') else { return name.to_string() };
+    let Some((module, mut func)) = name.split_once('.') else {
+        return name.to_string();
+    };
     loop {
         let candidate = format!("{module}.{func}");
         if public.contains(&candidate) {
@@ -57,12 +61,13 @@ pub fn public_of_twin(name: &str, public: &BTreeSet<String>) -> String {
 pub fn unavailable_rows(toml: &str) -> HashMap<String, Vec<String>> {
     let mut rows: HashMap<String, Vec<String>> = HashMap::new();
     let (mut cur_fn, mut cur_legs): (Option<String>, Vec<String>) = (None, Vec::new());
-    let flush = |f: &mut Option<String>, l: &mut Vec<String>, rows: &mut HashMap<String, Vec<String>>| {
-        if let Some(name) = f.take() {
-            rows.entry(name).or_default().append(l);
-        }
-        l.clear();
-    };
+    let flush =
+        |f: &mut Option<String>, l: &mut Vec<String>, rows: &mut HashMap<String, Vec<String>>| {
+            if let Some(name) = f.take() {
+                rows.entry(name).or_default().append(l);
+            }
+            l.clear();
+        };
     for line in toml.lines() {
         let line = line.trim();
         if line.starts_with("[[") {
@@ -89,7 +94,9 @@ pub fn unavailable_rows(toml: &str) -> HashMap<String, Vec<String>> {
 /// The public fns of `module` per the compiler's own interface, or an empty
 /// set when the module has none (an unknown module, a compile failure).
 fn public_fns(almide: &Path, module: &str) -> BTreeSet<String> {
-    let out = Command::new(almide).args(["compile", module, "--json"]).output();
+    let out = Command::new(almide)
+        .args(["compile", module, "--json"])
+        .output();
     let Ok(out) = out else { return BTreeSet::new() };
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
         return BTreeSet::new();
@@ -113,7 +120,8 @@ pub fn declared_available_walls(
     almide: &Path,
     leg: &str,
 ) -> BTreeMap<String, u64> {
-    let toml = std::fs::read_to_string(repo.join("proofs/target-availability.toml")).unwrap_or_default();
+    let toml =
+        std::fs::read_to_string(repo.join("proofs/target-availability.toml")).unwrap_or_default();
     let unavailable = unavailable_rows(&toml);
     let mut public_cache: HashMap<String, BTreeSet<String>> = HashMap::new();
     let mut out: BTreeMap<String, u64> = BTreeMap::new();
@@ -145,17 +153,31 @@ mod tests {
     #[test]
     fn unlinked_names_come_from_the_one_reason_class() {
         let r = "unlinked stdlib/runtime call(s) with no wasm definition: map.from_list_hval_wall, map.get_or_hval_wall — rendering them would emit a dangling `(call $…)`";
-        assert_eq!(unlinked_names(r), vec!["map.from_list_hval_wall", "map.get_or_hval_wall"]);
-        assert!(unlinked_names("main is outside the MIR-lowering subset: call argument Block").is_empty());
+        assert_eq!(
+            unlinked_names(r),
+            vec!["map.from_list_hval_wall", "map.get_or_hval_wall"]
+        );
+        assert!(
+            unlinked_names("main is outside the MIR-lowering subset: call argument Block")
+                .is_empty()
+        );
     }
 
     #[test]
     fn a_twin_resolves_to_its_public_fn_by_suffix_stripping() {
-        let public: BTreeSet<String> =
-            ["list.zip_with", "map.from_list", "list.take_while"].iter().map(|s| s.to_string()).collect();
+        let public: BTreeSet<String> = ["list.zip_with", "map.from_list", "list.take_while"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(public_of_twin("list.zip_with_x", &public), "list.zip_with");
-        assert_eq!(public_of_twin("map.from_list_hval_wall", &public), "map.from_list");
-        assert_eq!(public_of_twin("list.take_while_heapelem", &public), "list.take_while");
+        assert_eq!(
+            public_of_twin("map.from_list_hval_wall", &public),
+            "map.from_list"
+        );
+        assert_eq!(
+            public_of_twin("list.take_while_heapelem", &public),
+            "list.take_while"
+        );
         assert_eq!(public_of_twin("list.nope_x", &public), "list.nope_x");
     }
 
