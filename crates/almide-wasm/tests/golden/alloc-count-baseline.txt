@@ -64,7 +64,7 @@
 18	6	174	18	spec/wasm_cross/bytes_param_writeback.almd
 16	1	261809	16	spec/wasm_cross/bytes_push_growth.almd
 1	0	0	1	spec/wasm_cross/bytes_push_inplace.almd
-1412	1315	37207	1412	spec/wasm_cross/bytes_rawptr.almd
+615	520	17684	615	spec/wasm_cross/bytes_rawptr.almd
 13	7	76	9	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 16	9	70	11	spec/wasm_cross/bytes_repeat_size_ceiling.almd
 674	643	8655	674	spec/wasm_cross/bytes_search_edit_family.almd
@@ -622,7 +622,7 @@
 21	10	265	21	spec/wasm_cross/native_wall_shapes.almd
 281	260	3302	281	spec/wasm_cross/negative_count_rule.almd
 7	5	29	7	spec/wasm_cross/negative_float_literal_sized.almd
-54	27	562	54	spec/wasm_cross/negative_offset_and_width_totality.almd
+47	24	516	47	spec/wasm_cross/negative_offset_and_width_totality.almd
 40	35	640	40	spec/wasm_cross/nested_box_guard_binder.almd
 15	11	152	15	spec/wasm_cross/nested_ctor_pattern.almd
 60578	60455	971208	60578	spec/wasm_cross/nested_field_path_mut.almd

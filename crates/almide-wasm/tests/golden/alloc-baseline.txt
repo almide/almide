@@ -622,7 +622,7 @@
 66576	spec/wasm_cross/native_wall_shapes.almd
 67248	spec/wasm_cross/negative_count_rule.almd
 66352	spec/wasm_cross/negative_float_literal_sized.almd
-67696	spec/wasm_cross/negative_offset_and_width_totality.almd
+67552	spec/wasm_cross/negative_offset_and_width_totality.almd
 65840	spec/wasm_cross/nested_box_guard_binder.almd
 65808	spec/wasm_cross/nested_ctor_pattern.almd
 71776	spec/wasm_cross/nested_field_path_mut.almd
