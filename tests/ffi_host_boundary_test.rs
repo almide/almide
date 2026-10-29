@@ -139,9 +139,11 @@ fn an_export_c_fn_reads_and_fills_a_lent_region_within_the_callers_length() {
     assert_eq!(stdout, "sum 10\nprobe 5\nfill 32043\nslice 43\n", "--- stderr ---\n{stderr}");
 }
 
-/// A lent Region kept past its call (stored in a top-level `var`) would read
-/// the caller's memory after the caller may have freed it: the wrapper stops
-/// the process before the caller regains control.
+/// A lent Region kept past its call would read the caller's memory after the
+/// caller may have freed it. Kept in the fn's own body it is E119 at check
+/// time (`a_lent_region_escape_is_e119`); kept by a helper the export calls,
+/// which the check does not follow, the wrapper stops the process before the
+/// caller regains control.
 #[test]
 #[cfg(unix)]
 fn a_lent_region_kept_past_its_call_stops_the_process() {
@@ -149,11 +151,13 @@ fn a_lent_region_kept_past_its_call_stops_the_process() {
 
 var kept: Region = ffi.region(bytes.new())
 
-@export(c, "ffb_keep")
-fn keep(buf: Region) -> Int = {
-  kept = buf
+fn stash(r: Region) -> Int = {
+  kept = r
   ffi.len(kept)
 }
+
+@export(c, "ffb_keep")
+fn keep(buf: Region) -> Int = stash(buf)
 
 @extern(c, "c", "cf_keep")
 fn c_keep() -> Int = _
@@ -219,4 +223,71 @@ effect fn main() -> Unit = println("x")
         assert!(out.contains(want), "no E090 for `{want}`\n{out}");
     }
     assert_eq!(out.matches("error[E090]").count(), 5, "one E090 per bad declaration, none for ok1\n{out}");
+}
+
+/// E119: every way a lent Region leaves an `@export(c)` fn's body is refused
+/// at check time — a top-level `var` (through a `let` alias, a slice and a
+/// container too), a closure, a return type holding one — and reading it,
+/// copying its bytes out, and a local alias are not.
+#[test]
+fn a_lent_region_escape_is_e119() {
+    let almd = r#"import ffi
+
+var kept: Region = ffi.region(bytes.new())
+var many: List[Region] = []
+var saved: Bytes = bytes.new()
+
+@export(c, "e1")
+fn e1(buf: Region) -> Int = {
+  kept = buf
+  0
+}
+
+@export(c, "e2")
+effect fn e2(buf: Region) -> Int = {
+  let part = ffi.slice(buf, 0, 1)!
+  kept = part
+  0
+}
+
+@export(c, "e3")
+fn e3(buf: Region) -> Int = {
+  let xs = [buf]
+  many = xs
+  0
+}
+
+@export(c, "e4")
+fn e4(buf: Region) -> Int = {
+  let f = () => ffi.len(buf)
+  f()
+}
+
+@export(c, "e5")
+fn e5(buf: Region) -> List[Region] = [buf]
+
+@export(c, "ok1")
+effect fn ok1(buf: Region) -> Int = {
+  let local = buf
+  var also = local
+  also = buf
+  saved = ffi.read(also, 0, ffi.len(buf))!
+  ffi.len(local)
+}
+
+effect fn main() -> Unit = println("x")
+"#;
+    let (ok, stdout, stderr) = run_package("e119", almd, "", &["check"]);
+    let out = format!("{stdout}{stderr}");
+    assert!(!ok, "check accepted escaping lent Regions:\n{out}");
+    for want in [
+        "fn 'e1' escapes its call: it is stored in the top-level var `kept`",
+        "fn 'e2' escapes its call: it is stored in the top-level var `kept`",
+        "fn 'e3' escapes its call: it is stored in the top-level var `many`",
+        "fn 'e4' escapes its call: it is captured by a closure",
+        "fn 'e5' escapes its call: it is returned",
+    ] {
+        assert!(out.contains(want), "no E119 for `{want}`\n{out}");
+    }
+    assert!(!out.contains("'ok1'"), "a read, a copy and local aliases were refused\n{out}");
 }
