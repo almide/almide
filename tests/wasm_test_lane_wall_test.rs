@@ -293,7 +293,8 @@ fn the_same_file_with_a_declared_skip_is_a_skip() {
     assert_eq!(code, Some(5), "a run whose only file was skipped ran nothing:\n{report}");
     std::fs::write(dir.path().join("runs_test.almd"), RUNS_ON_THE_LANE).expect("control");
     let out = Command::new(almide_bin())
-        .args(["test", dir.path().to_str().expect("path"), "--target", "wasm"])
+        // `.`: a tempdir is named `.tmp…`, and discovery skips hidden dirs.
+        .args(["test", ".", "--target", "wasm"])
         .current_dir(dir.path())
         .output()
         .expect("run");
