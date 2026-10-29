@@ -106,6 +106,18 @@ impl Run {
                 c.data().lock().unwrap().err.push_str(&t);
             })
             .unwrap();
+        // A `panic` writes its line through the raw-stderr host op (73):
+        // `fs_call(op, 0, 0, ptr, len)`. Every other op traps.
+        linker
+            .func_wrap("almide", "fs_call", |mut c: Caller<'_, Arc<Mutex<Host>>>, op: i32, _a: i32, _b: i32, p: i32, n: i32| -> wasmtime::Result<i64> {
+                if op != 73 {
+                    return Err(wasmtime::Error::msg(format!("fs_call op {op} is not served here")));
+                }
+                let t = text(&mut c, p, n);
+                c.data().lock().unwrap().err.push_str(&t);
+                Ok(0)
+            })
+            .unwrap();
         linker
             .func_wrap("almide", "exit", |_c: Caller<'_, Arc<Mutex<Host>>>, code: i32| -> wasmtime::Result<()> {
                 Err(wasmtime::Error::msg(format!("exit {code}")))
@@ -148,6 +160,14 @@ impl Run {
         m.data(&self.store)[p as usize..(p + n) as usize].to_vec()
     }
 
+    /// An `effect fn` export answers a Result block: the ok Int, or the test fails.
+    fn ok_int(&mut self, block: i32) -> i64 {
+        let tag = self.mem(block + (almide_layout::PAYLOAD + almide_layout::SUM_TAG) as i32, 4);
+        assert_eq!(tag, [0, 0, 0, 0], "the export answered err");
+        let v = self.mem(block + (almide_layout::PAYLOAD + almide_layout::SUM_FIELD) as i32, 8);
+        i64::from_le_bytes(v.try_into().unwrap())
+    }
+
     fn rc(&mut self, p: i32) -> u32 {
         let b = self.mem(p - almide_layout::PAYLOAD as i32, 4);
         u32::from_le_bytes([b[0], b[1], b[2], b[3]])
@@ -177,12 +197,14 @@ fn the_host_writes_into_an_exported_alloc_region_and_the_next_export_reads_it() 
     assert!(p != 0 && n == 4, "({p}, {n})");
     let m = r.inst.get_memory(&mut r.store, "memory").unwrap();
     m.data_mut(&mut r.store)[p as usize..(p + 4) as usize].copy_from_slice(&[1, 2, 3, 40]);
-    let sum = r.inst.get_typed_func::<(), i64>(&mut r.store, "inbox_sum").unwrap();
-    assert_eq!(sum.call(&mut r.store, ()).unwrap(), 46);
+    let sum = r.inst.get_typed_func::<(), i32>(&mut r.store, "inbox_sum").unwrap();
+    let b = sum.call(&mut r.store, ()).unwrap();
+    assert_eq!(r.ok_int(b), 46);
     let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
     release.call(&mut r.store, p).unwrap();
     // The program's own copy (the `inbox` var) still holds the block.
-    assert_eq!(sum.call(&mut r.store, ()).unwrap(), 46);
+    let b = sum.call(&mut r.store, ()).unwrap();
+    assert_eq!(r.ok_int(b), 46);
 }
 
 /// A1 ownership: a Region the program dropped when the export returned
@@ -228,8 +250,9 @@ fn a_sub_region_or_an_err_traps_with_its_reason() {
 #[test]
 fn an_import_fills_a_lent_alloc_region_in_place() {
     let mut r = Run::new();
-    let pull = r.inst.get_typed_func::<i64, i64>(&mut r.store, "pull").unwrap();
-    assert_eq!(pull.call(&mut r.store, 5).unwrap(), 35);
+    let pull = r.inst.get_typed_func::<i64, i32>(&mut r.store, "pull").unwrap();
+    let b = pull.call(&mut r.store, 5).unwrap();
+    assert_eq!(r.ok_int(b), 35);
     let fills = r.host.lock().unwrap().fills.clone();
     assert_eq!(fills.len(), 1);
     assert!(fills[0].0 != 0 && fills[0].1 == 5, "{fills:?}");
