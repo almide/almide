@@ -14,6 +14,11 @@
 // round-trips. #1352: get_header used to compare with `==` here while v0 used
 // `eq_ignore_ascii_case`, so a wasm-target program reading back a header it had
 // just written under a different spelling silently got `none`.
+// The lean constructor (ADR-0032): exactly the given pairs, which the caller
+// writes once each, after the status and body.
+@implements("http.__http_response_flat")
+fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
+
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
   [st, body, "Content-Type", "application/json"]
