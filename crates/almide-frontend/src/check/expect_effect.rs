@@ -162,7 +162,7 @@ impl Checker {
     /// A named record literal (`Box { h: (req) => … }`) is shaped by its own
     /// declaration.
     pub(crate) fn expect_named_record_fields(&mut self, name: almide_base::intern::Sym, fields: &[ast::FieldInit]) {
-        if let Ty::Record { fields: decl } = self.env.resolve_named(&Ty::Named(name, vec![])) {
+        if let Ty::Record { fields: decl } = self.env.resolve_named(&Ty::Named(name, Default::default())) {
             self.expect_fields(fields, &decl);
         }
     }

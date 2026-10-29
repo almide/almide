@@ -156,7 +156,7 @@ fn shape_of<'a>(func: &IrFunction, scope: &'a str, mut_fns: &'a MutFns) -> Optio
     }
     let orig = (!was_unit).then(|| orig.clone());
     let elems: Vec<Ty> = orig.iter().cloned().chain(bufs.iter().map(|(_, t)| t.clone())).collect();
-    let pair = if elems.len() == 1 { elems[0].clone() } else { Ty::Tuple(elems) };
+    let pair = if elems.len() == 1 { elems[0].clone() } else { Ty::Tuple(elems.into()) };
     let buf_tys: Vec<Ty> = bufs.iter().map(|(_, t)| t.clone()).collect();
     let carried = Ty::result(pair.clone(), crate::mut_param_err_carry::err_payload_ty(&buf_tys));
     let carrier = if func.ret_ty == pair {

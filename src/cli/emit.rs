@@ -213,6 +213,11 @@ pub fn cmd_emit(args: EmitArgs) {
             }
         }
         almide_driver::link_ir(ir);
+        // E112 (ADR-0030): linking stopped at the `generic_instances` budget.
+        if let Some(d) = almide_driver::budget_refusal() {
+            eprintln!("{}", crate::diagnostic_render::display(&d));
+            std::process::exit(1);
+        }
     }
 
     if emit_dialect {

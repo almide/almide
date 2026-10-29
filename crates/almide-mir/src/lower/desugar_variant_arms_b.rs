@@ -209,7 +209,7 @@ fn va_field_ty_from_pats<'a>(
             {
                 if let Some((tyname, layout, _)) = layouts.lookup_ctor(name) {
                     if layout.generics.is_empty() {
-                        return Some(Ty::Named(almide_lang::intern::sym(tyname), Vec::new()));
+                        return Some(Ty::Named(almide_lang::intern::sym(tyname), Default::default()));
                     }
                 }
             }

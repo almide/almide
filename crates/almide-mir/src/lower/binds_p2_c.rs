@@ -723,7 +723,7 @@ impl LowerCtx {
         // Without the pattern fallback the seed misses and the destructure container-grains
         // (reads slot 0 as the whole handle + slot 1 as Const 0 — the `8212 / 0` garbage).
         let elem_tys: Option<Vec<Ty>> = if let Ty::Tuple(tys) = &value.ty {
-            Some(tys.clone())
+            Some(tys.clone().into_vec())
         } else if matches!(&value.kind, IrExprKind::Unwrap { .. } | IrExprKind::Call { .. }) {
             Some(
                 elements

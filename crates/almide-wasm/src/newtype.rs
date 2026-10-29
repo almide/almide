@@ -91,10 +91,10 @@ fn subst(ty: &Ty, map: &AliasMap) -> Ty {
         Ty::Named(name, args) if args.is_empty() => {
             map.get(name.as_str()).cloned().unwrap_or_else(|| ty.clone())
         }
-        Ty::Named(name, args) => Ty::Named(*name, all(args)),
-        Ty::Applied(id, args) => Ty::Applied(id.clone(), all(args)),
-        Ty::Tuple(ts) => Ty::Tuple(all(ts)),
-        Ty::Union(ts) => Ty::Union(all(ts)),
+        Ty::Named(name, args) => Ty::Named(*name, all(args).into()),
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), all(args).into()),
+        Ty::Tuple(ts) => Ty::Tuple(all(ts).into()),
+        Ty::Union(ts) => Ty::Union(all(ts).into()),
         Ty::Record { fields: fs } => Ty::Record { fields: fields(fs) },
         Ty::OpenRecord { fields: fs } => Ty::OpenRecord { fields: fields(fs) },
         Ty::Fn { params, ret, is_effect } => Ty::Fn {

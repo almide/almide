@@ -102,7 +102,7 @@ impl LowerCtx<'_> {
             if name.as_str().starts_with("<type-params:") {
                 continue;
             }
-            let named = Ty::Named(*name, vec![]);
+            let named = Ty::Named(*name, Default::default());
             if let Some(t) = facts.repr_target(&named) {
                 table.targets.insert(*name, t);
             }

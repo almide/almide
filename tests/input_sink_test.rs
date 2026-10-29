@@ -14,29 +14,21 @@
 //! from E110 to running with `is_admin=true` — proving the refusal is what
 //! stands between the request body and the field, not a constant.
 //!
-//! Skips cleanly when the `almide` binary is unavailable; the wasm leg also
-//! needs wasmtime (PATH=/opt/homebrew/bin locally).
+//! The flow half (#4232): a handler that skips the sink and parses the body
+//! itself, `User.decode(json.parse(http.body(req))!)`, is E110 too — the
+//! request data is followed to the decode (`almide_frontend::request_flow`).
+//! Its control (`ALMIDE_CONTROL_ADMIT_HAND_DECODE=1`) must flip that program
+//! to a run that prints `201 m is_admin=true`.
+//!
+//! Nothing here skips: the binary is the one cargo built for this test
+//! (`CARGO_BIN_EXE_almide`), and the wasm leg runs on the host embedded in it
+//! (`almide run --target wasm`), so a missing tool is a failure, not a pass.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn almide_bin() -> String {
-    if let Ok(bin) = std::env::var("ALMIDE_BIN") {
-        return bin;
-    }
-    let cargo_bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
-    if cargo_bin.exists() {
-        return cargo_bin.to_str().unwrap().to_string();
-    }
-    "almide".to_string()
-}
-
-fn tool_available() -> bool {
-    Command::new(almide_bin()).arg("--version").output().is_ok()
-}
-
-fn wasmtime_available() -> bool {
-    Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
+fn almide_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_almide")
 }
 
 /// `almide <cmd> <src>` with optional extra args and env; (success, stdout, stderr).
@@ -85,20 +77,62 @@ effect fn main() -> Unit = {
 }
 "#;
 
-fn over_post_program() -> PathBuf {
+fn write_program(name: &str, text: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("almide-input-sink-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("over_post.almd");
-    std::fs::write(&path, OVER_POST_PROGRAM).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, text).unwrap();
     path
 }
 
+fn over_post_program() -> PathBuf {
+    write_program("over_post.almd", OVER_POST_PROGRAM)
+}
+
+/// The bypass (#4232): no sink call, the body parsed and decoded by hand
+/// into the type the program also sends out.
+const HAND_DECODE_PROGRAM: &str = r#"import http
+import json
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let u = User.decode(json.parse(http.body(req))!)!
+  http.response(201, "${u.name} is_admin=${u.is_admin}")
+}
+
+effect fn main() -> Unit = {
+  let res = create(http.new_request("POST", "/users", "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}", []))!
+  println("${http.status(res)} ${http.body(res)}")
+}
+"#;
+
+/// The same bypass laundered through bindings, a list, a lambda and a pure
+/// helper before the decode.
+const LAUNDERED_PROGRAM: &str = r#"import http
+import json
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+fn texts(t: String) -> List[String] = [t]
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let raw = http.body(req)
+  let users = texts(raw) |> list.map((t) => match json.parse(t) {
+    ok(v) => User.decode(v),
+    err(e) => err(e),
+  })
+  http.response(201, "${list.len(users)}")
+}
+
+effect fn main() -> Unit = {
+  let res = create(http.new_request("POST", "/users", "{}", []))!
+  println("${http.status(res)} ${http.body(res)}")
+}
+"#;
+
 #[test]
 fn the_fixture_refuses_the_over_post_on_both_legs() {
-    if !tool_available() {
-        eprintln!("almide unavailable — skipping");
-        return;
-    }
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURE);
     let (ok, out, err) = almide("run", &path, &[], None);
     assert!(ok, "native run failed:\n{err}");
@@ -107,10 +141,6 @@ fn the_fixture_refuses_the_over_post_on_both_legs() {
     for deep in DEEP_CELLS {
         assert!(out.lines().any(|l| l == *deep), "native: missing nested refusal `{deep}`:\n{out}");
     }
-    if !wasmtime_available() {
-        eprintln!("wasmtime unavailable — wasm leg skipped");
-        return;
-    }
     let (ok, wout, err) = almide("run", &path, &["--target", "wasm"], None);
     assert!(ok, "wasm run failed:\n{err}");
     assert_eq!(wout, out, "the legs disagree");
@@ -118,10 +148,6 @@ fn the_fixture_refuses_the_over_post_on_both_legs() {
 
 #[test]
 fn the_over_post_shape_is_e110() {
-    if !tool_available() {
-        eprintln!("almide unavailable — skipping");
-        return;
-    }
     let path = over_post_program();
     let (ok, _, err) = almide("check", &path, &[], None);
     assert!(!ok, "the over-post program checked");
@@ -135,12 +161,43 @@ fn the_over_post_shape_is_e110() {
 /// gate and proves nothing.
 #[test]
 fn admitting_codec_at_the_sink_lets_the_over_post_land() {
-    if !tool_available() {
-        eprintln!("almide unavailable — skipping");
-        return;
-    }
     let path = over_post_program();
     let control = Some(("ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT", "1"));
+    let (ok, out, err) = almide("run", &path, &[], control);
+    assert!(ok, "control run failed:\n{err}");
+    assert_eq!(out.trim_end(), "201 m is_admin=true", "control should land the over-post");
+}
+
+#[test]
+fn the_hand_decoded_body_is_e110_on_check_and_run() {
+    let path = write_program("hand_decode.almd", HAND_DECODE_PROGRAM);
+    let (ok, _, err) = almide("check", &path, &[], None);
+    assert!(!ok, "the hand-decode program checked");
+    assert!(err.contains("error[E110]"), "expected E110:\n{err}");
+    assert!(err.contains("`User.decode` decodes request data into `User`"), "the message names the decode:\n{err}");
+    for target in [None, Some("wasm")] {
+        let extra: Vec<&str> = target.map(|t| vec!["--target", t]).unwrap_or_default();
+        let (ok, out, err) = almide("run", &path, &extra, None);
+        assert!(!ok, "the hand-decode program ran on {target:?}:\n{out}");
+        assert!(err.contains("E110"), "expected E110 on {target:?}:\n{err}");
+    }
+}
+
+#[test]
+fn the_laundered_hand_decode_is_e110() {
+    let path = write_program("laundered.almd", LAUNDERED_PROGRAM);
+    let (ok, _, err) = almide("check", &path, &[], None);
+    assert!(!ok, "the laundered program checked");
+    assert!(err.contains("error[E110]"), "expected E110:\n{err}");
+}
+
+/// Negative control of the flow half: with the gate told to admit a hand
+/// decode, the program compiles and the client sets `is_admin`. If it still
+/// fails, the E110 above is not reading the flow gate.
+#[test]
+fn admitting_the_hand_decode_lets_the_over_post_land() {
+    let path = write_program("hand_decode_control.almd", HAND_DECODE_PROGRAM);
+    let control = Some(("ALMIDE_CONTROL_ADMIT_HAND_DECODE", "1"));
     let (ok, out, err) = almide("run", &path, &[], control);
     assert!(ok, "control run failed:\n{err}");
     assert_eq!(out.trim_end(), "201 m is_admin=true", "control should land the over-post");

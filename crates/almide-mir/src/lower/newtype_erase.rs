@@ -25,7 +25,7 @@ fn seed_selfhost_newtype_reps(
     if !declared.contains("Path") {
         map.insert(
             "Path".to_string(),
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String].into()),
         );
     }
     // HttpResponse — the self-host rep is `[status, body, k1, v1, …]`
@@ -33,7 +33,7 @@ fn seed_selfhost_newtype_reps(
     if !declared.contains("HttpResponse") {
         map.insert(
             "HttpResponse".to_string(),
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String].into()),
         );
     }
     // HttpRequest — the self-host rep is `[method, target, body, nh, k1, v1,
@@ -41,7 +41,7 @@ fn seed_selfhost_newtype_reps(
     if !declared.contains("HttpRequest") {
         map.insert(
             "HttpRequest".to_string(),
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String].into()),
         );
     }
     // FileStat — the fs.stat Ok payload. Its decl lives in the BUNDLED stdlib fs module,

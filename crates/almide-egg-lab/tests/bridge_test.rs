@@ -30,7 +30,7 @@ fn seeded_var_table(max_existing_id: u32) -> VarTable {
 // ── Helpers: build IrExpr fragments ─────────────────────────────────
 
 fn list_int() -> Ty {
-    Ty::Applied(TypeConstructorId::List, vec![Ty::Int])
+    Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into())
 }
 
 fn var(id: u32, ty: Ty) -> IrExpr {

@@ -232,6 +232,10 @@ pub(crate) fn lower_resolved(
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
+    // E112 (ADR-0030): linking stopped at the `generic_instances` budget.
+    if let Some(d) = almide_driver::budget_refusal() {
+        return Err(crate::diagnostic_render::display_with_source(&d, source_text).to_string());
+    }
     // R-map-09: the inline map arms load an entry's key and value into two
     // locals — the protocol the registered self-hosted bodies declare — so a
     // `((k, v)) => …` callback is adapted to it here (almide_ir::entry_split).
