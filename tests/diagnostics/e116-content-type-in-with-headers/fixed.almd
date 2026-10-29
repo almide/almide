@@ -1,5 +1,5 @@
-// The body says what it is: a CSV body is `http.typed` (what `almide fix`
-// writes).
+// E116 (ADR-0032): a response's Content-Type is its body's type. Written by
+// name it would relabel the String body; here as a CSV report.
 import http
 
 fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [])
