@@ -43,6 +43,7 @@ pub const PRIM_FREE: &[&str] = &[
     "value_path_key",
     "value_path_index",
     "value_get_path",
+    "value_set_path",
     "value_set_path_steps",
     "__matrix_concat_rows",
     "__matrix_zip_with",

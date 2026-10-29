@@ -14209,12 +14209,22 @@ fn value_path_index(p: List[String], i: Int) -> List[String] =
 @implements("value.get_path")
 fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
 
+
+
+
+
 @implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
-  let steps = list.len(p)
-  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(v, p, 0, x))
-}
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = value.__set_path_steps(
+  v,
+  __jpath_steps(p),
+  x,
+)
+
+
+fn __jpath_steps(p: List[String]) -> List[(Bool, String, Int)] = p |> list.map((seg) => match string.take(seg, 1) {
+  "f" => (true, string.drop(seg, 1), 0),
+  _ => (false, "", int.parse(string.drop(seg, 1)) ?? 0),
+})
 
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
@@ -14224,118 +14234,6 @@ fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p,
 
 
 
-
-
-
-
-
-
-
-
-
-
-fn __jp_empty_obj() -> Value = {
-  let v = prim.alloc_value(0)
-  let h = prim.handle(v)
-  prim.store32(h + 4, 6)
-  prim.store32(h + 8, 0)
-  v
-}
-
-
-
-fn __jp_has(j: Value, key: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let ek: String = prim.load_handle(prim.handle(j) + 12 + (2 * i) * 8)
-  if ek == key then true
-  else __jp_has(j, key, i + 1, n)
-}
-
-
-
-
-
-
-
-
-
-fn __jpath_max_depth() -> Int = 1000
-
-
-fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
-
-
-
-fn __json_nests_past(v: Value, budget: Int) -> Bool = {
-  let tag = prim.load32(prim.handle(v) + 4)
-  if tag != 5 and tag != 6 then false
-  else if budget == 0 then true
-  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
-  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
-}
-
-
-
-fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
-else {
-  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
-  if __json_nests_past(ev, budget) then true
-  else __jnp_items(v, budget, i + 1, n, stride)
-}
-
-fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
-  if k >= list.len(path) then nv
-  else {
-    let seg = list.get(path, k) ?? ""
-    let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
-    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
-  }
-
-fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 6 then {
-    let n = prim.load32(prim.handle(j) + 8) / 2
-    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
-    if __jp_has(j, key, 0, n) then value.object(pairs)
-    else {
-      let seed = __jp_empty_obj()
-      let sv = json_path_set_go(seed, path, k + 1, nv)
-      value.object(pairs + [(key, sv)])
-    }
-  } else {
-    let seed = __jp_empty_obj()
-    let sv = json_path_set_go(seed, path, k + 1, nv)
-    value.object([(key, sv)])
-  }
-
-fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(j)
-    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    if ek == key then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
-    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
-  }
-
-fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 5 then {
-    let n = prim.load32(prim.handle(j) + 8)
-    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
-    else j
-  } else j
-
-fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
-  if i >= n then acc
-  else {
-    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-    if i == tgt then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
-    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
-  }
 
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
@@ -41047,7 +40945,11 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 
 
 
+
+
+
 @intrinsic("almide_rt_value_set_path_steps")
+@reuse(v)
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 

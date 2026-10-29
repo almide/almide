@@ -94,6 +94,9 @@ impl Emitter<'_> {
                     self.f.instructions().end();
                     et
                 }
+                SliceTy::Result(o, er) if self.rc_owned_result(expr) => {
+                    self.lower_unwrap_or_owned_result(e, fallback, (o, er))?
+                }
                 SliceTy::Result(o, _) => {
                     let et = self.types.el(o);
                     self.f
@@ -650,6 +653,59 @@ impl Emitter<'_> {
         }
         self.rc_inc_top();
         self.owned_call_marks.mark(e);
+    }
+
+    /// `r ?? fb` over an OWNED Result carrier — the fold step `x = f(x, …)
+    /// ?? fb` arg_temps.rs leaves unparked (#4315). The carrier is this
+    /// site's alone, so it goes on both arms: on err its typed drop releases
+    /// the block and the err payload before the fallback is built; on ok the
+    /// payload's credit moves out (the spine freed flat, `release_ok_carrier`'s
+    /// rule). The join is owned on both arms: a borrowed fallback takes its
+    /// share. Parked, the carrier kept a credit on the payload until its
+    /// next rebind, so the next step met the value at rc 2.
+    fn lower_unwrap_or_owned_result(
+        &mut self,
+        e: &IrExpr,
+        fallback: &IrExpr,
+        (o, er): (crate::ETy, crate::ETy),
+    ) -> Result<SliceTy, EmitError> {
+        let et = self.types.el(o);
+        let droppable = self.rc_droppable(et);
+        let carrier_dec = self.dec_fn_of(SliceTy::Result(o, er));
+        let temp = self.witness.as_mut().map(|w| w.temp_born());
+        self.f
+            .instructions()
+            .local_tee(self.scr_i32_local)
+            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+            .i32_const(0)
+            .i32_ne()
+            .if_(BlockType::Result(et.val_type()));
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.f.instructions().local_get(self.scr_i32_local).call(carrier_dec);
+        if let (Some(w), Some(t)) = (self.witness.as_mut(), temp) {
+            w.temp_ops(t, "d");
+        }
+        self.lower(fallback, Some(et))?;
+        if droppable {
+            if !self.rc_owned_result(fallback) {
+                self.rc_inc_top();
+            }
+            self.witness_share_or_move(fallback, "unwrap-or:owned-carrier-fallback");
+        }
+        self.f.instructions().else_().local_get(self.scr_i32_local);
+        self.witness_branch_arm();
+        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+        self.f.instructions().local_get(self.scr_i32_local).call(F_DEC_FLAT);
+        if let (Some(w), Some(t)) = (self.witness.as_mut(), temp) {
+            w.temp_ops(t, "d");
+        }
+        self.witness_branch_close();
+        self.f.instructions().end();
+        if droppable {
+            self.owned_call_marks.mark(e);
+        }
+        Ok(et)
     }
 
     /// Does `own_unwrap_or_join` normalize this `??` to an owned join? (The

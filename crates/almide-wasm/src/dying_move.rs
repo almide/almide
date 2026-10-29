@@ -51,6 +51,10 @@ use crate::*;
 /// unread and shares as before.
 fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
     let read = match &value.kind {
+        // #4315: `x = f(x, …)!` — a fallible `@reuse` op (value.set_path's
+        // walk) under its propagation. The op spends the credit on both of
+        // its answers, and an err leaves the frame with the emptied local.
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => return consumed_read(expr),
         _ if let Some(source) = reuse_root(value) => source,
         IrExprKind::SpreadRecord { base, .. } => base.as_ref(),
         // #3530: a one-element push onto the var, at either end.
