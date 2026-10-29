@@ -411,27 +411,19 @@ pub fn check_rc(
         by_pref.sort_by_key(|&i| (in_window(calls[i].0), calls[i].0));
         by_pref.extend(nc..nc + takers.len());
         let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
-        // An unnamed event (a temporary's) tries the calls that name no
-        // variable the frame's events name first: a frame variable's release
-        // left without its event then shows as that call, not as some
-        // temporary's.
-        let mut unnamed_pref: Vec<usize> = by_pref.clone();
-        unnamed_pref.sort_by_key(|&i| i < nc && calls[i].2.iter().any(|n| witnessed.contains(n)));
-        let pref_of = |e: usize| if evs[e].1.is_none() { unnamed_pref.as_slice() } else { by_pref.as_slice() };
-        fn augment<'p>(
+        fn augment(
             e: usize,
-            pref_of: &dyn Fn(usize) -> &'p [usize],
-            only_calls: Option<usize>,
+            by_pref: &[usize],
             fits: &dyn Fn(usize, usize) -> bool,
             seen: &mut [bool],
             owner: &mut [Option<usize>],
         ) -> bool {
-            for &i in pref_of(e) {
-                if only_calls.is_some_and(|nc| i >= nc) || seen[i] || !fits(e, i) {
+            for &i in by_pref {
+                if seen[i] || !fits(e, i) {
                     continue;
                 }
                 seen[i] = true;
-                if owner[i].is_none_or(|o| augment(o, pref_of, only_calls, fits, seen, owner)) {
+                if owner[i].is_none_or(|o| augment(o, by_pref, fits, seen, owner)) {
                     owner[i] = Some(e);
                     return true;
                 }
@@ -442,16 +434,17 @@ pub fn check_rc(
         // accounted; then each event still unmatched may reach a consuming
         // argument, re-routing others along the way (an augmenting path never
         // frees a node, so no call matched in the first pass is left over).
+        let calls_only: Vec<usize> = by_pref.iter().copied().filter(|&i| i < nc).collect();
         for &e in &order {
             let mut seen = vec![false; owner.len()];
-            augment(e, &pref_of, Some(nc), &fits, &mut seen, &mut owner);
+            augment(e, &calls_only, &fits, &mut seen, &mut owner);
         }
         for &e in &order {
             if owner.contains(&Some(e)) {
                 continue;
             }
             let mut seen = vec![false; owner.len()];
-            augment(e, &pref_of, None, &fits, &mut seen, &mut owner);
+            augment(e, &by_pref, &fits, &mut seen, &mut owner);
         }
         // A move's credit is released by the arm on some of its paths: one
         // release per path. Releases of it that no run passes through two of
