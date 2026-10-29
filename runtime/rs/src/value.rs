@@ -24,7 +24,124 @@ pub enum AlmideValue {
     Float(f64),
     Str(AlmideString),
     Array(Vec<AlmideValue>),
-    Object(Vec<(AlmideKey, AlmideValue)>),
+    Object(AlmideObject),
+}
+
+/// From this many entries on, an Object carries a key index (#4297).
+const ALMIDE_OBJECT_INDEX_MIN: usize = 16;
+
+/// An Object's entries: the pairs in insertion order (C-401) — every reader
+/// (`keys`, `as_object`, `stringify`) walks `pairs` — plus, from
+/// `ALMIDE_OBJECT_INDEX_MIN` entries on, a key → slot index, so a lookup or
+/// an insert is amortised O(1) instead of a scan of the pairs (#4297): a
+/// fold of n `set_path` inserts compared each new key against every field so
+/// far, n²/2 compares. The index is built on the first indexed lookup and kept
+/// in step by every insert through these methods; it never decides an order,
+/// so the bytes written are the pairs' bytes. It maps a key to its FIRST slot:
+/// a pair list that holds a key twice (`json.object`'s pass-through) answers
+/// the first, as the scan did. A clone copies the pairs only — exactly what
+/// a clone cost before the index — and rebuilds its index when it is next
+/// updated.
+#[derive(Default)]
+pub struct AlmideObject {
+    pairs: Vec<(AlmideKey, AlmideValue)>,
+    index: Option<std::collections::HashMap<AlmideKey, usize>>,
+}
+
+impl AlmideObject {
+    pub fn new() -> Self { AlmideObject { pairs: Vec::new(), index: None } }
+    pub fn with_capacity(n: usize) -> Self { AlmideObject { pairs: Vec::with_capacity(n), index: None } }
+    /// The pairs as given, in order; the index is built when first needed.
+    pub fn from_pairs(pairs: Vec<(AlmideKey, AlmideValue)>) -> Self { AlmideObject { pairs, index: None } }
+    pub fn into_pairs(self) -> Vec<(AlmideKey, AlmideValue)> { self.pairs }
+    /// Build the index if the Object is big enough to want one and has none.
+    fn ensure_index(&mut self) {
+        if self.index.is_none() && self.pairs.len() >= ALMIDE_OBJECT_INDEX_MIN {
+            let mut ix: std::collections::HashMap<AlmideKey, usize> = std::collections::HashMap::with_capacity(self.pairs.len() * 2);
+            for (i, (k, _)) in self.pairs.iter().enumerate() {
+                ix.entry(k.clone()).or_insert(i);
+            }
+            self.index = Some(ix);
+        }
+    }
+    /// The first slot holding `key`: the index when built, a scan otherwise.
+    pub fn position(&self, key: &str) -> Option<usize> {
+        match &self.index {
+            Some(ix) => ix.get(key).copied(),
+            None => self.pairs.iter().position(|(k, _)| k.as_ref() == key),
+        }
+    }
+    /// `position`, building the index first when the Object is big enough.
+    pub fn position_indexed(&mut self, key: &str) -> Option<usize> {
+        self.ensure_index();
+        self.position(key)
+    }
+    /// The value of the first pair holding `key`.
+    pub fn find(&self, key: &str) -> Option<&AlmideValue> { self.position(key).map(|i| &self.pairs[i].1) }
+    /// Append a pair whose key the Object does not hold.
+    pub fn push_new(&mut self, k: AlmideKey, v: AlmideValue) {
+        if let Some(ix) = &mut self.index {
+            ix.insert(k.clone(), self.pairs.len());
+        }
+        self.pairs.push((k, v));
+        self.ensure_index();
+    }
+    /// The C-380 upsert: a held key keeps its slot and takes `v`, a new key
+    /// is appended.
+    pub fn upsert(&mut self, k: AlmideKey, v: AlmideValue) {
+        match self.position_indexed(k.as_ref()) {
+            Some(at) => self.pairs[at].1 = v,
+            None => self.push_new(k, v),
+        }
+    }
+    /// The value slot of `key`, appended holding `fill()` when absent.
+    pub fn slot_or_insert_with(&mut self, key: &str, fill: impl FnOnce() -> AlmideValue) -> &mut AlmideValue {
+        let at = match self.position_indexed(key) {
+            Some(at) => at,
+            None => {
+                self.push_new(almide_rt_intern_key(key), fill());
+                self.pairs.len() - 1
+            }
+        };
+        &mut self.pairs[at].1
+    }
+}
+
+impl std::ops::Deref for AlmideObject {
+    type Target = [(AlmideKey, AlmideValue)];
+    fn deref(&self) -> &Self::Target { &self.pairs }
+}
+
+impl Clone for AlmideObject {
+    fn clone(&self) -> Self { AlmideObject::from_pairs(self.pairs.clone()) }
+}
+
+impl PartialEq for AlmideObject {
+    fn eq(&self, other: &Self) -> bool { self.pairs == other.pairs }
+}
+
+impl std::fmt::Debug for AlmideObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.pairs.fmt(f) }
+}
+
+impl From<Vec<(AlmideKey, AlmideValue)>> for AlmideObject {
+    fn from(pairs: Vec<(AlmideKey, AlmideValue)>) -> Self { AlmideObject::from_pairs(pairs) }
+}
+
+impl FromIterator<(AlmideKey, AlmideValue)> for AlmideObject {
+    fn from_iter<I: IntoIterator<Item = (AlmideKey, AlmideValue)>>(it: I) -> Self { AlmideObject::from_pairs(it.into_iter().collect()) }
+}
+
+impl IntoIterator for AlmideObject {
+    type Item = (AlmideKey, AlmideValue);
+    type IntoIter = std::vec::IntoIter<(AlmideKey, AlmideValue)>;
+    fn into_iter(self) -> Self::IntoIter { self.pairs.into_iter() }
+}
+
+impl<'a> IntoIterator for &'a AlmideObject {
+    type Item = &'a (AlmideKey, AlmideValue);
+    type IntoIter = std::slice::Iter<'a, (AlmideKey, AlmideValue)>;
+    fn into_iter(self) -> Self::IntoIter { self.pairs.iter() }
 }
 
 const ALMIDE_KEY_SLOTS: usize = 1024;
@@ -72,27 +189,17 @@ pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideVa
 /// occurrence and takes the VALUE of its last, the C-380 rule
 /// (ALS-C1). So every reader of the Object (`field`, `keys`, `stringify`,
 /// `to_map`) sees one entry, and `json.stringify` never writes a key twice.
-/// Small lists compare pairwise; from 16 pairs an index answers.
-pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> Vec<(AlmideKey, AlmideValue)> {
-    let dup = if pairs.len() < 16 {
-        (1..pairs.len()).any(|i| pairs[..i].iter().any(|(k, _)| *k == pairs[i].0))
-    } else {
-        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::with_capacity(pairs.len());
-        !pairs.iter().all(|(k, _)| seen.insert(k.as_ref()))
-    };
-    if !dup {
-        return pairs;
+/// Small lists compare pairwise; from 16 pairs the Object's own key index
+/// answers (#4297), and the Object keeps it.
+pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> AlmideObject {
+    if pairs.len() < ALMIDE_OBJECT_INDEX_MIN
+        && !(1..pairs.len()).any(|i| pairs[..i].iter().any(|(k, _)| *k == pairs[i].0))
+    {
+        return AlmideObject::from_pairs(pairs);
     }
-    let mut out: Vec<(AlmideKey, AlmideValue)> = Vec::with_capacity(pairs.len());
-    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut out = AlmideObject::with_capacity(pairs.len());
     for (k, v) in pairs {
-        match at.get(k.as_ref()) {
-            Some(&i) => out[i].1 = v,
-            None => {
-                at.insert(k.to_string(), out.len());
-                out.push((k, v));
-            }
-        }
+        out.upsert(k, v);
     }
     out
 }
@@ -147,9 +254,7 @@ pub fn almide_rt___err_at_index(e: AlmideString, i: i64) -> AlmideString { almid
 pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, AlmideString> {
     let __almide_r: Result<AlmideValue, String> = (|| {
         if let AlmideValue::Object(pairs) = v {
-            for (k, val) in pairs {
-                if k.as_ref() == key { return Ok(val.clone()); }
-            }
+            if let Some(val) = pairs.find(key) { return Ok(val.clone()); }
             Err(format!("missing field '{}'", almide_rt_errtext_escape(key)))
         } else {
             Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
@@ -262,9 +367,7 @@ pub fn almide_rt_value_decode_option_custom_ref<T, F: Fn(&AlmideValue) -> Result
 pub fn almide_rt_value_field_ref<'a>(v: &'a AlmideValue, key: &str) -> Result<&'a AlmideValue, AlmideString> {
     let __almide_r: Result<&'a AlmideValue, String> = (|| {
         if let AlmideValue::Object(pairs) = v {
-            for (k, val) in pairs {
-                if k.as_ref() == key { return Ok(val); }
-            }
+            if let Some(val) = pairs.find(key) { return Ok(val); }
             Err(format!("missing field '{}'", almide_rt_errtext_escape(key)))
         } else {
             Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
@@ -382,7 +485,7 @@ pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
             let want: std::collections::HashSet<&str> = keys.iter().map(|x| x.as_str()).collect();
             AlmideValue::Object(pairs.iter().filter(|(k, _)| want.contains(k.as_ref())).cloned().collect())
         }
-        _ => AlmideValue::Object(Vec::new()),
+        _ => AlmideValue::Object(AlmideObject::new()),
     }
 }
 
@@ -390,24 +493,15 @@ pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
 pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
     match (a, b) {
         (AlmideValue::Object(pa), AlmideValue::Object(pb)) => {
-            // The FIRST slot holding each key, built once (#4207): O(|a| + |b|)
-            // where a scan of the growing result per key of b was O(|a|·|b|).
-            // The fold is unchanged — a key of b overrides the first of a's
-            // repeats in place, a new key is appended at its first position
-            // and later repeats in b override that slot, so b's last value wins.
+            // The result's key index answers each key of b (#4207, #4297):
+            // O(|a| + |b|) where a scan of the growing result per key of b was
+            // O(|a|·|b|). The fold is unchanged — a key of b overrides the
+            // first of a's repeats in place, a new key is appended at its first
+            // position and later repeats in b override that slot, so b's last
+            // value wins.
             let mut out = pa.clone();
-            let mut at: std::collections::HashMap<&str, usize> = std::collections::HashMap::with_capacity(pa.len() + pb.len());
-            for (i, (k, _)) in pa.iter().enumerate() {
-                at.entry(k.as_ref()).or_insert(i);
-            }
-            for (k, v) in pb {
-                match at.get(k.as_ref()) {
-                    Some(&pos) => out[pos] = (k.clone(), v.clone()),
-                    None => {
-                        at.insert(k.as_ref(), out.len());
-                        out.push((k.clone(), v.clone()));
-                    }
-                }
+            for (k, v) in pb.iter() {
+                out.upsert(k.clone(), v.clone());
             }
             AlmideValue::Object(out)
         }
@@ -437,18 +531,13 @@ pub fn almide_rt_value_set_path_steps(v: AlmideValue, steps: &[(bool, AlmideStri
     for (is_key, name, i) in steps {
         if *is_key {
             if !matches!(cur, AlmideValue::Object(_)) {
-                *cur = AlmideValue::Object(Vec::new());
+                *cur = AlmideValue::Object(AlmideObject::new());
             }
             let AlmideValue::Object(entries) = cur else { unreachable!() };
-            // No Object holds a key twice (C-401), so the first match is the one.
-            let at = match entries.iter().position(|(k, _)| k.as_ref() == name.as_str()) {
-                Some(at) => at,
-                None => {
-                    entries.push((almide_rt_intern_key(name.as_str()), AlmideValue::Object(Vec::new())));
-                    entries.len() - 1
-                }
-            };
-            cur = &mut entries[at].1;
+            // No Object holds a key twice (C-401), so the first match is the
+            // one; the Object's key index finds it (#4297), so a fold of n
+            // inserts is linear, not n²/2 key compares.
+            cur = entries.slot_or_insert_with(name.as_str(), || AlmideValue::Object(AlmideObject::new()));
         } else {
             match cur {
                 AlmideValue::Array(items) if usize::try_from(*i).is_ok_and(|at| at < items.len()) => {

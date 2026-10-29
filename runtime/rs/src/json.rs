@@ -236,38 +236,26 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
         }
         /// A key the object already holds is refused where the repeat starts
         /// (I-JSON §2.3). Small objects compare against the pairs read so far;
-        /// from 16 keys on, a set built once answers instead.
+        /// from 16 keys on, the Object's own key index answers (#4297), and
+        /// the parsed Object keeps it for its lookups.
         fn parse_object(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             let b = t.as_bytes();
             *pos += 1;
             skip_ws(t, pos);
-            let mut pairs: Vec<(AlmideKey, AlmideValue)> = Vec::with_capacity(8);
+            let mut pairs = AlmideObject::with_capacity(8);
             if *pos < b.len() && b[*pos] == b'}' { *pos += 1; return Ok(AlmideValue::Object(pairs)); }
-            let mut seen: Option<std::collections::HashSet<String>> = None;
             loop {
                 if *pos >= b.len() { return Err("unexpected end of input".into()); }
                 if b[*pos] != b'"' { return Err(at("json: unquoted key", t, *pos)); }
                 let key_at = *pos;
                 let key = parse_key(t, pos)?;
-                let repeat = match &mut seen {
-                    Some(set) => !set.insert(key.to_string()),
-                    None => {
-                        let hit = pairs.iter().any(|(k, _)| *k == key);
-                        if !hit && pairs.len() >= 16 {
-                            let mut set: std::collections::HashSet<String> = pairs.iter().map(|(k, _)| k.to_string()).collect();
-                            set.insert(key.to_string());
-                            seen = Some(set);
-                        }
-                        hit
-                    }
-                };
-                if repeat { return Err(at("json: duplicate key", t, key_at)); }
+                if pairs.position_indexed(key.as_ref()).is_some() { return Err(at("json: duplicate key", t, key_at)); }
                 skip_ws(t, pos);
                 if *pos >= b.len() { return Err("unexpected end of input".into()); }
                 if b[*pos] != b':' { return Err(at("json: expected ':'", t, *pos)); }
                 *pos += 1;
                 let val = parse_value(t, pos, depth)?;
-                pairs.push((key, val));
+                pairs.push_new(key, val);
                 skip_ws(t, pos);
                 if *pos >= b.len() { return Err("unexpected end of input".into()); }
                 match b[*pos] {
