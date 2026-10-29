@@ -35,7 +35,7 @@ pub const PROBE_APP: &str = r#"fn app(req: HttpRequest) -> Result[HttpResponse, 
   match path {
     "/missing" => err("no route ${path}"),
     "/a/b" => ok(http.response(200, http.body(req)) |> http.set_status(418) |> http.set_header("x-kind", "teapot")),
-    _ => ok(http.with_headers(200, "${http.method(req)} ${path} [${keys}] ${http.body(req)}", [("x-token", http.header(req, "x-token") ?? "none"))])),
+    _ => ok(http.with_headers(200, "${http.method(req)} ${path} [${keys}] ${http.body(req)}", [("x-token", http.header(req, "x-token") ?? "none")])),
   }
 }
 "#;
