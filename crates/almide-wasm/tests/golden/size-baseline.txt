@@ -30,7 +30,7 @@
 5727	spec/wasm_cross/bang_in_record_literal_field.almd
 5108	spec/wasm_cross/base64_decode_canonical.almd
 3274	spec/wasm_cross/base64_encode.almd
-14650	spec/wasm_cross/bigint_text_and_pow_limits.almd
+14629	spec/wasm_cross/bigint_text_and_pow_limits.almd
 5362	spec/wasm_cross/binary_operators.almd
 4081	spec/wasm_cross/binary_search_duplicate_keys.almd
 1114	spec/wasm_cross/binding_stmts.almd
@@ -61,10 +61,10 @@
 9499	spec/wasm_cross/bytes_negative_offset_family.almd
 1888	spec/wasm_cross/bytes_new_exhaustion.almd
 2220	spec/wasm_cross/bytes_pad_ceiling_oom.almd
-6761	spec/wasm_cross/bytes_param_writeback.almd
-2766	spec/wasm_cross/bytes_push_growth.almd
-1978	spec/wasm_cross/bytes_push_inplace.almd
-12210	spec/wasm_cross/bytes_rawptr.almd
+6752	spec/wasm_cross/bytes_param_writeback.almd
+2745	spec/wasm_cross/bytes_push_growth.almd
+1957	spec/wasm_cross/bytes_push_inplace.almd
+12189	spec/wasm_cross/bytes_rawptr.almd
 2940	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 3143	spec/wasm_cross/bytes_repeat_size_ceiling.almd
 20152	spec/wasm_cross/bytes_search_edit_family.almd
@@ -630,7 +630,7 @@
 4784	spec/wasm_cross/nested_list_list_int.almd
 5555	spec/wasm_cross/nested_list_list_string.almd
 4393	spec/wasm_cross/nested_list_option_result.almd
-6637	spec/wasm_cross/nested_map_list_values.almd
+6616	spec/wasm_cross/nested_map_list_values.almd
 6579	spec/wasm_cross/nested_match_heap_arm.almd
 2186	spec/wasm_cross/nested_payload_guard.almd
 11636	spec/wasm_cross/nested_place_assign.almd
@@ -833,7 +833,7 @@
 11994	spec/wasm_cross/tco_map_acc_seed.almd
 1728	spec/wasm_cross/tco_multi_concat.almd
 1971	spec/wasm_cross/tco_nested_list_accumulator.almd
-2647	spec/wasm_cross/tco_over_match_result.almd
+2626	spec/wasm_cross/tco_over_match_result.almd
 8805	spec/wasm_cross/testing_assert_abort_approx.almd
 5973	spec/wasm_cross/testing_assert_abort_contains.almd
 5937	spec/wasm_cross/testing_assert_abort_err.almd
@@ -995,10 +995,10 @@
 34328	spec/wasm_cross/witness_straightline.almd
 7380	spec/wasm_cross/zip_view_shape.almd
 26017	spec/wasm_cross/zlib_call_vs_user_namesake.almd
-21215	spec/wasm_cross/zlib_output_bound.almd
-26935	spec/wasm_cross/zlib_selfhost.almd
-8951	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
-12647	spec/wasm_fail/bigint_to_string_limit_aborts.almd
+21194	spec/wasm_cross/zlib_output_bound.almd
+26914	spec/wasm_cross/zlib_selfhost.almd
+8930	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
+12626	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 3329	spec/wasm_fail/effect_err_aborts_both_legs.almd
 3494	spec/wasm_fail/int_parse_err_propagates.almd
 3230	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
