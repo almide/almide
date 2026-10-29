@@ -140,8 +140,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         region_exports,
         main_index,
     } = a;
-    let adapters: Vec<Function> = region_exports.iter().map(crate::region_export::adapter).collect();
-    let release = (!adapters.is_empty()).then(crate::region_export::release);
+    // ADR-0031 A1: the Region adapters' bodies for the helper scan; their
+    // export-table global index is fixed once the globals are laid out, and
+    // the call edges do not depend on it.
+    let mut adapters: Vec<Function> = region_exports.iter().map(|e| crate::region_export::adapter(e, 0)).collect();
+    let mut release = (!adapters.is_empty()).then(|| crate::region_export::release(0));
     // #2407: the allocation counters, APPENDED after the top-let globals so
     // no existing index moves — four i64 globals `$alloc` / `$free` bump,
     // present only under the `alloc_count` switch (a shipped module has
@@ -401,6 +404,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // recursive type's drop, `==` or display walks one (deep_walk.rs).
     debug_assert!(!work.deep_globals_used.get() || globals.len() == work.deep_global_base.get());
     crate::deep_walk::declare_globals(&mut globals, work);
+    // The Region export table (region_export.rs): block, count, capacity.
+    if release.is_some() {
+        let g = globals.len();
+        for _ in 0..crate::region_export::TABLE_GLOBALS {
+            globals.global(GlobalType { val_type: ValType::I32, mutable: true, shared: false }, &ConstExpr::i32_const(0));
+        }
+        adapters = region_exports.iter().map(|e| crate::region_export::adapter(e, g)).collect();
+        release = Some(crate::region_export::release(g));
+    }
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);

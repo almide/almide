@@ -42,6 +42,9 @@ fn empty() -> Region = ffi.region(bytes.new())
 @export(wasm, "tail_of")
 effect fn tail_of() -> Region = ffi.slice(ffi.region(bytes.from_string("hello")), 1, 4)!
 
+@export(wasm, "inbox_tail")
+effect fn inbox_tail() -> Region = ffi.slice(inbox, 1, 2)!
+
 @export(wasm, "churn")
 fn churn(n: Int) -> Int = list.range(0, n) |> list.map((i) => bytes.len(bytes.from_string("filler-${i}"))) |> list.fold(0, (a, x) => a + x)
 
@@ -253,14 +256,52 @@ fn an_empty_region_crosses_as_zero_zero() {
     release.call(&mut r.store, 0).unwrap();
 }
 
-/// A sub-region has no block of its own to hand out, and an `effect fn`
-/// export's err has no slot in `(ptr, len)`: both trap with the reason on
-/// stderr, never an address the host could not give back.
+/// A1: a sub-region crosses as its own address inside its parent's block,
+/// with no copy. The host's share keeps the parent alive even after the
+/// program dropped it, `__region_release` gives exactly that share back, and
+/// releasing an address twice (or one never handed out) traps.
 #[test]
-fn a_sub_region_or_an_err_traps_with_its_reason() {
+fn an_exported_slice_holds_its_parent_until_released() {
     let mut r = Run::new();
-    assert!(r.region0("tail_of").is_err(), "a sub-region crossed");
-    assert!(r.host.lock().unwrap().err.contains("returned a sub-region of 4 bytes"), "{}", r.host.lock().unwrap().err);
+    let (p, n) = r.region0("tail_of").expect("tail_of");
+    assert_eq!((n, r.mem(p, n)), (4, b"ello".to_vec()));
+    // `tail_of`'s parent is a temporary: only the host's share holds it.
+    assert_eq!(r.rc(p - 1), 1);
+    let churn = r.inst.get_typed_func::<i64, i64>(&mut r.store, "churn").unwrap();
+    churn.call(&mut r.store, 300).unwrap();
+    assert_eq!(r.mem(p, n), b"ello".to_vec(), "the parent moved under the host");
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
+    release.call(&mut r.store, p).unwrap();
+    assert!(release.call(&mut r.store, p).is_err(), "a second release of one address did not trap");
+}
+
+/// The share accounting on a parent the program keeps: the export of a slice
+/// of the `inbox` var adds one share, and its release takes exactly that one
+/// back; an address the module never handed out traps.
+#[test]
+fn releasing_an_exported_slice_gives_back_one_share() {
+    let mut r = Run::new();
+    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").unwrap();
+    let (p, _) = open.call(&mut r.store, 4).unwrap();
+    let m = r.inst.get_memory(&mut r.store, "memory").unwrap();
+    m.data_mut(&mut r.store)[p as usize..(p + 4) as usize].copy_from_slice(&[1, 2, 3, 40]);
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
+    release.call(&mut r.store, p).unwrap();
+    assert_eq!(r.rc(p), 1, "the inbox var's own share");
+    let (q, n) = r.region0("inbox_tail").expect("inbox_tail");
+    assert_eq!((q, n, r.mem(q, n)), (p + 1, 2, vec![2, 3]));
+    assert_eq!(r.rc(p), 2, "the var's share and the host's");
+    release.call(&mut r.store, q).unwrap();
+    assert_eq!(r.rc(p), 1, "the release took back the host's share alone");
+    assert!(release.call(&mut r.store, q).is_err(), "a released address was released again");
+    assert!(release.call(&mut r.store, p + 2).is_err(), "an address never handed out was released");
+}
+
+/// An `effect fn` export's err has no slot in `(ptr, len)`: it traps with the
+/// reason on stderr.
+#[test]
+fn an_err_traps_with_its_reason() {
+    let mut r = Run::new();
     let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").unwrap();
     assert!(open.call(&mut r.store, -1).is_err());
     assert!(r.host.lock().unwrap().err.contains("ffi.alloc: negative length -1"), "{}", r.host.lock().unwrap().err);
