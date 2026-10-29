@@ -70,7 +70,7 @@ pub const P1_SERVED_OPS: &[i32] = &[
     // `almide:process/spawn` import, which a stock runtime refuses at load.
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
     // The `process.start` child (#4308): the same import, cases 11..=16.
-    140, 141, 142, 143, 144, 145,
+    146, 147, 148, 149, 150, 151,
     // The rooted fs family by descriptor (#4084): the fs service's segment
     // walk from the root, lookupflags 0 at every step.
     120, 121, 122, 123, 124, 125,
@@ -343,7 +343,7 @@ pub struct P1Services {
     /// any op of [`FS_SERVICE_OPS`] (#2742): the spliced fs service, its
     /// own page past the park, and the WASI imports it reaches.
     pub fs: bool,
-    /// any process op (80..=90 and 140..=145, #2589 / #4308): the `almide:process/spawn` import,
+    /// any process op (80..=90 and 146..=151, #2589 / #4308): the `almide:process/spawn` import,
     /// its forwarder and the `cabi_realloc` export (`proc_service.rs`).
     pub proc: bool,
 }

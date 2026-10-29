@@ -932,7 +932,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
-            // ops 80..=90 and 140..=145 = almide:process/spawn (#2589,
+            // ops 80..=90 and 146..=151 = almide:process/spawn (#2589,
             // #4308, ADR-0025): the
             // subprocess core native runs; stdout flushed before a child
             // that shares it.

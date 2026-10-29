@@ -175,7 +175,7 @@ fn a_linker_without_the_import_refuses_the_guest_at_instantiation() {
 
 /// The WIT is the interface's one written form: its `enum op` order IS the
 /// host op numbering (case index = op − 80, the `start` child's cases
-/// continuing at op 140), and `call` keeps the shape the
+/// continuing at op 146), and `call` keeps the shape the
 /// canonical import above lowers. A reordered case or a changed signature
 /// fails here before it can disagree with the emitter or the host.
 #[test]
@@ -332,7 +332,7 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
     assert!(format!("{e:#}").contains("almide:process/spawn"), "{e:#}");
 }
 
-/// The `start` child (#4308) over ops 140..=145: native's child core on the
+/// The `start` child (#4308) over ops 146..=151: native's child core on the
 /// run's table — the handle, poll while running, the incremental reads, the
 /// outcome, stop, and an unknown handle.
 #[test]
@@ -341,26 +341,26 @@ fn the_start_child_answers_through_its_handle() {
     set_allowlist(None);
     let t: ProcTable = std::sync::Mutex::new(Vec::new());
     let script = "printf a; printf x >&2; exit 3";
-    let h = call(140, "sh", &frame(&["0", "", "", "-c", script]), &|| {}, &t).expect("start");
-    let st = call(142, &h, "", &|| {}, &t).expect("wait");
+    let h = call(146, "sh", &frame(&["0", "", "", "-c", script]), &|| {}, &t).expect("start");
+    let st = call(148, &h, "", &|| {}, &t).expect("wait");
     assert_eq!(st, "3\n1\nax");
-    assert_eq!(call(141, &h, "", &|| {}, &t).as_deref(), Ok("1"));
-    assert_eq!(call(144, &h, "1", &|| {}, &t).as_deref(), Ok("a"));
-    assert_eq!(call(144, &h, "1", &|| {}, &t).as_deref(), Ok(""));
-    assert_eq!(call(144, &h, "2", &|| {}, &t).as_deref(), Ok("x"));
-    assert!(call(145, &h, "", &|| {}, &t).expect("pid").parse::<i64>().expect("decimal") > 0);
+    assert_eq!(call(147, &h, "", &|| {}, &t).as_deref(), Ok("1"));
+    assert_eq!(call(150, &h, "1", &|| {}, &t).as_deref(), Ok("a"));
+    assert_eq!(call(150, &h, "1", &|| {}, &t).as_deref(), Ok(""));
+    assert_eq!(call(150, &h, "2", &|| {}, &t).as_deref(), Ok("x"));
+    assert!(call(151, &h, "", &|| {}, &t).expect("pid").parse::<i64>().expect("decimal") > 0);
 
-    let s = call(140, "sleep", &frame(&["0", "", "", "30"]), &|| {}, &t).expect("start sleep");
-    assert_eq!(call(141, &s, "", &|| {}, &t).as_deref(), Ok("0"));
-    let stopped = call(143, &s, "200", &|| {}, &t).expect("stop");
+    let s = call(146, "sleep", &frame(&["0", "", "", "30"]), &|| {}, &t).expect("start sleep");
+    assert_eq!(call(147, &s, "", &|| {}, &t).as_deref(), Ok("0"));
+    let stopped = call(149, &s, "200", &|| {}, &t).expect("stop");
     assert!(stopped.starts_with("-1\n"), "{stopped}");
-    assert_eq!(call(143, &s, "200", &|| {}, &t).as_deref(), Ok(stopped.as_str()));
+    assert_eq!(call(149, &s, "200", &|| {}, &t).as_deref(), Ok(stopped.as_str()));
 
-    let late = call(140, "sleep", &frame(&["100", "", "", "30"]), &|| {}, &t).expect("start");
-    assert_eq!(call(142, &late, "", &|| {}, &t).unwrap_err(), "exec timed out after 100ms");
+    let late = call(146, "sleep", &frame(&["100", "", "", "30"]), &|| {}, &t).expect("start");
+    assert_eq!(call(148, &late, "", &|| {}, &t).unwrap_err(), "exec timed out after 100ms");
 
-    assert_eq!(call(142, "99", "", &|| {}, &t).unwrap_err(), "invalid ProcessChild handle: 99");
-    let missing = call(140, "almide-no-such-binary-4308", &frame(&["0", "", ""]), &|| {}, &t).unwrap_err();
+    assert_eq!(call(148, "99", "", &|| {}, &t).unwrap_err(), "invalid ProcessChild handle: 99");
+    let missing = call(146, "almide-no-such-binary-4308", &frame(&["0", "", ""]), &|| {}, &t).unwrap_err();
     assert!(missing.starts_with("process.start(\"almide-no-such-binary-4308\"): "), "{missing}");
 }
 
@@ -370,10 +370,10 @@ fn the_run_end_stops_an_unwaited_child() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     set_allowlist(None);
     let t: ProcTable = std::sync::Mutex::new(Vec::new());
-    let h = call(140, "sleep", &frame(&["0", "", "", "30"]), &|| {}, &t).expect("start");
-    let pid: i32 = call(145, &h, "", &|| {}, &t).expect("pid").parse().expect("decimal");
+    let h = call(146, "sleep", &frame(&["0", "", "", "30"]), &|| {}, &t).expect("start");
+    let pid: i32 = call(151, &h, "", &|| {}, &t).expect("pid").parse().expect("decimal");
     super::stop_unwaited(&t);
-    assert_eq!(call(141, &h, "", &|| {}, &t).as_deref(), Ok("1"));
+    assert_eq!(call(147, &h, "", &|| {}, &t).as_deref(), Ok("1"));
     let gone = std::process::Command::new("sh").arg("-c").arg(format!("kill -0 {pid} 2>/dev/null")).status().expect("sh");
     assert!(!gone.success(), "the child outlived the run");
 }

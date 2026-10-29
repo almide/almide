@@ -5,7 +5,7 @@
 // on stock runtimes). It is bounded three ways:
 //
 // - it ships only when the program's op set names a process op (80..=90,
-//   or the `start` child's 140..=145):
+//   or the `start` child's 146..=151):
 //   a program that never starts a child never carries the import;
 // - a host that does not implement it refuses the module at load (stock
 //   wasmtime: "unknown import: `almide:process/spawn::call` has not been
@@ -21,7 +21,7 @@
 // with the answer's bytes placed through the module's `cabi_realloc` export.
 // The embedded host (`almide run --target wasm`, `almide test`) serves the
 // same operations to the raw module as `almide.fs_call` ops 80..=90 and
-// 140..=145.
+// 146..=151.
 package almide:process;
 
 interface spawn {
@@ -70,8 +70,8 @@ interface spawn {
     /// The `process.start` child (#4308, R-process-03): a host resource. The
     /// host keeps each started child in its own table — the pipes it drains,
     /// the deadline, what was read so far — and the guest holds only its
-    /// handle, decimal text in `a`. These cases are host ops 140..=145
-    /// (case index = op − 129; host ops 91..=139 serve other families).
+    /// handle, decimal text in `a`. These cases are host ops 146..=151
+    /// (case index = op − 135; host ops 91..=145 serve other families).
     ///
     /// a = cmd, b = [timeout-ms, dir, stdin] ++ argv, as `output`; starts the
     /// child in its own process group and returns at once. ok = the handle;
