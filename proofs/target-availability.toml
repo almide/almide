@@ -325,7 +325,8 @@ pending_self_host_ceiling = 0
 # tests/net_udp_embedded_cross_test.rs). Each row keeps its stock-p1 leg —
 # the stock p1 standard has no sockets — so no row is removed and the count
 # stays.
-pending_port_ceiling = 31
+# 31 -> 30 (2026-10-30, #4307): uuid.v7 serves on every wasm leg; its stamp cell is a guest global (stdlib/uuid_wasm.almd), pinned by spec/wasm_cross/uuid_v7_monotonic.almd.
+pending_port_ceiling = 30
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -623,15 +624,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
 issue = "#4306"
-
-[[unavailable]]
-fn = "uuid.v7"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-reason-stock-p1 = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-reason-embedded = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-issue = "#4307"
 
 [[unavailable]]
 fn = "process.start"

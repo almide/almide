@@ -1067,6 +1067,7 @@ spec/wasm_cross/uoe_heap_ok_share.almd
 spec/wasm_cross/url_authority_edges.almd
 spec/wasm_cross/url_whatwg_probes.almd
 spec/wasm_cross/user_box_recursive_enum.almd
+spec/wasm_cross/uuid_v7_monotonic.almd
 spec/wasm_cross/value_array_leak_loop.almd
 spec/wasm_cross/value_array_tuple_tco.almd
 spec/wasm_cross/value_as_array_leak_loop.almd

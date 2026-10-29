@@ -19,6 +19,7 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_STRING_ERR_TEXT, &[("err_text_escape", "string.__err_text")]),
     (crate::embedded::SRC_STRING_SEARCH, &[("string_split", "string.split"), ("string_split_once", "string.split_once"), ("string_replace", "string.replace"), ("string_replace_first", "string.replace_first")]),
     (crate::embedded::SRC_UNIX_WASM, &[("__unix_impl_connect_impl", "unix.__os_connect"), ("__unix_impl_listen_impl", "unix.__os_listen"), ("__unix_impl_accept_impl", "unix.__os_accept"), ("__unix_impl_send_impl", "unix.__os_send"), ("__unix_impl_recv_impl", "unix.__os_recv"), ("__unix_impl_take_fds_impl", "unix.__os_take_fds"), ("__unix_impl_wait_impl", "unix.__os_wait"), ("__unix_impl_close_impl", "unix.__os_close"), ("__unix_impl_shm_create_impl", "unix.__os_shm_create"), ("__unix_impl_shm_resize_impl", "unix.__os_shm_resize"), ("__unix_impl_shm_write_impl", "unix.__os_shm_write"), ("__unix_impl_shm_read_impl", "unix.__os_shm_read")]),
+    (crate::embedded::SRC_UUID_WASM, &[("uuid_v7_stamp", "uuid.__v7_stamp")]),
     (crate::embedded::SRC_ZLIB_INFLATE, &[("zlib_gunzip_max", "zlib.gunzip_max"), ("zlib_inflate_max", "zlib.inflate_max"), ("zlib_decompress_max", "zlib.decompress_max")]),
 ];
 
@@ -83,6 +84,7 @@ pub const PRIM_FREE: &[&str] = &[
     "__unix_impl_shm_resize_impl",
     "__unix_impl_shm_write_impl",
     "__unix_impl_shm_read_impl",
+    "uuid_v7_stamp",
     "zlib_gunzip_max",
     "zlib_inflate_max",
     "zlib_decompress_max",

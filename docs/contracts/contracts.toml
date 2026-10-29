@@ -5784,6 +5784,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-441"
+spec      = "ALS-R5"
+title     = "uuid.v7 carries version 7 and the RFC 9562 variant, spells as 8-4-4-4-12 lowercase hex, and each one is strictly greater than the last on every leg, in one millisecond too"
+statement = "ALS-R5 (almide/almide#4307): `uuid.v7()` is an `effect fn` answering a 16-byte `uuid.Uuid` whose first 48 bits are the Unix time in milliseconds, big-endian, then the version nibble 7, a 12-bit counter, the RFC 9562 variant bits `10` and 62 random bits. One cell per run holds the last stamp `ms * 4096 + counter`: a new millisecond (clamped to 0..2^48-1) restarts the counter at 0, and a stamp at or below the last one (the same millisecond, or a clock stepped back) takes the last one plus 1, carrying into the next millisecond past counter 4095 (RFC 9562 section 6.2 method 1). So every `Uuid` a run makes is strictly greater than the one made before it, under `uuid.compare` and byte by byte over its first 8 bytes, however many fall in one millisecond, on native (a process-wide cell in the runtime) and on every wasm leg (a global of the program's one instance). `uuid.to_string` spells it as 8-4-4-4-12 lowercase hex digits whose 13th digit is `7`. The time and the random bits are not observables; the observables are the version and variant bits, the length and text shape, the order, stdout, stderr and the exit code."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/uuid_v7_monotonic.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-442"
 spec      = "ALS-R5"
 title     = "net udp and lookup_host: binding, datagram boundaries, the max-bytes rule, the sender's address and loopback name lookup agree on native and the embedded wasm lane"
