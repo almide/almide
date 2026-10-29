@@ -4,8 +4,8 @@ import http
 
 type Report: Body = { rows: String, kind: String }
 
-fn Report.__self_media_type(self) -> String = "text/csv"
+fn Report.media_type(self) -> String = "text/csv"
 
-fn Report.__self_to_text(self) -> String = self.rows
+fn Report.to_text(self) -> String = self.rows
 
 fn main() -> Unit = println(http.body(http.response(200, Report { rows: "a,b", kind: "csv" })))

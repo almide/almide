@@ -4,8 +4,8 @@ import http
 
 type Chart: Body = { markup: String }
 
-fn Chart.__self_media_type(self) -> String = "image/svg+xml"
+fn Chart.media_type(self) -> String = "image/svg+xml"
 
-fn Chart.__self_to_text(self) -> String = self.markup
+fn Chart.to_text(self) -> String = self.markup
 
 fn main() -> Unit = println(http.body(http.response(200, Chart { markup: "<svg/>" })))
