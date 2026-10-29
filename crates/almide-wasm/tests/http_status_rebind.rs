@@ -44,12 +44,15 @@ effect fn main() -> Unit = {{
 #[test]
 fn setting_the_status_in_a_loop_does_not_copy_the_headers() {
     let headers = 2000;
-    let base = bytes_requested(&program(headers, 0), &format!("200 {headers}\n"));
+    // `with_headers` writes the body's Content-Type first, then the caller's
+    // list (ADR-0032, C-275), so the response carries one header more.
+    let listed = headers + 1;
+    let base = bytes_requested(&program(headers, 0), &format!("200 {listed}\n"));
     // 200 runs the rolled loop; 4096 (a literal bound >= 1024) the unrolled
     // fast lane (unroll.rs), whose body once skipped the move-in walk.
     for steps in [200, 4096] {
         let code = if steps % 2 == 0 { 201 } else { 200 };
-        let want = format!("{code} {headers}\n");
+        let want = format!("{code} {listed}\n");
         let looped = bytes_requested(&program(headers, steps), &want);
         let per_step = looped.saturating_sub(base) / u64::from(steps);
         // One header pair is two 4-byte slots plus their strings; a copy of the
