@@ -13,7 +13,7 @@
 98	63	789	98	spec/wasm_cross/arg_rebinds_earlier_arg.almd
 ~	spec/wasm_cross/args_surface.almd
 11	7	139	11	spec/wasm_cross/as_pattern.almd
-0	0	0	0	spec/wasm_cross/assert_abort_eq.almd
+9	3	81	7	spec/wasm_cross/assert_abort_eq.almd
 0	0	0	0	spec/wasm_cross/assert_abort_msg.almd
 207	171	1747	205	spec/wasm_cross/assert_abort_multiline.almd
 7	3	82	7	spec/wasm_cross/assert_abort_ne.almd
@@ -686,7 +686,7 @@
 ~	spec/wasm_cross/process_args.almd
 12	5	55	12	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 17	10	181	17	spec/wasm_cross/pure_bang_propagation.almd
-0	0	0	0	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
+9	3	82	7	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 10	2	112	10	spec/wasm_cross/qq_record_fallback.almd
 19	9	242	19	spec/wasm_cross/r5_lowmisc_param_try_err.almd
 3	0	58	3	spec/wasm_cross/r5_mod_global_init_order.almd
@@ -834,13 +834,13 @@
 6	1	21	6	spec/wasm_cross/tco_multi_concat.almd
 12	6	272	12	spec/wasm_cross/tco_nested_list_accumulator.almd
 17	10	237	17	spec/wasm_cross/tco_over_match_result.almd
-3	2	9	3	spec/wasm_cross/testing_assert_abort_approx.almd
-2	1	64	2	spec/wasm_cross/testing_assert_abort_contains.almd
-2	0	32	0	spec/wasm_cross/testing_assert_abort_err.almd
-0	0	0	0	spec/wasm_cross/testing_assert_abort_gt.almd
-0	0	0	0	spec/wasm_cross/testing_assert_abort_lt.almd
-2	0	12	0	spec/wasm_cross/testing_assert_abort_none.almd
-4	0	52	0	spec/wasm_cross/testing_assert_abort_ok.almd
+30	20	211	27	spec/wasm_cross/testing_assert_abort_approx.almd
+85	62	865	84	spec/wasm_cross/testing_assert_abort_contains.almd
+27	10	264	24	spec/wasm_cross/testing_assert_abort_err.almd
+9	3	84	7	spec/wasm_cross/testing_assert_abort_gt.almd
+12	4	111	10	spec/wasm_cross/testing_assert_abort_lt.almd
+40	17	412	37	spec/wasm_cross/testing_assert_abort_none.almd
+42	17	453	37	spec/wasm_cross/testing_assert_abort_ok.almd
 4	1	60	2	spec/wasm_cross/testing_assert_abort_some.almd
 0	0	0	0	spec/wasm_cross/time_negative_scale.almd
 0	0	0	0	spec/wasm_cross/time_negative_trap.almd
