@@ -65,6 +65,70 @@ effect fn main() -> Unit = {
 }
 ```
 
+**Slices.** `ffi.slice(r, off, n)` is a view of the `n` bytes at `off` inside
+`r`. It answers `err` unless `0 <= off` and `off + n <= ffi.len(r)`, so it never
+reaches past its parent. A slice is read-only, even of a writable parent. It
+reads the parent's memory, so a later write to the parent shows through it, and
+it holds the parent's block, so the memory outlives the view. Handing a slice to
+an `@extern` passes a sub-range with no copy.
+
+```almide check
+import ffi
+
+effect fn main() -> Unit = {
+  let r = ffi.alloc(4)!
+  let tail = ffi.slice(r, 2, 2)!
+  ffi.write(r, 2, bytes.from_list([7, 8]))!
+  println(bytes.to_list(ffi.read(tail, 0, 2)!) |> list.map((x) => int.to_string(x)) |> list.join(","))
+  let far = match ffi.slice(r, 3, 2) {
+    ok(_) => "sliced",
+    err(e) => e,
+  }
+  println(far)
+}
+```
+
+**Host buffers, with no copy** (ADR-0031 amendment, 2026-10-29). The length
+always comes from the Region.
+
+- *Push, wasm.* An `@export(wasm)` fn may return a Region. It crosses as
+  `(ptr: i32, len: i32)` through the multi-value return. The host holds one
+  share of the Region's block: the bytes stay where they are, whatever the
+  program does with its own copies, until the host passes `ptr` to the
+  module's `__region_release` export. The host can write straight into an
+  `ffi.alloc` Region the export returned, then call the next export, which
+  reads it (a top-level `var` holds the program's copy). An empty Region
+  crosses as `(0, 0)`. Only a whole Region crosses: an export returning a
+  slice aborts. An `effect fn` export's `err` prints and traps.
+- *Pull.* A writable `ffi.alloc` Region passed to an `@extern(wasm)` or
+  `@extern(c)` fn is lent for that call, as `(base, len)` or
+  `(uint8_t*, size_t)`, and the foreign code fills it in place.
+- *C callers.* An `@export(c)` fn may take a Region parameter: the caller's
+  `(const uint8_t*, size_t)`, read-only, or, for a parameter the declaration
+  names with `@region(out = p)`, `(uint8_t*, size_t)`, writable. Either is lent
+  for the one call. Every access is still checked against the length the
+  caller passed. A copy still held when the call returns stops the process
+  rather than outlive the caller's buffer.
+
+```almide
+import ffi
+
+var inbox: Region = ffi.region(bytes.new())
+
+@export(wasm, "inbox_open")
+effect fn inbox_open(n: Int) -> Region = {
+  inbox = ffi.alloc(n)!
+  inbox
+}
+
+@export(c, "fill")
+@region(out = out)
+effect fn fill(out: Region, byte: Int) -> Int = {
+  ffi.write(out, 0, bytes.from_list(list.repeat(byte, ffi.len(out))))!
+  ffi.len(out)
+}
+```
+
 The removed spellings (dialect epoch 15; `almide fix` renames the first three):
 
 | Removed | Write |
@@ -78,7 +142,7 @@ The removed spellings (dialect epoch 15; `almide fix` renames the first three):
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (7 functions)
+## Signature index (8 functions)
 
 ```
 // A read-only view of b; b lives as long as the view.
@@ -108,6 +172,10 @@ effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit
 // A copy of the whole region as Bytes.
 // @since unreleased
 effect ffi.to_bytes(r: Region) -> Bytes
+
+// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+// @since unreleased
+ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

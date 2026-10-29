@@ -18,7 +18,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [deque](#deque) | 60 | 0 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
-| [ffi](#ffi) | 7 | 0 |
+| [ffi](#ffi) | 8 | 0 |
 | [float](#float) | 27 | 0 |
 | [float32](#float32) | 24 | 0 |
 | [float64](#float64) | 24 | 0 |
@@ -434,6 +434,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect ffi.read(r: Region, off: Int, n: Int) -> Bytes` — Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
 - `effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit` — Writes b at off; err if the region is read-only or b does not fit.
 - `effect ffi.to_bytes(r: Region) -> Bytes` — A copy of the whole region as Bytes.
+- `ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]` — A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 
 ## float
 

@@ -1,6 +1,6 @@
 # ADR-0031: A pointer the program can read through carries its provenance — `RawPtr` splits into an opaque `Handle` and a bounds-checked `Region` (base, length, owner), and a foreign pointer becomes a `Region` only where its `@extern` declaration states the length
 
-- **Status**: Accepted (2026-10-27). The owner answered ○ to all eight [Owner decisions](#owner-decisions-); see [Implementation](#implementation-2026-10-27) for what landed and where it reads the decisions narrowly.
+- **Status**: Accepted (2026-10-27). The owner answered ○ to all eight [Owner decisions](#owner-decisions-); see [Implementation](#implementation-2026-10-27) for what landed and where it reads the decisions narrowly. Amended 2026-10-29: [Regions at the host boundary](#amendment-2026-10-29-regions-at-the-host-boundary).
 - **Date**: 2026-10-27
 - **Scope**: the `RawPtr` type, the `ffi` module, the `@extern` signature ABI for pointers (`crates/almide-types/src/types/extern_abi.rs`), the deprecated `bytes` raw-pointer spellings, and security-table row 5.
 - **Related**:
@@ -117,6 +117,125 @@ Read narrowly, and named for a decision if the owner wants otherwise:
 - D3's component-model lowering (`list<u8>` / `own<resource>`) is not part of this change: the p2/p3 components take no `@extern(wasm)` hooks today.
 
 Gates: tests/raw_ptr_surface_test.rs (signature-derived: no user-reachable stdlib fn holds a Handle; every Region fn is `@memory_unsafe`; the forgery spellings are refused; the bounds and permission checks answer `err` on the native and the wasm leg), spec/wasm_cross/bytes_rawptr.almd (C-062, C-376), tests/extern_rust_abi_test.rs (the C ABI pair and the single release), scripts/check-rawptr-surface.py.
+
+## Amendment (2026-10-29): Regions at the host boundary
+
+The epoch-15 migration left about 30 downstream repos red, because a Region could not
+be exchanged with a host. The JS drivers of about 20 fizz repos and the nendo-ceangal-web
+pool asked an export for a buffer address, wrote into it, and called the next export;
+ptcg-abc and bindgen's scaffolding pass a C buffer into an `@export(c)` fn. The owner
+answered each gap on 2026-10-29. The binding requirement is answer 5: the inbound host
+data path is zero-copy and still bounded, because the ideal must not cost performance.
+The length always comes from the Region. No `Bytes` copy happens at the boundary.
+
+### A1. An `@export(wasm)` fn may return a Region
+
+It crosses as `(ptr: i32, len: i32)` through wasm's multi-value return, the wasm32 form
+of the `(base, length)` pair a Region argument crosses an import as (D3).
+
+**Ownership.** The returned Region stays alive until the host hands `ptr` back to the
+module's `__region_release` export. Exactly:
+
+1. The adapter the emitter exports keeps one share of the Region's block for the host.
+   The program's own copies of the Region drop by the ordinary rules, and none of them
+   can free the block while the host's share exists. So `ptr` never dangles, and the
+   bytes the host writes stay where they are across later calls.
+2. `__region_release(ptr)` gives that share back. A host that never calls it keeps the
+   block for the instance's lifetime. That is a leak, never a dangling pointer.
+3. An empty Region crosses as `(0, 0)` and holds nothing. Releasing 0 is a no-op.
+4. Only a whole Region crosses: one whose length is its block's length (`ffi.alloc`,
+   `ffi.region`). A sub-region (`ffi.slice`) has no block of its own, so there is no
+   address the host could give back. The export aborts with the reason instead of
+   handing one out.
+5. An `effect fn` export's `err` has no slot in `(ptr, len)`. The adapter writes it to
+   stderr and traps.
+
+Mechanism: an IR rewrite (crates/almide-wasm/src/extern_region.rs,
+`wrap_region_exports`) moves the export to a compiler-made wrapper returning
+`ffi.__export_owner(f(…))`, the Region's block, so the record is released by the
+ordinary ownership rules. A stamp on the wrapper (`region_export`) tells the emitter to
+export an adapter in its place. The adapter (crates/almide-wasm/src/region_export.rs)
+calls the wrapper and returns the block's data address and length, keeping the
+wrapper's share for the host.
+
+### A2. An `@export(c)` fn may take Region parameters
+
+A Region parameter crosses as the C caller's `(const uint8_t *ptr, size_t len)` and is
+read-only. A parameter the declaration names with `@region(out = p)` crosses as
+`(uint8_t *ptr, size_t len)` and is writable: the caller-provided buffer form. Either one
+is **lent for the call**. It owns nothing, because the memory is the caller's. Every
+access is checked against the caller's length (D5: out of bounds is `err`). After the
+call, the wrapper stops the process if any copy of the Region is still held, for example
+in a top-level `var`. That keeps the Region from outliving a buffer the caller may free
+the moment it regains control. Nothing can revoke a value from every copy, so the
+check is Go's `cgocheck` answer, applied always. `check` refuses (E090) a Region return
+from an `@export(c)` fn, because the caller could not free it. It also refuses an `out`
+naming anything but a Region parameter, and a `@region` clause on a fn that neither
+binds nor exports C. The `Built` line counts each lent Region (`@export(c) Region `p`
+of `f``), because its length is the caller's word, like a `@region(len = …)` clause.
+
+### A3. `ffi.slice(r, off, n) -> Result[Region, String]`
+
+A read-only view of the `n` bytes at `off` inside `r`. The answer is `err` unless
+`0 <= off` and `off + n <= ffi.len(r)`, and a negative count is `err` too. The view
+reads the parent's memory, so a later write to a writable parent shows through it. It
+holds the parent's owner (and its release guard), so the memory outlives the view. It is
+never writable, even when the parent is. It mints no new provenance and does no address
+arithmetic: a Region carries the offset of its view in its block (`off`, 0 for
+every mint), `read` / `write` add it after their own bounds check, and an
+`@extern` is handed `base + off`. It removes the
+per-frame outbound sub-range copies in nendo and ceangal, because a slice handed to an
+`@extern` is a sub-range with no copy. C-062 is amended to state it.
+
+### A4. Zero-copy inbound host data
+
+- **Push.** The host writes straight into the writable Region that an A1 export returned,
+  then calls the next export, which reads it through the program's own copy (a top-level
+  `var`).
+- **Pull.** A writable `ffi.alloc` Region passed to an `@extern(wasm)` or `@extern(c)`
+  fn is lent for that call (D3 already did this). The foreign code fills it in place.
+
+### How others cross a buffer (surveyed 2026-10)
+
+| | Outbound view | Inbound, caller's buffer | Lifetime across the boundary |
+|---|---|---|---|
+| **Rust** | `&[u8]` → `(ptr, len)` via `as_ptr` / `len`; `Box<[u8]>::into_raw` to give one away | `slice::from_raw_parts(_mut)(ptr, len)` in an `extern "C" fn`: the length is the caller's word, asserted once | borrowed for the call (`'a` unbounded in practice); `into_raw` / `from_raw` hand ownership over and back |
+| **Swift** 6.2 | `Span` / `RawSpan` (non-escapable views) | `MutableSpan` / `OutputSpan` for a caller-provided buffer; `withUnsafeMutableBytes` | `~Escapable`: the compiler forbids the view outliving the call — Almide checks it at run time instead (A2) |
+| **Wasm component model** | `list<u8>` is copied by the canonical ABI into the callee's memory (`cabi_realloc`) | same copy | `borrow<T>` handles end with the call, `own<T>` runs the destructor: the shape of A1's share and A2's lend, without zero-copy for bytes |
+| **Zig** | `[]u8` = `(ptr, len)`; `export fn f(p: [*]u8, n: usize)` and `p[0..n]` | `[*]u8` + `usize`, sliced once | none checked; a slice may outlive its memory |
+
+Almide takes Rust's and Zig's `(ptr, len)` crossing, because answer 5 rules out the
+component model's copy. It takes the component model's `own` / `borrow` split as its
+lifetime rule: A1 hands over a share, which is like `own`, and A2 lends for one call,
+which is like `borrow`. Where Swift checks non-escape statically, Almide checks it at
+run time, because a non-escape rule is what the checker does not have (see the
+scoped-borrow alternative below).
+
+### What stays trusted (added)
+
+- The C caller's `(ptr, len)` for an `@export(c)` Region: one statement per call, counted
+  on the `Built` line per declaration.
+- The wasm host, which can write anywhere in linear memory. A1 gives it a share and a
+  length, not a capability. A read-only Region the host is handed is read-only by
+  contract only.
+
+### Read narrowly, named for a decision
+
+- The `(ptr, len)` of an A1 export is `(i32, i32)`, as answer 7 of the original decisions
+  says. A Region argument to an `@extern(wasm)` import still crosses as the `Int` scalar
+  (`i64`), the narrowing the [Implementation](#implementation-2026-10-27) section left
+  open. The two directions differ until that narrowing lands.
+- A1 exports no JS-host marshalling (`--host js` notes no shape for the adapter): a JS
+  driver reads `instance.exports.f()` as the two numbers directly.
+- There is no C header generator. A2's prototypes are written by hand:
+  `int32_t f(const uint8_t *buf, size_t buf_len)`, and `uint8_t *` for an `out` parameter.
+
+Evidence: crates/almide-wasm/tests/ffi_host_boundary.rs (A1, A4 push and pull on wasm,
+driven by wasmtime), tests/ffi_host_boundary_test.rs (A2 on native: read-only and `out`
+lends, the bounds `err`s, the escape stop, the E090 rules),
+tests/extern_rust_abi_test.rs (A4 pull on native, `(uint8_t*, size_t)`),
+tests/raw_ptr_surface_test.rs and spec/wasm_cross/bytes_rawptr.almd (A3 on both
+targets, C-062).
 
 ## Alternatives considered
 

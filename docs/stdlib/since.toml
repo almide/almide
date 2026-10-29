@@ -333,6 +333,7 @@
 "ffi.len" = "unreleased"
 "ffi.read" = "unreleased"
 "ffi.region" = "unreleased"
+"ffi.slice" = "unreleased"
 "ffi.to_bytes" = "unreleased"
 "ffi.write" = "unreleased"
 "float.abs" = "<=0.5.0"

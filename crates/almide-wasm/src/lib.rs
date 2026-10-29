@@ -205,6 +205,7 @@ mod host_read_line;
 mod newtype;
 // ADR-0031 D3: a Region argument of a wasm import crosses as (base, len).
 mod extern_region;
+mod region_export;
 mod arg_rebind;
 mod arg_temps;
 mod arm;

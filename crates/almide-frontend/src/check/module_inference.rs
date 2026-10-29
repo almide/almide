@@ -554,6 +554,14 @@ impl Checker {
             let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
             self.reject_extern_c_types(sig, extern_attrs, attrs);
         }
+        // ADR-0031 amendment A2: an `@export(c)` fn's Region parameters and
+        // its `@region(out = …)` clauses.
+        if let ast::Decl::Fn { name, params, return_type, extern_attrs, export_attrs, attrs, span, .. } = &*decl
+            && extern_attrs.is_empty()
+        {
+            let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
+            self.check_export_c_regions(sig, export_attrs, attrs);
+        }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the
             // bodyless form for @extern/@intrinsic declarations (and the
