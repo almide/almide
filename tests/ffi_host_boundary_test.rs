@@ -72,6 +72,9 @@ effect fn fill(out: Region, byte: Int) -> Int = {
 @extern(c, "c", "cf_sum")
 fn c_sum() -> Int = _
 
+@extern(c, "c", "cf_sum_buf")
+fn c_sum_buf(buf: Region) -> Int = _
+
 @extern(c, "c", "cf_probe")
 fn c_probe() -> Int = _
 
@@ -82,6 +85,8 @@ effect fn main() -> Unit = {
   println("sum ${c_sum()}")
   println("probe ${c_probe()}")
   println("fill ${c_fill()}")
+  let tail = ffi.slice(ffi.region(bytes.from_list([1, 2, 3, 40])), 2, 2) ?? ffi.region(bytes.new())
+  println("slice ${c_sum_buf(tail)}")
 }
 "#;
 
@@ -97,6 +102,11 @@ extern "C" {
 pub extern "C" fn cf_sum() -> i32 {
     let v = [1u8, 2, 3, 4];
     unsafe { ffb_sum(v.as_ptr(), v.len()) }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn cf_sum_buf(p: *const u8, n: usize) -> i32 {
+    (0..n).map(|i| unsafe { *p.add(i) } as i32).sum()
 }
 
 #[no_mangle]
@@ -126,7 +136,7 @@ fn an_export_c_fn_reads_and_fills_a_lent_region_within_the_callers_length() {
     let (ok, stdout, stderr) = run_package("lend", ALMD, HOST, &["run"]);
     assert!(ok, "the @export(c) Region program failed\n--- stderr ---\n{stderr}");
     // fill: n = 3, the write at 3 refused (past = 0) -> 30; bytes 20, 21, 22, 0.
-    assert_eq!(stdout, "sum 10\nprobe 5\nfill 32043\n", "--- stderr ---\n{stderr}");
+    assert_eq!(stdout, "sum 10\nprobe 5\nfill 32043\nslice 43\n", "--- stderr ---\n{stderr}");
 }
 
 /// A lent Region kept past its call (stored in a top-level `var`) would read
