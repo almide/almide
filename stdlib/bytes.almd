@@ -1234,4 +1234,4 @@ else list.len(bytes.split(b, needle)) - 1
 // crates/almide-frontend/src/canonicalize/protocols.rs).
 fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
 
-fn __bytes_to_bytes(b: Bytes) -> Bytes = b
+fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)

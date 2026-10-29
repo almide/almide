@@ -162,4 +162,4 @@ fn script_json(v: Value) -> SafeHtml = {
 @media_owns("text/html", "*/xml", "*/*+xml")
 fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
 
-fn __safe_html_to_bytes(h: SafeHtml) -> Bytes = bytes.from_string(to_string(h))
+fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)

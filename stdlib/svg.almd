@@ -115,4 +115,4 @@ fn element(name: String, attrs: List[SafeSvg], children: List[SafeSvg]) -> SafeS
 @media_owns("image/svg+xml")
 fn __safe_svg_media_type(h: SafeSvg) -> String = "image/svg+xml"
 
-fn __safe_svg_to_bytes(h: SafeSvg) -> Bytes = bytes.from_string(to_string(h))
+fn __safe_svg_to_text(h: SafeSvg) -> String = to_string(h)

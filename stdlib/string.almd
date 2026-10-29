@@ -503,4 +503,4 @@ fn __err_text(s: String) -> String = _
 // crates/almide-frontend/src/canonicalize/protocols.rs).
 fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
 
-fn __string_to_bytes(s: String) -> Bytes = bytes.from_string(s)
+fn __string_to_text(s: String) -> String = s
