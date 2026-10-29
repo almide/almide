@@ -77,3 +77,65 @@ fn __process_pid_impl() -> Int = match __proc_pid("", "") {
   ok(p) => int.parse(p) ?? -1,
   _ => -1,
 }
+
+// ── The `start` child (R-process-03, #4308) ──
+//
+// A started child is a host resource: the host keeps it in its own table —
+// the pipes its workers drain, the deadline, what was read so far — and the
+// guest holds only its handle, carried as decimal text in a. The host runs
+// native's child core on it (`AlmideProcChild`), so every outcome, read and
+// err string is native's. The ops follow `run-with` in the WIT `enum op`.
+// a = cmd, b = [timeout_ms, dir, stdin] ++ argv (op 146); ok = the handle.
+effect fn __proc_start(cmd: String, argv: String) -> Result[String, String] = _
+
+// ok = `1` once the child's outcome is in, else `0` (op 147).
+effect fn __proc_poll(h: String, unused: String) -> Result[String, String] = _
+
+// Blocks until the outcome (op 148); ok = the status answer.
+effect fn __proc_wait(h: String, unused: String) -> Result[String, String] = _
+
+// b = grace_ms (op 149); ok = the status answer.
+effect fn __proc_stop(h: String, grace_ms: String) -> Result[String, String] = _
+
+// The two non-blocking reads keep plain leaves, as `pid` does: their
+// surfaces are called with the raw type at the site. b = `1` stdout, `2`
+// stderr (op 150); op 151 answers the child's pid.
+fn __proc_read_new(h: String, which: String) -> Result[String, String] = _
+
+fn __proc_child_pid(h: String, unused: String) -> Result[String, String] = _
+
+@implements("process.__os_start")
+effect fn __process_start_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let h = __proc_start(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
+  ok(int.parse(h) ?? -1)
+}
+
+@implements("process.__os_poll")
+effect fn __process_poll_impl(h: Int) -> Result[Bool, String] = {
+  let t = __proc_poll(int.to_string(h), "")!
+  ok(t == "1")
+}
+
+@implements("process.__os_wait")
+effect fn __process_wait_impl(h: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_wait(int.to_string(h), "")!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_stop")
+effect fn __process_stop_impl(h: Int, grace_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_stop(int.to_string(h), int.to_string(grace_ms))!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_read_new")
+fn __process_read_new_impl(h: Int, which: Int) -> String = __proc_read_new(
+  int.to_string(h),
+  int.to_string(which),
+) ?? ""
+
+@implements("process.__os_child_pid")
+fn __process_child_pid_impl(h: Int) -> Int = match __proc_child_pid(int.to_string(h), "") {
+  ok(p) => int.parse(p) ?? -1,
+  _ => -1,
+}

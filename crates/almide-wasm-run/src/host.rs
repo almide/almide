@@ -122,6 +122,8 @@ struct Host {
     /// The run's tcp and udp handles and unix / shm descriptors (ops
     /// 91..=116, #3620; 140..=145, #4306) — closed when the run ends.
     net: Arc<Mutex<crate::net_host::NetRun>>,
+    /// The children `process.start` made on this run (#4308).
+    procs: Arc<crate::host_process::ProcTable>,
     /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
     /// buffer flushed at every line end, and per write on a terminal —
     /// native's rule (#3417) — and stderr
@@ -656,6 +658,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             calls: Arc::default(),
             serve: Arc::new(Mutex::new(crate::host_serve::ServeState::default())),
             net: Arc::default(),
+            procs: Arc::default(),
             live_out: live.then(|| Arc::new(Mutex::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())))),
             err_last: Arc::new(Mutex::new(String::new())),
             par: None,
@@ -726,6 +729,9 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
         }
     };
     drop(ticker);
+    // #4308: the run's end stops every `process.start` child it neither
+    // waited on nor stopped, as native's exit does (C-437).
+    crate::host_process::stop_unwaited(&store.data().procs);
     if let Some(w) = &store.data().live_out {
         use std::io::Write as _;
         let _ = w.lock().expect("live stdout").flush();
@@ -926,10 +932,11 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
-            // ops 80..=90 = almide:process/spawn (#2589, ADR-0025): the
+            // ops 80..=90 and 146..=151 = almide:process/spawn (#2589,
+            // #4308, ADR-0025): the
             // subprocess core native runs; stdout flushed before a child
             // that shares it.
-            if (crate::host_process::OP_FIRST..=crate::host_process::OP_LAST).contains(&op) {
+            if crate::host_process::is_op(op) {
                 let live = caller.data().live_out.clone();
                 let flush = move || {
                     if let Some(w) = &live {
@@ -937,7 +944,8 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                         let _ = w.lock().expect("live stdout").flush();
                     }
                 };
-                let (ret, buf) = crate::host_process::dispatch(op, &a, &b, &flush);
+                let procs = caller.data().procs.clone();
+                let (ret, buf) = crate::host_process::dispatch(op, &a, &b, &flush, &procs);
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }

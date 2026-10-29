@@ -100,9 +100,11 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 テスト: `spec/stdlib/process_timeout_test.almd`
 
 wasm ターゲットでは、埋め込みホスト（`almide run --target wasm` と `almide test`
-の wasm レグ）が子プロセス族（`process.exec`・`output`・`run`・`kill`・`pid`）を
-native と同じ観測で提供する。捕捉した stdout と stderr、
-終了コード（シグナルで終わった子は -1）、err の文字列は同一バイトである。pid は
+の wasm レグ）が子プロセス族（`process.exec`・`output`・`run`・`kill`・`pid`）と、
+`process.start` の子とその `poll`・`wait`・`stop`・`read_new_stdout`・
+`read_new_stderr`・`child_pid` を native と同じ観測で提供する。捕捉した stdout と
+stderr、各逐次読み取りが返す文字列、終了コード（シグナルで終わった子は -1）、
+期限の err、その他の err の文字列は同一バイトである。pid は
 ホストの値であり、レグ間で比べない。単体の成果物（`almide build --target wasm`）
 は、プログラムが子プロセス操作を含むときに限り、非公開インターフェース
 `almide:process/spawn` の `call` をインポートする。含まないプログラムの成果物は
@@ -110,7 +112,8 @@ native と同じ観測で提供する。捕捉した stdout と stderr、
 実行する前の読み込み時にモジュールを拒否する。したがって子プロセス呼び出しが
 実行時に誤った答えを返すことはない。そのようなプログラムのコンポーネント
 （`--component`）としてのビルドは E081 で拒否する。
-テスト: `spec/embedded_cross/process_spawn_family.almd`
+テスト: `spec/embedded_cross/process_spawn_family.almd`、
+`spec/embedded_cross/process_start_family.almd`
 
 `http.start(http.new_request(method, url, body, headers), limits)` は、
 要求を始めてすぐに呼び出しハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,

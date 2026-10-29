@@ -64,12 +64,10 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // handle runs on the embedded lane since #2633 — tests/
     // http_call_handle_test.rs covers it on both legs.
     ("spec/stdlib/http_call_test.almd", SkipReason::NativeOnlyApi),
-    // Native-only by ruling (stdlib redesign wave 4B): `process.start` keeps
-    // a live child behind a native runtime table, declared in
-    // proofs/target-availability.toml (E081). (The uuid_v7_test row retired
-    // with #4307: the stamp cell is a guest global on wasm, and the file runs
-    // the wasm leg.)
-    ("spec/stdlib/process_start_test.almd", SkipReason::NativeOnlyApi),
+    // Native-only by ruling (stdlib redesign wave 4B) held two rows, and both
+    // have left: `uuid_v7_test` with #4307 (the stamp cell is a guest global
+    // on wasm) and `process_start_test` with #4308 (the embedded host keeps
+    // the child as a host resource). Both files run the wasm leg.
     // `http.serve` binds a TCP listener.
     ("spec/lang/effect_intrinsic_tail_test.almd", SkipReason::NativeOnlyApi),
     // (zlib row RETIRED 2026-09-01: #1700 implemented DEFLATE in Almide —

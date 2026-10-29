@@ -64,8 +64,8 @@ pub mod cap {
     pub const NET: u32 = 7;
     /// A program-declared `@extern(wasm, ..)` host function.
     pub const FOREIGN: u32 = 8;
-    /// Starting and signalling child processes (ops 80..=90, the private
-    /// `almide:process/spawn` capability, ADR-0025), and assert_aborts's
+    /// Starting and signalling child processes (ops 80..=90 and 146..=151,
+    /// the private `almide:process/spawn` capability, ADR-0025), and assert_aborts's
     /// child run (op 117). `almide_mir::Capability::Process` has this id. Past [`super::SENTINEL`]
     /// so the sentinel keeps its small value.
     pub const PROC: u32 = 10;
@@ -106,7 +106,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         35 => &[STDIN],
         // 50 (framed raw-bytes http) is retired.
         43..=49 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
-        80..=90 => &[PROC],
+        80..=90 | 146..=151 => &[PROC],
         // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
         // site on a fresh instance — a child, the native leg's re-exec — and
         // op 118 reads which site this instance was launched to run.
