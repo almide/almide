@@ -268,11 +268,11 @@ fn e5(buf: Region) -> List[Region] = [buf]
 
 @export(c, "ok1")
 effect fn ok1(buf: Region) -> Int = {
-  let local = buf
-  var also = local
+  let alias = buf
+  var also = alias
   also = buf
   saved = ffi.read(also, 0, ffi.len(buf))!
-  ffi.len(local)
+  ffi.len(alias)
 }
 
 effect fn main() -> Unit = println("x")
