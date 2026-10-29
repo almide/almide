@@ -1,0 +1,3 @@
+expects_code = "E118"
+expects_error = "`Chart.__self_media_type` serves `image/svg+xml`, which runs script in a browser, without owning it"
+hint_substring = "the application grants it in almide.toml `[trust] media`"
