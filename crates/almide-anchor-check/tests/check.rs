@@ -608,3 +608,19 @@ fn one_taking_call_accounts_for_one_consumed_release() -> Result<(), String> {
     assert!(consuming("local.get 0 call $all", "d0 d0").is_err());
     Ok(())
 }
+
+/// Events meet calls by a maximum matching, not first fit: the alias's
+/// release (read through locals 1 and 0) must not be taken by local 0's
+/// event when local 0 has a release of its own.
+#[test]
+fn an_alias_release_does_not_steal_the_aliased_variables_call() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 local.set 1 local.get 1 call $alloc drop local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let mut r = RcReport::default();
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0 d1".into())], &[vec![], vec![]], &mut r)?;
+    assert_eq!(r.calls, 2);
+    // Three releases for two calls is still refused.
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0 d1 d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

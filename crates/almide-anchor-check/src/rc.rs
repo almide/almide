@@ -290,32 +290,75 @@ pub fn check_rc(
         // container's own RC never touches one of these (that would be the
         // frame's credit, which its events must account).
         let witnessed: HashSet<u32> = evs.iter().filter_map(|e| e.1).collect();
-        // Rebind releases first: a release or a judge call on their local.
-        for &(_, local) in evs.iter().filter(|e| e.0 == 'o') {
-            let l = local.unwrap_or(u32::MAX);
-            match (0..calls.len()).find(|&i| !used[i] && matches!(calls[i].1, 'd' | 'j') && calls[i].2.contains(&l)) {
-                Some(i) => used[i] = true,
-                None => rep.rebind_unmatched += 1,
+        // Events to calls: a MAXIMUM matching, each call taking at most one
+        // event, so the result never depends on the order the recorder logged
+        // events in (an alias's reads name several variables; a first-fit
+        // pass let one variable's event take the call another's needed).
+        // Compatible pairs:
+        // - a named `a` / `d` takes a call of its kind read through its local;
+        //   a `d` may instead take a copy-on-write judge call on its local (the
+        //   judge released the variable's old block when it copied it);
+        // - an unnamed `a-` / `d-` takes any call of its kind;
+        // - a rebind `o` takes a release or a judge call on its local.
+        // The named and unnamed events are matched first; a rebind takes
+        // what is left (augmenting paths never unmatch an earlier event).
+        let fits = |e: (char, Option<u32>), i: usize| -> bool {
+            let (k, names_of) = (calls[i].1, &calls[i].2);
+            match e {
+                ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
+                (kind, Some(l)) => (k == kind || (kind == 'd' && k == 'j')) && names_of.contains(&l),
+                (kind, None) => k == kind,
             }
-        }
-        // Named events next: each takes a call of its kind read through its local.
-        for &(kind, local) in evs.iter().filter(|e| e.1.is_some() && e.0 != 'o') {
-            let l = local.unwrap_or(u32::MAX);
-            let on = |i: usize, k: char| !used[i] && calls[i].1 == k && calls[i].2.contains(&l);
-            // A release a copy-on-write judge performs on the variable's old
-            // block (it copied a shared one) is recorded as that variable's `d`.
-            let found = (0..calls.len()).find(|&i| on(i, kind)).or_else(|| {
-                (kind == 'd').then(|| (0..calls.len()).find(|&i| on(i, 'j'))).flatten()
-            });
-            match found {
-                Some(i) => used[i] = true,
-                None => pending.push((kind, l)),
+        };
+        let order: Vec<usize> = (0..evs.len())
+            .filter(|&e| evs[e].0 != 'o')
+            .chain((0..evs.len()).filter(|&e| evs[e].0 == 'o'))
+            .collect();
+        let mut owner: Vec<Option<usize>> = vec![None; calls.len()];
+        fn augment(
+            e: usize,
+            evs: &[(char, Option<u32>)],
+            ncalls: usize,
+            fits: &dyn Fn((char, Option<u32>), usize) -> bool,
+            seen: &mut [bool],
+            owner: &mut [Option<usize>],
+        ) -> bool {
+            for i in 0..ncalls {
+                if seen[i] || !fits(evs[e], i) {
+                    continue;
+                }
+                seen[i] = true;
+                if owner[i].is_none_or(|o| augment(o, evs, ncalls, fits, seen, owner)) {
+                    owner[i] = Some(e);
+                    return true;
+                }
             }
+            false
         }
-        for &(kind, _) in evs.iter().filter(|e| e.1.is_none()) {
-            match (0..calls.len()).find(|&i| !used[i] && calls[i].1 == kind) {
-                Some(i) => used[i] = true,
-                None => unmatched.push(format!("{kind}-")),
+        for &e in &order {
+            let mut seen = vec![false; calls.len()];
+            augment(e, &evs, calls.len(), &fits, &mut seen, &mut owner);
+        }
+        // Who holds a call can change along an augmenting path; read the
+        // final matching.
+        let mut got = vec![false; evs.len()];
+        for o in owner.iter().flatten() {
+            got[*o] = true;
+        }
+        for (i, o) in owner.iter().enumerate() {
+            used[i] = o.is_some();
+        }
+        for (e, &(kind, local)) in evs.iter().enumerate() {
+            if got[e] {
+                continue;
+            }
+            match (kind, local) {
+                ('o', _) => rep.rebind_unmatched += 1,
+                // Named events no RC call took: a release may be the
+                // consumption of the variable by a stdlib arm or a compound
+                // routine (below).
+                (k, Some(l)) => pending.push((k, l)),
+                (k, None) => unmatched.push(format!("{k}-")),
             }
         }
         rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
