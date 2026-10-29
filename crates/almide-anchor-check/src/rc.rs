@@ -659,15 +659,23 @@ pub fn check_rc(
             }
             false
         }
-        // A call a move could take (its release inside the window the credit
-        // moved into) is as good an end for the path: the moves are matched
-        // after, and a call no move takes is still judged as left over.
-        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| evs[e].0 == 'm' && fits(e, i))).collect();
-        let fallback_call = |i: usize| i >= nc || fallback(i) || move_fits[i];
+        let fallback_call = |i: usize| i >= nc || fallback(i);
         for c in 0..nc {
             if owner[c].is_none() && !fallback(c) {
                 let mut seen = vec![false; evs.len()];
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
+            }
+        }
+        // A call still left over (refused as it stands) may end its path at
+        // a call a move could take instead (its release inside the window
+        // the credit moved into): the moves are matched after, and a call no
+        // move takes is still judged as left over.
+        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| evs[e].0 == 'm' && fits(e, i))).collect();
+        let or_move = |i: usize| fallback_call(i) || move_fits[i];
+        for c in 0..nc {
+            if owner[c].is_none() && !fallback(c) {
+                let mut seen = vec![false; evs.len()];
+                rehome(c, evs.len(), &fits, &or_move, &mut seen, &mut owner);
             }
         }
         // A move's credit is released by the arm on some of its paths: one
