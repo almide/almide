@@ -10178,11 +10178,10 @@ local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.m
   none => c,
 }) |> list.join("")
 
-local fn __http_response_owned_refusal(op: String, name: String) -> Unit = {
-  let folded = __http_response_fold(name)
-  if __http_response_body_headers() |> list.any((h) => __http_response_fold(h) == folded) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+
+local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
+  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and __http_response_fold(h) == __http_response_fold(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
-}
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
