@@ -54,6 +54,11 @@ mod runtime_random {
     pub fn float_from_u64(r: u64) -> f64 {
         almide_float_from_u64(r)
     }
+
+    // The per-OS entropy arm, private for the same reason.
+    pub fn os_entropy(chunk: &mut [u8]) -> bool {
+        almide_os_entropy(chunk)
+    }
 }
 
 /// The ~1024 largest u64 values are where `r as f64 / u64::MAX as f64` returned
@@ -130,4 +135,20 @@ fn random_bytes_fills_every_chunk() {
 #[should_panic(expected = "random.bytes: negative length -1")]
 fn random_bytes_refuses_a_negative_length() {
     runtime_random::almide_rt_random_bytes(-1);
+}
+
+/// The OS source itself answers on the host this test runs on. Each OS has its
+/// own `almide_os_entropy` arm (getrandom(2), getentropy(3), BCryptGenRandom),
+/// and a host without one gets the arm that always fails — which is how every
+/// Windows `random.bytes` aborted until it had an arm. CI runs this file on
+/// Linux, macOS and Windows (the `build` job's platform-sensitive set), so an
+/// arm that is missing, mis-linked or answers zeros is a red test on its OS.
+#[test]
+fn the_os_random_source_answers_on_this_host() {
+    let mut a = [0u8; 256];
+    let mut b = [0u8; 256];
+    assert!(runtime_random::os_entropy(&mut a), "the OS random source failed on this host");
+    assert!(runtime_random::os_entropy(&mut b), "the OS random source failed on this host");
+    assert!(a.iter().any(|&x| x != 0), "the OS random source left the buffer zeroed");
+    assert_ne!(a, b, "two 256-byte OS draws were equal");
 }
