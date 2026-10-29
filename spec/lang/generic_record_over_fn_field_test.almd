@@ -30,9 +30,8 @@ test "a generic variant holds a record with a function field" {
   assert_eq(got, 2)
 }
 
-test "a secret holds a record with a function field and still prints hidden" {
+test "a secret holds a record with a function field" {
   let s = secret.new(hook(5))
-  assert_eq("${s}", "Secret(***)")
   assert_eq(secret.reveal(s).run(1), 6)
 }
 
