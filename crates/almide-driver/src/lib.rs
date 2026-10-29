@@ -98,3 +98,27 @@ pub fn link_half(ir: &mut IrProgram) {
 }
 
 
+/// E112 (ADR-0030): `link_half` stopped monomorphizing at the
+/// `generic_instances` budget — too many instances, or an instance whose type
+/// arguments passed `type_size` (polymorphic recursion doubles them each
+/// round). Every route that links calls this after linking, so the run ends
+/// in the diagnostic instead of an incomplete program.
+pub fn budget_refusal() -> Option<almide_base::Diagnostic> {
+    use almide_base::budget::{self, BudgetId};
+    let figure = budget::take_exceeded(BudgetId::GenericInstances)?;
+    Some(
+        almide_base::Diagnostic::error(
+            format!(
+                "too many generic instances ({figure}+, max {}), or an instance whose type passed the type-size budget (max {} nodes)",
+                budget::limit(BudgetId::GenericInstances),
+                budget::limit(BudgetId::TypeSize),
+            ),
+            "A generic fn that passes a larger type argument on (`g((x, x))` inside `f[T]`) needs a new instance \
+             for every step, each one's type larger than the last. Pass the same type on (collect the values in a \
+             list, or count the steps in an Int). The budget is the compiler's, not the program's: the source \
+             cannot raise it (ADR-0030); `--budget generic_instances=N` on the command line can.",
+            "monomorphization",
+        )
+        .with_code("E112"),
+    )
+}

@@ -1,0 +1,51 @@
+// Fold each pair back to the element type: the type stays the same size.
+type Pair[A, B] = { fst: A, snd: B }
+
+fn pair[T](x: T) -> Pair[T, T] = { fst: x, snd: x }
+
+fn sum(p: Pair[Int, Int]) -> Int = p.fst + p.snd
+
+effect fn main() -> Unit = {
+  let t0 = 1
+  let t1 = sum(pair(t0))
+  let t2 = sum(pair(t1))
+  let t3 = sum(pair(t2))
+  let t4 = sum(pair(t3))
+  let t5 = sum(pair(t4))
+  let t6 = sum(pair(t5))
+  let t7 = sum(pair(t6))
+  let t8 = sum(pair(t7))
+  let t9 = sum(pair(t8))
+  let t10 = sum(pair(t9))
+  let t11 = sum(pair(t10))
+  let t12 = sum(pair(t11))
+  let t13 = sum(pair(t12))
+  let t14 = sum(pair(t13))
+  let t15 = sum(pair(t14))
+  let t16 = sum(pair(t15))
+  let t17 = sum(pair(t16))
+  let t18 = sum(pair(t17))
+  let t19 = sum(pair(t18))
+  let t20 = sum(pair(t19))
+  let t21 = sum(pair(t20))
+  let t22 = sum(pair(t21))
+  let t23 = sum(pair(t22))
+  let t24 = sum(pair(t23))
+  let t25 = sum(pair(t24))
+  let t26 = sum(pair(t25))
+  let t27 = sum(pair(t26))
+  let t28 = sum(pair(t27))
+  let t29 = sum(pair(t28))
+  let t30 = sum(pair(t29))
+  let t31 = sum(pair(t30))
+  let t32 = sum(pair(t31))
+  let t33 = sum(pair(t32))
+  let t34 = sum(pair(t33))
+  let t35 = sum(pair(t34))
+  let t36 = sum(pair(t35))
+  let t37 = sum(pair(t36))
+  let t38 = sum(pair(t37))
+  let t39 = sum(pair(t38))
+  let t40 = sum(pair(t39))
+  println("ok ${t40}")
+}

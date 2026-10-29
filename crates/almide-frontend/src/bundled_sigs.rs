@@ -95,6 +95,46 @@ pub fn lookup_deprecation(module: &str, func: &str) -> Option<crate::deprecation
     found
 }
 
+/// The declared parameter types of every `@input_sink` fn in a bundled
+/// module, its type parameters left out: the untrusted-input types the
+/// request-decode flow gate (E110 phase 2, #4232) treats as sources —
+/// `http.decode_json(req: HttpRequest)` makes `HttpRequest` one. Read from
+/// the declarations, so a new sink brings its input type with it.
+pub fn input_sink_param_types(module: &str) -> Vec<almide_lang::types::Ty> {
+    type SinkMap = HashMap<String, Vec<almide_lang::types::Ty>>;
+    static CELL: OnceLock<std::sync::RwLock<SinkMap>> = OnceLock::new();
+    let cell = CELL.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
+    if let Ok(guard) = cell.read() {
+        if let Some(tys) = guard.get(module) {
+            return tys.clone();
+        }
+    }
+    if !almide_lang::stdlib_info::is_bundled_module(module) {
+        return Vec::new();
+    }
+    let Some(source) = super::stdlib::get_bundled_source(module) else { return Vec::new() };
+    let Some(program) = almide_lang::parse_cached(source) else { return Vec::new() };
+    let builtin_named = builtin_named_types(&program);
+    let mut out: Vec<almide_lang::types::Ty> = Vec::new();
+    for decl in &program.decls {
+        if let ast::Decl::Fn { params, return_type, effect, generics, attrs, .. } = decl {
+            if !attrs.iter().any(|a| a.name.as_str() == crate::request_flow::INPUT_SINK_ATTR) {
+                continue;
+            }
+            let sig = build_fn_sig(params, return_type, effect, generics, attrs, &builtin_named);
+            for (_, t) in sig.params {
+                if !matches!(t, almide_lang::types::Ty::TypeVar(_)) && !out.contains(&t) {
+                    out.push(t);
+                }
+            }
+        }
+    }
+    if let Ok(mut guard) = cell.write() {
+        guard.insert(module.to_string(), out.clone());
+    }
+    out
+}
+
 /// Return every fn name declared in a bundled stdlib module. Used by
 /// reflection paths (outline, docs-gen, ...) that need the full
 /// declared surface regardless of whether it originated in TOML or
@@ -212,13 +252,7 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
     // builtin `Path` (= String), so a caller typed through the table (the
     // MIR pipeline, which links no bundled module) saw `value.root()` as a
     // `String` that a `value.Path` slot refuses.
-    let builtin_named: Vec<Sym> = program.decls.iter().filter_map(|d| match d {
-        ast::Decl::Type { name, .. }
-            if crate::canonicalize::resolve::builtin_type_head(
-                name.as_str(), crate::canonicalize::resolve::TypeSpelling::Bare,
-            ).is_some() => Some(*name),
-        _ => None,
-    }).collect();
+    let builtin_named = builtin_named_types(&program);
     let mut out = HashMap::new();
     for decl in &program.decls {
         if let ast::Decl::Fn { name, params, return_type, effect, generics, attrs, .. } = decl {
@@ -227,6 +261,17 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
         }
     }
     Some(out)
+}
+
+/// The types a bundled module declares under a builtin's bare name (#2858).
+fn builtin_named_types(program: &ast::Program) -> Vec<Sym> {
+    program.decls.iter().filter_map(|d| match d {
+        ast::Decl::Type { name, .. }
+            if crate::canonicalize::resolve::builtin_type_head(
+                name.as_str(), crate::canonicalize::resolve::TypeSpelling::Bare,
+            ).is_some() => Some(*name),
+        _ => None,
+    }).collect()
 }
 
 fn build_fn_sig(
@@ -256,7 +301,7 @@ fn build_fn_sig(
     for n in builtin_named {
         known_types.insert(
             crate::canonicalize::resolve::builtin_named_type_key(None, n.as_str()),
-            almide_lang::types::Ty::Named(*n, vec![]),
+            almide_lang::types::Ty::Named(*n, Default::default()),
         );
     }
     let resolver_ctx = if known_types.is_empty() { None } else { Some(&known_types) };

@@ -196,10 +196,10 @@ mod tests {
     use almide_base::intern::sym;
 
     fn named(n: &str, args: Vec<Ty>) -> Ty {
-        Ty::Named(sym(n), args)
+        Ty::Named(sym(n), args.into())
     }
     fn list(t: Ty) -> Ty {
-        Ty::Applied(TypeConstructorId::List, vec![t])
+        Ty::Applied(TypeConstructorId::List, vec![t].into())
     }
     fn rec(fields: &[(&str, Ty)]) -> Ty {
         Ty::Record { fields: fields.iter().map(|(n, t)| (sym(n), t.clone())).collect() }
@@ -215,7 +215,7 @@ mod tests {
             vec![vec![named("Box", vec![list(Ty::Int)])], vec![named("Box_List_Int", vec![])], vec![list(named("Box", vec![Ty::Int]))], vec![named("List_Box_Int", vec![])]],
             vec![vec![rec(&[("a_b", Ty::Int), ("c", Ty::Int)])], vec![rec(&[("a", Ty::Int), ("b_c", Ty::Int)])], vec![rec(&[("a", Ty::Int), ("b", Ty::Int), ("c", Ty::Int)])]],
             vec![vec![named("varlib.Pigment", vec![])], vec![named("varlib_Pigment", vec![])]],
-            vec![vec![Ty::Matrix], vec![Ty::Applied(TypeConstructorId::Matrix, vec![])]],
+            vec![vec![Ty::Matrix], vec![Ty::Applied(TypeConstructorId::Matrix, Default::default())]],
             vec![vec![Ty::Int], vec![named("Int", vec![])], vec![Ty::Int, Ty::Int], vec![]],
         ];
         for g in groups {

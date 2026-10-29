@@ -19,7 +19,7 @@ fn e(kind: IrExprKind, ty: Ty) -> IrExpr {
 }
 
 fn map_ty() -> Ty {
-    Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int])
+    Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int].into())
 }
 
 fn var(id: VarId, ty: Ty) -> IrExpr {
@@ -181,7 +181,7 @@ fn declines_a_for_loop_head_read() {
             kind: IrStmtKind::Expr { expr: call("insert", vec![borrow(stats, map_ty(), true), var(x, Ty::String)], Ty::Unit) },
             span: None,
         }];
-        let iterable = call("keys", vec![borrow(stats, map_ty(), false)], Ty::Applied(TypeConstructorId::List, vec![Ty::String]));
+        let iterable = call("keys", vec![borrow(stats, map_ty(), false)], Ty::Applied(TypeConstructorId::List, vec![Ty::String].into()));
         vec![IrStmt {
             kind: IrStmtKind::Expr { expr: e(IrExprKind::ForIn { var: x, var_tuple: None, iterable: Box::new(iterable), body }, Ty::Unit) },
             span: None,

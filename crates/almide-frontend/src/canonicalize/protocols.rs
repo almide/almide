@@ -34,7 +34,7 @@ impl BuiltinProtocol {
     /// The protocol definition registered under `name`.
     pub fn def(&self) -> ProtocolDef {
         let self_ty = Ty::TypeVar(sym("Self"));
-        let value_ty = Ty::Named(sym("Value"), vec![]);
+        let value_ty = Ty::Named(sym("Value"), Default::default());
         ProtocolDef {
             origin: None,
             name: self.name.into(),
@@ -333,7 +333,7 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
 /// `set_body_bytes` dispatch to for each message type.
 fn http_message_methods(s: &Ty) -> Vec<ProtocolMethodSig> {
     let str_ = Ty::String;
-    let pair = Ty::Tuple(vec![Ty::String, Ty::String]);
+    let pair = Ty::Tuple(vec![Ty::String, Ty::String].into());
     vec![
         method("__self_header", &[("m", s), ("name", &str_)], Ty::option(Ty::String)),
         method("__self_header_values", &[("m", s), ("name", &str_)], Ty::list(Ty::String)),

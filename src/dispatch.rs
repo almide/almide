@@ -692,6 +692,7 @@ fn refuse_invalid_manifest(command: &Commands) {
             | Commands::SelfUpdate { .. }
             | Commands::DocsGen { .. }
             | Commands::Switches { .. }
+            | Commands::Budgets { .. }
             | Commands::Explain { .. }
     ) {
         return;
@@ -789,8 +790,37 @@ fn arm_switch_lock(cli: &crate::cli_args::Cli) {
     }
 }
 
+/// ADR-0030 D3: the command line is the only place a budget is set.
+/// `--profile critical` judges the program under the default budgets, so it
+/// refuses `--budget`.
+fn arm_budgets(cli: &crate::cli_args::Cli) {
+    if !cli.budget.is_empty()
+        && let Some(crate::cli_args::Commands::Check { profile: Some(p), .. }) = &cli.command
+        && p == "critical"
+    {
+        eprintln!("error: --profile critical refuses --budget: the critical profile judges a program under the default compile-cost budgets");
+        std::process::exit(1);
+    }
+    for b in &cli.budget {
+        if let Err(e) = almide_base::budget::set_override(b) {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    }
+    #[cfg(unix)]
+    if cli.budget_report {
+        extern "C" fn print_budget_report() {
+            eprint!("{}", almide_base::budget::report());
+        }
+        // SAFETY: registers a plain `extern "C" fn` with no captured state;
+        // it runs once at process exit, `std::process::exit` included.
+        unsafe { libc::atexit(print_budget_report) };
+    }
+}
+
 pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
     arm_switch_lock(&cli);
+    arm_budgets(&cli);
     if cli.verbose {
         // Deep pipeline code reads the env var so verbosity needs no
         // plumbing through every call chain (same pattern as
@@ -874,6 +904,9 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         }
         Commands::DocsGen { check } => {
             cli::cmd_docs_gen(check);
+        }
+        Commands::Budgets { md } => {
+            print!("{}", if md { almide_base::budget::markdown_table() } else { almide_base::budget::plain_table() });
         }
         Commands::Switches { md } => {
             print!("{}", if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() });

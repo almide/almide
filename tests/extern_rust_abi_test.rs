@@ -186,19 +186,19 @@ fn covering_rows(ty: &Ty) -> Result<&'static [&'static str], &'static str> {
 /// One sample of every `Ty` variant that can be a parameter type, with its
 /// Almide spelling (the C side's E090 program declares each spelling).
 fn every_ty_variant() -> Vec<(Ty, &'static str)> {
-    let named = |n: &str| Ty::Named(almide::intern::sym(n), vec![]);
+    let named = |n: &str| Ty::Named(almide::intern::sym(n), Default::default());
     vec![
         (Ty::Int, "Int"), (Ty::Int8, "Int8"), (Ty::Int16, "Int16"), (Ty::Int32, "Int32"), (Ty::Int64, "Int64"),
         (Ty::UInt8, "UInt8"), (Ty::UInt16, "UInt16"), (Ty::UInt32, "UInt32"), (Ty::UInt64, "UInt64"),
         (Ty::Float, "Float"), (Ty::Float32, "Float32"), (Ty::Float64, "Float64"),
         (Ty::Bool, "Bool"), (Ty::Unit, "Unit"), (Ty::String, "String"), (Ty::Bytes, "Bytes"),
         (Ty::Matrix, "Matrix"), (Ty::RawPtr, "Handle"),
-        (Ty::Applied(TypeConstructorId::List, vec![Ty::Int]), "List[Int]"),
-        (Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int]), "Map[String, Int]"),
-        (Ty::Applied(TypeConstructorId::Set, vec![Ty::Int]), "Set[Int]"),
-        (Ty::Applied(TypeConstructorId::Option, vec![Ty::Int]), "Option[Int]"),
-        (Ty::Applied(TypeConstructorId::Result, vec![Ty::Int, Ty::String]), "Result[Int, String]"),
-        (Ty::Tuple(vec![Ty::Int, Ty::String]), "(Int, String)"),
+        (Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into()), "List[Int]"),
+        (Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int].into()), "Map[String, Int]"),
+        (Ty::Applied(TypeConstructorId::Set, vec![Ty::Int].into()), "Set[Int]"),
+        (Ty::Applied(TypeConstructorId::Option, vec![Ty::Int].into()), "Option[Int]"),
+        (Ty::Applied(TypeConstructorId::Result, vec![Ty::Int, Ty::String].into()), "Result[Int, String]"),
+        (Ty::Tuple(vec![Ty::Int, Ty::String].into()), "(Int, String)"),
         (named("Pt"), "Pt"),
         (named("Sh"), "Sh"),
         (Ty::Record { fields: vec![(almide::intern::sym("x"), Ty::Int)] }, "{ x: Int }"),

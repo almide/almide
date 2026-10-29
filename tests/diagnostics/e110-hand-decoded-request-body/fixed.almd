@@ -1,0 +1,18 @@
+// The body decodes into an input type that lists what the client may set,
+// and the program builds `User` from it. A `Codec` type decoded from data
+// that is not the request (the defaults below) is not request input.
+import http
+import json
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+type UserInput: Decode = { name: String, email: String }
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let i = UserInput.decode_strict(json.parse(http.body(req))!)!
+  let base = User.decode(json.parse("{\"name\":\"-\",\"email\":\"-\"}")!)!
+  let u = User { name: i.name, email: i.email, is_admin: base.is_admin }
+  http.response(201, "${u.name} is_admin=${u.is_admin}")
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", []))!))

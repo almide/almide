@@ -71,7 +71,10 @@ equal to the set of codes the compiler emits.
 | [E101](E101.md) | Source that reads differently from what compiles: a raw hidden character (a bidi control, U+2028/U+2029, a zero-width or other Cf character, a tag character, a raw control) anywhere in the file — write `\u{202E}` in a literal (#4092, #4266) — or a homoglyph identifier: mixed scripts beyond UTS #39 Moderately Restrictive, or a UTS #39 confusable of another name (#4266) |
 | [E104](E104.md) | A record field marked `@skip` or `@skip_decode` has no default, so `T.decode` has no value for it (#4108) |
 | [E109](E109.md) | A pure fn runs an `effect fn` it reached through a function value — a record field, a list element, a callback handed down through pure helpers (#4151) |
-| [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22) |
+| [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22); request data decoded by hand into such a type (#4232) |
+| [E111](E111.md) | An inferred type passed the `type_size` compile-cost budget — a doubling chain such as `let t1 = (t0, t0)` (ADR-0030, #4114) |
+| [E112](E112.md) | Monomorphization passed the `generic_instances` budget — polymorphic recursion that needs an instance per call depth (ADR-0030) |
+| [E113](E113.md) | A `match` whose exhaustiveness check passed the `exhaustiveness_steps` compile-cost budget (ADR-0030) |
 | [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 

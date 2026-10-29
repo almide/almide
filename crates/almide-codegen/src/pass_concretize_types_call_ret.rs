@@ -38,7 +38,7 @@ fn list_poly_lambda_ret(args: &[IrExpr], idx: usize) -> Option<Ty> {
 /// Helper: wrap a type in `List`.
 fn list_poly_list_of(t: Ty) -> Ty {
     use almide_lang::types::constructor::TypeConstructorId as TCI;
-    Ty::Applied(TCI::List, vec![t])
+    Ty::Applied(TCI::List, vec![t].into())
 }
 
 /// `resolve_list_poly_ret_ty` group 1 (cog>25 second-round decomposition):
@@ -74,7 +74,7 @@ fn resolve_list_poly_ret_ty_aggregate(func: &str, args: &[IrExpr]) -> Option<Ty>
             // zip(xs, ys) -> List[(A, B)]
             let a = list_poly_elem(args, 0)?;
             let b = list_poly_elem(args, 1)?;
-            Some(list_poly_list_of(Ty::Tuple(vec![a, b])))
+            Some(list_poly_list_of(Ty::Tuple(vec![a, b].into())))
         }
         "fold" => {
             // fold(list, init, f) -> type of init
@@ -84,7 +84,7 @@ fn resolve_list_poly_ret_ty_aggregate(func: &str, args: &[IrExpr]) -> Option<Ty>
         "reduce" | "min_by" | "max_by" => {
             // Option[elem]
             let elem = list_poly_elem(args, 0)?;
-            Some(Ty::Applied(TCI::Option, vec![elem]))
+            Some(Ty::Applied(TCI::Option, vec![elem].into()))
         }
         "any" | "all" => Some(Ty::Bool),
         "count" => Some(Ty::Int),
@@ -92,7 +92,7 @@ fn resolve_list_poly_ret_ty_aggregate(func: &str, args: &[IrExpr]) -> Option<Ty>
         "first" | "last" | "find" => {
             // Option[elem]
             let elem = list_poly_elem(args, 0)?;
-            Some(Ty::Applied(TCI::Option, vec![elem]))
+            Some(Ty::Applied(TCI::Option, vec![elem].into()))
         }
         _ => None,
     }
@@ -117,12 +117,12 @@ fn resolve_list_poly_ret_ty_structural(func: &str, args: &[IrExpr]) -> Option<Ty
             // (List[elem], List[elem])
             let elem = list_poly_elem(args, 0)?;
             let l = list_poly_list_of(elem);
-            Some(Ty::Tuple(vec![l.clone(), l]))
+            Some(Ty::Tuple(vec![l.clone(), l].into()))
         }
         "enumerate" => {
             // List[(Int, elem)]
             let elem = list_poly_elem(args, 0)?;
-            Some(list_poly_list_of(Ty::Tuple(vec![Ty::Int, elem])))
+            Some(list_poly_list_of(Ty::Tuple(vec![Ty::Int, elem].into())))
         }
         _ => None,
     }

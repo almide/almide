@@ -37,7 +37,6 @@ use crate::lexer::{Token, TokenType};
 use crate::diagnostic::Diagnostic;
 use crate::ast::ExprId;
 
-const MAX_DEPTH: usize = 500;
 
 pub struct Parser {
     pub(crate) tokens: Vec<Token>,
@@ -229,8 +228,11 @@ impl Parser {
 
     pub(crate) fn enter_depth(&mut self) -> Result<(), String> {
         self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            Err("expression nesting too deep (max 500)".to_string())
+        // The `nesting` row of the compile-cost budget table (ADR-0030).
+        let max = almide_base::budget::limit(almide_base::budget::BudgetId::Nesting);
+        almide_base::budget::observe(almide_base::budget::BudgetId::Nesting, self.depth as u64);
+        if self.depth as u64 > max {
+            Err(format!("expression nesting too deep (max {max})"))
         } else {
             Ok(())
         }
