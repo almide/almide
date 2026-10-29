@@ -692,7 +692,8 @@ impl Emitter<'_> {
     /// shares and moves (`am`). The release of the block the iteration
     /// received (the arm's `$dec` before the rebind) is the `d` the recorder
     /// writes for every owner local bound in a loop body at the iteration's
-    /// end (witness_paths.rs), so it is not logged twice. A droppable
+    /// end (witness_paths.rs), so it is not logged twice on the certificate;
+    /// it is logged for the byte check at that `$dec` (#4277). A droppable
     /// accumulator that is not a handle takes neither instruction: declined.
     pub(crate) fn witness_fold_step(&mut self, body: &almide_ir::IrExpr, acc: u32, ty: SliceTy) {
         if self.witness.is_none() || !self.rc_droppable(ty) {
@@ -702,7 +703,9 @@ impl Emitter<'_> {
             self.witness_decline("fold-acc:flat");
             return;
         }
-        let _ = acc;
+        if let Some(w) = self.witness.as_mut() {
+            w.iteration_release(acc);
+        }
         self.witness_store(body, ty);
     }
 

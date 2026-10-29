@@ -83,8 +83,19 @@ impl WitnessRecorder {
         if self.branches.dead() {
             return;
         }
-        for &l in self.iter_owned.last().into_iter().flatten() {
-            crate::witness::rc::event('d', Some(l));
+        let owned = self.iter_owned.last().cloned().unwrap_or_default();
+        for l in owned {
+            self.iteration_release(l);
+        }
+    }
+
+    /// One owner's iteration-end release, emitted here as a `$dec` on
+    /// `local` (a fused element's owner, a fold's accumulator before its
+    /// rebind): logged for the byte check only — the certificate writes it at
+    /// the iteration's end.
+    pub fn iteration_release(&mut self, local: u32) {
+        if !self.branches.dead() && self.bound.contains_key(&local) {
+            crate::witness::rc::event('d', Some(local));
         }
     }
 
