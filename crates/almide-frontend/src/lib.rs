@@ -10,6 +10,8 @@ pub mod deprecation;
 /// Where a stdlib spelling removed at a dialect epoch went (read from the ledger).
 pub mod removed_spellings;
 pub mod attr_vocab;
+/// Media-type ownership read off declarations (ADR-0032 D4, D7).
+pub mod media_owners;
 pub mod secret_type;
 pub mod stdlib;
 pub mod bundled_sigs;

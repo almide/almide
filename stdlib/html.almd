@@ -154,12 +154,17 @@ fn script_json(v: Value) -> SafeHtml = {
   SafeHtml(s)
 }
 
-// ADR-0032: SafeHtml is a response Body. It owns the markup documents a
-// browser runs script in — HTML and, since any XML document can carry the
-// XHTML namespace, XML and every `+xml` subtype (RFC 6839 patterns) — so
-// `http.typed` cannot label a String as one (E117). SVG is `svg.SafeSvg`'s.
-// XML has no builder yet (#4310): owned here, it stays unbuildable.
-@media_owns("text/html", "*/xml", "*/*+xml")
+// ADR-0032: SafeHtml is a response Body and owns HTML and XHTML, so
+// `http.typed` cannot label a String as either (E117).
+//
+// `@script_capable` is the one declaration of the media types a browser runs
+// script in: HTML, XHTML, SVG, and, since any XML document can carry the
+// XHTML namespace, XML and every `+xml` subtype (RFC 6839 patterns). `typed`
+// refuses all of them; a type outside the stdlib owning one needs the
+// application's `[trust] media` grant (D7), so SVG is a package's (almide/svg)
+// and XML, with no owner yet (#4310), stays unbuildable.
+@media_owns("text/html", "application/xhtml+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
 fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
 
 fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)
