@@ -410,7 +410,19 @@ pub fn check_rc(
             }
             false
         }
+        // First the RC calls alone, so as many of them as possible are
+        // accounted; then each event still unmatched may reach a consuming
+        // argument, re-routing others along the way (an augmenting path never
+        // frees a node, so no call matched in the first pass is left over).
+        let calls_only: Vec<usize> = by_pref.iter().copied().filter(|&i| i < nc).collect();
         for &e in &order {
+            let mut seen = vec![false; owner.len()];
+            augment(e, &calls_only, &fits, &mut seen, &mut owner);
+        }
+        for &e in &order {
+            if owner.contains(&Some(e)) {
+                continue;
+            }
             let mut seen = vec![false; owner.len()];
             augment(e, &by_pref, &fits, &mut seen, &mut owner);
         }
