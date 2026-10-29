@@ -55,11 +55,9 @@ use crate::value::{VT_ARRAY, VT_OBJECT};
 use crate::work::Helper;
 use crate::*;
 
-/// The err `json.parse` gives past its nesting bound (#4209, C-433), which
-/// a value `set_path` would build past it gives too.
-const DEEP_ERR: &str = "json: nesting deeper than 1000";
-/// The nesting bound itself (crates/almide-base/src/json_limits.rs).
-const MAX_DEPTH: i32 = 1000;
+/// json.parse's nesting bound (#4209, C-433), which a value `set_path`
+/// would build past it is refused at too, with parse's err text.
+const MAX_DEPTH: i32 = almide_base::json_limits::JSON_MAX_DEPTH as i32;
 /// Pairs (in bytes of 4-byte slots) below which a lookup scans.
 const SCAN_BYTES: i32 = 16 * 4;
 /// An index's first slot count.
@@ -505,7 +503,7 @@ impl Emitter<'_> {
         };
         let walk = self.work.helper(Helper::VsetSteps { fns });
         let nests = self.work.helper(Helper::VsetNests { val_off });
-        let msg = self.pool.intern(DEEP_ERR);
+        let msg = self.pool.intern(&almide_base::json_limits::json_depth_error());
         let hn = self.hold_i32()?;
         let hr = self.hold_i32()?;
         let mut i = self.f.instructions();
