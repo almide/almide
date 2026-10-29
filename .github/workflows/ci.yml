@@ -998,6 +998,37 @@ jobs:
           printf '\n[workspace]\n' >> crates/almide-kernel/Cargo.toml
           cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
 
+      # Security table row 10 on macOS: the rooted family and `[permissions] fs`
+      # by descriptor (the O_NOFOLLOW openat walk, fstatat for an entry the
+      # process may not open), which no other job runs on this platform.
+      - name: Rooted and scoped fs by descriptor (macOS)
+        run: |
+          git checkout -- crates/almide-kernel/Cargo.toml
+          cargo test --release -p almide-rt-core --test fs_beneath_platform --test fs_beneath_core --test fs_scoped_core
+
+  fs-beneath-32bit:
+    name: Rooted fs refusal (32-bit Linux)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # Security table row 10 on a 32-bit target, which has no descriptor-call
+    # layouts spelled: every rooted and scoped call below a root must be
+    # refused and the build-time check must refuse `[permissions] fs`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: i686-unknown-linux-gnu
+
+      - name: Install the 32-bit C toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
+
+      - name: Rooted and scoped fs refuse on i686
+        run: cargo test -p almide-rt-core --target i686-unknown-linux-gnu --test fs_beneath_platform
+
   miri-almide-str:
     name: Miri (almide-str)
     needs: changes
@@ -1150,6 +1181,36 @@ jobs:
               exit 1
             fi
             echo "parity ok: $f"
+          done
+
+      # Security table row 10 on a platform WITHOUT descriptor-relative fs
+      # calls: nothing may fall back to the racy check-then-call. The core's
+      # calls below a root are refused (`Unsupported`), and the toolchain
+      # refuses `[permissions] fs` before it builds, on both legs.
+      - name: Rooted and scoped fs refuse where descriptors are missing (Windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release -p almide-rt-core --test fs_beneath_platform
+          ALMIDE="$PWD/target/release/almide.exe"
+          d=$(mktemp -d)
+          mkdir -p "$d/data/sub"
+          printf 'hello\n' > "$d/data/sub/a.txt"
+          printf 'import fs\n\neffect fn main() -> Unit = {\n  println(fs.read_text("data/sub/a.txt")!)\n}\n' > "$d/main.almd"
+          printf 'import fs\n\neffect fn main() -> Unit = {\n  let root = fs.open_root("data")!\n  match fs.root_read_text(root, "sub/a.txt") {\n    ok(v) => println("read ${v}"),\n    err(e) => println("err ${e}"),\n  }\n}\n' > "$d/rooted.almd"
+          n=$(cd "$d" && "$ALMIDE" run rooted.almd)
+          w=$(cd "$d" && "$ALMIDE" run rooted.almd --target wasm)
+          echo "native: $n"; echo "wasm:   $w"
+          case "$n" in *"refused rather than checked by path"*) ;; *) echo "native rooted read was not refused"; exit 1 ;; esac
+          [ "$n" = "$w" ] || { echo "the rooted refusal differs between the legs"; exit 1; }
+          printf '[package]\nname = "scoped"\n\n[permissions]\nfs = ["./data"]\n' > "$d/almide.toml"
+          for leg in native wasm; do
+            args=(run main.almd); [ "$leg" = wasm ] && args+=(--target wasm)
+            if (cd "$d" && "$ALMIDE" "${args[@]}" > out.txt 2> err.txt); then
+              echo "[permissions] fs ran on a platform that cannot hold it ($leg)"; cat "$d/out.txt"; exit 1
+            fi
+            grep -q 'cannot be enforced on this platform' "$d/err.txt" || { echo "refusal text missing ($leg)"; cat "$d/err.txt"; exit 1; }
+            echo "refused before running: $leg"
           done
 
   # ═══════════════════════════════════════════════

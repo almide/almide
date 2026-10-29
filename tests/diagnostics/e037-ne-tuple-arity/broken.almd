@@ -1,0 +1,7 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// Tuples of different arity are different types.
+fn main() -> Unit = {
+  let a = (1, 2)
+  let b = (1, 2, 3)
+  println("${a != b}")
+}
