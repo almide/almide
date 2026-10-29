@@ -72,22 +72,6 @@ macro_rules! http_call {
 /// Sized values use fixed-width keys (`k100000000`…), so a series is
 /// linear in n.
 pub const NOMINALS: &[Nominal] = &[
-    // A host address (ADR-0027 D3). The grammar builds only null (an empty
-    // buffer's address): a pointer to a dropped buffer read or written later
-    // is undefined on either leg, not a divergence. It is never printed.
-    Nominal {
-        name: "RawPtr",
-        module: "bytes",
-        small: "bytes.as_ptr(bytes.from_list([]))",
-        sized: "bytes.as_ptr(bytes.from_list([]))",
-        leaves: &["bytes.as_ptr(bytes.from_list([]))"],
-        observe: "\"ptr\"",
-        observed: string,
-        digest: "1",
-        observe_calls_effect: false,
-        refuses_var: false,
-        in_flight: false,
-    },
     // `fs.stat`'s record. Its mtime is the host's clock (`verdicts.rs`
     // checks it), so it is observed through the other three fields.
     Nominal {

@@ -18,7 +18,4 @@ wasmtime-cli 49.0.1 — the stock runtime every CI job installs to run built .wa
 # debt: pin it to RUST_TOOLCHAIN (or a dated nightly) and delete its line.
 # What is left measures a number (perf, coverage, the runtime ratio) that a
 # pin would move, or is Miri, which needs a dated nightly that ships it.
-floating ci.yml:perf-ratchet stable — the native/Rust ratio is measured with this rustc; pinning moves the baseline
-floating ci.yml:perf-profile-arm stable — the aarch64 perf ratio, same as perf-ratchet
-floating ci.yml:commissioned-wasm-gates-probes stable — target availability and the runtime ratio
 floating fuzz-nightly.yml:coverage-ratchet stable — the structural coverage ratchet's stable job

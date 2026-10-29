@@ -203,6 +203,8 @@ mod host_env;
 mod host_read_all;
 mod host_read_line;
 mod newtype;
+// ADR-0031 D3: a Region argument of a wasm import crosses as (base, len).
+mod extern_region;
 mod arg_rebind;
 mod arg_temps;
 mod arm;
@@ -223,6 +225,7 @@ mod tco;
 mod types_table;
 mod value;
 mod utf8_helpers;
+pub use utf8_helpers::emit_errtext_multibyte;
 mod json_helpers;
 mod value_helpers;
 mod whitelist;

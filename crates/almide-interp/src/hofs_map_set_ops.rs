@@ -15,6 +15,11 @@ impl<'a> Interpreter<'a> {
             // (C-277's fixture, #1416; `with_capacity`/`set.new` likewise).
             "new" if args.is_empty() => Some(Flow::val(Value::Map(Rc::new(Vec::new())))),
             "len" | "size" => Some(self.map_len(args)),
+            // Element-type-blind, so served here: the pool's `map.is_empty`
+            // body is the Int-keyed core, and a map keyed by a record (the
+            // declared-repr walker over `Map[Secret[String], Int]`) abstained
+            // on it (#4240).
+            "is_empty" => Some(self.map_is_empty(args)),
             "get" => Some(self.map_get(args)),
             // `map.contains` is the stdlib's KEY-membership name
             // (stdlib/map.almd: `fn contains[K, V](m, key) -> Bool`) —
@@ -148,6 +153,7 @@ impl<'a> Interpreter<'a> {
             // a time.
             "from_list" => Some(self.set_from_list(args)),
             "len" | "size" => Some(self.set_len(args)),
+            "is_empty" => Some(self.set_is_empty(args)),
             "contains" | "has" => Some(self.set_contains(args)),
             "insert" | "add" => Some(self.set_insert(args)),
             "to_list" => Some(self.set_to_list(args)),
@@ -209,6 +215,20 @@ impl<'a> Interpreter<'a> {
         let mut out: Vec<Value> = a.iter().filter(|x| !b.contains(x)).cloned().collect();
         out.extend(b.iter().filter(|x| !a.contains(x)).cloned());
         Flow::val(Value::Set(Rc::new(out)))
+    }
+
+    fn set_is_empty(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Set(e)) => Flow::val(Value::Bool(e.is_empty())),
+            _ => Flow::Abort("internal: set.is_empty on non-set".into()),
+        }
+    }
+
+    fn map_is_empty(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Map(e)) => Flow::val(Value::Bool(e.is_empty())),
+            _ => Flow::Abort("internal: map.is_empty on non-map".into()),
+        }
     }
 
     fn set_len(&mut self, args: &[Value]) -> Flow {

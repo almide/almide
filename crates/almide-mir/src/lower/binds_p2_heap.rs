@@ -359,6 +359,11 @@ impl LowerCtx {
         if self.materialized_lists.contains(&src) {
             self.materialized_lists.insert(dst);
         }
+        // The variant READ shape too (`let a = o` — the in-test assert's operand
+        // bind of `o?` over an Option, #4262): the alias reads the same tag.
+        if let Some(shape) = self.value_shapes.get(&src).cloned() {
+            self.value_shapes.entry(dst).or_insert(shape);
+        }
         // An alias of a BORROWED param/slot handle (`v = __mp_buf` — the C-132
         // write-back Assign, where `__mp_buf` is a destructured tuple slot in
         // `param_values`) denotes the same GENUINE block the borrow does, so a
@@ -432,6 +437,13 @@ impl LowerCtx {
         // machinery (closure_value_of) instead of walling as unresolvable.
         if matches!(ty, Ty::Fn { .. }) {
             self.closure_values.insert(dst);
+        }
+        // A precise slot borrow of an Option/Result field or element (`let a =
+        // w.nickname`, `let a = rs[0]` — the in-test assert's operand bind,
+        // #4262) is the block the slot holds: the same borrow `==` takes for
+        // the direct operand (`try_lower_heap_field_borrow`), so read its tag.
+        if self.param_values.contains(&dst) {
+            self.seed_variant_read_shape(dst, ty);
         }
         // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
         // container) is in `param_values` — it is NOT a second owner, so it must NOT

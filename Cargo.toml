@@ -6,7 +6,7 @@ members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-typ
 # ship a command that can only fail.
 default-members = [".", "crates/almide-verify"]
 resolver = "3"
-exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
+exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz", "tools/loom-fan-gate"]
 
 # Inheritance source for the commissioned greenfield crates (almide-layout,
 # almide-corpus, almide-wasm, almide-spine, almide-wasm-run). Inert for every

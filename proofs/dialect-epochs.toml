@@ -249,6 +249,8 @@ breaks = [
   "an `@inline_rust` fn outside the stdlib counts as every effect category, like an `@extern` fn (epoch 8), so a project whose `[permissions].allow` omits one now fails `almide build` with a capability violation; a dependency that carries one also needs `[permissions] native`. A file is the stdlib's for E085 only when its text is the embedded stdlib source of its name, not because it sits under `stdlib/` (#4100)",
   "an explicit `[permissions] allow = []` now allows no capability: every function that reaches one is a capability violation (an absent `allow` key or table stays unchecked). It used to mean every capability; a project that relied on that removes the empty `allow` line or lists what it uses (#4101)",
   "a raw Unicode bidirectional control character (U+202A–U+202E, U+2066–U+2069) anywhere in a source file, in a comment, a string literal, a heredoc or a raw string, is E101 (Trojan Source, CVE-2021-42574), where it used to be accepted silently (#4092). Remove it from a comment; in a literal write the escape `\\u{202E}` (`\\u{...}` with its codepoint), which decodes to the same character",
+  "the rest of the hidden-character family is E101 too (#4266): a raw U+2028 LINE SEPARATOR or U+2029 PARAGRAPH SEPARATOR, a zero-width or other format (Cf) character such as U+200B or a mid-file U+FEFF, a Unicode tag character (U+E0000–U+E007F), or a raw control character other than TAB, LF and CR, anywhere in a source file, where it used to be accepted silently. The set is C-418's escape table. Remove it from a comment; in a literal write the escape `\\u{200B}` (an emoji ZWJ sequence spells its joiners `\\u{200D}`)",
+  "a non-ASCII identifier that mixes scripts a reader cannot tell apart (beyond UTS #39 Moderately Restrictive, e.g. Latin with a Cyrillic `а` in `pаypal`), or that has the same UTS #39 confusable skeleton as another identifier in the file (all-Cyrillic `асе` beside `ace`), is E101 (homoglyph identifiers, CVE-2021-42694, #4266), where it used to be a second name that reads as the first. Write the letter from the name's own script, or rename one of the two",
   "`bytes.cmp(a, b)` → rewrite as `bytes.compare(a, b)`: the same answer under the spelling list and string use (R-bytes-07/08)",
   "`bytes.eof(b, pos)` → rewrite as `bytes.is_eof(b, pos)`: the same answer under the spelling list and string use (R-bytes-07/08)",
   "`bytes.map_each(b, f)` → rewrite as `bytes.map(b, f)`: the same answer under the spelling list and string use (R-bytes-07/08)",
@@ -803,6 +805,16 @@ breaks = [
   "`zlib.adler32(data)` → rewrite as `hash.adler32(b)`: every checksum lives in `hash` (R-zlib-01)",
   "the stdlib types `bytes.Endian` (`LittleEndian` / `BigEndian`, R-bytes-04), `path.SafePath` (R-path-02) and `json.JsonPath` (R-json-01) left with the functions that took them: a reference to one is an unknown type unless the program declares its own; `bytes.get_u32_le(b, pos)` and its siblings put the byte order in the name, every `path` and `fs` function takes the String, and `value.root()` / `value.key` / `value.index` build a `value.Path`",
   "the stdlib `error` module left (R-error-01): its three functions are interpolation (`\"${outer}\\ncaused by: ${cause}\"`), `result.map_err(r, (e) => \"${msg}: ${e}\")` and `result.to_err_option(r) ?? \"\"`",
+  "the type `RawPtr` → rewrite as `Handle`: an opaque foreign token, only passed back to an `@extern` fn (ADR-0031 D1); an `@extern(c)` fn returning a buffer the program reads returns `Region` with `@region(len = …, release = \"…\")` instead (D2)",
+  "`ffi.address(b)` → rewrite as `ffi.region(b)`: a read-only Region of `b` carrying its length and keeping `b` alive (ADR-0031 D1, D2)",
+  "`ffi.to_int(p)` → delete the call: an address has no `Int` form (ADR-0031 D7); hand the Region itself to the `@extern` fn, which receives its base and length",
+  "`bytes.data_ptr(b)` → rewrite as `ffi.region(b)`: a wasm `@extern` takes the Region and receives `(base, len)`, so its `(ptr: Int, len: Int)` parameters become one `Region` parameter (ADR-0031 D3, D7)",
+  "`bytes.as_ptr(b)` → rewrite as `ffi.region(b)`: the read-only Region of `b` (ADR-0031 D2)",
+  "`bytes.as_mut_ptr(b)` → rewrite as `ffi.alloc(bytes.len(b))!` and `ffi.write(r, 0, b)!`: a writable Region is a fresh allocation, never a view of a Bytes value, so a write cannot change a `let` (ADR-0031 D4, #3966); read it back with `ffi.to_bytes(r)!`",
+  "`bytes.from_raw_ptr(p, n)` → rewrite as `ffi.read(r, 0, n)!` with `r` a Region: the read is checked against the region's length (ADR-0031 D1)",
+  "`bytes.copy_to_ptr(b, p, cap)` → rewrite as `ffi.write(r, 0, b)!` with `r` a writable Region from `ffi.alloc`: the write is checked against the region's length and permission (ADR-0031 D1, D4)",
+  "`ffi.read` and `ffi.write` take a `Region` and an offset (ADR-0031 D1, D5): `ffi.read(r, off, n)` answers `err` unless `0 <= off` and `off + n <= ffi.len(r)`, and `ffi.write(r, off, b)` answers `Result[Unit, String]`, `err` for a read-only region or a write that does not fit — where they took a raw address and a caller-typed length, and `write` returned a clamped count. List indexing still aborts (C-067)",
+  "an `@extern(c)` parameter of type `Region` crosses as two C arguments, the pointer and its `size_t` length (ADR-0031 D3), and an `@extern(wasm)` one as `(base, len)`; an `@extern(c)` fn returning `Region` without `@region(len = …, release = \"…\")` is E090 (D2), and the runtime calls the named release function once, when the last copy of the region drops (D6)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
@@ -811,15 +823,6 @@ breaks = [
 # A window is a [[deprecation]] block: id, issue, since_epoch, since,
 # removal_epoch, summary, removal. `legacy-native-callback-names` (#3425,
 # since epoch 10) reached its removal_epoch 14 and is a break of epoch 14 above.
-
-[[deprecation]]
-id = "bytes-raw-pointers-to-ffi"
-issue = 3853
-since_epoch = 15
-since = "0.69.0"
-removal_epoch = 16
-summary = "The five `bytes` raw-pointer functions are `@deprecated` (E052) in favour of the `ffi` module, which needs `import ffi` (R-ffi-01). `ffi.read` / `ffi.write` are effect fns (R-ffi-02) and `ffi.write` takes the address first (R-ffi-03)."
-removal = "`bytes.as_ptr(b)` / `bytes.as_mut_ptr(b)` → `ffi.address(b)`; `bytes.data_ptr(b)` → `ffi.to_int(ffi.address(b))` (0 for an empty b); `bytes.from_raw_ptr(p, n)` → `ffi.read(p, n)` from an effect fn; `bytes.copy_to_ptr(b, p, c)` → `ffi.write(p, b, c)` from an effect fn — each with `import ffi`"
 
 [[deprecation]]
 id = "numeric-renames-wave-2"

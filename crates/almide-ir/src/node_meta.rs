@@ -616,4 +616,9 @@ pub struct IrProgram {
     /// mono reads this table to give it the same call.
     #[serde(skip)]
     pub operator_requirements: std::collections::HashMap<(Sym, Sym), crate::CallTarget>,
+    /// The declared reprs and nominal shapes the lowering knew (#4239), for
+    /// the renderer rule's post-monomorphization run
+    /// ([`crate::declared_repr::route_instantiated_segments`]).
+    #[serde(skip)]
+    pub declared_reprs: crate::declared_repr::DeclaredReprTable,
 }

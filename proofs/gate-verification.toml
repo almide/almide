@@ -108,9 +108,13 @@
 # outside prelude_*.rs, and a `//` inside an emitted string (30 -> 32). The
 # memory-trap gate (#4023) names two: a trap violation the corpus and the seed
 # never reach, and a region bug that shows only in the unarmed layout (32 -> 34).
+# The loom fan gate (security row 6, 2026-10-27) compensates the Miri fan gate's
+# unsampled interleavings and names two of its own: interleavings past its
+# bounded models' preemption bounds, and C11 executions loom does not model
+# (36 -> 37).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "36"
+# uncompensated_blind_ceiling = "37"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -193,10 +197,30 @@ path = "scripts/check-action-pins.sh"
 reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#4094 landing (2026-10-24): `--self-test` runs on every CI run. It forges a workflow with a tag pin (actions/checkout@v7), a branch pin (dtolnay/rust-toolchain@stable), a local action and a commit pin, and requires exit 1 naming both refs and `2 of 3`, then pins both and requires exit 0. Against the real tree before #4094 (origin/develop at 56a3d0f90, extracted with git archive), the gate exits 1 with `218 of 218 action references are not pinned to a commit`; the pinned tree reads `OK — 218 action references`."
-measures = "the count of `uses: owner/repo@ref` lines in .github/workflows and .github/actions whose ref is not a 40-hex commit (local ./ actions and docker:// excluded)"
-varies = "#4094 landing (2026-10-24): 218 unpinned on origin/develop 56a3d0f90, 0 on the pinned tree; 2 on the self-test's forged workflow"
-blind = "an action whose pinned commit fetches more code by tag or branch (a composite action's own `uses:`, rustup installing the current toolchain) -> UNCOMPENSATED; a commit that was already malicious when it was pinned -> .github/dependabot.yml"
+evidence = "#4094 landing (2026-10-24): `--self-test` runs on every CI run. It forges a workflow with a tag pin (actions/checkout@v7), a branch pin (dtolnay/rust-toolchain@stable), a local action and a commit pin, and requires exit 1 naming both refs and `2 of 3`, then pins both and requires exit 0. Against the real tree before #4094 (origin/develop at 56a3d0f90, extracted with git archive), the gate exits 1 with `218 of 218 action references are not pinned to a commit`; the pinned tree reads `OK — 218 action references`. Security row 16 (2026-10-27) adds scripts/lib/action_supply.py: `versions` on the tree before the pins (sec-batch-1026c e25c7b636) exits 1 with `9 step(s) fetch by a moving name (59 checked)` — three node-version majors, rustup `stable`, unpinned `pip install lark`, three dtolnay/rust-toolchain steps with no `toolchain:`, `cargo install cargo-audit` with no version — and 0 after; `--closure` walks the 13 pinned actions at their commits (actions/attest-build-provenance -> actions/attest pinned) and exits 0. The self-test forges each of the seven moving kinds (resolved through env, a composite's input and a dispatch default) and a mirrored composite whose own `uses:` is `ex/tagged@v1`, requires each refusal, then the fixed trees to pass."
+measures = "the count of `uses: owner/repo@ref` lines in .github/workflows and .github/actions whose ref is not a 40-hex commit (local ./ actions and docker:// excluded); the count of toolchain / runtime / installer steps whose resolved version is a moving name; the count of nested `uses:` / images in the pinned actions' own action.yml (read at the pinned commit) that are not pinned"
+varies = "#4094 landing (2026-10-24): 218 unpinned on origin/develop 56a3d0f90, 0 on the pinned tree; 2 on the self-test's forged workflow. Row 16 (2026-10-27): 9 moving versions on e25c7b636, 0 after"
+blind = "a `curl` of a release asset by a versioned URL (wasmtime, nextest, wasm-pack, elan) whose bytes the upstream can replace -> UNCOMPENSATED; a commit that was already malicious when it was pinned -> .github/dependabot.yml"
+
+[[gate]]
+path = "scripts/check-installer-attestation.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "Security row 16 (2026-10-27): runs tools/install.sh (and tools/install.ps1 under pwsh, required in CI) against a stubbed release — a `curl` / `Invoke-WebRequest` that serves a local directory, `gh` absent / failing / passing, a PATH without the runner's own gh — and requires the refusal or the install each case names. Against the installers before the change (sec-batch-1026c e25c7b636) it exits 1: `install.sh [no-gh]: expected a refusal, got exit 0` and the skip case's missing warning; on the changed installers all five sh cases pass."
+measures = "per installer and case (no gh, --skip-attestation, gh failing, gh verifying, a bad checksum): whether the installer refused or installed, and the line it said"
+varies = "2026-10-27: 2 failing cases on e25c7b636's install.sh, 0 after"
+blind = "a `gh attestation verify` that accepts a forged attestation (Sigstore and the GitHub CLI are trusted, not checked) -> proofs/TRUSTED_BASE.md; an installer fetched over a compromised raw.githubusercontent.com -> SECURITY.md"
+
+[[gate]]
+path = "scripts/check-release-switch-lock.sh"
+reads = "scalar"
+wired_by = ".github/workflows/release.yml"
+class = "NEGATIVE_TESTED"
+evidence = "Security row 25 (2026-10-27), on GCE at 2c5b4ee37: a debug build made with ALMIDE_BUILD_PROVENANCE=release (`almide 0.68.0 (release, 2c5b4ee37)`) passes, exit 0. With `lock_engaged_by_default` returning false and the same build, it exits 1: `a release binary honoured an inherited ALMIDE_SKIP_VERSION_CHECK with no --allow-switch — the lock is not engaged by default` (the binary printed `[almide] ALMIDE_SKIP_VERSION_CHECK is set` and `No errors found`), and the predicate's unit test fails too. A dev binary is refused as the wrong artifact, exit 1."
+measures = "whether the release artifact, with ALMIDE_SKIP_VERSION_CHECK inherited and no flag, still refuses a project pinned to almide 999.0.0 and says IGNORED, and whether --allow-switch then honours it"
+varies = "2026-10-27: exit 0 on the release-kind build of 2c5b4ee37, exit 1 with the default engagement removed"
+blind = "a build-changing switch read before the lock is armed in dispatch -> tests/switch_lock_test.rs; the aarch64 Linux artifact, cross-compiled and not run -> crates/almide-base/src/env.rs"
 
 [[gate]]
 path = "scripts/check-exit-sites.sh"
@@ -895,7 +919,7 @@ path = "scripts/asan-generated.sh"
 reads = "scalar"
 wired_by = ".github/workflows/miri-nightly.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#4009 landing (2026-10-23): every invocation first runs a control, a 64-byte ffi.read through a 4-byte buffer's address (the #4043 shape), and refuses to judge unless AddressSanitizer reports it as a heap-buffer-overflow"
+evidence = "#4009 landing (2026-10-23): every invocation first runs a control, a 64-byte ffi.read through a 4-byte buffer's address (the #4043 shape; since ADR-0031 a 4-byte malloc block read through a Region whose `@region(len = 64)` clause lies, the one trusted line left), and refuses to judge unless AddressSanitizer reports it as a heap-buffer-overflow"
 measures = "the number of spec/wasm_cross programs whose generated native crate, built with -Zsanitizer=address, gets an AddressSanitizer report, plus the control's verdict"
 varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin, nightly-2026-08-01: over all 958 programs 955 ok and 3 reports, all three allocation-size-too-big on the OOM fixtures' deliberate huge try_reserve (not memory errors); with allocator_may_return_null=1 those 3 reach their defined abort and report nothing"
 blind = "a memory error the corpus does not reach -> UNCOMPENSATED; an out-of-bounds access that lands inside another live allocation, past the redzone -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
@@ -908,14 +932,24 @@ class = "NEGATIVE_TESTED"
 evidence = "#4007 landing (2026-10-24): every invocation first runs a control, the same generated crate with the fan caller's wait for its helpers removed (almide_fan_deal returns while a helper is inside its gate), and refuses to judge unless Miri reports it UB. Measured on aarch64-apple-darwin, nightly-2026-08-01: the control came back UB ('deallocating while item is strongly protected', in almide_fan_deal) on seeds 0..8 and on seed 0 alone, four runs out of four; the unbroken crate ran clean on seeds 0..8 with its output equal to the native run. The same broken crate under miri-generated.sh's flags (one reported CPU, cost model on) came back clean — that corpus never crosses the gate. Rows 6/9 (2026-10-26, GCE n2-standard-8, x86_64-linux, nightly-2026-08-01): the gate runs one program per shape, each behind its own control — gate and par_filter (list.filter/list.any under fan arms) with the caller's wait removed came back UB ('deallocating while item [SharedReadOnly ...] is strongly protected'), the line-fold workers (fs.fold_lines_chunked, which hold no gate) with one unsynchronised static mut written by every worker came back UB ('Data race detected between (1) non-atomic write on thread ...'); every unbroken shape ran clean on seeds 0..8 at preemption rates 0.01 and 0.2 with output equal to native. fan.min / fan.bounded start no thread: the gate first requires `almide check` to refuse a fan block (E007) and a fan.map inside their pure bodies."
 measures = "whether Miri reports undefined behaviour in each shape's program (flat and nested fan.map offers, list.par_filter/par_any under fan arms, the line-fold workers) with every offer dealt to helper threads (four reported CPUs, ALMIDE_FAN_COST_OFF=1, the seeds of MIRI_SEEDS at each of MIRI_PREEMPTION_RATES), plus each shape's control verdict, the output against the native run, and the refusal of fan offers inside fan.min / fan.bounded bodies"
 varies = "landing (2026-10-24): control UB, program clean, output = native"
-blind = "an interleaving none of the seeds and preemption rates schedules (Miri samples two schedules per seed and does not enumerate them, and there is no loom or GenMC model of the gate protocol) -> UNCOMPENSATED; a fan shape the programs do not use -> UNCOMPENSATED; the wasm host's fan (host_fan.rs: safe Rust under the workspace forbid(unsafe_code), one instance with its own unshared linear memory per worker, so rustc rather than a gate holds it) -> UNCOMPENSATED"
+blind = "an interleaving none of the seeds and preemption rates schedules (Miri samples two schedules per seed and does not enumerate them) -> scripts/loom-fan-gate.sh (loom enumerates the gate protocol's interleavings from the same source, within the bounds its own row states); a fan shape the programs do not use -> UNCOMPENSATED; the wasm host's fan (host_fan.rs: safe Rust under the workspace forbid(unsafe_code), one instance with its own unshared linear memory per worker, so rustc rather than a gate holds it) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/loom-fan-gate.sh"
+reads = "scalar"
+wired_by = ".github/workflows/miri-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "Security row 6 landing (2026-10-27, GCE n2-standard-8, x86_64-linux, rust 1.96.0, loom 0.7.2, commit 5caace74a): every invocation first runs two controls planted in the extracted runtime source and refuses to judge unless loom reports a causality violation for each — `nowait` (the caller's wait for helpers inside its gate removed, the defect miri-fan-gate.sh's control plants) came back 'Causality violation: Concurrent read and write accesses to `UnsafeCell`' in 11 s, `noreaders` (withdraw no longer waits for the slot's readers) came back 'Causality violation: Concurrent read and write accesses' in 2 s; a control that fails without a causality violation (a build error, an unrelated panic) is refused as not the planted defect. The unbroken protocol passed all three models (flat offer unbounded, nested offer to 3 preemptions, two offers to 2) in 84 s; scripts/loom-fan-gate.sh exit 0, 97 s with the builds."
+measures = "whether loom finds an execution of the fan gate protocol (runtime/rs/src/list.rs, almide_fan_deal through almide_fan_steal, extracted by tools/loom-fan-gate/build.rs and run on loom's primitives) in which a helper's access to an offer's gate, block queue or borrowed taking loop is not happens-before that frame's teardown, or an offer does not run each block exactly once, plus each control's verdict"
+varies = "landing (2026-10-27): both controls red with a causality violation, the unbroken protocol green"
+blind = "an interleaving past the nested and two-offer models' preemption bounds (3 and 2, where unbounded did not finish in 300 s and 20 min) -> UNCOMPENSATED; a C11 execution loom does not explore (load buffering), or one a SeqCst access admits but the model's fence-sandwiched SeqCst forbids (the fences also order the thread's surrounding non-SeqCst accesses) -> UNCOMPENSATED; more threads, offers or blocks than the models' (one or two offers of two blocks, one helper of two turns) -> scripts/miri-fan-gate.sh (16- and 8-element offers, nested offers under fan arms, four CPUs); the pool's resident loop, wake-ups and thread-count budget, outside the extracted span -> scripts/miri-fan-gate.sh"
 
 [[gate]]
 path = "scripts/miri-generated.sh"
 reads = "scalar"
 wired_by = ".github/workflows/miri-nightly.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#4009 landing (2026-10-23): every invocation first runs a control — a 64-byte ffi.read through a 4-byte buffer's address, the #4043 shape — and refuses to judge unless Miri reports it UB. Its first corpus run was a genuine catch: 10 of 30 fan fixtures were UB because the fan clock declared clock_gettime's clockid_t as i32 where macOS has an unsigned enum, fixed in the same change"
+evidence = "#4009 landing (2026-10-23): every invocation first runs a control — a 64-byte ffi.read through a 4-byte buffer's address, the #4043 shape (since ADR-0031 a 4-byte malloc block read through a Region whose `@region(len = 64)` clause lies) — and refuses to judge unless Miri reports it UB. Its first corpus run was a genuine catch: 10 of 30 fan fixtures were UB because the fan clock declared clock_gettime's clockid_t as i32 where macOS has an unsigned enum, fixed in the same change"
 measures = "the number of spec/wasm_cross programs whose generated native crate Miri reports undefined behaviour in, plus the control's verdict"
 varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin: 10 UB of 30 fan fixtures (clock_gettime signature), then over all 958 spec/wasm_cross programs 1 UB (a OnceCell::get_or_init reference held across a re-entrant global access) and 2 no-build (E0747, a user record named D); with the three fixes 949 ok, 0 UB, 2 unsupported (fs), 7 cut off"
 blind = "undefined behaviour Miri does not model or that the corpus does not reach (a program stopped at an unsupported foreign call such as a socket or a child process is reported, not judged, and a code path no fixture runs is not seen) -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
@@ -925,7 +959,7 @@ path = "scripts/wasm-checked-alloc.sh"
 reads = "scalar"
 wired_by = ".github/workflows/wasm-checked-alloc-nightly.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#4009 landing (2026-10-23): every invocation first runs a control — proofs/fixtures/heap-check/uaf_write.almd writes through a dangling ffi address — and fails unless the ordinary build exits 0 and the checked build exits 70 with the heap-check message; locally the control read exit 0 vs 70, and scripts/wasm-checked-alloc-reinject.sh re-injects #3538 and requires this gate to fail; #4224 (2026-10-25): a sandbox control runs proofs/fixtures/heap-check/temp_root.almd (makes its own temp dir, as the corpus's fs fixtures do) and fails unless it exits 0 under the harness with its fresh temp root at /tmp, and its negative leg fails unless the same program is refused (create_temp_dir) without one — locally exit 0 and exit 1; before the temp root, develop 926542089 read every fs fixture as a DIFF of two refusals (runs 40176025801, 40173951179)"
+evidence = "#4009 landing (2026-10-23): every invocation first runs a control — proofs/fixtures/heap-check/raw/uaf_write.almd writes through a dangling address (an `ffi` address until ADR-0031 made that unspellable; since then the primitive floor under `--stdlib-authority`) — and fails unless the ordinary build exits 0 and the checked build exits 70 with the heap-check message; locally the control read exit 0 vs 70, and scripts/wasm-checked-alloc-reinject.sh re-injects #3538 and requires this gate to fail; #4224 (2026-10-25): a sandbox control runs proofs/fixtures/heap-check/temp_root.almd (makes its own temp dir, as the corpus's fs fixtures do) and fails unless it exits 0 under the harness with its fresh temp root at /tmp, and its negative leg fails unless the same program is refused (create_temp_dir) without one — locally exit 0 and exit 1; before the temp root, develop 926542089 read every fs fixture as a DIFF of two refusals (runs 40176025801, 40173951179)"
 measures = "the number of spec/wasm_cross programs whose ordinary and ALMIDE_WASM_CHECKED_ALLOC builds differ in stdout, stderr or exit status, plus the control's verdict, plus the sandbox control's two verdicts (the temp-root program runs with the temp root, is refused without it)"
 varies = "develop 5059b4cde + the switch, aarch64-apple-darwin, wasmtime 47.0.2: 958 built, 958 identical, 0 different (again with the canaries: 958 identical, and the overrun control exits 0 ordinarily and 70 checked); with #3538 re-injected the reproduction differs (both builds print freed bytes, different ones)"
 blind = "an out-of-bounds write inside a LIVE block's usable capacity, or one that skips the canary and lands further on, or into a block never freed -> UNCOMPENSATED; blocks above the size-class ceiling (the large list keeps links in the payload) -> UNCOMPENSATED; a read after free whose poisoned value prints the same as the old one -> .github/workflows/ci-cross-target.yml"
@@ -1564,10 +1598,10 @@ path = "scripts/check-rawptr-surface.py"
 reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "landing (2026-10-23, #4008): reads the committed signature-index blocks of docs/stdlib/*.md; at landing 8 RawPtr signatures — the 4 of ffi and the 4 allowlisted deprecated bytes spellings. --self-test forges five surfaces in memory and asserts each is refused exactly once: a RawPtr return outside ffi, a RawPtr parameter outside ffi, an allowlisted bytes fn deleted (the allowlist must shrink), a fifth ffi fn, and an ffi fn missing. An empty index exits 2 instead of passing vacuously."
-measures = "which public stdlib functions carry RawPtr in their signature (R-L0-45: only ffi, plus the shrink-only allowlist of deprecated bytes spellings), and whether ffi's surface is exactly the four functions of R-ffi-01"
-varies = "landing (2026-10-23): 8 RawPtr signatures, allowlist 4; epoch 16 removes the bytes spellings and the allowlist goes to 0"
-blind = "a memory-unsafe function whose signature carries no RawPtr (bytes.data_ptr returns an Int address) -> tests/critical_profile_test.rs (#4008: --profile critical refuses every @memory_unsafe stdlib fn, bytes.data_ptr included); whether a non-ffi function writes outside its value without a RawPtr in its type is not read, only types -> spec/stdlib out-of-range fixtures (R-L0-46)"
+evidence = "landing (2026-10-23, #4008): reads the committed signature-index blocks of docs/stdlib/*.md; at landing 8 RawPtr signatures — the 4 of ffi and the 4 allowlisted deprecated bytes spellings. --self-test forges five surfaces in memory and asserts each is refused exactly once: a RawPtr return outside ffi, a RawPtr parameter outside ffi, an allowlisted bytes fn deleted (the allowlist must shrink), a fifth ffi fn, and an ffi fn missing. An empty index exits 2 instead of passing vacuously.; ADR-0031 (2026-10-27): the rule is now that no public stdlib signature carries a Handle (RawPtr's new name) at all, a Region only inside ffi, and ffi's surface is the seven Region functions; --self-test forges five surfaces (a Handle return outside ffi, a Handle inside ffi, a Region parameter outside ffi, a new ffi fn, a missing ffi fn) and asserts each is refused exactly once"
+measures = "which public stdlib functions carry a Handle (none may, ADR-0031 D1/D7) or a Region (ffi only, R-L0-45) in their signature, and whether ffi's surface is exactly the seven Region functions of ADR-0031"
+varies = "landing (2026-10-23): 8 RawPtr signatures, allowlist 4; ADR-0031 (2026-10-27): 0 Handle signatures, the allowlist gone with the bytes spellings, Region only in ffi"
+blind = "a function that reaches memory through a type other than Handle or Region (a prim cast is not user-nameable, E085) -> tests/raw_ptr_surface_test.rs derives the same rule from the declared signatures and visibility, and runs the bounds check on both legs"
 
 [[gate]]
 path = "scripts/check-runtime-unsafe.sh"

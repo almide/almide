@@ -1,8 +1,10 @@
 //! The address-hold rule (C-376, #4153), as a target-independent IR rewrite.
 //!
 //! C-376 promises that a named value whose address is bound to a `let` stays
-//! valid as long as that binding can be used. An address op (`ffi.address`,
-//! and the deprecated `bytes.as_ptr` / `as_mut_ptr` / `data_ptr`) reads its
+//! valid as long as that binding can be used. Since ADR-0031 the one address
+//! op is `ffi`'s `local` `__address`, reached only by the Region mints, which
+//! also keep the block in the Region they build (the user-facing spellings
+//! `ffi.address` and `bytes.as_ptr` / `as_mut_ptr` / `data_ptr` are gone). It reads its
 //! block without owning it, so when the named value is a `var` the promise
 //! broke on the first rebinding: `b = …` released the old block while the
 //! let-bound address still pointed into it, a later allocation took the
@@ -55,8 +57,7 @@ use almide_lang::types::Ty;
 /// The wasm leg's `is_raw_address_op` (#3420) reads this one set.
 pub fn is_address_op(target: &CallTarget) -> bool {
     matches!(target, CallTarget::Module { module, func, .. }
-        if (module.as_str() == "bytes" && matches!(func.as_str(), "data_ptr" | "as_ptr" | "as_mut_ptr"))
-            || (module.as_str() == "ffi" && func.as_str() == "address"))
+        if module.as_str() == "ffi" && func.as_str() == "__address")
 }
 
 /// Rewrite every let-bound address of a `var` (or a `mut` parameter) into the

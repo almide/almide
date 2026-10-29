@@ -1,12 +1,18 @@
 // html — safe HTML construction (secure-by-design Layer 3)
 //
 // `SafeHtml` is an opaque type: external modules cannot construct it
-// directly from String. All construction goes through escape() or raw().
-// This makes XSS a compile-time type error.
+// directly from String. All construction goes through a context builder —
+// escape() for text, attr() for an attribute, url_attr() for a URL
+// attribute, script_json() for data inside <script> — or raw(), the named
+// opt-out. This makes XSS a compile-time type error (#4120).
+import json
+
 mod type SafeHtml = String
 
 // Escape HTML special characters: & < > " '
-/// s with & < > " ' turned into HTML entities.
+// TEXT context only (element content). An attribute is attr() / url_attr(),
+// and data inside <script> is script_json() (#4120).
+/// s with & < > " ' turned into HTML entities; text context only.
 fn escape(s: String) -> SafeHtml = {
   let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(
     ">",
@@ -37,3 +43,113 @@ fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
 // Empty SafeHtml
 /// SafeHtml of the empty string.
 fn empty() -> SafeHtml = SafeHtml("")
+
+// ── Context builders (#4120) ──
+//
+// Each builder produces markup that is safe in ONE context, so the context
+// is part of the call rather than something the author has to remember.
+fn __html_ascii(c: String) -> Bool = (string.to_codepoint(c) ?? 128) < 128
+
+// An ASCII control character or space: browsers strip or ignore these inside
+// a URL's scheme (`java\tscript:`), so a scheme holding one is never trusted.
+fn __html_blank(c: String) -> Bool = (string.to_codepoint(c) ?? 0) <= 32
+
+// An attribute name the builders accept: an ASCII letter, then ASCII
+// letters, digits, `-`, `_`, `:` or `.`. Anything else (a space, `=`, `>`,
+// a quote) would end the attribute or the tag.
+fn __html_name_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "-" or c == "_" or c == ":" or c == ".")
+
+fn __html_name_ok(name: String) -> Bool = match list.first(string.to_list(name)) {
+  some(c) => __html_ascii(c) and string.is_alpha(c) and list.all(
+    string.to_list(name),
+    (x) => __html_name_char(x),
+  ),
+  none => false,
+}
+
+// The attributes whose value the browser reads as a URL, as HTML, as CSS or
+// as script: attr() refuses them, so a value there goes through url_attr()
+// (a URL) or nowhere (an event handler, `style`, `srcdoc`).
+fn __html_url_attr_name(n: String) -> Bool = match n {
+  "href" => true,
+  "src" => true,
+  "action" => true,
+  "formaction" => true,
+  "srcset" => true,
+  "xlink:href" => true,
+  "poster" => true,
+  "cite" => true,
+  "data" => true,
+  "background" => true,
+  "ping" => true,
+  "manifest" => true,
+  "codebase" => true,
+  "longdesc" => true,
+  "usemap" => true,
+  "icon" => true,
+  _ => false,
+}
+
+fn __html_active_attr_name(n: String) -> Bool = string.starts_with(n, "on") or n == "style" or n == "srcdoc"
+
+// The attribute value escape: the five metacharacters, so the value cannot
+// close a double-quoted attribute or open a tag.
+fn __html_attr_value(v: String) -> String = to_string(escape(v))
+
+/// name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+fn attr(name: String, value: String) -> SafeHtml = {
+  let n = string.to_lower(name)
+  if not __html_name_ok(name) then panic("html.attr: `${name}` is not an attribute name")
+  else if __html_url_attr_name(n) then panic("html.attr: `${name}` takes a URL; use html.url_attr")
+  else if __html_active_attr_name(n) then panic("html.attr: `${name}` runs script or styles; no builder writes it")
+  else SafeHtml("${name}=\"${__html_attr_value(value)}\"")
+}
+
+fn __html_scheme_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == ".")
+
+// The scheme of a URL, lowercased, or none for a relative URL (no `:` before
+// the first `/`, `?` or `#`). A scheme that is empty or holds anything but
+// ASCII letters, digits, `+`, `-` and `.` — a control character or a space
+// included — answers some(""), which no allowlist entry matches; so does a
+// would-be relative URL whose path starts with one, since a browser strips
+// leading blanks and may then find a scheme.
+fn __html_scheme(url: String) -> String? = {
+  let cs = string.to_list(url)
+  let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
+  let head = list.take(cs, i)
+  let colon = list.get(cs, i) == some(":")
+  if colon and not list.is_empty(head) and list.all(head, (c) => __html_scheme_char(c)) then some(string.to_lower(list.join(head, "")))
+  else if colon or list.any(head, (c) => __html_blank(c)) then some("")
+  else none
+}
+
+// The URL url_attr() writes in place of one whose scheme is not allowed:
+// inert in every URL attribute (Go's html/template writes `#ZgotmplZ`).
+fn __html_blocked_url() -> String = "about:invalid#almide-blocked"
+
+/// name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+fn url_attr(name: String, url: String) -> SafeHtml = {
+  if not __html_name_ok(name) then panic("html.url_attr: `${name}` is not an attribute name")
+  else if __html_active_attr_name(string.to_lower(name)) then panic("html.url_attr: `${name}` runs script or styles; no builder writes it")
+  else {
+    let kept = match __html_scheme(url) {
+      none => url,
+      some(s) => match s {
+        "http" => url,
+        "https" => url,
+        "mailto" => url,
+        _ => __html_blocked_url(),
+      },
+    }
+    SafeHtml("${name}=\"${__html_attr_value(kept)}\"")
+  }
+}
+
+/// json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
+fn script_json(v: Value) -> SafeHtml = {
+  let s = json.stringify(v) |> string.replace("<", "\\u003c") |> string.replace(">", "\\u003e") |> string.replace(
+    "&",
+    "\\u0026",
+  ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
+  SafeHtml(s)
+}

@@ -8,9 +8,15 @@
 //! `int` (0/1) — the mapping `@extern(c)` has always had, kept so existing
 //! bindings keep their C prototypes. The sized ints and floats cross at their
 //! own width. A `String` parameter crosses as a NUL-terminated copy
-//! (`*const u8`, valid for the call; the text up to its first NUL). Heap
-//! values (lists, bytes, maps, records, …) have no C representation: bind
-//! them through an `@extern(rust)` shim in `native/*.rs` instead.
+//! (`*const u8`, valid for the call; the text up to its first NUL). A
+//! `Handle` crosses as the bare pointer it is. A `Region` parameter crosses
+//! as TWO C arguments, the pointer and its `size_t` length, so the callee gets
+//! the length the runtime holds, never one the caller typed (ADR-0031 D3); a
+//! `Region` return is a pointer whose length and release function the
+//! declaration states with `@region(len = …, release = "…")` — the checker
+//! refuses the return without it (ADR-0031 D2). Other heap values (lists,
+//! bytes, maps, records, …) have no C representation: bind them through an
+//! `@extern(rust)` shim in `native/*.rs` instead.
 //!
 //! Gated by `tests/extern_rust_abi_test.rs` (every `Ty` variant × target).
 
@@ -36,6 +42,18 @@ pub enum CConv {
     /// `String` → a NUL-terminated copy (`CString`), passed as `*const u8`.
     /// Parameters only.
     CString,
+    /// `Region` (ADR-0031): a parameter is two C arguments, `*mut u8` and
+    /// `usize` (the region's base and its runtime-held length); a return is a
+    /// `*mut u8` the wrapper builds a Region around from the declaration's
+    /// `@region(len = …, release = "…")`.
+    Region,
+}
+
+/// Is `ty` the `ffi` module's `Region` (ADR-0031)? The stdlib-owned bare name
+/// is the type's identity: a user's own `type Region` takes the
+/// module-qualified identity instead (#1828), so it never reaches here.
+pub fn is_region(ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(n, args) if args.is_empty() && n.as_str() == crate::stdlib_info::FFI_REGION_TYPE)
 }
 
 const fn abi(c_ty: &'static str, conv: CConv) -> Option<CAbi> {
@@ -66,6 +84,7 @@ fn scalar(ty: &Ty) -> Option<CAbi> {
 pub fn c_param_abi(ty: &Ty) -> Option<CAbi> {
     match ty {
         Ty::String => abi("*const u8", CConv::CString),
+        t if is_region(t) => abi("*mut u8", CConv::Region),
         _ => scalar(ty),
     }
 }
@@ -75,14 +94,15 @@ pub fn c_param_abi(ty: &Ty) -> Option<CAbi> {
 pub fn c_return_abi(ty: &Ty) -> Option<CAbi> {
     match ty {
         Ty::Unit => abi("()", CConv::Same),
+        t if is_region(t) => abi("*mut u8", CConv::Region),
         _ => scalar(ty),
     }
 }
 
 /// The Almide types [`c_param_abi`] accepts, for diagnostics.
-pub const C_PARAM_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, String, RawPtr";
+pub const C_PARAM_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, String, Handle, Region";
 /// The Almide types [`c_return_abi`] accepts, for diagnostics.
-pub const C_RETURN_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, RawPtr, Unit";
+pub const C_RETURN_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, Handle, Unit, and Region with `@region(len = …, release = \"…\")`";
 
 /// The two native binding kinds an `@extern` target can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

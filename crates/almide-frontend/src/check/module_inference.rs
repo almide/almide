@@ -1,8 +1,6 @@
-// Continuation of `impl Checker` — module-level type inference, declaration
-// checking, and test where-clause evaluation. Split out of mod.rs to keep it
-// under the 800-line codopsy max-lines threshold; pure text move, same
-// module scope via `include!` (no privacy boundary since these continuations
-// are spliced directly into check/mod.rs's module, not separate submodules).
+// Continuation of `impl Checker` (spliced into check/mod.rs by `include!`,
+// same module scope): module-level type inference, declaration checking and
+// test where-clause evaluation, split out of mod.rs for the 800-line budget.
 
 impl Checker {
     /// Every post-solve validation, in ONE list (#2373).
@@ -14,9 +12,8 @@ impl Checker {
     /// away. `almide check` reaches every file as an entry and rejected it;
     /// `almide build` reached it as a module and shipped the artifact.
     /// Whether a rule applied depended on which file the author happened to
-    /// put the function in, which is invisible from the source.
-    ///
-    /// A shared list cannot drift: adding a validation here adds it to both.
+    /// put the function in, which is invisible from the source. A shared list
+    /// cannot drift: adding a validation here adds it to both.
     fn validate_after_solve(&mut self, program: &ast::Program) {
         self.validate_map_key_types();
         self.validate_result_interpolations();
@@ -25,6 +22,8 @@ impl Checker {
         self.validate_polymorphic_recursion(new_generic_calls);
         self.validate_ord_elem_types();
         self.validate_eq_operand_types();
+        self.validate_eq_instantiations();
+        self.validate_opaque_spreads();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
@@ -180,6 +179,7 @@ impl Checker {
             self.deferred_type_param_checks.len(),
             self.deferred_input_sink_checks.len(),
             self.deferred_protocol_bounds.len(),
+            self.deferred_opaque_spreads.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -240,6 +240,7 @@ impl Checker {
         self.deferred_type_param_checks.truncate(saved_deferred_lens.15);
         self.deferred_input_sink_checks.truncate(saved_deferred_lens.16);
         self.deferred_protocol_bounds.truncate(saved_deferred_lens.17);
+        self.deferred_opaque_spreads.truncate(saved_deferred_lens.18);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
@@ -540,10 +541,11 @@ impl Checker {
     fn check_decl(&mut self, decl: &mut ast::Decl) {
         // E090: an `@extern(c)` signature must be one the C ABI table has
         // rows for — with a body (`= _`) or without.
-        if let ast::Decl::Fn { name, params, return_type, extern_attrs, span, .. } = &*decl
+        if let ast::Decl::Fn { name, params, return_type, extern_attrs, attrs, span, .. } = &*decl
             && !extern_attrs.is_empty()
         {
-            self.reject_extern_c_types(name.as_str(), params, return_type, extern_attrs, *span);
+            let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
+            self.reject_extern_c_types(sig, extern_attrs, attrs);
         }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the

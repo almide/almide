@@ -1,8 +1,8 @@
 diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
-index 1c76143df..9f6967e1c 100644
+index 8ae92437a..7c702ac63 100644
 --- a/crates/almide-wasm/src/list_order.rs
 +++ b/crates/almide-wasm/src/list_order.rs
-@@ -378,9 +378,9 @@ impl Emitter<'_> {
+@@ -376,9 +376,9 @@ impl Emitter<'_> {
                      i.local_get(hk).local_get(hnum).i32_ge_u().br_if(1);
                      // row size: min(n, total - k*n)
                      // cs = n > remaining ? remaining : n

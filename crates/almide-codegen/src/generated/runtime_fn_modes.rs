@@ -5,6 +5,7 @@
 pub fn takes_raw_fn_last_arg(name: &str) -> bool {
     matches!(name,
         "almide_rt_fan_map_par" |
+        "almide_rt_ffi_release_guard" |
         "almide_rt_fs_fold_lines_chunked" |
         "almide_rt_fs_fold_lines_range" |
         "almide_rt_list_flat_map_arr" |
@@ -78,22 +79,17 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_bytes_append_u32_be" => &[true, false],
         "almide_rt_bytes_append_u32_le" => &[true, false],
         "almide_rt_bytes_append_u8" => &[true, false],
-        "almide_rt_bytes_as_mut_ptr" => &[true],
-        "almide_rt_bytes_as_ptr" => &[false],
         "almide_rt_bytes_chunks" => &[false, false],
         "almide_rt_bytes_clear" => &[true],
         "almide_rt_bytes_cmp" => &[false, false],
         "almide_rt_bytes_concat" => &[false, false],
         "almide_rt_bytes_contains" => &[false, false],
         "almide_rt_bytes_copy_from" => &[true, false, false, false, false],
-        "almide_rt_bytes_copy_to_ptr" => &[false, false, false],
         "almide_rt_bytes_copy_within" => &[true, false, false, false],
-        "almide_rt_bytes_data_ptr" => &[false],
         "almide_rt_bytes_ends_with" => &[false, false],
         "almide_rt_bytes_eof" => &[false, false],
         "almide_rt_bytes_fill" => &[true, false],
         "almide_rt_bytes_from_list" => &[false],
-        "almide_rt_bytes_from_raw_ptr" => &[false, false],
         "almide_rt_bytes_from_string" => &[false],
         "almide_rt_bytes_get" => &[false, false],
         "almide_rt_bytes_index_of" => &[false, false],
@@ -202,9 +198,9 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fan_race" => &[false],
         "almide_rt_fan_settle" => &[false],
         "almide_rt_ffi_address" => &[false],
-        "almide_rt_ffi_read" => &[false, false],
-        "almide_rt_ffi_to_int" => &[false],
-        "almide_rt_ffi_write" => &[false, false, false],
+        "almide_rt_ffi_load" => &[false, false, false],
+        "almide_rt_ffi_release_guard" => &[false, false],
+        "almide_rt_ffi_store" => &[false, false, false],
         "almide_rt_float32_to_string" => &[false],
         "almide_rt_float_abs" => &[false],
         "almide_rt_float_ceil" => &[false],

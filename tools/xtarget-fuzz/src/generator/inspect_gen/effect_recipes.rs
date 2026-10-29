@@ -127,16 +127,6 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     // program makes, inside C-350's 0..=125. The literal is what every
     // probe must exit with (`Target::expected_exit`).
     Recipe { func: "process.exit", size: "", args: &[("code", "3")] },
-    // Host addresses over a live buffer: the probe binds it before the loop.
-    Recipe { func: "bytes.as_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
-    Recipe { func: "bytes.as_mut_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
-    Recipe { func: "bytes.data_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
-    Recipe { func: "bytes.copy_to_ptr", size: "b", args: &[("b", SIZED_BYTES), ("ptr", "bytes.as_ptr(live_buf)"), ("cap", "{n}")] },
-    Recipe { func: "bytes.from_raw_ptr", size: "len", args: &[("ptr", "bytes.as_ptr(live_buf)"), ("len", "{n}")] },
-    Recipe { func: "ffi.address", size: "b", args: &[("b", SIZED_BYTES)] },
-    Recipe { func: "ffi.to_int", size: "", args: &[("p", "ffi.address(live_buf)")] },
-    Recipe { func: "ffi.read", size: "len", args: &[("ptr", "ffi.address(live_buf)"), ("len", "{n}")] },
-    Recipe { func: "ffi.write", size: "b", args: &[("ptr", "ffi.address(live_buf)"), ("b", SIZED_BYTES), ("cap", "{n}")] },
     // net's TCP calls and unix's sockets and shared-memory files take and
     // return opaque handles (`net.TcpStream`, `unix.Fd`), and the stream
     // operations on them are io's generic `read` / `write` / `close`: neither
@@ -159,15 +149,11 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
-/// their own `let`: an address is only valid while its buffer lives, so the
-/// buffer is bound here and the address taken from it in the recipe.
-pub(super) fn prelude_for(func: &str, n: u64) -> Option<String> {
-    match func {
-        "bytes.copy_to_ptr" | "bytes.from_raw_ptr" | "ffi.to_int" | "ffi.read" | "ffi.write" => {
-            Some(format!("  let live_buf: Bytes = bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))\n"))
-        }
-        _ => None,
-    }
+/// their own `let`. None today: the raw-address recipes that bound a live
+/// buffer here left with the address surface (ADR-0031); the hook stays for
+/// the next operand that needs one.
+pub(super) fn prelude_for(_func: &str, _n: u64) -> Option<String> {
+    None
 }
 
 /// What a stdin reader's probe gets on stdin: for size n and k calls, the

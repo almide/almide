@@ -1,0 +1,12 @@
+// @contract: C-153, C-418
+// #4262: a failing assert shows its operands by C-418's rule, so an operand
+// carrying ESC, U+202E, a newline, a C1 control or an isolate reads
+// `\u{1b}`, `\u{202e}`, `\n`, `\u{85}`, `\u{2066}`: it cannot recolour the
+// terminal, reorder what a reviewer reads, or forge a `found:` line of the
+// block. The block is one line per field and the same bytes on both legs.
+fn main() -> Unit = {
+  let h = "A\u{1b}[31mB\u{202e}C\nD"
+  println("before")
+  assert_eq(h, "x\u{85}y\u{2066}")
+  println("unreachable")
+}

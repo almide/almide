@@ -44,7 +44,7 @@ fn stdlib_types() -> BTreeMap<(String, String), bool> {
             }
         }
     }
-    for (m, t) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES {
+    for (m, t) in almide_lang::stdlib_info::stdlib_owned_types() {
         let key = (m.to_string(), t.to_string());
         if !generic.contains(&key) {
             out.insert(key, false);

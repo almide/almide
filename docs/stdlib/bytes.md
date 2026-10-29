@@ -90,23 +90,17 @@ fails if one is missing. The signature index below lists each one.
 | a u32-length-prefixed string at `pos` | `bytes.next_u32_le(b, pos)` (or `_be`), then `bytes.next_bytes(b, p, n)` |
 | append a u32-length-prefixed string | `bytes.append_u32_be(b, n)`, then `bytes.append_bytes(b, bytes.from_string(s))` |
 
-## Pointer interop (deprecated — use `ffi`)
+## Pointer interop
 
-Deprecated since dialect epoch 15 in favour of the [`ffi`](ffi.md) module, and
-outside the memory-safety guarantee: each call is E100 in a file without
-`import ffi` (#4043) and under `--profile critical` (#4008).
-
-| Signature | Purpose |
-|---|---|
-| `bytes.as_ptr(b) -> RawPtr` | Read-only pointer to data region |
-| `bytes.as_mut_ptr(b) -> RawPtr` | Mutable pointer to data region |
-| `bytes.from_raw_ptr(ptr, len) -> Bytes` | Wrap a foreign buffer |
-| `bytes.copy_to_ptr(b, ptr, cap)` | Copy buffer into a foreign address |
-| `bytes.data_ptr(b)` | Address of the data (after the length prefix) |
+The `bytes` raw-pointer functions (`as_ptr`, `as_mut_ptr`, `from_raw_ptr`,
+`copy_to_ptr`, `data_ptr`) were removed at dialect epoch 15 (ADR-0031). Hand a
+`Bytes` value to foreign code as a bounds-checked [`ffi`](ffi.md) Region:
+`ffi.region(b)` for a read-only view, `ffi.alloc(n)!` for a buffer foreign code
+or `ffi.write` may fill.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (183 functions)
+## Signature index (178 functions)
 
 ```
 // Appends x rounded to f32, BE.
@@ -169,14 +163,6 @@ bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit
 // @since 0.13.4 or earlier
 bytes.append_u8(mut b: Bytes, x: Int) -> Unit
 
-// Mutable address of the data; null if empty.
-// @since 0.11.0 or earlier
-bytes.as_mut_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)
-
-// Address of the data; null if empty.
-// @since 0.11.0 or earlier
-bytes.as_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)
-
 // Truncates b to length 0 in place.
 // @since 0.9.8 or earlier
 bytes.clear(mut b: Bytes) -> Unit
@@ -193,14 +179,6 @@ bytes.contains(b: Bytes, needle: Bytes) -> Bool
 // @since 0.13.4 or earlier
 bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit
 
-// Writes up to cap bytes to ptr; count, 0 if null.
-// @since 0.11.0 or earlier
-bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int   (deprecated — use ffi.write)
-
-// Address of the data as an Int; target-specific.
-// @since 0.13.2 or earlier
-bytes.data_ptr(b: Bytes) -> Int   (deprecated — use ffi.address)
-
 // True if b ends with suffix, or suffix is empty.
 // @since 0.13.4 or earlier
 bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool
@@ -216,10 +194,6 @@ bytes.fill(mut b: Bytes, x: Int) -> Unit
 // xs as bytes, low 8 bits each; -1 becomes 255.
 // @since 0.9.3 or earlier
 bytes.from_list(xs: List[Int]) -> Bytes
-
-// Copy of len bytes at ptr; empty if null or len <= 0.
-// @since 0.11.0 or earlier
-bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes   (deprecated — use ffi.read)
 
 // UTF-8 encoding of s.
 // @since 0.9.8 or earlier

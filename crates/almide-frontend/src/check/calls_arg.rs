@@ -76,6 +76,13 @@ impl Checker {
     ) -> bool {
         let ArgSite { fn_name, param_name } = site;
         if let Some(bound) = structural_bounds.get(&tv) {
+            // #4107: a structural bound would read a foreign opaque
+            // record's fields through the type variable.
+            let arg_now = super::types::resolve_ty(arg_ty, &self.uf);
+            if self.foreign_opaque_record(&arg_now).is_some() {
+                self.reject_opaque_crossing(&arg_now, true);
+                return true;
+            }
             let resolved = self.env.resolve_named(arg_ty);
             if bound.compatible(&resolved) || bound.compatible(arg_ty) {
                 bindings.insert(tv, arg_ty.clone());
@@ -103,6 +110,13 @@ impl Checker {
     ) -> bool {
         Self::unify_apart(param_ty, arg_ty, apart, bindings);
         let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
+        // #4107: a foreign opaque record never fills another record shape
+        // (a structural param would read its fields) and no other record
+        // fills it (a forge) — at any depth of the slot.
+        if let Some((opaque, reading)) = self.opaque_crossing(&expected, arg_ty) {
+            self.reject_opaque_crossing(&opaque, reading);
+            return true;
+        }
         let expected_resolved = self.env.resolve_named(&expected);
         let arg_resolved = self.env.resolve_named(arg_ty);
         if !types_mismatch(&expected_resolved, &arg_resolved) {

@@ -1,0 +1,26 @@
+# Loom model of the native fan gate protocol (security row 6).
+#
+# The model runs the gate protocol's OWN source — runtime/rs/src/list.rs from
+# `fn almide_fan_deal` through `fn almide_fan_steal` — not a transcription:
+# build.rs extracts that span and swaps its synchronisation primitives for
+# loom's (see build.rs and src/shim.rs), so a change to the protocol changes
+# the model. Driven by scripts/loom-fan-gate.sh.
+#
+# Like tools/xtarget-fuzz, NOT a member of the parent workspace: the empty
+# `[workspace]` table makes it its own root, and the parent lists it under
+# `exclude`.
+[workspace]
+
+[package]
+name = "loom-fan-gate"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[dependencies]
+loom = "=0.7.2"
+
+[profile.release]
+debug-assertions = true
+overflow-checks = true

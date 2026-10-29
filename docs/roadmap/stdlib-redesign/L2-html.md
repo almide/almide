@@ -51,6 +51,12 @@
 - 理由: エスケープの型を持つ言語が 2 つしかなく、5 言語の基準に届きません。`list.fold(xs, html.empty(), html.concat)` で書けます。
 - issue: なし
 
+### R-html-04 文脈ごとの組み立て関数 `attr`・`url_attr`・`script_json` を足す — ○ 採用（#4120）
+
+- 内容: `escape` は本文（テキスト文脈）専用です。属性値は `html.attr(name, value)`（二重引用符で囲んでエスケープ）、URL 属性は `html.url_attr(name, url)`（相対 URL と `http`・`https`・`mailto` だけを通し、ほかは `about:invalid#almide-blocked`）、`<script>` の中のデータは `html.script_json(v)`（`<` `>` `&` U+2028 U+2029 を JSON の `\u` エスケープにする）で作ります。`http.html(status, SafeHtml)` は `SafeHtml` を `text/html` で返します。
+- 根拠: セキュリティ表の行 11e（HTML への注入）。Go の `html/template` は文脈ごとにエスケープを変え、許されない URL を `#ZgotmplZ` に置き換えます。5 言語の基準より、注入を型で防ぐ方針（R-html-01 の (c)）を優先します。
+- issue: #4120
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
