@@ -301,7 +301,9 @@ pub fn check_rc(
         // - an unnamed `a-` / `d-` takes any call of its kind;
         // - a rebind `o` takes a release or a judge call on its local.
         // The named and unnamed events are matched first; a rebind takes
-        // what is left (augmenting paths never unmatch an earlier event).
+        // what is left (augmenting paths never unmatch an earlier event);
+        // each event tries the calls outside every arm and routine window
+        // before those inside one.
         let fits = |e: (char, Option<u32>), i: usize| -> bool {
             let (k, names_of) = (calls[i].1, &calls[i].2);
             match e {
@@ -314,21 +316,26 @@ pub fn check_rc(
             .filter(|&e| evs[e].0 != 'o')
             .chain((0..evs.len()).filter(|&e| evs[e].0 == 'o'))
             .collect();
+        // A call inside an arm or routine window is tried last: left over,
+        // it is that arm's or routine's own; one outside has no such reading.
+        let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
+        let mut by_pref: Vec<usize> = (0..calls.len()).collect();
+        by_pref.sort_by_key(|&i| (in_window(calls[i].0), calls[i].0));
         let mut owner: Vec<Option<usize>> = vec![None; calls.len()];
         fn augment(
             e: usize,
             evs: &[(char, Option<u32>)],
-            ncalls: usize,
+            by_pref: &[usize],
             fits: &dyn Fn((char, Option<u32>), usize) -> bool,
             seen: &mut [bool],
             owner: &mut [Option<usize>],
         ) -> bool {
-            for i in 0..ncalls {
+            for &i in by_pref {
                 if seen[i] || !fits(evs[e], i) {
                     continue;
                 }
                 seen[i] = true;
-                if owner[i].is_none_or(|o| augment(o, evs, ncalls, fits, seen, owner)) {
+                if owner[i].is_none_or(|o| augment(o, evs, by_pref, fits, seen, owner)) {
                     owner[i] = Some(e);
                     return true;
                 }
@@ -337,7 +344,7 @@ pub fn check_rc(
         }
         for &e in &order {
             let mut seen = vec![false; calls.len()];
-            augment(e, &evs, calls.len(), &fits, &mut seen, &mut owner);
+            augment(e, &evs, &by_pref, &fits, &mut seen, &mut owner);
         }
         // Who holds a call can change along an augmenting path; read the
         // final matching.

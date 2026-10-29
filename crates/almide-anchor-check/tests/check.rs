@@ -624,3 +624,16 @@ fn an_alias_release_does_not_steal_the_aliased_variables_call() -> Result<(), St
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0 d1 d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// An event takes a call outside every arm window before one inside: the
+/// one left over is then the arm's own, not an unrecorded share.
+#[test]
+fn an_unnamed_event_takes_the_call_outside_the_arm_window_first() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    let mut r = RcReport::default();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a-".into())], &[vec![(1, 0, 2)], vec![]], &mut r)?;
+    assert_eq!(r.arm_internal, 1);
+    Ok(())
+}
