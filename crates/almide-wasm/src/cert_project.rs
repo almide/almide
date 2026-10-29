@@ -64,9 +64,8 @@ pub mod cap {
     pub const NET: u32 = 7;
     /// A program-declared `@extern(wasm, ..)` host function.
     pub const FOREIGN: u32 = 8;
-    /// Starting and signalling child processes (ops 80..=90 and the `start`
-    /// child's 140..=145, the private
-    /// `almide:process/spawn` capability, ADR-0025), and assert_aborts's
+    /// Starting and signalling child processes (ops 80..=90 and 140..=145,
+    /// the private `almide:process/spawn` capability, ADR-0025), and assert_aborts's
     /// child run (op 117). `almide_mir::Capability::Process` has this id. Past [`super::SENTINEL`]
     /// so the sentinel keeps its small value.
     pub const PROC: u32 = 10;
