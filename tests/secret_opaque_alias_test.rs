@@ -311,7 +311,7 @@ fn an_own_type_shadows_a_dependency_mod_type_of_the_same_name() {
     .unwrap();
     std::fs::write(
         app.join("src/main.almd"),
-        "import d\n\ntype Item = { id: String }\ntype Vault = { key: String }\n\nfn id_of(i: Item) -> String = i.id\n\neffect fn main() -> Unit = {\n  let v = Vault { key: \"k\" }\n  let w = { ...v, key: \"w\" }\n  let Vault { key } = w\n  println(\"${id_of(Item { id: \"a\" })} ${v.key} ${key} ${d.hi()}\")\n}\n",
+        "import d\n\ntype Item = { id: String }\ntype Vault = { key: String }\n\nfn id_of(i: Item) -> String = i.id\n\neffect fn main() -> Unit = {\n  let v = Vault { key: \"k\" }\n  let w = { ...v, key: \"w\" }\n  let { key } = w\n  println(\"${id_of(Item { id: \"a\" })} ${v.key} ${key} ${d.hi()}\")\n}\n",
     )
     .unwrap();
     let (ok, out, err) = run_args(&app, &["check", "src/m.almd"]);
