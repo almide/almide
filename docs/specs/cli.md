@@ -1287,7 +1287,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
-| `ALMIDE_RC_ANCHORS` | harness | add the #4277 RC lines (`rcfns` / `rc`) to the anchor file the structural bundle producer writes, so almide-anchor-check matches each certified frame's recorded rc_inc / release events against the shipped calls; measurement-gated while #4278 is open |
 | `ALMIDE_REAL_RUSTC=value` | harness | the real `rustc` the fake one in tests/rustc_floor_test.rs runs for anything but `--version` |
 | `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
 | `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |

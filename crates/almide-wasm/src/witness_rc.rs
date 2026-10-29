@@ -12,9 +12,9 @@
 //! place a release routine is chosen). `almide-anchor-check` then matches the
 //! events against the calls of the shipped body (anchor-check `rc.rs`).
 //!
-//! Measurement-gated while #4278 is open: the anchor file carries the `rc`
-//! lines only under `ALMIDE_RC_ANCHORS=1`, since releases before an abort and
-//! RC inside runtime helpers are not recorded events by design.
+//! The anchor file always carries the `rc` lines, so the structural wall's
+//! anchor check (proofs/structural-wall.sh) judges every certified fixture's
+//! RC calls on every build.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;

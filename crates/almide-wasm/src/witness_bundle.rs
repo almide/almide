@@ -159,7 +159,7 @@ fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::
     frames.iter().filter(|(_, n, _)| names.contains(n)).map(|(k, _, e)| (*k, e.clone())).collect()
 }
 
-/// #4277, measurement-gated (`ALMIDE_RC_ANCHORS=1`, witness_rc.rs): the
+/// #4277 (witness_rc.rs): the
 /// release routines as shipped function indices, and per certified frame its
 /// shipped position and live RC events:
 ///
@@ -181,9 +181,6 @@ fn rc_lines(
     routines: &[(u64, usize, usize)],
     window_ids: &std::collections::HashMap<u64, (u64, usize, usize)>,
 ) -> Result<String, String> {
-    if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
-        return Ok(String::new());
-    }
     use crate::cert_project as cp;
     let (ei, si) = (
         cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
