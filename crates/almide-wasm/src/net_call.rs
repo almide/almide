@@ -59,7 +59,7 @@ const SENDS_BYTES: [i32; 4] = [OP_NET_WRITE, OP_UNIX_SEND, OP_SHM_WRITE, OP_UDP_
 /// The ops that answer `Result[Bytes, String]`.
 const READS: [i32; 6] = [OP_NET_READ, OP_NET_READ_EXACT, OP_NET_READ_TIMEOUT, OP_UNIX_RECV, OP_SHM_READ, OP_UDP_RECV_FROM];
 
-/// The tcp, udp and lookup op for a `__net_*` leaf.
+/// The tcp family's op for a `__net_*` leaf.
 fn tcp_op(name: &str) -> Option<i32> {
     Some(match name {
         "__net_listen" => OP_NET_LISTEN,
@@ -75,6 +75,13 @@ fn tcp_op(name: &str) -> Option<i32> {
         "__net_close_listener" => OP_NET_CLOSE_LISTENER,
         "__net_is_open" => OP_NET_IS_OPEN,
         "__net_local_port" => OP_NET_LOCAL_PORT,
+        _ => return None,
+    })
+}
+
+/// The udp and name-lookup op for a `__net_udp_*` / `__net_lookup_host` leaf.
+fn udp_op(name: &str) -> Option<i32> {
+    Some(match name {
         "__net_udp_bind" => OP_UDP_BIND,
         "__net_udp_local_port" => OP_UDP_LOCAL_PORT,
         "__net_udp_send_to" => OP_UDP_SEND_TO,
@@ -108,7 +115,7 @@ fn unix_op(name: &str) -> Option<i32> {
 impl Emitter<'_> {
     /// A net leaf, or `Ok(None)` when `name` is not one.
     pub(crate) fn lower_net_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
-        let Some(op) = tcp_op(name).or_else(|| unix_op(name)) else { return Ok(None) };
+        let Some(op) = tcp_op(name).or_else(|| udp_op(name)).or_else(|| unix_op(name)) else { return Ok(None) };
         let [a, b] = args else { return unsup("net-leaf-arity") };
         let b_ty = if SENDS_BYTES.contains(&op) { crate::bytes::BYTES } else { STR };
         self.fs_call_two((a, STR), (b, b_ty), op)?;
