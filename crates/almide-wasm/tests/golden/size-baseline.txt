@@ -181,7 +181,7 @@
 13955	spec/wasm_cross/endian_auto_import.almd
 6800	spec/wasm_cross/endian_explicit_import.almd
 1932	spec/wasm_cross/enumerate_unnameable_element.almd
-2061	spec/wasm_cross/env_args.almd
+2118	spec/wasm_cross/env_args.almd
 2546	spec/wasm_cross/env_get.almd
 2015	spec/wasm_cross/env_platform_reporting.almd
 7479	spec/wasm_cross/env_secret.almd
@@ -614,7 +614,7 @@
 1863	spec/wasm_cross/mutable_global_scalar_assign.almd
 11400	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 2744	spec/wasm_cross/mutual_append.almd
-3383	spec/wasm_cross/mutual_recursive_types.almd
+3486	spec/wasm_cross/mutual_recursive_types.almd
 1550	spec/wasm_cross/mutual_tail_recursion.almd
 5930	spec/wasm_cross/nan_canonical_bytes_set_write.almd
 3806	spec/wasm_cross/nan_canonical_bytes_write.almd
@@ -643,8 +643,8 @@
 7225	spec/wasm_cross/nested_unwrap_or_share.almd
 4657	spec/wasm_cross/nested_unwrap_propagation.almd
 4148	spec/wasm_cross/nested_variant_match_bind.almd
-3152	spec/wasm_cross/nested_variant_tag_box.almd
-2738	spec/wasm_cross/nested_variant_tree.almd
+3209	spec/wasm_cross/nested_variant_tag_box.almd
+2841	spec/wasm_cross/nested_variant_tree.almd
 7484	spec/wasm_cross/newtype_string_form.almd
 4389	spec/wasm_cross/num_edge_to_string.almd
 12133	spec/wasm_cross/number_parse_ascii_trim.almd
@@ -987,8 +987,8 @@
 3422	spec/wasm_cross/variant_case_named_like_its_type.almd
 5282	spec/wasm_cross/variant_pair_result_return.almd
 2075	spec/wasm_cross/variant_record_literal_equality.almd
-3831	spec/wasm_cross/variant_result_credit_shapes.almd
-2602	spec/wasm_cross/variant_result_one_credit_churn.almd
+3913	spec/wasm_cross/variant_result_credit_shapes.almd
+2705	spec/wasm_cross/variant_result_one_credit_churn.almd
 841	spec/wasm_cross/while_loops.almd
 2901	spec/wasm_cross/whilep_str.almd
 5756	spec/wasm_cross/wide_function_body.almd

@@ -1,0 +1,1 @@
+ANCHORS REJECT: bounds stretch 0: `a0` against its check at 6:70: the byte access covers [0, 1), the room test 0 bytes

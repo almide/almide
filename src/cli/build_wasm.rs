@@ -80,13 +80,32 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, host_ops, surface, outside_guarantee) = match compile_to_wasm_bytes_surfaced(file, req.allow_unverified, req.verified, true, false) {
+    // #4011 (row 3 of the security table): with an independent verifier
+    // installed, the build records its certificate as it emits and the
+    // verifier judges it before anything is written (verify.rs `gate_build`).
+    let certify = super::verify::verifier_present();
+    if certify {
+        almide_wasm::witness::start_collecting();
+    }
+    let (emitted, host_ops, surface, outside_guarantee) = match compile_to_wasm_bytes_surfaced(file, req.allow_unverified, req.verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
     let proc_op = refuse_unpackageable(file, &host_ops, req.component, js_host);
     let shape = WasmPackage::decide(&host_ops, req.component);
-    let bytes = shape.package(file, &bytes, &host_ops);
+    let bytes = shape.package(file, &emitted, &host_ops);
+    if certify {
+        // A component is not the core module the certificate describes
+        // (`almide verify` refuses it the same way): its sinks are dropped.
+        if shape.component {
+            let _ = almide_wasm::witness::take();
+        } else if let Err(e) = super::verify::gate_build(file, &emitted, &bytes) {
+            err(&format!(
+                "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
+            ));
+            std::process::exit(1);
+        }
+    }
 
     if let Err(e) = std::fs::write(output, &bytes) {
         err(&format!("Failed to write {}: {}", output, e));

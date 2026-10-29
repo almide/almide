@@ -32,6 +32,9 @@ impl Emitter<'_> {
         // stack-neutral).
         let depth = self.borrowed_temps.len();
         let hooks_before = self.witness.as_ref().map(|w| w.arg_hooks());
+        // #4277: the arm's instruction window, for the RC byte check.
+        let arm_from = self.f.byte_len();
+        let window = crate::witness::rc::window_open();
         let lowered = self.arm_scope(|em| {
             let l = em.lower_module_call_dispatch(target, args, tail, ret_hint)?;
             // The witness audit (#1696 step 4): the arm fired one argument
@@ -48,13 +51,41 @@ impl Emitter<'_> {
                 }
                 other => other,
             })
-        })?;
+        });
+        let lowered = match lowered {
+            Ok(l) => l,
+            Err(e) => {
+                crate::witness::rc::window_dropped(window);
+                return Err(e);
+            }
+        };
+        crate::witness::rc::arm(window, arm_from, self.f.byte_len());
         Ok(lowered.map(|l| {
             if l.own == Own::Owned && self.rc_droppable(l.ty) {
                 self.mark_owned_call(target);
             }
             l.ty
         }))
+    }
+
+    /// Run a compound routine's route — the emitter's choice point between
+    /// an in-place or fused routine (append, string building, a map edit)
+    /// and the general lowering (#4277 / #4278). When the route is `taken`,
+    /// its instruction window is recorded: RC the routine does inside itself
+    /// is the routine's own, accounted by the witness at the operation.
+    pub(crate) fn routine<T>(
+        &mut self,
+        taken: impl Fn(&T) -> bool,
+        route: impl FnOnce(&mut Self) -> Result<T, EmitError>,
+    ) -> Result<T, EmitError> {
+        let from = self.f.byte_len();
+        let window = crate::witness::rc::window_open();
+        let out = route(self);
+        match &out {
+            Ok(o) if taken(o) => crate::witness::rc::routine(window, from, self.f.byte_len()),
+            _ => crate::witness::rc::window_dropped(window),
+        }
+        out
     }
 
     fn lower_module_call_dispatch(

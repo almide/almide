@@ -73,7 +73,9 @@ impl Emitter<'_> {
         if matches!(ty, SliceTy::List(_) | SliceTy::Scalar(Scalar::Bytes)) {
             let scr = self.scr_i32_local;
             let cow = self.cow_fn_of(ty);
-            self.f.instructions().call(cow).local_set(scr);
+            self.f.instructions().call(cow);
+            crate::witness::bounds::judge(self.f);
+            self.f.instructions().local_set(scr);
             self.f.instructions().local_get(scr);
             self.emit_store_mut_var(*id, idx, ty, global)?;
             self.f.instructions().local_get(scr);

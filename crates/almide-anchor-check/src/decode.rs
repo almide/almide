@@ -11,6 +11,10 @@ pub struct Body<'a> {
     /// For a store: the instruction that pushed its address operand, when
     /// the provenance walk knows it.
     pub addr: Vec<Option<usize>>,
+    /// For every instruction, the instruction that pushed each operand it
+    /// pops, bottom first, when the provenance walk knows it (operands.rs
+    /// rebuilds a value's expression from these).
+    pub args: Vec<Vec<Option<usize>>>,
 }
 
 /// Every defined function of `bytes`, validated, in position order.
@@ -24,7 +28,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
             let mut br = body.get_binary_reader();
             fv.read_locals(&mut br).map_err(|e| e.to_string())?;
             let mut r = wasmparser::OperatorsReader::new(br);
-            let (mut ops, mut depth, mut addr) = (Vec::new(), Vec::new(), Vec::new());
+            let (mut ops, mut depth, mut addr, mut args) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut shadow: Vec<Option<usize>> = Vec::new();
             let mut d = 0u32;
             while !r.eof() {
@@ -33,6 +37,13 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
                 let i = ops.len();
                 let pre = fv.operand_stack_height() as usize;
                 let arity = op.operator_arity(&fv);
+                args.push(match arity {
+                    Some((k, _)) if pre >= k as usize && shadow.len() == pre => {
+                        shadow[pre - k as usize..pre].to_vec()
+                    }
+                    Some((k, _)) => vec![None; k as usize],
+                    None => Vec::new(),
+                });
                 addr.push(if store_width(&op).is_some() && pre >= 2 {
                     shadow.get(pre - 2).copied().flatten()
                 } else {
@@ -69,10 +80,26 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
                 }
                 ops.push(op);
             }
-            out.push(Body { ops, depth, addr });
+            out.push(Body { ops, depth, addr, args });
         }
     }
     Ok(out)
+}
+
+/// How many functions the module imports (they precede the defined ones in
+/// the function index space).
+pub fn function_imports(bytes: &[u8]) -> u32 {
+    let mut n = 0;
+    for payload in Parser::new(0).parse_all(bytes).flatten() {
+        if let wasmparser::Payload::ImportSection(r) = payload {
+            n += r
+                .into_imports()
+                .flatten()
+                .filter(|i| matches!(i.ty, wasmparser::TypeRef::Func(_)))
+                .count() as u32;
+        }
+    }
+    n
 }
 
 /// A store's width in bytes and its static offset.
@@ -89,7 +116,7 @@ pub fn store_width(op: &Op<'_>) -> Option<(u32, u64)> {
     })
 }
 
-pub(crate) fn is_load(op: &Op<'_>) -> bool {
+pub fn is_load(op: &Op<'_>) -> bool {
     matches!(
         op,
         Op::I32Load { .. }
