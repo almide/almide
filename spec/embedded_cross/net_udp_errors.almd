@@ -1,4 +1,4 @@
-// @contract: C-453
+// @contract: C-443
 // net udp and lookup failure texts (#4306): every failure is errno-free text
 // from net's one table (the tcp family's, C-378), identical on native and the
 // embedded lane. Bind and send read `<fn>(<host>:<port>): <class text>`,
