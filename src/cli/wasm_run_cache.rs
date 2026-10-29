@@ -37,104 +37,96 @@ use sha2::{Digest, Sha256};
 /// The first line of an entry; bumped when the layout changes.
 const MAGIC: &str = "almide-wasm-run-cache 1";
 
-/// A cache entry's identity, computed from the render's inputs.
-pub(super) struct Key {
-    path: std::path::PathBuf,
+/// The entry path of rendering `file` (whose text is `source_text`) with the
+/// resolved module set `resolved` and the package dirs `dep_paths`.
+/// `None` when the cache is off for this run (`ALMIDE_VERIFIED_DEBUG`
+/// narrates the render, which a hit would silently skip).
+pub(super) fn entry_path(
+    file: &str,
+    source_text: &str,
+    resolved: &crate::resolve::ResolvedModules,
+    dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
+    verified: bool,
+) -> Option<std::path::PathBuf> {
+    if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
+        return None;
+    }
+    let mut h = Sha256::new();
+    let mut field = |label: &str, value: &[u8]| {
+        // Length-prefixed, so no two field sequences hash alike.
+        h.update(label.as_bytes());
+        h.update((value.len() as u64).to_le_bytes());
+        h.update(value);
+    };
+    field("magic", MAGIC.as_bytes());
+    field("compiler", compiler_identity().as_bytes());
+    field("verified", &[verified as u8]);
+    let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+    field("cwd", cwd.as_bytes());
+    field("entry", file.as_bytes());
+    field("entry-source", source_text.as_bytes());
+    let mut sources: Vec<(&String, &(String, String))> = resolved.sources.iter().collect();
+    sources.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, (path, text)) in sources {
+        field("module", name.as_bytes());
+        field("module-path", path.as_bytes());
+        field("module-source", text.as_bytes());
+    }
+    let mut names: Vec<&str> = resolved.modules.iter().map(|(n, ..)| n.as_str()).collect();
+    names.sort_unstable();
+    field("module-set", names.join(",").as_bytes());
+    for (pkg, dir) in dep_paths {
+        field("dep", format!("{pkg:?}={}", dir.display()).as_bytes());
+    }
+    let mut vars: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k.starts_with("ALMIDE_")).collect();
+    vars.sort();
+    for (k, v) in vars {
+        field("env", format!("{k}={v}").as_bytes());
+    }
+    let digest: String = h.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect();
+    Some(super::build_dir::shared_run_project_dir().join("target").join("wasm").join(format!("almide-{digest}")))
 }
 
-impl Key {
-    /// The key of rendering `file` (whose text is `source_text`) with the
-    /// resolved module set `resolved` and the package dirs `dep_paths`.
-    /// `None` when the cache is off for this run (`ALMIDE_VERIFIED_DEBUG`
-    /// narrates the render, which a hit would silently skip).
-    pub(super) fn of(
-        file: &str,
-        source_text: &str,
-        resolved: &crate::resolve::ResolvedModules,
-        dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
-        verified: bool,
-    ) -> Option<Self> {
-        if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
-            return None;
-        }
-        let mut h = Sha256::new();
-        let mut field = |label: &str, value: &[u8]| {
-            // Length-prefixed, so no two field sequences hash alike.
-            h.update(label.as_bytes());
-            h.update((value.len() as u64).to_le_bytes());
-            h.update(value);
-        };
-        field("magic", MAGIC.as_bytes());
-        field("compiler", compiler_identity().as_bytes());
-        field("verified", &[verified as u8]);
-        let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
-        field("cwd", cwd.as_bytes());
-        field("entry", file.as_bytes());
-        field("entry-source", source_text.as_bytes());
-        let mut sources: Vec<(&String, &(String, String))> = resolved.sources.iter().collect();
-        sources.sort_by(|a, b| a.0.cmp(b.0));
-        for (name, (path, text)) in sources {
-            field("module", name.as_bytes());
-            field("module-path", path.as_bytes());
-            field("module-source", text.as_bytes());
-        }
-        let mut names: Vec<&str> = resolved.modules.iter().map(|(n, ..)| n.as_str()).collect();
-        names.sort_unstable();
-        field("module-set", names.join(",").as_bytes());
-        for (pkg, dir) in dep_paths {
-            field("dep", format!("{pkg:?}={}", dir.display()).as_bytes());
-        }
-        let mut vars: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k.starts_with("ALMIDE_")).collect();
-        vars.sort();
-        for (k, v) in vars {
-            field("env", format!("{k}={v}").as_bytes());
-        }
-        let digest: String = h.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect();
-        let path = super::build_dir::shared_run_project_dir().join("target").join("wasm").join(format!("almide-{digest}"));
-        Some(Key { path })
+/// The cached module and its host ops, when an intact entry exists.
+pub(super) fn lookup(entry: &std::path::Path) -> Option<(Vec<u8>, Vec<i32>)> {
+    if !super::run::cached_binary_intact(entry) {
+        return None;
     }
+    let raw = std::fs::read(entry).ok()?;
+    let decoded = decode(&raw)?;
+    super::build_dir::touch_used(entry);
+    super::build_dir::touch_used(&super::run::binary_digest_path(entry));
+    Some(decoded)
+}
 
-    /// The cached module and its host ops, when an intact entry exists.
-    pub(super) fn lookup(&self) -> Option<(Vec<u8>, Vec<i32>)> {
-        if !super::run::cached_binary_intact(&self.path) {
-            return None;
-        }
-        let raw = std::fs::read(&self.path).ok()?;
-        let entry = decode(&raw)?;
-        super::build_dir::touch_used(&self.path);
-        super::build_dir::touch_used(&super::run::binary_digest_path(&self.path));
-        Some(entry)
+/// Record a rendered module. Best effort: a cache that cannot be written
+/// costs the next run a render, never this run its result.
+pub(super) fn store(entry: &std::path::Path, bytes: &[u8], host_ops: &[i32]) {
+    let Some(dir) = entry.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
     }
-
-    /// Record a rendered module. Best effort: a cache that cannot be written
-    /// costs the next run a render, never this run its result.
-    pub(super) fn store(&self, bytes: &[u8], host_ops: &[i32]) {
-        let Some(dir) = self.path.parent() else { return };
-        if std::fs::create_dir_all(dir).is_err() {
-            return;
+    // Housekeeping on a miss, as the native builder does — but never
+    // waiting: a cargo build holding the dir's lock sweeps it itself.
+    let project_dir = super::build_dir::shared_run_project_dir();
+    if let Some(_lock) = super::build_dir::BuildDirLock::try_acquire(&project_dir) {
+        super::build_dir::evict_stale_artifacts(&project_dir);
+        if let Some(cap) = super::cache_bound::cache_max_bytes() {
+            super::cache_bound::bound_build_artifacts(&project_dir, cap);
         }
-        // Housekeeping on a miss, as the native builder does — but never
-        // waiting: a cargo build holding the dir's lock sweeps it itself.
-        let project_dir = super::build_dir::shared_run_project_dir();
-        if let Some(_lock) = super::build_dir::BuildDirLock::try_acquire(&project_dir) {
-            super::build_dir::evict_stale_artifacts(&project_dir);
-            if let Some(cap) = super::cache_bound::cache_max_bytes() {
-                super::cache_bound::bound_build_artifacts(&project_dir, cap);
-            }
-        }
-        // Staged + renamed (an entry is never read half-written), then its
-        // digest the same way.
-        let staged = self.path.with_extension(format!("stage-{}", std::process::id()));
-        if std::fs::write(&staged, encode(bytes, host_ops)).is_err() {
-            let _ = std::fs::remove_file(&staged);
-            return;
-        }
-        if std::fs::rename(&staged, &self.path).is_err() {
-            let _ = std::fs::remove_file(&staged);
-            return;
-        }
-        let _ = super::run::record_binary_digest(&self.path);
     }
+    // Staged + renamed (an entry is never read half-written), then its
+    // digest the same way.
+    let staged = entry.with_extension(format!("stage-{}", std::process::id()));
+    if std::fs::write(&staged, encode(bytes, host_ops)).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        return;
+    }
+    if std::fs::rename(&staged, entry).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        return;
+    }
+    let _ = super::run::record_binary_digest(entry);
 }
 
 /// The running compiler: its version line, plus the path, size and mtime of

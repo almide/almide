@@ -553,17 +553,17 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // The embedded-leg run form (`run` / `bench`) reuses a module rendered
     // from the same inputs (`wasm_run_cache`); every gate above has run.
     let cache = (embedded_leg && !library_ok && inputs.has_main)
-        .then(|| super::wasm_run_cache::Key::of(file, &source_text, &resolved, &dep_paths, verified))
+        .then(|| super::wasm_run_cache::entry_path(file, &source_text, &resolved, &dep_paths, verified))
         .flatten();
-    let (bytes, host_ops) = match cache.as_ref().and_then(super::wasm_run_cache::Key::lookup) {
+    let (bytes, host_ops) = match cache.as_deref().and_then(super::wasm_run_cache::lookup) {
         Some(hit) => {
             t.lap("render (cache hit)");
             hit
         }
         None => {
             let rendered = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths)?;
-            if let Some(key) = &cache {
-                key.store(&rendered.0, &rendered.1);
+            if let Some(entry) = &cache {
+                super::wasm_run_cache::store(entry, &rendered.0, &rendered.1);
             }
             t.lap("render");
             rendered
