@@ -91,55 +91,63 @@ fn push_arena(s: &mut String, vis: &str, trap: bool) {
     // `std::boxed::Box`, never bare `Box`: the prelude shares the user
     // program's module, and a user `type Box = { .. }` shadows the std name
     // (tests/dep_qualified_type_collision_test.rs).
+    // The arena's scalars are `Cell`s and its tables `RefCell`s (#4342), so
+    // the mark, the rewind and the bump itself are safe code; only the write
+    // of a node into its fresh block (and, armed, the header writes) is not.
     let (trap_fields, trap_init) = if trap {
-        (", gen: u64, hdrs: std::vec::Vec<*mut u64>", ", gen: 0, hdrs: std::vec::Vec::new()")
+        (", gen: std::cell::Cell<u64>, hdrs: std::cell::RefCell<std::vec::Vec<*mut u64>>", ", gen: std::cell::Cell::new(0), hdrs: std::cell::RefCell::new(std::vec::Vec::new())")
     } else {
         ("", "")
     };
-    s.push_str(&format!("{vis}struct AlmideArena {{ chunks: std::vec::Vec<std::boxed::Box<[std::mem::MaybeUninit<u8>]>>, cur: usize, off: usize, base: usize, end: usize{trap_fields} }}\n"));
+    s.push_str(&format!("{vis}struct AlmideArena {{ chunks: std::cell::RefCell<std::vec::Vec<std::boxed::Box<[std::mem::MaybeUninit<u8>]>>>, cur: std::cell::Cell<usize>, off: std::cell::Cell<usize>, base: std::cell::Cell<usize>, end: std::cell::Cell<usize>{trap_fields} }}\n"));
     s.push_str("impl AlmideArena {\n");
-    s.push_str("    #[inline(always)] fn alloc(&mut self, size: usize, align: usize) -> *mut u8 {\n");
+    s.push_str("    #[inline(always)] fn alloc(&self, size: usize, align: usize) -> *mut u8 {\n");
     // The current chunk's bounds ride in `base` / `end` (0 / 0 when there is
     // none), so the fast path is align, add, compare, store — no chunk-table
     // load per node (#3586).
-    s.push_str("        let start = (self.base + self.off + align - 1) & !(align - 1);\n");
-    s.push_str("        if self.end != 0 && start + size <= self.end { self.off = start + size - self.base; return start as *mut u8; }\n");
+    s.push_str("        let (base, end) = (self.base.get(), self.end.get());\n");
+    s.push_str("        let start = (base + self.off.get() + align - 1) & !(align - 1);\n");
+    s.push_str("        if end != 0 && start + size <= end { self.off.set(start + size - base); return start as *mut u8; }\n");
     s.push_str("        self.alloc_slow(size, align)\n");
     s.push_str("    }\n");
-    s.push_str("    #[inline(never)] fn alloc_slow(&mut self, size: usize, align: usize) -> *mut u8 {\n");
-    s.push_str("        let mut next = if self.chunks.is_empty() { 0 } else { self.cur + 1 };\n");
-    s.push_str("        while next < self.chunks.len() && self.chunks[next].len() < size + align { next += 1; }\n");
-    s.push_str("        if next == self.chunks.len() {\n");
-    s.push_str("            let want = ((64usize << 10) << self.chunks.len().min(10)).max(size + align);\n");
-    s.push_str("            self.chunks.push(vec![std::mem::MaybeUninit::uninit(); want].into_boxed_slice());\n");
-    s.push_str("        }\n");
+    s.push_str("    #[inline(never)] fn alloc_slow(&self, size: usize, align: usize) -> *mut u8 {\n");
+    s.push_str("        let next = {\n");
+    s.push_str("            let mut chunks = self.chunks.borrow_mut();\n");
+    s.push_str("            let mut next = if chunks.is_empty() { 0 } else { self.cur.get() + 1 };\n");
+    s.push_str("            while next < chunks.len() && chunks[next].len() < size + align { next += 1; }\n");
+    s.push_str("            if next == chunks.len() {\n");
+    s.push_str("                let want = ((64usize << 10) << chunks.len().min(10)).max(size + align);\n");
+    s.push_str("                chunks.push(vec![std::mem::MaybeUninit::uninit(); want].into_boxed_slice());\n");
+    s.push_str("            }\n");
+    s.push_str("            next\n");
+    s.push_str("        };\n");
     s.push_str("        self.seat(next, 0);\n");
     s.push_str("        self.alloc(size, align)\n");
     s.push_str("    }\n");
-    s.push_str("    #[inline(always)] fn seat(&mut self, cur: usize, off: usize) {\n");
-    s.push_str("        self.cur = cur; self.off = off;\n");
-    s.push_str("        match self.chunks.get_mut(cur) { Some(c) => { self.base = c.as_mut_ptr() as usize; self.end = self.base + c.len(); } None => { self.base = 0; self.end = 0; } }\n");
+    s.push_str("    #[inline(always)] fn seat(&self, cur: usize, off: usize) {\n");
+    s.push_str("        self.cur.set(cur); self.off.set(off);\n");
+    s.push_str("        match self.chunks.borrow_mut().get_mut(cur) { Some(c) => { let b = c.as_mut_ptr() as usize; self.base.set(b); self.end.set(b + c.len()); } None => { self.base.set(0); self.end.set(0); } }\n");
     s.push_str("    }\n");
     s.push_str("}\n");
-    s.push_str(&format!("thread_local! {{ static ALMIDE_ARENA: std::cell::UnsafeCell<AlmideArena> = const {{ std::cell::UnsafeCell::new(AlmideArena {{ chunks: std::vec::Vec::new(), cur: 0, off: 0, base: 0, end: 0{trap_init} }}) }}; }}\n"));
-    // SAFETY (all three): the cell is thread-local and `alloc` calls no user
-    // code, so no re-entry. The untrapped `almide_rgn_alloc` takes only the
-    // cell's pointer out of `with` (valid for the thread's life, and a window
-    // never runs during TLS teardown) and writes `v` outside the closure: a
-    // closure capturing `v` by reference kept `with` out of line and sent the
-    // node through the stack, where x86 reloaded two 8-byte stores with one
-    // 16-byte load that store forwarding cannot serve (#3586).
+    s.push_str(&format!("thread_local! {{ static ALMIDE_ARENA: AlmideArena = const {{ AlmideArena {{ chunks: std::cell::RefCell::new(std::vec::Vec::new()), cur: std::cell::Cell::new(0), off: std::cell::Cell::new(0), base: std::cell::Cell::new(0), end: std::cell::Cell::new(0){trap_init} }} }}; }}\n"));
+    // SAFETY (the node writes): the block `alloc` returns is fresh, sized and
+    // aligned for `T`, and inside a chunk the arena owns for the thread's
+    // life. The untrapped `almide_rgn_alloc` takes only the block's address
+    // out of `with` and writes `v` outside the closure: a closure capturing
+    // `v` by reference kept `with` out of line and sent the node through the
+    // stack, where x86 reloaded two 8-byte stores with one 16-byte load that
+    // store forwarding cannot serve (#3586).
     if trap {
         // The header sits in the 8 bytes before the value: the block is
         // over-aligned to `max(align, 8)` and the value placed one alignment
         // unit in, so both the header and the value keep their alignment.
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let align = std::mem::align_of::<T>().max(8); let p = a.alloc(std::mem::size_of::<T>() + align, align); let hdr = unsafe {{ p.add(align - 8) }} as *mut u64; unsafe {{ hdr.write(a.gen) }}; a.hdrs.push(hdr); let vp = unsafe {{ p.add(align) }} as *mut T; unsafe {{ vp.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(vp) }}, a.gen) }}) }}\n"));
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize, usize) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &*a.get() }}; (a.cur, a.off, a.hdrs.len()) }}) }}\n"));
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; for h in a.hdrs.drain(mark.2..) {{ unsafe {{ h.write(ALMIDE_RGN_POISON) }} }} a.gen += 1; a.seat(mark.0, mark.1); }}) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let align = std::mem::align_of::<T>().max(8); let p = a.alloc(std::mem::size_of::<T>() + align, align); let g = a.gen.get(); let hdr = p.wrapping_add(align - 8) as *mut u64; unsafe {{ hdr.write(g) }}; a.hdrs.borrow_mut().push(hdr); let vp = p.wrapping_add(align) as *mut T; unsafe {{ vp.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(vp) }}, g) }}) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize, usize) {{ ALMIDE_ARENA.with(|a| (a.cur.get(), a.off.get(), a.hdrs.borrow().len())) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ for h in a.hdrs.borrow_mut().drain(mark.2..) {{ unsafe {{ h.write(ALMIDE_RGN_POISON) }} }} a.gen.set(a.gen.get() + 1); a.seat(mark.0, mark.1); }}) }}\n"));
     } else {
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ let a = unsafe {{ &mut *ALMIDE_ARENA.with(|a| a.get()) }}; let p = a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(p) }}) }}\n"));
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &*a.get() }}; (a.cur, a.off) }}) }}\n"));
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; a.seat(mark.0, mark.1); }}) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ let p = ALMIDE_ARENA.with(|a| a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>())) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(p) }}) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize) {{ ALMIDE_ARENA.with(|a| (a.cur.get(), a.off.get())) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize)) {{ ALMIDE_ARENA.with(|a| a.seat(mark.0, mark.1)) }}\n"));
     }
     s.push_str(&format!("#[inline(always)] {vis}fn almide_region_window<R>(body: impl FnOnce() -> R) -> R {{ let mark = almide_region_save(); let r = body(); almide_region_restore(mark); r }}\n"));
 }
