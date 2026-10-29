@@ -471,7 +471,10 @@ pub fn check_rc(
                 .entry(l)
                 .or_insert_with(|| {
                     (0..takers.len())
-                        .map(|t| names(&args[t]).contains(&l) || fl.same(&args[t], &fl.local_value(l, takers[t].0, FUEL)))
+                        .map(|t| {
+                            names_through(bodies, imports, b, &args[t], 2).contains(&l)
+                                || fl.same(&args[t], &fl.local_value(l, takers[t].0, FUEL))
+                        })
                         .collect()
                 })[t]
         };
