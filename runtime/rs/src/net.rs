@@ -109,10 +109,7 @@ pub fn almide_rt_net___os_tcp_set_timeout(handle: i64, timeout_ms: i64) -> Resul
 /// Run `f` on UDP socket `h` without holding the table lock, as for a
 /// stream: a datagram wait in one `fan` arm must not stall another arm.
 fn almide_net_udp_io<R>(h: i64, f: impl FnOnce(&mut AlmideNetTables) -> Result<R, String>) -> Result<R, String> {
-    let clone = almide_net(|t| t.udp(h)?.try_clone().map_err(|e| net_io_error_text("UdpSocket", &e)))?;
-    let mut scratch = AlmideNetTables::default();
-    scratch.udps.resize_with(h as usize, || None);
-    scratch.udps.push(Some(clone));
+    let mut scratch = almide_net(|t| t.udp_scratch(h))?;
     f(&mut scratch)
 }
 
