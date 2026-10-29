@@ -37,7 +37,8 @@ runs:
     - name: Install cargo-nextest
       shell: bash
       run: |
-        curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 "https://get.nexte.st/${{ inputs.nextest-version }}/linux" -o /tmp/nextest.tar.gz
+        V="${{ inputs.nextest-version }}"
+        bash scripts/fetch-pinned.sh "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${V}/cargo-nextest-${V}-x86_64-unknown-linux-gnu.tar.gz" /tmp/nextest.tar.gz
         tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
         cargo nextest --version
     # The archive lands on the root volume, not the /tmp tmpfs (see the action).
@@ -61,12 +62,7 @@ runs:
         # "not a tar archive". The cache key above derives from the same input.
         VERSION="${{ inputs.wasmtime-version }}"
         TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-        if [ ! -s "$TARBALL" ]; then
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
-        fi
+        bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
         tar -xf "$TARBALL"
         sudo mv wasmtime-*/wasmtime /usr/local/bin/
         wasmtime --version

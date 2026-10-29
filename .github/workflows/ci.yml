@@ -335,7 +335,7 @@ jobs:
       # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
+          bash scripts/fetch-pinned.sh "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz" /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
@@ -417,7 +417,7 @@ jobs:
       # job's old enumerate compiled the workspace.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
+          bash scripts/fetch-pinned.sh "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz" /tmp/nextest.tar.gz
           sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       # Each `nextest list --archive-file` below unpacks the whole archive
@@ -784,10 +784,9 @@ jobs:
 
       - name: Install wasmtime
         run: |
-          if [ ! -f /tmp/wasmtime.tar.xz ]; then
-            curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/wasmtime.tar.xz \
-              https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz
-          fi
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
           sudo mv /tmp/wasmtime-v49.0.1-x86_64-linux/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1114,12 +1113,7 @@ jobs:
           # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1177,12 +1171,7 @@ jobs:
         run: |
           VERSION=v49.0.1
           ZIP="wasmtime-${VERSION}-x86_64-windows.zip"
-          if [ ! -s "$ZIP" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${ZIP}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$ZIP"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${ZIP}" "$ZIP"
           unzip -oq "$ZIP"
           # NATIVE spelling, not git-bash's /d/... form: the runner prepends
           # this string to PATH verbatim, and the almide.exe → CreateProcess
@@ -1304,12 +1293,7 @@ jobs:
         run: |
           VERSION=v0.13.1
           TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xzf "$TARBALL"
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
@@ -1342,12 +1326,7 @@ jobs:
           # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1395,12 +1374,7 @@ jobs:
         run: |
           VERSION=v0.13.1
           TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xzf "$TARBALL"
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
@@ -1437,12 +1411,7 @@ jobs:
           # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1517,10 +1486,8 @@ jobs:
         # below call `lake` directly so nothing downloads elan again.
         run: |
           if [ ! -x "$HOME/.elan/bin/elan" ]; then
-            for i in 1 2 3 4 5; do
-              curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz -o /tmp/elan.tar.gz && break
-              echo "elan download failed (504/rate-limit?), retry ${i}/5"; sleep 20; rm -f /tmp/elan.tar.gz
-            done
+            # elan by an exact release, not `latest` (security row 16).
+            bash scripts/fetch-pinned.sh https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz /tmp/elan.tar.gz
             tar xzf /tmp/elan.tar.gz -C /tmp
             /tmp/elan-init -y --default-toolchain none --no-modify-path
           fi
@@ -2088,12 +2055,7 @@ jobs:
         run: |
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -2213,10 +2175,7 @@ jobs:
             *)     ARCH_TRIPLE="x86_64-linux"  ;;
           esac
           TARBALL="wasmtime-${VERSION}-${ARCH_TRIPLE}.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -2328,10 +2287,7 @@ jobs:
           # The same pinned, verified install as build-cross (#1036).
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-aarch64-macos.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -2499,11 +2455,7 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" "$TARBALL"
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
@@ -2563,11 +2515,7 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" "$TARBALL"
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
@@ -2614,11 +2562,7 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" "$TARBALL"
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
@@ -2635,13 +2579,15 @@ jobs:
       # step: a gate that quietly degrades to informational is the hole
       # #2143 closed, so the script refuses to run on CI without a baseline.
       - name: Fetch the latest release binary (the wasm A/B baseline, #2143)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/almide-baseline
-          for i in 1 2 3 4 5; do
-            curl -fsSL "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" -o /tmp/almide-baseline/almide.tar.gz && break
-            echo "baseline download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f /tmp/almide-baseline/almide.tar.gz
-          done
+          # A moving name (`latest`) no digest can pin: the release
+          # workflow's Sigstore attestation is checked instead (row 16).
+          bash scripts/fetch-pinned.sh --attested almide/almide \
+            "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" /tmp/almide-baseline/almide.tar.gz
           tar xzf /tmp/almide-baseline/almide.tar.gz -C /tmp/almide-baseline --strip-components=1
           chmod +x /tmp/almide-baseline/almide
           /tmp/almide-baseline/almide --version

@@ -56,7 +56,7 @@ pre-commit:
       run: bash scripts/check-workflows.sh
     action-pins:
       # #4094: a tag can be moved to another commit; a 40-hex commit cannot.
-      glob: "{.github/workflows/*.yml,.github/workflows/*.yaml,.github/actions/**/*.yml,scripts/check-action-pins.sh}"
+      glob: "{.github/workflows/*.yml,.github/workflows/*.yaml,.github/actions/**/*.yml,.github/pinned-downloads.txt,scripts/**/*.sh,scripts/lib/action_supply.py,scripts/lib/download_pins.py}"
       run: bash scripts/check-action-pins.sh
     semantics-manifest:
       # Globbed by PATTERN, not by covered module: the hook named
