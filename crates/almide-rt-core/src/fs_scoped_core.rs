@@ -385,7 +385,7 @@ impl FsScoped {
                 Ok(fd) => {
                     if std::fs::File::from(fd).metadata()?.is_dir() { Ok(()) } else { Err(almide_fs_beneath_sys::err_exists()) }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(&self.root_path(i)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(self.root_path(i)),
                 Err(e) => Err(e),
             };
         }
