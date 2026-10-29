@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 759  implementations = 1715
+# holes = 765  implementations = 1721
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -3292,43 +3292,43 @@ module   = "net"
 name     = "__os_udp_bind"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_local_port"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_send_to"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_recv_from"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_close"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_lookup_host"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__net_listen"
@@ -3409,6 +3409,48 @@ total    = 0
 [[hole]]
 module   = "net"
 name     = "__net_is_open"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_bind"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_local_port"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_send_to"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_recv_from"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_close"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_lookup_host"
 native   = 0
 emitter  = 0
 selfhost = 0

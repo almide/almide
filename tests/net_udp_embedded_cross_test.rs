@@ -1,6 +1,6 @@
 //! UDP and name lookup on the embedded wasm lane (`almide run --target
 //! wasm`) answer what native answers (#4306, ops 140..=145 over native's net
-//! core): C-452 and C-453, whose fixtures are the judge's own, verbatim, in
+//! core): C-442 and C-443, whose fixtures are the judge's own, verbatim, in
 //! spec/embedded_cross. That directory's sweep compares stdout and the exit
 //! code only, so two legs that fail alike pass it; this test also requires
 //! each program to run to its closing `done` line on both legs.

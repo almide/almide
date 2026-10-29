@@ -1,4 +1,4 @@
-// @contract: C-452
+// @contract: C-442
 // net udp loopback and name lookup inside one program (#4306): bind two
 // sockets on 127.0.0.1 port 0, read the OS-assigned ports with
 // `net.udp_local_port`, and exchange datagrams. Each send is one datagram and
