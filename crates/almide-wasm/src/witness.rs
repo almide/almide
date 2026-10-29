@@ -359,8 +359,21 @@ impl WitnessRecorder {
     /// (`released_old`), and the local now holds the rhs — a new object
     /// (`src = None`) or a share of `src`'s. A var bound outside the loop
     /// being assigned is loop-carried (#2755, [`Self::rebind_site`]).
+    ///
+    /// The events follow the emitted order (stmts.rs `lower_assign`): the
+    /// rhs is lowered and a borrowed Var rhs takes its `rc_inc_top` BEFORE
+    /// the old occupant's release, so a share of `src` is logged before the
+    /// `d`. For `x = x` the two name one block: share, then release, nets
+    /// to zero (#4339 — logged the other way round, the release reached 0
+    /// first and the owned-line probe rejected a share the bytes never make
+    /// on a dead block).
     pub fn assign(&mut self, local: u32, released_old: bool, src: Option<u32>) -> bool {
         if !self.rebind_site(local) {
+            return false;
+        }
+        if let Some(s) = src
+            && !self.held_ops(s, "a")
+        {
             return false;
         }
         if released_old {
@@ -372,12 +385,7 @@ impl WitnessRecorder {
                 self.ops(o, "i");
                 self.log(Ev::Bind { local, obj: o, owner: true });
             }
-            Some(s) => {
-                if !self.held_ops(s, "a") {
-                    return false;
-                }
-                self.log(Ev::Alias { local, src: s, owner: true });
-            }
+            Some(s) => self.log(Ev::Alias { local, src: s, owner: true }),
         }
         true
     }
