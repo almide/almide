@@ -613,8 +613,12 @@ pub fn check_rc(
             let mut seen = vec![false; owner.len()];
             augment(e, &calls_only, &fits, &mut seen, &mut owner);
         }
+        // A move is not re-routed here: it may take nothing (its arm or
+        // routine keeps the credit), so it never displaces a release from its
+        // own call onto a consuming argument — that would trade an instruction
+        // the frame's events account for a trusted `consumed` reading.
         for &e in &order {
-            if owner.contains(&Some(e)) {
+            if owner.contains(&Some(e)) || evs[e].0 == 'm' {
                 continue;
             }
             let mut seen = vec![false; owner.len()];
