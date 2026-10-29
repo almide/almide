@@ -55,3 +55,43 @@ fn main() -> Unit = println(http.header(badge("ok"), "Content-Type") ?? "none")
 ### `svg.concat(a: SafeSvg, b: SafeSvg) -> SafeSvg`, `svg.empty()`, `svg.to_string(h)`
 
 Join two values, the empty value, and the markup as a String.
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (8 functions)
+
+```
+// s with & < > " ' turned into entities; text context only.
+// @since unreleased
+svg.escape(s: String) -> SafeSvg
+
+// s as SafeSvg, unescaped; trusted input only.
+// @since unreleased
+svg.raw(s: String) -> SafeSvg
+
+// SVG text inside h, as-is.
+// @since unreleased
+svg.to_string(h: SafeSvg) -> String
+
+// a then b as one SafeSvg; nothing re-escaped.
+// @since unreleased
+svg.concat(a: SafeSvg, b: SafeSvg) -> SafeSvg
+
+// SafeSvg of the empty string.
+// @since unreleased
+svg.empty() -> SafeSvg
+
+// name="value" with value escaped; aborts on a URL, event-handler, style or malformed name.
+// @since unreleased
+svg.attr(name: String, value: String) -> SafeSvg
+
+// name="url" escaped, url kept only if relative or http / https; else about:invalid#almide-blocked.
+// @since unreleased
+svg.url_attr(name: String, url: String) -> SafeSvg
+
+// <name attrs…>children…</name>; aborts on a malformed name or an element that runs script (script, foreignObject, set, animate…).
+// @since unreleased
+svg.element(name: String, attrs: List[SafeSvg], children: List[SafeSvg]) -> SafeSvg
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->
