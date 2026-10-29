@@ -63,3 +63,23 @@ pub fn almide_rt_ffi_release_guard<F: FnMut(*mut u8) + 'static>(base: *mut u8, r
     let guard = AlmideFfiReleaseGuard { base, release };
     std::rc::Rc::new(move || { let _ = &guard; })
 }
+
+// The `keep` of a Region an `@export(c)` fn is lent by its C caller (ADR-0031
+// amendment A2): the memory is the caller's, borrowed for the one call. The
+// wrapper holds this `Rc` while the Almide fn runs, and every copy of the
+// Region shares it, so after the call `almide_rt_ffi_lent_end` can see whether
+// a copy outlived the call.
+pub fn almide_rt_ffi_lent_keep() -> std::rc::Rc<dyn Fn() -> ()> {
+    std::rc::Rc::new(|| ())
+}
+
+// A lent Region that is still referenced after its call returned would read
+// or write the C caller's memory after the caller may have freed it. Nothing
+// can take the lend back from every copy, so the process stops instead, the
+// way Go's cgocheck does, before the caller regains control.
+pub fn almide_rt_ffi_lent_end(keep: &std::rc::Rc<dyn Fn() -> ()>, symbol: &str, param: &str) {
+    if std::rc::Rc::strong_count(keep) > 1 {
+        eprintln!("ffi: the Region `{param}` lent to @export(c) fn `{symbol}` is still held after the call returned; a lent Region lives only for its call");
+        std::process::abort();
+    }
+}

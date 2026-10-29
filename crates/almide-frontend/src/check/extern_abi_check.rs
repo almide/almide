@@ -13,7 +13,7 @@
 //! spelled the type as its `Debug` text — the acceptance-parity class: check
 //! refuses what the build cannot honor. The renderer reads the same table.
 use super::{Checker, err};
-use crate::ast::{AttrValue, Attribute, ExternAttr, Param, Span, TypeExpr};
+use crate::ast::{AttrValue, Attribute, ExportAttr, ExternAttr, Param, Span, TypeExpr};
 use almide_lang::stdlib_info::REGION_ATTR;
 use almide_lang::types::extern_abi::{
     c_param_abi, c_return_abi, is_region, native_extern_kind, NativeExtern, C_PARAM_TYPES, C_RETURN_TYPES,
@@ -137,6 +137,59 @@ impl Checker {
             fn_name,
             span,
         );
+    }
+
+    /// ADR-0031 amendment A2: an `@export(c)` fn may take a `Region`
+    /// parameter, which crosses as the C caller's `(const uint8_t*, size_t)`
+    /// and is read-only, or — named by `@region(out = p)` — as
+    /// `(uint8_t*, size_t)` and writable, both for the one call. It cannot
+    /// return one (the caller would get a pointer it cannot free), and a
+    /// `@region` clause on a fn without `@extern` is only `out = p` on an
+    /// `@export(c)` fn, naming a Region parameter.
+    pub(super) fn check_export_c_regions(&mut self, sig: ExternSig<'_>, export_attrs: &[ExportAttr], attrs: &[Attribute]) {
+        let ExternSig { name: fn_name, params, return_type, span } = sig;
+        let exports_c = export_attrs.iter().any(|a| a.target.as_str() == "c");
+        let clauses: Vec<&Attribute> = attrs.iter().filter(|a| a.name.as_str() == REGION_ATTR).collect();
+        if !exports_c {
+            if !clauses.is_empty() {
+                self.emit_extern_c(
+                    format!("fn '{fn_name}': `@region` is only read on an @extern fn returning Region or an @export(c) fn"),
+                    "on an @extern fn: `@region(len = n, release = \"free_fn\")`; on an @export(c) fn: `@region(out = p)` naming a Region parameter the C caller lets the fn write (ADR-0031)".to_string(),
+                    fn_name,
+                    span,
+                );
+            }
+            return;
+        }
+        if is_region(&self.resolve_type_expr(return_type)) {
+            self.emit_extern_c(
+                format!("@export(c) fn '{fn_name}': a Region return has no C form the caller could free"),
+                "take a caller-provided buffer instead: a Region parameter named by `@region(out = p)` crosses as (uint8_t*, size_t) and is writable for the call (ADR-0031 amendment A2)".to_string(),
+                fn_name,
+                span,
+            );
+        }
+        for attr in clauses {
+            for a in &attr.args {
+                let problem = match (a.name.map(|n| n.as_str()), &a.value) {
+                    (Some("out"), AttrValue::Ident { name }) => match params.iter().find(|p| p.name == *name) {
+                        Some(p) if is_region(&self.resolve_type_expr(&p.ty)) => None,
+                        Some(p) => Some(format!("`out = {name}` names a parameter of type {}, not Region", self.resolve_type_expr(&p.ty).display())),
+                        None => Some(format!("`out = {name}` names no parameter of '{fn_name}'")),
+                    },
+                    (Some("out"), _) => Some("`out` must name a Region parameter".to_string()),
+                    (other, _) => Some(format!("unknown argument `{}` (an @export(c) fn takes only `out = p`)", other.unwrap_or("(positional)"))),
+                };
+                if let Some(problem) = problem {
+                    self.emit_extern_c(
+                        format!("@export(c) fn '{fn_name}': `@region` {problem}"),
+                        "write `@region(out = p)` with `p` a Region parameter the C caller lets the fn write for the call (ADR-0031 amendment A2)".to_string(),
+                        fn_name,
+                        span,
+                    );
+                }
+            }
+        }
     }
 
     fn emit_extern_c(&mut self, msg: String, hint: String, fn_name: &str, span: Option<Span>) {

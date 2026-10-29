@@ -193,6 +193,17 @@ impl Checker {
                     found.push(format!("@region length of `{name}` ({})", at(*span)));
                 }
             }
+            // ADR-0031 amendment A2: a Region an `@export(c)` fn is lent
+            // carries its C caller's length — the caller's word, so counted.
+            if let Decl::Fn { name, export_attrs, params, span, .. } = decl
+                && export_attrs.iter().any(|a| a.target.as_str() == "c")
+            {
+                for p in params {
+                    if almide_lang::types::extern_abi::is_region(&self.resolve_type_expr(&p.ty)) {
+                        found.push(format!("@export(c) Region `{}` of `{name}` ({})", p.name, at(*span)));
+                    }
+                }
+            }
             let (label, body) = match decl {
                 Decl::Fn { name, body: Some(b), .. } => (format!("fn `{name}`"), b),
                 Decl::TopLet { name, value, .. } => (format!("`{name}`"), value),
