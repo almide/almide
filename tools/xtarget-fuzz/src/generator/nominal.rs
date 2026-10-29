@@ -279,6 +279,34 @@ pub const NOMINALS: &[Nominal] = &[
         refuses_var: false,
         in_flight: true,
     },
+    // A bounds-checked view of memory (ADR-0031), from the two mints the
+    // language has (an `@extern` with `@region(len = …)` is the third, and
+    // needs a foreign library): `ffi.region(b)`, read-only and the length of
+    // `b`, and `ffi.alloc(n)`, writable and n zero bytes — each at length 0
+    // as well. The sized value is writable, so a probe of `ffi.write` takes
+    // the success path. Observed through the module's readers, its bytes
+    // included (`to_bytes` is an effect fn: an error there is an `err`).
+    Nominal {
+        name: "Region",
+        module: "ffi",
+        small: "ffi.region(bytes.from_list([1, 2, 3, 4]))",
+        sized: "(match ffi.alloc({n}) { ok(r) => r, err(e) => panic(e) })",
+        leaves: &[
+            "ffi.region(bytes.new())",
+            "ffi.region(bytes.from_list([1, 2, 3, 4]))",
+            "ffi.region(bytes.from_string(\"aé\"))",
+            "(match ffi.alloc(0) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(1) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(4) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(16) { ok(r) => r, err(e) => panic(e) })",
+        ],
+        observe: "(ffi.len({v}), (ffi.is_writable({v}), bytes.to_list(ffi.to_bytes({v})!)))",
+        observed: || pair(GenType::Int, pair(GenType::Bool, GenType::List(Box::new(GenType::Int)))),
+        digest: "ffi.len({v})",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
     // The ADR-0001 clocks: an i64 of nanoseconds behind the checker's
     // firewall, observed through Repr (S7 keeps accessors omitted). A
     // constructor's size is its count; the value never has a size of its own.

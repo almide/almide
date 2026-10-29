@@ -1,0 +1,32 @@
+// #4314: a type that declares `T.repr` has a string form whatever its
+// fields hold. `Region` holds a Handle and a closure, and `Secret[A]` may
+// wrap a closure-bearing record; both interpolate through their declared
+// repr on every leg, at the top, inside a container and through a generic.
+import ffi
+import secret
+
+type Hook = { run: (Int) -> Int }
+
+fn show[T](v: T) -> String = "v=${v}"
+
+test "a Region interpolates through Region.repr" {
+  let r = ffi.region(bytes.from_string("abc"))
+  assert_eq("${r}", "Region(3 bytes)")
+  assert_eq("${ffi.region(bytes.new())}", "Region(0 bytes)")
+  assert_eq("${[r]}", "[Region(3 bytes)]")
+  assert_eq(show(r), "v=Region(3 bytes)")
+}
+
+test "a Secret over a closure-bearing record interpolates as Secret(***)" {
+  let s = secret.new(Hook { run: (x: Int) => x + 1 })
+  assert_eq("${s}", "Secret(***)")
+  assert_eq("${some(s)}", "some(Secret(***))")
+  assert_eq(show(s), "v=Secret(***)")
+  assert_eq(secret.reveal(s).run(1), 2)
+}
+
+test "a Secret over a Region interpolates as Secret(***)" {
+  let s = secret.new(ffi.region(bytes.from_string("a")))
+  assert_eq("${s}", "Secret(***)")
+  assert_eq("${[s, s]}", "[Secret(***), Secret(***)]")
+}

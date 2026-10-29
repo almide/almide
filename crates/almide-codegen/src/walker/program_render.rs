@@ -414,16 +414,16 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
             let bare_generics: Vec<String> = (0..field_names.len())
                 .map(|i| format!("T{}", i)).collect();
             // The repr impl needs exactly what a NAMED record's repr impl
-            // needs — `generic_bound` (`T: Clone + PartialEq`) plus
-            // `AlmideRepr` so the field reprs compose. Not `_full`: the
-            // repr never formats with Debug, and a generic record's own repr
-            // impl (bounded `T: AlmideRepr + Clone + PartialEq`) calls this
-            // one on its anonymous field — a Debug requirement here made
-            // that call unsatisfiable (#1798, E0599 behind the E0277).
+            // needs — `generic_bound_minimal` (`T: Clone`) plus
+            // `AlmideRepr` so the field reprs compose. No Debug or
+            // PartialEq: a generic record's own repr impl (bounded
+            // `T: AlmideRepr + Clone`) calls this one on its anonymous
+            // field — a stricter bound here made that call unsatisfiable
+            // (#1798, E0599 behind the E0277; #4312).
             let impl_bounds = bare_generics.iter()
                 .map(|t| {
-                    let own = ctx.templates.render_with("generic_bound", None, &[], &[("name", t.as_str())])
-                        .unwrap_or_else(|| format!("{}: Clone + std::fmt::Debug + PartialEq", t));
+                    let own = ctx.templates.render_with("generic_bound_minimal", None, &[], &[("name", t.as_str())])
+                        .unwrap_or_else(|| format!("{}: Clone", t));
                     match own.split_once(':') {
                         Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
                         None => format!("{}: AlmideRepr", t),

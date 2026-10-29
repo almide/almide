@@ -120,8 +120,17 @@ pub fn ends_without_unwinding(src: &str) -> bool {
 
 /// Effect modules that reach no host: a computation that can fail, the same
 /// on every run and every leg, so their effect functions are catalogued with
-/// no sandbox (`zlib`: its codecs return `err` on a corrupt stream).
-pub const HOSTLESS_EFFECT_MODULES: &[&str] = &["zlib"];
+/// no sandbox (`zlib`: its codecs return `err` on a corrupt stream; `ffi`:
+/// an access outside a Region is an `err`, ADR-0031 D5). The flag says the
+/// module's effect functions encode bytes that differ by leg by contract:
+/// each is then an encoder of [`LEG_DEPENDENT_ENCODERS`] or the decoder of
+/// one (`every_hostless_effect_function_is_an_encoder_or_its_decoder`).
+pub const HOSTLESS_EFFECT_MODULES: &[(&str, bool)] = &[("zlib", true), ("ffi", false)];
+
+/// `module` is a [`HOSTLESS_EFFECT_MODULES`] row.
+fn hostless(module: &str) -> bool {
+    HOSTLESS_EFFECT_MODULES.iter().any(|(m, _)| *m == module)
+}
 
 /// Encoders whose output bytes differ by leg BY CONTRACT, each with the
 /// decoder that undoes it: C-331 keeps flate2's LZ77 on native and emits
@@ -208,8 +217,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("float32", include_str!("../../../../stdlib/float32.almd"), false),
     ("float64", include_str!("../../../../stdlib/float64.almd"), false),
     ("bytes", include_str!("../../../../stdlib/bytes.almd"), false),
-    // Bounds-checked Regions (ADR-0031). No `Region` nominal is built yet, so
-    // its fns are not drawn; listed so a program naming `ffi.` imports it.
+    // Bounds-checked Regions (ADR-0031), built by the `Region` nominal
+    // (`nominal.rs`); hostless, so its effect fns are drawn too.
     ("ffi", include_str!("../../../../stdlib/ffi.almd"), true),
     ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
     ("value", include_str!("../../../../stdlib/value.almd"), false),
@@ -499,7 +508,7 @@ mod availability_tests {
         let cat = build();
         let effects: Vec<String> = cat
             .iter()
-            .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&s.module))
+            .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&(s.module, true)))
             .map(|s| format!("{}.{}", s.module, s.func))
             .collect();
         // Five since wave 4A made zlib's decoders (decompress / inflate /
@@ -515,6 +524,28 @@ mod availability_tests {
             let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
             assert_eq!(s.observed_through, Some(*d));
         }
+    }
+
+    /// Every public fn of `ffi` is drawn once the grammar builds a `Region`
+    /// (#4298): a pure one, and an effect one through the hostless row.
+    #[test]
+    fn every_public_ffi_function_is_catalogued() {
+        let src = BUNDLED_MODULES.iter().find(|(m, _, _)| *m == "ffi").unwrap().1;
+        let public: Vec<String> = parse(src)
+            .unwrap()
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Fn { name, visibility: almide::ast::Visibility::Public, .. } if !sym_str(*name).starts_with("__") => Some(sym_str(*name).to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(public.len(), 7, "{public:?}");
+        let cat = build();
+        for f in &public {
+            assert!(cat.iter().any(|s| s.module == "ffi" && s.func == *f), "ffi.{f} is not in the catalogue");
+        }
+        assert!(cat.iter().any(|s| s.module == "ffi" && s.effect), "no ffi effect fn is drawn");
     }
 
     #[test]
@@ -578,7 +609,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // A host-decided result is admitted past both filters below: its calls
     // are checked and replaced by a fixed value (`verdicts.rs`).
     let verdict = super::verdicts::verdict_for(module, &func);
-    if verdict.is_none() && effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !HOSTLESS_EFFECT_MODULES.contains(&module) {
+    if verdict.is_none() && effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !hostless(module) {
         return None;
     }
 
