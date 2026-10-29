@@ -74,124 +74,12 @@ fn __jpath_steps(p: List[String]) -> List[(Bool, String, Int)] = p |> list.map((
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
 
-// ── set_path / remove_path — byte-matching native set_at_steps / remove_at_steps ──
-// (runtime/rs/src/json.rs, the C-090 oracle). remove_path is INFALLIBLE; set_path's Result
-// is err only past the nesting bound (#4209). A Field step over an Object rewrites EVERY entry whose key matches — the
-// walks go by SLOT index (key @ h+12+(2i)*8, value @ +8), not by key lookup, so duplicate
-// keys transform each entry exactly like native's entries map. Over a non-object, set
-// AUTOVIVIFIES: the whole node is replaced by a fresh single-key object, and descents are
-// seeded with `{}` (__jp_empty_obj). An Index step is never negative (value.index); a
-// non-array node or an out-of-range index is a NO-OP — the shared `j` returned
-// bare (auto-acquire, the value_pick `else v` precedent) stands in for native's clone,
-// byte-identical because Values are immutable. Rebuilds go through the PROVEN
-// value.object / value.array ctors: the entry walks Dup borrowed slot handles into
-// `acc + [(k, v)]` tuples (the __ment_build discipline); an owned recursive result
-// co-owns into its tuple/list and frees its own ref at scope end.
-// A fresh empty tag-6 Object — native's `Value::Object(vec![])` autoviv seed
-// (the value_object shape with n = 0).
-fn __jp_empty_obj() -> Value = {
-  let v = prim.alloc_value(0)
-  let h = prim.handle(v)
-  prim.store32(h + 4, 6)
-  prim.store32(h + 8, 0)
-  v
-}
-
-// Object ∋ key — linear scan of the key slots (the __vu_has shape, but over the
-// Object's own slots so duplicate keys need no dedup pass).
-fn __jp_has(j: Value, key: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let ek: String = prim.load_handle(prim.handle(j) + 12 + (2 * i) * 8)
-  if ek == key then true
-  else __jp_has(j, key, i + 1, n)
-}
-
-// The value set_path builds nests its path's steps plus the new value's own
-// nesting deep; past json.parse's bound it is refused with parse's text
-// (#4209), so a value made here is one parse could have made and every
-// recursive walk of it stays bounded. A self-hosted source links on its own
-// (a private fn of stdlib/json_parse.almd is not callable from here), so the
-// bound is read through this file's `__jpath_max_depth`, which
-// tests/json_depth_limit_test.rs pins, with json_parse.almd's, to
-// crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH.
-fn __jpath_max_depth() -> Int = 1000
-
-// json.parse's err text, spelled out; the test pins it to json_depth_error().
-fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
-
-// `v` holds containers nested more than `budget` deep (tag 5 = array, 6 =
-// object); recurses at most `budget + 1` levels whatever `v` holds.
-fn __json_nests_past(v: Value, budget: Int) -> Bool = {
-  let tag = prim.load32(prim.handle(v) + 4)
-  if tag != 5 and tag != 6 then false
-  else if budget == 0 then true
-  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
-  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
-}
-
-// Slot `i * stride + stride - 1` is an element (stride 1) or an entry's
-// value (stride 2: key, value).
-fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
-else {
-  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
-  if __json_nests_past(ev, budget) then true
-  else __jnp_items(v, budget, i + 1, n, stride)
-}
-
-fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
-  if k >= list.len(path) then nv
-  else {
-    let seg = list.get(path, k) ?? ""
-    let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
-    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
-  }
-
-fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 6 then {
-    let n = prim.load32(prim.handle(j) + 8) / 2
-    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
-    if __jp_has(j, key, 0, n) then value.object(pairs)
-    else {
-      let seed = __jp_empty_obj()
-      let sv = json_path_set_go(seed, path, k + 1, nv)
-      value.object(pairs + [(key, sv)])
-    }
-  } else {
-    let seed = __jp_empty_obj()
-    let sv = json_path_set_go(seed, path, k + 1, nv)
-    value.object([(key, sv)])
-  }
-
-fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(j)
-    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    if ek == key then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
-    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
-  }
-
-fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 5 then {
-    let n = prim.load32(prim.handle(j) + 8)
-    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
-    else j
-  } else j
-
-fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
-  if i >= n then acc
-  else {
-    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-    if i == tgt then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
-    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
-  }
-
+// ── remove_path — byte-matching native remove_at_steps (runtime/rs/src/json.rs, the
+// C-090 oracle); INFALLIBLE. A Field step over an Object rewrites EVERY entry whose key
+// matches — the walks go by SLOT index (key @ h+12+(2i)*8, value @ +8), not by key
+// lookup, so duplicate keys transform each entry exactly like native's entries map. A
+// non-object node or an out-of-range index is a NO-OP. Rebuilds go through the PROVEN
+// value.object / value.array ctors. (set_path is __set_path_steps' walk, above.)
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
   else {
@@ -243,11 +131,11 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
 
-// ── value.__set_path_steps ── the wasm leg's and the interp oracle's body for
-// the native runtime walk value.set_path calls over the bundled Path's
-// (is_key, name, index) steps: stdlib/value.almd's pure `__set_path_pure`,
-// which walks the public Value surface only (no layout reads, unlike
-// `__json_nests_past` here), so the structural leg links it.
+// ── value.__set_path_steps ── the interp oracle's body for the native runtime
+// walk value.set_path calls over the bundled Path's (is_key, name, index)
+// steps: stdlib/value.almd's pure `__set_path_pure`, which walks the public
+// Value surface only. The structural wasm leg lowers the call itself
+// (crates/almide-wasm/src/value_set_path.rs, #4315).
 @implements("value.__set_path_steps")
 fn value_set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = value.__set_path_pure(
   v,
