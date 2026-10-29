@@ -30554,6 +30554,68 @@ fn __process_pid_impl() -> Int = match __proc_pid("", "") {
   ok(p) => int.parse(p) ?? -1,
   _ => -1,
 }
+
+
+
+
+
+
+
+
+
+effect fn __proc_start(cmd: String, argv: String) -> Result[String, String] = _
+
+
+effect fn __proc_poll(h: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __proc_wait(h: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __proc_stop(h: String, grace_ms: String) -> Result[String, String] = _
+
+
+
+
+fn __proc_read_new(h: String, which: String) -> Result[String, String] = _
+
+fn __proc_child_pid(h: String, unused: String) -> Result[String, String] = _
+
+@implements("process.__os_start")
+effect fn __process_start_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let h = __proc_start(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
+  ok(int.parse(h) ?? -1)
+}
+
+@implements("process.__os_poll")
+effect fn __process_poll_impl(h: Int) -> Result[Bool, String] = {
+  let t = __proc_poll(int.to_string(h), "")!
+  ok(t == "1")
+}
+
+@implements("process.__os_wait")
+effect fn __process_wait_impl(h: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_wait(int.to_string(h), "")!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_stop")
+effect fn __process_stop_impl(h: Int, grace_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_stop(int.to_string(h), int.to_string(grace_ms))!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_read_new")
+fn __process_read_new_impl(h: Int, which: Int) -> String = __proc_read_new(
+  int.to_string(h),
+  int.to_string(which),
+) ?? ""
+
+@implements("process.__os_child_pid")
+fn __process_child_pid_impl(h: Int) -> Int = match __proc_child_pid(int.to_string(h), "") {
+  ok(p) => int.parse(p) ?? -1,
+  _ => -1,
+}
 "#;
 pub const SRC_RANDOM: &str = r#"
 

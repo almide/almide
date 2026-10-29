@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 759  implementations = 1715
+# holes = 765  implementations = 1721
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -4139,43 +4139,43 @@ module   = "process"
 name     = "__os_start"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_poll"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_wait"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_stop"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_read_new"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_child_pid"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__proc_exec"
@@ -4207,6 +4207,48 @@ total    = 0
 [[hole]]
 module   = "process"
 name     = "__proc_pid"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_start"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_poll"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_wait"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_stop"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_read_new"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_child_pid"
 native   = 0
 emitter  = 0
 selfhost = 0
