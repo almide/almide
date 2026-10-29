@@ -9,11 +9,10 @@
 //   requirement its body dispatches to for the argument's type, so
 //   `set_header` on a request is not a response write.
 // - E117: a fn declared `@literal_media(p)` takes parameter `p` only as a
-//   string literal naming a well-formed media type that no `Body` type owns.
-//   Ownership is the union of the `@media_owns(patterns…)` declarations on
-//   the stdlib's body requirement fns (RFC 6839 patterns: `*` is any type, a
-//   subtype `*<suffix>` a longer subtype ending in it). Naming such a fn as
-//   a value is E117 too: its argument could then never be read.
+//   string literal naming a well-formed media type that is neither owned by
+//   a stdlib `Body` type nor script-capable (`crate::media_owners`, read off
+//   `@media_owns` and html's `@script_capable`). Naming such a fn as a value
+//   is E117 too: its argument could then never be read.
 //
 // Spliced into check/mod.rs; runs once per program after inference.
 
@@ -26,7 +25,6 @@ struct HeaderWrite {
 
 const HEADER_WRITE_ATTR: &str = "header_write";
 const LITERAL_MEDIA_ATTR: &str = "literal_media";
-const MEDIA_OWNS_ATTR: &str = "media_owns";
 
 /// One stdlib fn's declaration, from its bundled module source.
 fn stdlib_fn_decl(module: &str, func: &str) -> Option<&'static ast::Decl> {
@@ -69,40 +67,6 @@ fn header_write_of(module: &str, func: &str) -> Option<HeaderWrite> {
     (!fields.is_empty() && !owned.is_empty()).then_some(HeaderWrite { fields, owned })
 }
 
-/// Every media-type pattern a stdlib body type owns: the union of the
-/// `@media_owns` declarations across the bundled modules, with the fn that
-/// declares each (`html.__safe_html_media_type`).
-fn owned_media_patterns() -> &'static [(String, String)] {
-    static TABLE: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut out = Vec::new();
-        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
-            let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else { continue };
-            for d in &program.decls {
-                let ast::Decl::Fn { name, attrs, .. } = d else { continue };
-                for a in attrs.iter().filter(|a| a.name.as_str() == MEDIA_OWNS_ATTR) {
-                    for arg in &a.args {
-                        if let ast::AttrValue::String { value } = &arg.value {
-                            out.push((value.to_ascii_lowercase(), format!("{module}.{name}")));
-                        }
-                    }
-                }
-            }
-        }
-        out
-    })
-}
-
-/// A media type against one RFC 6839 pattern.
-fn media_matches(t: &str, pattern: &str) -> bool {
-    let (Some((tt, ts)), Some((pt, ps))) = (t.split_once('/'), pattern.split_once('/')) else { return false };
-    let subtype = match ps.strip_prefix('*') {
-        Some(suffix) => ts.chars().count() > suffix.chars().count() && ts.ends_with(suffix),
-        None => ps == ts,
-    };
-    (pt == "*" || pt == tt) && subtype
-}
-
 /// An RFC 9110 `token` character.
 fn is_tchar(c: char) -> bool {
     c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c)
@@ -119,11 +83,16 @@ fn media_refusal(value: &str) -> Option<String> {
         return Some(format!("`{value}` is not a media type: write one `type/subtype`, as `text/csv`, with `; name=value` parameters after it"));
     }
     let t = essence.to_ascii_lowercase();
-    owned_media_patterns().iter().find(|(p, _)| media_matches(&t, p)).map(|(_, owner)| {
+    if let Some((_, owner)) = media_owners::stdlib_owners().iter().find(|(p, _)| media_owners::matches(&t, p)) {
         let module = owner.split('.').next().unwrap_or(owner);
-        format!("`{essence}` runs script in a browser and is owned by `{module}`: build the body with the `{module}` builders, whose type serves it")
+        return Some(format!("`{essence}` runs script in a browser and is owned by `{module}`: build the body with the `{module}` builders, whose type serves it"));
+    }
+    media_owners::script_capable().iter().any(|p| media_owners::matches(&t, p)).then(|| {
+        format!("`{essence}` runs script in a browser, so only a type that owns it may serve it: a package's safe type, granted in almide.toml `[trust] media` (ADR-0032 D7)")
     })
 }
+
+use crate::media_owners;
 
 impl Checker {
     pub(crate) fn check_body_rules(&mut self, program: &ast::Program) {
@@ -230,7 +199,7 @@ impl Checker {
     fn e117(&self, callee: &str, why: &str, span: Option<ast::Span>) -> Diagnostic {
         let d = Diagnostic::error(
             format!("`{callee}`: {why}"),
-            "a body of another media type is `http.typed(\"text/csv\", bytes)` with the type written as a literal; HTML is `html.*` and SVG is `svg.*`, served by `http.response(status, body)`".to_string(),
+            "a body of another media type is `http.typed(\"text/csv\", bytes)` with the type written as a literal; HTML is `html.*`, and SVG or another script-capable type is the safe type of the package that owns it, granted in almide.toml `[trust] media`; serve either with `http.response(status, body)`".to_string(),
             format!("the media type passed to {callee}"),
         )
         .with_code("E117");
@@ -240,7 +209,7 @@ impl Checker {
     fn e116(&self, callee: &str, header: &str, span: Option<ast::Span>, fix: Option<(ast::Span, String)>) -> Diagnostic {
         let mut d = Diagnostic::error(
             format!("`{callee}` writes `{header}` by name, and a response's `{header}` is written from its body's type"),
-            "pass the body as its type: a String is text/plain; charset=utf-8, `html.*` builds text/html, `svg.*` image/svg+xml, a `Value` application/json, and any other type is `http.typed(\"text/csv\", bytes)`; `http.response(status, body)` and `http.with_body(resp, body)` write it".to_string(),
+            "pass the body as its type: a String is text/plain; charset=utf-8, `html.*` builds text/html, a package's safe type its own type, a `Value` application/json, and any other type is `http.typed(\"text/csv\", bytes)`; `http.response(status, body)` and `http.with_body(resp, body)` write it".to_string(),
             format!("the {header} header written by {callee}"),
         )
         .with_code("E116");
