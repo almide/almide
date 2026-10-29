@@ -1214,7 +1214,7 @@ jobs:
       - name: Library builds for wasm32-unknown-unknown without the embedded host
         run: cargo check --lib --no-default-features --target wasm32-unknown-unknown --locked
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-node-pinned
         with:
           node-version: "20.20.2"  # exact (security row 16): a major alone resolves to the newest 20.x at run time
 
@@ -1295,7 +1295,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: wasm32-wasip1, wasm32-unknown-unknown
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-node-pinned
         with:
           node-version: "20.20.2"  # exact (security row 16): a major alone resolves to the newest 20.x at run time
 
@@ -1412,7 +1412,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.elan
-          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
+          key: elan-pinned-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
 
       - name: Install elan (retry-resilient)
         # A transient GitHub 504 (or 403 rate-limit) on the elan tarball
@@ -1432,26 +1432,36 @@ jobs:
           fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Install the belts' Lean toolchains (retry-resilient)
+      - name: Install the belts' Lean toolchain (pinned sha256)
         # On a cache miss `lake build` downloaded the toolchain itself, once,
         # with no retry: a TLS connect error to releases.lean-lang.org failed
         # the release PR #4286's run 40638509907 before any proof was checked.
-        # Each belt's `lean-toolchain` is installed here with the same retry
-        # loop as elan; a cache hit makes every install a no-op.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Security row 16: elan verifies no digest of the archive it fetches,
+        # so it fetches nothing here. The release archive is fetched through
+        # scripts/fetch-pinned.sh (sha256 in .github/pinned-downloads.txt;
+        # releases.lean-lang.org redirects to the same GitHub asset) and
+        # unpacked where elan looks for an installed toolchain
+        # (~/.elan/toolchains/leanprover--lean4---v<V>), so `lake build` finds
+        # it and never downloads. Every belt's `lean-toolchain` must name
+        # exactly LEAN below — bump them, this and the manifest line together.
         run: |
-          for tc in $(cat crates/almide-perceus-belt/lean-toolchain crates/almide-race-belt/lean-toolchain crates/almide-edit-belt/lean-toolchain | sort -u); do
-            for i in 1 2 3 4 5; do
-              "$HOME/.elan/bin/elan" toolchain install "$tc" && break
-              [ "$i" = 5 ] && { echo "::error::could not install Lean toolchain $tc after 5 tries"; exit 1; }
-              echo "toolchain $tc download failed, retry ${i}/5"; sleep 20
-            done
+          set -euo pipefail
+          LEAN=4.29.1
+          for f in crates/almide-perceus-belt/lean-toolchain crates/almide-race-belt/lean-toolchain crates/almide-edit-belt/lean-toolchain; do
+            [ "$(tr -d '[:space:]' < "$f")" = "leanprover/lean4:v${LEAN}" ] \
+              || { echo "::error::$f names $(cat "$f"), not the pinned leanprover/lean4:v${LEAN}"; exit 1; }
           done
+          dir="$HOME/.elan/toolchains/leanprover--lean4---v${LEAN}"
+          if [ ! -x "$dir/bin/lean" ]; then
+            bash scripts/fetch-pinned.sh "https://github.com/leanprover/lean4/releases/download/v${LEAN}/lean-${LEAN}-linux.tar.zst" /tmp/lean.tar.zst
+            rm -rf "$dir" && mkdir -p "$dir"
+            tar --zstd -xf /tmp/lean.tar.zst -C "$dir" --strip-components=1
+          fi
+          "$dir/bin/lean" --version
 
       # The three belts are kernel-checked with `lake build` straight from the
-      # cached elan (elan installs each belt's `lean-toolchain` on first use;
-      # the toolchain lives in the ~/.elan cache keyed on those files). The
+      # cached elan (the toolchain the step above unpacked from its pinned
+      # archive; it lives in the ~/.elan cache keyed on those files). The
       # GITHUB_TOKEN authenticates elan's release-tag lookups so they use the
       # 5000/hr authenticated limit, not the 60/hr per-IP one that 403s.
       - name: Kernel-check proofs (lake build)
@@ -1635,7 +1645,7 @@ jobs:
 
       # Node 24: the JS host gate's `returns: promise` fixtures need JSPI
       # (WebAssembly.Suspending / promising, on by default from Node 24.20, #3353 #3362).
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-node-pinned
         with:
           node-version: "24.22.1"  # exact (security row 16); JSPI needs >= 24.20
       - name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)
@@ -2550,6 +2560,8 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CODOPSY_SHA: 85ac6cdcda79e07c02a1c796d3b37ee5236848be  # O6lvl4/codopsy, pinned (security row 16)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -2557,17 +2569,16 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       # #2381: the analyzer was cloned and built from source on every run
-      # (400–437 s, the whole job) although its input — codopsy's HEAD —
-      # moves rarely. The built binary is cached under that HEAD's sha, so a
-      # run pays the build only when the analyzer itself changed; a stale
-      # binary cannot be served because the key IS the source revision.
+      # (400–437 s, the whole job). The built binary is cached under its
+      # source revision, so a run pays the build only when the pin moves.
+      # Security row 16: the revision is a PINNED commit, not codopsy's HEAD —
+      # a push to that repository no longer changes what this gate runs (or
+      # what code it builds and executes here). Bump CODOPSY_SHA on purpose.
       - name: Resolve the analyzer revision
         id: codopsy-rev
         run: |
           set -euo pipefail
-          sha="$(git ls-remote https://github.com/O6lvl4/codopsy HEAD | cut -f1)"
-          [ -n "$sha" ] || { echo "::error::could not resolve codopsy HEAD"; exit 1; }
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "sha=$CODOPSY_SHA" >> "$GITHUB_OUTPUT"
       - name: Cache the built analyzer
         id: codopsy-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -2577,7 +2588,8 @@ jobs:
       - name: build codopsy
         if: steps.codopsy-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy
+          git clone -q https://github.com/O6lvl4/codopsy /tmp/codopsy
+          git -C /tmp/codopsy checkout -q --detach "$CODOPSY_SHA"
           cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
           mkdir -p /tmp/codopsy-bin && cp /tmp/codopsy/target/release/codopsy /tmp/codopsy-bin/codopsy
       # Every workspace member crate holds A (>= 90), not only the

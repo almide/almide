@@ -90,6 +90,11 @@ env:
   # The rocq-core release CI proves on. It is in the cache key, so moving it
   # rebuilds the toolchain instead of restoring an older one.
   ROCQ_CORE_VERSION: "9.3.0"
+  # The opam-repository commit every package (OCaml, Rocq and their
+  # dependencies) resolves from. Its opam files carry each source archive's
+  # checksum, so pinning the commit pins every digest opam checks; the
+  # repository's moving head did not (security row 16). In the cache key.
+  OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
 
 jobs:
   trust-spine:
@@ -130,7 +135,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
-          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
 
       - name: Install opam + wabt (wat2wasm for the A2 byte-binding grounding)
         run: |
@@ -161,7 +166,7 @@ jobs:
       - name: Build opam switch + Rocq (cache miss only)
         if: steps.opam-cache.outputs.cache-hit != 'true'
         run: |
-          opam init --bare --disable-sandboxing -y
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
           opam switch create "${OCAML_VERSION}" -y
           eval "$(opam env)"
           # opam's published rocq-prover has no 9.1.1 (the local trusted base is a
@@ -244,7 +249,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
-          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
 
       # ── #571: the qualification dossier, on release tags only ──────────
       # The spine just verified THIS tree, so the receipt inside the dossier
