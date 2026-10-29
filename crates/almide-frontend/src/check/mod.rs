@@ -32,6 +32,7 @@ mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod eq_operands;
 mod mut_fn_value;
 mod pure_attr;
 mod bang_error_channel;
@@ -305,6 +306,9 @@ pub struct Checker {
     /// check (E033): a base whose type is still open at the spread is
     /// judged once it resolves.
     pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Comparison operand pairs awaiting the post-solve one-type check
+    /// (E037, #4018 / security row 11b): see `eq_operands.rs`.
+    pub(crate) deferred_eq_pair_checks: Vec<eq_operands::EqPairSite>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
     /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
@@ -746,6 +750,7 @@ impl Checker {
             eq_reqs: std::collections::HashMap::new(),
             eq_reported: std::collections::HashSet::new(),
             deferred_opaque_spreads: Vec::new(),
+            deferred_eq_pair_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_float_overflow_checks: Vec::new(),
