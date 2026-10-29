@@ -1,0 +1,123 @@
+// svg — safe SVG construction (ADR-0032, security row 11e)
+//
+// `SafeSvg` is opaque: outside this module it is built only by the context
+// builders below — escape() for text, attr() / url_attr() for attributes,
+// element() for an element — or by raw(), the named opt-out. It is a response
+// `Body` served as image/svg+xml, and that media type is owned here, so no
+// String reaches a browser as SVG (whose `<script>`, `onload` and animated
+// `href` run like a page's) except through these functions.
+/// SVG markup that is safe to serve; built only by this module.
+mod type SafeSvg: Body = String
+
+/// s with & < > " ' turned into entities; text context only.
+fn escape(s: String) -> SafeSvg = SafeSvg(s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(">", "&gt;") |> string.replace(
+  '"',
+  "&quot;",
+) |> string.replace("'", "&#39;"))
+
+/// s as SafeSvg, unescaped; trusted input only.
+fn raw(s: String) -> SafeSvg = SafeSvg(s)
+
+/// SVG text inside h, as-is.
+fn to_string(h: SafeSvg) -> String = match h {
+  SafeSvg(s) => s
+}
+
+/// a then b as one SafeSvg; nothing re-escaped.
+fn concat(a: SafeSvg, b: SafeSvg) -> SafeSvg = SafeSvg(to_string(a) + to_string(b))
+
+/// SafeSvg of the empty string.
+fn empty() -> SafeSvg = SafeSvg("")
+
+fn __svg_ascii(c: String) -> Bool = (string.to_codepoint(c) ?? 128) < 128
+
+// A name the builders accept: an ASCII letter, then ASCII letters, digits,
+// `-`, `_`, `:` or `.`. Anything else would end the attribute or the tag.
+fn __svg_name_ok(name: String) -> Bool = match list.first(string.to_list(name)) {
+  some(c) => __svg_ascii(c) and string.is_alpha(c) and list.all(
+    string.to_list(name),
+    (x) => __svg_ascii(x) and (string.is_alphanumeric(x) or x == "-" or x == "_" or x == ":" or x == "."),
+  ),
+  none => false,
+}
+
+// The attributes an SVG user agent reads as a URL; url_attr() writes them.
+fn __svg_url_attr_name(n: String) -> Bool = n == "href" or n == "xlink:href" or n == "src"
+
+// The attributes that run script or style; no builder writes them.
+fn __svg_active_attr_name(n: String) -> Bool = string.starts_with(n, "on") or n == "style"
+
+// The elements that run script, embed HTML or rewrite another attribute at
+// run time (an `<animate attributeName="href">` turns any href into a
+// javascript: URL); element() refuses them.
+fn __svg_active_element(n: String) -> Bool = match n {
+  "script" => true,
+  "foreignobject" => true,
+  "set" => true,
+  "animate" => true,
+  "animatemotion" => true,
+  "animatetransform" => true,
+  "handler" => true,
+  "listener" => true,
+  _ => false,
+}
+
+fn __svg_attr_value(v: String) -> String = to_string(escape(v))
+
+/// name="value" with value escaped; aborts on a URL, event-handler, style or malformed name.
+fn attr(name: String, value: String) -> SafeSvg = {
+  let n = string.to_lower(name)
+  if not __svg_name_ok(name) then panic("svg.attr: `${name}` is not an attribute name")
+  else if __svg_url_attr_name(n) then panic("svg.attr: `${name}` takes a URL; use svg.url_attr")
+  else if __svg_active_attr_name(n) then panic("svg.attr: `${name}` runs script or styles; no builder writes it")
+  else SafeSvg("${name}=\"${__svg_attr_value(value)}\"")
+}
+
+// The scheme of a URL, lowercased, or none for a relative URL; some("") for
+// one a browser might still read a scheme from (a blank or control inside).
+fn __svg_scheme(url: String) -> String? = {
+  let cs = string.to_list(url)
+  let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
+  let head = list.take(cs, i)
+  let colon = list.get(cs, i) == some(":")
+  if colon and not list.is_empty(head) and list.all(
+    head,
+    (c) => __svg_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == "."),
+  ) then some(string.to_lower(list.join(head, "")))
+  else if colon or list.any(head, (c) => (string.to_codepoint(c) ?? 0) <= 32) then some("")
+  else none
+}
+
+/// name="url" escaped, url kept only if relative or http / https; else about:invalid#almide-blocked.
+fn url_attr(name: String, url: String) -> SafeSvg = {
+  if not __svg_name_ok(name) then panic("svg.url_attr: `${name}` is not an attribute name")
+  else if __svg_active_attr_name(string.to_lower(name)) then panic("svg.url_attr: `${name}` runs script or styles; no builder writes it")
+  else {
+    let kept = match __svg_scheme(url) {
+      none => url,
+      some(s) => match s {
+        "http" => url,
+        "https" => url,
+        _ => "about:invalid#almide-blocked",
+      },
+    }
+    SafeSvg("${name}=\"${__svg_attr_value(kept)}\"")
+  }
+}
+
+/// <name attrs…>children…</name>; aborts on a malformed name or an element that runs script (script, foreignObject, set, animate…).
+fn element(name: String, attrs: List[SafeSvg], children: List[SafeSvg]) -> SafeSvg = {
+  if not __svg_name_ok(name) then panic("svg.element: `${name}` is not an element name")
+  else if __svg_active_element(string.to_lower(name)) then panic("svg.element: `${name}` runs script or rewrites attributes; no builder writes it")
+  else {
+    let a = attrs |> list.map((x) => " " + to_string(x)) |> list.join("")
+    let c = children |> list.map((x) => to_string(x)) |> list.join("")
+    SafeSvg("<${name}${a}>${c}</${name}>")
+  }
+}
+
+// ADR-0032: SafeSvg is a response Body and owns image/svg+xml.
+@media_owns("image/svg+xml")
+fn __safe_svg_media_type(h: SafeSvg) -> String = "image/svg+xml"
+
+fn __safe_svg_to_text(h: SafeSvg) -> String = to_string(h)

@@ -9394,16 +9394,3 @@ parity = "PASS: seed 1793177516, 200 programs; 200 program(s) call it, 122 of th
 complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 3.660e7/7.316e7/1.463e8/2.925e8/5.850e8 fit n (rms 0.0%) moved 7.806e5/1.561e6/3.121e6/6.241e6/1.248e7B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.020/0.051s wasm k=1..2 2.005e7/4.005e7/8.008e7/1.601e8/3.202e8 fit n (rms 0.0%) moved 7.424e5/1.484e6/2.968e6/5.937e6/1.187e7B fit n (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.030s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-[[fn]]
-name = "http.html"
-sig = "(status: Int, body: SafeHtml) -> HttpResponse"
-class = "pure"
-status = "inspected"
-impl = "fnv1a:a11e7fb2a0c1c9f1"
-stamp = "almide 0.69.0 (dev) at sec-follow-1028 (#4290) bcc4be349 (list.min, list.max, list.sort, list.sort_by after the #4258 NaN order; html.script_json, http.html) and 7d45bcae3 (html.attr, html.url_attr, with their valid-name recipe); xtarget-fuzz inspect at the same shas (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 (INTEL XEON PLATINUM 8581C, 8 vCPU, PMU standard, one fn at a time, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-28; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1793176543, 200 programs; 200 program(s) call it, 121 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 2.056e7/4.104e7/8.200e7/1.639e8/3.278e8 fit n (rms 0.0%) moved 5.126e6/1.025e7/2.049e7/4.097e7/8.193e7B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.010/0.025s wasm k=1024..2048 6.682e7/6.682e7/6.683e7/6.682e7/6.682e7 fit 1 (rms 0.0%) moved 6.592e4/6.539e4/6.570e4/6.557e4/6.501e4B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.005s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"

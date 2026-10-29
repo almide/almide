@@ -174,7 +174,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
     // (Option ret) sits in the SUM tier below.
-    "http_response", "http_json", "http_redirect", "http_with_headers",
+    "http_json", "http_with_headers",
     "http_status", "http_body", "http_body_bytes", "http_set_header",
     // The #1791 read side (audited 2026-09-03): the same list/string
     // surface plus int.parse / map.new / map.contains / map.set.

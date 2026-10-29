@@ -90,6 +90,39 @@ impl Checker {
         Some(in_stdlib_dir && embedded_identity)
     }
 
+    /// E118 (ADR-0032 Q15): a type outside the stdlib declaring a sealed
+    /// built-in protocol (`Body`). Read off the protocol's `sealed` flag,
+    /// never off its name.
+    pub(super) fn reject_user_sealed_conformance(&mut self, program: &crate::ast::Program) {
+        if self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let mut found: Vec<(String, String, Option<Span>)> = Vec::new();
+        for d in &program.decls {
+            let crate::ast::Decl::Type { name, deriving: Some(protos), deriving_spans, span, .. } = d else { continue };
+            for (i, p) in protos.iter().enumerate() {
+                if crate::canonicalize::protocols::builtin_protocol(p.as_str()).is_some_and(|bp| bp.sealed) {
+                    found.push((name.to_string(), p.to_string(), deriving_spans.get(i).copied().or(*span)));
+                }
+            }
+        }
+        for (ty, proto, span) in found {
+            let mut diagnostic = err(
+                format!("type `{ty}` declares `{proto}`, which only the standard library's types conform to"),
+                "a response body's type is its Content-Type, so only the stdlib's safe types declare one: send a String, Bytes, a Value, `html.*` or `svg.*`, or any other media type through `http.typed(\"text/csv\", bytes)`".to_string(),
+                format!("type {ty}"),
+            )
+            .with_code("E118");
+            if let Some(span) = span {
+                diagnostic.file = self.source_file.clone();
+                diagnostic.line = Some(span.line);
+                diagnostic.col = Some(span.col);
+                diagnostic.end_col = Some(span.end_col);
+            }
+            self.emit(diagnostic);
+        }
+    }
+
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
         let Some(attr) = attrs
             .iter()

@@ -7,7 +7,7 @@
 // opt-out. This makes XSS a compile-time type error (#4120).
 import json
 
-mod type SafeHtml = String
+mod type SafeHtml: Body = String
 
 // Escape HTML special characters: & < > " '
 // TEXT context only (element content). An attribute is attr() / url_attr(),
@@ -153,3 +153,13 @@ fn script_json(v: Value) -> SafeHtml = {
   ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
   SafeHtml(s)
 }
+
+// ADR-0032: SafeHtml is a response Body. It owns the markup documents a
+// browser runs script in — HTML and, since any XML document can carry the
+// XHTML namespace, XML and every `+xml` subtype (RFC 6839 patterns) — so
+// `http.typed` cannot label a String as one (E117). SVG is `svg.SafeSvg`'s.
+// XML has no builder yet (#4310): owned here, it stays unbuildable.
+@media_owns("text/html", "*/xml", "*/*+xml")
+fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
+
+fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)

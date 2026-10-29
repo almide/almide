@@ -1,0 +1,4 @@
+// Markup is built with html, whose SafeHtml is the Body.
+import html
+
+fn main() -> Unit = println(html.to_string(html.escape("markup")))

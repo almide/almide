@@ -13,7 +13,7 @@
 98	63	789	98	spec/wasm_cross/arg_rebinds_earlier_arg.almd
 ~	spec/wasm_cross/args_surface.almd
 11	7	139	11	spec/wasm_cross/as_pattern.almd
-9	3	81	7	spec/wasm_cross/assert_abort_eq.almd
+0	0	0	0	spec/wasm_cross/assert_abort_eq.almd
 0	0	0	0	spec/wasm_cross/assert_abort_msg.almd
 207	171	1747	205	spec/wasm_cross/assert_abort_multiline.almd
 7	3	82	7	spec/wasm_cross/assert_abort_ne.almd
@@ -48,6 +48,7 @@
 54	45	1984	54	spec/wasm_cross/bytes_copy_from_negative_len.almd
 127	119	4442	127	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 806	757	27474	806	spec/wasm_cross/bytes_cursor_read_domain.almd
+2	0	5	2	spec/wasm_cross/bytes_data_ptr_identity.almd
 4	1	36	4	spec/wasm_cross/bytes_equality_call_operands.almd
 68	50	557	68	spec/wasm_cross/bytes_f16.almd
 52	32	661	52	spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -64,7 +65,7 @@
 18	6	174	18	spec/wasm_cross/bytes_param_writeback.almd
 16	1	261809	16	spec/wasm_cross/bytes_push_growth.almd
 1	0	0	1	spec/wasm_cross/bytes_push_inplace.almd
-615	520	17684	615	spec/wasm_cross/bytes_rawptr.almd
+1412	1315	37207	1412	spec/wasm_cross/bytes_rawptr.almd
 13	7	76	9	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 16	9	70	11	spec/wasm_cross/bytes_repeat_size_ceiling.almd
 674	643	8655	674	spec/wasm_cross/bytes_search_edit_family.almd
@@ -143,7 +144,7 @@
 183	159	3198	183	spec/wasm_cross/datetime_pre_epoch.almd
 25	14	266	25	spec/wasm_cross/declaration_forms.almd
 52	27	960	52	spec/wasm_cross/declaration_literal_domain.almd
-2144	2028	21755	2144	spec/wasm_cross/decode_strict_unknown_key_escape.almd
+2246	2130	22631	2246	spec/wasm_cross/decode_strict_unknown_key_escape.almd
 8	0	88	8	spec/wasm_cross/deep_eq_heap.almd
 156	88	696	156	spec/wasm_cross/deep_eq_nested_distinct.almd
 1	0	4	1	spec/wasm_cross/default_param_ref.almd
@@ -351,9 +352,9 @@
 55	42	507	55	spec/wasm_cross/hof_closure_string_tail.almd
 62	46	644	62	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
-2323	2230	28739	2323	spec/wasm_cross/http_decode_json_input_type.almd
+2884	2788	33557	2884	spec/wasm_cross/http_decode_json_input_type.almd
 1075	1030	9197	1075	spec/wasm_cross/http_query_params_decoder.almd
-1877	1820	10558	1877	spec/wasm_cross/http_response_headers.almd
+2730	2665	16888	2730	spec/wasm_cross/http_response_headers.almd
 0	0	0	0	spec/wasm_cross/i64_min_literal.almd
 0	0	0	0	spec/wasm_cross/if_block_forms.almd
 1	0	8	1	spec/wasm_cross/if_let_forms.almd
@@ -622,7 +623,7 @@
 21	10	265	21	spec/wasm_cross/native_wall_shapes.almd
 281	260	3302	281	spec/wasm_cross/negative_count_rule.almd
 7	5	29	7	spec/wasm_cross/negative_float_literal_sized.almd
-47	24	516	47	spec/wasm_cross/negative_offset_and_width_totality.almd
+54	27	562	54	spec/wasm_cross/negative_offset_and_width_totality.almd
 40	35	640	40	spec/wasm_cross/nested_box_guard_binder.almd
 15	11	152	15	spec/wasm_cross/nested_ctor_pattern.almd
 60578	60455	971208	60578	spec/wasm_cross/nested_field_path_mut.almd
@@ -686,7 +687,7 @@
 ~	spec/wasm_cross/process_args.almd
 12	5	55	12	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 17	10	181	17	spec/wasm_cross/pure_bang_propagation.almd
-9	3	82	7	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
+0	0	0	0	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 10	2	112	10	spec/wasm_cross/qq_record_fallback.almd
 19	9	242	19	spec/wasm_cross/r5_lowmisc_param_try_err.almd
 3	0	58	3	spec/wasm_cross/r5_mod_global_init_order.almd
@@ -770,8 +771,8 @@
 7	2	83	7	spec/wasm_cross/result_uoe_float.almd
 12	1	138	12	spec/wasm_cross/result_value_int_tuple.almd
 5	0	72	5	spec/wasm_cross/result_wall_escalations.almd
-585	533	12398	585	spec/wasm_cross/runtime_backed_value_repr.almd
-105	79	2556	105	spec/wasm_cross/runtime_backed_variant_repr.almd
+631	577	12768	631	spec/wasm_cross/runtime_backed_value_repr.almd
+156	119	2994	156	spec/wasm_cross/runtime_backed_variant_repr.almd
 5	2	36	5	spec/wasm_cross/scalar_if_arm_effects.almd
 9	1	93	9	spec/wasm_cross/scan_heap_acc.almd
 2070	30	41548	2070	spec/wasm_cross/scoped_region_value.almd
@@ -800,7 +801,7 @@
 77	41	3709	77	spec/wasm_cross/stdlib_call_temporaries_release.almd
 151	145	3617	151	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 49	30	539	49	spec/wasm_cross/stdlib_opaque_shadow.almd
-214	148	2009	214	spec/wasm_cross/stdlib_type_shadow.almd
+265	199	2447	265	spec/wasm_cross/stdlib_type_shadow.almd
 13	9	178	13	spec/wasm_cross/str_result_heap_bind.almd
 225	193	1517	225	spec/wasm_cross/string_bidi_controls_literal.almd
 0	0	0	0	spec/wasm_cross/string_bool_ordering.almd
@@ -834,13 +835,13 @@
 6	1	21	6	spec/wasm_cross/tco_multi_concat.almd
 12	6	272	12	spec/wasm_cross/tco_nested_list_accumulator.almd
 17	10	237	17	spec/wasm_cross/tco_over_match_result.almd
-30	20	211	27	spec/wasm_cross/testing_assert_abort_approx.almd
-85	62	865	84	spec/wasm_cross/testing_assert_abort_contains.almd
-27	10	264	24	spec/wasm_cross/testing_assert_abort_err.almd
-9	3	84	7	spec/wasm_cross/testing_assert_abort_gt.almd
-12	4	111	10	spec/wasm_cross/testing_assert_abort_lt.almd
-40	17	412	37	spec/wasm_cross/testing_assert_abort_none.almd
-42	17	453	37	spec/wasm_cross/testing_assert_abort_ok.almd
+3	2	9	3	spec/wasm_cross/testing_assert_abort_approx.almd
+2	1	64	2	spec/wasm_cross/testing_assert_abort_contains.almd
+2	0	32	0	spec/wasm_cross/testing_assert_abort_err.almd
+0	0	0	0	spec/wasm_cross/testing_assert_abort_gt.almd
+0	0	0	0	spec/wasm_cross/testing_assert_abort_lt.almd
+2	0	12	0	spec/wasm_cross/testing_assert_abort_none.almd
+4	0	52	0	spec/wasm_cross/testing_assert_abort_ok.almd
 4	1	60	2	spec/wasm_cross/testing_assert_abort_some.almd
 0	0	0	0	spec/wasm_cross/time_negative_scale.almd
 0	0	0	0	spec/wasm_cross/time_negative_trap.almd

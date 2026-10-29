@@ -343,6 +343,31 @@ depth. Field attributes are only `@skip` /
 `@skip_decode` (and WGSL's `@builtin` / `@location`), for two-way types;
 `@serde(skip)`, `@json_ignore`, `@redact` are E053.
 
+### A response's Content-Type is its body's type
+
+`http.response(status, body)` takes a `Body`: a String is
+`text/plain; charset=utf-8`, Bytes `application/octet-stream`, a `Value`
+`application/json`, `html.*` builds `text/html` and `svg.*` `image/svg+xml`
+(`html.escape` / `html.attr` / `html.url_attr` / `html.script_json`, or
+`html.raw(s)` for trusted markup). Any other media type is
+`http.typed("text/csv", bytes)` with a literal type (E117 for a computed one,
+or for HTML / XML / SVG). Content-Type is never written by name: `set_header` /
+`with_headers` refuse it (E116); `set_body` / `http.with_body(resp, body)`
+replace the body and its type together. `http.html` is gone (`almide fix`
+rewrites it to `http.response`).
+
+```almide check
+import html
+import http
+
+fn greet(req: HttpRequest) -> HttpResponse = {
+  let name = http.param(req, "name") ?? "guest"
+  http.response(200, html.escape("Hello, ${name}"))
+}
+
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Rows", "1")])
+```
+
 ```almide check
 import http
 import secret
@@ -380,6 +405,9 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E112 | Too many generic instances, or an instance type past `type_size` (generic fns passing ever-larger type arguments on) | Pass the same type on: collect the values in a list, or count the steps in an `Int` |
 | E113 | Match too complex to check for exhaustiveness (`exhaustiveness_steps` budget) | Split the match, or add a `_ =>` arm for the remaining cases |
 | E114 | Generic fn calls itself (directly or through other generic fns) at a growing type, e.g. `depth((x, x), n - 1)` inside `depth[T]` | Recurse at the type the fn was called with: collect values in a `List[T]`, or count levels in an `Int` |
+| E116 | `http.set_header` / `http.with_headers` writes `Content-Type` on a response | Pass the body as its type: String, Bytes, a `Value`, `html.*`, `svg.*`, or `http.typed("text/csv", bytes)` |
+| E117 | `http.typed`'s media type is computed, malformed, or HTML / XML / SVG | Write the type as a literal; build HTML with `html.*` and SVG with `svg.*` |
+| E118 | A user type declares `Body` | Convert to a String, Bytes, `Value`, `html.*`, `svg.*` or `http.typed` body at the response |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |

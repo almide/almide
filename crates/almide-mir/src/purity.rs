@@ -281,6 +281,7 @@ pub const PURE_MODULES: &[&str] = &[
     "string_to_lower",
     "string_to_upper",
     "string_trim",
+    "svg",
     "testing_assert",
     "uint16",
     "uint16_convert",
