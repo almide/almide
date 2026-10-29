@@ -206,7 +206,7 @@ fn almide_lang_attr(name: &str) -> almide_lang::ast::Attribute {
 
 /// `ffi.RegionExportView`, the record `__export_view` answers.
 fn export_view_ty() -> Ty {
-    Ty::Named(almide_base::intern::sym("RegionExportView"), Vec::new())
+    Ty::Named(almide_base::intern::sym("RegionExportView"), Vec::new().into())
 }
 
 /// The stamp on a Region import stub naming its address and length
