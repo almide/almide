@@ -1,0 +1,27 @@
+[package]
+name = "almide-gpu-run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The GPU leg (#1331, #4236): a strict IR → WGSL kernel emitter for pure Int → Int maps, and a wgpu runner that executes it"
+
+[lints]
+workspace = true
+
+[dependencies]
+almide-ir = { path = "../almide-ir" }
+almide-lang = { path = "../almide-lang" }
+# Isolated in this crate so the compiler binary does not carry a GPU stack.
+# Only the native backends the runner needs, plus the WGSL front end.
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl", "vulkan", "metal"] }
+pollster = "1.0.1"
+
+[dev-dependencies]
+almide-base = { path = "../almide-base" }
+almide-frontend = { path = "../almide-frontend" }
+almide-driver = { path = "../almide-driver" }
+almide-interp = { path = "../almide-interp" }
+# The affine-shape census example (#4236) reads the MIR the GPU leg will
+# take its eligibility rule from.
+almide-mir = { path = "../almide-mir" }
