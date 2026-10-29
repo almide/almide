@@ -296,7 +296,10 @@ pub const NOMINALS: &[Nominal] = &[
         ],
         observe: "(http.header(http.response(200, {v}), \"Content-Type\") ?? \"-\", http.body(http.response(200, {v})))",
         observed: || pair(GenType::String, GenType::String),
-        digest: "string.len(http.body(http.response(200, {v})))",
+        // No reader leaves the bytes alone: making the response decodes them
+        // (`__self_to_text`), so a per-call digest through it would time the
+        // decode, not the call (#4337). The digest is constant, as a tuple's.
+        digest: "1",
         observe_calls_effect: false,
         refuses_var: false,
         in_flight: false,
