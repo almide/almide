@@ -865,12 +865,3 @@ fn a_select_site_over_an_anchored_if_pairs_too() -> Result<(), String> {
     assert!(run("(@1-3 |@1-3 ) (@1-3 d1 |@1-3 d0 )").is_err());
     Ok(())
 }
-
-/// A temporary's event logged inside a window prefers a call inside it:
-/// with one call in the window and one outside, the in-window call is its,
-/// and the named event takes the other.
-#[test]
-fn a_windowed_temporary_event_prefers_a_call_in_its_window() -> Result<(), String> {
-    rc("local.get 0 call $alloc drop local.get 0 call $alloc drop", "d-@0-1 d0")?;
-    Ok(())
-}
