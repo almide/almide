@@ -178,13 +178,43 @@ impl Toolchain {
     /// same exit code — with the timeout now covering ONLY the program.
     pub fn run_native_bin(&self, bin: &Path) -> ProcResult {
         let bin = absolute(bin);
-        self.run_sandboxed(|_| {
+        self.run_sandboxed(|_, _| {
             let mut cmd = Command::new(&bin);
             cmd.args(super::sandbox::ARGS);
-            cmd.env("NO_COLOR", "1");
             native_memory_cap(&mut cmd);
             cmd
         })
+    }
+}
+
+/// `cmd` with no inherited environment: `env`, then what `cmd` set itself.
+fn isolated(mut cmd: Command, env: &[(String, String)]) -> Command {
+    let own: Vec<(std::ffi::OsString, std::ffi::OsString)> =
+        cmd.get_envs().filter_map(|(k, v)| Some((k.to_os_string(), v?.to_os_string()))).collect();
+    cmd.env_clear();
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
+    cmd.envs(own);
+    cmd
+}
+
+impl Toolchain {
+    /// The environment every leg's program sees for a run in sandbox `dir`:
+    /// the fixed env and the fixtures' addresses, the temp root beside the
+    /// tree, colourless diagnostics and this worker's project dir (the
+    /// embedded host is `almide` itself, so what it needs its guest sees),
+    /// and the harness's own `PATH` and `HOME`, the same value on every leg.
+    fn guest_env(&self, dir: &Path) -> Vec<(String, String)> {
+        let mut env: Vec<(String, String)> = super::sandbox::ENV.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        env.extend(super::fixture::env().iter().cloned());
+        env.push(("TMPDIR".into(), super::sandbox::tmp_of(dir).to_string_lossy().into_owned()));
+        env.push(("NO_COLOR".into(), "1".into()));
+        env.push(("ALMIDE_RUN_PROJECT_DIR".into(), absolute(&self.scratch).to_string_lossy().into_owned()));
+        for k in ["PATH", "HOME"] {
+            if let Ok(v) = std::env::var(k) {
+                env.push((k.into(), v));
+            }
+        }
+        env
     }
 }
 
@@ -230,12 +260,10 @@ impl Toolchain {
     /// armed; the `__ALMD_WASM_ALLOC … live=N` line lands on stderr.
     pub fn run_wasm_counted(&self, file: &Path) -> ProcResult {
         let file = absolute(file);
-        self.run_sandboxed(|_| {
+        self.run_sandboxed(|_, _| {
             let mut cmd = Command::new(&self.almide);
             cmd.args(["run", &file.to_string_lossy(), "--target", "wasm", "--"]);
             cmd.args(super::sandbox::ARGS);
-            cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
-            cmd.env("NO_COLOR", "1");
             cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
             cmd
         })
@@ -247,23 +275,22 @@ impl Toolchain {
         if let Some(src) = std::fs::read(&wasm).ok().and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.strip_prefix(EMBEDDED_LEG).map(String::from)) {
             // Absolute: the run's cwd is its sandbox.
             let almide = absolute(&self.almide);
-            return self.run_sandboxed(|_| {
+            return self.run_sandboxed(|_, _| {
                 let mut cmd = Command::new(&almide);
                 cmd.args(["run", &src, "--target", "wasm", "--"]);
                 cmd.args(super::sandbox::ARGS);
-                cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
-                cmd.env("NO_COLOR", "1");
                 cmd
             });
         }
-        self.run_sandboxed(|dir| {
+        self.run_sandboxed(|dir, env| {
             let mut cmd = Command::new(&self.wasmtime);
+            let tmp = super::sandbox::tmp_of(dir);
             cmd.arg(format!("--dir={}::.", dir.display()));
-            cmd.arg(format!("--dir={}::/tmp", super::sandbox::tmp_of(dir).display()));
-            for (k, v) in super::sandbox::ENV {
-                cmd.arg(format!("--env={k}={v}"));
-            }
-            for (k, v) in super::fixture::env() {
+            cmd.arg(format!("--dir={}::/tmp", tmp.display()));
+            // `TMPDIR` names the host path on every leg: the guest finds it
+            // preopened at that same path.
+            cmd.arg(format!("--dir={}::{}", tmp.display(), tmp.display()));
+            for (k, v) in env {
                 cmd.arg(format!("--env={k}={v}"));
             }
             cmd.arg(&wasm);
@@ -401,17 +428,20 @@ impl Toolchain {
     /// tier E1): cwd = the seeded tree, the fixed env, stdin from the fixed
     /// file. `build` makes the command for the sandbox it is given and places
     /// the program arguments itself. The tree after the run is kept.
-    fn run_sandboxed(&self, build: impl FnOnce(&Path) -> Command) -> ProcResult {
+    ///
+    /// Every leg's program sees one environment, [`Self::guest_env`], and
+    /// nothing inherited: the native binary and the embedded host's guest
+    /// read their process's environment, a stock runtime's guest its
+    /// `--env` list, and `env.vars()` must answer the same on all of them.
+    /// What `build` sets itself (a counter switch) comes on top.
+    fn run_sandboxed(&self, build: impl FnOnce(&Path, &[(String, String)]) -> Command) -> ProcResult {
         let Ok((dir, stdin)) = super::sandbox::create(&self.scratch) else {
-            return self.spawn_timed(build(&self.scratch));
+            let env = self.guest_env(&self.scratch);
+            return self.spawn_timed(isolated(build(&self.scratch, &env), &env));
         };
-        let mut cmd = build(&dir);
+        let env = self.guest_env(&dir);
+        let mut cmd = isolated(build(&dir, &env), &env);
         cmd.current_dir(&dir);
-        for (k, v) in super::sandbox::ENV {
-            cmd.env(k, v);
-        }
-        cmd.env("TMPDIR", super::sandbox::tmp_of(&dir));
-        cmd.envs(super::fixture::env().iter().map(|(k, v)| (k, v)));
         let mut res = self.spawn_timed_with(cmd, std::fs::File::open(&stdin).ok());
         res.tree = Some(super::sandbox::snapshot(&dir));
         super::sandbox::remove(&dir, &stdin);
