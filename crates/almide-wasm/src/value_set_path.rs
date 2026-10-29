@@ -30,9 +30,9 @@
 //! # The Object key index
 //!
 //! An Object box is `[rc][len][cap][tag @SUM_TAG][pad][pairs @SUM_FIELD]`;
-//! the pairs handle is an i32, so the upper half of the 8-byte payload slot
-//! (`SUM_FIELD + 4`) was unused. It now holds the box's key index, or 0:
-//! every Object box is born with 0 there (value.rs), the Value drop glue
+//! the pad word (`SUM_TAG + 4`) was unused. It now holds the box's key
+//! index, or 0: every Object box is born with 0 there (value.rs writes the
+//! tag and the pad as one i64, no more bytes than the tag), the Value drop glue
 //! releases it with the box (rc_ownership.rs `shape_slots`), and a box copy
 //! shares it with a credit (the same glue's inc). The index is a flat block
 //! `[hdr][pairs][count][mask][slot × (mask+1)]` — open addressing over the
@@ -113,9 +113,8 @@ fn unique(i: &mut wasm_encoder::InstructionSink<'_>, b: u32) {
 /// A fresh Object box over the pairs list in `pairs`, left on the stack.
 fn new_object(i: &mut wasm_encoder::InstructionSink<'_>, pairs: u32, scratch: u32) {
     i.i32_const(16).call(F_ALLOC).local_tee(scratch);
-    i.i32_const(VT_OBJECT).i32_store(slot_memarg(TAG));
+    crate::value::store_object_tag(i);
     i.local_get(scratch).local_get(pairs).i32_store(slot_memarg(PAY));
-    i.local_get(scratch).i32_const(0).i32_store(slot_memarg(IDX));
     i.local_get(scratch);
 }
 
@@ -153,10 +152,11 @@ fn emit_unique(dec_value: u32, tag: i32) -> Function {
     i.local_get(q).local_get(j).i32_add().i32_load(slot_memarg(0)).call(F_INC);
     i.local_get(j).i32_const(4).i32_add().local_set(j);
     i.br(0).end().end();
+    // The tag with a zero pad word: an Object's no-index word, unused
+    // under an Array.
     i.i32_const(16).call(F_ALLOC).local_tee(b);
-    i.i32_const(tag).i32_store(slot_memarg(TAG));
+    i.i64_const(i64::from(tag)).i64_store(slot_memarg(TAG));
     i.local_get(b).local_get(q).i32_store(slot_memarg(PAY));
-    i.local_get(b).i32_const(0).i32_store(slot_memarg(IDX));
     i.local_get(v).call(dec_value);
     i.local_get(b);
     i.end();
