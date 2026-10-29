@@ -179,6 +179,11 @@ fn wrap_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
         w.mutated_params.clear();
         w.visibility = almide_ir::IrVisibility::Public;
         f.export_attrs.retain(|a| a.target.as_str() != "wasm");
+        // The export is the wrapper's now: the fn itself must not also
+        // export under its own name as an entry `pub fn` would (a record
+        // block the host has no reading of). Visibility is past checking here;
+        // the emitter reads it only to pick the implicit exports.
+        f.visibility = almide_ir::IrVisibility::Mod;
         wrappers.push(w);
     }
     functions.extend(wrappers);
