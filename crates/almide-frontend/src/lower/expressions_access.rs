@@ -707,8 +707,17 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                     ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
                 }).collect();
                 let ret_ty = ret.as_ref().clone();
+                // A selectively imported fn (#4329) is called through the
+                // module, exactly as its bare CALL lowers (`lower_call_target`).
+                let target = match ctx.env.selective_fn_module(name) {
+                    Some(module) => CallTarget::Module {
+                        module, func: *name,
+                        def_id: ctx.def_map.get(&sym(&format!("{}.{}", module, name))).copied(),
+                    },
+                    None => CallTarget::Named { name: ctx.ir_fn_name(sym(name)) },
+                };
                 let body = ctx.mk(IrExprKind::Call {
-                    target: CallTarget::Named { name: ctx.ir_fn_name(sym(name)) },
+                    target,
                     args: call_args, type_args: vec![],
                 }, ret_ty, span);
                 ctx.mk(IrExprKind::Lambda {

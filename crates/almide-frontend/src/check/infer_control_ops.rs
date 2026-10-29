@@ -688,6 +688,7 @@ impl Checker {
                 else if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     *ty
                 }
+                else if let Some(ty) = self.selective_fn_value_ty(name.as_str(), expr.span) { ty }
                 else if let Some(sig) = self.env.functions.get(&sym(name)).cloned() {
                     if !self.env.pure_fns_absent {
                         let callee = self.purity_callee(name);
@@ -699,6 +700,34 @@ impl Checker {
                 else {
                     self.report_undefined_variable(name)
                 }
+    }
+
+    /// A selectively imported fn named as a VALUE (`import p.common.{items}`
+    /// then `call(items)` / `xs |> list.map(f)`, #4329): the same signature
+    /// the bare CALL resolves (`resolve_call_sig_and_import`), through the
+    /// same module question the lowering asks (`TypeEnv::selective_fn_module`).
+    /// A file's own fn of that name still wins, as on the call path (#2375).
+    fn selective_fn_value_ty(&mut self, name: &str, span: Option<crate::ast::Span>) -> Option<Ty> {
+        let own_key = match &self.current_module_prefix {
+            Some(p) => sym(&format!("{}.{}", p, name)),
+            None => sym(name),
+        };
+        if self.env.functions.contains_key(&own_key) {
+            return None;
+        }
+        let module = self.env.selective_fn_module(&sym(name))?;
+        let qualified = sym(&format!("{}.{}", module.as_str(), name));
+        let (sig, user_fn) = match crate::stdlib::lookup_sig(module.as_str(), name) {
+            Some(sig) => (sig, false),
+            None => (self.env.functions.get(&qualified).cloned()?, true),
+        };
+        self.env.import_table.used.insert(module);
+        if !self.env.pure_fns_absent {
+            let callee = self.purity_callee(name);
+            self.record_purity_ref(callee, span);
+        }
+        self.reject_mut_param_fn_value(name, &sig, user_fn);
+        Some(self.fn_value_ty(&sig))
     }
 
     /// The Ty a named fn carries when referenced as a VALUE (#1055, #1148):
