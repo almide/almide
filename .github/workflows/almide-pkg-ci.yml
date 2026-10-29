@@ -15,8 +15,17 @@ jobs:
       - uses: ./.github/actions/root-tmpdir
 
       - name: Install Almide
+        # A reusable workflow: the checkout is the CALLER's repository, so
+        # scripts/fetch-pinned.sh is not on disk. `latest` is a moving name no
+        # digest can pin; the bytes are refused unless they carry the release
+        # workflow's Sigstore attestation (security row 16).
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" -o almide.tar.gz
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" -o almide.tar.gz
+          gh attestation verify almide.tar.gz --repo almide/almide \
+            --signer-workflow almide/almide/.github/workflows/release.yml >/dev/null
           tar xzf almide.tar.gz --strip-components=1
           chmod +x almide
           sudo mv almide /usr/local/bin/
