@@ -192,6 +192,12 @@ impl Parser {
     pub(crate) fn report_confusable_idents(&mut self) {
         use unicode_security::{RestrictionLevel, RestrictionLevelDetection};
         let idents = std::mem::take(&mut self.idents);
+        // Both refusals below need a non-ASCII spelling, so a file of ASCII
+        // identifiers has nothing to judge; skip the per-name skeletons, which
+        // cost the parse phase ~29% on the edit-loop ladder.
+        if idents.iter().all(|(name, _, _)| name.is_ascii()) {
+            return;
+        }
         let mut judged: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut by_skeleton: std::collections::HashMap<String, (String, usize)> = std::collections::HashMap::new();
         for (name, line, col) in idents {
