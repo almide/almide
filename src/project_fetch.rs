@@ -758,10 +758,12 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
                 existing.version = version_str;
                 existing.source_dir = source_dir;
                 existing.package_dir = path;
+                existing.source = dep.git.clone();
             }
         }
         None => fetched.push(FetchedDep {
             pkg_id: actual_pkg_id,
+            source: dep.git.clone(),
             version: version_str,
             source_dir,
             package_dir: path,
