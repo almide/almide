@@ -542,6 +542,10 @@ impl Emitter<'_> {
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        // The key's credit moves in through `kh` (map_inplace.rs, the same set).
+        if self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         let vh = self.hold_for(v)?;
         self.lower_arg(value, Some(v), ArgMode::Retain)?;
         self.f.instructions().local_set(vh);
