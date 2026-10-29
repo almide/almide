@@ -966,6 +966,7 @@
 44138	spec/wasm_cross/url_authority_edges.almd
 48926	spec/wasm_cross/url_whatwg_probes.almd
 5158	spec/wasm_cross/user_box_recursive_enum.almd
+36495	spec/wasm_cross/uuid_v7_monotonic.almd
 3061	spec/wasm_cross/value_array_leak_loop.almd
 3443	spec/wasm_cross/value_array_tuple_tco.almd
 3551	spec/wasm_cross/value_as_array_leak_loop.almd
