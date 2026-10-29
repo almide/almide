@@ -44,7 +44,14 @@ pub fn tmp_of(dir: &Path) -> PathBuf {
 /// file. The stdin file lives beside the sandbox, so it is not in the tree.
 pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = scratch.join(format!("sbx-{}-{n}", std::process::id()));
+    create_named(scratch, &format!("sbx-{}-{n}", std::process::id()))
+}
+
+/// [`create`] at `scratch/<name>`, replacing what a previous run left there:
+/// the legs of one program, run one after another under one name, see the
+/// same paths (`TMPDIR` is in the environment `env.vars()` lists).
+pub fn create_named(scratch: &Path, name: &str) -> std::io::Result<(PathBuf, PathBuf)> {
+    let dir = scratch.join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("empty_dir"))?;
     let _ = std::fs::remove_dir_all(tmp_of(&dir));
@@ -60,7 +67,7 @@ pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     // allows none leaves it out).
     #[cfg(unix)]
     let _ = std::os::unix::fs::symlink("data.txt", dir.join("link.txt"));
-    let stdin = scratch.join(format!("sbx-{}-{n}.stdin", std::process::id()));
+    let stdin = scratch.join(format!("{name}.stdin"));
     std::fs::write(&stdin, STDIN)?;
     Ok((dir, stdin))
 }

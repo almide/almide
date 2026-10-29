@@ -468,7 +468,16 @@ impl Toolchain {
         &self,
         build: impl FnOnce(&Path, &[(String, String)]) -> Command,
     ) -> ProcResult {
-        let Ok((dir, stdin)) = super::sandbox::create(&self.scratch) else {
+        // One name per thread: a worker runs a program's legs one after
+        // another, so each leg sees the same sandbox path, and two threads
+        // sharing a scratch dir never share a sandbox.
+        let name = format!(
+            "sbx-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        )
+        .replace(['(', ')'], "");
+        let Ok((dir, stdin)) = super::sandbox::create_named(&self.scratch, &name) else {
             let env = self.guest_env(&self.scratch);
             return self.spawn_timed(isolated(build(&self.scratch, &env), &env));
         };
