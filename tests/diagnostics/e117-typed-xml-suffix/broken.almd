@@ -3,6 +3,9 @@
 // html); an Atom feed has no owner yet (#4310), so it is not served from a String.
 import http
 
-fn feed(xml: String) -> HttpResponse = http.response(200, http.typed("application/atom+xml", bytes.from_string(xml)))
+fn feed(xml: String) -> HttpResponse = http.response(
+  200,
+  http.typed("application/atom+xml", bytes.from_string(xml)),
+)
 
 fn main() -> Unit = println(http.body(feed("<feed/>")))

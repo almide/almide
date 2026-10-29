@@ -1,6 +1,5 @@
 // E118 (ADR-0032 Q22): a media type has one owner. text/html is html's, so
 // a page is built with html's builders.
-import html
 import http
 
 type Page: Body = { text: String }
