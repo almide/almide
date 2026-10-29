@@ -3,6 +3,11 @@
 // view — so the list param it comes from is borrowed. A mixed body that also
 // moves the element (collects it) keeps the param owned. The ownership
 // certifier's C4 refused the owned `classify`.
+//
+// #4296: an arm that binds the matched value binds a `&str` view of it; the
+// arm copies it out where it is wanted as a value, so the source stays
+// borrowed. Native refused the owned copy-less form (E0308), and the
+// certifier's C4 refused the owned verdict.
 type Tag = { name: String, weight: Int }
 
 fn classify(xs: List[String]) -> Int = {
@@ -63,6 +68,51 @@ fn keep_unknown(xs: List[String]) -> List[String] = {
   out
 }
 
+fn rename(xs: List[String]) -> List[String] = xs |> list.map((x) => match x {
+  "a" => "A",
+  other => other,
+})
+
+fn rename_loop(xs: List[String]) -> List[String] = {
+  var out: List[String] = []
+  for x in xs {
+    out = out + [
+      match x {
+        "a" => "A",
+        other => other,
+      }
+    ]
+  }
+  out
+}
+
+fn canon(s: String) -> String = match s {
+  "a" => "A",
+  other => other,
+}
+
+fn measure(xs: List[String]) -> Int = {
+  var n = 0
+  for x in xs {
+    n = n + match x {
+      "a" => 1,
+      other => string.len(other),
+    }
+  }
+  n
+}
+
+fn tag_names(ts: List[Tag]) -> List[String] = ts |> list.map((t) => match t.name {
+  "heavy" => "H",
+  n => n,
+})
+
+fn shout(s: String) -> String = match s {
+  "a" => s,
+  long if string.len(long) > 2 => long + "!",
+  other => other + "?",
+}
+
 test "a List[String] element matched only against literals" {
   let xs = ["a", "b", "c", "a"]
   assert_eq(classify(xs), 112)
@@ -98,4 +148,35 @@ test "an element matched and collected stays owned" {
   assert_eq(keep_unknown(xs), ["q", "r"])
   assert_eq(keep_unknown(xs), ["q", "r"])
   assert_eq(list.len(xs), 4)
+}
+
+test "an arm binding the matched element copies it out" {
+  let xs = ["a", "q", "bb"]
+  assert_eq(rename(xs), ["A", "q", "bb"])
+  assert_eq(rename(xs), ["A", "q", "bb"])
+  assert_eq(rename_loop(xs), ["A", "q", "bb"])
+  assert_eq(rename_loop(xs), ["A", "q", "bb"])
+  assert_eq(measure(xs), 4)
+  assert_eq(measure(xs), 4)
+  assert_eq(list.len(xs), 3)
+}
+
+test "a String param matched with a binding arm" {
+  let s = "z"
+  assert_eq(canon("a"), "A")
+  assert_eq(canon(s), "z")
+  assert_eq(canon(s) + s, "zz")
+  assert_eq(shout("a"), "a")
+  assert_eq(shout("abc"), "abc!")
+  assert_eq(shout(s), "z?")
+  assert_eq(s, "z")
+}
+
+test "a record field matched with a binding arm" {
+  let ts = [
+    { name: "heavy", weight: 3 },
+    { name: "light", weight: 4 }
+  ]
+  assert_eq(tag_names(ts), ["H", "light"])
+  assert_eq(tag_names(ts), ["H", "light"])
 }

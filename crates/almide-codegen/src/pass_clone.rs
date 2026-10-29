@@ -593,6 +593,20 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
         super::pass_clone_projection::match_binders(&subject, &arms)
     };
     let subject = if borrowed.is_some() { super::pass_clone_projection::borrowed_subject(subject) } else { subject };
+    // #4296: a stable `String` place matched against string literals is read
+    // through a `&str` view (`Site::StrView`), so it is spelled that borrow
+    // HERE, the way a `==` operand is (`pass_clone_compare`): the `Borrow`
+    // path counts the use without the copy a bare subject would take for a
+    // later read (`match &*x.clone()`). `MatchSubject` keeps the borrow.
+    let subject = if crate::pass_match_subject::matches_through_str_view(&subject.ty, &arms)
+        && super::pass_clone_compare::stable(&subject)
+        && !matches!(subject.kind, IrExprKind::LitStr { .. })
+    {
+        let (ty, span) = (subject.ty.clone(), subject.span);
+        IrExpr { kind: IrExprKind::Borrow { expr: Box::new(subject), as_str: true, mutable: false }, ty, span, def_id: None }
+    } else {
+        subject
+    };
     let new_subject = insert_clones_live(subject, ctx);
     // Memo lookups must happen before `arms.into_iter()` moves the arms out of
     // the Vec buffer — the body's buffer address is the memo key (#1230).

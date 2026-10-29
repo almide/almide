@@ -73,6 +73,7 @@ pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;
 pub mod pass_range_counting;
+pub mod pass_str_view_rebind;
 pub mod pass_metered_region_delegate;
 pub mod pass_meter_charge;
 pub mod pass_region_window;

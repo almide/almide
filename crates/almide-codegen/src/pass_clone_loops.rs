@@ -170,9 +170,9 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
 /// for a `&T` binder as for a `T` one: `&v` (a shared `Borrow`, which coerces
 /// from `&&T`), `v.field` (auto-deref), or `v.clone()` (resolves to
 /// `T::clone` through the reference), or the subject of a literal `match`
-/// that binds nothing (`Site::StrView`: `MatchSubject` spells it `&*x`, and
+/// (`Site::StrView`: `MatchSubject` spells it `&*x`, and
 /// `BorrowLowering` `x.as_str()` for a borrowed binder, #4294)? A bare
-/// occurrence (a move), a `&mut`, a binding match subject, an
+/// occurrence (a move), a `&mut`, a non-literal match subject, an
 /// interpolation, or any use inside a closure / fused iterator chain (whose
 /// captures must own) says no.
 fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
@@ -282,9 +282,11 @@ impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
         // some(v) => v }` moves out of nothing the next iteration reads. A
         // match on anything else (a captured or outer value) binds into
         // a value that outlives the iteration, and stays cloned.
+        // A match over a `&str` view of its subject (#4296) binds a copy its
+        // own arm makes (`StrViewRebind`'s copy), whatever it views.
         if let IrExprKind::Match { subject, arms } = &expr.kind
-            && let IrExprKind::Var { id } = &subject.kind
-            && self.fresh.contains(id)
+            && (matches!(&subject.kind, IrExprKind::Var { id } if self.fresh.contains(id))
+                || crate::pass_match_subject::matches_through_str_view(&subject.ty, arms))
         {
             for arm in arms {
                 almide_ir::free_vars::collect_pattern_bindings(&arm.pattern, self.fresh);
