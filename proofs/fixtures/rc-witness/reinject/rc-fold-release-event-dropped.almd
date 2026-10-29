@@ -1,0 +1,14 @@
+// #4277 drill: a fold's accumulator release before the rebind (the `$dec` the
+// certificate writes as the iteration-end release) loses its byte-check event
+// (`WitnessRecorder::iteration_release`); the instruction and the ownership
+// witness are unchanged. Before a windowed temporary's event was held to its
+// own window (9e33eb9eb), an unnamed event logged inside another window
+// absorbed that release and the RC check accepted the frame; now the release
+// has no event and the check must refuse it. (`http.with_headers` folds each
+// header into a map through `map.set`, whose window the release follows.)
+import http
+
+effect fn main() -> Unit = {
+  let c = http.with_headers(200, "b", [("x-kind", "a/b"), ("X-Kind", "c/d")])
+  println("${http.header(c, "x-kind") ?? "none"} ${list.len(http.headers(c))}")
+}
