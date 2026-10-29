@@ -27,8 +27,6 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "map", "set", "string", "deque", "heap",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
-    // Safe SVG construction, a response Body (ADR-0032). `import svg`.
-    "svg",
     // Raw addresses at the foreign-function boundary (R-ffi-01). Never
     // auto-imported: `import ffi` is the opt-in.
     "ffi",
@@ -347,7 +345,6 @@ fn bundled_source_io(name: &str) -> Option<&'static str> {
         "fs" => Some(crate::embedded::SRC_FS),
         "http" => Some(crate::embedded::SRC_HTTP),
         "html" => Some(crate::embedded::SRC_HTML),
-        "svg" => Some(crate::embedded::SRC_SVG),
         "json" => Some(crate::embedded::SRC_JSON),
         "matrix" => Some(crate::embedded::SRC_MATRIX),
         "math" => Some(crate::embedded::SRC_MATH),

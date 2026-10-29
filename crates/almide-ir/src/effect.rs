@@ -181,7 +181,6 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("string", ModuleEffects::Pure),
     ("regex", ModuleEffects::Pure),
     ("html", ModuleEffects::Pure),
-    ("svg", ModuleEffects::Pure),
     // Codecs.
     ("json", ModuleEffects::Pure),
     ("value", ModuleEffects::Pure),
