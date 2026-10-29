@@ -113,6 +113,8 @@ pub struct WitnessRecorder {
     /// a different fn set); the floor test compares their certificates only
     /// where this agrees. Never part of the certificate.
     conv: String,
+    /// Per open fused chain, the owner locals its stages bound (witness_rest.rs).
+    iter_owned: Vec<Vec<u32>>,
 }
 
 impl Default for WitnessRecorder {
@@ -134,6 +136,7 @@ impl WitnessRecorder {
             hooked: Vec::new(),
             err_exit_armed: false,
             conv: String::new(),
+            iter_owned: Vec::new(),
         }
     }
 
@@ -466,6 +469,16 @@ impl WitnessRecorder {
     /// The next arm of the innermost open site begins.
     pub fn branch_arm(&mut self) {
         self.branches.arm(&mut self.log);
+    }
+
+    /// `branch_open` / `branch_arm` of an `if` whose arms the RC check
+    /// holds to the shipped `if` / `else` (`rc::site_window`).
+    pub fn branch_open_at(&mut self, anchor: u64) {
+        self.branches.open_at(&mut self.log, Some(anchor));
+    }
+
+    pub fn branch_arm_at(&mut self, anchor: u64) {
+        self.branches.arm_at(&mut self.log, Some(anchor));
     }
 
     /// The innermost open site joins.

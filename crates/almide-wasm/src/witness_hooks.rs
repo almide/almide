@@ -540,6 +540,29 @@ impl Emitter<'_> {
         }
     }
 
+    /// #4277: a temporary's credit, held in `local`, moved into the open
+    /// routine window — an `m<local>` for the RC byte check only (the
+    /// ownership witness already logged the temporary moved, `im`): the
+    /// routine's release of that local, one per path, is that credit's.
+    pub(crate) fn witness_rc_hold_move(&mut self, local: u32) {
+        if self.witness.as_ref().is_some_and(|w| !w.dead()) {
+            crate::witness::rc::event('m', Some(local));
+        }
+    }
+
+    /// The anchored forms (`rc::site_window`): the `if` of `lower_if_arms`.
+    pub(crate) fn witness_branch_open_at(&mut self, anchor: u64) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_open_at(anchor);
+        }
+    }
+
+    pub(crate) fn witness_branch_arm_at(&mut self, anchor: u64) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_arm_at(anchor);
+        }
+    }
+
     pub(crate) fn witness_branch_close(&mut self) {
         if let Some(w) = self.witness.as_mut() {
             w.branch_close();
@@ -669,7 +692,8 @@ impl Emitter<'_> {
     /// shares and moves (`am`). The release of the block the iteration
     /// received (the arm's `$dec` before the rebind) is the `d` the recorder
     /// writes for every owner local bound in a loop body at the iteration's
-    /// end (witness_paths.rs), so it is not logged twice. A droppable
+    /// end (witness_paths.rs), so it is not logged twice on the certificate;
+    /// it is logged for the byte check at that `$dec` (#4277). A droppable
     /// accumulator that is not a handle takes neither instruction: declined.
     pub(crate) fn witness_fold_step(&mut self, body: &almide_ir::IrExpr, acc: u32, ty: SliceTy) {
         if self.witness.is_none() || !self.rc_droppable(ty) {
@@ -679,7 +703,9 @@ impl Emitter<'_> {
             self.witness_decline("fold-acc:flat");
             return;
         }
-        let _ = acc;
+        if let Some(w) = self.witness.as_mut() {
+            w.iteration_release(acc);
+        }
         self.witness_store(body, ty);
     }
 

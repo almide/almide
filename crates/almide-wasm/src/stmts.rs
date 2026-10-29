@@ -349,7 +349,9 @@ impl Emitter<'_> {
                 if self.routine(|r: &bool| *r, |em| em.try_map_set_in_place(target, key, value))? {
                     return Ok(());
                 }
-                self.lower_map_insert_writeback(target, key, value)
+                // The write-back is a compound routine too: the key's credit
+                // moves into the set, which releases it when the key exists.
+                self.routine(|_: &()| true, |em| em.lower_map_insert_writeback(target, key, value))
             }
             IrStmtKind::Assign { var, value } => self.lower_assign(var, value),
             IrStmtKind::IndexAssign { target, index, value } => {

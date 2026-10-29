@@ -1,15 +1,16 @@
 diff --git a/crates/almide-wasm/src/witness_rc.rs b/crates/almide-wasm/src/witness_rc.rs
-index f9b36f31a..2dc5570d1 100644
+index 9c6e0b53f..7b1b38148 100644
 --- a/crates/almide-wasm/src/witness_rc.rs
 +++ b/crates/almide-wasm/src/witness_rc.rs
-@@ -80,7 +80,9 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
-             None => e.push('-'),
-         }
-         if kind == 'm' {
+@@ -82,7 +82,10 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
+         // A move names its window; so does a temporary's event logged inside
+         // one (the arm or routine may release that temporary in its callee).
+         if kind == 'm' || (local.is_none() && window.is_some()) {
 -            e.push_str(&format!("#{}", window.unwrap_or(0)));
-+            // RE-INJECTED (#4277 drill): the move names the window after the
++            // RE-INJECTED (#4277 drill): a move names the window after the
 +            // one it was logged in.
-+            e.push_str(&format!("#{}", window.unwrap_or(0) + 1));
++            let shift = u64::from(kind == 'm');
++            e.push_str(&format!("#{}", window.unwrap_or(0) + shift));
          }
          e.push(' ');
      });

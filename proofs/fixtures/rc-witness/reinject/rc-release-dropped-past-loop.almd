@@ -1,0 +1,19 @@
+// #4277 drill: an exit release that sits past a loop is dropped while its
+// event stays. The loop's block end is reached only through the loop's
+// `br_if` out of it (its body ends in `br 0` back to the loop), so the
+// release is live code: the RC byte check's dead-code reading must keep it
+// live and refuse the dropped release.
+fn count(xs: List[Int]) -> Int = {
+  let a = [1, 2, 3]
+  var i = 0
+  var s = 0
+  while i < list.len(xs) {
+    s = s + i
+    i = i + 1
+  }
+  s + list.len(a)
+}
+
+effect fn main() -> Unit = {
+  println("${count([4, 5])}")
+}

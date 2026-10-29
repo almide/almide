@@ -1,0 +1,11 @@
+// #4277 drill: the select site over an `if` handed to a new holder records
+// its arms in reverse (the then-arm's share recorded in the else-arm and
+// back). The ownership witness is unchanged; the one `+1` past the join, on
+// the value the shipped arms chose, now pairs each recorder arm with the
+// other shipped arm's value. The site is anchored to the shipped `if` / `else`, so the RC
+// byte check must refuse the swap instead of trusting the arm order.
+fn longest(xs: List[String]) -> String = (xs |> list.reduce((a, b) => if string.len(b) > string.len(a) then b else a)) ?? "none"
+
+effect fn main() -> Unit = {
+  println(longest(["alpha", "be", "gamma", "de", "epsilon"]))
+}

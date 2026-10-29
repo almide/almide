@@ -86,7 +86,7 @@ pub(crate) enum T {
 }
 
 /// `t` without the variables it came through.
-fn pl(t: &T) -> &T {
+pub(crate) fn pl(t: &T) -> &T {
     match t {
         T::Def(_, _, v) => pl(v),
         _ => t,
@@ -367,14 +367,50 @@ impl<'b, 'a> Flow<'b, 'a> {
     /// The write of local `l` every path to `p` last passes, when there is
     /// exactly one such instruction.
     fn reaching_def(&self, l: u32, p: usize) -> Option<usize> {
-        let k = (0..p).rev().find(|&k| !self.abort_arm[k] && self.writes(k, Src::Local(l)))?;
-        if !self.dominates(k, p) {
-            return None;
-        }
-        if self.window(k, p).into_iter().any(|j| self.writes(j, Src::Local(l))) {
+        // The latest write that dominates `p` and that no other write can
+        // follow on a path to `p`. A later write in the other arm of an `if`
+        // that `p` sits in (entered after the def, inside no loop the def is
+        // outside of) never runs on a path that reaches `p` from the def.
+        let writes = |k: usize| !self.abort_arm[k] && self.writes(k, Src::Local(l));
+        let k = (0..p).rev().filter(|&k| writes(k)).find(|&k| self.dominates(k, p))?;
+        if self.window(k, p).into_iter().any(|j| writes(j) && !self.other_arm(k, j, p)) {
             return None;
         }
         Some(k)
+    }
+
+    /// `j` (after `k`, before `p`) lies in one arm of an `if` entered after
+    /// `k` and `p` in its other arm, with no loop between `k` and that `if`
+    /// (whose back edge would carry `j`'s write round to `p`).
+    fn other_arm(&self, k: usize, j: usize, p: usize) -> bool {
+        if !(k < j && j < p) {
+            return false;
+        }
+        let mut c = self.parent[j];
+        while let Some(s) = c {
+            if s <= k {
+                return false;
+            }
+            if matches!(self.b.ops[s], Op::If { .. })
+                && p < self.close[s]
+                && (j + 1..=p).any(|x| self.parent[x] == Some(s) && matches!(self.b.ops[x], Op::Else))
+            {
+                // `p` in the other arm; no loop between `k` and `s`.
+                let mut a = self.parent[s];
+                while let Some(t) = a {
+                    if t <= k {
+                        break;
+                    }
+                    if matches!(self.b.ops[t], Op::Loop { .. }) {
+                        return false;
+                    }
+                    a = self.parent[t];
+                }
+                return true;
+            }
+            c = self.parent[s];
+        }
+        false
     }
 
     /// The value local `l` holds at instruction `p`, as a read of it there
@@ -426,6 +462,18 @@ impl<'b, 'a> Flow<'b, 'a> {
                 None => T::Opaque(p),
             },
         }
+    }
+
+    /// The `if` closed at `end` (index of its `end`): its `if` and `else`
+    /// positions and the value each arm yields to the join.
+    pub(crate) fn if_arms(&self, end: usize, fuel: u32) -> Option<(usize, usize, [T; 2])> {
+        let s = (0..end).rev().find(|&s| self.close[s] == end)?;
+        if !matches!(self.b.ops[s], Op::If { .. }) {
+            return None;
+        }
+        let e = (s + 1..end).find(|&k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else))?;
+        let at = |k: usize| self.b.args.get(k)?.first().copied().flatten().map(|q| self.term(q, fuel));
+        Some((s, e, [at(e)?, at(end)?]))
     }
 
     /// The local both arms of the `if` closed at `end` yield (module header

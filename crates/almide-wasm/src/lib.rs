@@ -217,6 +217,7 @@ mod fuel;
 mod inline_calls;
 mod ranges;
 mod rc_ownership;
+mod rc_shape;
 mod region;
 mod sums;
 mod random;

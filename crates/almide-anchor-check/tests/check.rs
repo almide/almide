@@ -695,3 +695,182 @@ fn an_event_outside_every_branch_site_accounts_for_one_release_per_path() -> Res
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// A C-319 cell variable's `a` event meets the +1 on the block its cell holds
+/// (read through the cell), one to one.
+#[test]
+fn a_cell_variables_event_meets_a_call_through_its_cell() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 local.set 1 local.get 1 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
+
+/// Past an `if` whose two arms both leave the function, the code is never
+/// run: its releases are no instruction the recorder owes an event for. An
+/// arm that branches to the `if`'s own end keeps the code after it live.
+#[test]
+fn code_past_an_if_whose_arms_both_leave_is_dead() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let bytes = module(
+        "(local i32 i32)",
+        "local.get 1 (if (then local.get 0 call $alloc drop return) (else local.get 0 call $alloc drop return)) local.get 0 call $alloc drop",
+    );
+    let bodies = decode(&bytes)?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    let bytes = module(
+        "(local i32 i32)",
+        "local.get 1 (if (then local.get 0 call $alloc drop br 0) (else local.get 0 call $alloc drop return)) local.get 0 call $alloc drop",
+    );
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
+
+/// A call's result names the argument its callee may hand back as is: a +1
+/// on the result is that variable's.
+#[test]
+fn a_call_result_names_the_argument_its_callee_may_return() -> Result<(), String> {
+    let bytes = wat::parse_str(
+        r#"(module (memory 1)
+             (func $inc (param i32))
+             (func $view (param i32) (result i32) local.get 0 i32.load (if (then local.get 0 return)) i32.const 64)
+             (func $main (local i32 i32) local.get 0 call $view local.set 1 local.get 1 call $inc))"#,
+    )
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    // A callee that never returns its argument: the result is not local 0's.
+    let bytes = wat::parse_str(
+        r#"(module (memory 1)
+             (func $inc (param i32))
+             (func $fresh (param i32) (result i32) i32.const 64)
+             (func $main (local i32 i32) local.get 0 call $fresh local.set 1 local.get 1 call $inc))"#,
+    )
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
+
+/// A move into a window nested in another may be released by the enclosing
+/// arm, after the inner window closes; outside both it is refused.
+#[test]
+fn a_move_may_be_released_by_an_enclosing_window() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "nop nop nop local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-2".into())], &[vec![(1, 0, 2), (1, 0, 6)], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
+
+/// Events logged in the two arms of one branch site never happen on one
+/// path: the one `+1` past the join, on the value both arms name, is each
+/// one's. Logged outside the site, two events need two calls.
+#[test]
+fn events_in_two_arms_of_one_site_share_the_call_past_the_join() -> Result<(), String> {
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 0)) call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "( a0 | a0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
+
+/// An event on a path that aborts may name an unreachable release; an
+/// unreachable release with no event is never refused.
+#[test]
+fn an_unreachable_release_is_never_refused_and_may_carry_an_event() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let bytes = module("(local i32 i32)", "unreachable local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    Ok(())
+}
+
+/// A check that runs past its deadline is a reject, never a pass or a skip.
+#[test]
+fn a_check_past_its_deadline_is_a_reject() {
+    use std::time::Duration;
+    assert_eq!(almide_anchor_check::within(Duration::from_millis(20), || {
+        std::thread::sleep(Duration::from_secs(5));
+        1
+    }), None);
+    assert_eq!(almide_anchor_check::within(Duration::from_secs(5), || 1), Some(1));
+    // A check that would have PASSED, had it finished: still a reject.
+    let late = almide_anchor_check::deadline(Duration::from_millis(20), || {
+        std::thread::sleep(Duration::from_secs(5));
+        Ok::<(), String>(())
+    });
+    assert!(late.is_err_and(|e| e.contains("deadline")));
+    assert_eq!(almide_anchor_check::deadline(Duration::from_secs(5), || Ok::<u8, String>(1)), Ok(1));
+}
+
+/// A rebind logged in both arms of one site is one release past the join;
+/// when matching first handed the exit release to one of them, that arm's
+/// rebind moves to share the join's release and the exit event takes its own.
+#[test]
+fn rebinds_in_two_arms_share_the_release_past_the_join() -> Result<(), String> {
+    let body = "local.get 1 (if (then) (else)) local.get 0 call $alloc drop local.get 0 call $alloc drop";
+    rc(body, "( o0 | o0 ) d0")?;
+    // Outside any site, two rebinds and an exit release are three releases.
+    assert!(rc(body, "o0 o0 d0").is_err());
+    Ok(())
+}
+
+/// A write in the other arm of an `if` never reaches a read in this arm:
+/// the read names the value the dominating def gave the local.
+#[test]
+fn a_write_in_the_other_arm_does_not_hide_the_def() -> Result<(), String> {
+    let body = "local.get 0 local.set 1 local.get 0 (if (then i32.const 0 local.set 1) (else local.get 1 call $alloc drop))";
+    rc(body, "d0")?;
+    // Past the join either write may have run: no def names the read.
+    let joined = "local.get 0 local.set 1 local.get 0 (if (then i32.const 0 local.set 1)) local.get 1 call $alloc drop";
+    assert!(rc(joined, "d0").is_err());
+    Ok(())
+}
+
+/// A release past an anchored `if`'s join, on the value its arms chose:
+/// one event in each arm, each naming its own shipped arm's value. The
+/// anchor (`(@<if>-<else>`) holds the recorder's arm order to the bytes:
+/// swapped, or unanchored, the pairing is refused.
+#[test]
+fn an_anchored_if_pairs_each_arm_event_with_its_arm_value() -> Result<(), String> {
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, None, &releases, &[], &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-3 d0 |@1-3 d1 )")?;
+    assert!(run("(@1-3 d1 |@1-3 d0 )").is_err(), "arms swapped");
+    assert!(run("( d0 | d1 )").is_err(), "no anchor");
+    assert!(run("(@1-3 d0 |@1-4 d1 )").is_err(), "arm boundary anchored elsewhere");
+    assert!(run("(@1-3 ( d0 | ) |@1-3 d1 )").is_err(), "an event on some of the arm's paths only");
+    Ok(())
+}
+
+/// Two recorder sites anchored to one `if` (its arms' own, then a select
+/// site over it): the pairing reads the one whose arms carry the events.
+#[test]
+fn a_select_site_over_an_anchored_if_pairs_too() -> Result<(), String> {
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, None, &releases, &[], &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-3 |@1-3 ) (@1-3 d0 |@1-3 d1 )")?;
+    assert!(run("(@1-3 |@1-3 ) (@1-3 d1 |@1-3 d0 )").is_err());
+    Ok(())
+}
+
+/// A temporary's event logged inside a window takes a call inside that
+/// window, never a release elsewhere that no event of its own accounts.
+#[test]
+fn a_windowed_temporary_event_takes_a_call_in_its_window() -> Result<(), String> {
+    rc("local.get 0 call $alloc drop", "d-@0-1")?;
+    assert!(rc("local.get 0 call $alloc drop", "d-@2-3").is_err());
+    Ok(())
+}

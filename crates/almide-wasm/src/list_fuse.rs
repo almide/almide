@@ -295,7 +295,7 @@ impl Emitter<'_> {
         // The owners' releases are the iteration-end `d`s the recorder
         // writes for every owner local bound in it (witness_paths.rs).
         self.release_fused_owners(&owners);
-        self.witness_loop_close();
+        self.witness_fused_close();
         self.f.instructions().end(); // skip-block
         self.loop_src_step(src);
         if let Some((p, ..)) = pair {

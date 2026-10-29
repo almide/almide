@@ -75,6 +75,10 @@ pub(crate) struct Emitter<'a> {
     /// address, so it only accepts nodes that outlive it: a tree the emitter
     /// builds and lowers must be `pin`ned in it (node_marks.rs, #3143).
     pub(crate) owned_call_marks: node_marks::NodeMarks,
+    /// #4277: each value-position `if` `lower_if_arms` emitted, by its node,
+    /// and the `rc::site_window` id anchoring it to its shipped `if` / `else`
+    /// — a select site recorded over that `if` later reuses the anchor.
+    pub(crate) if_sites: std::collections::HashMap<*const almide_ir::IrExpr, u64>,
     /// Temporaries the arms of the module call being lowered BORROWED
     /// (`lower_arg`, arm.rs): released by the enclosing `arm_scope`. Each
     /// entry is a local of the BORROW pool — disjoint from the scratch

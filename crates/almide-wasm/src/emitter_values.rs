@@ -204,7 +204,14 @@ impl Emitter<'_> {
                     span: e.span,
                     def_id: None,
                 });
-                match self.arm_scope(|em| em.lower_map_call("from_list", std::slice::from_ref(&*pairs), Some(ty)))? {
+                // The literal is `map.from_list`'s arm lowered inline: a
+                // compound routine whose window holds the upserts' own RC (a
+                // grown block's release, a duplicate key's) — #4277.
+                let lowered = self.routine(
+                    |_: &Option<_>| true,
+                    |em| em.arm_scope(|em| em.lower_map_call("from_list", std::slice::from_ref(&*pairs), Some(ty))),
+                )?;
+                match lowered {
                     Some(t) => Ok(t.ty),
                     None => unsup("map-literal-unit"),
                 }

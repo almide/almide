@@ -89,10 +89,11 @@ impl Emitter<'_> {
     /// view (`bind_view`). False when the value is not such an `if`.
     pub(crate) fn witness_bind_select(&mut self, idx: u32, value: &almide_ir::IrExpr) -> bool {
         let Some(sources) = self.witness_if_sources(value) else { return false };
+        let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(value) as *const _)).copied();
         let Some(w) = self.witness.as_mut() else { return true };
-        w.branch_open();
+        select_open(w, site);
         for src in sources {
-            w.branch_arm();
+            select_arm(w, site);
             match src {
                 Some(l) if w.bind_alias(idx, l) => {}
                 Some(_) => w.poison(),
@@ -108,10 +109,11 @@ impl Emitter<'_> {
     /// source and move it (`am`). False when the value is not such an `if`.
     pub(crate) fn witness_share_select(&mut self, e: &almide_ir::IrExpr) -> bool {
         let Some(sources) = self.witness_if_sources(e) else { return false };
+        let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(e) as *const _)).copied();
         let Some(w) = self.witness.as_mut() else { return true };
-        w.branch_open();
+        select_open(w, site);
         for src in sources {
-            w.branch_arm();
+            select_arm(w, site);
             match src {
                 Some(l) if w.arg_share_move(l) => {}
                 Some(_) => w.poison(),
@@ -120,5 +122,21 @@ impl Emitter<'_> {
         }
         w.branch_close();
         true
+    }
+}
+
+/// A select site over an `if` `lower_if_arms` emitted: anchored to that
+/// `if`'s shipped `if` / `else` (its arms are the shipped arms, in order).
+fn select_open(w: &mut crate::witness::WitnessRecorder, site: Option<u64>) {
+    match site {
+        Some(id) => w.branch_open_at(id),
+        None => w.branch_open(),
+    }
+}
+
+fn select_arm(w: &mut crate::witness::WitnessRecorder, site: Option<u64>) {
+    match site {
+        Some(id) => w.branch_arm_at(id),
+        None => w.branch_arm(),
     }
 }

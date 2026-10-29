@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/witness_guard.rs b/crates/almide-wasm/src/witness_guard.rs
+index 95885c6fb..01369b3cb 100644
+--- a/crates/almide-wasm/src/witness_guard.rs
++++ b/crates/almide-wasm/src/witness_guard.rs
+@@ -112,7 +112,7 @@ impl Emitter<'_> {
+         let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(e) as *const _)).copied();
+         let Some(w) = self.witness.as_mut() else { return true };
+         select_open(w, site);
+-        for src in sources {
++        for src in sources.into_iter().rev() {
+             select_arm(w, site);
+             match src {
+                 Some(l) if w.arg_share_move(l) => {}
