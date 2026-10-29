@@ -2475,7 +2475,7 @@
 {
 "mod": "http",
 "name": "response",
-"sig": "fn http.response(status: Int, body: String) -> HttpResponse",
+"sig": "fn http.response[B: Body](status: Int, body: B) -> HttpResponse",
 "kind": "据え置き"
 },
 {
@@ -2487,7 +2487,7 @@
 {
 "mod": "http",
 "name": "with_headers",
-"sig": "fn http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse",
+"sig": "fn http.with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse",
 "kind": "意味変更"
 },
 {

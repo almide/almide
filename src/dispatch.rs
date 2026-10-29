@@ -534,6 +534,10 @@ fn dispatch_deps() {
         out(&format!("{} (required by another dependency) = {}", n.name, n.package_dir.display()));
         print_dependency_details(n, caps.as_ref());
     }
+    // ADR-0032 D7 (Q23): every media owner, and what grants it.
+    for line in crate::media_grant::owner_lines(&proj, &crate::media_grant::survey(&proj, &fetched)) {
+        out(&line);
+    }
 }
 
 /// `almide deps`'s first line for a declared dependency: where it comes from.
@@ -857,6 +861,9 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
             | Commands::Build { print_release_rustflags: false, .. }
     ) {
         cli::resolve_cwd_deps_or_exit();
+    }
+    if matches!(command, Commands::Check { .. }) {
+        cli::check_cwd_media_grants_or_exit();
     }
     match command {
         Commands::Init => cli::cmd_init(),

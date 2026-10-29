@@ -1,0 +1,3 @@
+expects_code = "E118"
+expects_error = "`Page.media_type` owns `text/html`, which `html.__safe_html_media_type` already owns as `text/html`"
+hint_substring = "a media type has one owner, so `http.typed` refuses it in one name"

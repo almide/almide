@@ -139,7 +139,7 @@ fn native_files(dir: &Path, rel: &Path) -> Vec<(PathBuf, bool)> {
     out
 }
 
-fn almd_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn almd_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
         let name = entry.file_name();

@@ -76,6 +76,9 @@ equal to the set of codes the compiler emits.
 | [E112](E112.md) | Monomorphization passed the `generic_instances` budget — polymorphic recursion that needs an instance per call depth (ADR-0030) |
 | [E113](E113.md) | A `match` whose exhaustiveness check passed the `exhaustiveness_steps` compile-cost budget (ADR-0030) |
 | [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
+| [E116](E116.md) | A response's `Content-Type` written by name through `http.set_header` / `http.with_headers`: it is written from the body's type (ADR-0032, row 11e) |
+| [E117](E117.md) | `http.typed`'s media type is not a literal, is malformed, or is owned by a safe module (`text/html`, XML, SVG) |
+| [E118](E118.md) | A media type's owner is not granted (`[trust] media`), not unique, or not a literal |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

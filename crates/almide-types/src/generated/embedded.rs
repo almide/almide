@@ -2134,6 +2134,12 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
 else list.len(bytes.split(b, needle)) - 1
+
+
+
+fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
+
+fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -9825,7 +9831,7 @@ pub const SRC_HTML: &str = r##"
 
 import json
 
-mod type SafeHtml = String
+mod type SafeHtml: Body = String
 
 
 
@@ -9971,6 +9977,21 @@ fn script_json(v: Value) -> SafeHtml = {
   ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
   SafeHtml(s)
 }
+
+
+
+
+
+
+
+
+
+
+@media_owns("text/html", "application/xhtml+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
+fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
+
+fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)
 "##;
 pub const SRC_HTTP: &str = r#"
 
@@ -9997,7 +10018,6 @@ pub const SRC_HTTP: &str = r#"
 
 
 
-import html
 import json
 import url
 
@@ -10008,34 +10028,70 @@ import url
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
-/// Reply with Content-Type text/plain.
-@intrinsic("almide_rt_http_response")
-fn response(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
-  response(status, html.to_string(body)),
-  "Content-Type",
-  "text/html; charset=utf-8",
+
+
+
+
+
+
+
+
+/// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__with_headers(
+  status,
+  body.__self_to_text(),
+  ["Content-Type", body.__self_media_type()],
 )
 
-/// Reply with Content-Type application/json.
+/// Reply with Content-Type application/json; body is JSON text.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
-  let flat = __flat(headers)
-  http.__with_headers(status, body, flat)
+/// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+@header_write(headers, owned="__http_response_body_headers")
+fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse = {
+  for h in headers {
+    __http_response_owned_refusal("http.with_headers", h.0)
+  }
+  http.__with_headers(
+    status,
+    body.__self_to_text(),
+    ["Content-Type", body.__self_media_type()] + __flat(headers),
+  )
 }
+
+/// resp with its body replaced by body and its Content-Type by body's type.
+fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http_response_put_header(
+  http.__http_response_put_body(resp, body.__self_to_text()),
+  "Content-Type",
+  body.__self_media_type(),
+)
+
+/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+@literal_media(media_type)
+fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
+  media_type: media_type,
+  bytes: body,
+}
+
+/// A body of a declared media type, built only by `http.typed`.
+mod type TypedBody: Body = { media_type: String, bytes: Bytes }
+
+fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
+
+fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
-fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
-/// 302 with Location url and empty body.
-@intrinsic("almide_rt_http_redirect")
-fn redirect(url: String) -> HttpResponse = _
+/// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
+fn redirect(url: String) -> HttpResponse = http.__with_headers(
+  302,
+  "",
+  ["Location", url, "Content-Type", string.__string_media_type("")],
+)
 
 
 /// resp with code set; not range-checked.
@@ -10064,16 +10120,16 @@ fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 /// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
-/// m with header name set, any case: the first match replaced in place, else appended.
+/// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
 fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
   name,
   value,
 )
 
-/// m with its body replaced.
+/// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8.
+/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -10099,18 +10155,40 @@ fn __http_response_body(m: HttpResponse) -> String = _
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
 
+@header_write(name, value, owned="__http_response_body_headers")
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = {
+  __http_response_owned_refusal("http.set_header", name)
+  http.__http_response_put_header(m, name, value)
+}
+
+
+
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = with_body(m, body)
+
+
 @intrinsic("almide_http_set_header")
 @consume(m)
-fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+local fn __http_response_put_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
 
 @intrinsic("almide_http_set_body")
 @consume(m)
-fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
-fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
-  m,
-  bytes.to_string_lossy(body),
-)
+
+local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
+
+
+local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.map((c) => match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
+  none => c,
+}) |> list.join("")
+
+
+local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
+  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and __http_response_fold(h) == __http_response_fold(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  else ()
+
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
 
 @intrinsic("almide_http_req_header")
@@ -10586,7 +10664,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
       )
       else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__http_response_set_body(res, "") else res
+        if via_get then http.__http_response_put_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -10969,17 +11047,10 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
-fn http_response(status: Int, body: String) -> List[String] = {
-  let st = int.to_string(status)
-  [st, body, "Content-Type", "text/plain"]
-}
-
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
   [st, body, "Content-Type", "application/json"]
 }
-
-fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 
 
 
@@ -36688,6 +36759,12 @@ fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 @intrinsic("almide_rt_string___err_text")
 fn __err_text(s: String) -> String = _
+
+
+
+fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
+
+fn __string_to_text(s: String) -> String = s
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -41046,6 +41123,12 @@ local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> V
     err(_) => v,
   },
 }
+
+
+
+fn __value_media_type(v: Value) -> String = "application/json"
+
+fn __value_to_text(v: Value) -> String = __stringify(v)
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 

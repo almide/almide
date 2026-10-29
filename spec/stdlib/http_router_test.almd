@@ -169,7 +169,7 @@ test "a path matched only under other methods is 405 with Allow" {
 test "HEAD answers through the GET route without the body" {
   let h = app()!
   assert_eq(call(h, "HEAD", "/users/7")!, "200 ")
-  assert_eq(header_of(h, "HEAD", "/users/7", "Content-Type")!, "text/plain")
+  assert_eq(header_of(h, "HEAD", "/users/7", "Content-Type")!, "text/plain; charset=utf-8")
 }
 
 test "bad input is a 400, not a 500" {

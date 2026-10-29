@@ -90,6 +90,68 @@ impl Checker {
         Some(in_stdlib_dir && embedded_identity)
     }
 
+    /// E118 (ADR-0032 D7): media-type ownership outside the stdlib. A
+    /// package or the application may declare a `Body` type and own media
+    /// types with `@media_owns`; the grant of a script-capable one is the
+    /// driver's (`[trust] media`, `crate::media_grant`). Here, per module:
+    /// - an owned pattern is well formed and overlaps no stdlib owner's, nor
+    ///   another pattern of this module's (one owner per media type, Q22);
+    /// - a `Body` type's media fn is a string literal (Q19), and a
+    ///   script-capable one is covered by that fn's own `@media_owns`, so a
+    ///   type cannot serve a type it was never granted.
+    /// Read off the declarations; the stdlib's own sources are exempt.
+    pub(super) fn check_media_ownership(&mut self, program: &crate::ast::Program) {
+        use crate::media_owners as mo;
+        if self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let mut found: Vec<(String, String, Option<Span>)> = Vec::new();
+        let fn_span = |func: &str| program.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, span, .. } if name.as_str() == func => *span,
+            _ => None,
+        });
+        let owns = mo::owns_in(program);
+        for (i, o) in owns.iter().enumerate() {
+            let span = fn_span(&o.func);
+            if !mo::well_formed_pattern(&o.pattern) {
+                found.push((format!("`@media_owns(\"{}\")` on `{}` is not a media-type pattern", o.pattern, o.func), "write `type/subtype`, `*` as the type, or `*<suffix>` as the subtype (`*/*+xml`)".to_string(), span));
+                continue;
+            }
+            if let Some((p, owner)) = mo::stdlib_owners().iter().find(|(p, _)| mo::overlap(&o.pattern, p)) {
+                found.push((format!("`{}` owns `{}`, which `{owner}` already owns as `{p}`", o.func, o.pattern), "a media type has one owner, so `http.typed` refuses it in one name: build that type with its owner's builders".to_string(), span));
+            }
+            if let Some(other) = owns[..i].iter().find(|e| mo::overlap(&o.pattern, &e.pattern)) {
+                found.push((format!("`{}` owns `{}`, which overlaps `{}` owned by `{}`", o.func, o.pattern, other.pattern, other.func), "a media type has one owner: declare each type once".to_string(), span));
+            }
+        }
+        for d in &program.decls {
+            let Decl::Type { name, deriving: Some(protos), span, .. } = d else { continue };
+            if !protos.iter().any(|p| p.as_str() == mo::BODY_PROTOCOL) {
+                continue;
+            }
+            let func = format!("{name}.{}", mo::MEDIA_REQUIREMENT);
+            let Some(Decl::Fn { body: Some(body), span: fspan, .. }) = program.decls.iter().find(|d| matches!(d, Decl::Fn { name: n, .. } if n.as_str() == func)) else { continue };
+            let crate::ast::ExprKind::String { value, .. } = &body.kind else {
+                found.push((format!("`{func}` computes its media type"), "a body type's media type is a string literal the checker reads, so what it serves is what it was granted: write it as `= \"text/csv\"`".to_string(), body.span.or(*fspan).or(*span)));
+                continue;
+            };
+            let essence = value.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+            if mo::is_script_capable(&essence) && !owns.iter().any(|o| o.func == func && mo::matches(&essence, &o.pattern)) {
+                found.push((format!("`{func}` serves `{essence}`, which runs script in a browser, without owning it"), format!("declare `@media_owns(\"{essence}\")` on `{func}`; the application grants it in almide.toml `[trust] media` (ADR-0032 D7)"), body.span.or(*fspan).or(*span)));
+            }
+        }
+        for (msg, hint, span) in found {
+            let mut diagnostic = err(msg, hint, "media-type ownership".to_string()).with_code("E118");
+            if let Some(span) = span {
+                diagnostic.file = self.source_file.clone();
+                diagnostic.line = Some(span.line);
+                diagnostic.col = Some(span.col);
+                diagnostic.end_col = Some(span.end_col);
+            }
+            self.emit(diagnostic);
+        }
+    }
+
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
         let Some(attr) = attrs
             .iter()

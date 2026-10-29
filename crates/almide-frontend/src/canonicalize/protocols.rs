@@ -82,7 +82,10 @@ pub fn is_builtin_conformer(type_name: &str, proto: &str) -> bool {
 /// `type BigInt: Numeric` in `bigint`) — the form a built-in type's
 /// requirements take in its stdlib module. `None` when neither exists.
 pub fn requirement_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<String> {
-    if let Some(k) = super::registration::convention_fn_key(env, type_name, method) {
+    // A declared type meets a requirement under its public name
+    // (`fn Chart.media_type`, never `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method);
+    if let Some(k) = super::registration::convention_fn_key(env, type_name, public) {
         return Some(k.to_string());
     }
     let module = declaring_module(env, type_name)?;
@@ -319,6 +322,22 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
     // replace their headers and body through one generic function each
     // (`http.header[M: HttpMessage]`). Both are runtime-backed http types
     // with no `type` declaration, so they are listed by name here.
+    // A response body (ADR-0032): the Content-Type it is served with and its
+    // wire text (a built response holds its body as text until #4311 gives it
+    // an exact bytes slot; a Bytes body decodes as lossy UTF-8). `http.response` / `with_headers` / `with_body` take a `Body`, so
+    // a response's Content-Type is its body's type, never a header string.
+    // The stdlib-declared conformers name it at their declarations
+    // (`html.SafeHtml`, `http.TypedBody`; a package's type under the application's grant, ADR-0032 D7).
+    BuiltinProtocol {
+        name: "Body",
+        methods: |s, _| vec![
+            method("__self_media_type", &[("b", s)], Ty::String),
+            method("__self_to_text", &[("b", s)], Ty::String),
+        ],
+        conformers: &[Ty::String, Ty::Bytes],
+        named_conformers: &["Value"],
+        derivable: false,
+    },
     BuiltinProtocol {
         name: "HttpMessage",
         methods: |s, _| http_message_methods(s),

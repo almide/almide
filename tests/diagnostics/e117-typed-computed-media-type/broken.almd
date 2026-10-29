@@ -1,0 +1,7 @@
+// E117 (ADR-0032): the media type is computed, so the checker cannot tell
+// whether it is one only a safe module may serve.
+import http
+
+fn asset(ext: String, data: Bytes) -> HttpResponse = http.response(200, http.typed("text/${ext}", data))
+
+fn main() -> Unit = println(http.body(asset("css", bytes.from_string("a{}"))))

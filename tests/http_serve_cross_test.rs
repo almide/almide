@@ -591,7 +591,7 @@ fn a_bad_status_or_field_is_refused_and_the_handlers_framing_fields_are_dropped_
             assert!(err.lines().any(|l| l == format!("http.serve: refused the response: {why}")), "{leg} {i}: no stderr line: {err:?}");
         }
         let framed = String::from_utf8_lossy(&a[REFUSED.len()]);
-        assert_eq!(framed, "HTTP/1.1 200 OK\r\nX-Kept: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello", "{leg}");
+        assert_eq!(framed, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nX-Kept: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello", "{leg}");
     }
     assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
 }

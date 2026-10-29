@@ -499,7 +499,10 @@ fn requirement_target(key: &str, bindings: &HashMap<String, Ty>) -> Option<CallT
     }
     let concrete_name = ty_to_name(concrete_ty)?;
     let bare = concrete_name.rsplit_once('.').map_or(concrete_name.as_str(), |(_, t)| t);
-    Some(CallTarget::Named { name: almide_base::intern::sym(&format!("{}.{}", bare, method_name)) })
+    // Its convention method carries the requirement's public name
+    // (`Chart.media_type` for `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method_name);
+    Some(CallTarget::Named { name: almide_base::intern::sym(&format!("{}.{}", bare, public)) })
 }
 
 fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {
