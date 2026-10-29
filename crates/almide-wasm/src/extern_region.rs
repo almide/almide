@@ -128,10 +128,11 @@ pub(crate) fn is_region_export(f: &IrFunction) -> bool {
 /// ADR-0031 amendment A1: an `@export(wasm, "sym")` fn returning a Region
 /// keeps its name and body but loses the export; a wrapper
 /// `__region_export_<name>` of the same parameters takes the export and
-/// returns the Region's block, `ffi.__export_owner(f(…))` (`f(…)!` for an
-/// `effect fn`), so the Region's own record is released by the ordinary
-/// ownership rules and only its block crosses. The emitter's adapter then
-/// hands the host the block's data address and length, and the block's share.
+/// returns `ffi.__export_view(f(…))` (`f(…)!` for an `effect fn`): the
+/// Region's block, one share of it, and the view's offset and length, so the
+/// Region's own record is released by the ordinary ownership rules. The
+/// emitter's adapter hands the host the view's data address and length, and
+/// files the address against the block's share (region_export.rs).
 /// None when no export returns a Region (no clone).
 pub(crate) fn wrap_region_exports(ir: &IrProgram) -> Option<IrProgram> {
     let wants = |fs: &[IrFunction]| fs.iter().any(returns_region_export);
@@ -171,15 +172,15 @@ fn wrap_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
             IrExprKind::Call {
                 target: CallTarget::Module {
                     module: almide_base::intern::sym("ffi"),
-                    func: almide_base::intern::sym("__export_owner"),
+                    func: almide_base::intern::sym("__export_view"),
                     def_id: None,
                 },
                 args: vec![region],
                 type_args: Vec::new(),
             },
-            Ty::Bytes,
+            export_view_ty(),
         );
-        w.ret_ty = Ty::Bytes;
+        w.ret_ty = export_view_ty();
         w.export_attrs.retain(|a| a.target.as_str() == "wasm");
         w.extern_attrs.clear();
         w.attrs = vec![almide_lang_attr(REGION_EXPORT_ATTR)];
@@ -200,4 +201,9 @@ fn wrap_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
 
 fn almide_lang_attr(name: &str) -> almide_lang::ast::Attribute {
     almide_lang::ast::Attribute { name: almide_base::intern::sym(name), args: Vec::new(), span: None }
+}
+
+/// `ffi.RegionExportView`, the record `__export_view` answers.
+fn export_view_ty() -> Ty {
+    Ty::Named(almide_base::intern::sym("RegionExportView"), Vec::new())
 }
