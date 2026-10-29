@@ -56,6 +56,12 @@ effect fn pull(n: Int) -> Int = {
   bytes.to_list(b) |> list.fold(0, (a, x) => a + x)
 }
 
+@extern(wasm, "host", "sum")
+fn host_sum(buf: Region) -> Int
+
+@export(wasm, "sum_tail")
+fn sum_tail() -> Int = host_sum(ffi.slice(ffi.region(bytes.from_list([1, 2, 3, 40])), 2, 2) ?? ffi.region(bytes.new()))
+
 effect fn main() -> Unit = println("ready")
 "#;
 
@@ -138,6 +144,21 @@ impl Run {
                     *b = byte as u8;
                 }
                 c.data().lock().unwrap().fills.push((base, len));
+                Ok(())
+            })
+            .unwrap();
+        // A lent read: the sum of the (base, len) bytes.
+        let sum = module
+            .imports()
+            .find(|i| i.module() == "host" && i.name() == "sum")
+            .and_then(|i| i.ty().func().cloned())
+            .expect("the module imports host.sum");
+        linker
+            .func_new("host", "sum", sum, |mut c, args, rets| {
+                let (base, len) = (as_i64(&args[0]), as_i64(&args[1]));
+                let mem = c.get_export("memory").and_then(Extern::into_memory).expect("memory");
+                let total: i64 = mem.data(&c)[base as usize..(base + len) as usize].iter().map(|b| i64::from(*b)).sum();
+                rets[0] = Val::I64(total);
                 Ok(())
             })
             .unwrap();
@@ -256,4 +277,13 @@ fn an_import_fills_a_lent_alloc_region_in_place() {
     let fills = r.host.lock().unwrap().fills.clone();
     assert_eq!(fills.len(), 1);
     assert!(fills[0].0 != 0 && fills[0].1 == 5, "{fills:?}");
+}
+
+/// A3 at the boundary: a slice handed to an import crosses as its own
+/// (base, len) — the sub-range of the parent, with no copy.
+#[test]
+fn a_slice_crosses_an_import_as_its_sub_range() {
+    let mut r = Run::new();
+    let f = r.inst.get_typed_func::<(), i64>(&mut r.store, "sum_tail").unwrap();
+    assert_eq!(f.call(&mut r.store, ()).unwrap(), 43);
 }
