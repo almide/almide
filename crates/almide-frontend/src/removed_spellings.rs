@@ -119,6 +119,49 @@ pub fn lookup(name: &str) -> Option<&'static Removal> {
     table().iter().find(|r| r.from == name)
 }
 
+fn breaks() -> impl Iterator<Item = (u32, &'static str)> {
+    static LEDGER_VALUE: OnceLock<toml::Value> = OnceLock::new();
+    let ledger = LEDGER_VALUE.get_or_init(|| toml::from_str(LEDGER).expect("proofs/dialect-epochs.toml parses"));
+    ledger.get("epoch").and_then(|v| v.as_array()).into_iter().flatten().flat_map(|e| {
+        let n = e.get("n").and_then(|v| v.as_integer()).unwrap_or(0) as u32;
+        e.get("breaks").and_then(|v| v.as_array()).into_iter().flatten().filter_map(move |b| b.as_str().map(|s| (n, s)))
+    })
+}
+
+/// The callee a removed spelling renames to, when the ledger's rewrite keeps
+/// the call's argument list verbatim (`` `ffi.address(b)` → rewrite as
+/// `ffi.region(b)` ``): renaming the callee is then the whole edit, so
+/// `almide fix` applies it. A rewrite whose argument list differs is a hint
+/// only.
+pub fn same_shape_rename(name: &str) -> Option<String> {
+    breaks().find_map(|(_, text)| {
+        let (old, rest) = between(text, "`", "`")?;
+        if !text.starts_with('`') || callee(old)? != name {
+            return None;
+        }
+        let shape = rest.trim_start().strip_prefix('→')?.trim_start().strip_prefix("rewrite as ")?;
+        let (new_call, _) = between(shape, "`", "`")?;
+        let args = |call: &str| call.split_once('(').map(|(_, a)| a.to_string());
+        (args(old)? == args(new_call)?).then(|| callee(new_call).map(str::to_string)).flatten()
+    })
+}
+
+/// A removed TYPE spelling, as an epoch's `breaks` records it:
+/// `` the type `RawPtr` → rewrite as `Handle`: … ``. Returns the epoch, the
+/// new spelling and the repair text.
+pub fn removed_type(name: &str) -> Option<(u32, String, String)> {
+    breaks().find_map(|(epoch, text)| {
+        let rest = text.strip_prefix("the type ")?;
+        let (old, rest) = between(rest, "`", "`")?;
+        if old != name {
+            return None;
+        }
+        let repair = rest.trim_start().strip_prefix('→')?.trim_start();
+        let (new, _) = between(repair.strip_prefix("rewrite as ")?, "`", "`")?;
+        Some((epoch, new.to_string(), repair.to_string()))
+    })
+}
+
 /// The hint for a call to a removed spelling.
 pub fn hint(r: &Removal) -> String {
     match &r.fate {
@@ -181,6 +224,17 @@ mod tests {
     }
 
     #[test]
+    fn the_adr_0031_removals_rename_only_where_the_arguments_are_kept() {
+        assert_eq!(same_shape_rename("ffi.address").as_deref(), Some("ffi.region"));
+        assert_eq!(same_shape_rename("bytes.as_ptr").as_deref(), Some("ffi.region"));
+        assert_eq!(same_shape_rename("bytes.from_raw_ptr"), None, "different arguments: a hint, not a fix");
+        assert_eq!(same_shape_rename("ffi.to_int"), None, "deleted, not renamed");
+        let (epoch, to, _) = removed_type("RawPtr").expect("the RawPtr removal is in the ledger");
+        assert_eq!((epoch, to.as_str()), (15, "Handle"));
+        assert!(removed_type("Handle").is_none());
+    }
+
+    #[test]
     fn a_deleted_break_parses_and_prose_does_not() {
         let r = parse_break(14, "`mem.save()` → delete the call: a no-op").unwrap();
         assert_eq!(r.fate, Fate::Deleted { repair: "delete the call: a no-op".into() });
@@ -215,7 +269,10 @@ mod tests {
         let ledger: toml::Value = toml::from_str(LEDGER).unwrap();
         let e15 = ledger["epoch"].as_array().unwrap().iter().find(|e| e["n"].as_integer() == Some(15)).unwrap();
         for b in e15["breaks"].as_array().unwrap().iter().filter_map(|b| b.as_str()) {
-            let shaped = b.contains("` → `import ") || b.contains("` → delete the call") || b.contains("` → rewrite as `");
+            // A removal names its spelling first (`parse_break`'s own rule);
+            // an entry that opens with prose (`the type `RawPtr` → …`) is not one.
+            let shaped = b.starts_with('`')
+                && (b.contains("` → `import ") || b.contains("` → delete the call") || b.contains("` → rewrite as `"));
             assert!(!shaped || parse_break(15, b).is_some(), "a removal-shaped break that does not parse: {b}");
         }
         for name in ["matrix.mul", "int.to_int8", "list.get_or", "bytes.concat", "path.trusted", "matrix.conv1d", "process.spawn"] {

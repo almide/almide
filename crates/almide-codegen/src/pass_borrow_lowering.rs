@@ -439,6 +439,28 @@ impl Lower<'_> {
         *expr = mk(IrExprKind::Deref { expr: Box::new(var) }, ty, span);
     }
 
+    /// The clone pass's copy of a boxed payload, `*l.clone()`, when a
+    /// by-reference match bound `l: &AlmideBox<T>` (#4292). `l.clone()` of
+    /// the reference clones the BOX, and BoxTakeLowering then reads the copy
+    /// through the place as `(*l).clone()` — an `AlmideBox<T>` where the
+    /// position takes the `T`. The value is two references down:
+    /// `(**l).clone()`, the spelling [`Lower::own_consumed_ref_mut`] gives a
+    /// bare consumed `*l`.
+    fn lower_ref_box_clone(&self, expr: &mut IrExpr) {
+        let IrExprKind::Deref { expr: inner } = &expr.kind else { return };
+        let IrExprKind::Clone { expr: var } = &inner.kind else { return };
+        let Some(id) = var_id(var) else { return };
+        if !self.ref_binders.contains(&id) || !self.ann.box_binders.contains(&id) || is_copy_scalar(&expr.ty) {
+            return;
+        }
+        let ty = expr.ty.clone();
+        let span = expr.span;
+        let IrExprKind::Deref { expr: inner } = std::mem::replace(&mut expr.kind, IrExprKind::Unit) else { unreachable!() };
+        let IrExprKind::Clone { expr: var } = inner.kind else { unreachable!() };
+        let place = mk(IrExprKind::Deref { expr: var }, ty.clone(), span);
+        *expr = owned_read(mk(IrExprKind::Deref { expr: Box::new(place) }, ty, span));
+    }
+
     /// `p.clone()` of a `&str` param yields a `&str`; the owned `String` the
     /// context expects is `.to_string()`.
     /// A `Clone` of a by-reference `String` / `List` param is its owned
@@ -726,9 +748,14 @@ impl IrMutVisitor for Lower<'_> {
                 // walker learns "this subject is borrowed" from the one
                 // annotation and never reads a param's borrow mode.
                 self.ref_binders.insert(id);
-                let mut bound = Vec::new();
-                for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
-                self.ref_binders.extend(bound);
+                // A match over a `&str` view (#4296) binds a `&str` the arm
+                // copies out itself where it is wanted as a value (the
+                // `StrViewRebind` copy): not a reference binder.
+                if !crate::pass_match_subject::matches_through_str_view(&subject.ty, arms) {
+                    let mut bound = Vec::new();
+                    for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
+                    self.ref_binders.extend(bound);
+                }
             }
             // A head read the clone pass borrowed (`almide_list_get_ref!`)
             // is an `Option<&T>`: its arms bind `&T` as well. Left out, a
@@ -745,6 +772,7 @@ impl IrMutVisitor for Lower<'_> {
             IrExprKind::Var { .. } => self.lower_scalar_ref_read(expr),
             IrExprKind::Borrow { .. } => self.lower_borrow(expr),
             IrExprKind::Clone { .. } => self.lower_clone(expr),
+            IrExprKind::Deref { .. } => self.lower_ref_box_clone(expr),
             IrExprKind::SpreadRecord { .. } => self.lower_spread(expr),
             IrExprKind::BinOp { .. } => self.lower_compare(expr),
             IrExprKind::MapAccess { .. } => self.lower_map_access(expr),

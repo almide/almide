@@ -219,12 +219,42 @@
     (call $stage (local.get $m) (local.get $l))
     (call $pack (i32.const 1) (local.get $l)))
 
-  ;; C-418 (#4126): copy the UTF-8 text p[0..l) to w with every control and
-  ;; bidi character escaped — almide-base's err_text.rs, byte for byte. Escaped:
-  ;; U+0000..=U+001F, U+007F..=U+009F, U+061C, U+200E, U+200F,
-  ;; U+202A..=U+202E, U+2066..=U+2069; written `\n` `\r` `\t` `\0`, else
-  ;; `\u{<lowercase hex, no leading zeros>}`. Every other character (quote and
-  ;; backslash included) is copied as is. Answers the new end.
+  ;; C-418 (#4126, #4265): is code point cp one the escaper writes as an
+  ;; escape? The ranges of almide-base's ALMIDE_RT_ERRTEXT_ESCAPED, one line
+  ;; each as (lo, hi - lo): C0, DEL and C1, Cf + Zl + Zp of Unicode 16.0, the
+  ;; Tags block. crates/almide-base/tests/err_text.rs reads them back.
+  (func $esc_cp (param $cp i32) (result i32)
+    (block $yes
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x0)) (i32.const 0x1f)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x7f)) (i32.const 0x20)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xad)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x600)) (i32.const 0x5)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x61c)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x6dd)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x70f)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x890)) (i32.const 0x1)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x8e2)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x180e)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x200b)) (i32.const 0x4)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2028)) (i32.const 0x6)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2060)) (i32.const 0x4)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2066)) (i32.const 0x9)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xfeff)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xfff9)) (i32.const 0x2)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x110bd)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x110cd)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x13430)) (i32.const 0xf)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x1bca0)) (i32.const 0x3)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x1d173)) (i32.const 0x7)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xe0000)) (i32.const 0x7f)))
+      (return (i32.const 0)))
+    (i32.const 1))
+
+  ;; C-418 (#4126): copy the UTF-8 text p[0..l) to w with every character
+  ;; `$esc_cp` names escaped — almide-base's err_text.rs, byte for byte:
+  ;; written `\n` `\r` `\t` `\0`, else `\u{<lowercase hex, no leading
+  ;; zeros>}`. Every other character (quote and backslash included) is copied
+  ;; as is. Answers the new end.
   (func $put_esc (param $w i32) (param $p i32) (param $l i32) (result i32)
     (local $i i32) (local $b i32) (local $n i32) (local $cp i32) (local $sh i32) (local $d i32)
     (block $done (loop $next
@@ -245,17 +275,18 @@
                 (i32.shl (i32.and (local.get $b) (i32.const 0x0f)) (i32.const 12))
                 (i32.shl (i32.and (i32.load8_u offset=1 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)) (i32.const 6)))
                 (i32.and (i32.load8_u offset=2 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)))))
-            (else (local.set $n (i32.const 4)) (local.set $cp (i32.const 0x10000))))))))
-      ;; A truncated tail (never in a valid string) is copied as is.
+            (else
+              (local.set $n (i32.const 4))
+              (local.set $cp (i32.or (i32.or (i32.or
+                (i32.shl (i32.and (local.get $b) (i32.const 0x07)) (i32.const 18))
+                (i32.shl (i32.and (i32.load8_u offset=1 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)) (i32.const 12)))
+                (i32.shl (i32.and (i32.load8_u offset=2 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)) (i32.const 6)))
+                (i32.and (i32.load8_u offset=3 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f))))))))))
+      ;; A truncated tail (never in a valid string) is copied as is (0x110000
+      ;; is past every code point, so no escape names it).
       (if (i32.gt_u (i32.add (local.get $i) (local.get $n)) (local.get $l))
-        (then (local.set $n (i32.sub (local.get $l) (local.get $i))) (local.set $cp (i32.const 0x10000))))
-      (if (i32.or (i32.or (i32.or
-            (i32.le_u (local.get $cp) (i32.const 0x1f))
-            (i32.le_u (i32.sub (local.get $cp) (i32.const 0x7f)) (i32.const 0x20)))
-          (i32.or (i32.eq (local.get $cp) (i32.const 0x61c))
-                  (i32.le_u (i32.sub (local.get $cp) (i32.const 0x200e)) (i32.const 1))))
-          (i32.or (i32.le_u (i32.sub (local.get $cp) (i32.const 0x202a)) (i32.const 4))
-                  (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2066)) (i32.const 3))))
+        (then (local.set $n (i32.sub (local.get $l) (local.get $i))) (local.set $cp (i32.const 0x110000))))
+      (if (call $esc_cp (local.get $cp))
         (then
           (i32.store8 (local.get $w) (i32.const 92))
           (local.set $d (i32.const 0))
@@ -271,7 +302,7 @@
               (i32.store8 offset=1 (local.get $w) (i32.const 117))
               (i32.store8 offset=2 (local.get $w) (i32.const 123))
               (local.set $w (i32.add (local.get $w) (i32.const 3)))
-              (local.set $sh (i32.const 12))
+              (local.set $sh (i32.const 20))
               (block $top (loop $skip
                 (br_if $top (i32.eqz (local.get $sh)))
                 (br_if $top (i32.shr_u (local.get $cp) (local.get $sh)))
@@ -298,7 +329,7 @@
     (local $np i32) (local $nl i32) (local $m i32) (local $w i32)
     (call $op_name (local.get $op)) (local.set $nl) (local.set $np)
     ;; An escaped byte grows at most 6x (`\u{1b}` for one byte, `\u{85}` for
-    ;; two, `\u{202e}` for three).
+    ;; two, `\u{202e}` for three, `\u{e0041}` for four).
     (local.set $m (call $alloc (i32.add (i32.add (i32.add (local.get $nl)
                                                           (i32.mul (i32.add (local.get $al) (local.get $bl)) (i32.const 6)))
                                                  (local.get $tl))

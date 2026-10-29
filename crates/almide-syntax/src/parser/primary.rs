@@ -735,6 +735,9 @@ impl Parser {
                     }
                     self.errors.push(d);
                 }
+                // #4266: a hole's identifiers are the file's identifiers —
+                // `"${аdmin()}"` must meet the same E101 judgment as `аdmin()`.
+                self.idents.extend(std::mem::take(&mut sub_parser.idents));
                 StringPart::Expr { expr: Box::new(parsed) }
             }
             Err(e) => {

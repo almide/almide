@@ -150,27 +150,14 @@ impl<'a> LowerCtx<'a> {
     /// Returns the fully qualified function name if:
     /// - The function is explicitly defined in env.functions, OR
     /// - The type declares `deriving <Convention>` (auto-derive will generate the function)
+    ///
     /// A convention method the user wrote EXPLICITLY (not one auto-derive will
     /// synthesize). String interpolation of a record/variant uses this — when no
     /// explicit `repr` exists it falls through to the codegen `AlmideRepr` impl,
     /// the canonical Almide-literal form (quoted strings, Display floats), so a
     /// `deriving Repr` record and a plain record interpolate identically.
     pub(super) fn find_explicit_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
-        if let Ty::Named(type_name, _) = ty {
-            let fn_name = sym(&format!("{}.{}", type_name, convention));
-            if self.explicit_convention_fns.contains(&fn_name) {
-                return Some(fn_name);
-            }
-            // The set above only holds the program being lowered, so a custom
-            // `repr` defined in ANOTHER module was silently skipped and the
-            // value fell through to the derived `AlmideRepr` impl — printing
-            // the variant name with no error anywhere (#1087).
-            let held = crate::canonicalize::registration::convention_fn_key(self.env, &type_name.to_string(), convention)?;
-            if self.env.explicit_convention_fns.contains(&held) {
-                return crate::canonicalize::registration::convention_emit_key(self.env, &type_name.to_string(), convention);
-            }
-        }
-        None
+        declared_repr::explicit_convention_fn(self.env, &self.explicit_convention_fns, ty, convention)
     }
 
     pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
@@ -628,7 +615,10 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
     }
     functions.append(&mut ctx.synthesized_fns);
     let operator_requirements = operator_requirement_targets(&mut ctx, env);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements };
+    // The renderer rule's post-mono run (#4239) reads the entry program's
+    // table; a module lowering's IR is folded into the entry's.
+    let declared_reprs = if ctx.current_module.is_none() { ctx.declared_repr_table() } else { Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements, declared_reprs };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
@@ -658,12 +648,29 @@ fn operator_requirement_targets(
     let methods: Vec<&str> = OPERATOR_REQUIREMENTS.iter().map(|(_, m)| *m)
         .chain([NEG_REQUIREMENT, ORDER_REQUIREMENT])
         .collect();
-    let mut names: Vec<almide_base::intern::Sym> = env.type_protocols.keys().copied().collect();
-    names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    // Only a type one of whose protocols requires an operator method can
+    // answer one, and most conforming types (every Eq / Repr / Hash
+    // conformer) require none: read each type's protocols once and keep the
+    // operator methods they require, instead of resolving every (type,
+    // method) pair — this ran for every module lowered (#4289).
+    let required_ops = |name: &str| -> Vec<&str> {
+        let bare = name.rsplit_once('.').map_or(name, |(_, b)| b);
+        let protos: Vec<&almide_base::intern::Sym> = [name, bare].iter()
+            .filter_map(|n| env.type_protocols.get(&sym(n)))
+            .flatten()
+            .collect();
+        methods.iter().copied().filter(|m| protos.iter().any(|p| {
+            env.protocols.get(*p).is_some_and(|d| d.methods.iter().any(|x| x.name.as_str() == *m))
+        })).collect()
+    };
+    let mut names: Vec<(almide_base::intern::Sym, Vec<&str>)> = env.type_protocols.keys()
+        .filter_map(|n| { let ops = required_ops(n.as_str()); (!ops.is_empty()).then_some((*n, ops)) })
+        .collect();
+    names.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     let mut out = std::collections::HashMap::new();
-    for name in names {
+    for (name, ops) in names {
         let ty = Ty::Named(name, vec![]);
-        for method in &methods {
+        for method in &ops {
             let Some(target) = expressions::requirement_call_target(ctx, &ty, method) else { continue };
             let bare = name.as_str().rsplit_once('.').map_or(name.as_str(), |(_, b)| b);
             out.insert((name, sym(method)), target.clone());

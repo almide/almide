@@ -270,3 +270,29 @@ fn user_types_named_after_formerly_imported_std_and_crate_items_build() {
         "7 8 5\n",
     );
 }
+
+/// #4284: the generated preamble opened with a crate-level
+/// `use std::collections::HashMap;` / `use std::collections::HashSet;`, so a
+/// user type of either name was E0255 at rustc beside it. The preamble binds
+/// no std name now; every emitted reference spells `std::collections::…`.
+/// The program pulls the map and set runtimes and interpolates a map, so the
+/// string-boundary conversion over `std::collections::HashMap` is emitted too.
+/// The wasm leg has no preamble; it runs the same program for agreement.
+#[test]
+fn user_types_named_hash_map_and_hash_set_build() {
+    let source = "type HashMap = { n: Int }\ntype HashSet = | HashSet(Int) | Empty\n\nfn pick(h: HashSet) -> Int = match h {\n  HashSet(v) => v,\n  Empty => 0,\n}\n\neffect fn main() -> Unit = {\n  let x = HashMap { n: 7 }\n  let m = map.from_list([(\"a\", 1), (\"b\", 2)])\n  let s = set.from_list([1, 2, 2])\n  println(\"${x.n} ${map.len(m)} ${set.len(s)} ${pick(HashSet(3))} ${pick(Empty)} ${m}\")\n}\n";
+    let expected = "7 2 2 3 0 [\"a\": 1, \"b\": 2]\n";
+    let (ok, stdout, stderr) = run_inline("HashMap", source);
+    for code in ["E0428", "E0255", "E0574", "E0560", "E0308", "E0412", "E0107"] {
+        assert!(!stderr.contains(code), "a user `HashMap` / `HashSet` collided with the preamble again ({code}):\n{stderr}");
+    }
+    assert!(ok, "user types named HashMap and HashSet must build natively:\nstdout={stdout}\nstderr={stderr}");
+    let dir = std::env::temp_dir().join(format!("almd_4284_wasm_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.almd"), source).unwrap();
+    let (wok, wout, werr) = almide_in(&dir, &["run", "m.almd", "--target", "wasm"]);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(wok, "wasm run failed:\nstdout={wout}\nstderr={werr}");
+    assert_eq!(stdout, wout, "native and wasm disagree");
+    assert_eq!(stdout, expected, "native output");
+}

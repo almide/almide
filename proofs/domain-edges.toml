@@ -100,7 +100,7 @@
 
 wasm_budget_bytes = 1073741824
 count = 23
-skip_count = 128
+skip_count = 126
 
 [[divergence]]
 cell   = "bytes.pad_end:n:i32_max"
@@ -201,16 +201,8 @@ reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocat
 # fails; a slot that becomes buildable must have its row deleted.
 
 [[skip]]
-slot   = "bytes.copy_to_ptr(cap)"
-reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
-
-[[skip]]
 slot   = "bytes.fold(init)"
 reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
-
-[[skip]]
-slot   = "bytes.from_raw_ptr(len)"
-reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
 
 [[skip]]
 slot   = "bytes.next_bool(pos)"

@@ -1,6 +1,6 @@
-/// Regression tests: verify that inference TypeVars (?N) are fully resolved
-/// before reaching codegen. These patterns previously caused WASM codegen
-/// to produce incorrect code due to unresolved TypeVars.
+//! Regression tests: verify that inference TypeVars (?N) are fully resolved
+//! before reaching codegen. These patterns previously caused WASM codegen
+//! to produce incorrect code due to unresolved TypeVars.
 
 use almide::lexer::Lexer;
 use almide::parser::Parser;

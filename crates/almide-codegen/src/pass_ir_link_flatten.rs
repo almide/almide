@@ -99,8 +99,9 @@ impl NanoPass for IrLinkFlattenPass {
 
 /// Type names the generated Rust crate already binds at its top level, which a
 /// user declaration of the same bare name would shadow for the whole crate:
-/// every type and trait in the Rust 2024 prelude, and the collections the
-/// generated preamble imports (`use std::collections::{HashMap, HashSet}`).
+/// every type and trait in the Rust 2024 prelude. The generated preamble
+/// imports no std name (#4284: it used to bind `HashMap` / `HashSet`, and the
+/// emitted code now spells them `std::collections::…`), so neither is here.
 /// The runtime's own items all carry the `Almide` / `almide_` prefix, which
 /// [`is_rust_reserved_type_name`] reserves as a family.
 ///
@@ -120,8 +121,6 @@ pub const RUST_RESERVED_TYPE_NAMES: &[&str] = &[
     "Iterator", "IntoIterator", "DoubleEndedIterator", "ExactSizeIterator",
     "Extend", "FromIterator", "PartialEq", "PartialOrd", "Eq", "Ord",
     "Future", "IntoFuture",
-    // The generated preamble's crate-level imports.
-    "HashMap", "HashSet",
     // The spliced runtime modules' crate-level imports (`use std::path::Path`
     // in fs, `std::time::Duration`, …): a user `type Path` in a package's
     // `src/path.almd` shadowed `std::path::Path` for the runtime (#2858).

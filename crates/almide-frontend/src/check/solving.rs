@@ -85,6 +85,16 @@ impl Checker {
         if self.report_erased_err_arm(c, &exp) {
             return;
         }
+        // #4107: a foreign opaque record met another record shape.
+        if let Some((opaque, reading)) = self.opaque_crossing(&exp, &act) {
+            let saved_span = self.current_span;
+            if c.span.is_some() {
+                self.current_span = c.span;
+            }
+            self.reject_opaque_crossing(&opaque, reading);
+            self.current_span = saved_span;
+            return;
+        }
         // #1108 Phase 2b-iii: a fallible callback handed to a container HOF the
         // name-keyed normalization does not cover. `list.map(xs, (x) => f(x)!)`
         // is rewritten to the `__fallible_*` twin before inference (so are the
@@ -262,13 +272,19 @@ impl Checker {
     fn unify_record_literal(&mut self, id: u32, other: Ty, literal_is_actual: bool) -> bool {
         // A literal standing for an opaque record outside its module (#4107),
         // reported where the literal first meets the nominal type.
-        if self.uf.resolve(id).is_none_or(super::types::is_structural_record) {
+        let literal_shape = self.uf.resolve(id).is_none_or(super::types::is_structural_record);
+        if literal_shape {
             self.reject_foreign_opaque_record(&other, "build a literal of");
         }
         let Some(existing) = self.uf.resolve(id).cloned() else {
             self.uf.bind(id, other);
             return true;
         };
+        // Already reported as the literal it is; unifying the literal's
+        // record with the opaque type would report it a second time.
+        if literal_shape && self.foreign_opaque_record(&other).is_some() {
+            return true;
+        }
         let ok = if literal_is_actual {
             self.unify_infer(&other, &existing)
         } else {
@@ -397,6 +413,11 @@ impl Checker {
                     && args_a.iter().zip(args_b.iter()).all(|(ta, tb)| self.unify_infer(ta, tb))
                     || (args_a.is_empty() || args_b.is_empty())
             }
+            // A foreign opaque record (#4107) never unifies with another
+            // record shape: its fields would become readable through the
+            // other type, or a forged value would pass as it. Reported as
+            // E033 by `report_constraint_mismatch`.
+            (Ty::Named(..), _) | (_, Ty::Named(..)) if self.opaque_crossing(a, b).is_some() => false,
             (Ty::Named(na, _), Ty::Named(nb, _)) => self.unify_distinct_nominals(a, b, *na, *nb),
             (Ty::Named(_, _), _) => {
                 let resolved = self.env.resolve_named(a);

@@ -68,7 +68,6 @@ pub const PURE_MODULES: &[&str] = &[
     "bytes_cursor",
     "bytes_f16",
     "bytes_mutate",
-    "bytes_rawptr",
     "bytes_split",
     "bytes_string",
     "codec_decode",
@@ -389,12 +388,12 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // capability is a host op, which `host_ops::classify` answers before
         // it asks purity.
         "zlib" => declares_public_fn("zlib", func),
-        // `ffi` (R-ffi-01): `address` / `to_int` build an address as a value,
-        // and `read` / `write` copy through one inside the program's own
-        // memory (stdlib/ffi_bridge.almd over bytes_rawptr.almd: prim loads and stores, no host op).
-        // The `effect fn` spelling of read/write marks memory outside Almide's
-        // values (R-ffi-02), not a host capability; `--profile critical`
-        // refuses the module wholesale (#4008).
+        // `ffi` (R-ffi-01, ADR-0031): `region` / `alloc` build a Region, and
+        // `read` / `write` copy through one after its bounds check, inside the
+        // program's own memory (stdlib/ffi_bridge.almd: prim loads and
+        // stores, no host op). The `effect fn` spelling marks memory outside
+        // Almide's values (R-ffi-02), not a host capability; `--profile
+        // critical` refuses the module wholesale (#4008).
         "ffi" => true,
         // Pure data on the blanket-impure http module (the network fns stay
         // walled): the response and request reps (stdlib/http_response.almd,

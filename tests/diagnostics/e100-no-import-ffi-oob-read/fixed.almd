@@ -1,9 +1,0 @@
-// The fix: `import ffi` opts the file in, `ffi.read` (an effect fn) replaces
-// the deprecated spelling, and the length is the buffer's own.
-import ffi
-
-effect fn main() -> Unit = {
-  let small = bytes.from_list([1, 2, 3, 4])
-  let copied = ffi.read(ffi.address(small), bytes.len(small))!
-  println(int.to_string(bytes.len(copied)))
-}

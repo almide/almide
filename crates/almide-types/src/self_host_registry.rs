@@ -429,7 +429,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_SET_TO_STRING_S, &[("set_to_string_s", "set.to_string_s")]),
         (crate::embedded::SRC_MAP_TO_STRING, &[("map_to_string", "map.to_string"), ("map_to_string_ss", "map.to_string_ss"), ("map_to_string_sb", "map.to_string_sb"), ("map_to_string_sf", "map.to_string_sf")]),
         (crate::embedded::SRC_MAP_TYPECHANGE, &[("map_entries_core", "map.to_list"), ("map_entries_hvalt", "map.to_list_hvalt"), ("map_map_skv2str", "map.map_skv2str"), ("map_map_str2skv", "map.map_str2skv"), ("map_map_ivh2core", "map.map_ivh2core"), ("map_map_skv2hvalt", "map.map_skv2hvalt"), ("set_map_i2s", "set.map_i2s")]),
-        (crate::embedded::SRC_BYTES_RAWPTR, &[("bytes_as_ptr", "bytes.as_ptr"), ("bytes_as_mut_ptr", "bytes.as_mut_ptr"), ("bytes_from_raw_ptr", "bytes.from_raw_ptr"), ("bytes_copy_to_ptr", "bytes.copy_to_ptr")]),
         (crate::embedded::SRC_LIST_TO_STRING_LO, &[("list_to_string_lo", "list.to_string_lo")]),
         (crate::embedded::SRC_LIST_TO_STRING_LOB, &[("list_to_string_lob", "list.to_string_lob")]),
         (crate::embedded::SRC_LIST_TO_STRING_LR, &[("list_to_string_lr", "list.to_string_lr")]),

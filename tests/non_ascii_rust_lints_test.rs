@@ -5,18 +5,19 @@
 //! generated crate must allow them: the name was legal Almide, and a warning
 //! about it in generated code is noise the author cannot act on.
 //!
-//! The programs: a lone Cyrillic `а` (the whole Cyrillic usage is confusable,
-//! and it collides with the runtime's Latin `a`), a Latin / Cyrillic look-alike
-//! pair, and a name from an excluded (archaic) script.
+//! The program: a lone Cyrillic `а` (the whole Cyrillic usage is confusable,
+//! and it collides with the runtime's Latin `a` in the generated crate). Since
+//! #4266 (UTS #39) a Latin / Cyrillic look-alike pair in one file, and a name
+//! from an excluded (archaic) script — not General Security Profile `Allowed`,
+//! the codepoints rustc's `uncommon_codepoints` names — are E101, so neither
+//! reaches a render; the last test holds the archaic name to that refusal.
 
 use std::process::Command;
 
 const LONE_CYRILLIC: &str = "fn \u{430}(n: Int) -> Int = n + 1\n\neffect fn main() -> Unit = {\n  println(int.to_string(\u{430}(1)))\n}\n";
-const LOOK_ALIKE_PAIR: &str = "fn a(n: Int) -> Int = n + 2\n\nfn \u{430}(n: Int) -> Int = n + 1\n\neffect fn main() -> Unit = {\n  println(int.to_string(a(1) + \u{430}(2)))\n}\n";
 const ARCHAIC_SCRIPT: &str = "fn \u{16a0}(n: Int) -> Int = n + 3\n\neffect fn main() -> Unit = {\n  println(int.to_string(\u{16a0}(1)))\n}\n";
 
-const PROGRAMS: [(&str, &str); 3] =
-    [("lone Cyrillic", LONE_CYRILLIC), ("look-alike pair", LOOK_ALIKE_PAIR), ("archaic script", ARCHAIC_SCRIPT)];
+const PROGRAMS: [(&str, &str); 1] = [("lone Cyrillic", LONE_CYRILLIC)];
 
 /// The identifier-lint warnings rustc reports for `rust` (type-checked only).
 fn identifier_lint_warnings(rust: &str) -> Vec<String> {
@@ -64,7 +65,7 @@ fn the_v1_native_render_allows_the_identifier_lints() {
     for (what, src) in PROGRAMS {
         let rust = almide_mir::pipeline::try_render_rust_source(src)
             .unwrap_or_else(|e| panic!("{what}: the v1 native render walled: {e:?}"));
-        assert!(rust.contains(if what == "archaic script" { '\u{16a0}' } else { '\u{430}' }),
+        assert!(rust.contains('\u{430}'),
             "{what}: the v1 render no longer spells the user's name, so this test no longer covers it");
         let warnings = identifier_lint_warnings(&rust);
         assert!(warnings.is_empty(), "{what}: the v1 native Rust warns on a legal Almide name: {warnings:?}");
@@ -82,4 +83,18 @@ fn the_external_runtime_slim_main_allows_the_identifier_lints() {
             assert!(first.contains(lint), "{what}: the crate attribute does not allow `{lint}`: {first}");
         }
     }
+}
+
+#[test]
+fn an_excluded_script_name_is_refused_before_any_render() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("names.almd");
+    std::fs::write(&file, ARCHAIC_SCRIPT).expect("write source");
+    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .arg(&file)
+        .args(["--target", "rust"])
+        .output()
+        .expect("emit rust");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains("E101"), "an archaic-script name must be E101: {stderr}");
 }

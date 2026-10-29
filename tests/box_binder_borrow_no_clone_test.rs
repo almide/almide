@@ -55,8 +55,13 @@ effect fn main() -> Unit = {
 
 const BORROWING: &[&str] = &["depth", "in_let", "in_and", "in_binop", "in_subject", "in_while"];
 
-fn almide() -> String {
-    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
+/// The compiler, with the ownership certifier (#2231) armed: CI runs this
+/// test with the RELEASE compiler, where the certifier is off by default, and
+/// `moved_after`'s C4 (#4292) only ever failed a debug build.
+fn almide() -> Command {
+    let mut c = Command::new(std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string()));
+    c.env("ALMIDE_CERTIFY_OWNERSHIP", "fail");
+    c
 }
 
 fn write_program() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -78,7 +83,7 @@ fn body_of<'a>(rust: &'a str, name: &str) -> &'a str {
 #[test]
 fn a_box_binder_at_a_borrowing_call_is_not_cloned() {
     let (_dir, source) = write_program();
-    let out = Command::new(almide()).arg(&source).args(["--target", "rust"]).output().unwrap();
+    let out = almide().arg(&source).args(["--target", "rust"]).output().unwrap();
     assert!(out.status.success(), "emit failed: {}", String::from_utf8_lossy(&out.stderr));
     let rust = String::from_utf8_lossy(&out.stdout).to_string();
     for name in BORROWING {
@@ -88,12 +93,19 @@ fn a_box_binder_at_a_borrowing_call_is_not_cloned() {
             "`{name}` clones a box-bound binder to pass it to a borrowing callee (#2582):\n{body}"
         );
     }
+    // #4292: `moved_after` clones `l` for its owned slot either way (the
+    // borrowing sibling reads it afterwards), so `t` is borrowed — owned, the
+    // ownership certifier refused it (C4) — and the copy is the boxed value,
+    // read through the reference the borrowed match binds.
+    let moved = body_of(&rust, "moved_after");
+    assert!(moved.contains("fn moved_after(t: &Tree)"), "`moved_after` owns a param its body only reads (#4292):\n{moved}");
+    assert!(moved.contains("(*(*l)).clone()"), "`moved_after` copies the box, not its value (#4292):\n{moved}");
 }
 
 #[test]
 fn the_box_binder_program_runs_in_a_handful_of_allocations() {
     let (_dir, source) = write_program();
-    let native = Command::new(almide())
+    let native = almide()
         .arg("run")
         .arg(&source)
         .env("ALMIDE_ALLOC_COUNT", "1")

@@ -82,36 +82,6 @@ pub const VERDICTS: &[Verdict] = &[
     // net's and unix's calls take and return opaque handles (`net.TcpStream`,
     // `unix.Fd`), outside the generator's type universe: none is catalogued,
     // so none has a verdict until the generator builds handles.
-    // A buffer's address reads back the buffer while it lives (checked on
-    // its first byte: the probe's check stays O(1)); a generated program goes
-    // on with null, so it never holds an address past its buffer.
-    Verdict {
-        func: "bytes.as_ptr",
-        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
-        canon: "bytes.as_ptr(bytes.from_list([]))",
-        domain: &[],
-    },
-    Verdict {
-        func: "bytes.as_mut_ptr",
-        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
-        canon: "bytes.as_ptr(bytes.from_list([]))",
-        domain: &[],
-    },
-    Verdict { func: "bytes.data_ptr", holds: "v > 0 or bytes.len({b}) == 0", canon: "0", domain: &[] },
-    // Through a generated (null) pointer nothing is written or read.
-    Verdict { func: "bytes.copy_to_ptr", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
-    // The `ffi` names of the same bridge (R-ffi-01): an address reads back its
-    // buffer, an address's integer is layout (never negative, replaced by 0),
-    // a read returns at most `len` bytes and a write moves at most `b`.
-    Verdict {
-        func: "ffi.address",
-        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
-        canon: "ffi.address(bytes.from_list([]))",
-        domain: &[],
-    },
-    Verdict { func: "ffi.to_int", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "ffi.read", holds: "bytes.len(v) <= int.max(0, {len})", canon: "v", domain: &[] },
-    Verdict { func: "ffi.write", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
     // An http call handle (#2631) against the loopback fixture. Whether the
     // exchange has ended when `poll` looks is the network's timing: `none`,
     // or the very result `wait` answers (an ended call's outcome never

@@ -1,0 +1,17 @@
+// E114 (#4287): `a` -> `b` -> `c` -> `a`, and `b` wraps its value in
+// `some(…)` on the way: every trip round the cycle is one `Option` deeper.
+fn a[T](x: T, n: Int) -> Int =
+  if n <= 0 then 0
+  else b(x, n - 1)
+
+fn b[U](y: U, n: Int) -> Int =
+  if n <= 0 then 0
+  else c(some(y), n - 1)
+
+fn c[V](z: V, n: Int) -> Int =
+  if n <= 0 then 0
+  else 1 + a(z, n - 1)
+
+effect fn main() -> Unit = {
+  println(int.to_string(a(1, 5)))
+}

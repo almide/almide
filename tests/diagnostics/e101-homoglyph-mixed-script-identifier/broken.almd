@@ -1,0 +1,5 @@
+// E101 (#4266, CVE-2021-42694): `аdmin` starts with CYRILLIC SMALL LETTER A
+// (U+0430), so it is a second function that reads as `admin`.
+fn admin() -> String = "real"
+fn аdmin() -> String = "fake"
+effect fn main() -> Unit = println(аdmin())

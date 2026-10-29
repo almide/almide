@@ -179,7 +179,7 @@ fn consumes(u: &Use) -> bool {
         Site::Arg(SlotMode::Borrow | SlotMode::Mut) | Site::Callee
         | Site::Iterable { consumed: false } | Site::Borrow { .. } | Site::Clone
         | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Deref | Site::Operand | Site::Compare
-        | Site::Assigned | Site::Reassign | Site::InPlace => false,
+        | Site::StrView | Site::Assigned | Site::Reassign | Site::InPlace => false,
     }
 }
 
@@ -225,17 +225,8 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
 /// payload out, so any binding keeps the conservative verdict.
 fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    use crate::use_kind::pattern_binds_nothing as binds_nothing;
     struct Scan { var: VarId, ok: bool }
-    fn binds_nothing(p: &IrPattern) -> bool {
-        match p {
-            IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
-            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binds_nothing(inner),
-            IrPattern::Constructor { args, .. } => args.iter().all(binds_nothing),
-            IrPattern::Tuple { elements } => elements.iter().all(binds_nothing),
-            IrPattern::List { elements, rest } => elements.iter().all(binds_nothing) && rest.as_deref().map_or(true, binds_nothing),
-            IrPattern::Bind { .. } | IrPattern::RecordPattern { .. } | IrPattern::As { .. } => false,
-        }
-    }
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Match { subject, arms } = &e.kind
@@ -271,8 +262,18 @@ pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
 /// after the verdict): the certifier's final IR spells a binder's capture as
 /// `let __cap = b` outside the closure, and that bind IS the capture (#3174).
 /// The verdict runs before the binds exist and passes an empty set.
+///
+/// #4292: a binder consumed where a later occurrence of it can still run
+/// (`Node(l, _, _) => keep(l, depth(l))`) is CLONED there whichever way the
+/// subject is matched — the clone pass keeps the binder live for the later
+/// read — so that consumption earns the subject's ownership nothing; it is a
+/// read, the same `cloned_anyway` rule `param_borrow` applies to a param.
+/// Admitted only at a [`part_clone_site`], the positions the borrow lowering
+/// already clones a by-reference binder at.
 pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites, captures: &HashSet<VarId>) -> bool {
-    subject_binders(body, var, uses, captures, &|_| false).is_some()
+    let cloned_anyway = |u: &Use| part_clone_site(u)
+        && uses.of(u.var).any(|w| !std::ptr::eq(w, u) && after(u, w) && uses.keeps_live(u, w));
+    subject_binders(body, var, uses, captures, &cloned_anyway).is_some()
 }
 
 /// The binders every `match` on `var` introduces (transitively, through a

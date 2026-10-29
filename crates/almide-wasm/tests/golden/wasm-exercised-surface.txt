@@ -87,20 +87,15 @@ call:bytes.append_u16_le
 call:bytes.append_u32_be
 call:bytes.append_u32_le
 call:bytes.append_u8
-call:bytes.as_mut_ptr
-call:bytes.as_ptr
 call:bytes.chunk
 call:bytes.clear
 call:bytes.compare
 call:bytes.contains
 call:bytes.copy_from
-call:bytes.copy_to_ptr
 call:bytes.copy_within
-call:bytes.data_ptr
 call:bytes.ends_with
 call:bytes.fill
 call:bytes.from_list
-call:bytes.from_raw_ptr
 call:bytes.from_string
 call:bytes.get
 call:bytes.get_f16_le
@@ -123,6 +118,7 @@ call:bytes.is_equal_constant_time
 call:bytes.is_valid_utf8
 call:bytes.len
 call:bytes.map
+call:bytes.new
 call:bytes.next_bool
 call:bytes.next_bytes
 call:bytes.next_f16_le
@@ -197,8 +193,10 @@ call:env.sleep_ms
 call:env.vars
 call:eprintln
 call:fan.map
-call:ffi.address
+call:ffi.alloc
+call:ffi.len
 call:ffi.read
+call:ffi.region
 call:ffi.write
 call:float.__almd_mono4_from__Float
 call:float.__almd_mono4_from__Float32
@@ -212,6 +210,7 @@ call:float.from_bits
 call:float.is_nan
 call:float.max
 call:float.min
+call:float.nan
 call:float.parse
 call:float.pow
 call:float.round
@@ -289,6 +288,7 @@ call:html.raw
 call:html.to_string
 call:http.__almd_mono10_set_header___nHttpResponse
 call:http.__almd_mono11_decode_json___nCommandInput
+call:http.__almd_mono11_decode_json___nOrder
 call:http.__almd_mono11_decode_json___nUserInput
 call:http.__almd_mono4_body___nHttpResponse
 call:http.__almd_mono6_header___nHttpResponse
@@ -656,6 +656,7 @@ call:set.remove
 call:set.symmetric_difference
 call:set.to_list
 call:set.union
+call:string.__err_text
 call:string.byte_slice
 call:string.capitalize
 call:string.clear

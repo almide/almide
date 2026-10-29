@@ -206,6 +206,9 @@ pub fn almide_proc_stop_tree(child: &mut std::process::Child) {
     }
     #[cfg(windows)]
     {
+        if matches!(child.try_wait(), Ok(None)) {
+            almide_proc_mark_killed(child.id());
+        }
         let _ = std::process::Command::new("taskkill")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdout(std::process::Stdio::null())
@@ -295,9 +298,55 @@ pub fn almide_proc_signal_windows(pid: i32, sig: i32) -> Result<(), i32> {
             .map(|o| o.status.success())
     };
     match out {
-        Ok(true) => Ok(()),
+        Ok(true) => {
+            if sig != 0 {
+                almide_proc_mark_killed(pid as u32);
+            }
+            Ok(())
+        }
         _ => Err(3),
     }
+}
+
+/// Windows has no signals: `taskkill /F` and `Child::kill` end a process
+/// with exit code 1, which reads as an ordinary exit. The pids this runtime
+/// ended are kept here, so a captured child's reported code is -1 — "a
+/// signal ended it" — as on unix, after `process.kill`, `stop` or a stopped
+/// tree. A pid leaves the set when its child is reported, or when a new
+/// child is started with it (a reused pid).
+#[cfg(windows)]
+static ALMIDE_PROC_KILLED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(windows)]
+fn almide_proc_mark_killed(pid: u32) {
+    let mut k = ALMIDE_PROC_KILLED.lock().unwrap_or_else(|p| p.into_inner());
+    if !k.contains(&pid) {
+        k.push(pid);
+    }
+}
+
+/// Whether this runtime ended `pid` (and forget it): always false off Windows,
+/// where the exit status itself says a signal ended the child.
+fn almide_proc_take_killed(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        let mut k = ALMIDE_PROC_KILLED.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(i) = k.iter().position(|p| *p == pid) {
+            k.swap_remove(i);
+            return true;
+        }
+    }
+    let _ = pid;
+    false
+}
+
+/// A captured child's exit code: -1 when a signal (on Windows: this runtime's
+/// kill) ended it, or no status was read.
+fn almide_proc_child_code(pid: u32, status: Option<std::process::ExitStatus>) -> i64 {
+    if almide_proc_take_killed(pid) {
+        return -1;
+    }
+    status.and_then(|s| s.code()).unwrap_or(-1) as i64
 }
 
 // ── The ProcessCommand family (R-process-02, -03, -05, -07) ──
@@ -373,6 +422,8 @@ impl AlmideProcChild {
         }
         let operand = if dir.is_empty() { almide_proc_q(cmd) } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
         let mut child = command.spawn().map_err(|e| almide_proc_call_err(call, &operand, e))?;
+        // A pid an earlier child ended with is this new child's now.
+        almide_proc_take_killed(child.id());
         let out = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let err = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let pumps = vec![almide_proc_pump(child.stdout.take(), out.clone()), almide_proc_pump(child.stderr.take(), err.clone())];
@@ -398,7 +449,8 @@ impl AlmideProcChild {
         for p in self.pumps.drain(..) {
             let _ = p.join();
         }
-        self.done = Some(Ok((status.code().unwrap_or(-1) as i64, Self::text(&self.out), Self::text(&self.err))));
+        let code = almide_proc_child_code(self.child.id(), Some(status));
+        self.done = Some(Ok((code, Self::text(&self.out), Self::text(&self.err))));
     }
 
     /// One look, never blocking: the outcome once the child has exited and
@@ -480,7 +532,7 @@ impl AlmideProcChild {
         while !self.pumps.iter().all(|p| p.is_finished()) && std::time::Instant::now() < until {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        let code = self.exited.and_then(|s| s.code()).unwrap_or(-1) as i64;
+        let code = almide_proc_child_code(self.child.id(), self.exited);
         if self.pumps.iter().all(|p| p.is_finished()) {
             for p in self.pumps.drain(..) {
                 let _ = p.join();

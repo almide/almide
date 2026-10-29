@@ -1077,7 +1077,7 @@ them.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (34 functions)
+## Signature index (35 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
@@ -1087,6 +1087,10 @@ effect http.serve(port: Int, handler: HttpHandler) -> Unit
 // Reply with Content-Type text/plain.
 // @since 0.5.0 or earlier
 http.response(status: Int, body: String) -> HttpResponse
+
+// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
+// @since unreleased
+http.html(status: Int, body: SafeHtml) -> HttpResponse
 
 // Reply with Content-Type application/json.
 // @since 0.5.0 or earlier

@@ -131,11 +131,10 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     // payload (handle+12 = OUR PAYLOAD, load32(h+4) = the byte length on
     // both legs), the editors (insert / remove_at / reverse / xor /
     // map_each) store into their own prim.alloc_bytes buffer only, the
-    // predicates and cmp/skip/eof are scalar results, data_ptr is the
-    // payload address (never printed cross-leg). map_each's callback is
+    // predicates and cmp/skip/eof are scalar results. map_each's callback is
     // a language-level closure call this emitter lowers itself. Parity
     // evidence: spec/wasm_cross/bytes_search_edit_family.almd.
-    "bytes_cmp", "bytes_contains", "bytes_data_ptr", "bytes_ends_with", "bytes_eof",
+    "bytes_cmp", "bytes_contains", "bytes_ends_with", "bytes_eof",
     "bytes_insert", "bytes_is_empty", "bytes_is_valid_utf8", "bytes_map_each",
     "bytes_remove_at", "bytes_reverse", "bytes_skip", "bytes_starts_with", "bytes_xor",
 ];
@@ -165,14 +164,12 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // (prim.die, as float clamp), the scan captures_all and replace_with
     // read, index_of's code-point count — the same byte walks and scratch.
     "regex_check", "regex_new", "regex_index_of", "regex_scan",
-    // bytes_rawptr.almd / bytes_skip.almd (audited 2026-08-25):
-    // raw-address bridge over load8/store8 on Bytes data regions
-    // (len = bytes both legs), handle+12 = OUR PAYLOAD; the empty-buffer
-    // NULL guard is the 2026-08-10 fuzz doctrine.
-    "bytes_as_ptr", "bytes_as_mut_ptr", "bytes_from_raw_ptr", "bytes_copy_to_ptr",
-    // ffi.to_int (R-ffi-01): the identity ptr_to_int cast. The other ffi
-    // bodies are prim-free calls to the bridge above (ffi_bridge.almd).
-    "ffi_to_int",
+    // ffi_bridge.almd (ADR-0031): the three `local` raw operations under
+    // `ffi`'s Region checks — the address of a Bytes data region
+    // (handle+12 = OUR PAYLOAD, NULL for an empty buffer, the 2026-08-10 fuzz
+    // doctrine) and load8/store8 copies at base + off. They run only after
+    // `ffi.read` / `ffi.write` checked the region's bounds and permission.
+    "ffi_address", "ffi_load", "ffi_store",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header

@@ -61,6 +61,9 @@ pub(crate) struct DeferredGenericCall {
     /// may then name that fn's rigid generics, and the callee's
     /// requirements transfer to it.
     pub caller: Option<Sym>,
+    /// The whole call's span (`span` is where the checker stood when the
+    /// call resolved — its last argument), for E114's anchor.
+    pub call_span: Option<crate::ast::Span>,
 }
 
 /// A call to a generic user fn with its bindings resolved (#2496).
@@ -70,6 +73,7 @@ pub(crate) struct GenericCall {
     pub bindings: std::collections::HashMap<Sym, Ty>,
     pub site: InterpLoc,
     pub caller: Option<Sym>,
+    pub call_span: Option<crate::ast::Span>,
 }
 
 /// A requirement a generic fn's body places on its instantiations: the
@@ -109,8 +113,8 @@ const UNIT_HINT: &str = "A Unit carries nothing to print. Drop the segment, or i
      value you meant — a `println` or other Unit-returning call has no text.";
 const MATRIX_HINT: &str = "Interpolate what you mean: `${matrix.to_lists(m)}` for the rows, or \
      `${matrix.rows(m)}x${matrix.cols(m)}` for the shape.";
-const RAWPTR_HINT: &str = "A raw pointer has no stable text. Interpolate the Bytes it was taken \
-     from (`bytes.from_raw_ptr(p, n)`), or the length.";
+const RAWPTR_HINT: &str = "A Handle is an opaque foreign token with no stable text. Interpolate \
+     what the foreign library reports about it, or a name for it.";
 const FN_HINT: &str = "A function value has no text. Call it and interpolate the result \
      (`${f(x)}`), or interpolate a name for it.";
 const HOLDS_HINT: &str = "Interpolate the printable parts instead — map the function values \
@@ -184,7 +188,7 @@ impl Checker {
             Ty::Bytes => gap("a Bytes value".into(), BYTES_HINT),
             Ty::Unit => gap("a Unit value".into(), UNIT_HINT),
             Ty::Matrix | Ty::Applied(TC::Matrix, _) => gap("a Matrix value".into(), MATRIX_HINT),
-            Ty::RawPtr => gap("a raw pointer".into(), RAWPTR_HINT),
+            Ty::RawPtr => gap("a Handle".into(), RAWPTR_HINT),
             Ty::Fn { .. } => gap("a function value".into(), FN_HINT),
             // An opaque newtype's string form is its TARGET's (#2496): the
             // emitted struct renders the wrapped value. So a newtype over
@@ -231,7 +235,7 @@ impl Checker {
     fn unprintable_leaf_in(&self, ty: &Ty, visiting: &mut Vec<Sym>) -> Option<String> {
         match ty {
             Ty::Fn { .. } => Some("a function value".to_string()),
-            Ty::RawPtr => Some("a raw pointer".to_string()),
+            Ty::RawPtr => Some("a Handle".to_string()),
             Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
                 args.iter().find_map(|a| self.unprintable_leaf_in(a, visiting))
             }
@@ -340,6 +344,7 @@ impl Checker {
                 bindings,
                 site: InterpLoc { file: file.clone(), span: call.span, label: format!("`{}`", call.callee.as_str()) },
                 caller: call.caller,
+                call_span: call.call_span,
             });
         }
         self.propagate_interp_reqs();
@@ -366,36 +371,7 @@ impl Checker {
     /// CALLER's generics is the caller's requirement too. To a fixpoint,
     /// since a chain may be any length.
     fn propagate_interp_reqs(&mut self) {
-        loop {
-            let mut added: Vec<(Sym, InterpReq)> = Vec::new();
-            for call in &self.generic_calls {
-                let Some(caller) = call.caller else { continue };
-                let Some(reqs) = self.interp_reqs.get(&call.callee) else { continue };
-                for req in reqs {
-                    let t = crate::types::substitute(&req.ty, &call.bindings);
-                    if !mentions_rigid_generic(&t) {
-                        continue;
-                    }
-                    let known = self.interp_reqs.get(&caller).is_some_and(|rs| rs.iter().any(|r| {
-                        r.ty == t && r.origin.file == req.origin.file && r.origin.span == req.origin.span
-                    })) || added.iter().any(|(c, r)| {
-                        *c == caller && r.ty == t && r.origin.file == req.origin.file && r.origin.span == req.origin.span
-                    });
-                    if known {
-                        continue;
-                    }
-                    let mut via = vec![call.site.clone()];
-                    via.extend(req.via.iter().cloned());
-                    added.push((caller, InterpReq { ty: t, origin: req.origin.clone(), via }));
-                }
-            }
-            if added.is_empty() {
-                break;
-            }
-            for (caller, req) in added {
-                self.interp_reqs.entry(caller).or_default().push(req);
-            }
-        }
+        propagate_reqs(&self.generic_calls, &mut self.interp_reqs);
     }
 
     /// One E089 for a (call, requirement) pair, anchored on the first site

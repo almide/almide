@@ -61,7 +61,7 @@
           "file": "calc_test.almd",
           "found": "-1",
           "line": 4,
-          "message": "assertion `left == right` failed: at line 4",
+          "message": "",
           "name": "add adds",
           "op": "assert_eq"
         },

@@ -146,7 +146,7 @@ impl Checker {
             self.reject_exit_literal(callee, argument);
         }
         let call_sig = self.lookup_call_sig(callee);
-        let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
+        let mut arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
@@ -182,6 +182,8 @@ impl Checker {
                         return ret;
                     }
                 }
+                // #4283: a fallible call in a builtin's argument is E041.
+                self.strip_builtin_effect_args(name.as_str(), args, &mut arg_tys);
                 let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
                 let arg_refs: Vec<&ast::Expr> = args.iter().collect();
                 self.validate_mut_args(&name, &arg_refs);
@@ -616,6 +618,7 @@ impl Checker {
                 caller: self.current_fn.as_ref()
                     .filter(|(_, gs)| !gs.is_empty())
                     .map(|(k, _)| *k),
+                call_span: self.call_span_hint.or(self.current_span),
             });
         }
 
@@ -644,7 +647,9 @@ impl Checker {
             let Some(binding) = bindings.get(g) else { continue };
             match bound.cap {
                 Cap::Eq if !Self::sig_keys_on(sig, *g) => {
-                    self.deferred_eq_checks.push((binding.clone(), span, format!("{qualified}()")));
+                    // #4239: the stdlib fn's body compares its parameter structurally.
+                    let in_fn = self.generic_fn_key();
+                    self.deferred_eq_checks.push(super::EqSite { ty: binding.clone(), span, what: format!("{qualified}()"), in_fn, generic_compare: true });
                 }
                 Cap::Eq => {}
                 Cap::Ord => self.deferred_ord_elem_checks.push((binding.clone(), span, qualified.to_string())),
@@ -1250,8 +1255,9 @@ impl Checker {
     // rather than a rename.
     fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
         // A spelling a dialect epoch removed: say where it went (or that the
-        // call is deleted), as the ledger records it. No fix-it — the new
-        // spelling needs a dependency and an import, not a rename.
+        // call is deleted), as the ledger records it. The fix-it, when the
+        // rewrite is a pure rename, is attached by the caller
+        // (`removed_spellings::same_shape_rename`).
         if let Some(removal) = crate::removed_spellings::lookup(name) {
             return (crate::removed_spellings::hint(removal), None, None);
         }
@@ -1344,7 +1350,13 @@ impl Checker {
             }
         }
         // `try_replace` (Phase 3): when the hint is a clean rename and the callee's source span is available, emit both a concise `try` and the exact replacement range so `Diagnostic::apply_try_to` can rewrite the source. Rich multi-line snippets (conversion wrappers, operator suggestions) stay display-only via `with_try`.
-        if let Some(rich) = rich_snippet {
+        // A dialect-epoch removal whose ledger rewrite keeps the argument list
+        // (`ffi.address(b)` → `ffi.region(b)`, ADR-0031): the callee rename IS
+        // the edit, so `almide fix` applies it unattended.
+        let removal_rename = crate::removed_spellings::same_shape_rename(name);
+        if let (Some(to), Some(span)) = (&removal_rename, self.callee_span_hint) {
+            diag = diag.with_machine_fix(span.line, span.col, span.end_col, to.clone());
+        } else if let Some(rich) = rich_snippet {
             diag = diag.with_try(rich.to_string());
         } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
             // Almide `Span::end_col` is the column one past the last char (same convention as lexer emit — `end_col = col + token_len`). `apply_try_to` wants the exclusive upper bound, so use `end_col` directly.

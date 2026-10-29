@@ -7,6 +7,23 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
+/// Push the list-ordering key of the f64 BITS held in i64 local `l`, leaving
+/// `l` untouched: the sign-magnitude key `b ^ ((b >>s 63) >>u 1)` (a monotone
+/// i64 over IEEE-754 totalOrder), except that every NaN — whatever its sign or
+/// producer — keys as the canonical +qNaN 0x7FF8000000000000 (R-float-09,
+/// #4258), after +inf. x86 answers -NaN for a runtime invalid operation, so
+/// the raw key put such a NaN before -inf. The same key native's
+/// `almide_float_order_key` and the self-hosted `__ftotal_*` compute.
+pub(crate) fn push_float_order_key(i: &mut wasm_encoder::InstructionSink<'_>, l: u32) {
+    i.i64_const(0x7FF8_0000_0000_0000);
+    i.local_get(l);
+    i.local_get(l).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
+    i.i64_xor();
+    i.local_get(l).i64_const(0x7FFF_FFFF_FFFF_FFFF).i64_and();
+    i.i64_const(0x7FF0_0000_0000_0000).i64_gt_s();
+    i.select();
+}
+
 /// The two orderable shapes a `SliceTy::Named` can be, read off the
 /// TypeTable once so [`emit_named_cmp`](Emitter::emit_named_cmp) branches on a
 /// value rather than holding a borrow of the table across emission.
@@ -113,9 +130,8 @@ impl Emitter<'_> {
                         i.i64_reinterpret_f64().local_set(hb);
                         i.i64_reinterpret_f64().local_set(ha);
                         for l in [ha, hb] {
-                            i.local_get(l);
-                            i.local_get(l).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
-                            i.i64_xor().local_set(l);
+                            push_float_order_key(&mut i, l);
+                            i.local_set(l);
                         }
                     } else {
                         i.local_set(hb).local_set(ha);
@@ -670,9 +686,7 @@ impl Emitter<'_> {
                 for idx in [hi_, hj] {
                     addr(&mut i, idx);
                     i.i64_load(slot_memarg(0)).local_set(t);
-                    i.local_get(t);
-                    i.local_get(t).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
-                    i.i64_xor();
+                    push_float_order_key(&mut i, t);
                 }
                 i.i64_le_s();
             }

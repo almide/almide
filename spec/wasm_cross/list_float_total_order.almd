@@ -1,7 +1,8 @@
 // @contract: C-055
 // list.sort / list.min / list.max over List[Float] and list.sort_by with a Float
-// key ORDER by IEEE-754 totalOrder (the ordering twin of f64::total_cmp): NaN
-// takes its totalOrder position (greatest, after +inf) and -0.0 < +0.0.
+// key ORDER by IEEE-754 totalOrder (the ordering twin of f64::total_cmp) over
+// NaN-canonicalised values: every NaN orders as the one +qNaN (greatest, after
+// +inf) whatever its sign or producer, and -0.0 < +0.0.
 //
 // Before: native REJECTED Float ordering at compile (`f64: Ord` unsatisfied)
 // while wasm accepted it — and the `sort_by` Float-key path emitted an INVALID
@@ -22,7 +23,43 @@ fn fmtf(xs: List[Float]) -> String = list.join(list.map(xs, (x) => float.to_stri
 
 fn fmtr(xs: List[R]) -> String = list.join(list.map(xs, (r) => r.name), ",")
 
+fn zero() -> Float = float.parse("0") ?? 1.0
+
+// ONE NaN (R-float-09, #4258): every NaN orders as the canonical +qNaN
+// 0x7FF8000000000000 — after +inf — however it was produced. x86 answers -NaN
+// for a runtime invalid operation while a const-folded `0.0 / 0.0` is +NaN, so
+// before the fix the runtime rows sorted NaN FIRST on x86 and the constant row
+// split native (last) from wasm (first). Each row is the same on every leg.
+fn nan_row(name: String, v: Float) -> Unit = {
+  let lo = list.min([v, 1.0]) ?? 0.0
+  let hi = list.max([1.0, v]) ?? 0.0
+  let by = list.sort_by(
+    [
+      R { name: "nan", v: v },
+      R { name: "one", v: 1.0 },
+      R { name: "neg", v: -1.0 }
+    ],
+    (r) => r.v,
+  )
+  println("${name}: sort=${fmtf(list.sort([1.0, v, -1.0]))} min=${float.to_string(lo)} max=${float.to_string(hi)} sort_by=${fmtr(by)}")
+}
+
+fn nan_rows() -> Unit = {
+  let z = zero()
+  let i = 1.0 / z
+  nan_row("0/0 const", 0.0 / 0.0)
+  nan_row("0/0 runtime", z / z)
+  nan_row("inf-inf", i - i)
+  nan_row("0*inf", z * i)
+  nan_row("inf/inf", i / i)
+  nan_row("sqrt(-1)", math.sqrt(-1.0))
+  nan_row("float.nan()", float.nan())
+  nan_row("-(0/0)", -(z / z))
+  nan_row("-(0/0) const", -(0.0 / 0.0))
+}
+
 fn main() -> Unit = {
+  nan_rows()
   let xs = [3.5, 1.2, 2.8, 1.2, 0.0]
   println("sort: " + fmtf(list.sort(xs)))
   println("min:  " + float.to_string(list.min(xs) ?? 99.0))
@@ -34,12 +71,8 @@ fn main() -> Unit = {
   println("sort neg: " + fmtf(list.sort(ns)))
   println("min neg:  " + float.to_string(list.min(ns) ?? 99.0))
   println("max neg:  " + float.to_string(list.max(ns) ?? 99.0))
-  // +inf / -inf land at the totalOrder extremes (just inside ±NaN). These have
-  // a DETERMINISTIC sign on all three judges, unlike a divided NaN whose sign is
-  // implementation-defined (rustc const-folds `0.0/0.0` to +NaN, an x86 runtime
-  // `divsd` yields -NaN — see the contract note). NaN's top/bottom position is
-  // exercised in the native/wasm-only path that the contract cites; here we keep
-  // the 3-way-oracle fixture sign-deterministic.
+  // -inf is the least value and +inf the greatest below NaN (nan_rows above
+  // pins NaN after +inf for every producer).
   let inf = 1.0 / 0.0
   let ninf = -1.0 / 0.0
   let ws = [1.0, ninf, -2.0, inf, 0.5]

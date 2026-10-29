@@ -313,7 +313,19 @@ fn link_self_host(
         }
     }
 
+    // Each scan clones the body ONCE and walks the owned copy:
+    // `map_children` consumes its node, and cloning at every level instead
+    // copied each subtree once per ancestor — O(size x depth), the bulk of a
+    // small program's wasm link step once more stdlib bodies reached it
+    // (#4289). The traversal (which children, in which order) is unchanged.
     fn scan_expr(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
+        scan_owned(e.clone(), out);
+    }
+    fn scan_owned(e: crate::ir::IrExpr, out: &mut HashSet<String>) -> crate::ir::IrExpr {
+        scan_node(&e, out);
+        e.map_children(&mut |c| scan_owned(c, out))
+    }
+    fn scan_node(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
         // A value of a runtime-backed type displays through its declared repr
         // (#4204) wherever it meets a display — bare, nested, or in an error
         // message — so its mention is the demand (an unused splice is
@@ -400,10 +412,6 @@ fn link_self_host(
             }
             _ => {}
         }
-        e.clone().map_children(&mut |c| {
-            scan_expr(&c, out);
-            c
-        });
     }
     /// An error value whose type can reach a Float is displayed at emission
     /// wherever it meets a String channel: `main`'s abort renders it through
@@ -414,17 +422,29 @@ fn link_self_host(
     /// #4071 the demand was met by accident — every auto-imported module was
     /// lowered into every program, and their bodies demanded the formatter.
     fn err_reaches_float(e: &crate::ir::IrExpr) -> bool {
-        let here = matches!(
+        let mut found = false;
+        err_float_owned(e.clone(), &mut found);
+        found
+    }
+    fn err_float_owned(e: crate::ir::IrExpr, found: &mut bool) -> crate::ir::IrExpr {
+        *found |= matches!(
             &e.ty,
             crate::types::Ty::Applied(crate::types::TypeConstructorId::Result, a)
                 if a.len() == 2 && !ty_float_free(&a[1]) && !a[1].is_unresolved()
         );
-        let mut below = false;
+        e.map_children(&mut |c| err_float_owned(c, found))
+    }
+    fn scan_own_calls(e: &crate::ir::IrExpr, module: &str, out: &mut HashSet<String>) {
+        if let crate::ir::IrExprKind::Call { target: crate::ir::CallTarget::Named { name }, .. }
+        | crate::ir::IrExprKind::TailCall { target: crate::ir::CallTarget::Named { name }, .. } = &e.kind
+            && !name.as_str().contains('.')
+        {
+            out.insert(format!("{module}.{}", name.as_str()));
+        }
         e.clone().map_children(&mut |c| {
-            below |= err_reaches_float(&c);
+            scan_own_calls(&c, module, out);
             c
         });
-        here || below
     }
     fn scan_program(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
         let bodies = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter()));
@@ -441,6 +461,11 @@ fn link_self_host(
         for m in &ir.modules {
             for f in &m.functions {
                 scan_expr(&f.body, out);
+                // A module's bare call to its own fn (`__address(b)` inside
+                // stdlib/ffi.almd, a `local` intrinsic) is the surface
+                // `<module>.<fn>`: demand it under that key, so a registered
+                // self-host body for it is loaded (ADR-0031).
+                scan_own_calls(&f.body, m.name.as_str(), out);
             }
             for tl in &m.top_lets {
                 scan_expr(&tl.value, out);

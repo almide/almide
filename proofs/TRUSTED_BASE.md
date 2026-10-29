@@ -38,6 +38,7 @@ but not listed fails, and so does a version listed but no longer used.
 | rustc | **1.96.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
 | LLVM | the copy inside that rustc (the 22.1 series for 1.96; `rustc -vV` prints it) | native code generation | as rustc |
 | rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus under the ISO 26262 qualified toolchain (#573) | the qualification is Ferrocene's |
+| rustc (stable, perf) | **1.99.1** (`RUST_STABLE_TOOLCHAIN`) | builds the handwritten-Rust side of the perf ratio in `perf-ratchet` and `perf-profile-arm`; nothing shipped is built with it | the ratio gates themselves; pinning it keeps their baseline still |
 | rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation (branch coverage, MC/DC) and Miri over `almide-str`; nothing shipped is built with them | — |
 | wasmtime (embedded crate) | **49.0.4** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
 | wasmtime (stock CLI in CI) | **49.0.1** | runs built `.wasm` artifacts in the CI gates, one version everywhere | the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares `almide-wasm-vm` against |
