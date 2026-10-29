@@ -65,12 +65,15 @@ pub(crate) fn begin_pass(pass: usize) {
 /// The recorder logged a live `a` / `d` / `o` on `local` (`None`: a
 /// temporary), or an `m`: the variable's credit moved into the arm or
 /// routine whose window is open (`#<window id>`; outside every window an
-/// `m` is no RC event and is not logged).
+/// `m` is no RC event and is not logged), or an `h`: a credit moved into the
+/// open routine through the pooled hold `local`, a name the checker scopes
+/// to that window (the slot holds other values outside it).
 pub(crate) fn event(kind: char, local: Option<u32>) {
     let Some(serial) = crate::witness::anchor::current() else { return };
     with(|s| {
         let window = s.open_windows.last().copied();
-        if kind == 'm' && (window.is_none() || local.is_none()) {
+        let moves = matches!(kind, 'm' | 'h');
+        if moves && (window.is_none() || local.is_none()) {
             return;
         }
         let e = s.open.entry(serial).or_default();
@@ -81,7 +84,7 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
         }
         // A move names its window; so does a temporary's event logged inside
         // one (the arm or routine may release that temporary in its callee).
-        if kind == 'm' || (local.is_none() && window.is_some()) {
+        if moves || (local.is_none() && window.is_some()) {
             e.push_str(&format!("#{}", window.unwrap_or(0)));
         }
         e.push(' ');
