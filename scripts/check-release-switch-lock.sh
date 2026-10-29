@@ -21,6 +21,9 @@
 set -uo pipefail
 bin="${1:?usage: check-release-switch-lock.sh <almide binary>}"
 [ -x "$bin" ] || { echo "::error::not executable: $bin" >&2; exit 2; }
+# The checks run from a scratch project dir, so a relative path (release.yml
+# passes target/<triple>/release/almide) must be resolved first.
+bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
 
 ver="$("$bin" --version 2>&1)"
 case "$ver" in
