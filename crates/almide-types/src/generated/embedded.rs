@@ -10209,27 +10209,13 @@ local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
 
 
-local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
-  string.to_list(a),
-  string.to_list(b),
-  0,
-)
 
-local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
-  if i >= list.len(a) then true
-  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
-  else __http_response_ci_at(a, b, i + 1)
+@intrinsic("almide_rt_http___http_response_ascii_lower")
+local fn __http_response_ascii_lower(s: String) -> String = _
 
-local fn __http_response_fold(c: String) -> String = match string.index_of(
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  c,
-) {
-  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
-  none => c,
-}
 
 local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
-  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and http.__http_response_ascii_lower(h) == http.__http_response_ascii_lower(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
@@ -11202,6 +11188,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 
 
+@implements("http.__http_response_ascii_lower")
 fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
