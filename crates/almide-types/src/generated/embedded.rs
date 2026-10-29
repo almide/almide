@@ -10061,7 +10061,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
-fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__with_headers(
+fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
   status,
   body.__self_to_text(),
   ["Content-Type", body.__self_media_type()],
@@ -10109,8 +10109,15 @@ fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 @borrow_ref(flat)
 local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
+
+
+
+@intrinsic("almide_rt_http___http_response_flat")
+@borrow_ref(flat)
+local fn __http_response_flat(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+
 /// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
-fn redirect(url: String) -> HttpResponse = http.__with_headers(
+fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
   302,
   "",
   ["Location", url, "Content-Type", string.__string_media_type("")],
@@ -10201,14 +10208,28 @@ local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse
 local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
 
-local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.map((c) => match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+
+local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
+  string.to_list(a),
+  string.to_list(b),
+  0,
+)
+
+local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
+  if i >= list.len(a) then true
+  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
+  else __http_response_ci_at(a, b, i + 1)
+
+local fn __http_response_fold(c: String) -> String = match string.index_of(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
-}) |> list.join("")
-
+}
 
 local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
-  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and __http_response_fold(h) == __http_response_fold(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
@@ -11069,6 +11090,11 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
+
+
+
+@implements("http.__http_response_flat")
+fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
 
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
@@ -14209,12 +14235,22 @@ fn value_path_index(p: List[String], i: Int) -> List[String] =
 @implements("value.get_path")
 fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
 
+
+
+
+
 @implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
-  let steps = list.len(p)
-  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(v, p, 0, x))
-}
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = value.__set_path_steps(
+  v,
+  __jpath_steps(p),
+  x,
+)
+
+
+fn __jpath_steps(p: List[String]) -> List[(Bool, String, Int)] = p |> list.map((seg) => match string.take(seg, 1) {
+  "f" => (true, string.drop(seg, 1), 0),
+  _ => (false, "", int.parse(string.drop(seg, 1)) ?? 0),
+})
 
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
@@ -14224,118 +14260,6 @@ fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p,
 
 
 
-
-
-
-
-
-
-
-
-
-
-fn __jp_empty_obj() -> Value = {
-  let v = prim.alloc_value(0)
-  let h = prim.handle(v)
-  prim.store32(h + 4, 6)
-  prim.store32(h + 8, 0)
-  v
-}
-
-
-
-fn __jp_has(j: Value, key: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let ek: String = prim.load_handle(prim.handle(j) + 12 + (2 * i) * 8)
-  if ek == key then true
-  else __jp_has(j, key, i + 1, n)
-}
-
-
-
-
-
-
-
-
-
-fn __jpath_max_depth() -> Int = 1000
-
-
-fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
-
-
-
-fn __json_nests_past(v: Value, budget: Int) -> Bool = {
-  let tag = prim.load32(prim.handle(v) + 4)
-  if tag != 5 and tag != 6 then false
-  else if budget == 0 then true
-  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
-  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
-}
-
-
-
-fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
-else {
-  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
-  if __json_nests_past(ev, budget) then true
-  else __jnp_items(v, budget, i + 1, n, stride)
-}
-
-fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
-  if k >= list.len(path) then nv
-  else {
-    let seg = list.get(path, k) ?? ""
-    let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
-    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
-  }
-
-fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 6 then {
-    let n = prim.load32(prim.handle(j) + 8) / 2
-    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
-    if __jp_has(j, key, 0, n) then value.object(pairs)
-    else {
-      let seed = __jp_empty_obj()
-      let sv = json_path_set_go(seed, path, k + 1, nv)
-      value.object(pairs + [(key, sv)])
-    }
-  } else {
-    let seed = __jp_empty_obj()
-    let sv = json_path_set_go(seed, path, k + 1, nv)
-    value.object([(key, sv)])
-  }
-
-fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(j)
-    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    if ek == key then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
-    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
-  }
-
-fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 5 then {
-    let n = prim.load32(prim.handle(j) + 8)
-    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
-    else j
-  } else j
-
-fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
-  if i >= n then acc
-  else {
-    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-    if i == tgt then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
-    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
-  }
 
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
@@ -41047,7 +40971,11 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 
 
 
+
+
+
 @intrinsic("almide_rt_value_set_path_steps")
+@reuse(v)
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 

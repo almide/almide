@@ -43,6 +43,12 @@ pub struct Target {
     /// A type variable was free (not pinned by the signature): the function
     /// is inspected at a heap instantiation too ([`Self::new_filled`]).
     pub generic: bool,
+    /// What the free type variables were bound to, as the verdicts label
+    /// each instantiation (`Int`; `Bytes` for `[B: Body]` at the Int fill).
+    pub vars: String,
+    /// The literal-only parameters (E117): written inline at every call,
+    /// never bound to a name first ([`Signature::literal_at`]).
+    literal: Vec<(usize, &'static [&'static str])>,
     /// An `effect fn` (a hostless one, catalogue.rs): the diamond's paths
     /// are effect functions too.
     effect: bool,
@@ -423,8 +429,17 @@ impl Target {
             p.collect_vars(&mut vars);
         }
         sig.ret.collect_vars(&mut vars);
+        // A bounded variable (`[B: Body]`) takes the fill when it conforms,
+        // else its first conformer other than the heap fill String: the two
+        // instantiations stay two different lowerings where the bound allows.
         for v in vars {
-            subst.entry(v).or_insert_with(|| fill.clone());
+            let pick = match sig.bound_of(&v) {
+                Some(allowed) if !allowed.contains(&fill) => {
+                    allowed.iter().find(|t| **t != GenType::String).or(allowed.first()).cloned().unwrap_or_else(|| fill.clone())
+                }
+                _ => fill.clone(),
+            };
+            subst.entry(v).or_insert(pick);
         }
         // A bodied effect fn's call is a `Result[T, String]` to the checker
         // (`Signature::lifted`): that is what the probe binds and wraps.
@@ -473,9 +488,11 @@ impl Target {
         let size_param = match (recipe, &domain) {
             (Some(r), _) => param_at(r.size),
             (None, Some((i, d))) => d.scales().then_some(*i),
+            // A literal-only parameter is one fixed literal: it never scales.
             (None, None) => params
                 .iter()
-                .position(|(_, t)| concrete(t).as_ref().is_some_and(has_size))
+                .enumerate()
+                .position(|(i, (_, t))| sig.literal_at(i).is_none() && concrete(t).as_ref().is_some_and(has_size))
                 .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
         };
         // A host-decided scalar rebound through its own call is a chain of
@@ -484,10 +501,12 @@ impl Target {
             .iter()
             .position(|(_, t)| concrete(t).as_ref() == Some(&ret))
             .filter(|_| sig.verdict.is_none() || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_)));
-        let generic = {
-            let forced = sig.forced_bindings();
-            subst.keys().any(|k| !forced.contains_key(k))
-        };
+        let forced = sig.forced_bindings();
+        let mut shown: Vec<String> = subst.iter().filter(|(k, _)| !forced.contains_key(*k)).map(|(_, t)| t.render()).collect();
+        shown.sort();
+        shown.dedup();
+        let generic = !shown.is_empty();
+        let literal = (0..params.len()).filter_map(|i| sig.literal_at(i).map(|l| (i, l))).collect();
         Ok(Target {
             name,
             params,
@@ -500,6 +519,8 @@ impl Target {
             routed,
             domain,
             generic,
+            vars: shown.join(","),
+            literal,
             effect: sig.effect,
             observe: sig.observed_through,
             verdict: sig.verdict,
@@ -657,6 +678,9 @@ impl Target {
         if self.recipe_arg(i).is_some() {
             return self.recipe_expr(i, n, "0");
         }
+        if let Some((_, lits)) = self.literal.iter().find(|(j, _)| *j == i) {
+            return lits[0].to_string();
+        }
         if let Some(d) = self.domain_arg(i) {
             return d.expr(n);
         }
@@ -771,7 +795,7 @@ impl Target {
         // leaves its error type unconstrained, E025). They are small, except
         // a recipe's operand that must keep its shape against the others.
         let mut consts = String::new();
-        for i in (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i)) {
+        for i in (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i) && !self.is_literal(*i)) {
             // A size operand of another type than `x` does not shape it: a
             // map `get_or` looks its default up in is built at size 1, not
             // rebuilt at n by every step (a matrix operand of `x`'s type
@@ -785,7 +809,7 @@ impl Target {
             let args: Vec<String> = (0..self.params.len())
                 .map(|i| match i {
                     _ if i == p => v.to_string(),
-                    _ if self.is_fn(i) => self.arg(i, 1),
+                    _ if self.is_fn(i) || self.is_literal(i) => self.arg(i, 1),
                     _ => format!("a{i}()"),
                 })
                 .collect();
@@ -859,13 +883,24 @@ impl Target {
     }
 
     fn diamond_project_of(&self, n: u64, paths: &[&str]) -> Project {
+        // A literal-only parameter is no wrapper's parameter: `base` writes
+        // its literal into the call, and the paths never see it.
         let sig: Vec<String> = (0..self.params.len())
+            .filter(|i| !self.is_literal(*i))
             .map(|i| format!("{}a{i}: {}", if Some(i) == self.mut_param { "mut " } else { "" }, self.render_param(i)))
             .collect();
-        let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
+        let inner_args = |inner: &str| -> Vec<String> {
+            (0..self.params.len())
+                .filter_map(|i| match i {
+                    _ if !self.is_literal(i) => Some(format!("a{i}")),
+                    _ if inner == self.name => Some(self.arg(i, 0)),
+                    _ => None,
+                })
+                .collect()
+        };
         let ret = if self.never { "Never".to_string() } else { self.ret.render() };
         let kw = if self.effect { "effect fn" } else { "fn" };
-        let wrap = |inner: &str, bang: &str| format!("pub {kw} call({}) -> {ret} = {inner}({}){bang}\n", sig.join(", "), names.join(", "));
+        let wrap = |inner: &str, bang: &str| format!("pub {kw} call({}) -> {ret} = {inner}({}){bang}\n", sig.join(", "), inner_args(inner).join(", "));
         let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
         // A path that does not return is its program's last statement; it
         // reaches the call through user effect fns, whose call is a Result.
@@ -889,7 +924,7 @@ impl Target {
             return Project { files, entry: "app/src/main.almd".to_string() };
         }
         main.push_str(&effect_recipes::prelude_for(&self.name, n).unwrap_or_default());
-        for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param && !self.per_step(*i)) {
+        for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param && !self.per_step(*i) && !self.is_literal(*i)) {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
         // Each path mutates its own var, so the three must agree on the
@@ -897,10 +932,11 @@ impl Target {
         // the call consumes (`fs.remove`'s file): each path builds its own.
         let path_args = |path: &str| -> String {
             (0..self.params.len())
-                .map(|i| match i {
-                    _ if Some(i) == self.mut_param => format!("{path}m"),
-                    _ if self.per_step(i) => format!("{path}a{i}"),
-                    _ => format!("a{i}"),
+                .filter_map(|i| match i {
+                    _ if self.is_literal(i) => (path == "d").then(|| self.arg(i, n)),
+                    _ if Some(i) == self.mut_param => Some(format!("{path}m")),
+                    _ if self.per_step(i) => Some(format!("{path}a{i}")),
+                    _ => Some(format!("a{i}")),
                 })
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -1017,7 +1053,7 @@ impl Target {
     /// (callbacks stay inline: they are not values a `let` can type here).
     fn arg_lets(&self, n: u64, skip: Option<usize>, later: &[usize]) -> String {
         let mut s = String::new();
-        for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i) && !later.contains(i)) {
+        for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i) && !self.is_literal(*i) && !later.contains(i)) {
             let kw = if Some(i) == self.mut_param { "var" } else { "let" };
             let _ = writeln!(s, "  {kw} a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
@@ -1030,7 +1066,7 @@ impl Target {
         let args: Vec<String> = (0..self.params.len())
             .map(|i| match i {
                 _ if Some(i) == slot => "x".to_string(),
-                _ if self.is_fn(i) => self.arg(i, 0),
+                _ if self.is_fn(i) || self.is_literal(i) => self.arg(i, 0),
                 _ => format!("a{i}"),
             })
             .collect();
@@ -1039,6 +1075,11 @@ impl Target {
 
     fn is_fn(&self, i: usize) -> bool {
         matches!(self.params[i].1, SigType::Fn(..))
+    }
+
+    /// Parameter `i` is literal-only (E117): inline at every call.
+    fn is_literal(&self, i: usize) -> bool {
+        self.literal.iter().any(|(j, _)| *j == i)
     }
 
     fn func(&self) -> &str {
@@ -1237,6 +1278,37 @@ pub(crate) mod tests {
         let catalogue = crate::generator::catalogue::build();
         let sig = catalogue.iter().find(|s| format!("{}.{}", s.module, s.func) == name).unwrap_or_else(|| panic!("{name} not catalogued"));
         Target::new(sig, &catalogue).expect("target")
+    }
+
+    /// `[B: Body]` is inspected at Bytes (the Int fill does not conform) and
+    /// at String, each labelled with what B was.
+    #[test]
+    fn a_bounded_variable_is_inspected_at_its_conformers() {
+        let catalogue = crate::generator::catalogue::build();
+        let sig = catalogue.iter().find(|s| s.module == "http" && s.func == "response").expect("http.response");
+        let int = Target::new_filled(sig, &catalogue, GenType::Int).expect("int target");
+        let heap = Target::new_filled(sig, &catalogue, GenType::String).expect("heap target");
+        assert!(int.generic && heap.generic);
+        assert_eq!((int.vars.as_str(), heap.vars.as_str()), ("Bytes", "String"));
+        assert!(int.direct_program(4, 1, true).contains("x: Bytes = "), "{}", int.direct_program(4, 1, true));
+        assert_eq!(target("list.map").vars, "Int");
+    }
+
+    /// A literal-only parameter (E117) is written inline at every call, and
+    /// is no parameter of the diamond's wrappers.
+    #[test]
+    fn a_literal_only_parameter_is_written_inline() {
+        let t = target("http.typed");
+        assert_eq!(t.size_param, Some(1), "the body scales, never the literal");
+        let direct = t.direct_program(4, 1, true);
+        assert!(direct.contains("http.typed(\"text/csv\", x)"), "{direct}");
+        assert!(!direct.contains("let a0"), "{direct}");
+        let project = t.diamond_project(4);
+        let file = |p: &str| project.files.iter().find(|(f, _)| f == p).map(|(_, s)| s.clone()).unwrap();
+        assert!(file("app/src/base.almd").contains("pub fn call(a1: Bytes) -> TypedBody = http.typed(\"text/csv\", a1)"), "{}", file("app/src/base.almd"));
+        assert!(file("app/src/left.almd").contains("pub fn call(a1: Bytes) -> TypedBody = base.call(a1)"), "{}", file("app/src/left.almd"));
+        let main = file("app/src/main.almd");
+        assert!(main.contains("http.typed(\"text/csv\", a1)") && main.contains("left.call(a1)") && !main.contains("let a0"), "{main}");
     }
 
     /// Every catalogued function the probes give an in-domain input.

@@ -121,6 +121,13 @@ pub fn almide_rt_http___with_headers(status: i64, body: &str, flat: &[AlmideStri
     AlmideHttpResponse::from_headers(status, body.to_string(), &header_pairs(flat))
 }
 
+/// `http.__http_response_flat`: the pairs as given, each name written once by its
+/// caller (`response`, `redirect`), so it is `__with_headers` without a merge
+/// to do.
+pub fn almide_rt_http___http_response_flat(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
+    almide_rt_http___with_headers(status, body, flat)
+}
+
 pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> AlmideHttpResponse {
     resp.status = code; resp
 }

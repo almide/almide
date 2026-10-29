@@ -237,6 +237,16 @@ pub(crate) enum Helper {
     FanStart { hook: u32, params: Vec<ValType> },
     FanWait,
     FanTake { hook: u32, ret: Option<ValType> },
+    /// `value.__set_path_steps`'s walk (#4315, value_set_path.rs): `{}`,
+    /// the one-level unique copy of an Object / Array box, the Object key
+    /// lookup through the box's index, the in-place append, the nesting
+    /// check and the walk itself.
+    VsetEmpty,
+    VsetUnique { dec_value: u32, tag: i32 },
+    VsetFind { hash: u32, key_off: u32 },
+    VsetPush { hash: u32, key_off: u32 },
+    VsetNests { val_off: u32 },
+    VsetSteps { fns: crate::value_set_path::VsetFns },
 }
 
 /// The pretty printer's extra pooled fragments.

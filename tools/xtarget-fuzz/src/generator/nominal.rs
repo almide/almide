@@ -279,6 +279,31 @@ pub const NOMINALS: &[Nominal] = &[
         refuses_var: false,
         in_flight: true,
     },
+    // A response body of a declared media type (ADR-0032), from its one
+    // constructor `http.typed`, whose media type is a literal (E117). It has
+    // no reader of its own: observed as the response it makes, through the
+    // Content-Type and body that response carries.
+    Nominal {
+        name: "TypedBody",
+        module: "http",
+        small: "http.typed(\"text/csv\", bytes.from_string(\"a,é\"))",
+        sized: "http.typed(\"application/octet-stream\", bytes.from_string(string.repeat(\"aé\", {n})))",
+        leaves: &[
+            "http.typed(\"text/csv\", bytes.new())",
+            "http.typed(\"text/csv; charset=utf-8\", bytes.from_string(\"a,b\\n1,é\"))",
+            "http.typed(\"image/png\", bytes.from_list([137, 80, 78, 71]))",
+            "http.typed(\"application/octet-stream\", bytes.from_list([0, 255, 128]))",
+        ],
+        observe: "(http.header(http.response(200, {v}), \"Content-Type\") ?? \"-\", http.body(http.response(200, {v})))",
+        observed: || pair(GenType::String, GenType::String),
+        // No reader leaves the bytes alone: making the response decodes them
+        // (`__self_to_text`), so a per-call digest through it would time the
+        // decode, not the call (#4337). The digest is constant, as a tuple's.
+        digest: "1",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
     // A bounds-checked view of memory (ADR-0031), from the two mints the
     // language has (an `@extern` with `@region(len = …)` is the third, and
     // needs a foreign library): `ffi.region(b)`, read-only and the length of
