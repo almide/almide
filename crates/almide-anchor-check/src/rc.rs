@@ -554,9 +554,7 @@ pub fn check_rc(
                     (k == kind || (kind == 'd' && k == 'j'))
                         && (names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l))))
                 }
-                // A temporary's event logged inside an arm or routine window
-                // is an instruction emitted inside it: a call in that window.
-                (kind, None) => k == kind && evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z),
+                (kind, None) => k == kind,
             }
         };
         let order: Vec<usize> = (0..evs.len())
@@ -607,10 +605,17 @@ pub fn check_rc(
         // accounted; then each event still unmatched may reach a consuming
         // argument, re-routing others along the way (an augmenting path never
         // frees a node, so no call matched in the first pass is left over).
+        // In that first pass a temporary's event logged inside an arm or
+        // routine window looks only at the calls inside that window (where
+        // the instruction it records was emitted, as a rule); a later pass
+        // may still take one outside (a preference, never a new pairing).
+        let fits_first = |e: usize, i: usize| {
+            fits(e, i) && (evs[e].1.is_some() || i >= nc || evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z))
+        };
         let calls_only: Vec<usize> = by_pref.iter().copied().filter(|&i| i < nc).collect();
         for &e in &order {
             let mut seen = vec![false; owner.len()];
-            augment(e, &calls_only, &fits, &mut seen, &mut owner);
+            augment(e, &calls_only, &fits_first, &mut seen, &mut owner);
         }
         for &e in &order {
             if owner.contains(&Some(e)) {
