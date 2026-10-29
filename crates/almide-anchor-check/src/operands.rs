@@ -256,6 +256,23 @@ impl<'b, 'a> Flow<'b, 'a> {
     }
 
     /// Inside an aborting `if` (module header).
+    /// No run passes through both `p` and `q`: they lie in the two arms
+    /// of one `if` (the then-arm before its `else`, the else-arm after).
+    pub(crate) fn exclusive(&self, p: usize, q: usize) -> bool {
+        let (a, b) = (p.min(q), p.max(q));
+        let mut c = self.parent[a];
+        while let Some(s) = c {
+            if b <= self.close[s] {
+                // `s` holds both: they are exclusive when it is an `if` whose
+                // `else` (a direct child) falls between them.
+                return matches!(self.b.ops[s], Op::If { .. })
+                    && (a + 1..b).any(|k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else));
+            }
+            c = self.parent[s];
+        }
+        false
+    }
+
     pub(crate) fn in_abort_arm(&self, k: usize) -> bool {
         self.abort_arm[k]
     }

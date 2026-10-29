@@ -658,3 +658,20 @@ fn a_move_into_an_arm_accounts_for_one_release_inside_its_window() -> Result<(),
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-5".into())], &[vec![(1, 0, 5)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// One move, released once on each arm of an `if`: both releases are the
+/// move's. Released twice on one path: the second is left over.
+#[test]
+fn a_move_released_once_per_path_is_accounted_on_every_path() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let bytes = module(
+        "(local i32 i32)",
+        "local.get 1 (if (then local.get 0 call $alloc drop) (else local.get 0 call $alloc drop))",
+    );
+    let bodies = decode(&bytes)?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default())?;
+    let bytes = module("(local i32 i32)", "local.get 1 (if (then local.get 0 call $alloc drop local.get 0 call $alloc drop))");
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

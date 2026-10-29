@@ -310,8 +310,9 @@ pub fn check_rc(
         // - a rebind `o` takes a release or a judge call on its local;
         // - a move `m` (the variable's credit handed into an arm or a
         //   routine) takes a release on its local INSIDE that window — the
-        //   arm's or routine's release of the credit it was given. A move
-        //   the arm keeps (stores or returns) takes nothing.
+        //   arm's or routine's release of the credit it was given, one per
+        //   path (below). A move the arm keeps (stores or returns) takes
+        //   nothing.
         // The rebinds are matched first, the named and unnamed events next,
         // the moves last (augmenting paths never unmatch an earlier event).
         // A rebind may go without an instruction, so it must not be left the
@@ -368,6 +369,18 @@ pub fn check_rc(
         for &e in &order {
             let mut seen = vec![false; calls.len()];
             augment(e, &by_pref, &fits, &mut seen, &mut owner);
+        }
+        // A move's credit is released by the arm on some of its paths: one
+        // release per path. Releases of it that no run passes through two of
+        // (the two arms of one `if`) are all that one move's.
+        for e in (0..evs.len()).filter(|&e| evs[e].0 == 'm') {
+            let mut held: Vec<usize> = (0..calls.len()).filter(|&i| owner[i] == Some(e)).collect();
+            for &i in &by_pref {
+                if owner[i].is_none() && fits(e, i) && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0)) {
+                    owner[i] = Some(e);
+                    held.push(i);
+                }
+            }
         }
         // Who holds a call can change along an augmenting path; read the
         // final matching.
