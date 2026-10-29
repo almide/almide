@@ -540,6 +540,19 @@ impl Emitter<'_> {
         }
     }
 
+    /// The anchored forms (`rc::site_window`): the `if` of `lower_if_arms`.
+    pub(crate) fn witness_branch_open_at(&mut self, anchor: u64) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_open_at(anchor);
+        }
+    }
+
+    pub(crate) fn witness_branch_arm_at(&mut self, anchor: u64) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_arm_at(anchor);
+        }
+    }
+
     pub(crate) fn witness_branch_close(&mut self) {
         if let Some(w) = self.witness.as_mut() {
             w.branch_close();

@@ -725,10 +725,14 @@ impl Emitter<'_> {
     ) -> Result<(), EmitError> {
         let IrExprKind::If { then, else_, .. } = &e.kind else { return unsup("if-arms") };
         let normalize = self.rc_droppable(ty) && (self.rc_predict_owned(then) || self.rc_predict_owned(else_));
+        // #4277: the site is anchored to this `if` and its `else`, so the RC
+        // check reads the recorder's first arm as the shipped then-arm.
+        let site = crate::witness::rc::site_id();
+        let if_at = self.f.byte_len();
         self.f.instructions().if_(wasm_encoder::BlockType::Result(ty.val_type()));
         self.branch_depth += 1;
         // The witness (#2756) sees each arm and the credit it hands the join.
-        self.witness_branch_open();
+        self.witness_branch_open_at(site);
         let arms = (|| {
             self.witness_branch_arm();
             self.in_tail = tail;
@@ -741,7 +745,8 @@ impl Emitter<'_> {
                 self.witness_arm_value(then);
             }
             self.f.instructions().else_();
-            self.witness_branch_arm();
+            crate::witness::rc::site_window(site, if_at, self.f.byte_len());
+            self.witness_branch_arm_at(site);
             self.in_tail = tail;
             self.lower(else_, Some(ty))?;
             let join = normalize || (then_owned && self.rc_droppable(ty));

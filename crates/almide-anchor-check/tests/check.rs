@@ -822,3 +822,33 @@ fn rebinds_in_two_arms_share_the_release_past_the_join() -> Result<(), String> {
     assert!(rc(body, "o0 o0 d0").is_err());
     Ok(())
 }
+
+/// A write in the other arm of an `if` never reaches a read in this arm:
+/// the read names the value the dominating def gave the local.
+#[test]
+fn a_write_in_the_other_arm_does_not_hide_the_def() -> Result<(), String> {
+    let body = "local.get 0 local.set 1 local.get 0 (if (then i32.const 0 local.set 1) (else local.get 1 call $alloc drop))";
+    rc(body, "d0")?;
+    // Past the join either write may have run: no def names the read.
+    let joined = "local.get 0 local.set 1 local.get 0 (if (then i32.const 0 local.set 1)) local.get 1 call $alloc drop";
+    assert!(rc(joined, "d0").is_err());
+    Ok(())
+}
+
+/// A release past an anchored `if`'s join, on the value its arms chose:
+/// one event in each arm, each naming its own shipped arm's value. The
+/// anchor (`(@<if>-<else>`) holds the recorder's arm order to the bytes:
+/// swapped, or unanchored, the pairing is refused.
+#[test]
+fn an_anchored_if_pairs_each_arm_event_with_its_arm_value() -> Result<(), String> {
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, None, &releases, &[], &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-3 d0 |@1-3 d1 )")?;
+    assert!(run("(@1-3 d1 |@1-3 d0 )").is_err(), "arms swapped");
+    assert!(run("( d0 | d1 )").is_err(), "no anchor");
+    assert!(run("(@1-3 d0 |@1-4 d1 )").is_err(), "arm boundary anchored elsewhere");
+    assert!(run("(@1-3 ( d0 | ) |@1-3 d1 )").is_err(), "an event on some of the arm's paths only");
+    Ok(())
+}

@@ -68,7 +68,7 @@
 //! routine's own RC keeps the balance of the operation the witness records;
 //! and that an element's RC keeps its container's credit invariant.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use wasmparser::Operator as Op;
 
@@ -390,17 +390,29 @@ pub fn check_rc(
         let mut evpath: Vec<Vec<(usize, usize)>> = Vec::new();
         let mut open_sites: Vec<(usize, usize)> = Vec::new();
         let mut next_site = 0usize;
+        // A site the recorder anchored (`(@<if>-<else>`, an `if` lowered with
+        // its arms in source order): the shipped `if` and `else` it is.
+        let mut site_at: HashMap<usize, (usize, usize)> = HashMap::new();
+        let anchor = |t: &str| t.get(2..)?.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
         let evs: Vec<(char, Option<u32>)> = events
             .split_whitespace()
             .filter(|t| match *t {
-                "(" => {
+                t if t.starts_with('(') => {
                     next_site += 1;
                     open_sites.push((next_site, 0));
+                    if let Some(at) = anchor(t) {
+                        site_at.insert(next_site, at);
+                    }
                     false
                 }
-                "|" => {
+                t if t.starts_with('|') => {
                     if let Some(s) = open_sites.last_mut() {
                         s.1 += 1;
+                        // An arm boundary anchored elsewhere than its site:
+                        // the site is not held to the shipped arms.
+                        if anchor(t) != site_at.get(&s.0).copied() {
+                            site_at.remove(&s.0);
+                        }
                     }
                     false
                 }
@@ -739,6 +751,35 @@ pub fn check_rc(
             let mut seen = vec![false; nc];
             if share_path(e, &prefs, (&fits, &exclusive_events, &movable), &mut seen, &mut owner, &mut co) {
                 got[e] = true;
+            }
+        }
+        // A `+1` / release past the join of an anchored `if` on the value its
+        // arms chose: one event in each arm, each naming its own arm's value
+        // (arm i of the recorder's site is the shipped arm i — the anchor
+        // holds it, never trusted), logged at the site's own level (on every
+        // path through that arm).
+        for c in 0..live {
+            if owner[c].is_some() || !co[c].is_empty() || !matches!(calls[c].1, 'a' | 'd') {
+                continue;
+            }
+            let arg = fl.arg(calls[c].0, 0, FUEL);
+            let crate::operands::T::Opaque(p) = crate::operands::pl(&arg) else { continue };
+            let Some((s, e, vals)) = fl.if_arms(*p, FUEL) else { continue };
+            let Some((&site, _)) = site_at.iter().find(|(_, &at)| at == (s, e)) else { continue };
+            let arm_names: Vec<Vec<u32>> = vals.iter().map(|v| names_through(bodies, imports, b, &judged, v, 2)).collect();
+            let pick = |arm: usize| {
+                (0..evs.len()).find(|&x| {
+                    !got[x]
+                        && evs[x].0 == calls[c].1
+                        && evpath[x].last() == Some(&(site, arm))
+                        && evs[x].1.is_some_and(|l| arm_names[arm].contains(&l))
+                })
+            };
+            if let (Some(e0), Some(e1)) = (pick(0), pick(1)) {
+                owner[c] = Some(e0);
+                co[c].push(e1);
+                got[e0] = true;
+                got[e1] = true;
             }
         }
         for i in 0..nc {

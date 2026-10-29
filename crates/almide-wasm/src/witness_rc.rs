@@ -101,6 +101,40 @@ pub(crate) fn mark(c: char) {
     });
 }
 
+/// `mark`, the site anchored to the window `anchor` names (`<c>#<id>`,
+/// rendered `<c>@<if>-<else>`): the wasm `if` and its `else`.
+pub(crate) fn mark_at(c: char, anchor: Option<u64>) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| {
+        let e = s.open.entry(serial).or_default();
+        e.push(c);
+        if let Some(id) = anchor {
+            e.push_str(&format!("#{id}"));
+        }
+        e.push(' ');
+    });
+}
+
+/// A fresh id for an `if` site's anchor window, closed by [`site_window`].
+/// Not an RC window: nothing is moved into it.
+pub(crate) fn site_id() -> u64 {
+    let mut id = 0;
+    with(|s| {
+        s.next_window += 1;
+        id = s.next_window;
+    });
+    id
+}
+
+/// The anchored `if` site `id` spans byte offsets `from` (its `if`) to `to`
+/// (just past its `else`).
+pub(crate) fn site_window(id: u64, from: usize, to: usize) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| {
+        s.window_ids.entry(s.pass).or_default().insert(id, (serial, from, to));
+    });
+}
+
 /// An arm's or a compound routine's instruction window opens; the id names
 /// it to [`arm`] / [`routine`] / [`window_dropped`] when it closes.
 pub(crate) fn window_open() -> u64 {

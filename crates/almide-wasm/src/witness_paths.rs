@@ -136,14 +136,25 @@ impl Branches {
     }
 
     pub(crate) fn open(&mut self, log: &mut Vec<Ev>) {
+        self.open_at(log, None);
+    }
+
+    /// `open`, the site anchored (`anchor`: an `rc::site_window` id naming
+    /// the wasm `if` and its `else`), so the RC check holds the recorder's
+    /// arms to the shipped arms.
+    pub(crate) fn open_at(&mut self, log: &mut Vec<Ev>, anchor: Option<u64>) {
         if !self.dead() {
-            crate::witness::rc::mark('(');
+            crate::witness::rc::mark_at('(', anchor);
         }
         self.push(log, Ev::Open);
     }
 
     /// The next arm begins (the first call after `open` starts arm one).
     pub(crate) fn arm(&mut self, log: &mut Vec<Ev>) {
+        self.arm_at(log, None);
+    }
+
+    pub(crate) fn arm_at(&mut self, log: &mut Vec<Ev>, anchor: Option<u64>) {
         let Some(s) = self.stack.last_mut() else { return };
         if s.started {
             s.exited += u32::from(s.cur_exited);
@@ -151,7 +162,7 @@ impl Branches {
             s.arms += 1;
             if s.logged {
                 log.push(Ev::Arm);
-                crate::witness::rc::mark('|');
+                crate::witness::rc::mark_at('|', anchor);
             }
         } else {
             s.started = true;

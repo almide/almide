@@ -460,6 +460,16 @@ impl WitnessRecorder {
         self.branches.arm(&mut self.log);
     }
 
+    /// `branch_open` / `branch_arm` of an `if` whose arms the RC check
+    /// holds to the shipped `if` / `else` (`rc::site_window`).
+    pub fn branch_open_at(&mut self, anchor: u64) {
+        self.branches.open_at(&mut self.log, Some(anchor));
+    }
+
+    pub fn branch_arm_at(&mut self, anchor: u64) {
+        self.branches.arm_at(&mut self.log, Some(anchor));
+    }
+
     /// The innermost open site joins.
     pub fn branch_close(&mut self) {
         self.branches.close(&mut self.log);

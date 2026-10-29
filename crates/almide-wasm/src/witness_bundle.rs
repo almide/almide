@@ -202,9 +202,14 @@ fn rc_lines(
                     // A move into a window this body does not ship (pruned)
                     // is dropped with it.
                     Some((m, id)) => {
-                        let &(wk, a, b) = window_ids.get(&id.parse::<u64>().ok()?)?;
-                        let (_, x, y) = locate.window(wk, a, b)?;
-                        Some(format!("{m}@{x}-{y}"))
+                        let at = window_ids.get(&id.parse::<u64>().ok()?).and_then(|&(wk, a, b)| locate.window(wk, a, b));
+                        match (at, m) {
+                            (Some((_, x, y)), _) => Some(format!("{m}@{x}-{y}")),
+                            // An `if` site whose anchor did not ship stays a
+                            // plain site mark (its arms are then not paired).
+                            (None, "(" | "|") => Some(m.to_string()),
+                            (None, _) => None,
+                        }
                     }
                     None => Some(t.to_string()),
                 })
