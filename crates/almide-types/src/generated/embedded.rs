@@ -5714,10 +5714,10 @@ local fn __address(b: Bytes) -> Handle = _
 
 
 
+mod type RegionExportView = { owner: Bytes, off: Int, len: Int }
+
 @memory_unsafe
-local fn __export_owner(r: Region) -> Bytes =
-  if r.len == bytes.len(r.owner) then r.owner
-  else panic("ffi: an @export(wasm) fn returned a sub-region of ${r.len} bytes; return the whole region and pass the offset")
+local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r.off, len: r.len }
 
 
 
