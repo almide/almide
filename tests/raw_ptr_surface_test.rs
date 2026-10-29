@@ -210,6 +210,11 @@ fn shown(r: Result[Unit, String]) -> String = match r {
   err(e) => "err " + e,
 }
 
+fn sliced(r: Result[Region, String]) -> String = match r {
+  ok(v) => "ok len ${ffi.len(v)} writable ${ffi.is_writable(v)}",
+  err(e) => "err " + e,
+}
+
 effect fn main() -> Unit = {
   let owned = ffi.region(bytes.from_list([1, 2, 3, 4]))
   println("owned in    " + show(ffi.read(owned, 0, 4)))
@@ -225,6 +230,19 @@ effect fn main() -> Unit = {
   println("alloc past  " + shown(ffi.write(fresh, 3, bytes.from_list([1, 2]))))
   println("alloc neg   " + shown(ffi.write(fresh, -1, bytes.from_list([1]))))
   println("alloc after " + show(ffi.read(fresh, 0, 4)))
+  let part = ffi.slice(owned, 1, 2)!
+  println("slice in    " + show(ffi.read(part, 0, 2)))
+  println("slice past  " + show(ffi.read(part, 1, 2)))
+  println("slice range " + sliced(ffi.slice(owned, 3, 2)))
+  println("slice neg   " + sliced(ffi.slice(owned, -1, 1)))
+  println("slice count " + sliced(ffi.slice(owned, 0, -1)))
+  println("slice huge  " + sliced(ffi.slice(owned, 9223372036854775807, 1)))
+  let view = ffi.slice(fresh, 1, 3)!
+  println("slice alloc " + sliced(ffi.slice(fresh, 1, 3)))
+  println("slice write " + shown(ffi.write(view, 0, bytes.from_list([5]))))
+  println("parent write " + shown(ffi.write(fresh, 1, bytes.from_list([6]))))
+  println("slice sees  " + show(ffi.read(view, 0, 3)))
+  println("slice nest  " + sliced(ffi.slice(view, 1, 3)))
 }
 "#;
 
@@ -241,6 +259,17 @@ const BOUNDS_EXPECTED: &[&str] = &[
     "alloc past  err ffi.write: 2 bytes at offset 3 are outside a region of 4 bytes",
     "alloc neg   err ffi.write: 1 bytes at offset -1 are outside a region of 4 bytes",
     "alloc after ok 0,7,8,0",
+    "slice in    ok 2,3",
+    "slice past  err ffi.read: 2 bytes at offset 1 are outside a region of 2 bytes",
+    "slice range err ffi.slice: 2 bytes at offset 3 are outside a region of 4 bytes",
+    "slice neg   err ffi.slice: 1 bytes at offset -1 are outside a region of 4 bytes",
+    "slice count err ffi.slice: negative count -1",
+    "slice huge  err ffi.slice: 1 bytes at offset 9223372036854775807 are outside a region of 4 bytes",
+    "slice alloc ok len 3 writable false",
+    "slice write err ffi.write: the region is read-only (ffi.region views a Bytes value)",
+    "parent write ok",
+    "slice sees  ok 6,8,0",
+    "slice nest  err ffi.slice: 3 bytes at offset 1 are outside a region of 3 bytes",
 ];
 
 fn run_bounds(leg: &str, args: &[&str]) {
