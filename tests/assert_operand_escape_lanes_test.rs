@@ -171,8 +171,16 @@ fn a_bytes_operand_shows_its_octets_on_every_route() {
         let mut args = vec!["test", "eq_test.almd"];
         args.extend_from_slice(lane);
         let (rc, out) = run(&args, &d);
-        let found = if out.contains("found:    [1, 2]") { "found:    [1, 2]" } else { "found: [1, 2]" };
-        check_route(&format!("{route} (assert_eq)"), rc, &out, &["expected: [1, 3]", found]);
+        // A list-shaped pair is reported as an item diff where the report
+        // draws one (as for a `List[Int]` pair), else as the block's pair.
+        let want: &[&str] = if out.contains("item 1 differs") {
+            &["- 3", "+ 2"]
+        } else if out.contains("found:    [1, 2]") {
+            &["expected: [1, 3]", "found:    [1, 2]"]
+        } else {
+            &["expected: [1, 3]", "found: [1, 2]"]
+        };
+        check_route(&format!("{route} (assert_eq)"), rc, &out, want);
         let mut args = vec!["test", "ne_test.almd"];
         args.extend_from_slice(lane);
         let (rc, out) = run(&args, &d);
