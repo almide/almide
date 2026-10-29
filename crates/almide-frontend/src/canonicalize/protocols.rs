@@ -82,7 +82,10 @@ pub fn is_builtin_conformer(type_name: &str, proto: &str) -> bool {
 /// `type BigInt: Numeric` in `bigint`) — the form a built-in type's
 /// requirements take in its stdlib module. `None` when neither exists.
 pub fn requirement_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<String> {
-    if let Some(k) = super::registration::convention_fn_key(env, type_name, method) {
+    // A declared type meets a requirement under its public name
+    // (`fn Chart.media_type`, never `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method);
+    if let Some(k) = super::registration::convention_fn_key(env, type_name, public) {
         return Some(k.to_string());
     }
     let module = declaring_module(env, type_name)?;
