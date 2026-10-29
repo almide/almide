@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# COMPILE-TIME RATIO RATCHET (#4289).
+# COMPILE-TIME RATIO RATCHET (#4289, #4317).
 #
 # The integration batch #4276 made compiling an ordinary program 25-50%
 # slower and nothing noticed until the release CI legs timed out: the
@@ -103,25 +103,43 @@ a, g, b = $1, $2, $BUDGET_PCT
 print('high' if g > a * (1 + b / 100) else 'low' if g < a * 0.5 else 'ok')"
 }
 
+# Recorded readings of the trees whose compile slowdown this gate exists for,
+# as `row reading label`: the band must call each one high.
+#   #4289: the post-batch release-fix tree, against anchors near 4.6 / 20.6.
+#   #4317: #4182's merge and develop before the fix, whose wasm link scanned
+#   every fn of every module it loaded — `int.to_string` linked 63 self-host
+#   bodies into a three-function program and the corpus wasm gates ran ~3x
+#   longer per fixture. Their check readings (4.66, 4.18) are in the check
+#   row's band: the front end's whole-module reach is not what #4317 fixed.
+REGRESSED=(
+  "check 6.65 release-fix(0ff4366bc,#4289)"
+  "wasm 27.3 release-fix(0ff4366bc,#4289)"
+  "wasm 22.4 #4182-merge(926542089,#4317)"
+  "wasm 18.9 develop-before-fix(ab7c28b74,#4317)"
+)
+
 status=0
 for row in check wasm; do
   anchor=$(awk -v r="$row" '$1 == r { print $2 }' "$BASELINE_FILE")
   [ -n "$anchor" ] || { echo "FAIL: no '$row' anchor in $BASELINE_FILE"; exit 1; }
-  # Negative control, run on every invocation: the band must call the
-  # release-fix tree's reading (#4289: check 6.65, wasm 27.3 against anchors
-  # near 4.6 / 20.6) high, and a reading at 40% of the anchor low. A band that
-  # stops biting fails here instead of reading green forever.
-  forged_high=$([ "$row" = check ] && echo 6.65 || echo 27.3)
+  # Negative control, run on every invocation: the band must call every
+  # recorded reading of a tree this gate exists for high (REGRESSED below),
+  # and a reading at 40% of the anchor low. A band that stops biting fails
+  # here instead of reading green forever.
+  for entry in "${REGRESSED[@]}"; do
+    read -r r forged_high label <<<"$entry"
+    [ "$r" = "$row" ] || continue
+    [ "$(verdict_of "$anchor" "$forged_high")" = high ] \
+      || { echo "FAIL: negative control — the $row band reads $label's $forged_high as not high against $anchor"; exit 1; }
+  done
   forged_low=$(python3 -c "print($anchor * 0.4)")
-  [ "$(verdict_of "$anchor" "$forged_high")" = high ] \
-    || { echo "FAIL: negative control — the $row band reads release-fix's $forged_high as not high against $anchor"; exit 1; }
   [ "$(verdict_of "$anchor" "$forged_low")" = low ] \
     || { echo "FAIL: negative control — the $row band reads $forged_low as not low against $anchor"; exit 1; }
   got=$([ "$row" = check ] && echo "$check_ratio" || echo "$wasm_ratio")
   verdict=$(verdict_of "$anchor" "$got")
   case $verdict in
     ok) echo "  ok   $row $got (anchor $anchor, ceiling +$BUDGET_PCT%)";;
-    high) echo "  FAIL $row $got is more than $BUDGET_PCT% above its anchor $anchor: compiling a small program got slower relative to reading it (#4289)"; status=1;;
+    high) echo "  FAIL $row $got is more than $BUDGET_PCT% above its anchor $anchor: compiling a small program got slower relative to reading it (#4289, #4317)"; status=1;;
     low) echo "  FAIL $row $got is below half its anchor $anchor: the measurement broke, or a durable win should lower the anchor in the same change"; status=1;;
   esac
 done

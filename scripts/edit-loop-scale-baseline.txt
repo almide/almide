@@ -137,7 +137,20 @@ ratio 18.81
 # (#4151) shifts the zero-sum split toward check. Same A/B as `ratio`:
 #   batch-sec-ffi 0.1085/0.1377/0.7538 -> batch-all-1025 0.0940/0.1143/0.7917
 #   (factors 0.867/0.830/1.050 applied to the CI anchors).
-share_lex 0.1118
+# 2026-10-29: share_lex moved 0.1118 -> 0.0942, re-anchored on CI readings. The
+# 0.1118 above was the M4 Pro factor applied to the old anchor, never a CI
+# reading: develop's Perf ratchet read 0.1240-0.1425 through 2026-10-24
+# (95abf53fe 0.1267) and has read 0.0886-0.1070 on every job since the #4182
+# integration landed (926542089, 2026-10-25) — a durable step of ~0.73x, not
+# the 0.867x the A/B predicted. The 13 develop push/PR-event jobs from
+# 926542089 to bfde4b0fb (2026-10-29T08:26):
+#     0.0886 0.0898 0.0927 0.0931 0.0936 0.0941 0.0942 0.0946 0.0948 0.0966
+#     0.0971 0.0972 0.1070   median 0.0942
+# The old floor 0.0894 sat 5% under that median, so it fired on develop itself
+# (ab7c28b74 0.0886) and on #4327 (0.0894) with no front-end change.
+# share_parse (0.1023-0.1307, two runner populations) and share_check
+# (0.7767-0.8025) stay inside their bands and keep their anchors.
+share_lex 0.0942
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
 share_parse 0.1150
