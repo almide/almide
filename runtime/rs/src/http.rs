@@ -128,6 +128,12 @@ pub fn almide_rt_http___http_response_flat(status: i64, body: &str, flat: &[Almi
     almide_rt_http___with_headers(status, body, flat)
 }
 
+/// `http.__http_response_ascii_lower`: a header name ASCII-lowercased, as
+/// the owned-header check compares it (RFC 9110 §5.1).
+pub fn almide_rt_http___http_response_ascii_lower(s: &str) -> AlmideString {
+    s.to_ascii_lowercase().into_almide()
+}
+
 pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> AlmideHttpResponse {
     resp.status = code; resp
 }
