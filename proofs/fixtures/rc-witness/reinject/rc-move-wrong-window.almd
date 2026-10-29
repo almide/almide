@@ -1,13 +1,18 @@
 // #4277 drill: a variable's credit moved into an arm is recorded against the
 // window after the one it was moved into. The ownership witness is
-// unchanged; the arm's release of the moved key, inside its own window, now
-// names a frame variable no event in that window accounts, so the RC byte
-// check must refuse it.
+// unchanged; the arm's release of the moved value, inside its own window,
+// now names a frame variable no event of that window accounts, so the RC
+// byte check must refuse it. (`list.set` over a List[Value] moves the new
+// element in and releases the replaced one inside the arm.)
+import json
+
 effect fn main() -> Unit = {
-  var m: Map[String, Int] = map.new()
-  let k = "a" + "b"
-  m = map.set(m, k, 1)
-  let k2 = "a" + "b"
-  m = map.set(m, k2, 2)
-  println(int.to_string(map.len(m)))
+  let items = [
+    value.int(1),
+    value.object([("a", value.int(2))]),
+    value.int(3)
+  ]
+  let updated = list.set(items, 1, value.array([value.int(7), value.int(8)]))
+  println(json.stringify(value.array(updated)))
+  println(json.stringify(value.array(list.set(items, 0, value.string("x")))))
 }
