@@ -138,3 +138,53 @@ fn a_test_lane_failure_shows_the_same_operands_on_every_lane() {
     }
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// #4323: a Bytes operand has no string form of its own, so the failure shows
+/// it as it prints inside a container — its octets `[1, 2]` — on every route.
+/// Native used to interpolate it with `{}` and rustc refused the generated
+/// Rust (E0277); the wasm leg walled the shape.
+#[test]
+fn a_bytes_operand_shows_its_octets_on_every_route() {
+    if !available() {
+        return;
+    }
+    let d = dir("bytes");
+    std::fs::write(
+        d.join("prog.almd"),
+        "fn main() -> Unit = {\n  let a = bytes.from_list([1, 2])\n  assert_eq(a, bytes.from_list([1, 3]))\n}\n",
+    )
+    .unwrap();
+    let want = "Error: assertion failed\n  at: line 3\n  expected: [1, 3]\n  found: [1, 2]";
+    let (rc, native) = run(&["run", "prog.almd"], &d);
+    check_route("run native", rc, &native, &[want]);
+    let (rc, wasm) = run(&["run", "prog.almd", "--target", "wasm"], &d);
+    check_route("run wasm", rc, &wasm, &[want]);
+    assert_eq!(block(&native), block(&wasm), "the two legs print different failure blocks");
+    std::fs::write(
+        d.join("eq_test.almd"),
+        "test \"eq\" {\n  let a = bytes.from_list([1, 2])\n  assert_eq(a, bytes.from_list([1, 3]))\n}\n",
+    )
+    .unwrap();
+    std::fs::write(d.join("ne_test.almd"), "test \"ne\" {\n  let a = bytes.from_list([7])\n  assert_ne(a, a)\n}\n").unwrap();
+    for lane in [&[][..], &["--target", "rust"][..], &["--target", "wasm"][..]] {
+        let route = format!("almide test {}", lane.join(" "));
+        let mut args = vec!["test", "eq_test.almd"];
+        args.extend_from_slice(lane);
+        let (rc, out) = run(&args, &d);
+        // A list-shaped pair is reported as an item diff where the report
+        // draws one (as for a `List[Int]` pair), else as the block's pair.
+        let want: &[&str] = if out.contains("item 1 differs") {
+            &["- 3", "+ 2"]
+        } else if out.contains("found:    [1, 2]") {
+            &["expected: [1, 3]", "found:    [1, 2]"]
+        } else {
+            &["expected: [1, 3]", "found: [1, 2]"]
+        };
+        check_route(&format!("{route} (assert_eq)"), rc, &out, want);
+        let mut args = vec!["test", "ne_test.almd"];
+        args.extend_from_slice(lane);
+        let (rc, out) = run(&args, &d);
+        check_route(&format!("{route} (assert_ne)"), rc, &out, &["expected: != [7]"]);
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

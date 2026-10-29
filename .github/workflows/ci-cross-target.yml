@@ -104,11 +104,13 @@ jobs:
           # commit-rotated 1-in-8 slice of the test files plus the ones the
           # change touches; every other run, all of them.
           . scripts/lib/ci-slice.sh
+          . scripts/lib/wasm-skip.sh
           find spec/ -name '*_test.almd' -type f | sed 's#^spec//#spec/#' | sort | ci_slice_filter cross-target-spec > /tmp/xt-selected.txt
           selected=0
           for f in $(cat /tmp/xt-selected.txt); do
-            # Skip files marked with wasm:skip
-            if head -3 "$f" | grep -q 'wasm:skip'; then continue; fi
+            # Skip files that declare `// wasm:skip` (scripts/lib/wasm-skip.sh:
+            # the harness's own reading of the marker), naming the reason.
+            if reason=$(wasm_skip_reason "$f"); then echo "SKIP $f (declared // wasm:skip: $reason)"; continue; fi
             selected=$((selected + 1))
 
             # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a

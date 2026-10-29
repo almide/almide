@@ -10,7 +10,8 @@
 //! The locks:
 //!   1. a type error in the entry file    → FAIL, exit 1, never a skip
 //!   2. a type error in an imported module → FAIL, exit 1, never a skip
-//!   3. `// wasm:skip` (a genuine skip)    → SKIP, exit 0
+//!   3. `// wasm:skip` (a genuine skip)    → SKIP; exit 0 beside a test that
+//!      ran, exit 5 when the skip was all the run did (#4325)
 //!
 //! Skips cleanly when the `almide` binary is unavailable (the release binary
 //! is built by CI's build step; locally run `make install` / `cargo build
@@ -97,9 +98,15 @@ fn wasm_skip_marker_stays_a_green_skip() {
     let file = dir.join("marked_test.almd");
     std::fs::write(&file, "// wasm:skip\ntest \"marked skip\" {\n  assert_eq(1, 1)\n}\n").unwrap();
 
+    // Alone, the skip is all the run did: nothing ran, the zero verdict (#4325).
     let (stderr, code) = wasm_test(&file);
-    assert_eq!(code, 0, "a genuine skip must stay green, got exit {}: {}", code, stderr);
+    assert_eq!(code, 5, "a run that only skipped ran no test, got exit {}: {}", code, stderr);
     assert!(stderr.contains("SKIP"), "verdict must be SKIP: {}", stderr);
     assert!(stderr.contains("1 skipped"), "the skip must be counted: {}", stderr);
+    // Beside a test that ran, a genuine skip stays green.
+    std::fs::write(dir.join("runs_test.almd"), "test \"runs\" {\n  assert_eq(1, 1)\n}\n").unwrap();
+    let (stderr, code) = wasm_test(&dir);
+    assert_eq!(code, 0, "a genuine skip beside a test that ran must stay green, got exit {}: {}", code, stderr);
+    assert!(stderr.contains("SKIP") && stderr.contains("1 skipped"), "the skip must be counted: {}", stderr);
     std::fs::remove_dir_all(&dir).ok();
 }
