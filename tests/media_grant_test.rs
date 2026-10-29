@@ -33,8 +33,8 @@ fn write(path: PathBuf, body: &str) {
 /// A package whose `Mark` type is a `Body` served as `media`, owning `owns`.
 fn body_pkg(media: &str, owns: &str) -> String {
     format!(
-        "type Mark: Body = {{ text: String }}\n\n@media_owns(\"{owns}\")\nfn Mark.__self_media_type(self) -> String = \"{media}\"\n\n\
-         fn Mark.__self_to_text(self) -> String = self.text\n\nfn mark(s: String) -> Mark = Mark {{ text: s }}\n"
+        "type Mark: Body = {{ text: String }}\n\n@media_owns(\"{owns}\")\nfn Mark.media_type(self) -> String = \"{media}\"\n\n\
+         fn Mark.to_text(self) -> String = self.text\n\nfn mark(s: String) -> Mark = Mark {{ text: s }}\n"
     )
 }
 

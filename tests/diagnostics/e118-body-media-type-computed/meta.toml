@@ -1,3 +1,3 @@
 expects_code = "E118"
-expects_error = "`Report.__self_media_type` computes its media type"
+expects_error = "`Report.media_type` computes its media type"
 hint_substring = "a body type's media type is a string literal the checker reads"

@@ -6,8 +6,8 @@ import http
 type Page: Body = { text: String }
 
 @media_owns("text/html")
-fn Page.__self_media_type(self) -> String = "text/html"
+fn Page.media_type(self) -> String = "text/html"
 
-fn Page.__self_to_text(self) -> String = self.text
+fn Page.to_text(self) -> String = self.text
 
 fn main() -> Unit = println(http.body(http.response(200, Page { text: "<p>hi</p>" })))
