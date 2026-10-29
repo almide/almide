@@ -345,10 +345,19 @@ pub fn check_rc(
         let verdict = |g: u32, j: usize| -> (bool, bool) {
             *verdicts.borrow_mut().entry((g, j)).or_insert_with(|| takes(bodies, imports, releases, g, j as u32, 4))
         };
+        // Per variable a named event carries, which consuming arguments hold
+        // its value at their call (computed once per variable: a term per
+        // argument, compared against the variable's value there).
+        let args: Vec<crate::operands::T> = takers.iter().map(|&(k, j, _)| fl.arg(k, j, FUEL)).collect();
+        let holding: std::cell::RefCell<std::collections::HashMap<u32, Vec<bool>>> = Default::default();
         let holds = |l: u32, t: usize| -> bool {
-            let (k, j, _) = takers[t];
-            let arg = fl.arg(k, j, FUEL);
-            names(&arg).contains(&l) || fl.same(&arg, &fl.local_value(l, k, FUEL))
+            holding.borrow_mut()
+                .entry(l)
+                .or_insert_with(|| {
+                    (0..takers.len())
+                        .map(|t| names(&args[t]).contains(&l) || fl.same(&args[t], &fl.local_value(l, takers[t].0, FUEL)))
+                        .collect()
+                })[t]
         };
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
