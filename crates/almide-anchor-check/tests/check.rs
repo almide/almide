@@ -755,3 +755,15 @@ fn a_call_result_names_the_argument_its_callee_may_return() -> Result<(), String
     assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// A move into a window nested in another may be released by the enclosing
+/// arm, after the inner window closes; outside both it is refused.
+#[test]
+fn a_move_may_be_released_by_an_enclosing_window() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "nop nop nop local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-2".into())], &[vec![(1, 0, 2), (1, 0, 6)], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

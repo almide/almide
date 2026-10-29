@@ -500,8 +500,15 @@ pub fn check_rc(
             let (k, names_of) = (calls[i].1, &calls[i].2);
             match evs[e] {
                 ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
+                // The arm or routine the credit moved into, or one enclosing
+                // it (a callback's move released by the fold that called it).
                 ('m', Some(l)) => {
-                    k == 'd' && names_of.contains(&l) && evwin[e].is_some_and(|(a, b)| a <= calls[i].0 && calls[i].0 <= b)
+                    k == 'd'
+                        && names_of.contains(&l)
+                        && evwin[e].is_some_and(|(a, z)| {
+                            windows.iter().flatten().any(|&(p, x, y)| p == *pos && x <= a && z <= y && x <= calls[i].0 && calls[i].0 <= y)
+                                || (a <= calls[i].0 && calls[i].0 <= z)
+                        })
                 }
                 ('m', None) => false,
                 // A C-319 cell variable's events name its local; a call on
