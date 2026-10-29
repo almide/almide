@@ -18,9 +18,9 @@ fn name(s: String) -> String = s
 // media fn states. text/csv runs no script, so it needs no grant.
 type Csv: Body = { rows: String }
 
-fn Csv.__self_media_type(self) -> String = "text/csv"
+fn Csv.media_type(self) -> String = "text/csv"
 
-fn Csv.__self_to_text(self) -> String = self.rows
+fn Csv.to_text(self) -> String = self.rows
 
 test "each body type gives the response its Content-Type" {
   assert_eq(
