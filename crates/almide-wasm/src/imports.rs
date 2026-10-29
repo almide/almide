@@ -53,80 +53,95 @@ pub(crate) fn declare(bytes: &[u8], declared: &[Declared]) -> Result<Vec<u8>, St
     if declared.is_empty() {
         return Ok(bytes.to_vec());
     }
-    let mut base_imports = 0u32;
-    let mut func_types: Vec<u32> = Vec::new();
-    let mut sigs: Vec<(Vec<ValType>, Vec<ValType>)> = Vec::new();
-    let mut memory64 = false;
-    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
-        match payload.map_err(|e| e.to_string())? {
-            wasmparser::Payload::ImportSection(r) => {
-                for i in r.into_imports() {
-                    if matches!(i.map_err(|e| e.to_string())?.ty, wasmparser::TypeRef::Func(_)) {
-                        base_imports += 1;
-                    }
-                }
-            }
-            wasmparser::Payload::FunctionSection(r) => {
-                for t in r {
-                    func_types.push(t.map_err(|e| e.to_string())?);
-                }
-            }
-            wasmparser::Payload::TypeSection(r) => {
-                for t in r.into_iter_err_on_gc_types() {
-                    let t = t.map_err(|e| e.to_string())?;
-                    let conv = |v: &wasmparser::ValType| match v {
-                        wasmparser::ValType::I32 => ValType::I32,
-                        wasmparser::ValType::I64 => ValType::I64,
-                        wasmparser::ValType::F32 => ValType::F32,
-                        wasmparser::ValType::F64 => ValType::F64,
-                        _ => ValType::I32,
-                    };
-                    sigs.push((t.params().iter().map(conv).collect(), t.results().iter().map(conv).collect()));
-                }
-            }
-            wasmparser::Payload::MemorySection(r) => {
-                for m in r {
-                    memory64 |= m.map_err(|e| e.to_string())?.memory64;
-                }
-            }
-            _ => {}
-        }
-    }
+    let sc = scan(bytes)?;
+    let base_imports = sc.base_imports;
     // Imports are numbered in stub order (ascending original index).
     let mut stubs: BTreeMap<u32, Stub<'_>> = BTreeMap::new();
     for d in declared {
-        if d.index < base_imports || (d.index - base_imports) as usize >= func_types.len() {
+        if d.index < base_imports || (d.index - base_imports) as usize >= sc.func_types.len() {
             return Err(format!("import `{}.{}`: stub index {} is not a defined function", d.module, d.name, d.index));
         }
-        stubs.insert(d.index, Stub { import: 0, ty: func_types[(d.index - base_imports) as usize], decl: d });
+        stubs.insert(d.index, Stub { import: 0, ty: sc.func_types[(d.index - base_imports) as usize], decl: d });
     }
     for (k, s) in stubs.values_mut().enumerate() {
         s.import = base_imports + k as u32;
     }
     let keys: Vec<u32> = stubs.keys().copied().collect();
-    // The address width is the target memory's: narrow only on wasm32.
-    let mut narrows: Vec<Narrow> = Vec::new();
-    let mut new_types: Vec<(Vec<ValType>, Vec<ValType>)> = Vec::new();
-    for s in stubs.values_mut() {
-        if memory64 || s.decl.narrow.is_empty() {
-            continue;
+    let (narrows, new_types) = plan_narrows(&mut stubs, &sc)?;
+    let mut re = Declare { base_imports, stubs, keys, narrows, new_types };
+    let mut module = Module::new();
+    re.parse_core_module(&mut module, wasmparser::Parser::new(0), bytes).map_err(|e| e.to_string())?;
+    Ok(module.finish())
+}
+
+/// What `declare` reads off the finished bytes first.
+struct Scan {
+    base_imports: u32,
+    func_types: Vec<u32>,
+    sigs: Vec<(Vec<ValType>, Vec<ValType>)>,
+    memory64: bool,
+}
+
+fn val(v: &wasmparser::ValType) -> ValType {
+    match v {
+        wasmparser::ValType::I64 => ValType::I64,
+        wasmparser::ValType::F32 => ValType::F32,
+        wasmparser::ValType::F64 => ValType::F64,
+        _ => ValType::I32,
+    }
+}
+
+fn scan(bytes: &[u8]) -> Result<Scan, String> {
+    let mut sc = Scan { base_imports: 0, func_types: Vec::new(), sigs: Vec::new(), memory64: false };
+    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+        match payload.map_err(|e| e.to_string())? {
+            wasmparser::Payload::ImportSection(r) => {
+                for i in r.into_imports() {
+                    sc.base_imports += u32::from(matches!(i.map_err(|e| e.to_string())?.ty, wasmparser::TypeRef::Func(_)));
+                }
+            }
+            wasmparser::Payload::FunctionSection(r) => {
+                sc.func_types = r.into_iter().collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+            }
+            wasmparser::Payload::TypeSection(r) => {
+                for t in r.into_iter_err_on_gc_types() {
+                    let t = t.map_err(|e| e.to_string())?;
+                    sc.sigs.push((t.params().iter().map(val).collect(), t.results().iter().map(val).collect()));
+                }
+            }
+            wasmparser::Payload::MemorySection(r) => {
+                for m in r {
+                    sc.memory64 |= m.map_err(|e| e.to_string())?.memory64;
+                }
+            }
+            _ => {}
         }
-        let (mut params, results) = sigs.get(s.ty as usize).cloned().ok_or("stub type out of range")?;
+    }
+    Ok(sc)
+}
+
+type Sig = (Vec<ValType>, Vec<ValType>);
+
+/// The address width is the target memory's: on wasm32 every stub with
+/// address parameters gets an `i32`-narrowed import type and a shim; on
+/// memory64 none does.
+fn plan_narrows(stubs: &mut BTreeMap<u32, Stub<'_>>, sc: &Scan) -> Result<(Vec<Narrow>, Vec<Sig>), String> {
+    let mut narrows: Vec<Narrow> = Vec::new();
+    let mut new_types: Vec<Sig> = Vec::new();
+    for s in stubs.values_mut().filter(|s| !sc.memory64 && !s.decl.narrow.is_empty()) {
+        let (mut params, results) = sc.sigs.get(s.ty as usize).cloned().ok_or("stub type out of range")?;
         for &p in &s.decl.narrow {
             if let Some(v) = params.get_mut(p as usize) {
                 *v = ValType::I32;
             }
         }
-        let shim = base_imports + func_types.len() as u32 + narrows.len() as u32;
-        let ty = sigs.len() as u32 + new_types.len() as u32;
+        let shim = sc.base_imports + sc.func_types.len() as u32 + narrows.len() as u32;
+        let ty = sc.sigs.len() as u32 + new_types.len() as u32;
         narrows.push(Narrow { stub: s.decl.index, ty: s.ty, shim, arity: params.len() as u32 });
         new_types.push((params, results));
         s.ty = ty;
     }
-    let mut re = Declare { base_imports, stubs, keys, narrows, new_types };
-    let mut module = Module::new();
-    re.parse_core_module(&mut module, wasmparser::Parser::new(0), bytes).map_err(|e| e.to_string())?;
-    Ok(module.finish())
+    Ok((narrows, new_types))
 }
 
 /// Where function `func` lands once the ascending `stubs` became imports

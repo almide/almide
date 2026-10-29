@@ -624,7 +624,8 @@ fn emit_program_pass(
                 ));
             }
             visited.extend(sub);
-            if region_exports.claim(f, &table.infos[i], &types, &export_name, &mut export_owners, &owner)? {
+            if region_exports.claim(f, &table.infos[i], &types, &export_name)? {
+                export_owners.push(owner);
                 continue;
             }
             crate::host_exports::note_export(
