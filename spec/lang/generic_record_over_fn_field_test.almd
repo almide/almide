@@ -1,0 +1,43 @@
+// #4312: a generic record or variant instantiated at a type that holds a
+// function compiles on every leg. The Rust struct definition once bounded
+// its parameters on PartialEq, which a closure-bearing record cannot meet.
+import ffi
+import secret
+
+type Hook = { run: (Int) -> Int, name: String }
+
+type Boxed[A] = { item: A, count: Int }
+
+type Slot[A] =
+  | Full(A)
+  | Empty
+
+fn hook(k: Int) -> Hook = { run: (x) => x + k, name: "add" }
+
+test "a generic record holds a record with a function field" {
+  let b: Boxed[Hook] = { item: hook(2), count: 1 }
+  let f = b.item.run
+  assert_eq(f(40), 42)
+  assert_eq(b.item.name, "add")
+}
+
+test "a generic variant holds a record with a function field" {
+  let s: Slot[Hook] = Full(hook(1))
+  let got = match s {
+    Full(h) => h.run(1),
+    Empty => 0,
+  }
+  assert_eq(got, 2)
+}
+
+test "a secret holds a record with a function field and still prints hidden" {
+  let s = secret.new(hook(5))
+  assert_eq("${s}", "Secret(***)")
+  assert_eq(secret.reveal(s).run(1), 6)
+}
+
+test "a secret holds a region" {
+  let s = secret.new(ffi.region(bytes.from_string("aé")))
+  assert(not ffi.is_writable(secret.reveal(s)))
+  assert_eq(ffi.len(secret.reveal(s)), 3)
+}
