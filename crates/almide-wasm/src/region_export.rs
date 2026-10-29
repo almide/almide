@@ -64,22 +64,19 @@ impl Claims {
     }
 
     /// Record the claim of `name` by `f`. True when `f` is a Region export's
-    /// wrapper: its adapter is recorded (and its owner), and the caller skips
-    /// the plain export, which pushes its owner itself.
+    /// wrapper: its adapter is recorded, and the caller skips the plain
+    /// export. Either way the caller records the claim's owner.
     pub(crate) fn claim(
         &mut self,
         f: &almide_ir::IrFunction,
         info: &FnInfo,
         types: &crate::types_table::TypeTable,
         name: &str,
-        owners: &mut Vec<String>,
-        owner: &str,
     ) -> Result<bool, EmitError> {
         self.names.push(name.to_string());
         if !crate::extern_region::is_region_export(f) {
             return Ok(false);
         }
-        owners.push(owner.to_string());
         let (fallible, view) = match info.ret {
             Some(SliceTy::Result(ok, _)) => (true, types.el(ok)),
             Some(t) => (false, t),

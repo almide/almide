@@ -106,15 +106,15 @@ impl Run {
         linker
             .func_wrap("almide", "println", |mut c: Caller<'_, Arc<Mutex<Host>>>, p: i32, n: i32| {
                 let t = text(&mut c, p, n);
-                c.data().lock().unwrap().out.push_str(&t);
+                c.data().lock().expect("wasmtime").out.push_str(&t);
             })
-            .unwrap();
+            .expect("wasmtime");
         linker
             .func_wrap("almide", "eprintln", |mut c: Caller<'_, Arc<Mutex<Host>>>, p: i32, n: i32| {
                 let t = text(&mut c, p, n);
-                c.data().lock().unwrap().err.push_str(&t);
+                c.data().lock().expect("wasmtime").err.push_str(&t);
             })
-            .unwrap();
+            .expect("wasmtime");
         // A `panic` writes its line through the raw-stderr host op (73):
         // `fs_call(op, 0, 0, ptr, len)`. Every other op traps.
         linker
@@ -123,15 +123,15 @@ impl Run {
                     return Err(wasmtime::Error::msg(format!("fs_call op {op} is not served here")));
                 }
                 let t = text(&mut c, p, n);
-                c.data().lock().unwrap().err.push_str(&t);
+                c.data().lock().expect("wasmtime").err.push_str(&t);
                 Ok(0)
             })
-            .unwrap();
+            .expect("wasmtime");
         linker
             .func_wrap("almide", "exit", |_c: Caller<'_, Arc<Mutex<Host>>>, code: i32| -> wasmtime::Result<()> {
                 Err(wasmtime::Error::msg(format!("exit {code}")))
             })
-            .unwrap();
+            .expect("wasmtime");
         // The pull import: fill the lent region with `byte`, using only the
         // (base, len) the module passed.
         let fill = module
@@ -146,10 +146,10 @@ impl Run {
                 for b in &mut mem.data_mut(&mut c)[base as usize..(base + len) as usize] {
                     *b = byte as u8;
                 }
-                c.data().lock().unwrap().fills.push((base, len));
+                c.data().lock().expect("wasmtime").fills.push((base, len));
                 Ok(())
             })
-            .unwrap();
+            .expect("wasmtime");
         // A lent read: the sum of the (base, len) bytes.
         let sum = module
             .imports()
@@ -164,13 +164,13 @@ impl Run {
                 rets[0] = Val::I64(total);
                 Ok(())
             })
-            .unwrap();
-        linker.define_unknown_imports_as_traps(&module).unwrap();
+            .expect("wasmtime");
+        linker.define_unknown_imports_as_traps(&module).expect("wasmtime");
         let mut store = Store::new(&engine, host.clone());
         let inst = linker.instantiate(&mut store, &module).expect("instantiate");
         let main = inst.get_typed_func::<(), ()>(&mut store, "main").expect("main");
         main.call(&mut store, ()).expect("main runs");
-        assert_eq!(host.lock().unwrap().out.trim(), "ready");
+        assert_eq!(host.lock().expect("wasmtime").out.trim(), "ready");
         Run { store, inst, host }
     }
 
@@ -180,7 +180,7 @@ impl Run {
     }
 
     fn mem(&mut self, p: i32, n: i32) -> Vec<u8> {
-        let m = self.inst.get_memory(&mut self.store, "memory").unwrap();
+        let m = self.inst.get_memory(&mut self.store, "memory").expect("wasmtime");
         m.data(&self.store)[p as usize..(p + n) as usize].to_vec()
     }
 
@@ -189,7 +189,7 @@ impl Run {
         let tag = self.mem(block + (almide_layout::PAYLOAD + almide_layout::SUM_TAG) as i32, 4);
         assert_eq!(tag, [0, 0, 0, 0], "the export answered err");
         let v = self.mem(block + (almide_layout::PAYLOAD + almide_layout::SUM_FIELD) as i32, 8);
-        i64::from_le_bytes(v.try_into().unwrap())
+        i64::from_le_bytes(v.try_into().expect("wasmtime"))
     }
 
     fn rc(&mut self, p: i32) -> u32 {
@@ -203,7 +203,7 @@ impl Run {
 #[test]
 fn a_region_export_returns_ptr_and_len_as_two_i32s() {
     let mut r = Run::new();
-    let ty = r.inst.get_func(&mut r.store, "inbox_open").unwrap().ty(&r.store);
+    let ty = r.inst.get_func(&mut r.store, "inbox_open").expect("wasmtime").ty(&r.store);
     assert!(matches!(ty.params().collect::<Vec<_>>()[..], [ValType::I64]), "{ty:?}");
     assert!(matches!(ty.results().collect::<Vec<_>>()[..], [ValType::I32, ValType::I32]), "{ty:?}");
     let rel = r.inst.get_func(&mut r.store, "__region_release").expect("the release export").ty(&r.store);
@@ -216,18 +216,18 @@ fn a_region_export_returns_ptr_and_len_as_two_i32s() {
 #[test]
 fn the_host_writes_into_an_exported_alloc_region_and_the_next_export_reads_it() {
     let mut r = Run::new();
-    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").unwrap();
+    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").expect("wasmtime");
     let (p, n) = open.call(&mut r.store, 4).expect("inbox_open");
     assert!(p != 0 && n == 4, "({p}, {n})");
-    let m = r.inst.get_memory(&mut r.store, "memory").unwrap();
+    let m = r.inst.get_memory(&mut r.store, "memory").expect("wasmtime");
     m.data_mut(&mut r.store)[p as usize..(p + 4) as usize].copy_from_slice(&[1, 2, 3, 40]);
-    let sum = r.inst.get_typed_func::<(), i32>(&mut r.store, "inbox_sum").unwrap();
-    let b = sum.call(&mut r.store, ()).unwrap();
+    let sum = r.inst.get_typed_func::<(), i32>(&mut r.store, "inbox_sum").expect("wasmtime");
+    let b = sum.call(&mut r.store, ()).expect("wasmtime");
     assert_eq!(r.ok_int(b), 46);
-    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
-    release.call(&mut r.store, p).unwrap();
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, p).expect("wasmtime");
     // The program's own copy (the `inbox` var) still holds the block.
-    let b = sum.call(&mut r.store, ()).unwrap();
+    let b = sum.call(&mut r.store, ()).expect("wasmtime");
     assert_eq!(r.ok_int(b), 46);
 }
 
@@ -240,20 +240,20 @@ fn an_exported_region_lives_until_the_host_releases_it() {
     let (p, n) = r.region0("greeting").expect("greeting");
     assert_eq!((n, r.mem(p, n)), (5, b"hello".to_vec()));
     assert_eq!(r.rc(p), 1, "only the host's share holds the block");
-    let churn = r.inst.get_typed_func::<i64, i64>(&mut r.store, "churn").unwrap();
-    churn.call(&mut r.store, 300).unwrap();
+    let churn = r.inst.get_typed_func::<i64, i64>(&mut r.store, "churn").expect("wasmtime");
+    churn.call(&mut r.store, 300).expect("wasmtime");
     assert_eq!(r.mem(p, n), b"hello".to_vec(), "the bytes moved under the host");
-    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
-    release.call(&mut r.store, p).unwrap();
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, p).expect("wasmtime");
 }
 
 /// An empty Region crosses as (0, 0) and its release is a no-op.
 #[test]
 fn an_empty_region_crosses_as_zero_zero() {
     let mut r = Run::new();
-    assert_eq!(r.region0("empty").unwrap(), (0, 0));
-    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
-    release.call(&mut r.store, 0).unwrap();
+    assert_eq!(r.region0("empty").expect("wasmtime"), (0, 0));
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, 0).expect("wasmtime");
 }
 
 /// A1: a sub-region crosses as its own address inside its parent's block,
@@ -267,11 +267,11 @@ fn an_exported_slice_holds_its_parent_until_released() {
     assert_eq!((n, r.mem(p, n)), (4, b"ello".to_vec()));
     // `tail_of`'s parent is a temporary: only the host's share holds it.
     assert_eq!(r.rc(p - 1), 1);
-    let churn = r.inst.get_typed_func::<i64, i64>(&mut r.store, "churn").unwrap();
-    churn.call(&mut r.store, 300).unwrap();
+    let churn = r.inst.get_typed_func::<i64, i64>(&mut r.store, "churn").expect("wasmtime");
+    churn.call(&mut r.store, 300).expect("wasmtime");
     assert_eq!(r.mem(p, n), b"ello".to_vec(), "the parent moved under the host");
-    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
-    release.call(&mut r.store, p).unwrap();
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, p).expect("wasmtime");
     assert!(release.call(&mut r.store, p).is_err(), "a second release of one address did not trap");
 }
 
@@ -281,17 +281,17 @@ fn an_exported_slice_holds_its_parent_until_released() {
 #[test]
 fn releasing_an_exported_slice_gives_back_one_share() {
     let mut r = Run::new();
-    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").unwrap();
-    let (p, _) = open.call(&mut r.store, 4).unwrap();
-    let m = r.inst.get_memory(&mut r.store, "memory").unwrap();
+    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").expect("wasmtime");
+    let (p, _) = open.call(&mut r.store, 4).expect("wasmtime");
+    let m = r.inst.get_memory(&mut r.store, "memory").expect("wasmtime");
     m.data_mut(&mut r.store)[p as usize..(p + 4) as usize].copy_from_slice(&[1, 2, 3, 40]);
-    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").unwrap();
-    release.call(&mut r.store, p).unwrap();
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, p).expect("wasmtime");
     assert_eq!(r.rc(p), 1, "the inbox var's own share");
     let (q, n) = r.region0("inbox_tail").expect("inbox_tail");
     assert_eq!((q, n, r.mem(q, n)), (p + 1, 2, vec![2, 3]));
     assert_eq!(r.rc(p), 2, "the var's share and the host's");
-    release.call(&mut r.store, q).unwrap();
+    release.call(&mut r.store, q).expect("wasmtime");
     assert_eq!(r.rc(p), 1, "the release took back the host's share alone");
     assert!(release.call(&mut r.store, q).is_err(), "a released address was released again");
     assert!(release.call(&mut r.store, p + 2).is_err(), "an address never handed out was released");
@@ -302,9 +302,9 @@ fn releasing_an_exported_slice_gives_back_one_share() {
 #[test]
 fn an_err_traps_with_its_reason() {
     let mut r = Run::new();
-    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").unwrap();
+    let open = r.inst.get_typed_func::<i64, (i32, i32)>(&mut r.store, "inbox_open").expect("wasmtime");
     assert!(open.call(&mut r.store, -1).is_err());
-    assert!(r.host.lock().unwrap().err.contains("ffi.alloc: negative length -1"), "{}", r.host.lock().unwrap().err);
+    assert!(r.host.lock().expect("wasmtime").err.contains("ffi.alloc: negative length -1"), "{}", r.host.lock().expect("wasmtime").err);
 }
 
 /// A4 pull: the import is handed the lent Region's base and the length it
@@ -312,10 +312,10 @@ fn an_err_traps_with_its_reason() {
 #[test]
 fn an_import_fills_a_lent_alloc_region_in_place() {
     let mut r = Run::new();
-    let pull = r.inst.get_typed_func::<i64, i32>(&mut r.store, "pull").unwrap();
-    let b = pull.call(&mut r.store, 5).unwrap();
+    let pull = r.inst.get_typed_func::<i64, i32>(&mut r.store, "pull").expect("wasmtime");
+    let b = pull.call(&mut r.store, 5).expect("wasmtime");
     assert_eq!(r.ok_int(b), 35);
-    let fills = r.host.lock().unwrap().fills.clone();
+    let fills = r.host.lock().expect("wasmtime").fills.clone();
     assert_eq!(fills.len(), 1);
     assert!(fills[0].0 != 0 && fills[0].1 == 5, "{fills:?}");
 }
@@ -325,8 +325,8 @@ fn an_import_fills_a_lent_alloc_region_in_place() {
 #[test]
 fn a_slice_crosses_an_import_as_its_sub_range() {
     let mut r = Run::new();
-    let f = r.inst.get_typed_func::<(), i64>(&mut r.store, "sum_tail").unwrap();
-    assert_eq!(f.call(&mut r.store, ()).unwrap(), 43);
+    let f = r.inst.get_typed_func::<(), i64>(&mut r.store, "sum_tail").expect("wasmtime");
+    assert_eq!(f.call(&mut r.store, ()).expect("wasmtime"), 43);
 }
 
 /// A Region crosses an import in the target memory's address width, as an
@@ -339,7 +339,7 @@ fn a_region_crosses_an_import_as_two_i32s_on_wasm32() {
     let engine = Engine::default();
     let module = Module::new(&engine, &bytes).expect("module");
     let ty = |name: &str| {
-        let f = module.imports().find(|i| i.module() == "host" && i.name() == name).unwrap().ty().func().cloned().unwrap();
+        let f = module.imports().find(|i| i.module() == "host" && i.name() == name).expect("wasmtime").ty().func().cloned().expect("wasmtime");
         (f.params().map(|v| format!("{v}")).collect::<Vec<_>>(), f.results().map(|v| format!("{v}")).collect::<Vec<_>>())
     };
     assert_eq!(ty("fill"), (vec!["i32".into(), "i32".into(), "i64".into()], vec![]));
