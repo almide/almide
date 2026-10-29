@@ -4,8 +4,9 @@
 //! verbatim), so the captured text, the exit code and every err string agree
 //! with native by construction.
 //!
-//! One operation = `(op, a, b) -> ok(text) | err(text)`, op 80..=90 in the
-//! WIT `enum op` order (wit/process/spawn.wit). It reaches the host two ways:
+//! One operation = `(op, a, b) -> ok(text) | err(text)`, op 80..=90 and the
+//! `start` child's 140..=145 in the WIT `enum op` order
+//! (wit/process/spawn.wit). It reaches the host two ways:
 //!
 //! - the raw module's `almide.fs_call` (the embedded lane — `almide run
 //!   --target wasm`, `almide test`), like every other embedded service;
@@ -23,6 +24,57 @@ use std::sync::Mutex;
 /// The first and last process op (`almide:process/spawn`'s `enum op`).
 pub(crate) const OP_FIRST: i32 = 80;
 pub(crate) const OP_LAST: i32 = 90;
+/// The `process.start` child's ops (#4308): the WIT cases after `run-with`.
+pub(crate) const CHILD_FIRST: i32 = 140;
+pub(crate) const CHILD_LAST: i32 = 145;
+const _: () = assert!(
+    *crate::wasi::PROC_OPS.start() == OP_FIRST
+        && *crate::wasi::PROC_OPS.end() == OP_LAST
+        && *crate::wasi::PROC_CHILD_OPS.start() == CHILD_FIRST
+        && *crate::wasi::PROC_CHILD_OPS.end() == CHILD_LAST
+);
+
+/// Is `op` one of `almide:process/spawn`'s operations?
+pub(crate) fn is_op(op: i32) -> bool {
+    crate::wasi::is_proc_op(op)
+}
+
+/// The children `process.start` made on one run, by handle (their slot) —
+/// native's `almide_proc_handles` table, held per run so a run's children
+/// are its own (and stopped at its end, C-437's rule).
+pub(crate) type ProcTable = Mutex<Vec<Option<almide_rt_core::process_core::AlmideProcChild>>>;
+
+/// The table of the canonical import's children ([`link_spawn_import`]): a
+/// stand-alone artifact's host keeps one table for the process.
+fn import_table() -> &'static ProcTable {
+    static T: ProcTable = Mutex::new(Vec::new());
+    &T
+}
+
+/// Run `f` on the child behind handle `h` (native's `almide_proc_with`).
+fn with_child<R>(procs: &ProcTable, h: &str, f: impl FnOnce(&mut almide_rt_core::process_core::AlmideProcChild) -> R) -> Result<R, String> {
+    let mut t = procs.lock().unwrap_or_else(|p| p.into_inner());
+    let c = h
+        .parse::<usize>()
+        .ok()
+        .and_then(|i| t.get_mut(i))
+        .and_then(|c| c.as_mut())
+        .ok_or_else(|| format!("invalid ProcessChild handle: {h}"))?;
+    Ok(f(c))
+}
+
+/// At the run's end: stop every child neither waited on nor stopped, the way
+/// native's exit does (`almide_proc_stop_all_unwaited`, C-437). A child whose
+/// outcome is in is left alone.
+pub(crate) fn stop_unwaited(procs: &ProcTable) {
+    use almide_rt_core::process_core as core;
+    let mut t = procs.lock().unwrap_or_else(|p| p.into_inner());
+    for c in t.iter_mut().flatten() {
+        if c.step(core::almide_proc_try_wait_poll).is_none() {
+            let _ = c.stop(core::ALMIDE_PROC_EXIT_GRACE_MS);
+        }
+    }
+}
 
 /// `None` = every command is allowed (no `proc` key in `[permissions]`).
 static ALLOW: Mutex<Option<Vec<String>>> = Mutex::new(None);
@@ -103,7 +155,7 @@ fn signal(pid: i32, sig: i32) -> Result<(), i32> {
 
 /// Serve one operation. `flush` runs before a child that shares this
 /// program's stdout starts (run / run_in), as native flushes its own.
-pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String, String> {
+pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn(), procs: &ProcTable) -> Result<String, String> {
     use almide_rt_core::process_core as core;
     match op {
         80 => {
@@ -160,14 +212,37 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             flush();
             core::almide_proc_run_cmd(&all[0], &rest, a, &all[1], ms).map(|c| c.to_string())
         }
+        // The `start` child (#4308): native's child core on this run's table.
+        140 => {
+            let mut all = cells(b)?;
+            if all.len() < 3 {
+                return Err("malformed process frame (missing operand)".to_string());
+            }
+            let rest = all.split_off(3);
+            let ms: i64 = all[0].parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
+            allowed("process.start", a)?;
+            flush();
+            let c = core::AlmideProcChild::start("process.start", a, &rest, &all[1], &all[2], ms)?;
+            let mut t = procs.lock().unwrap_or_else(|p| p.into_inner());
+            t.push(Some(c));
+            Ok((t.len() - 1).to_string())
+        }
+        141 => with_child(procs, a, |c| if c.step(core::almide_proc_try_wait_poll).is_some() { "1" } else { "0" }.to_string()),
+        142 => with_child(procs, a, |c| c.wait(core::almide_proc_try_wait_poll))?.map(status_text),
+        143 => {
+            let grace: i64 = b.parse().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(b)))?;
+            with_child(procs, a, |c| c.stop(grace))?.map(status_text)
+        }
+        144 => Ok(with_child(procs, a, |c| c.read_new(b == "2")).unwrap_or_default()),
+        145 => Ok(with_child(procs, a, |c| c.pid()).unwrap_or(-1).to_string()),
         _ => Err(format!("unknown process op {op}")),
     }
 }
 
 /// The `fs_call` form: status 0 = ok, 1 = err, the text parked for
 /// `host_read`.
-pub(crate) fn dispatch(op: i32, a: &str, b: &[u8], flush: &dyn Fn()) -> (i64, Vec<u8>) {
-    let (status, text) = match call(op, a, &String::from_utf8_lossy(b), flush) {
+pub(crate) fn dispatch(op: i32, a: &str, b: &[u8], flush: &dyn Fn(), procs: &ProcTable) -> (i64, Vec<u8>) {
+    let (status, text) = match call(op, a, &String::from_utf8_lossy(b), flush, procs) {
         Ok(t) => (0i64, t),
         Err(m) => (1i64, m),
     };
@@ -205,7 +280,7 @@ fn spawn_call<T>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr,
     };
     let a = read(caller, a_ptr, a_len)?;
     let b = read(caller, b_ptr, b_len)?;
-    let (disc, text) = match call(op + OP_FIRST, &a, &b, &|| {}) {
+    let (disc, text) = match call(crate::wasi::proc_op_of_case(op), &a, &b, &|| {}, import_table()) {
         Ok(t) => (0u8, t),
         Err(m) => (1u8, m),
     };

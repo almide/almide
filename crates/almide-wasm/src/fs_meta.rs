@@ -144,6 +144,24 @@ pub(crate) const PROC_LEAVES: &[(&str, i32)] = &[
     // R-process-07: `run` over its settings record took run_in's op.
     ("__proc_run_cmd", 90),
 ];
+/// The `start` child (#4308): ops 140..=145, the WIT cases after `run-with`
+/// (case index = op − 129; 91..=139 belong to other families). Same shape as
+/// the leaves above — two text operands, an ok(text) / err(text) answer —
+/// with the child's host handle in a.
+pub(crate) const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = 140..=145;
+/// The `start` child's op for a `__proc_*` leaf (one name per arm: dispatch).
+pub(crate) fn proc_child_op(name: &str) -> Option<i32> {
+    Some(match name {
+        "__proc_start" => 140,
+        "__proc_poll" => 141,
+        "__proc_wait" => 142,
+        "__proc_stop" => 143,
+        "__proc_read_new" => 144,
+        "__proc_child_pid" => 145,
+        _ => return None,
+    })
+}
+const _: () = assert!(*PROC_CHILD_OPS.start() == 140 && *PROC_CHILD_OPS.end() == 145);
 /// The tcp family (#3620, the net/tcp design step 2): ops 91..=103, one per
 /// `__net_*` leaf in stdlib/net_wasm.almd, two operands and an ok / err
 /// answer. The embedded host serves them (net_host.rs) with native's core; a

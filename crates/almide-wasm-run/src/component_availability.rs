@@ -41,6 +41,12 @@ pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
     (88, PROC_EXCLUDED),
     (89, PROC_EXCLUDED),
     (90, PROC_EXCLUDED),
+    (140, PROC_EXCLUDED),
+    (141, PROC_EXCLUDED),
+    (142, PROC_EXCLUDED),
+    (143, PROC_EXCLUDED),
+    (144, PROC_EXCLUDED),
+    (145, PROC_EXCLUDED),
 ];
 
 /// The ops the WASI 0.3 shim serves and the embedded core-module host does
@@ -119,7 +125,7 @@ pub fn check_service(host_ops: &[i32]) -> Result<(), String> {
 
 /// `operation_name`, with the subprocess family (#2589) named as one.
 fn operation_label(op: i32) -> &'static str {
-    if (80..=90).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
+    if crate::wasi::is_proc_op(op) { "the subprocess family (process.exec / output / run / start / kill / …)" } else { operation_name(op) }
 }
 
 fn operation_name(op: i32) -> &'static str {

@@ -69,6 +69,8 @@ pub const P1_SERVED_OPS: &[i32] = &[
     // The subprocess family (#2589, ADR-0025): forwarded to the private
     // `almide:process/spawn` import, which a stock runtime refuses at load.
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+    // The `process.start` child (#4308): the same import, cases 11..=16.
+    140, 141, 142, 143, 144, 145,
     // The rooted fs family by descriptor (#4084): the fs service's segment
     // walk from the root, lookupflags 0 at every step.
     120, 121, 122, 123, 124, 125,
@@ -78,7 +80,7 @@ pub mod env_overlay;
 pub mod fs_service;
 mod proc_service;
 mod prune;
-pub use proc_service::{wants_proc, PROC_OPS};
+pub use proc_service::{is_proc_op, proc_case, proc_op_of_case, wants_proc, PROC_CHILD_OPS, PROC_OPS};
 pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
 /// The last pass every shipped form runs (p1 here, p2/p3 in almide-wasm-run).
 pub use prune::prune;
@@ -341,7 +343,7 @@ pub struct P1Services {
     /// any op of [`FS_SERVICE_OPS`] (#2742): the spliced fs service, its
     /// own page past the park, and the WASI imports it reaches.
     pub fs: bool,
-    /// any process op (80..=90, #2589): the `almide:process/spawn` import,
+    /// any process op (80..=90 and 140..=145, #2589 / #4308): the `almide:process/spawn` import,
     /// its forwarder and the `cabi_realloc` export (`proc_service.rs`).
     pub proc: bool,
 }
@@ -590,7 +592,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let forward: Vec<(i32, u32)> = [(26, f_env_get), (37, f_env_set), (29, f_args), (77, f_env_vars)]
         .into_iter()
         .filter_map(|(c, t)| t.map(|t| (c, t)))
-        .chain(f_proc.into_iter().flat_map(|t| PROC_OPS.filter(|op| host_ops.contains(op)).map(move |op| (op, t))))
+        .chain(f_proc.into_iter().flat_map(|t| PROC_OPS.chain(PROC_CHILD_OPS).filter(|op| host_ops.contains(op)).map(move |op| (op, t))))
         .chain(fs.as_ref().zip(f_fs).map(|(f, d)| f.forward(d)).unwrap_or_default())
         .collect();
 
