@@ -143,20 +143,31 @@ module's `__region_release` export. Exactly:
 2. `__region_release(ptr)` gives that share back. A host that never calls it keeps the
    block for the instance's lifetime. That is a leak, never a dangling pointer.
 3. An empty Region crosses as `(0, 0)` and holds nothing. Releasing 0 is a no-op.
-4. Only a whole Region crosses: one whose length is its block's length (`ffi.alloc`,
-   `ffi.region`). A sub-region (`ffi.slice`) has no block of its own, so there is no
-   address the host could give back. The export aborts with the reason instead of
-   handing one out.
+4. A sub-region (`ffi.slice`) crosses too (owner ○, 2026-10-29), as its own address
+   inside its parent's block, with no copy. The adapter files every `(ptr, block)` it
+   hands out in a small table of the module's own (three globals after every other
+   one: the table block, its count, its capacity). `__region_release(ptr)` looks the
+   address up, releases that block's share, and removes the entry. So the parent lives
+   until the host releases the slice. An address the table does not hold, whether
+   released already or never handed out, traps.
 5. An `effect fn` export's `err` has no slot in `(ptr, len)`. The adapter writes it to
    stderr and traps.
 
 Mechanism: an IR rewrite (crates/almide-wasm/src/extern_region.rs,
 `wrap_region_exports`) moves the export to a compiler-made wrapper returning
-`ffi.__export_owner(f(…))`, the Region's block, so the record is released by the
-ordinary ownership rules. A stamp on the wrapper (`region_export`) tells the emitter to
-export an adapter in its place. The adapter (crates/almide-wasm/src/region_export.rs)
-calls the wrapper and returns the block's data address and length, keeping the
-wrapper's share for the host.
+`ffi.__export_view(f(…))`: the Region's block with one share, and the view's offset
+and length in it. The Region's record is then released by the ordinary ownership rules.
+A stamp on the wrapper (`region_export`) tells the emitter to export an adapter in its
+place. The adapter (crates/almide-wasm/src/region_export.rs) calls the wrapper, frees
+the view record's shell, files the address in the table, and returns the view's data
+address and length, keeping the share for the host.
+
+**Width** (owner ○, 2026-10-29). Both directions use the target memory's address
+width: `(i32, i32)` on wasm32, and `i64` on memory64. The emitter computes addresses as
+its `Int` scalar. When the module declares a 32-bit memory, `imports::declare` gives a
+Region import's base and length parameters `i32` (the stub stamps their positions,
+`address_params`) and puts a shim in the stub's place that wraps them. On memory64 the
+shim is not made and they stay `i64`.
 
 ### A2. An `@export(c)` fn may take Region parameters
 
@@ -168,7 +179,12 @@ access is checked against the caller's length (D5: out of bounds is `err`). Afte
 call, the wrapper stops the process if any copy of the Region is still held, for example
 in a top-level `var`. That keeps the Region from outliving a buffer the caller may free
 the moment it regains control. Nothing can revoke a value from every copy, so the
-check is Go's `cgocheck` answer, applied always. `check` refuses (E090) a Region return
+check is Go's `cgocheck` answer, applied always. It is the backstop: the escapes
+a body can spell are refused at check time (owner ○, 2026-10-29, **E119**). A lent
+Region, or a local `let` / `var`, slice or container holding it, that is stored in a
+top-level `var`, returned, or captured by a closure is an error. The rule reads the
+checker's types and follows local bindings. A Region handed to another fn is left to the
+run-time check. `check` refuses (E090) a Region return
 from an `@export(c)` fn, because the caller could not free it. It also refuses an `out`
 naming anything but a Region parameter, and a `@region` clause on a fn that neither
 binds nor exports C. The `Built` line counts each lent Region (`@export(c) Region `p`
@@ -221,10 +237,6 @@ scoped-borrow alternative below).
 
 ### Read narrowly, named for a decision
 
-- The `(ptr, len)` of an A1 export is `(i32, i32)`, as answer 7 of the original decisions
-  says. A Region argument to an `@extern(wasm)` import still crosses as the `Int` scalar
-  (`i64`), the narrowing the [Implementation](#implementation-2026-10-27) section left
-  open. The two directions differ until that narrowing lands.
 - A1 exports no JS-host marshalling (`--host js` notes no shape for the adapter): a JS
   driver reads `instance.exports.f()` as the two numbers directly.
 - There is no C header generator. A2's prototypes are written by hand:
