@@ -22,9 +22,10 @@ import os, re, sys, glob
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ADR-0031. `read` / `write` / `to_bytes` touch memory, after the region's
-# bounds check (R-L0-45 rule 1); `region` / `alloc` mint one; `len` /
-# `is_writable` read its header.
-FFI_SURFACE = {'ffi.region', 'ffi.alloc', 'ffi.len', 'ffi.is_writable', 'ffi.read', 'ffi.write', 'ffi.to_bytes'}
+# bounds check (R-L0-45 rule 1); `region` / `alloc` mint one; `slice`
+# narrows one inside its parent's bounds (the 2026-10-29 amendment) without
+# touching memory; `len` / `is_writable` read its header.
+FFI_SURFACE = {'ffi.region', 'ffi.alloc', 'ffi.slice', 'ffi.len', 'ffi.is_writable', 'ffi.read', 'ffi.write', 'ffi.to_bytes'}
 
 SIG = re.compile(r'^(?:effect\s+)?(?:fn\s+)?(?P<mod>[a-z][a-z0-9_]*)\.(?P<name>[a-z_][a-z0-9_]*)(?:\[[^\]]*\])?\((?P<params>.*)\)\s*->\s*(?P<ret>.+?)\s*(?:\(deprecated[^)]*\))?$')
 HANDLE = re.compile(r'\b(?:Handle|RawPtr)\b')

@@ -16,6 +16,14 @@ pub fn almide_rt_ffi_address(b: &Vec<u8>) -> *mut u8 {
     if b.is_empty() { std::ptr::null_mut() } else { b.as_ptr() as *mut u8 }
 }
 
+// The address `off` bytes past `base` (`ffi.slice`): reached only after the
+// slice's bounds check against its parent's length, so the result stays inside
+// the parent. Null stays null (an empty region has no data). No memory is
+// touched, so no `unsafe`.
+pub fn almide_rt_ffi_offset(base: *mut u8, off: i64) -> *mut u8 {
+    if base.is_null() || off <= 0 { base } else { base.wrapping_add(off as usize) }
+}
+
 pub fn almide_rt_ffi_load(base: *mut u8, off: i64, n: i64) -> Vec<u8> {
     if base.is_null() || n <= 0 || off < 0 { return Vec::new(); }
     // SAFETY: `ffi.read` checked `off + n <= len` for the Region `base` came
