@@ -34,6 +34,7 @@ impl Emitter<'_> {
         let hooks_before = self.witness.as_ref().map(|w| w.arg_hooks());
         // #4277: the arm's instruction window, for the RC byte check.
         let arm_from = self.f.byte_len();
+        let window = crate::witness::rc::window_open();
         let lowered = self.arm_scope(|em| {
             let l = em.lower_module_call_dispatch(target, args, tail, ret_hint)?;
             // The witness audit (#1696 step 4): the arm fired one argument
@@ -50,8 +51,15 @@ impl Emitter<'_> {
                 }
                 other => other,
             })
-        })?;
-        crate::witness::rc::arm(arm_from, self.f.byte_len());
+        });
+        let lowered = match lowered {
+            Ok(l) => l,
+            Err(e) => {
+                crate::witness::rc::window_dropped(window);
+                return Err(e);
+            }
+        };
+        crate::witness::rc::arm(window, arm_from, self.f.byte_len());
         Ok(lowered.map(|l| {
             if l.own == Own::Owned && self.rc_droppable(l.ty) {
                 self.mark_owned_call(target);
@@ -71,11 +79,13 @@ impl Emitter<'_> {
         route: impl FnOnce(&mut Self) -> Result<T, EmitError>,
     ) -> Result<T, EmitError> {
         let from = self.f.byte_len();
-        let out = route(self)?;
-        if taken(&out) {
-            crate::witness::rc::routine(from, self.f.byte_len());
+        let window = crate::witness::rc::window_open();
+        let out = route(self);
+        match &out {
+            Ok(o) if taken(o) => crate::witness::rc::routine(window, from, self.f.byte_len()),
+            _ => crate::witness::rc::window_dropped(window),
         }
-        Ok(out)
+        out
     }
 
     fn lower_module_call_dispatch(

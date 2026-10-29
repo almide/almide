@@ -637,3 +637,24 @@ fn an_unnamed_event_takes_the_call_outside_the_arm_window_first() -> Result<(), 
     assert_eq!(r.arm_internal, 1);
     Ok(())
 }
+
+/// A credit moved into an arm (`m<local>@<window>`) accounts for one release
+/// of that variable inside the arm's window, and only there.
+#[test]
+fn a_move_into_an_arm_accounts_for_one_release_inside_its_window() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let win = [vec![(1, 0, 2)], vec![]];
+    let mut r = RcReport::default();
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-2".into())], &win, &mut r)?;
+    assert_eq!(r.arm_internal, 0);
+    // The move names another window: the release is a frame variable's
+    // credit left over inside an arm, refused.
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@5-9".into())], &win, &mut RcReport::default()).is_err());
+    // One move, two releases: one is left over.
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-5".into())], &[vec![(1, 0, 5)], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

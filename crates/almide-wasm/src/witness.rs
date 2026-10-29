@@ -178,7 +178,7 @@ impl WitnessRecorder {
             // #4277: a live rc_inc / release, for the byte check.
             match ev {
                 Ev::Op(_, c @ ('a' | 'd')) => crate::witness::rc::event(c, None),
-                Ev::LOp(l, c @ ('a' | 'd')) => crate::witness::rc::event(c, Some(l)),
+                Ev::LOp(l, c @ ('a' | 'd' | 'm')) => crate::witness::rc::event(c, Some(l)),
                 // An owner rebind's release of the old block: by a release
                 // call, or inside the copy-on-write judge that rebinds it (#4278).
                 Ev::DecOld(l) => crate::witness::rc::event('o', Some(l)),

@@ -82,7 +82,7 @@ fn records_inner(
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
-    let (rc_frames, rc_releases, rc_arms, rc_routines) = super::rc::take(pass);
+    let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -124,7 +124,7 @@ fn records_inner(
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
         locate.text(&pick(judge_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines)?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -167,6 +167,9 @@ fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::
 /// rcfns <inc index | -> <release index> ...
 /// rc <position>|<events>;...
 /// ```
+///
+/// An `m<local>#<window id>` event (a credit moved into an arm or a routine)
+/// renders as `m<local>@<from>-<to>`: that window's instruction ordinals.
 fn rc_lines(
     locate: &Locator,
     emitted: &[u8],
@@ -176,6 +179,7 @@ fn rc_lines(
     releases: &std::collections::BTreeSet<u32>,
     arms: &[(u64, usize, usize)],
     routines: &[(u64, usize, usize)],
+    window_ids: &std::collections::HashMap<u64, (u64, usize, usize)>,
 ) -> Result<String, String> {
     if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
         return Ok(String::new());
@@ -190,7 +194,22 @@ fn rc_lines(
     let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
     let rc: Vec<String> = frames
         .iter()
-        .filter_map(|(k, ev)| locate.position(*k).map(|j| format!("{j}|{ev}")))
+        .filter_map(|(k, ev)| {
+            let ev: Vec<String> = ev
+                .split_whitespace()
+                .filter_map(|t| match t.split_once('#') {
+                    // A move into a window this body does not ship (pruned)
+                    // is dropped with it.
+                    Some((m, id)) => {
+                        let &(wk, a, b) = window_ids.get(&id.parse::<u64>().ok()?)?;
+                        let (_, x, y) = locate.window(wk, a, b)?;
+                        Some(format!("{m}@{x}-{y}"))
+                    }
+                    None => Some(t.to_string()),
+                })
+                .collect();
+            locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
+        })
         .collect();
     let windows = |w: &[(u64, usize, usize)]| -> String {
         w.iter()

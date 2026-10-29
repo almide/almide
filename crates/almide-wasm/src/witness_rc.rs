@@ -34,6 +34,12 @@ struct State {
     /// Per pass, every taken compound routine's window (in-place append,
     /// string building, map edits — `Emitter::routine`).
     routines: HashMap<usize, Vec<(u64, usize, usize)>>,
+    /// The windows open right now (innermost last), by id: an `m` logged
+    /// while one is open is a move into that arm or routine.
+    open_windows: Vec<u64>,
+    next_window: u64,
+    /// Per pass, each closed window's id and `(serial, from, to)`.
+    window_ids: HashMap<usize, HashMap<u64, (u64, usize, usize)>>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -56,18 +62,54 @@ pub(crate) fn begin_pass(pass: usize) {
     with(|s| s.pass = pass);
 }
 
-/// The recorder logged a live `a` / `d` on `local` (`None`: a temporary).
+/// The recorder logged a live `a` / `d` / `o` on `local` (`None`: a
+/// temporary), or an `m`: the variable's credit moved into the arm or
+/// routine whose window is open (`#<window id>`; outside every window an
+/// `m` is no RC event and is not logged).
 pub(crate) fn event(kind: char, local: Option<u32>) {
     let Some(serial) = crate::witness::anchor::current() else { return };
     with(|s| {
+        let window = s.open_windows.last().copied();
+        if kind == 'm' && (window.is_none() || local.is_none()) {
+            return;
+        }
         let e = s.open.entry(serial).or_default();
         e.push(kind);
         match local {
             Some(l) => e.push_str(&l.to_string()),
             None => e.push('-'),
         }
+        if kind == 'm' {
+            e.push_str(&format!("#{}", window.unwrap_or(0)));
+        }
         e.push(' ');
     });
+}
+
+/// An arm's or a compound routine's instruction window opens; the id names
+/// it to [`arm`] / [`routine`] / [`window_dropped`] when it closes.
+pub(crate) fn window_open() -> u64 {
+    let mut id = 0;
+    with(|s| {
+        s.next_window += 1;
+        id = s.next_window;
+        s.open_windows.push(id);
+    });
+    id
+}
+
+fn close(s: &mut State, id: u64, serial: Option<(u64, usize, usize)>) {
+    if let Some(at) = s.open_windows.iter().rposition(|&w| w == id) {
+        s.open_windows.truncate(at);
+    }
+    if let Some(w) = serial {
+        s.window_ids.entry(s.pass).or_default().insert(id, w);
+    }
+}
+
+/// A routine route that was not taken: its window records nothing.
+pub(crate) fn window_dropped(id: u64) {
+    with(|s| close(s, id, None));
 }
 
 /// The frame whose body is `serial` finished as `name`.
@@ -80,16 +122,22 @@ pub(crate) fn frame(serial: u64, name: &str) {
 
 /// A stdlib arm was emitted into the open body between byte offsets
 /// `from` and `to`.
-pub(crate) fn arm(from: usize, to: usize) {
+pub(crate) fn arm(id: u64, from: usize, to: usize) {
     let Some(serial) = crate::witness::anchor::current() else { return };
-    with(|s| s.arms.entry(s.pass).or_default().push((serial, from, to)));
+    with(|s| {
+        s.arms.entry(s.pass).or_default().push((serial, from, to));
+        close(s, id, Some((serial, from, to)));
+    });
 }
 
 /// A compound routine that does RC inside itself was taken, emitted into
 /// the open body between byte offsets `from` and `to`.
-pub(crate) fn routine(from: usize, to: usize) {
+pub(crate) fn routine(id: u64, from: usize, to: usize) {
     let Some(serial) = crate::witness::anchor::current() else { return };
-    with(|s| s.routines.entry(s.pass).or_default().push((serial, from, to)));
+    with(|s| {
+        s.routines.entry(s.pass).or_default().push((serial, from, to));
+        close(s, id, Some((serial, from, to)));
+    });
 }
 
 /// `f` was handed out as a release routine.
@@ -101,8 +149,14 @@ pub(crate) fn release_fn(f: u32) {
 
 /// One pass's RC record: its frames `(serial, name, events)`, its release
 /// routines, its arm windows and its compound-routine windows, each
-/// `(serial, from, to)`.
-pub type Taken = (Vec<(u64, String, String)>, BTreeSet<u32>, Vec<(u64, usize, usize)>, Vec<(u64, usize, usize)>);
+/// `(serial, from, to)`, and the windows by the id an `m` event names.
+pub type Taken = (
+    Vec<(u64, String, String)>,
+    BTreeSet<u32>,
+    Vec<(u64, usize, usize)>,
+    Vec<(u64, usize, usize)>,
+    HashMap<u64, (u64, usize, usize)>,
+);
 
 /// The shipped pass's RC record.
 pub fn take(pass: usize) -> Taken {
@@ -119,5 +173,6 @@ pub fn take(pass: usize) -> Taken {
         releases,
         s.arms.remove(&pass).unwrap_or_default(),
         s.routines.remove(&pass).unwrap_or_default(),
+        s.window_ids.remove(&pass).unwrap_or_default(),
     )
 }

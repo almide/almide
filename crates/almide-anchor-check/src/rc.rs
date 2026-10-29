@@ -271,13 +271,21 @@ pub fn check_rc(
             calls.push((k, kind, names(&arg)));
         }
         rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
+        // Each event, and for a move `m<local>@<from>-<to>` the window of
+        // the arm or routine the credit moved into.
+        let mut evwin: Vec<Option<(usize, usize)>> = Vec::new();
         let evs: Vec<(char, Option<u32>)> = events
             .split_whitespace()
             .map(|t| {
                 let mut c = t.chars();
                 let kind = c.next().unwrap_or('?');
                 let rest: String = c.collect();
-                (kind, rest.parse().ok())
+                let (local, win) = match rest.split_once('@') {
+                    Some((l, w)) => (l, w.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))),
+                    None => (rest.as_str(), None),
+                };
+                evwin.push(win);
+                (kind, local.parse().ok())
             })
             .collect();
         rep.events += evs.len();
@@ -299,22 +307,30 @@ pub fn check_rc(
         //   a `d` may instead take a copy-on-write judge call on its local (the
         //   judge released the variable's old block when it copied it);
         // - an unnamed `a-` / `d-` takes any call of its kind;
-        // - a rebind `o` takes a release or a judge call on its local.
+        // - a rebind `o` takes a release or a judge call on its local;
+        // - a move `m` (the variable's credit handed into an arm or a
+        //   routine) takes a release on its local INSIDE that window — the
+        //   arm's or routine's release of the credit it was given. A move
+        //   the arm keeps (stores or returns) takes nothing.
         // The named and unnamed events are matched first; a rebind takes
         // what is left (augmenting paths never unmatch an earlier event);
         // each event tries the calls outside every arm and routine window
         // before those inside one.
-        let fits = |e: (char, Option<u32>), i: usize| -> bool {
+        let fits = |e: usize, i: usize| -> bool {
             let (k, names_of) = (calls[i].1, &calls[i].2);
-            match e {
+            match evs[e] {
                 ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
+                ('m', Some(l)) => {
+                    k == 'd' && names_of.contains(&l) && evwin[e].is_some_and(|(a, b)| a <= calls[i].0 && calls[i].0 <= b)
+                }
+                ('m', None) => false,
                 (kind, Some(l)) => (k == kind || (kind == 'd' && k == 'j')) && names_of.contains(&l),
                 (kind, None) => k == kind,
             }
         };
         let order: Vec<usize> = (0..evs.len())
-            .filter(|&e| evs[e].0 != 'o')
-            .chain((0..evs.len()).filter(|&e| evs[e].0 == 'o'))
+            .filter(|&e| !matches!(evs[e].0, 'o' | 'm'))
+            .chain((0..evs.len()).filter(|&e| matches!(evs[e].0, 'o' | 'm')))
             .collect();
         // A call inside an arm or routine window is tried last: left over,
         // it is that arm's or routine's own; one outside has no such reading.
@@ -324,18 +340,17 @@ pub fn check_rc(
         let mut owner: Vec<Option<usize>> = vec![None; calls.len()];
         fn augment(
             e: usize,
-            evs: &[(char, Option<u32>)],
             by_pref: &[usize],
-            fits: &dyn Fn((char, Option<u32>), usize) -> bool,
+            fits: &dyn Fn(usize, usize) -> bool,
             seen: &mut [bool],
             owner: &mut [Option<usize>],
         ) -> bool {
             for &i in by_pref {
-                if seen[i] || !fits(evs[e], i) {
+                if seen[i] || !fits(e, i) {
                     continue;
                 }
                 seen[i] = true;
-                if owner[i].is_none_or(|o| augment(o, evs, by_pref, fits, seen, owner)) {
+                if owner[i].is_none_or(|o| augment(o, by_pref, fits, seen, owner)) {
                     owner[i] = Some(e);
                     return true;
                 }
@@ -344,7 +359,7 @@ pub fn check_rc(
         }
         for &e in &order {
             let mut seen = vec![false; calls.len()];
-            augment(e, &evs, &by_pref, &fits, &mut seen, &mut owner);
+            augment(e, &by_pref, &fits, &mut seen, &mut owner);
         }
         // Who holds a call can change along an augmenting path; read the
         // final matching.
@@ -361,6 +376,7 @@ pub fn check_rc(
             }
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
+                ('m', _) => {}
                 // Named events no RC call took: a release may be the
                 // consumption of the variable by a stdlib arm or a compound
                 // routine (below).
