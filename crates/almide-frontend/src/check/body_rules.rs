@@ -289,39 +289,29 @@ impl Checker {
                     return None;
                 }
                 let (status, body, list) = (bound[0]?, bound[1]?, bound[2]?);
-                if resolve_ty(self.type_map.get(&body.id)?, &self.uf) != Ty::String {
+                if resolve_ty(self.type_map.get(&body.id)?, &self.uf) != Ty::String || !single_token(status) || !single_token(body) {
                     return None;
                 }
+                // Only a list holding the one owned pair: the pieces of a
+                // longer list do not read back from their spans.
                 let ast::ExprKind::List { elements } = &list.kind else { return None };
-                let mut media = None;
-                let mut rest = Vec::new();
-                for p in elements {
-                    let ast::ExprKind::Tuple { elements: kv } = &p.kind else { return None };
-                    if kv.len() != 2 {
-                        return None;
-                    }
-                    match lit(&kv[0]) {
-                        Some(n) if is_owned(&n) => {
-                            if media.is_some() {
-                                return None;
-                            }
-                            media = Some(lit(&kv[1])?);
-                        }
-                        _ => rest.push(slice(p)?),
-                    }
+                let [p] = elements.as_slice() else { return None };
+                let ast::ExprKind::Tuple { elements: kv } = &p.kind else { return None };
+                if kv.len() != 2 || !lit(&kv[0]).is_some_and(|n| is_owned(&n)) {
+                    return None;
                 }
-                let media = media?;
+                let media = lit(&kv[1])?;
                 if media_refusal(&media).is_some() {
                     return None;
                 }
                 Some((span, format!(
-                    "{callee_text}({}, {alias}.typed(\"{media}\", bytes.from_string({})), [{}])",
-                    slice(status)?, slice(body)?, rest.join(", "),
+                    "{callee_text}({}, {alias}.typed(\"{media}\", bytes.from_string({})), [])",
+                    slice(status)?, slice(body)?,
                 )))
             }
             [_name, value] => {
                 let resp = bound[0]?;
-                if !matches!(resp.kind, ast::ExprKind::Ident { .. }) {
+                if !single_token(resp) {
                     return None;
                 }
                 let pos = params.iter().position(|p| p.name == *value)?;
@@ -384,6 +374,12 @@ impl Checker {
         let impl_fn = almide_lang::stdlib_info::requirement_fn_name(type_name.as_str(), method.as_str());
         header_write_of(module, &impl_fn)
     }
+}
+
+/// An argument whose span reads back as its whole source: a name or a
+/// literal.
+fn single_token(e: &ast::Expr) -> bool {
+    matches!(e.kind, ast::ExprKind::Ident { .. } | ast::ExprKind::Int { .. } | ast::ExprKind::String { .. })
 }
 
 /// Every expression body of the program: fns (and their parameter

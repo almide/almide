@@ -1,3 +1,3 @@
 expects_code = "E116"
 expects_error = "`http.with_headers` writes `Content-Type` by name, and a response's `Content-Type` is written from its body's type"
-hint_substring = "any other type is `http.typed(\"text/csv\", bytes)`"
+hint_substring = "and `http.with_body(resp, body)` write it"

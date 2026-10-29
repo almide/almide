@@ -1,3 +1,3 @@
 expects_code = "E118"
 expects_error = "type `Page` declares `Body`, which only the standard library's types conform to"
-hint_substring = "through `http.typed(\"text/csv\", bytes)`"
+hint_substring = "so only the stdlib's safe types declare one"

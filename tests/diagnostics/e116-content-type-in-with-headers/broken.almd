@@ -2,6 +2,6 @@
 // name it would relabel the String body; here as a CSV report.
 import http
 
-fn report(rows: String) -> HttpResponse = http.with_headers(200, rows, [("Content-Type", "text/csv"), ("X-Report", "1")])
+fn report(rows: String) -> HttpResponse = http.with_headers(200, rows, [("Content-Type", "text/csv")])
 
 fn main() -> Unit = println(http.body(report("a,b")))

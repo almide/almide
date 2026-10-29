@@ -1,6 +1,7 @@
-// The body says what it is: a CSV body is `http.typed`.
+// The body says what it is: a CSV body is `http.typed` (what `almide fix`
+// writes).
 import http
 
-fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Report", "1")])
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [])
 
 fn main() -> Unit = println(http.body(report("a,b")))
