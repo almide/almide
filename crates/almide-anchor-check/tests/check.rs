@@ -675,3 +675,23 @@ fn a_move_released_once_per_path_is_accounted_on_every_path() -> Result<(), Stri
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// A release the recorder logged outside every branch site happens once on
+/// each path: one release in each arm of an `if` is that one event's. Logged
+/// inside a site (on some paths only), the other arm's release is left over.
+#[test]
+fn an_event_outside_every_branch_site_accounts_for_one_release_per_path() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let bytes = module(
+        "(local i32 i32)",
+        "local.get 1 (if (then local.get 0 call $alloc drop) (else local.get 0 call $alloc drop))",
+    );
+    let bodies = decode(&bytes)?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "( d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    // Twice on one path is never one event's.
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

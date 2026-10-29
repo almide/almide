@@ -136,6 +136,9 @@ impl Branches {
     }
 
     pub(crate) fn open(&mut self, log: &mut Vec<Ev>) {
+        if !self.dead() {
+            crate::witness::rc::mark('(');
+        }
         self.push(log, Ev::Open);
     }
 
@@ -162,6 +165,7 @@ impl Branches {
         s.exited += u32::from(s.cur_exited);
         if s.logged {
             log.push(Ev::Close);
+            crate::witness::rc::mark(')');
         }
         if s.started && s.exited == s.arms {
             self.left();

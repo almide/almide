@@ -86,6 +86,19 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
     });
 }
 
+/// A branch site of the recorder opens (`(`) or joins (`)`): an event
+/// between them happens on some of the site's paths, one outside every site
+/// on each path through the frame (the RC check reads one release per path
+/// only for the latter).
+pub(crate) fn mark(c: char) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| {
+        let e = s.open.entry(serial).or_default();
+        e.push(c);
+        e.push(' ');
+    });
+}
+
 /// An arm's or a compound routine's instruction window opens; the id names
 /// it to [`arm`] / [`routine`] / [`window_dropped`] when it closes.
 pub(crate) fn window_open() -> u64 {

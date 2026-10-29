@@ -274,8 +274,28 @@ pub fn check_rc(
         // Each event, and for a move `m<local>@<from>-<to>` the window of
         // the arm or routine the credit moved into.
         let mut evwin: Vec<Option<(usize, usize)>> = Vec::new();
+        // Each event's depth in the recorder's branch sites (`(` … `)`): at
+        // depth 0 it happens once on every path through the frame.
+        let mut evdepth: Vec<usize> = Vec::new();
+        let mut depth = 0usize;
         let evs: Vec<(char, Option<u32>)> = events
             .split_whitespace()
+            .filter(|t| match *t {
+                "(" => {
+                    depth += 1;
+                    false
+                }
+                ")" => {
+                    depth = depth.saturating_sub(1);
+                    false
+                }
+                _ => {
+                    evdepth.push(depth);
+                    true
+                }
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
             .map(|t| {
                 let mut c = t.chars();
                 let kind = c.next().unwrap_or('?');
@@ -433,6 +453,24 @@ pub fn check_rc(
             let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
             for &i in by_pref.iter().filter(|&&i| i < nc) {
                 if owner[i].is_none() && fits(e, i) && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0)) {
+                    owner[i] = Some(e);
+                    held.push(i);
+                }
+            }
+        }
+        // An `a` / `d` the recorder logged outside every branch site happens
+        // once on each path: the same value's release (or +1) emitted once in
+        // each arm of an `if` is that one event's, never twice on one path.
+        for e in (0..evs.len()).filter(|&e| matches!(evs[e].0, 'a' | 'd') && evdepth[e] == 0) {
+            let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
+            let Some(&first) = held.first() else { continue };
+            for &i in by_pref.iter().filter(|&&i| i < nc) {
+                if owner[i].is_none()
+                    && calls[i].1 == calls[first].1
+                    && !calls[i].2.is_empty()
+                    && calls[i].2 == calls[first].2
+                    && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0))
+                {
                     owner[i] = Some(e);
                     held.push(i);
                 }
