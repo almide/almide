@@ -247,7 +247,7 @@ fn returns_param(bodies: &[Body<'_>], imports: u32, f: u32, j: u32) -> bool {
 /// [`names`], and for a call's result, the names of each argument the callee
 /// hands back as its result on some path: the result may be that block (a
 /// view the callee returns as is), so its RC is that variable's.
-fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, arg: &crate::operands::T, depth: u32) -> Vec<u32> {
+fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, judged: &HashSet<usize>, arg: &crate::operands::T, depth: u32) -> Vec<u32> {
     let mut v = names(arg);
     if depth == 0 {
         return v;
@@ -255,8 +255,11 @@ fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, arg: &crate::o
     let crate::operands::T::Call { site, args } = crate::operands::pl(arg) else { return v };
     if let Some(Op::Call { function_index: g }) = b.ops.get(*site) {
         for (j, a) in args.iter().enumerate() {
-            if returns_param(bodies, imports, *g, j as u32) {
-                for n in names_through(bodies, imports, b, a, depth - 1) {
+            // A recorded copy-on-write judge returns the variable's own block
+            // (the one it judged, or the copy that replaced it): its result
+            // is the judged argument's credit (the judge site's TRUSTED reading).
+            if returns_param(bodies, imports, *g, j as u32) || (j == 0 && judged.contains(site)) {
+                for n in names_through(bodies, imports, b, judged, a, depth - 1) {
                     if !v.contains(&n) {
                         v.push(n);
                     }
@@ -369,7 +372,7 @@ pub fn check_rc(
             if crate::operands::is_loaded(&arg) {
                 elements.insert(k);
             }
-            let named = names_through(bodies, imports, b, &arg, 2);
+            let named = names_through(bodies, imports, b, &judged, &arg, 2);
             calls.push((k, kind, named));
         }
         rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
@@ -493,14 +496,14 @@ pub fn check_rc(
                 .or_insert_with(|| {
                     (0..takers.len())
                         .map(|t| {
-                            names_through(bodies, imports, b, &args[t], 2).contains(&l)
+                            names_through(bodies, imports, b, &judged, &args[t], 2).contains(&l)
                                 || fl.same(&args[t], &fl.local_value(l, takers[t].0, FUEL))
                         })
                         .collect()
                 })[t]
         };
         let temp_arg: Vec<bool> = (0..takers.len())
-            .map(|t| !names_through(bodies, imports, b, &args[t], 2).iter().any(|n| witnessed.contains(n)))
+            .map(|t| !names_through(bodies, imports, b, &judged, &args[t], 2).iter().any(|n| witnessed.contains(n)))
             .collect();
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
@@ -695,31 +698,46 @@ pub fn check_rc(
             false
         };
         let mut co: Vec<Vec<usize>> = vec![Vec::new(); nc];
-        let shares = |e: usize, c: usize, owner: &[Option<usize>], co: &[Vec<usize>]| {
-            fits(e, c) && owner[c].is_some_and(|o| exclusive_events(e, o)) && co[c].iter().all(|&o| exclusive_events(e, o))
-        };
-        for e in 0..evs.len() {
-            if got[e] || !matches!(evs[e].0, 'a' | 'd' | 'o') {
-                continue;
-            }
-            if let Some(c) = (0..nc).find(|&c| shares(e, c, &owner, &co)) {
-                co[c].push(e);
-                got[e] = true;
-                continue;
-            }
-            // One step further: a call `e` fits whose sole holder `o` can
-            // share another call with that call's holder (their events in
-            // two arms of one site) — `o` moves there and `e` takes the call.
-            let moved = (0..nc).find_map(|c| {
-                let o = owner[c]?;
-                if !fits(e, c) || !co[c].is_empty() || !matches!(evs[o].0, 'a' | 'd' | 'o') || (0..owner.len()).any(|x| x != c && owner[x] == Some(o)) {
-                    return None;
+        let movable = |e: usize| matches!(evs[e].0, 'a' | 'd' | 'o');
+        // An alternating path ending in a share: `e` takes a call, its holder
+        // (holding nothing else) takes another, … until one shares a call
+        // with an event in another arm of a common site.
+        type Preds<'p> = (&'p dyn Fn(usize, usize) -> bool, &'p dyn Fn(usize, usize) -> bool, &'p dyn Fn(usize) -> bool);
+        fn share_path(
+            e: usize,
+            prefs: &[usize],
+            (fits, twin, movable): Preds<'_>,
+            seen: &mut [bool],
+            owner: &mut [Option<usize>],
+            co: &mut [Vec<usize>],
+        ) -> bool {
+            for &c in prefs {
+                if seen[c] || !fits(e, c) {
+                    continue;
                 }
-                (0..nc).find(|&c2| c2 != c && shares(o, c2, &owner, &co)).map(|c2| (c, o, c2))
-            });
-            if let Some((c, o, c2)) = moved {
-                co[c2].push(o);
-                owner[c] = Some(e);
+                seen[c] = true;
+                if owner[c].is_some_and(|o| twin(e, o)) && co[c].iter().all(|&o| twin(e, o)) {
+                    co[c].push(e);
+                    return true;
+                }
+                let Some(o) = owner[c] else { continue };
+                if !co[c].is_empty() || !movable(o) || owner.iter().enumerate().any(|(x, h)| x != c && *h == Some(o)) {
+                    continue;
+                }
+                if share_path(o, prefs, (fits, twin, movable), seen, owner, co) {
+                    owner[c] = Some(e);
+                    return true;
+                }
+            }
+            false
+        }
+        let prefs: Vec<usize> = by_pref.iter().copied().filter(|&c| c < nc).collect();
+        for e in 0..evs.len() {
+            if got[e] || !movable(e) {
+                continue;
+            }
+            let mut seen = vec![false; nc];
+            if share_path(e, &prefs, (&fits, &exclusive_events, &movable), &mut seen, &mut owner, &mut co) {
                 got[e] = true;
             }
         }
