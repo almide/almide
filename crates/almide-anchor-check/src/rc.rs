@@ -231,6 +231,42 @@ fn names(arg: &crate::operands::T) -> Vec<u32> {
 /// takes it on every path (followed `depth` calls deep). An exit is covered
 /// when it returns or tail-passes the parameter, or a taking instruction
 /// dominates it. An imported function takes nothing.
+/// Callee `f` hands its parameter `j` back as its result on some path.
+fn returns_param(bodies: &[Body<'_>], imports: u32, f: u32, j: u32) -> bool {
+    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return false };
+    let fl = Flow::new(b, HashSet::new());
+    let dead = dead(b);
+    let last = b.ops.len().saturating_sub(1);
+    b.ops.iter().enumerate().any(|(k, op)| {
+        !dead[k]
+            && (matches!(op, Op::Return) || (matches!(op, Op::End) && k == last))
+            && (0..b.args[k].len()).any(|a| names(&fl.arg(k, a, FUEL)).contains(&j))
+    })
+}
+
+/// [`names`], and for a call's result, the names of each argument the callee
+/// hands back as its result on some path: the result may be that block (a
+/// view the callee returns as is), so its RC is that variable's.
+fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, arg: &crate::operands::T, depth: u32) -> Vec<u32> {
+    let mut v = names(arg);
+    if depth == 0 {
+        return v;
+    }
+    let crate::operands::T::Call { site, args } = crate::operands::pl(arg) else { return v };
+    if let Some(Op::Call { function_index: g }) = b.ops.get(*site) {
+        for (j, a) in args.iter().enumerate() {
+            if returns_param(bodies, imports, *g, j as u32) {
+                for n in names_through(bodies, imports, b, a, depth - 1) {
+                    if !v.contains(&n) {
+                        v.push(n);
+                    }
+                }
+            }
+        }
+    }
+    v
+}
+
 fn takes(bodies: &[Body<'_>], imports: u32, releases: &HashSet<u32>, f: u32, j: u32, depth: u32) -> (bool, bool) {
     if depth == 0 {
         return (false, false);
@@ -328,7 +364,7 @@ pub fn check_rc(
             if crate::operands::is_loaded(&arg) {
                 elements.insert(k);
             }
-            calls.push((k, kind, names(&arg)));
+            calls.push((k, kind, names_through(bodies, imports, b, &arg, 2)));
         }
         rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
         // Each event, and for a move `m<local>@<from>-<to>` the window of

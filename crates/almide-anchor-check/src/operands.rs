@@ -86,7 +86,7 @@ pub(crate) enum T {
 }
 
 /// `t` without the variables it came through.
-fn pl(t: &T) -> &T {
+pub(crate) fn pl(t: &T) -> &T {
     match t {
         T::Def(_, _, v) => pl(v),
         _ => t,

@@ -728,3 +728,30 @@ fn code_past_an_if_whose_arms_both_leave_is_dead() -> Result<(), String> {
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// A call's result names the argument its callee may hand back as is: a +1
+/// on the result is that variable's.
+#[test]
+fn a_call_result_names_the_argument_its_callee_may_return() -> Result<(), String> {
+    let bytes = wat::parse_str(
+        r#"(module (memory 1)
+             (func $inc (param i32))
+             (func $view (param i32) (result i32) local.get 0 i32.load (if (then local.get 0 return)) i32.const 64)
+             (func $main (local i32 i32) local.get 0 call $view local.set 1 local.get 1 call $inc))"#,
+    )
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    // A callee that never returns its argument: the result is not local 0's.
+    let bytes = wat::parse_str(
+        r#"(module (memory 1)
+             (func $inc (param i32))
+             (func $fresh (param i32) (result i32) i32.const 64)
+             (func $main (local i32 i32) local.get 0 call $fresh local.set 1 local.get 1 call $inc))"#,
+    )
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}
