@@ -358,6 +358,13 @@ the application grants in `almide.toml`: `[trust]` `media = { "almide/svg" =
 replace the body and its type together. `http.html` is gone (`almide fix`
 rewrites it to `http.response`).
 
+Your own type meets a built-in protocol with plain method names, never a `__`
+prefix: `Read` / `Write` / `Close` (`effect fn T.read(self, max: Int)`,
+`T.write(self, data: Bytes)`, `T.close(self)`), `HttpMessage` (`T.header`,
+`header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`,
+`set_body_bytes`) and `Body` (`fn T.media_type(self) -> String` as a literal,
+`fn T.to_text(self) -> String`).
+
 ```almide check
 import html
 import http

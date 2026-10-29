@@ -378,6 +378,22 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
+Your own type can meet the built-in handle and message protocols the same
+way, with plain method names (never a `__` prefix):
+
+| Protocol | Methods your type writes |
+|---|---|
+| `Read` | `effect fn T.read(self, max: Int) -> Result[Bytes, String]` |
+| `Write` | `effect fn T.write(self, data: Bytes) -> Result[Unit, String]` |
+| `Close` | `effect fn T.close(self) -> Result[Unit, String]` |
+| `HttpMessage` | `header`, `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`, `set_body_bytes` |
+| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_text(self) -> String` |
+
+`io.read` / `io.write` / `io.close`, `http.header` / `http.body` and
+`http.response` then take your type. A `Body` whose media type runs script
+(HTML, SVG, XML) also declares `@media_owns(...)` on `media_type`, and a
+dependency owning one needs the application's `[trust] media` grant (E118).
+
 The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration. A mutating receiver is `mut self` (sugar for `mut self: Self`).
 
 ### Generic protocols (explicit conformance)
