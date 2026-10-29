@@ -659,45 +659,51 @@ pub fn check_rc(
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
             }
         }
-        // A call still left over (refused as it stands) may end its path at
-        // a call a move could take instead (its release inside the window
-        // the credit moved into): the moves are matched after, and a call no
-        // move takes is still judged as left over.
         let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| evs[e].0 == 'm' && fits(e, i))).collect();
         let or_move = |i: usize| fallback_call(i) || move_fits[i];
-        for c in 0..nc {
-            if owner[c].is_none() && !fallback(c) {
-                let mut seen = vec![false; evs.len()];
-                rehome(c, evs.len(), &fits, &or_move, &mut seen, &mut owner);
-            }
-        }
-        // A move's credit is released by the arm on some of its paths: one
-        // release per path. Releases of it that no run passes through two of
-        // (the two arms of one `if`) are all that one move's.
-        for e in (0..evs.len()).filter(|&e| evs[e].0 == 'm') {
-            let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
-            for &i in by_pref.iter().filter(|&&i| i < nc) {
-                if owner[i].is_none() && fits(e, i) && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0)) {
-                    owner[i] = Some(e);
-                    held.push(i);
+        for round in 0..2 {
+            // A move's credit is released by the arm on some of its paths: one
+            // release per path. Releases of it that no run passes through two of
+            // (the two arms of one `if`) are all that one move's.
+            for e in (0..evs.len()).filter(|&e| evs[e].0 == 'm') {
+                let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
+                for &i in by_pref.iter().filter(|&&i| i < nc) {
+                    if owner[i].is_none() && fits(e, i) && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0)) {
+                        owner[i] = Some(e);
+                        held.push(i);
+                    }
                 }
             }
-        }
-        // An `a` / `d` the recorder logged outside every branch site happens
-        // once on each path: the same value's release (or +1) emitted once in
-        // each arm of an `if` is that one event's, never twice on one path.
-        for e in (0..evs.len()).filter(|&e| matches!(evs[e].0, 'a' | 'd') && evdepth[e] == 0) {
-            let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
-            let Some(&first) = held.first() else { continue };
-            for &i in by_pref.iter().filter(|&&i| i < nc) {
-                if owner[i].is_none()
-                    && calls[i].1 == calls[first].1
-                    && !calls[i].2.is_empty()
-                    && calls[i].2 == calls[first].2
-                    && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0))
-                {
-                    owner[i] = Some(e);
-                    held.push(i);
+            // An `a` / `d` the recorder logged outside every branch site happens
+            // once on each path: the same value's release (or +1) emitted once in
+            // each arm of an `if` is that one event's, never twice on one path.
+            for e in (0..evs.len()).filter(|&e| matches!(evs[e].0, 'a' | 'd') && evdepth[e] == 0) {
+                let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
+                let Some(&first) = held.first() else { continue };
+                for &i in by_pref.iter().filter(|&&i| i < nc) {
+                    if owner[i].is_none()
+                        && calls[i].1 == calls[first].1
+                        && !calls[i].2.is_empty()
+                        && calls[i].2 == calls[first].2
+                        && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0))
+                    {
+                        owner[i] = Some(e);
+                        held.push(i);
+                    }
+                }
+            }
+            if round == 1 {
+                break;
+            }
+            // A call still left over after the absorptions (refused as it
+            // stands) may end its path at a call a move could take instead
+            // (its release inside the window the credit moved into): the
+            // absorptions run again, and a call no move takes is still judged
+            // as left over.
+            for c in 0..nc {
+                if owner[c].is_none() && !fallback(c) {
+                    let mut seen = vec![false; evs.len()];
+                    rehome(c, evs.len(), &fits, &or_move, &mut seen, &mut owner);
                 }
             }
         }
