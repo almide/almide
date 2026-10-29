@@ -25,7 +25,7 @@ The owner's ruling: the Content-Type comes from the body's type, never from a he
 A builtin protocol `Body` (the noun family `Encode` / `Decode` / `HttpMessage` already uses) has two requirements:
 
 - `T.media_type() -> String`: the Content-Type a response with this body carries;
-- `body.to_text() -> String`: the body on the wire. A built response holds its body as text until #4311 gives it an exact bytes slot, so the requirement is the text (a Bytes body decodes as lossy UTF-8, Q16). It was `to_bytes` in the proposal; as text, a String body costs no round trip and `string` does not reach `bytes` (the #4289 reach gate in `bundled_reach.rs`). Both requirements are per-type (`__self_media_type`, `__self_to_text`), so neither is user surface.
+- `body.to_text() -> String`: the body on the wire. A built response holds its body as text until #4311 gives it an exact bytes slot, so the requirement is the text (a Bytes body decodes as lossy UTF-8, Q16). It was `to_bytes` in the proposal; as text, a String body costs no round trip and `string` does not reach `bytes` (the #4289 reach gate in `bundled_reach.rs`). Inside the stdlib both are per-type functions marked `__self_` (`__safe_html_media_type`); a type declared outside the stdlib writes them by their plain names, `fn T.media_type(self)` and `fn T.to_text(self)` (Q24).
 
 | Body type | Content-Type | Declared in |
 |---|---|---|
@@ -161,6 +161,7 @@ Answers (2026-10-29): Q1 ○, Q2 ○ (owner), Q3 ○, Q4 ○, Q5 ○ as amended 
 - **Q21.** The script-capable set is declared once, in `stdlib/html.almd`; html owns only `text/html` and `application/xhtml+xml`. Recommendation: ○.
 - **Q22.** Two owners whose patterns can match a common type are duplicates. Recommendation: ○.
 - **Q23.** `almide deps` gains a media-owners section; no new command. Recommendation: ○.
+- **Q24.** How a type outside the stdlib writes a per-type requirement. Recommendation was to keep the internal `__self_media_type` spelling for now; the owner ruled the opposite (fix it now): every per-type protocol — `Read`, `Write`, `Close`, `HttpMessage`, `Body` — is met with plain names (`fn SafeSvg.media_type(self)`, `fn Conn.close(self)`), so no third party ever writes `__self_`. The public name is derived in one place, `stdlib_info::requirement_public_name` (the requirement with its `__self_` marker dropped), and read by the checker's conformance lookup (`protocols::requirement_fn_key`) and by monomorphization (`specialization::requirement_target`); the marker stays internal to the stdlib's own per-type functions. A user method spelled `T.__self_media_type` is an ordinary method that meets nothing, so the type is refused as missing `media_type`, with `Add: fn T.media_type(...)` as the hint. That is cleaner than a separate refusal of the prefix: there is one rule (a requirement is met by its plain name), one diagnostic that already exists, and nothing new to document; the fixture `tests/diagnostics/protocol-requirement-internal-name` pins it. No released spelling changes — `Body` was sealed until this ADR and no user conformance to the I/O or message protocols was documented or tested with `__self_` — so there is no epoch line and no `almide fix` rewrite.
 
 ## Implementation plan (after the decisions)
 
