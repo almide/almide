@@ -707,3 +707,24 @@ fn a_cell_variables_event_meets_a_call_through_its_cell() -> Result<(), String> 
     assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// Past an `if` whose two arms both leave the function, the code is never
+/// run: its releases are no instruction the recorder owes an event for. An
+/// arm that branches to the `if`'s own end keeps the code after it live.
+#[test]
+fn code_past_an_if_whose_arms_both_leave_is_dead() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let bytes = module(
+        "(local i32 i32)",
+        "local.get 1 (if (then local.get 0 call $alloc drop return) (else local.get 0 call $alloc drop return)) local.get 0 call $alloc drop",
+    );
+    let bodies = decode(&bytes)?;
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    let bytes = module(
+        "(local i32 i32)",
+        "local.get 1 (if (then local.get 0 call $alloc drop br 0) (else local.get 0 call $alloc drop return)) local.get 0 call $alloc drop",
+    );
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

@@ -98,30 +98,85 @@ pub struct RcReport {
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
 /// `unreachable` / a return call, up to the end of that block.
 fn dead(b: &Body<'_>) -> Vec<bool> {
+    // Per open construct: whether the code now reached in it is dead, the
+    // then-arm's verdict once an `else` begins, whether a branch targets its
+    // end, and whether it is a loop (a branch to a loop re-enters it).
+    struct Frame {
+        dead: bool,
+        then_dead: Option<bool>,
+        targeted: bool,
+        is_loop: bool,
+        is_if: bool,
+    }
     let mut out = vec![false; b.ops.len()];
-    // Per open block, whether its rest is dead.
-    let mut stack: Vec<bool> = vec![false];
+    let mut stack: Vec<Frame> = vec![Frame { dead: false, then_dead: None, targeted: false, is_loop: false, is_if: false }];
+    let target = |stack: &mut Vec<Frame>, depth: u32| {
+        let n = stack.len();
+        if let Some(f) = (depth as usize).checked_add(1).and_then(|d| n.checked_sub(d)).and_then(|i| stack.get_mut(i)) {
+            f.targeted = true;
+        }
+    };
     for (k, op) in b.ops.iter().enumerate() {
-        let d = *stack.last().unwrap_or(&false);
+        let d = stack.last().is_some_and(|f| f.dead);
         out[k] = d && !matches!(op, Op::End | Op::Else);
         match op {
-            Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => stack.push(d),
+            Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => stack.push(Frame {
+                dead: d,
+                then_dead: None,
+                targeted: false,
+                is_loop: matches!(op, Op::Loop { .. }),
+                is_if: matches!(op, Op::If { .. }),
+            }),
             Op::Else => {
-                stack.pop();
-                let outer = *stack.last().unwrap_or(&false);
-                stack.push(outer);
+                let outer = stack.len() >= 2 && stack[stack.len() - 2].dead;
+                if let Some(f) = stack.last_mut() {
+                    f.then_dead = Some(f.dead);
+                    f.dead = outer;
+                }
             }
             Op::End => {
-                stack.pop();
+                let Some(f) = stack.pop() else { continue };
+                // Past the end: reached when the body falls through (both arms
+                // of an `if` with an `else`; an `if` without one always can),
+                // or a branch targets the end (never a loop's: that re-enters).
+                let falls_through = match (f.is_if, f.then_dead) {
+                    (true, Some(t)) => !(t && f.dead),
+                    (true, None) => true,
+                    _ => !f.dead,
+                };
+                let reached = falls_through || (f.targeted && !f.is_loop);
+                if let Some(p) = stack.last_mut() {
+                    if !reached {
+                        p.dead = true;
+                    }
+                }
             }
-            Op::Br { .. }
-            | Op::BrTable { .. }
-            | Op::Return
-            | Op::Unreachable
-            | Op::ReturnCall { .. }
-            | Op::ReturnCallIndirect { .. } => {
+            Op::Br { relative_depth } => {
+                if !d {
+                    target(&mut stack, *relative_depth);
+                }
                 if let Some(t) = stack.last_mut() {
-                    *t = true;
+                    t.dead = true;
+                }
+            }
+            Op::BrIf { relative_depth } => {
+                if !d {
+                    target(&mut stack, *relative_depth);
+                }
+            }
+            Op::BrTable { targets } => {
+                if !d {
+                    for t in targets.targets().flatten().chain(std::iter::once(targets.default())) {
+                        target(&mut stack, t);
+                    }
+                }
+                if let Some(t) = stack.last_mut() {
+                    t.dead = true;
+                }
+            }
+            Op::Return | Op::Unreachable | Op::ReturnCall { .. } | Op::ReturnCallIndirect { .. } => {
+                if let Some(t) = stack.last_mut() {
+                    t.dead = true;
                 }
             }
             _ => {}
