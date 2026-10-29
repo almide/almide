@@ -19,9 +19,10 @@ pub const MEDIA_OWNS_ATTR: &str = "media_owns";
 /// The attribute that declares the script-capable media patterns.
 pub const SCRIPT_CAPABLE_ATTR: &str = "script_capable";
 /// The protocol whose types are response bodies, and its requirement that
-/// states a body type's media type (`fn T.__self_media_type`).
+/// states a body type's media type, by the name a type outside the stdlib
+/// writes (`fn T.media_type(self)`, ADR-0032 Q24).
 pub const BODY_PROTOCOL: &str = "Body";
-pub const MEDIA_REQUIREMENT: &str = "__self_media_type";
+pub const MEDIA_REQUIREMENT: &str = "media_type";
 /// The module holding the `@script_capable` declaration.
 const SCRIPT_CAPABLE_MODULE: &str = "html";
 
