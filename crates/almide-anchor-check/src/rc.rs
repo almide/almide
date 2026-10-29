@@ -659,7 +659,11 @@ pub fn check_rc(
             }
             false
         }
-        let fallback_call = |i: usize| i >= nc || fallback(i);
+        // A call a move could take (its release inside the window the credit
+        // moved into) is as good an end for the path: the moves are matched
+        // after, and a call no move takes is still judged as left over.
+        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| evs[e].0 == 'm' && fits(e, i))).collect();
+        let fallback_call = |i: usize| i >= nc || fallback(i) || move_fits[i];
         for c in 0..nc {
             if owner[c].is_none() && !fallback(c) {
                 let mut seen = vec![false; evs.len()];
