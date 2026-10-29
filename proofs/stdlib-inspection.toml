@@ -9290,7 +9290,14 @@ status = "uninspected"
 name = "ffi.alloc"
 sig = "effect (n: Int) -> Region ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:b6f742950bb1a033"
+stamp = "almide 0.69.0 (dev) at ffi-host-boundary merged into sec-post-rc1b 4526ca336dc23ff6fdfa6d272719c22ff4058e23 (ffi.slice added by the ADR-0031 host-boundary amendment, and ffi.region, ffi.alloc, ffi.len, ffi.is_writable, ffi.read, ffi.write, ffi.to_bytes re-inspected against the final ffi code (the Region view offset, the export view, the import address width): Regions from Bytes and from ffi.alloc, length 0 included, and slices of each; out-of-bounds slice, read and write, a negative count, and a write through a read-only Region or slice answer err alike on both legs); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), 200 programs per fn; no type variable; GCE c4-standard-8 (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU standard, one fn at a time, us-central1-a), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-29; codopsy: almide-codegen, almide-wasm, almide-frontend re-analysed at the same sha"
+order = "n"
+parity = "PASS: seed 1793296384, 200 programs; 200 program(s) call it, 138 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1024..2048 5.218e7/1.034e8/2.058e8/4.106e8/8.202e8 fit n (rms 0.0%) moved 2.048e7/4.096e7/8.192e7/1.638e8/3.277e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.025/0.061s wasm k=1024..2048 5.190e7/1.031e8/2.055e8/4.103e8/8.200e8 fit n (rms 0.0%) moved 2.048e7/4.096e7/8.192e7/1.638e8/3.277e8B fit n (rms 0.0%) wall 0.015/0.030/0.046/0.096/0.192s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "ffi.is_writable"
@@ -9317,16 +9324,17 @@ status = "uninspected"
 
 
 [[fn]]
-name = "ffi.slice"
-sig = "(r: Region, off: Int, n: Int) -> Result[Region, String]"
-class = "pure"
-status = "uninspected"
-
-[[fn]]
 name = "ffi.to_bytes"
 sig = "effect (r: Region) -> Bytes ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:72c27d5cdcc96c5e"
+stamp = "almide 0.69.0 (dev) at ffi-host-boundary merged into sec-post-rc1b 4526ca336dc23ff6fdfa6d272719c22ff4058e23 (ffi.slice added by the ADR-0031 host-boundary amendment, and ffi.region, ffi.alloc, ffi.len, ffi.is_writable, ffi.read, ffi.write, ffi.to_bytes re-inspected against the final ffi code (the Region view offset, the export view, the import address width): Regions from Bytes and from ffi.alloc, length 0 included, and slices of each; out-of-bounds slice, read and write, a negative count, and a write through a read-only Region or slice answer err alike on both legs); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), 200 programs per fn; no type variable; GCE c4-standard-8 (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU standard, one fn at a time, us-central1-a), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-29; codopsy: almide-codegen, almide-wasm, almide-frontend re-analysed at the same sha"
+order = "n"
+parity = "PASS: seed 1793296305, 200 programs; 200 program(s) call it, 116 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 2.065e7/4.113e7/8.210e7/1.640e8/3.279e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.025s wasm k=256..512 5.133e7/1.025e8/2.049e8/4.097e8/8.193e8 fit n (rms 0.0%) moved 0.000e0/3.360e2/0.000e0/0.000e0/1.920e2B fit 1 (rms 0.0%) wall 0.010/0.015/0.020/0.040/0.081s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "html.attr"
