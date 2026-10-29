@@ -1,0 +1,13 @@
+// #4277 drill: a variable's credit moved into an arm is recorded against the
+// window after the one it was moved into. The ownership witness is
+// unchanged; the arm's release of the moved key, inside its own window, now
+// names a frame variable no event in that window accounts, so the RC byte
+// check must refuse it.
+effect fn main() -> Unit = {
+  var m: Map[String, Int] = map.new()
+  let k = "a" + "b"
+  m = map.set(m, k, 1)
+  let k2 = "a" + "b"
+  m = map.set(m, k2, 2)
+  println(int.to_string(map.len(m)))
+}

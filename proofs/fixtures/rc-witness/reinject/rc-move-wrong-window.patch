@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/witness_rc.rs b/crates/almide-wasm/src/witness_rc.rs
+index f9b36f31a..2dc5570d1 100644
+--- a/crates/almide-wasm/src/witness_rc.rs
++++ b/crates/almide-wasm/src/witness_rc.rs
+@@ -80,7 +80,9 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
+             None => e.push('-'),
+         }
+         if kind == 'm' {
+-            e.push_str(&format!("#{}", window.unwrap_or(0)));
++            // RE-INJECTED (#4277 drill): the move names the window after the
++            // one it was logged in.
++            e.push_str(&format!("#{}", window.unwrap_or(0) + 1));
+         }
+         e.push(' ');
+     });
