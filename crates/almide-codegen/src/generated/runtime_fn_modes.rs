@@ -201,7 +201,6 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_ffi_lent_end" => &[false, false, false],
         "almide_rt_ffi_lent_keep" => &[],
         "almide_rt_ffi_load" => &[false, false, false],
-        "almide_rt_ffi_offset" => &[false, false],
         "almide_rt_ffi_release_guard" => &[false, false],
         "almide_rt_ffi_store" => &[false, false, false],
         "almide_rt_float32_to_string" => &[false],

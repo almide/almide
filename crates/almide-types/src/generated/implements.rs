@@ -4,7 +4,7 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_BYTES_CORE, &[("bytes_split", "bytes.split")]),
     (crate::embedded::SRC_BYTES_CT, &[("bytes_is_equal_constant_time", "bytes.is_equal_constant_time"), ("string_is_equal_constant_time", "string.is_equal_constant_time")]),
     (crate::embedded::SRC_DATETIME_CALENDAR, &[("datetime_from_parts", "datetime.from_parts")]),
-    (crate::embedded::SRC_FFI_BRIDGE, &[("ffi_address", "ffi.__address"), ("ffi_offset", "ffi.__offset"), ("ffi_load", "ffi.__load"), ("ffi_store", "ffi.__store")]),
+    (crate::embedded::SRC_FFI_BRIDGE, &[("ffi_address", "ffi.__address"), ("ffi_load", "ffi.__load"), ("ffi_store", "ffi.__store")]),
     (crate::embedded::SRC_HTTP_CALL, &[("http_call_repr", "http.__http_call_repr")]),
     (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.__request"), ("__request_response_impl", "http.__request_response"), ("__get_response_impl", "http.get_response")]),
     (crate::embedded::SRC_HTTP_REQUEST, &[("http_req_repr", "http.__http_request_repr"), ("http_resp_repr", "http.__http_response_repr")]),

@@ -5640,14 +5640,16 @@ pub const SRC_FFI: &str = r#"
 
 
 
-/// A view of memory: base, length, permission and owner (ADR-0031 D1).
-mod type Region = { owner: Bytes, base: Handle, len: Int, writable: Bool, keep: () -> Unit }
+/// A view of memory: base, length, permission and owner (ADR-0031 D1). The
+/// view starts `off` bytes past `base`: 0 for every mint, the slice's offset
+/// for `slice`, so narrowing a region needs no address arithmetic.
+mod type Region = { owner: Bytes, base: Handle, off: Int, len: Int, writable: Bool, keep: () -> Unit }
 
 /// A read-only view of b; b lives as long as the view.
 @memory_unsafe
 fn region(b: Bytes) -> Region = {
   let base = __address(b)
-  { owner: b, base: base, len: bytes.len(b), writable: false, keep: () => () }
+  { owner: b, base: base, off: 0, len: bytes.len(b), writable: false, keep: () => () }
 }
 
 /// A fresh writable region of n zero bytes; err if n is negative.
@@ -5657,7 +5659,7 @@ effect fn alloc(n: Int) -> Result[Region, String] =
   else {
     let buf = bytes.zeros(n)
     let base = __address(buf)
-    ok({ owner: buf, base: base, len: n, writable: true, keep: () => () })
+    ok({ owner: buf, base: base, off: 0, len: n, writable: true, keep: () => () })
   }
 
 /// The region's length in bytes.
@@ -5673,7 +5675,7 @@ fn is_writable(r: Region) -> Bool = r.writable
 effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
   if n < 0 then err("ffi.read: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
-  else ok(__load(r.base, off, n))
+  else ok(__load(r.base, r.off + off, n))
 
 /// Writes b at off; err if the region is read-only or b does not fit.
 @memory_unsafe
@@ -5681,20 +5683,20 @@ effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
   if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
   else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
   else {
-    __store(r.base, off, b)
+    __store(r.base, r.off + off, b)
     ok(())
   }
 
 /// A copy of the whole region as Bytes.
 @memory_unsafe
-effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, 0, r.len))
+effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, r.off, r.len))
 
 /// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 @memory_unsafe
 fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
   if n < 0 then err("ffi.slice: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
-  else ok({ ...r, base: __offset(r.base, off), len: n, writable: false })
+  else ok({ ...r, off: r.off + off, len: n, writable: false })
 
 /// `Region(<len> bytes)`: the base address differs per target and is never shown.
 mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
@@ -5704,12 +5706,6 @@ mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
 local fn __address(b: Bytes) -> Handle = _
-
-
-
-@memory_unsafe
-@intrinsic("almide_rt_ffi_offset")
-local fn __offset(base: Handle, off: Int) -> Handle = _
 
 
 
@@ -5750,17 +5746,10 @@ pub const SRC_FFI_BRIDGE: &str = r#"
 
 
 
-
 @implements("ffi.__address")
 fn ffi_address(b: Bytes) -> Handle = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-@implements("ffi.__offset")
-fn ffi_offset(base: Handle, off: Int) -> Handle = {
-  let a = prim.ptr_to_int(base)
-  if a == 0 then base else prim.int_to_ptr(a + off)
 }
 
 fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
