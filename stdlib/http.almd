@@ -189,25 +189,31 @@ local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse
 // The headers a response's body owns: written from its type, never by name.
 local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
-// ASCII case-insensitive equality, as header names are compared (RFC 9110
-// §5.1): the lengths first, then one character at a time, so nothing is built.
+// Is name one of the owned headers? ASCII case-insensitively, as header names
+// are compared (RFC 9110 §5.1): the lengths first, then one codepoint at a
+// time folded by arithmetic, so no string is built and no search is linked.
+local fn __http_response_owns(hs: List[String], name: String, i: Int) -> Bool = i < list.len(hs) and (__http_response_ci_eq(
+  list.get(hs, i) ?? "",
+  name,
+) or __http_response_owns(hs, name, i + 1))
+
 local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
   string.to_list(a),
   string.to_list(b),
   0,
 )
 
-local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool = if i >= list.len(a) then true
-else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
-else __http_response_ci_at(a, b, i + 1)
+local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool = i >= list.len(a) or (__http_response_fold(
+  list.get(a, i) ?? "",
+) == __http_response_fold(list.get(b, i) ?? "") and __http_response_ci_at(a, b, i + 1))
 
-local fn __http_response_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
-  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
-  none => c,
+local fn __http_response_fold(c: String) -> Int = match string.to_codepoint(c) {
+  some(n) => if n >= 65 and n <= 90 then n + 32 else n,
+  none => -1,
 }
 
 local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
-  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  if __http_response_owns(__http_response_body_headers(), name, 0) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
