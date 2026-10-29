@@ -189,29 +189,15 @@ local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse
 // The headers a response's body owns: written from its type, never by name.
 local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
-// ASCII case-insensitive equality, as header names are compared (RFC 9110
-// §5.1): the lengths first, then one character at a time, so nothing is built.
-local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
-  string.to_list(a),
-  string.to_list(b),
-  0,
-)
-
-local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
-  if i >= list.len(a) then true
-  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
-  else __http_response_ci_at(a, b, i + 1)
-
-local fn __http_response_fold(c: String) -> String = match string.index_of(
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  c,
-) {
+// ASCII case fold, as header names are compared (RFC 9110 §5.1).
+local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.map((c) => match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
-}
+}) |> list.join("")
 
+// The length is compared first, so a name of another length is never folded.
 local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
-  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and __http_response_fold(h) == __http_response_fold(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
