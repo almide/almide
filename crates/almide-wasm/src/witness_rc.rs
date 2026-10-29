@@ -79,7 +79,9 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
             Some(l) => e.push_str(&l.to_string()),
             None => e.push('-'),
         }
-        if kind == 'm' {
+        // A move names its window; so does a temporary's event logged inside
+        // one (the arm or routine may release that temporary in its callee).
+        if kind == 'm' || (local.is_none() && window.is_some()) {
             e.push_str(&format!("#{}", window.unwrap_or(0)));
         }
         e.push(' ');

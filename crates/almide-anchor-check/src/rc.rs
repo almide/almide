@@ -478,11 +478,22 @@ pub fn check_rc(
                         .collect()
                 })[t]
         };
+        let temp_arg: Vec<bool> = (0..takers.len())
+            .map(|t| !names_through(bodies, imports, b, &args[t], 2).iter().any(|n| witnessed.contains(n)))
+            .collect();
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
                 let t = i - nc;
                 return match evs[e] {
                     ('a' | 'd', Some(l)) => holds(l, t) && verdict(takers[t].2, takers[t].1).1,
+                    // A temporary's event logged inside an arm or routine
+                    // window: that window's call taking a temporary (no frame
+                    // variable) on every path.
+                    ('a' | 'd', None) => {
+                        evwin[e].is_some_and(|(a, z)| a <= takers[t].0 && takers[t].0 <= z)
+                            && temp_arg[t]
+                            && verdict(takers[t].2, takers[t].1).1
+                    }
                     _ => false,
                 };
             }
