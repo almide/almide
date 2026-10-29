@@ -479,7 +479,8 @@ fn main() -> Unit = {
     assert!(!after.contains("unwrap_or("), "eager call left behind:\n{after}");
     assert!(after.contains("let a = f(1) ?? 0"), "{after}");
     assert!(after.contains("let b = f(2) ?? 9"), "{after}");
-    assert!(after.contains("[1, 2] |> list.get(0) ?? 7"), "{after}");
+    // The pipe binds looser than `??`'s left operand (#4319).
+    assert!(after.contains("([1, 2] |> list.get(0)) ?? 7"), "{after}");
     assert!(after.contains("${r ?? 0}"), "{after}");
     let run = Command::new(almide()).args(["run", &path]).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1 2 1 3");
@@ -508,6 +509,77 @@ fn main() -> Unit = {
     let run = Command::new(almide()).args(["run", &path]).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "a\nd");
+}
+
+/// #4319: a call argument lands next to an operator, and the call itself
+/// may sit where only a tighter form re-parses. An operand that binds looser
+/// than its slot is grouped — on either side of `??`, on either side of a
+/// comparison, and under a prefix `not` — and the rewritten program computes
+/// what the original did. Before the fix `option.unwrap_or(i, 0 - 1)` became
+/// `i ?? 0 - 1`, i.e. `(i ?? 0) - 1`: every found index off by one.
+#[test]
+fn fix_groups_an_operand_that_binds_looser_than_its_operator() {
+    let src = r#"
+fn close_of(raw: String) -> Int = option.unwrap_or(string.index_of(raw, "]"), 0 - 1)
+fn pick(flag: Bool, a: Int?, b: Int?) -> Int = option.unwrap_or(if flag then a else b, 2 + 3)
+fn first_or(xs: List[Int], d: Int) -> Int = option.unwrap_or(xs |> list.get(0), d * 2 - 1)
+
+fn main() -> Unit = {
+  let c1 = close_of("abc")
+  let c2 = close_of("a]")
+  let c3 = close_of("ab]")
+  let p1 = pick(true, none, some(1))
+  let p2 = pick(false, none, some(1))
+  let p3 = pick(true, some(4), none)
+  let f1 = first_or([], 3)
+  let f2 = first_or([9], 3)
+  println("${c1} ${c2} ${c3} ${p1} ${p2} ${p3} ${f1} ${f2}")
+}
+"#;
+    let expected = "-1 1 2 5 1 4 5 9";
+    let path = write_tmp("fix_4319_unwrap_or_grouping.almd", src);
+    let (mut cmd, _td) = run_cmd();
+    let before = cmd.args(["run", &path]).output().unwrap();
+    assert!(before.status.success(), "{}", String::from_utf8_lossy(&before.stderr));
+    assert_eq!(String::from_utf8_lossy(&before.stdout).trim(), expected);
+
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(!after.contains("unwrap_or("), "eager call left behind:\n{after}");
+    assert!(after.contains(r#"string.index_of(raw, "]") ?? (0 - 1)"#), "{after}");
+    assert!(after.contains("?? (2 + 3)") && after.contains("(if flag"), "{after}");
+    assert!(after.contains("(xs |> list.get(0)) ?? (d * 2 - 1)"), "{after}");
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
+    assert!(run.status.success(), "{after}\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), expected, "the rewrite changed a value:\n{after}");
+}
+
+/// #4319, the sibling rewrite: `bool.eq(a or b, c)` is `(a or b) == c`, not
+/// `a or b == c` (= `a or (b == c)`), and `not int.gt(x, y)` is `not (x > y)`.
+#[test]
+fn fix_groups_comparison_operands_and_the_comparison_itself() {
+    let src = r#"
+fn either_matches(a: Bool, b: Bool, c: Bool) -> Bool = bool.eq(a or b, c)
+fn matches_either(a: Bool, b: Bool, c: Bool) -> Bool = bool.eq(c, a or b)
+fn not_greater(x: Int, y: Int) -> Bool = not int.gt(x, y)
+
+fn main() -> Unit = {
+  println("${either_matches(true, false, false)} ${matches_either(false, true, false)} ${not_greater(1, 2)} ${not_greater(3, 2)}")
+}
+"#;
+    let path = write_tmp("fix_4319_comparison_grouping.almd", src);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("(a or b) == c"), "{after}");
+    assert!(after.contains("c == (a or b)"), "{after}");
+    assert!(after.contains("not (x > y)"), "{after}");
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
+    assert!(run.status.success(), "{after}\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "false false true false", "{after}");
 }
 
 /// #3063: E041 on `x = f()`, `s.f = f()` and `xs[i] = f()` each carries the
