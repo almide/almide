@@ -5,7 +5,11 @@
 use std::io::Write;
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(at) = args.iter().position(|a| a == "--explain") {
+        args.remove(at);
+        almide_anchor_check::rc::EXPLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),

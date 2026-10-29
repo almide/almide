@@ -54,7 +54,7 @@ use wasmparser::{BlockType, Operator as Op};
 
 mod decode;
 mod operands;
-mod rc;
+pub mod rc;
 pub use rc::{check_rc, RcReport};
 use decode::{branch_target, is_load};
 pub use decode::{decode, function_imports, store_width, Body};

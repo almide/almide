@@ -75,6 +75,11 @@ use wasmparser::Operator as Op;
 use crate::decode::{store_width, Body};
 use crate::operands::{chain, Flow, Src, FUEL};
 
+/// `--explain`: a refusal lists every RC call of the frame and the event
+/// (or counted class) that took it. Diagnosis output only; the verdict is
+/// the same.
+pub static EXPLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// What the RC check saw.
 #[derive(Default, Debug)]
 pub struct RcReport {
@@ -530,11 +535,24 @@ pub fn check_rc(
             .map(|i| format!("{}@{} on {:?}", calls[i].1, calls[i].0, calls[i].2))
             .collect();
         if !unmatched.is_empty() || !extra.is_empty() {
-            return Err(format!(
+            let mut msg = format!(
                 "rc: function {pos}: recorded events with no call [{}]; calls with no recorded event [{}]",
                 unmatched.join(" "),
                 extra.join(", ")
-            ));
+            );
+            if EXPLAIN.load(std::sync::atomic::Ordering::Relaxed) {
+                // Diagnosis only (`--explain`): every RC call and what took it.
+                let ev_txt = |e: usize| format!("{}{}", evs[e].0, evs[e].1.map_or("-".to_string(), |l| l.to_string()));
+                for i in 0..nc {
+                    let by = match owner[i] {
+                        Some(e) => ev_txt(e),
+                        None if used[i] => "counted".to_string(),
+                        None => "LEFT".to_string(),
+                    };
+                    msg.push_str(&format!("\n  {}@{} {:?} <- {}", calls[i].1, calls[i].0, calls[i].2, by));
+                }
+            }
+            return Err(msg);
         }
         rep.frames += 1;
     }
