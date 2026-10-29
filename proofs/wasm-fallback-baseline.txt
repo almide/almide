@@ -42,4 +42,5 @@ spec/stdlib/http_call_test.almd :: HOST_CAPABILITY :: http client is an OS socke
 spec/integration/extern/extern_test.almd :: HOST_CAPABILITY :: @extern(rs) binds native Rust code
 spec/integration/extern_c/extern_c_test.almd :: HOST_CAPABILITY :: @extern(c) links a C library
 spec/stdlib/process_start_test.almd :: HOST_CAPABILITY :: process.start keeps a live child behind a native runtime table (native-only by ruling, E081)
-spec/stdlib/uuid_v7_test.almd :: HOST_CAPABILITY :: uuid.v7 reads a process-wide native monotonic stamp (native-only by ruling, E081)
+# 2026-10-30 (#4307): spec/stdlib/uuid_v7_test.almd left — uuid.v7's stamp cell
+# is a guest global on wasm (stdlib/uuid_wasm.almd), so it runs the wasm leg.
