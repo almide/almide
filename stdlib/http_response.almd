@@ -19,8 +19,6 @@ fn http_json(status: Int, body: String) -> List[String] = {
   [st, body, "Content-Type", "application/json"]
 }
 
-fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
-
 // ASCII-only case fold of ONE character — RFC 9110 field names are `token`s
 // (ASCII), and v0 compares with `eq_ignore_ascii_case`, so reaching for the
 // Unicode string.to_lower here would DISAGREE with native on a non-ASCII name.

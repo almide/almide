@@ -89,10 +89,11 @@ fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes
 local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
 /// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
-fn redirect(url: String) -> HttpResponse = http.__http_response_put_header(http.__redirect(url), "Content-Type", string.__string_media_type(""))
-
-@intrinsic("almide_rt_http_redirect")
-local fn __redirect(url: String) -> HttpResponse = _
+fn redirect(url: String) -> HttpResponse = http.__with_headers(
+  302,
+  "",
+  ["Location", url, "Content-Type", string.__string_media_type("")],
+)
 
 // ── Response status ──
 /// resp with code set; not range-checked.
