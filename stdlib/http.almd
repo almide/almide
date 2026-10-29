@@ -75,7 +75,10 @@ fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http
 
 /// A body of media type media_type; a literal, never one a safe module owns (html, svg).
 @literal_media(media_type)
-fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody { media_type: media_type, bytes: body }
+fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
+  media_type: media_type,
+  bytes: body,
+}
 
 /// A body of a declared media type, built only by `http.typed`.
 mod type TypedBody: Body = { media_type: String, bytes: Bytes }
