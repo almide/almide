@@ -224,6 +224,7 @@ mod testing;
 mod tco;
 mod types_table;
 mod value;
+pub use value::{VALUE_HELPER_ANCHOR, VALUE_SELFHOST_HELPERS};
 mod utf8_helpers;
 pub use utf8_helpers::emit_errtext_multibyte;
 mod json_helpers;

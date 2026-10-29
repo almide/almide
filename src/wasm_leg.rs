@@ -334,13 +334,6 @@ fn link_self_host(
                         {
                             out.insert("float.to_string".to_string());
                         }
-                        // value.object boxes its pairs through the linked
-                        // `__vu_fold_pairs` (C-401: one entry per key), which
-                        // lives in value_utils — linked through its registered
-                        // surface value.pick.
-                        if module.as_str() == "value" && func.as_str() == "object" {
-                            out.insert("value.pick".to_string());
-                        }
                         // testing.assert_contains lowers as a native arm
                         // over the linked string.contains (#2743).
                         if module.as_str() == "testing" && func.as_str() == "assert_contains" {
@@ -507,6 +500,24 @@ fn link_self_host(
                     work.extend(by_key.get(&format!("{module}.{impl_fn}")).copied());
                 }
             }
+            // A `value.*` surface the emitter lowers natively calls a
+            // self-host helper no IR names (value.object boxes through
+            // `__vu_fold_pairs`, C-401; value.merge merges through
+            // `__vu_merge_pairs`): demand the helpers' source and, once it is
+            // loaded, walk the helper's body like any reached fn.
+            let mut helper_demands = Vec::new();
+            for (surface, helper) in almide_wasm::VALUE_SELFHOST_HELPERS {
+                if !s.keys.contains(*surface) {
+                    continue;
+                }
+                helper_demands.push(almide_wasm::VALUE_HELPER_ANCHOR.to_string());
+                if let Some((src, _)) = impls.get(almide_wasm::VALUE_HELPER_ANCHOR)
+                    && let Some(module) = loaded.get(src)
+                {
+                    work.extend(by_key.get(&format!("{module}.{helper}")).copied());
+                }
+            }
+            out.extend(helper_demands);
             for r in &s.refs {
                 let bare = r.rsplit('.').next().unwrap_or(r);
                 work.extend(by_name.get(bare).into_iter().flatten().copied());

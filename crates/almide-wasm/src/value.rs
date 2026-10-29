@@ -25,6 +25,31 @@ pub(crate) const VT_STR: i32 = 4;
 pub(crate) const VT_ARRAY: i32 = 5;
 pub(crate) const VT_OBJECT: i32 = 6;
 
+/// The self-host helpers this emitter calls DIRECTLY when it lowers a
+/// `value.*` surface natively: (surface, helper). No IR names a helper — the
+/// emitter reaches it by name — so the wasm link reads this table to load the
+/// helper's source and walk its body (#4317's reach-only link scans only what
+/// something names). Every helper lives in stdlib/value_utils.almd, loaded
+/// through its registered surface [`VALUE_HELPER_ANCHOR`].
+pub const VALUE_SELFHOST_HELPERS: &[(&str, &str)] = &[
+    ("value.object", "__vu_fold_pairs"),
+    ("value.merge", "__vu_merge_pairs"),
+    ("value.pick", "__vu_pick_pairs"),
+    ("value.omit", "__vu_omit_pairs"),
+];
+
+/// The registered surface whose self-host source holds every helper of
+/// [`VALUE_SELFHOST_HELPERS`].
+pub const VALUE_HELPER_ANCHOR: &str = "value.pick";
+
+fn value_helper(surface: &str) -> &'static str {
+    VALUE_SELFHOST_HELPERS
+        .iter()
+        .find(|(s, _)| *s == surface)
+        .map(|(_, h)| *h)
+        .expect("a natively lowered value surface declares its helper in VALUE_SELFHOST_HELPERS")
+}
+
 impl Emitter<'_> {
     /// `value.*` module calls. Returns Ok(None) for unhandled names so the
     /// caller can fall through to the qualified table / whitelist.
@@ -120,7 +145,7 @@ impl Emitter<'_> {
     /// where the emitted scan per key of b was O(|a|·|b|)); any non-Object
     /// operand yields b itself. Both operands are only READ (#2010 item 5).
     fn lower_value_merge(&mut self, va: &IrExpr, vb: &IrExpr) -> Result<SliceTy, EmitError> {
-        let (merge, owned) = self.pairs_helper("__vu_merge_pairs", 2)?;
+        let (merge, owned) = self.pairs_helper(value_helper("value.merge"), 2)?;
         self.lower_arg(va, Some(SliceTy::Value), ArgMode::Borrow)?;
         let ha = self.hold_i32()?;
         self.f.instructions().local_set(ha);
@@ -160,7 +185,7 @@ impl Emitter<'_> {
     /// Non-object: pick answers `{}` (C-401), omit passes it through.
     fn lower_value_pick_omit(&mut self, func: &str, v: &IrExpr, keys: &IrExpr) -> Result<SliceTy, EmitError> {
         let pick = func == "pick";
-        let (sel, owned) = self.pairs_helper(if pick { "__vu_pick_pairs" } else { "__vu_omit_pairs" }, 2)?;
+        let (sel, owned) = self.pairs_helper(value_helper(if pick { "value.pick" } else { "value.omit" }), 2)?;
         // #2010 item 5: the source is only READ — every block the result
         // shares with it (a passed-through non-object) takes its own credit.
         self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
@@ -229,11 +254,12 @@ impl Emitter<'_> {
     /// `__vu_fold_pairs` (stdlib/value_utils.almd): the duplicate-key fold
     /// every Object construction goes through (C-401).
     fn value_fold_helper(&mut self) -> Result<u32, EmitError> {
-        let Some(hi) = self.selfhost_helper("__vu_fold_pairs") else {
-            return Err(EmitError::Unsupported("value.object:unlinked:__vu_fold_pairs".into()));
+        let name = value_helper("value.object");
+        let Some(hi) = self.selfhost_helper(name) else {
+            return Err(EmitError::Unsupported(format!("value.object:unlinked:{name}")));
         };
         if let Some(r) = &self.table.infos[hi].refuse {
-            return Err(EmitError::Unsupported(format!("call-fn:__vu_fold_pairs:{r}")));
+            return Err(EmitError::Unsupported(format!("call-fn:{name}:{r}")));
         }
         self.calls.insert(hi);
         Ok(self.table.infos[hi].wasm_index)
