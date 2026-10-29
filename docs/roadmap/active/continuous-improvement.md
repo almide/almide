@@ -14,7 +14,7 @@ before acting.
 ## Quality bar: codopsy grade A
 
 Measured exactly as CI's `commissioned-aviation-quality` job does: codopsy
-built from `O6lvl4/codopsy` HEAD, the repo-root `.codopsyrc.json` copied into
+built from `O6lvl4/codopsy` at the commit ci.yml pins (`CODOPSY_SHA`), the repo-root `.codopsyrc.json` copied into
 the measured directory, `codopsy analyze <dir>`, the `Quality Score:` line read
 from stderr. Grades: A ≥ 90, B ≥ 75, C ≥ 60, D ≥ 40. CI gates every workspace
 member crate at A; the root package and `crates/almide-edit-belt` are outside

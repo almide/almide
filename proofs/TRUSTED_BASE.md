@@ -45,6 +45,34 @@ but not listed fails, and so does a version listed but no longer used.
 | almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
 | OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
 
+**What CI fetches (security row 16).** Every binary or archive a workflow
+or CI script downloads is checked against a sha256 stated in
+`.github/pinned-downloads.txt` (`scripts/fetch-pinned.sh`). This covers
+wasmtime, cargo-nextest, wasm-pack, elan, the Lean toolchain and Node. A
+first-party `latest` almide release is checked against its release
+attestation instead. Every `git clone` checks out a 40-hex commit (codopsy),
+the opam repository is pinned to a commit whose opam files carry each source
+archive's checksum, and every third-party action is declared there with what
+it fetches. `scripts/check-action-pins.sh` refuses anything else. Four
+channels are trusted rather than pinned here:
+- **rustup.** `dtolnay/rust-toolchain` runs it for an exact toolchain. rustup
+  checks every component against the sha256 in that release's channel
+  manifest, which static.rust-lang.org serves. The Rust release
+  infrastructure is trusted, as rustc itself is.
+- **apt and Homebrew packages** (binaryen, musl-tools, opam, wabt, valgrind,
+  Vulkan drivers). These are checked against the distribution's signed
+  package index, not against a digest stated here.
+- **`actions/cache` entries.** Only this repository's own runs write them; a
+  pull request's cache is scoped to its own ref. A cached release tarball is
+  re-hashed by `fetch-pinned.sh` before use. An unpacked tree (the Lean
+  toolchain under `~/.elan`, the codopsy binary keyed by its pinned commit,
+  the opam root) is not.
+- **Clones marked `# supply: head-tracked`.** In these the moving head is the
+  thing being measured. The downstream canary tests each project at its
+  default-branch HEAD: it is dispatch-only, its token is read-only, and the
+  leg holds no secrets. The grammar drift check reads `almide-grammar` as
+  data and never builds or runs it.
+
 **Two engines.** wasm execution does not rest on wasmtime alone.
 `almide-wasm-vm` shares no code with wasmtime, and REQ-VM-9 diffs it against
 the stock runtime on the whole `spec/wasm_cross` corpus. Its scope is the
