@@ -5770,8 +5770,8 @@ evidence  = [
 [[contract]]
 id        = "C-444"
 spec      = "ALS-E16"
-title     = "A Bytes value renders as the list of its byte values wherever it is rendered, identically on every target"
-statement = "A Bytes value with no declared repr renders as the list of its byte values, each an unsigned integer 0..=255 in decimal separated by `, ` inside `[` `]` (`bytes.from_string(\"ab\")` is `[97, 98]`, an empty Bytes is `[]`), wherever it is rendered: at the top of a string interpolation, nested inside an Option, Result, list, tuple or record, and as an operand of an `assert_eq` / `assert_ne` failure block. Identical on native, wasm and the interpreter."
+title     = "A Bytes value nested in a rendered value prints as the list of its byte values, identically on every target"
+statement = "A Bytes value with no declared repr, nested inside a rendered Option, Result, list, tuple, record or variant payload, renders as the list of its byte values: each an unsigned integer 0..=255 in decimal, separated by `, ` inside `[` `]` (`[bytes.from_string(\"ab\")]` renders `[[97, 98]]`, an empty Bytes `[]`). The same holds inside the operands of an `assert_eq` / `assert_ne` failure block. At the top of a string interpolation a Bytes has no string form and is refused at check time (E089). Identical on native, wasm and the interpreter."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
