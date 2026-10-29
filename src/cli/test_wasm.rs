@@ -57,6 +57,14 @@ pub(super) enum SkipKind {
     /// registered in proofs/wasm-test-walls.txt and gated shrink-only by
     /// scripts/check-wasm-test-walls.sh.
     Wall,
+    /// The program imports an `@extern(wasm, module, name)` function the
+    /// embedded host does not serve (#4324). Not a miscompile and not a wall:
+    /// the module is fine, this HOST has no such import — the refusal
+    /// `almide run --target wasm` gives the same program. `reason` is that
+    /// refusal's text. The default lane runs the file on the native fallback
+    /// and says why; `--target wasm` fails it, as `run --target wasm` does —
+    /// a file that cannot run on this host says so with `// wasm:skip`.
+    NoHost,
 }
 
 /// Compile one `.almd` file to WASM and run it under wasmtime. Pure per-file
@@ -367,6 +375,20 @@ pub(super) fn note_wasm_leg_unavailable(outcomes: &[WasmTestOutcome]) {
     }
 }
 
+/// The default lane's note for a file whose extern import the embedded host
+/// does not serve (#4324): the refusal, and where the file's tests run
+/// instead — not the miscompile verdict a failed instantiation used to get.
+pub(super) fn note_wasm_leg_no_host(outcomes: &[WasmTestOutcome]) {
+    for o in outcomes {
+        if let WasmTestOutcome::Skip { file, reason, kind: SkipKind::NoHost } = o {
+            err(&format!("note: {file}: the wasm leg cannot run this file; its tests run on the native fallback"));
+            for line in reason.lines() {
+                err(&format!("  {}", line.trim_start_matches("error: ")));
+            }
+        }
+    }
+}
+
 /// `compile_and_run_wasm_test`'s type-check phase. Unlike `almide
 /// build`/`run --target wasm` (which print full diagnostics on a type
 /// error), test mode returns the errors compactly: the default harness
@@ -537,6 +559,17 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     let module_bytes = structural_test_render(test_file, &source_text, &ir_program, declared_tests, run_filter, explain);
     let runner = WasmTestRunner::from_env();
     let run_module = |module: &TestModule| -> WasmTestOutcome {
+        // #4324: a declared `@extern(wasm, ..)` import no host here serves.
+        // Instantiating it fails with wasmtime's "unknown import", which read
+        // as a wasm-only miscompile once the native re-run passed. Refuse it
+        // up front with `almide run --target wasm`'s own text instead.
+        if let Some((module_name, name)) = super::run::foreign_import(&module.almide) {
+            return WasmTestOutcome::Skip {
+                file: test_file.to_string(),
+                reason: super::run::no_host_for_import(test_file, &module_name, &name, "`almide test`'s wasm leg (the embedded host)"),
+                kind: SkipKind::NoHost,
+            };
+        }
         if runner == WasmTestRunner::Embedded {
             // No time limit and no stdin, as the CLI route had: a test runs to
             // completion exactly as its native twin does. The host reads the
@@ -630,8 +663,9 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
 
     let mut failed = 0;
     let mut passed = 0;
-    let mut skipped = 0;
     let mut walled: Vec<String> = Vec::new();
+    let mut declared = 0usize;
+    let mut environment = 0usize;
     let mut counts = TestCounts::default();
     for o in &outcomes {
         match o {
@@ -668,11 +702,21 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
                 // how five of them went unnoticed (#2121).
                 err(&format!("WALL {} (tests did not run on wasm: {})", file, reason));
                 walled.push(file.clone());
-                skipped += 1;
             }
-            WasmTestOutcome::Skip { file, reason, .. } => {
+            // The run asked for wasm and this host cannot run the file — the
+            // verdict `almide run --target wasm` gives it (#4324), not a skip.
+            WasmTestOutcome::Skip { file, reason, kind: SkipKind::NoHost } => {
+                err(&format!("FAIL {} (the embedded wasm host cannot run it)", file));
+                err(&format!("  {}", reason.lines().collect::<Vec<_>>().join("\n  ")));
+                err("  hint: a file whose tests need that host can say so with `// wasm:skip <reason>` in its first three lines");
+                failed += 1;
+            }
+            WasmTestOutcome::Skip { file, reason, kind } => {
                 err(&format!("SKIP {} ({})", file, reason));
-                skipped += 1;
+                match kind {
+                    SkipKind::Declared => declared += 1,
+                    _ => environment += 1,
+                }
             }
             // Counted with the passes, as native counts a file whose binary
             // ran zero tests; the zero-test verdict below is what fails it.
@@ -684,9 +728,18 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
     }
 
     err("");
+    let skipped = walled.len() + declared + environment;
     if skipped > 0 {
-        err(&format!("{} passed, {} failed, {} skipped (of {} files)",
-            passed, failed, skipped, test_files.len()));
+        // Which kind of skip each was (#4325): a declared one is the
+        // author's statement, a wall is the leg's, an environment one the
+        // host's — and none of them ran a test.
+        let kinds: Vec<String> = [(walled.len(), "walled"), (declared, "declared `// wasm:skip`"), (environment, "host unavailable")]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, k)| format!("{n} {k}"))
+            .collect();
+        err(&format!("{} passed, {} failed, {} skipped: {} (of {} files)",
+            passed, failed, skipped, kinds.join(", "), test_files.len()));
     } else {
         err(&format!("{} passed, {} failed (of {} files)",
             passed, failed, test_files.len()));
@@ -708,7 +761,7 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
     if failed > 0 {
         std::process::exit(1);
     }
-    // `skipped` files are declines, not absences — see finish_test_run.
+    // A skip is benign only beside a test that ran (#4325) — see finish_test_run.
     finish_test_run(counts, test_files.len(), skipped, allow_no_tests);
 }
 

@@ -545,7 +545,7 @@ pub(crate) fn wasmtime_fs_args(cmd: &mut Command) {
 
 /// The first function import of `bytes` outside the `almide.*` host contract
 /// (#2275): a program's own `@extern(wasm, ..)` declaration.
-fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
+pub(super) fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
     for payload in wasmparser::Parser::new(0).parse_all(bytes) {
         if let Ok(wasmparser::Payload::ImportSection(r)) = payload {
             for i in r.into_imports().flatten() {
@@ -556,6 +556,17 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
         }
     }
     None
+}
+
+/// The refusal for a program whose `@extern(wasm, module, name)` import the
+/// embedded host does not serve (#2275) — one text for `almide run --target
+/// wasm` and `almide test`'s wasm leg (#4324), which run on the same host: the
+/// import is missing from the HOST, nothing was miscompiled.
+pub(super) fn no_host_for_import(file: &str, module: &str, name: &str, lane: &str) -> String {
+    format!(
+        "error: this program imports `{module}.{name}` (an `@extern(wasm, \"{module}\", \"{name}\")` declaration), and {lane} has no host for it\n  \
+         hint: `almide build {file} --target wasm --host js` writes the module with a JS host next to it — run it under node or in a page, where `init({{ {module}: {{ {name} }} }})` serves the import"
+    )
 }
 
 /// Build `file` to a wasm module and execute it on the embedded host.
@@ -626,10 +637,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // #2275: a declared `@extern(wasm, ..)` import has no host here — say
     // so, instead of wasmtime's "unknown import" at instantiation.
     if let Some((module, name)) = foreign_import(&bytes) {
-        err(&format!(
-            "error: this program imports `{module}.{name}` (an `@extern(wasm, \"{module}\", \"{name}\")` declaration), and `almide run --target wasm` has no host for it\n  \
-             hint: `almide build {file} --target wasm --host js` writes the module with a JS host next to it — run it under node or in a page, where `init({{ js: {{ {name} }} }})` serves the import"
-        ));
+        err(&no_host_for_import(file, &module, &name, "`almide run --target wasm`"));
         return 1;
     }
     match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {

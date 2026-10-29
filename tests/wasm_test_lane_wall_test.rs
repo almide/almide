@@ -278,20 +278,32 @@ fn run_lane_per_file(root: &std::path::Path, files: &[String]) -> String {
     })
 }
 
+/// A declared skip is reported as a skip, and stays green beside a test that
+/// ran. ALONE it ran nothing, which is the zero-test verdict (#4325) — the
+/// rule `tests/wasm_test_skip_verdict_test.rs` pins for every kind of skip.
 #[test]
 fn the_same_file_with_a_declared_skip_is_a_skip() {
     let dir = tempfile::tempdir().expect("tempdir");
     let declared = format!("// wasm:skip — pinned by tests/wasm_test_lane_wall_test.rs\n{WALLS_THE_INCUMBENT}");
     let (code, report) = test_on_wasm(dir.path(), &declared);
-    assert_eq!(
-        code,
-        Some(0),
-        "a skip the author DECLARED, with its reason in the file, stays benign:\n{report}"
-    );
     assert!(
         report.contains("SKIP") && report.contains("wasm:skip"),
         "the declared skip must still be reported as a skip:\n{report}"
     );
+    assert_eq!(code, Some(5), "a run whose only file was skipped ran nothing:\n{report}");
+    std::fs::write(dir.path().join("runs_test.almd"), RUNS_ON_THE_LANE).expect("control");
+    let out = Command::new(almide_bin())
+        .args(["test", dir.path().to_str().expect("path"), "--target", "wasm"])
+        .current_dir(dir.path())
+        .output()
+        .expect("run");
+    let report = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a skip the author DECLARED, with its reason in the file, stays benign beside a test that ran:\n{report}"
+    );
+    assert!(report.contains("1 skipped: 1 declared"), "the summary names the kind of skip:\n{report}");
 }
 
 /// The happy path must be untouched: classifying skips changed no verdict for a
