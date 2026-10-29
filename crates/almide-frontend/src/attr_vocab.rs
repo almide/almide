@@ -66,10 +66,13 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // ADR-0032 (row 11e), read by crates/almide-frontend check/body_rules.rs:
     // a header writer and the list of names the body owns (E116); a
     // parameter taken only as a literal media type (E117); the media-type
-    // patterns a body type's media fn owns, so no other way builds them
+    // patterns a body type's media fn owns, so no other way builds them; the
+    // script-capable patterns, declared once in html (owning one outside the
+    // stdlib needs the application's `[trust] media` grant, D7)
     "header_write",
     "literal_media",
     "media_owns",
+    "script_capable",
     // Scheduling and placement
     "schedule",
     "location",
