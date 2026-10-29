@@ -325,6 +325,7 @@ dependencies = [
  "almide-base",
  "almide-corpus",
  "almide-ir",
+ "almide-lang",
  "almide-layout",
  "almide-spine",
  "almide-types",
