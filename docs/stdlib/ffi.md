@@ -142,7 +142,7 @@ The removed spellings (dialect epoch 15; `almide fix` renames the first three):
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (7 functions)
+## Signature index (8 functions)
 
 ```
 // A read-only view of b; b lives as long as the view.
@@ -172,6 +172,10 @@ effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit
 // A copy of the whole region as Bytes.
 // @since unreleased
 effect ffi.to_bytes(r: Region) -> Bytes
+
+// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+// @since unreleased
+ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

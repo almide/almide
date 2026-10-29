@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 51 stdlib modules, 1322 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1323 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -18,7 +18,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [deque](#deque) | 60 | 0 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
-| [ffi](#ffi) | 7 | 0 |
+| [ffi](#ffi) | 8 | 0 |
 | [float](#float) | 27 | 0 |
 | [float32](#float32) | 24 | 0 |
 | [float64](#float64) | 24 | 0 |
@@ -434,6 +434,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect ffi.read(r: Region, off: Int, n: Int) -> Bytes` — Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
 - `effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit` — Writes b at off; err if the region is read-only or b does not fit.
 - `effect ffi.to_bytes(r: Region) -> Bytes` — A copy of the whole region as Bytes.
+- `ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]` — A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 
 ## float
 
