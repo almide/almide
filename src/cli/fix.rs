@@ -12,9 +12,13 @@
 //!   edit distance, a `T` → `Option[T]` rewrite, a placement heuristic —
 //!   is reported for a human or a model to choose. `Diagnostic::machine_fix`
 //!   is the single read path, so an untagged fix-it cannot leak in.
-//! - **A round is discarded if it made the parse worse.** After applying a
-//!   batch we re-parse; if the parse-error count went UP the batch is
-//!   dropped and the previous text stands.
+//! - **A round is discarded if it made the file worse.** After applying a
+//!   batch we re-parse and re-check; if the parse-error count went UP, or
+//!   it held and the checker's error count went up (#4318: a deleted import
+//!   whose names were still used), the batch is dropped and the previous
+//!   text stands. The hand-maintained stages below pass the same gate, and
+//!   a stage that re-renders the file must also decode to the same string
+//!   literal values (#4320).
 //!
 //! **Still hand-maintained** (each one cannot be stated as a single exact
 //! span, so tagging it machine-applicable would be a lie):
@@ -302,6 +306,81 @@ fn infer_entry(file: &str, source: &str, prog: &mut almide::ast::Program) -> Vec
     checker.infer_program(prog)
 }
 
+/// How far a text is from compiling, compared lexicographically: the parse
+/// errors first, then — on a clean parse, the only time the checker runs —
+/// the checker's error-level diagnostics. A rewrite that clears a parse
+/// error may surface checker errors the recovery hid (an improvement); a
+/// rewrite that keeps the parse and adds a checker error changed what the
+/// program means (#4318), and is refused.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Brokenness {
+    parse_errors: usize,
+    check_errors: usize,
+}
+
+fn brokenness(diagnostics: &[Diagnostic], parse_errors: usize) -> Brokenness {
+    let check_errors = if parse_errors > 0 {
+        0
+    } else {
+        diagnostics.iter().filter(|d| d.level == almide_base::diagnostic::Level::Error).count()
+    };
+    Brokenness { parse_errors, check_errors }
+}
+
+fn brokenness_of(file: &str, source: &str) -> Brokenness {
+    let (diagnostics, parse_errors) = collect_diagnostics(file, source);
+    brokenness(&diagnostics, parse_errors)
+}
+
+/// Every string literal's DECODED value in `source`, sorted, or `None` when
+/// it does not parse cleanly. Interpolated literals contribute their literal
+/// segments. A stage that re-renders the file from its AST changes how a
+/// literal is spelled, never what it decodes to (#4320): this is the
+/// witness, and a stage whose output disagrees is refused.
+fn string_literal_values(file: &str, source: &str) -> Option<Vec<String>> {
+    let tokens = almide::lexer::Lexer::tokenize(source);
+    let mut parser = almide::parser::Parser::new(tokens).with_file(file);
+    let mut program = parser.parse().ok()?;
+    if !parser.errors.is_empty() {
+        return None;
+    }
+    let mut values = Vec::new();
+    ast::visit_exprs_mut(&mut program, &mut |e: &mut Expr| match &e.kind {
+        ExprKind::String { value, .. } => values.push(value.clone()),
+        ExprKind::InterpolatedString { parts, .. } => {
+            for p in parts {
+                if let ast::StringPart::Lit { value } = p {
+                    values.push(value.clone());
+                }
+            }
+        }
+        _ => {}
+    });
+    values.sort();
+    Some(values)
+}
+
+/// The gate every whole-text stage of `cmd_fix` passes (#4318, #4320):
+/// `after` stands only if it is no more broken than `before` and decodes to
+/// the same string literals. Anything else changed what the program means —
+/// or made a file the compiler refuses (a raw E101 character) — and the
+/// stage's text is dropped for the one it was given.
+fn stage_preserves_meaning(file: &str, before: &str, after: &str) -> bool {
+    if before == after {
+        return true;
+    }
+    if brokenness_of(file, after) > brokenness_of(file, before) {
+        return false;
+    }
+    match (string_literal_values(file, before), string_literal_values(file, after)) {
+        (Some(b), Some(a)) => a == b,
+        // `before` did not parse cleanly: there is no literal set to hold
+        // the stage to, and the brokenness gate above already ruled.
+        (None, _) => true,
+        (Some(_), None) => false,
+    }
+}
+
 /// True when two single-line replacement ranges touch. Half-open
 /// `[col, end_col)`; a zero-width insertion is a point, which conflicts
 /// with any range that contains it and with another insertion at the same
@@ -360,24 +439,29 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
 /// Drive the engine to a fixpoint: apply every machine-applicable fix-it,
 /// re-check, repeat. Bounded by `MAX_FIX_ROUNDS`.
 ///
-/// The safety rail is the parse-error count. If a round raised it, some
-/// fix-it's span or replacement was wrong, and the round is thrown away —
-/// the text from before the batch is what the caller gets. A `fix` that
+/// The safety rail is [`Brokenness`]: the parse-error count, then the
+/// checker's error count. If a round raised it, some fix-it's span or
+/// replacement was wrong — or, like an import deletion whose names were
+/// still used (#4318), right about its span and wrong about its premise —
+/// and the round is thrown away; the text from before the batch is what the
+/// caller gets. A `fix` that
 /// leaves the file alone is a bad day; a `fix` that corrupts it is the
 /// failure mode this command exists to avoid.
 fn run_fix_engine(file: &str, source: &str) -> (String, Vec<FixItJson>) {
     let mut working = source.to_string();
     let mut applied: Vec<FixItJson> = Vec::new();
-    let (mut diagnostics, mut parse_errors) = collect_diagnostics(file, &working);
+    let (mut diagnostics, parse_errors) = collect_diagnostics(file, &working);
+    let mut broken = brokenness(&diagnostics, parse_errors);
     for _ in 0..MAX_FIX_ROUNDS {
         let (candidate, round) = apply_batch(&working, &diagnostics);
         if round.is_empty() { break; }
         let (next_diagnostics, next_parse_errors) = collect_diagnostics(file, &candidate);
-        if next_parse_errors > parse_errors { break; }
+        let next_broken = brokenness(&next_diagnostics, next_parse_errors);
+        if next_broken > broken { break; }
         working = candidate;
         applied.extend(round);
         diagnostics = next_diagnostics;
-        parse_errors = next_parse_errors;
+        broken = next_broken;
     }
     (working, applied)
 }
@@ -426,8 +510,14 @@ fn apply_ast_family(file: &str, source: &str) -> (String, Vec<String>, usize) {
     // literal reprints its own source text verbatim (#1263) — which would
     // reprint the pre-rewrite hole and silently drop the fix. Dropping the
     // cached spellings makes fmt render those literals from their values.
+    // Only an INTERPOLATED literal has a hole to go stale; a plain string
+    // or float keeps its spelling (`"\x1b[2m"` stays `"\x1b[2m"`, #4320).
     if operator_count > 0 {
-        ast::strip_literal_raw(&mut program);
+        ast::visit_exprs_mut(&mut program, &mut |e: &mut Expr| {
+            if let ExprKind::InterpolatedString { raw, .. } = &mut e.kind {
+                *raw = None;
+            }
+        });
     }
     if import_messages.is_empty() && operator_count == 0 {
         // Nothing changed — keep the original text verbatim so the other
@@ -447,13 +537,26 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     // hard-coded here; now it is just one of the codes that states a fix).
     let (source_text, applied) = run_fix_engine(file, &disk_source);
 
-    let (mut working, import_messages, operator_count) = apply_ast_family(file, &source_text);
+    // Each whole-text stage passes `stage_preserves_meaning` or is dropped
+    // (#4318, #4320): the AST family re-renders the file, so it is held to
+    // the decoded string literals as well as to the error counts.
+    let (mut working, mut import_messages, mut operator_count) = apply_ast_family(file, &source_text);
+    if !stage_preserves_meaning(file, &source_text, &working) {
+        working = source_text.clone();
+        import_messages = Vec::new();
+        operator_count = 0;
+    }
 
     // `return` removal stays a text rule (see the module header): deleting
     // the keyword only preserves meaning in TAIL position, and neither the
     // parser nor the checker can establish that from the token alone — so
     // no fix-it may claim to be machine-applicable for it.
-    let return_count = RETURN_REMOVAL.apply(&mut working);
+    let before_return = working.clone();
+    let mut return_count = RETURN_REMOVAL.apply(&mut working);
+    if return_count > 0 && !stage_preserves_meaning(file, &before_return, &working) {
+        working = before_return;
+        return_count = 0;
+    }
 
     let any_change = !applied.is_empty()
         || !import_messages.is_empty()
@@ -862,5 +965,37 @@ mod batching_tests {
         let batch = select_batch(&diags);
         let spans: Vec<(usize, usize, usize)> = batch.iter().map(|(_, s, _)| *s).collect();
         assert_eq!(spans, vec![(5, 1, 3), (2, 7, 12)]);
+    }
+
+    /// #4318: a rewrite that keeps the parse clean but adds a checker error
+    /// (here: deleting the definition a call still names, the shape of an
+    /// import deletion whose names are used) is refused; one that clears a
+    /// parse error is accepted even though checking then runs.
+    #[test]
+    fn brokenness_orders_parse_errors_before_checker_errors() {
+        let file = "fix_brokenness_unit.almd";
+        let clean = "fn f() -> Int = 1\nfn g() -> Int = f()\n";
+        let stranded = "fn g() -> Int = f()\n";
+        assert!(brokenness_of(file, stranded) > brokenness_of(file, clean));
+        assert!(!stage_preserves_meaning(file, clean, stranded));
+        assert!(stage_preserves_meaning(file, clean, clean));
+        let a = Brokenness { parse_errors: 1, check_errors: 0 };
+        let b = Brokenness { parse_errors: 0, check_errors: 5 };
+        assert!(b < a, "clearing a parse error is progress");
+    }
+
+    /// #4320: a re-rendered literal must decode to what it decoded to, and
+    /// must not hold a character E101 refuses raw. The escape spellings all
+    /// pass; the raw ESC the formatter used to write is refused.
+    #[test]
+    fn a_stage_that_writes_a_raw_hidden_character_is_refused() {
+        let file = "fix_hidden_unit.almd";
+        let escaped = "effect fn main() -> Unit = println(\"\\x1b[1mbold\")\n";
+        let c418 = "effect fn main() -> Unit = println(\"\\u{1b}[1mbold\")\n";
+        let raw = "effect fn main() -> Unit = println(\"\u{1b}[1mbold\")\n";
+        let changed = "effect fn main() -> Unit = println(\"[1mbold\")\n";
+        assert!(stage_preserves_meaning(file, escaped, c418));
+        assert!(!stage_preserves_meaning(file, escaped, raw));
+        assert!(!stage_preserves_meaning(file, escaped, changed));
     }
 }

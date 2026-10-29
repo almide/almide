@@ -1357,12 +1357,19 @@ impl Checker {
             let used_via_bound = self.env.import_table.aliases.get(&sym(&import_name))
                 .is_some_and(|canon| bound_origins.contains(canon));
             // A selectively imported TYPE or CONSTRUCTOR is spelled bare
-            // (`import self.t.{T, V}` then `-> T`, `V(1)`, #3384): that
-            // spelling is the import's use, and deleting the line would
-            // strand it.
+            // (`import self.t.{T, V}` then `-> T`, `V(1)`, #3384), and so is
+            // a selectively imported FUNCTION (`import p.common.{items}` then
+            // `items()`, #4318): that spelling is the import's use, and
+            // deleting the line would strand it. Judged from the spelling,
+            // not from the call-site mark — that mark records the module's
+            // canonical path (`p.common`), which is not the name this verdict
+            // keys on (`common`), so a package submodule's selective import
+            // was judged unused however many of its names were called.
             let used_via_selective = names.as_ref().is_some_and(|ns| ns.iter().any(|n| {
                 !spelled.declared.contains(n)
-                    && (spelled.bare_ctors.contains(n) || spelled.bare_types.iter().any(|(t, _)| t == n))
+                    && (spelled.bare_ctors.contains(n)
+                        || spelled.bare_values.contains(n)
+                        || spelled.bare_types.iter().any(|(t, _)| t == n))
             }));
             if import_name.is_empty()
                 || self.env.import_table.used.contains(&sym(&import_name))
@@ -1555,6 +1562,11 @@ struct ImportSpellings {
     /// constructor's (`V4(..)`, `V4(..) => ..`). The E060 pass
     /// maps each to its declaring type through the constructor table.
     bare_ctors: std::collections::HashSet<Sym>,
+    /// Every BARE lower-case value spelling — a call target or a function
+    /// value (`items(..)`, `xs |> list.map(sep)`). A selective import's
+    /// function is used by exactly this spelling (#4318); a local of the
+    /// same name over-approximates, which only ever keeps an import.
+    bare_values: std::collections::HashSet<Sym>,
     /// Every type name and variant case THIS file declares. A bare spelling
     /// of one is the file's own declaration — a user `type IpAddr` shadows
     /// the stdlib's, it never uses `import net` (#1837).
@@ -1593,7 +1605,7 @@ impl ImportSpellings {
             None if name.as_str().starts_with(|c: char| c.is_ascii_uppercase()) => {
                 self.bare_ctors.insert(name);
             }
-            None => {}
+            None => { self.bare_values.insert(name); }
         }
     }
 }
