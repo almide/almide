@@ -45,7 +45,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__with_headers(
   status,
-  bytes.to_string_lossy(body.__self_to_bytes()),
+  body.__self_to_text(),
   ["Content-Type", body.__self_media_type()],
 )
 
@@ -61,14 +61,14 @@ fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) 
   }
   http.__with_headers(
     status,
-    bytes.to_string_lossy(body.__self_to_bytes()),
+    body.__self_to_text(),
     ["Content-Type", body.__self_media_type()] + __flat(headers),
   )
 }
 
 /// resp with its body replaced by body and its Content-Type by body's type.
 fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http_response_put_header(
-  http.__http_response_put_body(resp, bytes.to_string_lossy(body.__self_to_bytes())),
+  http.__http_response_put_body(resp, body.__self_to_text()),
   "Content-Type",
   body.__self_media_type(),
 )
@@ -82,7 +82,7 @@ mod type TypedBody: Body = { media_type: String, bytes: Bytes }
 
 fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
-fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes
+fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)

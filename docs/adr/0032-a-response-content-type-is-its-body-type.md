@@ -25,7 +25,7 @@ The owner's ruling: the Content-Type comes from the body's type, never from a he
 A builtin protocol `Body` (the noun family `Encode` / `Decode` / `HttpMessage` already uses) has two requirements:
 
 - `T.media_type() -> String`: the Content-Type a response with this body carries;
-- `body.to_bytes() -> Bytes`: the bytes on the wire.
+- `body.to_text() -> String`: the body on the wire. A built response holds its body as text until #4311 gives it an exact bytes slot, so the requirement is the text (a Bytes body decodes as lossy UTF-8, Q16). It was `to_bytes` in the proposal; as text, a String body costs no round trip and `string` does not reach `bytes` (the #4289 reach gate in `bundled_reach.rs`). Both requirements are per-type (`__self_media_type`, `__self_to_text`), so neither is user surface.
 
 | Body type | Content-Type | Declared in |
 |---|---|---|
