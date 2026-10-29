@@ -27,6 +27,7 @@ pub const CONSTANT_APP: &str = "fn app(req: HttpRequest) -> Result[HttpResponse,
 
 /// The app of the alloc and diamond probes: every reader, a header set
 /// from a request header, a status outside the reason table, and an err.
+/// Its Content-Type is its String body's (ADR-0032), never a header by name.
 pub const PROBE_APP: &str = r#"fn app(req: HttpRequest) -> Result[HttpResponse, String] = {
   let path = http.path(req)
   let q = http.query_params(req) ?? []
@@ -34,7 +35,7 @@ pub const PROBE_APP: &str = r#"fn app(req: HttpRequest) -> Result[HttpResponse, 
   match path {
     "/missing" => err("no route ${path}"),
     "/a/b" => ok(http.response(200, http.body(req)) |> http.set_status(418) |> http.set_header("x-kind", "teapot")),
-    _ => ok(http.with_headers(200, "${http.method(req)} ${path} [${keys}] ${http.body(req)}", [("x-token", http.header(req, "x-token") ?? "none"), ("Content-Type", "text/plain; charset=utf-8")])),
+    _ => ok(http.with_headers(200, "${http.method(req)} ${path} [${keys}] ${http.body(req)}", [("x-token", http.header(req, "x-token") ?? "none"))])),
   }
 }
 "#;
