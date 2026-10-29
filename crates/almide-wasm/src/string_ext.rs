@@ -182,7 +182,7 @@ impl Emitter<'_> {
     /// the route `list.push(h.f, v)` takes (#2411).
     fn lower_string_push(&mut self, v: &IrExpr, x: &IrExpr) -> ArmResult {
         // #3639: a field the append window admits grows in place.
-        if self.try_field_push_str(v, x)? {
+        if self.routine(|r: &bool| *r, |em| em.try_field_push_str(v, x))? {
             return Ok(None);
         }
         if let Some((id, path)) = crate::list_mut::record_field_receiver(v) {

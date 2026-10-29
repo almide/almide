@@ -52,6 +52,7 @@ pub fn records(
 /// alloc <function index of $alloc in the shipped bytes>
 /// init <one token per init event: position:ordinal | ->
 /// bounds <one token per bounds token: position:ordinal | ->
+/// judges <one token per copy-on-write judge call: position:ordinal | ->
 /// ```
 ///
 /// laid out exactly as the witness texts (`;` between sites / stretches,
@@ -80,12 +81,19 @@ fn records_inner(
     let bounds = super::take_bounds();
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
+    let judge_anchors = super::bounds::take_judges();
+    let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
 
     let mut records = Vec::new();
     let mut uncertified = Vec::new();
+    let certified_names: std::collections::HashSet<String> = frames
+        .iter()
+        .filter(|(_, c)| !c.starts_with('!'))
+        .map(|(n, _)| n.clone())
+        .collect();
     for (name, cert) in frames {
         match cert.strip_prefix(super::DECLINE_PREFIX) {
             Some(reason) => uncertified.push((name, reason.trim().to_string())),
@@ -104,7 +112,7 @@ fn records_inner(
         Some(fmap) => {
     let locate = Locator::new(emitted, shipped, seals, fmap)?;
     format!(
-        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\n",
+        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\njudges {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
             let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
@@ -115,7 +123,8 @@ fn records_inner(
         },
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
-    )
+        locate.text(&pick(judge_anchors))?,
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -145,6 +154,79 @@ fn records_inner(
     Ok(((records, uncertified), anchor_file))
 }
 
+/// The rc sink's frames that the shipped pass certified.
+fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::HashSet<String>) -> Vec<(u64, String)> {
+    frames.iter().filter(|(_, n, _)| names.contains(n)).map(|(k, _, e)| (*k, e.clone())).collect()
+}
+
+/// #4277, measurement-gated (`ALMIDE_RC_ANCHORS=1`, witness_rc.rs): the
+/// release routines as shipped function indices, and per certified frame its
+/// shipped position and live RC events:
+///
+/// ```text
+/// rcfns <inc index | -> <release index> ...
+/// rc <position>|<events>;...
+/// ```
+///
+/// An `m<local>#<window id>` event (a credit moved into an arm or a routine)
+/// renders as `m<local>@<from>-<to>`: that window's instruction ordinals.
+fn rc_lines(
+    locate: &Locator,
+    emitted: &[u8],
+    shipped: &[u8],
+    fmap: &[Option<u32>],
+    frames: &[(u64, String)],
+    releases: &std::collections::BTreeSet<u32>,
+    arms: &[(u64, usize, usize)],
+    routines: &[(u64, usize, usize)],
+    window_ids: &std::collections::HashMap<u64, (u64, usize, usize)>,
+) -> Result<String, String> {
+    if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
+        return Ok(String::new());
+    }
+    use crate::cert_project as cp;
+    let (ei, si) = (
+        cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
+        cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
+    );
+    let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
+    let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
+    let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
+    let rc: Vec<String> = frames
+        .iter()
+        .filter_map(|(k, ev)| {
+            let ev: Vec<String> = ev
+                .split_whitespace()
+                .map(|t| locate.shipped_holder(t))
+                .filter_map(|t| match t.split_once('#') {
+                    // A move into a window this body does not ship (pruned)
+                    // is dropped with it.
+                    Some((m, id)) => {
+                        let &(wk, a, b) = window_ids.get(&id.parse::<u64>().ok()?)?;
+                        let (_, x, y) = locate.window(wk, a, b)?;
+                        Some(format!("{m}@{x}-{y}"))
+                    }
+                    None => Some(t.to_string()),
+                })
+                .collect();
+            locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
+        })
+        .collect();
+    let windows = |w: &[(u64, usize, usize)]| -> String {
+        w.iter()
+            .filter_map(|&(k, a, b)| locate.window(k, a, b).map(|(j, x, y)| format!("{j}:{x}-{y}")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    Ok(format!(
+        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\n",
+        decs.join(" "),
+        rc.join(";"),
+        windows(arms),
+        windows(routines)
+    ))
+}
+
 /// Turns the sinks' `serial@offset` anchors into `position:ordinal`.
 struct Locator {
     /// serial -> defined position in the emitted module.
@@ -157,12 +239,14 @@ struct Locator {
     /// body (`to_wasi` puts `i32.const 1; call $exit` before every
     /// `unreachable`).
     ords: std::collections::HashMap<usize, Vec<usize>>,
+    /// Emitted global index -> shipped, read off the paired bodies.
+    globals: std::collections::HashMap<u32, u32>,
 }
 
 /// Each emitted instruction's index in the shipped body: the two walk in
 /// step, the shipped one allowed to run ahead only into an `unreachable`
 /// (the exit `to_wasi` injects before it).
-fn align(emitted: &[u8], shipped: &[u8]) -> Result<Vec<usize>, String> {
+fn align(emitted: &[u8], shipped: &[u8], globals: &mut std::collections::HashMap<u32, u32>) -> Result<Vec<usize>, String> {
     use std::mem::discriminant;
     fn ops(b: &[u8]) -> Result<Vec<wasmparser::Operator<'_>>, String> {
         let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(b, 0));
@@ -178,6 +262,15 @@ fn align(emitted: &[u8], shipped: &[u8]) -> Result<Vec<usize>, String> {
         }
         if j >= sh.len() || discriminant(&sh[j]) != discriminant(op) {
             return Err(format!("anchors: an emitted instruction ({op:?}) has no counterpart in the shipped body"));
+        }
+        // The prune renumbers globals: a global read or written here names
+        // its shipped index at the paired instruction.
+        use wasmparser::Operator::{GlobalGet, GlobalSet};
+        match (op, &sh[j]) {
+            (GlobalGet { global_index: a }, GlobalGet { global_index: b }) | (GlobalSet { global_index: a }, GlobalSet { global_index: b }) => {
+                globals.insert(*a, *b);
+            }
+            _ => {}
         }
         out.push(j);
         j += 1;
@@ -228,16 +321,51 @@ impl Locator {
             return Err(format!("anchors: the function map has {} rows for {} emitted bodies", fmap.len(), em.len()));
         }
         let mut ords = std::collections::HashMap::new();
+        let mut globals = std::collections::HashMap::new();
         for &i in pos.values() {
             if ords.contains_key(&i) {
                 continue;
             }
             if let Some(j) = fmap[i] {
                 let (sraw, _) = sh.get(j as usize).ok_or_else(|| format!("anchors: emitted body {i} ships at {j}, past the shipped bodies"))?;
-                ords.insert(i, align(&em[i].0, sraw)?);
+                ords.insert(i, align(&em[i].0, sraw, &mut globals)?);
             }
         }
-        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords })
+        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords, globals })
+    }
+
+    /// Body `serial`'s instructions between byte offsets `from` and `to`, as
+    /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
+    /// `None` for a body that did not ship or an empty window.
+    fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
+        let &i = self.pos.get(&serial)?;
+        let j = self.ships_at[i]?;
+        let ends = &self.ends[i];
+        let first = ends.iter().position(|&e| e > from)?;
+        let last = ends.iter().rposition(|&e| e <= to)?;
+        let ords = self.ords.get(&i)?;
+        (first <= last).then(|| (j, ords[first], ords[last]))
+    }
+
+    /// An rc event token whose variable is an outer global holder
+    /// (`0xC000_0000 | g`, the recorder's emitted global index) renamed to
+    /// the global's shipped index.
+    fn shipped_holder(&self, t: &str) -> String {
+        const GLOBAL_HOLDER: u32 = 0xC000_0000;
+        let kind = &t[..1];
+        let (num, rest) = t[1..].split_at(t[1..].find(['#', '@']).unwrap_or(t.len() - 1));
+        match num.parse::<u32>() {
+            Ok(v) if v & 0xF000_0000 == GLOBAL_HOLDER => match self.globals.get(&(v & !GLOBAL_HOLDER)) {
+                Some(g) => format!("{kind}{}{rest}", GLOBAL_HOLDER | g),
+                None => t.to_string(),
+            },
+            _ => t.to_string(),
+        }
+    }
+
+    /// The shipped position of body `serial`, when it shipped.
+    fn position(&self, serial: u64) -> Option<u32> {
+        self.pos.get(&serial).and_then(|&i| self.ships_at[i])
     }
 
     fn token(&self, t: &str) -> String {
