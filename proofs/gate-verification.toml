@@ -1519,6 +1519,16 @@ varies = "the corpus the union is judged against grew 834 -> 851 fixtures betwee
 blind = "a shard that writes a fixture's name without running it: each list is the shard's own claim -> UNCOMPENSATED"
 
 [[gate]]
+path = "scripts/ci-commissioned-wasm-shard.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "2026-10-29: `verify ratchet` exited 0 on a log with both of the shard's tests `... ok` and 1 on the same log with one of them FAILED; `verify rest` exited 0 on the committed matrix and 1 with `parity` deleted from the matrix line. On GCE (02e0fc9e0) all five shards' `verify` exited 0 after the full release-shape run"
+measures = "a named shard: each test its table row names appears as `test <name> ... ok` in the shard's cargo log; `rest`: the workflow's commissioned-wasm-gates matrix lists exactly the table's shards"
+varies = "the shard table and the matrix line are both hand-edited; the 2026-10-29 packing is five shards over eight named tests"
+blind = "NONE: its domain is whether every test the step ran before the split still runs in some shard; `rest` skips exactly the table's names, so only a table row the matrix does not run or a name no test answers to can drop one, and each is a verify failure. Whether a named test is itself sound is that test's own gate"
+
+[[gate]]
 path = "scripts/downstream-canary.py"
 reads = "structured"
 wired_by = ".github/workflows/downstream-canary.yml"

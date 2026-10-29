@@ -12,41 +12,33 @@
 // a server that talks every 50 ms for up to 10 s against a 400 ms wall clock,
 // a server silent for 2 s against a 300 ms idle limit.
 //
-// The server arm is written with `net` and runs in its own `fan` arm (the net
-// handle tables are thread-local). It proves the close from ITS side: it
-// reads between events, and a read that answers end-of-stream or a reset is
-// the client having closed the connection. The client arm first dials a
-// throwaway connection until the listener is up, so `start` never races the
-// bind.
+// Each test listens on port 0 BEFORE its `fan` and hands the listener to the
+// server arm and the port the OS chose to the client arm (#4313: fixed ports
+// collided with whatever else held them). The net handle tables are the
+// program's, not a thread's (C-377), so an arm accepts on the test's
+// listener, and the client's dial queues in the listen backlog until it does.
+// The server arm proves the close from ITS side: it reads between events, and
+// a read that answers end-of-stream or a reset is the client having closed
+// the connection. A write the close answered first is the same end of the
+// stream: EPIPE or ECONNRESET on unix, WSAECONNABORTED on Windows. A server
+// that stopped early for any other reason ends the response, and the client's
+// own verdict (a fired limit, a cancelled call) would not hold.
 import env
 import io
 import http
 import net
 
-effect fn ready(port: Int, left: Int) -> Result[Unit, String] = match net.tcp_connect(
-  "127.0.0.1",
-  port,
-) {
-  ok(probe) => {
-    io.close(probe)!
-    ok(())
-  },
-  err(e) => if left == 0 then err(e)
-  else {
-    env.sleep_ms(20)
-    ready(port, left - 1)
-  },
+// Listen on a port the OS chooses: the listener and its port.
+effect fn listen_any() -> Result[(net.TcpListener, Int), String] = {
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  ok((server, net.tcp_local_port(server)!))
 }
 
-// Listen, answer the readiness probe, accept the real client and read its
-// request: the real client's stream.
-effect fn accept_real(port: Int) -> Result[(net.TcpListener, net.TcpStream), String] = {
-  let server = net.tcp_listen("127.0.0.1", port)!
-  let probe = net.tcp_accept(server)!
-  io.close(probe)!
+// Accept the client and read its request: the client's stream.
+effect fn accept_real(server: net.TcpListener) -> Result[net.TcpStream, String] = {
   let peer = net.tcp_accept(server)!
   let _ = io.read(peer, 4096)!
-  ok((server, peer))
+  ok(peer)
 }
 
 // Has the client closed the connection? A read that answers end-of-stream
@@ -66,17 +58,19 @@ effect fn peer_closed(peer: net.TcpStream) -> Result[Bool, String] = match net.t
 }
 
 // Talk every 50 ms until the client closes; the number of events it took.
+// The close shows as a read (`peer_closed`) or, when it lands between that
+// read and the next event, as the event's write failing.
 // A client that never closes ends the arm with an err after 200 events.
 effect fn trickle(peer: net.TcpStream, i: Int) -> Result[Int, String] =
   if i >= 200 then err("the client never closed the connection")
   else if peer_closed(peer)! then ok(i)
-  else {
-    io.write(peer, bytes.from_string("data: ${i}\n\n"))!
-    trickle(peer, i + 1)
+  else match io.write(peer, bytes.from_string("data: ${i}\n\n")) {
+    ok(_) => trickle(peer, i + 1),
+    err(_) => ok(i),
   }
 
-effect fn trickle_server(port: Int) -> Result[Int, String] = {
-  let (server, peer) = accept_real(port)!
+effect fn trickle_server(server: net.TcpListener) -> Result[Int, String] = {
+  let peer = accept_real(server)!
   io.write(peer, bytes.from_string("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"))!
   let n = trickle(peer, 0)!
   io.close(peer)!
@@ -84,16 +78,16 @@ effect fn trickle_server(port: Int) -> Result[Int, String] = {
   ok(n)
 }
 
-effect fn silent_server(port: Int) -> Result[Unit, String] = {
-  let (server, peer) = accept_real(port)!
+effect fn silent_server(server: net.TcpListener) -> Result[Unit, String] = {
+  let peer = accept_real(server)!
   env.sleep_ms(2000)
   io.close(peer)!
   io.close(server)!
   ok(())
 }
 
-effect fn answer_server(port: Int, reply: String) -> Result[Unit, String] = {
-  let (server, peer) = accept_real(port)!
+effect fn answer_server(server: net.TcpListener, reply: String) -> Result[Unit, String] = {
+  let peer = accept_real(server)!
   io.write(peer, bytes.from_string(reply))!
   io.close(peer)!
   io.close(server)!
@@ -111,7 +105,6 @@ fn polled(p: Result[HttpResponse, String]?) -> String = match p {
 }
 
 effect fn wait_with(port: Int, total_ms: Int, idle_ms: Int) -> Result[String, String] = {
-  ready(port, 200)!
   let c = http.start(
     http.new_request("GET", "http://127.0.0.1:${port}/", "", []),
     { total_ms: total_ms, idle_ms: idle_ms },
@@ -130,7 +123,6 @@ effect fn gather(c: HttpCall, rounds: Int, acc: String) -> Result[String, String
 }
 
 effect fn cancel_client(port: Int) -> Result[(String, String, String, String), String] = {
-  ready(port, 200)!
   let c = http.start(
     http.new_request("GET", "http://127.0.0.1:${port}/", "", []),
     { total_ms: 0, idle_ms: 0 },
@@ -144,9 +136,10 @@ effect fn cancel_client(port: Int) -> Result[(String, String, String, String), S
 }
 
 test "total_ms is a wall clock: a stream that keeps talking ends at it" {
+  let (server, port) = listen_any()!
   let (served, answer) = fan {
-    trickle_server(39290)
-    wait_with(39290, 400, 0)
+    trickle_server(server)
+    wait_with(port, 400, 0)
   }
   assert_eq(answer, "request timeout: total_ms 400 exceeded")
   // The server saw the close long before its own 200-event cap.
@@ -154,17 +147,19 @@ test "total_ms is a wall clock: a stream that keeps talking ends at it" {
 }
 
 test "idle_ms bounds the wait for the first byte" {
+  let (server, port) = listen_any()!
   let (_, answer) = fan {
-    silent_server(39291)
-    wait_with(39291, 0, 300)
+    silent_server(server)
+    wait_with(port, 0, 300)
   }
   assert_eq(answer, "request timeout: idle_ms 300 exceeded")
 }
 
 test "poll never blocks, cancel closes the connection and nothing arrives after it" {
+  let (server, port) = listen_any()!
   let (served, (before, seen, after, final)) = fan {
-    trickle_server(39292)
-    cancel_client(39292)
+    trickle_server(server)
+    cancel_client(port)
   }
   assert_eq(before, "pending")
   assert(string.starts_with(seen, "data: 0\n\n"))
@@ -174,9 +169,10 @@ test "poll never blocks, cancel closes the connection and nothing arrives after 
 }
 
 test "wait answers the whole response, any status" {
+  let (server, port) = listen_any()!
   let (_, answer) = fan {
-    answer_server(39293, "HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\ngone")
-    wait_with(39293, 5000, 0)
+    answer_server(server, "HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\ngone")
+    wait_with(port, 5000, 0)
   }
   assert_eq(answer, "404 gone")
 }
