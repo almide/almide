@@ -86,7 +86,10 @@ struct Module {
 /// lives in `app/` and every package beside it.
 fn project(modules: Vec<Module>, entry_body: &str) -> (Vec<(String, String)>, String) {
     if modules.is_empty() {
-        return (vec![("main.almd".into(), entry_body.to_string())], "main.almd".into());
+        return (
+            vec![("main.almd".into(), entry_body.to_string())],
+            "main.almd".into(),
+        );
     }
     let any_pkg = modules.iter().any(|m| m.package);
     let app = if any_pkg { "app/" } else { "" };
@@ -123,20 +126,43 @@ fn project(modules: Vec<Module>, entry_body: &str) -> (Vec<(String, String)>, St
 fn layout_project(layout: Layout, decls: &str, main_body: &str) -> (Vec<(String, String)>, String) {
     match layout {
         Layout::Single => project(vec![], &format!("{decls}\n{main_body}")),
-        Layout::Sibling => project(vec![Module { name: "m".into(), package: false, src: decls.into() }], main_body),
-        Layout::Package => project(vec![Module { name: "lib".into(), package: true, src: decls.into() }], main_body),
+        Layout::Sibling => project(
+            vec![Module {
+                name: "m".into(),
+                package: false,
+                src: decls.into(),
+            }],
+            main_body,
+        ),
+        Layout::Package => project(
+            vec![Module {
+                name: "lib".into(),
+                package: true,
+                src: decls.into(),
+            }],
+            main_body,
+        ),
     }
 }
 
 /// `effect fn main` that runs `stmts` and prints the Int `v` they bind.
 fn main_printing(stmts: &str) -> String {
-    format!("effect fn main() -> Unit = {{\n{}\n  println(int.to_string(v))\n}}\n", indent(stmts, 2))
+    format!(
+        "effect fn main() -> Unit = {{\n{}\n  println(int.to_string(v))\n}}\n",
+        indent(stmts, 2)
+    )
 }
 
 fn indent(s: &str, n: usize) -> String {
     let pad = " ".repeat(n);
     s.lines()
-        .map(|l| if l.trim().is_empty() { String::new() } else { format!("{pad}{l}") })
+        .map(|l| {
+            if l.trim().is_empty() {
+                String::new()
+            } else {
+                format!("{pad}{l}")
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -163,10 +189,42 @@ struct LetKind {
 
 fn let_kinds() -> Vec<LetKind> {
     vec![
-        LetKind { callable: false, tag: "int", prelude: "", init: "41", annot: "", obs: |r| r.to_string(), val: 41 },
-        LetKind { callable: false, tag: "string", prelude: "", init: "\"abc\"", annot: "", obs: |r| format!("string.len({r})"), val: 3 },
-        LetKind { callable: false, tag: "list", prelude: "", init: "[5, 6, 7]", annot: "", obs: |r| format!("list.len({r}) + {r}[0]"), val: 8 },
-        LetKind { callable: false, tag: "map", prelude: "", init: "[\"k\": 2]", annot: "", obs: |r| format!("{r}[\"k\"] ?? 0"), val: 2 },
+        LetKind {
+            callable: false,
+            tag: "int",
+            prelude: "",
+            init: "41",
+            annot: "",
+            obs: |r| r.to_string(),
+            val: 41,
+        },
+        LetKind {
+            callable: false,
+            tag: "string",
+            prelude: "",
+            init: "\"abc\"",
+            annot: "",
+            obs: |r| format!("string.len({r})"),
+            val: 3,
+        },
+        LetKind {
+            callable: false,
+            tag: "list",
+            prelude: "",
+            init: "[5, 6, 7]",
+            annot: "",
+            obs: |r| format!("list.len({r}) + {r}[0]"),
+            val: 8,
+        },
+        LetKind {
+            callable: false,
+            tag: "map",
+            prelude: "",
+            init: "[\"k\": 2]",
+            annot: "",
+            obs: |r| format!("{r}[\"k\"] ?? 0"),
+            val: 2,
+        },
         LetKind {
             callable: false,
             tag: "record",
@@ -185,8 +243,24 @@ fn let_kinds() -> Vec<LetKind> {
             obs: |r| format!("string.len(\"${{{r}}}\")"),
             val: 7,
         },
-        LetKind { callable: false, tag: "option", prelude: "", init: "some(4)", annot: ": Option[Int]", obs: |r| format!("{r} ?? 0"), val: 4 },
-        LetKind { callable: false, tag: "bytes", prelude: "", init: "bytes.from_list([1, 2, 3])", annot: "", obs: |r| format!("bytes.len({r})"), val: 3 },
+        LetKind {
+            callable: false,
+            tag: "option",
+            prelude: "",
+            init: "some(4)",
+            annot: ": Option[Int]",
+            obs: |r| format!("{r} ?? 0"),
+            val: 4,
+        },
+        LetKind {
+            callable: false,
+            tag: "bytes",
+            prelude: "",
+            init: "bytes.from_list([1, 2, 3])",
+            annot: "",
+            obs: |r| format!("bytes.len({r})"),
+            val: 3,
+        },
         LetKind {
             callable: false,
             tag: "record_bytes",
@@ -196,7 +270,15 @@ fn let_kinds() -> Vec<LetKind> {
             obs: |r| format!("{r}.n + bytes.len({r}.data)"),
             val: 3,
         },
-        LetKind { callable: false, tag: "matrix", prelude: "", init: "matrix.zeros(2, 3)", annot: "", obs: |r| format!("matrix.rows({r})"), val: 2 },
+        LetKind {
+            callable: false,
+            tag: "matrix",
+            prelude: "",
+            init: "matrix.zeros(2, 3)",
+            annot: "",
+            obs: |r| format!("matrix.rows({r})"),
+            val: 2,
+        },
         LetKind {
             callable: true,
             tag: "fn_value",
@@ -237,7 +319,14 @@ fn let_kinds() -> Vec<LetKind> {
 }
 
 /// Where the top-level let is read from.
-const LET_USES: [&str; 6] = ["direct", "closure", "nested_closure", "hof", "own_fn", "own_fn_closure"];
+const LET_USES: [&str; 6] = [
+    "direct",
+    "closure",
+    "nested_closure",
+    "hof",
+    "own_fn",
+    "own_fn_closure",
+];
 
 /// How the let is named.
 ///  - `upper`: `THING`
@@ -252,7 +341,9 @@ fn read_site(use_: &str, o: &str, q: &str) -> String {
     match use_ {
         "direct" => format!("let v = {o}"),
         "closure" => format!("let f = () => {o}\nlet v = f()"),
-        "nested_closure" => format!("let f = () => {{\n  let g = () => {o}\n  g()\n}}\nlet v = f()"),
+        "nested_closure" => {
+            format!("let f = () => {{\n  let g = () => {o}\n  g()\n}}\nlet v = f()")
+        }
         "hof" => format!("let v = list.fold([0], 0, (acc, i) => acc + i + {o})"),
         "own_fn" | "own_fn_closure" => format!("let v = {q}probe()"),
         _ => unreachable!(),
@@ -296,7 +387,13 @@ fn toplet_cells(out: &mut Vec<Cell>) {
                     let obs_at = |qual: &str| -> String {
                         names
                             .iter()
-                            .map(|n| if kind.callable && *n == "THING" { format!("{qual}{n}") } else { (kind.obs)(&format!("{qual}{n}")) })
+                            .map(|n| {
+                                if kind.callable && *n == "THING" {
+                                    format!("{qual}{n}")
+                                } else {
+                                    (kind.obs)(&format!("{qual}{n}"))
+                                }
+                            })
                             .map(|e| format!("({e})"))
                             .collect::<Vec<_>>()
                             .join(" + ")
@@ -306,18 +403,30 @@ fn toplet_cells(out: &mut Vec<Cell>) {
                             let _ = writeln!(decls, "pub fn probe() -> Int = {}", obs_at(""));
                         }
                         "own_fn_closure" => {
-                            let _ = writeln!(decls, "pub fn probe() -> Int = {{\n  let f = () => {}\n  f()\n}}", obs_at(""));
+                            let _ = writeln!(
+                                decls,
+                                "pub fn probe() -> Int = {{\n  let f = () => {}\n  f()\n}}",
+                                obs_at("")
+                            );
                         }
                         _ => {}
                     }
                     let mut stmts = read_site(use_, &obs_at(q), q);
-                    let mut val = if twin_val > 0 { kind.val + twin_val } else { kind.val * names.len() as i64 };
+                    let mut val = if twin_val > 0 {
+                        kind.val + twin_val
+                    } else {
+                        kind.val * names.len() as i64
+                    };
                     let mut root_decls = String::new();
                     if naming == "gen_static" {
                         // The root's own let, spelled as the native static of
                         // the declaring module's `VALUE` would be before
                         // upper-casing.
-                        let modname = if layout == Layout::Sibling { "m" } else { "lib" };
+                        let modname = if layout == Layout::Sibling {
+                            "m"
+                        } else {
+                            "lib"
+                        };
                         let _ = writeln!(root_decls, "let almide_rt_{modname}_thing = 100");
                         stmts.push_str(&format!("\nlet v = v + almide_rt_{modname}_thing"));
                         val += 100;
@@ -408,8 +517,16 @@ fn var_forms() -> Vec<VarForm> {
 /// Where the mutation runs. `own_*` sites are fns of the declaring module;
 /// `root_*` sites are fns of the entry module (another module whenever the
 /// layout has one).
-const VAR_SITES: [&str; 8] =
-    ["own_fn", "own_closure", "own_nested", "own_hof", "root_fn", "root_closure", "root_nested", "root_hof"];
+const VAR_SITES: [&str; 8] = [
+    "own_fn",
+    "own_closure",
+    "own_nested",
+    "own_hof",
+    "root_fn",
+    "root_closure",
+    "root_nested",
+    "root_hof",
+];
 
 /// The local feeding the mutation: `k`, or `c` — the parameter name of the
 /// native leg's generated `X.with(|c| ...)` accessor (#3304).
@@ -419,11 +536,20 @@ fn mutation_fn(fn_kw: &str, name: &str, l: &str, site_shape: &str, mutate: &str)
     let body = match site_shape {
         "fn" => mutate.to_string(),
         "closure" => format!("let f = () => {{\n{}\n}}\nf()", indent(mutate, 2)),
-        "nested" => format!("let f = () => {{\n  let g = () => {{\n{}\n  }}\n  g()\n}}\nf()", indent(mutate, 4)),
-        "hof" => format!("let _ = list.map([1], (i) => {{\n{}\n  i\n}})", indent(mutate, 2)),
+        "nested" => format!(
+            "let f = () => {{\n  let g = () => {{\n{}\n  }}\n  g()\n}}\nf()",
+            indent(mutate, 4)
+        ),
+        "hof" => format!(
+            "let _ = list.map([1], (i) => {{\n{}\n  i\n}})",
+            indent(mutate, 2)
+        ),
         _ => unreachable!(),
     };
-    format!("{fn_kw} {name}({l}: Int) -> Unit = {{\n{}\n}}\n", indent(&body, 2))
+    format!(
+        "{fn_kw} {name}({l}: Int) -> Unit = {{\n{}\n}}\n",
+        indent(&body, 2)
+    )
 }
 
 fn modvar_cells(out: &mut Vec<Cell>) {
@@ -437,7 +563,10 @@ fn modvar_cells(out: &mut Vec<Cell>) {
                 }
                 // Another module's `var` is not a `var` binding of the caller:
                 // passing it to a `mut` parameter is E032 by the language.
-                if site.starts_with("root_") && layout != Layout::Single && form.tag.starts_with("mut_arg") {
+                if site.starts_with("root_")
+                    && layout != Layout::Single
+                    && form.tag.starts_with("mut_arg")
+                {
                     continue;
                 }
                 for naming in VAR_NAMINGS {
@@ -454,10 +583,22 @@ fn modvar_cells(out: &mut Vec<Cell>) {
                     }
                     let mut root = String::new();
                     let call = if own == "own" {
-                        decls.push_str(&mutation_fn("pub fn", "touch", l, shape, &(form.mutate)("buf", l, "")));
+                        decls.push_str(&mutation_fn(
+                            "pub fn",
+                            "touch",
+                            l,
+                            shape,
+                            &(form.mutate)("buf", l, ""),
+                        ));
                         format!("{q}touch(3)")
                     } else {
-                        root.push_str(&mutation_fn("fn", "poke", l, shape, &(form.mutate)(&format!("{q}buf"), l, q)));
+                        root.push_str(&mutation_fn(
+                            "fn",
+                            "poke",
+                            l,
+                            shape,
+                            &(form.mutate)(&format!("{q}buf"), l, q),
+                        ));
                         "poke(3)".to_string()
                     };
                     let mut obs = (form.obs)(&format!("{q}buf"));
@@ -523,11 +664,25 @@ fn mutargs_cells(out: &mut Vec<Cell>) {
         for origin in MUTARG_ORIGINS {
             let (decl_vars, outv, wv, layout) = match origin {
                 "local" => (String::new(), "out", "w", Layout::Single),
-                "module_same" => ("var out: List[Int] = [5]\nvar w: List[Int] = [0, 7]\n".to_string(), "out", "w", Layout::Single),
-                _ => ("var out: List[Int] = [5]\nvar w: List[Int] = [0, 7]\n".to_string(), "m.out", "m.w", Layout::Sibling),
+                "module_same" => (
+                    "var out: List[Int] = [5]\nvar w: List[Int] = [0, 7]\n".to_string(),
+                    "out",
+                    "w",
+                    Layout::Single,
+                ),
+                _ => (
+                    "var out: List[Int] = [5]\nvar w: List[Int] = [0, 7]\n".to_string(),
+                    "m.out",
+                    "m.w",
+                    Layout::Sibling,
+                ),
             };
             let call = call.replace("OUT", outv).replace("W", wv);
-            let locals = if origin == "local" { "var out: List[Int] = [5]\nvar w: List[Int] = [0, 7]\n" } else { "" };
+            let locals = if origin == "local" {
+                "var out: List[Int] = [5]\nvar w: List[Int] = [0, 7]\n"
+            } else {
+                ""
+            };
             let stmts = format!("{locals}{call}\nlet v = {wv}[0] * 100 + list.len({outv})");
             // `val` was written for n landing in w[0]; recompute it.
             let n = match tag {
@@ -539,11 +694,19 @@ fn mutargs_cells(out: &mut Vec<Cell>) {
             let expect = n * 100 + 1 + pushes;
             let _ = val;
             let (decls, body) = match layout {
-                Layout::Single => (String::new(), format!("{decl_vars}{callee}\n{}", main_printing(&stmts))),
+                Layout::Single => (
+                    String::new(),
+                    format!("{decl_vars}{callee}\n{}", main_printing(&stmts)),
+                ),
                 _ => (decl_vars, format!("{callee}\n{}", main_printing(&stmts))),
             };
             let (files, entry) = layout_project(layout, &decls, &body);
-            out.push(Cell { name: format!("mutargs/{origin}.{tag}"), files, entry, expected: format!("{expect}\n") });
+            out.push(Cell {
+                name: format!("mutargs/{origin}.{tag}"),
+                files,
+                entry,
+                expected: format!("{expect}\n"),
+            });
         }
     }
 }
@@ -564,9 +727,33 @@ struct Payload {
 
 fn payloads() -> Vec<Payload> {
     vec![
-        Payload { tag: "int", prelude: "", ty: "Int", value: "5", init: "0", obs: |r| r.into(), val: 5 },
-        Payload { tag: "string", prelude: "", ty: "String", value: "\"hello\"", init: "\"\"", obs: |r| format!("string.len({r})"), val: 5 },
-        Payload { tag: "list", prelude: "", ty: "List[Int]", value: "[2, 3]", init: "[]", obs: |r| format!("list.len({r}) + {r}[1]"), val: 5 },
+        Payload {
+            tag: "int",
+            prelude: "",
+            ty: "Int",
+            value: "5",
+            init: "0",
+            obs: |r| r.into(),
+            val: 5,
+        },
+        Payload {
+            tag: "string",
+            prelude: "",
+            ty: "String",
+            value: "\"hello\"",
+            init: "\"\"",
+            obs: |r| format!("string.len({r})"),
+            val: 5,
+        },
+        Payload {
+            tag: "list",
+            prelude: "",
+            ty: "List[Int]",
+            value: "[2, 3]",
+            init: "[]",
+            obs: |r| format!("list.len({r}) + {r}[1]"),
+            val: 5,
+        },
         Payload {
             tag: "record",
             prelude: "type C = { r: Int }\n",
@@ -591,7 +778,15 @@ fn payloads() -> Vec<Payload> {
 /// The binding forms that introduce `b`, each wrapping a `sink` statement
 /// that moves `b` somewhere outside the binding's scope. `TY` / `VAL` are
 /// replaced with the payload's type and value.
-const BIND_FORMS: [&str; 7] = ["match_arm", "match_option", "destructure_record", "destructure_tuple", "let", "for_in", "lambda_param"];
+const BIND_FORMS: [&str; 7] = [
+    "match_arm",
+    "match_option",
+    "destructure_record",
+    "destructure_tuple",
+    "let",
+    "for_in",
+    "lambda_param",
+];
 
 /// Where the bound value comes from: a local of `run`, or a parameter of
 /// `run` (borrowed on the native leg — #3303's `fn pick(p: P)`).
@@ -613,11 +808,31 @@ fn bind_form(form: &str, sink: &str) -> (&'static str, &'static str, &'static st
             "some(VAL)",
             format!("match src {{\n  some(b) => {{ {sink} }},\n  none => (),\n}}"),
         ),
-        "destructure_record" => ("type Hr = { b: TY, n: Int }\n", "Hr", "{ b: VAL, n: 1 }", format!("let {{ b, n }} = src\n{sink}")),
-        "destructure_tuple" => ("", "(TY, Int)", "(VAL, 1)", format!("let (b, n) = src\n{sink}")),
+        "destructure_record" => (
+            "type Hr = { b: TY, n: Int }\n",
+            "Hr",
+            "{ b: VAL, n: 1 }",
+            format!("let {{ b, n }} = src\n{sink}"),
+        ),
+        "destructure_tuple" => (
+            "",
+            "(TY, Int)",
+            "(VAL, 1)",
+            format!("let (b, n) = src\n{sink}"),
+        ),
         "let" => ("", "TY", "VAL", format!("let b = src\n{sink}")),
-        "for_in" => ("", "List[TY]", "[VAL]", format!("for b in src {{\n  {sink}\n}}")),
-        "lambda_param" => ("", "TY", "VAL", format!("let put = (b: TY) => {{ {sink} }}\nput(src)")),
+        "for_in" => (
+            "",
+            "List[TY]",
+            "[VAL]",
+            format!("for b in src {{\n  {sink}\n}}"),
+        ),
+        "lambda_param" => (
+            "",
+            "TY",
+            "VAL",
+            format!("let put = (b: TY) => {{ {sink} }}\nput(src)"),
+        ),
         _ => unreachable!(),
     }
 }
@@ -638,11 +853,21 @@ fn bind_cells(out: &mut Vec<Cell>) {
                         continue;
                     }
                     let (sink_stmt, pre, obs) = match sink {
-                        "outer_var" => ("slot = b".to_string(), "var slot: TY = INIT\n".to_string(), (p.obs)("slot")),
-                        "outer_push" => ("list.push(acc, b)".to_string(), "var acc: List[TY] = []\n".to_string(), (p.obs)("acc[0]")),
-                        "outer_field" => {
-                            ("holder.f = b".to_string(), "var holder: Ho = { f: INIT, k: 0 }\n".to_string(), (p.obs)("holder.f"))
-                        }
+                        "outer_var" => (
+                            "slot = b".to_string(),
+                            "var slot: TY = INIT\n".to_string(),
+                            (p.obs)("slot"),
+                        ),
+                        "outer_push" => (
+                            "list.push(acc, b)".to_string(),
+                            "var acc: List[TY] = []\n".to_string(),
+                            (p.obs)("acc[0]"),
+                        ),
+                        "outer_field" => (
+                            "holder.f = b".to_string(),
+                            "var holder: Ho = { f: INIT, k: 0 }\n".to_string(),
+                            (p.obs)("holder.f"),
+                        ),
                         "module_var" => ("gslot = b".to_string(), String::new(), (p.obs)("gslot")),
                         _ => unreachable!(),
                     };
@@ -657,13 +882,21 @@ fn bind_cells(out: &mut Vec<Cell>) {
                     let (params, local, arg) = if source == "param" {
                         (format!("src: {src_ty}"), String::new(), src_val.to_string())
                     } else {
-                        (String::new(), format!("let src: {src_ty} = {src_val}\n"), String::new())
+                        (
+                            String::new(),
+                            format!("let src: {src_ty} = {src_val}\n"),
+                            String::new(),
+                        )
                     };
                     let body = format!("{local}{pre}{stmts}\nlet v = {obs}");
                     // A closure handing the enclosing `var` to an in-place
                     // mutator is E011 in a pure fn (dialect epoch 9, #3344):
                     // that cell's `run` is an effect fn.
-                    let (kw, bang) = if form == "lambda_param" && sink == "outer_push" { ("effect fn", "!") } else { ("fn", "") };
+                    let (kw, bang) = if form == "lambda_param" && sink == "outer_push" {
+                        ("effect fn", "!")
+                    } else {
+                        ("fn", "")
+                    };
                     let src = format!(
                         "{decls}\n{kw} run({params}) -> Int = {{\n{}\n  v\n}}\n\neffect fn main() -> Unit = println(int.to_string(run({arg}){bang}))\n",
                         indent(&body, 2)
@@ -744,9 +977,21 @@ fn samerec_cells(out: &mut Vec<Cell>) {
                     "a_pkg_b_sib" => (true, false),
                     _ => (false, true),
                 };
-                let a = Module { name: "a".into(), package: a_pkg, src: a_src.into() };
-                let b = Module { name: "b".into(), package: b_pkg, src: b_src };
-                let mods = if order == "a_first" { vec![a, b] } else { vec![b, a] };
+                let a = Module {
+                    name: "a".into(),
+                    package: a_pkg,
+                    src: a_src.into(),
+                };
+                let b = Module {
+                    name: "b".into(),
+                    package: b_pkg,
+                    src: b_src,
+                };
+                let mods = if order == "a_first" {
+                    vec![a, b]
+                } else {
+                    vec![b, a]
+                };
                 let probe = if site == "entry_annotated" {
                     "let e: b.Extent = { w: 3, h: 6 }\nlet v = a.size_sum(a.unit()) + b.ext_sum(e)"
                 } else {
@@ -816,7 +1061,11 @@ fn depclos_cells(out: &mut Vec<Cell>) {
                         }
                         _ => format!("{q}dispatch_with({root_expr}, n)"),
                     };
-                    let setup = if holder == "dep_var" { format!("{q}app({root_expr})\n") } else { String::new() };
+                    let setup = if holder == "dep_var" {
+                        format!("{q}app({root_expr})\n")
+                    } else {
+                        String::new()
+                    };
                     let stmts = if entry_kind == "export" {
                         let _ = writeln!(
                             entry_src,
@@ -871,8 +1120,20 @@ impl Draw<'_> {
 /// Names for a top-level let or a module var. None of them is a name the
 /// templates use themselves (`f`, `g`, `v`, `acc`, `i`, `a`, `x`, `n`, `k`
 /// of a mutation site), and none is a stdlib module name.
-const ADV_GLOBALS: [&str; 12] =
-    ["thing", "THING", "c", "C", "cell", "CELL", "it", "IT", "_fn_arg0", "__cap_v", "__almide_cell", "tl"];
+const ADV_GLOBALS: [&str; 12] = [
+    "thing",
+    "THING",
+    "c",
+    "C",
+    "cell",
+    "CELL",
+    "it",
+    "IT",
+    "_fn_arg0",
+    "__cap_v",
+    "__almide_cell",
+    "tl",
+];
 /// Names for the local that feeds a module-var mutation.
 const ADV_LOCALS: [&str; 6] = ["c", "cell", "it", "_fn_arg0", "__almide_cell", "q"];
 
@@ -883,7 +1144,11 @@ fn read_site_deep(use_: &str, o: &str, q: &str, probe: &str, depth: usize) -> St
         "closure" | "nested_closure" => {
             let mut inner = o.to_string();
             for d in 0..depth {
-                inner = if d == 0 { format!("() => {inner}") } else { format!("() => {{\n  let g{d} = {inner}\n  g{d}()\n}}") };
+                inner = if d == 0 {
+                    format!("() => {inner}")
+                } else {
+                    format!("() => {{\n  let g{d} = {inner}\n  g{d}()\n}}")
+                };
             }
             format!("let f = {inner}\nlet v = f()")
         }
@@ -899,7 +1164,13 @@ struct Part {
     val: i64,
 }
 
-fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, root_names: &mut Vec<String>) -> Part {
+fn random_toplet_part(
+    d: &mut Draw,
+    q: &str,
+    modname: Option<&str>,
+    i: usize,
+    root_names: &mut Vec<String>,
+) -> Part {
     let kinds = let_kinds();
     let kind = &kinds[d.below(kinds.len())];
     let mut decls = String::from(kind.prelude);
@@ -908,7 +1179,8 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
         let n = d.pick(&ADV_GLOBALS);
         // A callable kind is only ever named with a lower-case initial (an
         // upper-case one in call position is a constructor, E003).
-        if names.contains(&n) || (kind.callable && !n.starts_with(|c: char| c.is_ascii_lowercase())) {
+        if names.contains(&n) || (kind.callable && !n.starts_with(|c: char| c.is_ascii_lowercase()))
+        {
             continue;
         }
         names.push(n);
@@ -918,7 +1190,13 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
         names.push("tl");
         let _ = writeln!(decls, "let tl{} = {}", kind.annot, kind.init);
     }
-    let obs_at = |qual: &str| names.iter().map(|n| format!("({})", (kind.obs)(&format!("{qual}{n}")))).collect::<Vec<_>>().join(" + ");
+    let obs_at = |qual: &str| {
+        names
+            .iter()
+            .map(|n| format!("({})", (kind.obs)(&format!("{qual}{n}"))))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
     let use_ = d.pick(&LET_USES);
     let probe = format!("probe{i}");
     match use_ {
@@ -926,7 +1204,11 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
             let _ = writeln!(decls, "pub fn {probe}() -> Int = {}", obs_at(""));
         }
         "own_fn_closure" => {
-            let _ = writeln!(decls, "pub fn {probe}() -> Int = {{\n  let f = () => {}\n  f()\n}}", obs_at(""));
+            let _ = writeln!(
+                decls,
+                "pub fn {probe}() -> Int = {{\n  let f = () => {}\n  f()\n}}",
+                obs_at("")
+            );
         }
         _ => {}
     }
@@ -936,15 +1218,20 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
     let mut root_decls = String::new();
     // Spell a root let as this module's mangled static.
     if let Some(m) = modname.filter(|_| d.chance(1, 3)) {
-            let spelled = format!("almide_rt_{m}_{}", names[0].to_ascii_lowercase());
-            if !root_names.contains(&spelled) {
-                let _ = writeln!(root_decls, "let {spelled} = 100");
-                stmts.push_str(&format!("\nlet v = v + {spelled}"));
-                root_names.push(spelled);
-                val += 100;
-            }
+        let spelled = format!("almide_rt_{m}_{}", names[0].to_ascii_lowercase());
+        if !root_names.contains(&spelled) {
+            let _ = writeln!(root_decls, "let {spelled} = 100");
+            stmts.push_str(&format!("\nlet v = v + {spelled}"));
+            root_names.push(spelled);
+            val += 100;
         }
-    Part { decls, root_decls, stmts, val }
+    }
+    Part {
+        decls,
+        root_decls,
+        stmts,
+        val,
+    }
 }
 
 fn random_modvar_part(d: &mut Draw, q: &str, hosted_in_root: bool, i: usize) -> Part {
@@ -965,7 +1252,11 @@ fn random_modvar_part(d: &mut Draw, q: &str, hosted_in_root: bool, i: usize) -> 
     let mut val = form.val;
     let mut obs = (form.obs)(&format!("{q}{var}"));
     // A let differing from the var only in case.
-    let twin = if var.starts_with(|c: char| c.is_ascii_lowercase()) { var.to_ascii_uppercase() } else { var.to_ascii_lowercase() };
+    let twin = if var.starts_with(|c: char| c.is_ascii_lowercase()) {
+        var.to_ascii_uppercase()
+    } else {
+        var.to_ascii_lowercase()
+    };
     if twin != var && d.chance(1, 3) {
         let _ = writeln!(decls, "let {twin} = 100");
         obs = format!("{obs} + {q}{twin}");
@@ -978,14 +1269,31 @@ fn random_modvar_part(d: &mut Draw, q: &str, hosted_in_root: bool, i: usize) -> 
     let mut root_decls = String::new();
     let call = if from_root {
         let name = format!("poke{i}");
-        root_decls.push_str(&mutation_fn("fn", &name, l, shape, &(form.mutate)(&format!("{q}{var}"), l, q)));
+        root_decls.push_str(&mutation_fn(
+            "fn",
+            &name,
+            l,
+            shape,
+            &(form.mutate)(&format!("{q}{var}"), l, q),
+        ));
         format!("{name}(3)")
     } else {
         let name = format!("touch{i}");
-        decls.push_str(&mutation_fn("pub fn", &name, l, shape, &(form.mutate)(var, l, "")));
+        decls.push_str(&mutation_fn(
+            "pub fn",
+            &name,
+            l,
+            shape,
+            &(form.mutate)(var, l, ""),
+        ));
         format!("{q}{name}(3)")
     };
-    Part { decls, root_decls, stmts: format!("{call}\nlet v = {obs}"), val }
+    Part {
+        decls,
+        root_decls,
+        stmts: format!("{call}\nlet v = {obs}"),
+        val,
+    }
 }
 
 /// One random multi-module program. `name` is the caller's (seed, index).
@@ -1001,10 +1309,24 @@ pub fn random_cell(next: &mut dyn FnMut() -> u64, name: &str) -> Cell {
     for i in 0..n_parts {
         let in_root = !root_hosted && d.chance(1, 4);
         let package = !in_root && d.chance(1, 3);
-        let modname = if package { format!("p{i}") } else { format!("m{i}") };
-        let q = if in_root { String::new() } else { format!("{modname}.") };
+        let modname = if package {
+            format!("p{i}")
+        } else {
+            format!("m{i}")
+        };
+        let q = if in_root {
+            String::new()
+        } else {
+            format!("{modname}.")
+        };
         let part = if d.chance(3, 5) {
-            random_toplet_part(&mut d, &q, (!in_root).then_some(modname.as_str()), i, &mut root_names)
+            random_toplet_part(
+                &mut d,
+                &q,
+                (!in_root).then_some(modname.as_str()),
+                i,
+                &mut root_names,
+            )
         } else {
             random_modvar_part(&mut d, &q, in_root, i)
         };
@@ -1012,16 +1334,32 @@ pub fn random_cell(next: &mut dyn FnMut() -> u64, name: &str) -> Cell {
             root_hosted = true;
             root.push_str(&part.decls);
         } else {
-            modules.push(Module { name: modname, package, src: part.decls });
+            modules.push(Module {
+                name: modname,
+                package,
+                src: part.decls,
+            });
         }
         root.push_str(&part.root_decls);
-        let _ = writeln!(root, "fn part{i}() -> Int = {{\n{}\n  v\n}}", indent(&part.stmts, 2));
+        let _ = writeln!(
+            root,
+            "fn part{i}() -> Int = {{\n{}\n  v\n}}",
+            indent(&part.stmts, 2)
+        );
         calls.push(format!("part{i}()"));
         total += part.val;
     }
-    let body = format!("{root}{}", main_printing(&format!("let v = {}", calls.join(" + "))));
+    let body = format!(
+        "{root}{}",
+        main_printing(&format!("let v = {}", calls.join(" + ")))
+    );
     let (files, entry) = project(modules, &body);
-    Cell { name: name.to_string(), files, entry, expected: format!("{total}\n") }
+    Cell {
+        name: name.to_string(),
+        files,
+        entry,
+        expected: format!("{total}\n"),
+    }
 }
 
 // ───────────────────────────── the matrix ─────────────────────────────
