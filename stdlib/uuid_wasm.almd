@@ -1,0 +1,27 @@
+// uuid_wasm — the WASM lowering of uuid.v7's stamp (#4307). Native keeps its
+// direct intrinsic (runtime/rs/src/uuid.rs, one process-wide Mutex cell); this
+// file only ever links on the wasm legs through the self-host registry.
+//
+// The cell is this module's `var`: one guest global, set once per instance.
+// Every wasm leg (the structural artifact on the embedded host or on a stock
+// runtime) runs a program as one instance on one thread, so the instance is
+// the process and the global is the whole of native's Mutex. Keeping it in the
+// guest serves the three legs with one body and no host op, and a stock
+// runtime needs nothing it does not already serve (the clock and entropy).
+//
+// The rule is native's, step for step: the clock is clamped to the 48 bits a
+// v7 carries and shifted past the 12-bit counter; a stamp above the last one
+// is taken as it is, one at or below it (the same millisecond, or a clock
+// stepped back) takes the last one plus 1, which carries into the next
+// millisecond past counter 4095. Native starts its cell at i64::MIN and adds
+// 1 saturating; every stamp is at least 0, so starting at -1 answers the same
+// first stamp, and the saturation would need 2^63 calls to reach.
+var v7_last: Int = -1
+
+@implements("uuid.__v7_stamp")
+effect fn uuid_v7_stamp(ms: Int) -> Int = {
+  let fresh = int.clamp(ms, 0, 281474976710655) * 4096
+  let next = if fresh > v7_last then fresh else v7_last + 1
+  v7_last = next
+  next
+}
