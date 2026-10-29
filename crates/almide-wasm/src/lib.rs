@@ -229,6 +229,7 @@ mod utf8_helpers;
 pub use utf8_helpers::emit_errtext_multibyte;
 mod json_helpers;
 mod value_helpers;
+mod value_set_path;
 mod whitelist;
 
 use collect::collect_binds;

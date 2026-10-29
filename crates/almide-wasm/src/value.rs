@@ -24,6 +24,9 @@ pub(crate) const VT_FLOAT: i32 = 3;
 pub(crate) const VT_STR: i32 = 4;
 pub(crate) const VT_ARRAY: i32 = 5;
 pub(crate) const VT_OBJECT: i32 = 6;
+/// An Object box's key-index word (value_set_path.rs): the upper half of
+/// the payload slot, beside the i32 pairs handle — 0, or an index block.
+pub(crate) const OBJECT_INDEX: u32 = almide_layout::SUM_FIELD + 4;
 
 /// The self-host helpers this emitter calls DIRECTLY when it lowers a
 /// `value.*` surface natively: (surface, helper). No IR names a helper — the
@@ -413,6 +416,11 @@ impl Emitter<'_> {
             self.f.instructions().local_get(hb).local_get(h);
             self.store_ty_slot(k, almide_layout::SUM_FIELD);
         }
+        // An Object is born with no key index (value_set_path.rs): the word
+        // beside its pairs handle is the index slot its drop releases.
+        if tag == VT_OBJECT {
+            self.f.instructions().local_get(hb).i32_const(0).i32_store(slot_memarg(OBJECT_INDEX));
+        }
         self.f.instructions().local_get(hb);
         self.release_i32();
         if let Some(k) = payload_kind {
@@ -652,6 +660,11 @@ impl Emitter<'_> {
                 self.release_i32();
                 Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
+            // #4315: the set_path walk, in place where the document is the
+            // op's alone (value_set_path.rs).
+            ("__set_path_steps", [v, steps, x]) => {
+                Some(Lowered::owned(self.lower_value_set_path_steps(v, steps, x)?))
+            }
             ("__stringify", [v]) => {
                 self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
@@ -669,5 +682,6 @@ fn box_object(i: &mut wasm_encoder::InstructionSink, pairs: u32, scratch: u32) {
     i.i32_const(16).call(F_ALLOC).local_set(scratch);
     i.local_get(scratch).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
     i.local_get(scratch).local_get(pairs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+    i.local_get(scratch).i32_const(0).i32_store(slot_memarg(OBJECT_INDEX));
     i.local_get(scratch);
 }

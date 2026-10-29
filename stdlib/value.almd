@@ -167,8 +167,12 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 // holds the nesting bound (#4209, C-433): a result nested past 1000 — the
 // path's steps plus x's own nesting — is json.parse's err, so a value
 // set_path builds is one parse could have made. The wasm leg and the interp
-// oracle run stdlib/json_path.almd's `value.set_path` body instead.
+// oracle run stdlib/json_path.almd's `value.set_path` body instead; the
+// structural wasm leg lowers this call itself (crates/almide-wasm/src/
+// value_set_path.rs, #4315), in place where the document is its alone —
+// `@reuse(v)` lets a dying `v` hand that credit over.
 @intrinsic("almide_rt_value_set_path_steps")
+@reuse(v)
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 

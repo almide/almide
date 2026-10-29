@@ -140,7 +140,12 @@ impl Emitter<'_> {
                 let cases = vec![
                     (crate::value::VT_STR as u32, vec![(almide_layout::SUM_FIELD, F_DEC_FLAT)]),
                     (crate::value::VT_ARRAY as u32, vec![(almide_layout::SUM_FIELD, self.dec_fn_of(items))]),
-                    (crate::value::VT_OBJECT as u32, vec![(almide_layout::SUM_FIELD, self.dec_fn_of(pairs))]),
+                    // The pairs list, and the key index beside it (0 until
+                    // value_set_path.rs builds one; a flat block).
+                    (
+                        crate::value::VT_OBJECT as u32,
+                        vec![(almide_layout::SUM_FIELD, self.dec_fn_of(pairs)), (crate::value::OBJECT_INDEX, F_DEC_FLAT)],
+                    ),
                 ];
                 (Vec::new(), Some((almide_layout::SUM_TAG, cases)))
             }
