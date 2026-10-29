@@ -291,6 +291,15 @@ pub fn convention_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option
     env.functions.contains_key(&owned).then_some(owned)
 }
 
+/// The key of a convention method the program DECLARES for `type_name` — an
+/// explicit `fn Type.method` with a body, in any module — as opposed to one
+/// `deriving` will synthesize. The single answer to "does this type declare
+/// its repr" for both the checker (E089, #4314) and the lowering (#4107).
+pub fn declared_convention_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
+    let held = convention_fn_key(env, type_name, method)?;
+    env.explicit_convention_fns.contains(&held).then_some(held)
+}
+
 fn bare_type_name(type_name: &str) -> &str {
     type_name.rsplit_once('.').map_or(type_name, |(_, t)| t)
 }
