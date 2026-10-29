@@ -169,7 +169,7 @@ nothing is published that `bench.py` did not produce.
   measure 75.5 ms against `Vec::with_capacity` + push at 90.6 ms. Evidence:
   [string-gap-1004.md](./string-gap-1004.md).
 - **`strchurn` is the string row** (#1004): N ints → `int.to_string` →
-  `string.join` → `string.split` → `string.len` → `list.sum`, the workload
+  `list.join` → `string.split` → `string.len` → `list.sum`, the workload
   whose 1.7x-vs-Rust opened that issue. It carries TWO references. The
   comparison that means anything is against `rust-ref/strchurn.rs`, which
   honours the two stdlib obligations the Almide program cannot escape — `split`
@@ -191,7 +191,7 @@ nothing is published that `bench.py` did not produce.
   vocabulary counted in a `Map[String, Int]`, top 10 by count desc / word asc
   — the keyed-aggregation shape every word-count, group-by and histogram
   program has. Two spellings of one workload, like listbuild: `wordfreq` is
-  the imperative `var` Map + `m[w] = map.get_or(m, w, 0) + 1` loop, and
+  the imperative `var` Map + `m[w] = (map.get(m, w) ?? 0) + 1` loop, and
   `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`; identical
   vocabulary, draws, sort and output, so the spread between them is what the
   recommended idiom costs. The reference (`rust-ref/wordfreq.rs`) is
@@ -227,7 +227,7 @@ nothing is published that `bench.py` did not produce.
   wasmtime: `value.array` / `value.object` cloned every element out of the
   list they were handed (each element a whole subtree, so the document was
   copied once per nesting level), `value.as_array` cloned every record out of
-  the parsed document, and `value.stringify` assembled its text bottom-up
+  the parsed document, and `json.stringify` assembled its text bottom-up
   through a `String` per node and a `format!` + `join` per container. The
   three ops are now declared `@reuse` with `_owned` runtime twins, so a source
   at its last use moves into the result, and the text is written into one

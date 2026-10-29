@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
+index c9c943da0..5452a42cd 100644
+--- a/crates/almide-wasm/src/emitter.rs
++++ b/crates/almide-wasm/src/emitter.rs
+@@ -656,7 +656,8 @@ impl Emitter<'_> {
+                     .local_set(hold);
+                 // #4013: a construction site; each slot is recorded as its store is emitted.
+                 let site = crate::witness::init::site(almide_layout::PAYLOAD, stride, elements.len(), h.index() as u32, self.f);
+-                for (i, el) in elements.iter().enumerate() {
++                // RE-INJECTED (#4013 drill): the first element is never stored.
++                for (i, el) in elements.iter().enumerate().skip(1) {
+                     self.f.instructions().local_get(hold);
+                     self.lower(el, Some(elem))?;
+                     self.rc_share_guard(el, elem);

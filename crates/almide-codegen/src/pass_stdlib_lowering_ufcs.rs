@@ -5,44 +5,9 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
     if candidates.is_empty() {
         return None;
     }
-    let module = container_ufcs_module(ty).or_else(|| numeric_ufcs_module(ty))?;
+    let module = ty.stdlib_module()?;
     candidates.contains(&module).then_some(module)
 }
-
-/// The stdlib module a CONTAINER (or String) receiver's UFCS call resolves to.
-fn container_ufcs_module(ty: &Ty) -> Option<&'static str> {
-    Some(match ty {
-        Ty::Applied(TypeConstructorId::List, _) => "list",
-        Ty::Applied(TypeConstructorId::Map, _) => "map",
-        Ty::Applied(TypeConstructorId::Set, _) => "set",
-        Ty::Applied(TypeConstructorId::Option, _) => "option",
-        Ty::Applied(TypeConstructorId::Result, _) => "result",
-        Ty::String => "string",
-        _ => return None,
-    })
-}
-
-/// The stdlib module a NUMERIC receiver's UFCS call resolves to. The sized
-/// numerics are Stage 3 of the sized-numeric-types arc: each hosts its own UFCS
-/// conversion / `.to_string()` module.
-fn numeric_ufcs_module(ty: &Ty) -> Option<&'static str> {
-    Some(match ty {
-        Ty::Int => "int",
-        Ty::Float => "float",
-        Ty::Int8 => "int8",
-        Ty::Int16 => "int16",
-        Ty::Int32 => "int32",
-        Ty::Int64 => "int64",
-        Ty::UInt8 => "uint8",
-        Ty::UInt16 => "uint16",
-        Ty::UInt32 => "uint32",
-        Ty::UInt64 => "uint64",
-        Ty::Float32 => "float32",
-        Ty::Float64 => "float64",
-        _ => return None,
-    })
-}
-
 
 /// Resolve bare UFCS calls in module function bodies where the checker
 /// couldn't fully resolve types. Only converts Named/Method calls that
@@ -129,7 +94,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
         .or_else(|| try_inline_intrinsic_exp_log(module, func, args, ty, span))
 }
 
-/// `math.sqrt`/`abs`/`floor`/`ceil`/`round` group of `try_inline_intrinsic`,
+/// `math.sqrt`/`floor`/`ceil`/`round` group of `try_inline_intrinsic`,
 /// extracted (cog>30 decomposition, pattern 1 — independent `(module,
 /// func)` name-router arms, mirrors the `list_call_name` recipe). These
 /// are the highest-impact — called in tight loops (nbody, spectralnorm).
@@ -141,16 +106,6 @@ fn try_inline_intrinsic_rounding(module: &str, func: &str, args: &[IrExpr], ty: 
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
                     method: almide_base::intern::sym("sqrt"),
-                },
-                args: vec![],
-                type_args: vec![],
-            }))
-        }
-        ("math", "abs") if args.len() >= 1 => {
-            Some(mk(IrExprKind::Call {
-                target: CallTarget::Method {
-                    object: Box::new(args[0].clone()),
-                    method: almide_base::intern::sym("abs"),
                 },
                 args: vec![],
                 type_args: vec![],
@@ -257,10 +212,10 @@ fn try_inline_intrinsic_exp_log(module: &str, func: &str, args: &[IrExpr], ty: &
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("log10") },
             args: vec![], type_args: vec![],
         })),
-        // float.from_int / int.to_float / float.to_int: walker handles inline cast
-        // math.pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
-        // ── math.fpow(base, exp) → base.powf(exp) ──
-        ("math", "fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
+        // float.__from_int / int.__raw_to_float / float.__to_int: walker handles inline cast
+        // math.__pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
+        // ── math.__fpow(base, exp) → base.powf(exp) ──
+        ("math", "__fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("powf") },
             args: vec![args[1].clone()], type_args: vec![],
         })),

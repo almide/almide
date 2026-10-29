@@ -27,6 +27,7 @@ mod f32_display;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
+mod surface;
 mod heap;
 mod vfs;
 mod value;
@@ -186,7 +187,7 @@ pub struct Interpreter<'a> {
     /// then payload, exactly as native's derived `Ord` and both wasm legs do.
     pub(crate) variant_tags: crate::value::VariantTags,
     /// The opaque NEWTYPE decls (`mod type SafeHtml = String`, `local type
-    /// JsonPath = Int`) under the identity their ctor call and ctor pattern
+    /// Path = Int`) under the identity their ctor call and ctor pattern
     /// carry into the IR — bare for a bundled module's own or the entry
     /// program's plain one, `self.Value` for the entry program's shadow of a
     /// stdlib-owned name, `m.Token` for a module's (#1835). Both backends
@@ -228,6 +229,9 @@ pub struct Interpreter<'a> {
     /// fn that happens to share the spelling (#3825: a user `list_len` beside
     /// the pool's).
     pub(crate) cur_pool: Cell<bool>,
+    /// The module of the EXECUTING `stdlib_pool::bundled_body` (its siblings).
+    pub(crate) cur_bundled: Cell<Option<Sym>>,
+    pub(crate) bundled_space: std::cell::RefCell<HashMap<usize, Sym>>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -597,6 +601,7 @@ impl<'a> Interpreter<'a> {
             fn_space,
             cur_space: Cell::new(0),
             cur_pool: Cell::new(false),
+            cur_bundled: Cell::new(None), bundled_space: Default::default(),
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),

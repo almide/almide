@@ -1,0 +1,1 @@
+ANCHORS REJECT: bounds stretch 0: `c0`: c: instruction 11 is Some(I32Const { value: 0 })

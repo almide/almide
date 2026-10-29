@@ -114,6 +114,12 @@ impl<'a> Interpreter<'a> {
     /// over the corpus is measurable (`interp_bridge_fallback_ledger`), else
     /// abstain with that reason.
     fn bridge_fallback(&mut self, module: Sym, func: Sym, args: &[Value], why: String) -> Flow {
+        self.try_bridge(module, func, args, why).unwrap_or_else(Flow::Unsupported)
+    }
+
+    /// [`Self::bridge_fallback`] that hands `why` back (`Err`) when the
+    /// bridge does not serve the name, so a later tier can still answer.
+    fn try_bridge(&mut self, module: Sym, func: Sym, args: &[Value], why: String) -> Result<Flow, String> {
         match crate::bridge::dispatch(module.as_str(), func.as_str(), args) {
             Some(result) => {
                 // The `prim.*` scalar floor is the spec's own vocabulary (the
@@ -122,10 +128,43 @@ impl<'a> Interpreter<'a> {
                 if module.as_str() != "prim" {
                     self.bridge_fallbacks.borrow_mut().push((format!("{}.{}", module, func), why));
                 }
-                result
+                Ok(result)
             }
-            None => Flow::Unsupported(why),
+            None => Err(why),
         }
+    }
+
+    /// A boundary call (`pool_depth == 0`) no lowered body can take: the
+    /// bridge first, exactly as before, then the auto-imported module's own
+    /// body (`stdlib_pool::bundled_body`) — the definition the driver loads
+    /// for both backends when the registry names no impl (`list.range_step`,
+    /// `int8.parse`). Consulted only where nothing else answers, so every
+    /// call some tier already served keeps its answer and its provenance.
+    /// The body runs as module code over `Value`s, reached with eagerly
+    /// evaluated arguments, so a `mut` parameter abstains for the same
+    /// reason the module path's gate gives (#1022).
+    fn no_body_fallback(&mut self, module: Sym, func: Sym, args: Vec<Value>, why: String) -> Flow {
+        let why = match self.try_bridge(module, func, &args, why) {
+            Ok(answered) => return answered,
+            Err(why) => why,
+        };
+        let Some(def) = self.bundled_fn(module, func) else {
+            return Flow::Unsupported(why);
+        };
+        if def.params.len() != args.len() || def.params.iter().any(|p| p.is_mut) {
+            return Flow::Unsupported(why);
+        }
+        let root = self.root_scope();
+        let flow = self.call_function(def, args, &root);
+        self.sync_at_pool_boundary(def, flow)
+    }
+
+    /// `module.func`'s auto-imported bundled body, its address recorded so
+    /// the hop that runs it resolves bare sibling calls in that module.
+    pub(crate) fn bundled_fn(&self, module: Sym, func: Sym) -> Option<&'a almide_ir::IrFunction> {
+        let def = crate::stdlib_pool::bundled_body(module, func)?;
+        self.bundled_space.borrow_mut().insert(def as *const almide_ir::IrFunction as usize, module);
+        Some(def)
     }
 
     /// The lowered Almide body `module.func` resolves to, paired with whether
@@ -155,10 +194,20 @@ impl<'a> Interpreter<'a> {
         if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
             return Some((d, true));
         }
-        let program_root = |d: &&almide_ir::IrFunction| {
-            self.fn_space.get(&(*d as *const almide_ir::IrFunction as usize)) == Some(&0)
+        // A flat-table fn another namespace owns never answers `module.func`:
+        // the entry program's (space 0), or ANOTHER loaded module's — a
+        // module's private `__` helper is flattened by its bare name, and
+        // bigint's `__trunc(x: BigInt)` answered mono's `int.__trunc` (the
+        // `S.__trunc` requirement of `bigint.from[S]` at S = Int) and read
+        // `.neg` off an Int. The module-identity class again (#1087–#1094).
+        let foreign = |d: &&almide_ir::IrFunction| {
+            match self.fn_space.get(&(*d as *const almide_ir::IrFunction as usize)) {
+                Some(0) => true,
+                Some(&space) => self.program.modules.get(space as usize - 1).is_some_and(|m| m.name != module),
+                None => false,
+            }
         };
-        if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !program_root(d)) {
+        if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !foreign(d)) {
             return Some((d, true));
         }
         // The registry's impl NAME is the pool's key, not a program-wide one:
@@ -170,7 +219,7 @@ impl<'a> Interpreter<'a> {
         // the entry program's own fn.
         let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
         crate::stdlib_pool::body(impl_name)
-            .or_else(|| self.fns.get(&impl_name).copied().filter(|d| !program_root(d)))
+            .or_else(|| self.fns.get(&impl_name).copied().filter(|d| !foreign(d)))
             .filter(bodied)
             .map(|d| (d, false))
     }

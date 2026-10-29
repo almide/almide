@@ -198,7 +198,9 @@ impl UnboxState {
         if self.borrowed { format!("&**{v}") } else { format!("&*{v}") }
     }
     fn out_of_box(&self, v: &str) -> String {
-        if self.borrowed { format!("&**{v}") } else { format!("*{v}") }
+        // An owned `AlmideBox` moves its value out by call (#4252): it has a
+        // drop, so `*v` cannot move through it.
+        if self.borrowed { format!("&**{v}") } else { format!("almide_box_take({v})") }
     }
 }
 
@@ -389,6 +391,21 @@ pub fn subject_is_borrowed(ctx: &RenderContext, subject: &IrExpr) -> bool {
     }
 }
 
+/// #4296: the binding arm of a match over a `&str` view of its `String`
+/// subject whose binder `StrViewRebindPass` found wanted owned takes its own
+/// copy at the head of the arm, `let other: AlmideString = other.to_almide();`.
+fn str_view_rebind(ctx: &RenderContext, arm: &IrMatchArm) -> Option<String> {
+    let var = match &arm.pattern {
+        IrPattern::Bind { var, .. } | IrPattern::As { var, .. } => *var,
+        _ => return None,
+    };
+    if !ctx.ann.str_view_owned_binders.contains(&var) {
+        return None;
+    }
+    let name = ctx.var_name(var);
+    Some(format!("let {name}: AlmideString = {name}.to_almide();"))
+}
+
 pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty, borrowed: bool) -> String {
     // #413/#3176: the arm's patterns are rendered against the SUBJECT's type,
     // so a case name two enums share qualifies with the enum the value has,
@@ -419,7 +436,10 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
     };
     // The box move-outs (`let Tree::Leaf(a) = *__bx0 else …`) run FIRST in the
     // arm body, then the original body sees the inner bindings.
-    let body = if box_binds.is_empty() {
+    let rebind = str_view_rebind(ctx, arm);
+    let body = if let Some(rebind) = rebind {
+        format!("{{ {} {} }}", rebind, raw_body)
+    } else if box_binds.is_empty() {
         raw_body
     } else {
         format!("{{ {} {} }}", box_binds.join(" "), raw_body)

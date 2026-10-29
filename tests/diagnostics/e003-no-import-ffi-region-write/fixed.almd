@@ -1,0 +1,13 @@
+// The fix: `import ffi` opts the file in; the oversized write answers err.
+import ffi
+
+effect fn main() -> Unit = {
+  let small = ffi.alloc(4)!
+  let big = bytes.from_list(list.repeat(65, 4096))
+  let outcome = match ffi.write(small, 0, big) {
+    ok(_) => "written",
+    err(e) => e,
+  }
+  println(outcome)
+  println(int.to_string(ffi.len(small)))
+}

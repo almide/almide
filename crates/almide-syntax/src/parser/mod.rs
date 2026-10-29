@@ -16,6 +16,7 @@ mod fn_decls;
 mod expressions;
 mod fan;
 pub use fan::renamed_fan_head_text;
+pub mod grouping;
 pub mod hints;
 mod helpers;
 mod patterns;
@@ -87,6 +88,16 @@ pub struct Parser {
     /// cases; their tokens were reclassified `TypeName`, and an
     /// interpolation hole's sub-parse applies the same set.
     pub(crate) caseless_type_names: std::collections::HashSet<String>,
+    /// #4092 / #4266: raw E101 characters (`lexer::is_hidden_source_char`)
+    /// found in the token stream (comments, string literals, stray
+    /// characters), as `(char, line, col)`. Reported as E101 by `parse`, once
+    /// the file name is known.
+    pub(crate) hidden_chars: Vec<(char, usize, usize)>,
+    /// #4266: every identifier spelling in the file with the position of its
+    /// first occurrence, in source order — this parser's own tokens, then
+    /// each interpolation hole's (a hole's sub-parser hands its list up).
+    /// `parse` judges them for UTS #39 restriction level and confusables.
+    pub(crate) idents: Vec<(String, usize, usize)>,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -113,10 +124,45 @@ pub(crate) enum CommentSide {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
+        // E101 (#4092): scanned BEFORE inline comments leave the stream, so a
+        // bidi control in `f(1 /* … */, 2)` is seen like any other.
+        let hidden_chars = Self::collect_hidden_chars(&tokens);
+        let idents = Self::collect_idents(&tokens);
         let (mut tokens, inline_comments) = Self::drop_inline_comments(tokens);
         let caseless_type_names = caseless::declared_caseless_type_names(&tokens);
         caseless::reclassify(&mut tokens, &caseless_type_names);
-        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None }
+        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None, hidden_chars, idents }
+    }
+
+    /// #4092 / #4266: every raw E101 character in the tokens' verbatim text
+    /// (`raw` for the string family, `value` for comments and stray
+    /// characters), located in the source as `(char, line, col)`. Whitespace
+    /// outside tokens is only ` `, TAB, CR and LF, so every other character of
+    /// the file is in some token's text.
+    fn collect_hidden_chars(tokens: &[Token]) -> Vec<(char, usize, usize)> {
+        let mut out = Vec::new();
+        for tok in tokens {
+            let text = tok.raw.as_deref().unwrap_or(&tok.value);
+            for b in crate::lexer::find_hidden_chars(text) {
+                let line = tok.line + b.line_offset;
+                let col = if b.line_offset == 0 { tok.col + b.col_offset } else { b.col_offset + 1 };
+                out.push((b.ch, line, col));
+            }
+        }
+        out
+    }
+
+    /// #4266: each distinct identifier spelling (an `Ident` or `TypeName`
+    /// token's NFC value) with its first position, in source order.
+    fn collect_idents(tokens: &[Token]) -> Vec<(String, usize, usize)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for tok in tokens {
+            if matches!(tok.token_type, TokenType::Ident | TokenType::TypeName) && seen.insert(tok.value.as_str()) {
+                out.push((tok.value.clone(), tok.line, tok.col));
+            }
+        }
+        out
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the

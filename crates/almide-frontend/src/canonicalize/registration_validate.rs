@@ -5,7 +5,7 @@
 // later. Split out of `registration.rs`, which registers declarations; both
 // halves share that file's imports via `include!`.
 
-const FIELD_RECURSIVE_PROTOCOLS: &[&str] = &["Codec", "Ord", "Hash"];
+const FIELD_RECURSIVE_PROTOCOLS: &[&str] = &["Codec", "Encode", "Decode", "Ord", "Hash"];
 /// The field-type slots a structural type exposes to its derive: record fields, and every variant case's payload (tuple positions / record fields).
 fn type_field_slots(ty: &Ty) -> Vec<(String, Ty)> {
     match ty {
@@ -52,12 +52,34 @@ fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
     if declares(leaf.as_str()) || declares(bare) {
         return true;
     }
-    if proto == "Codec" {
+    if super::protocols::is_codec_family(proto) {
         let has = |m: &str| env.functions.contains_key(&sym(&format!("{}.{}", leaf, m)))
             || env.functions.contains_key(&sym(&format!("{}.{}", bare, m)));
-        return has("encode") && has("decode");
+        // A hand-written method satisfies the direction it is (C-435).
+        let protocol_methods = super::protocols::builtin_protocol(proto).map(|p| p.method_names()).unwrap_or_default();
+        return protocol_methods.iter().all(|m| has(m));
     }
     false
+}
+/// A Secret in `ty` that no nominal Codec type of its own decodes (#4107):
+/// `List[Secret[String]]` is one, a field of a `: Codec` record that holds
+/// Secret fields itself (it derives its own `decode`) is not.
+fn secret_outside_codec_types(env: &TypeEnv, ty: &Ty) -> bool {
+    if crate::secret_type::secret_payload(ty).is_some() {
+        return true;
+    }
+    match ty {
+        Ty::Named(n, _) => {
+            let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+            if env.functions.contains_key(&sym(&format!("{}.decode", n))) || env.functions.contains_key(&sym(&format!("{}.decode", bare))) {
+                return false;
+            }
+            env.types.get(n).is_some_and(|t| crate::secret_type::holds_secret(env, t))
+        }
+        Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().any(|a| secret_outside_codec_types(env, a)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| secret_outside_codec_types(env, t)),
+        _ => false,
+    }
 }
 /// The Codec derive serializes a field by structural recursion over String/Int/Float/Bool/Option/List/Named — it has NO Map or Set arm, so a `Map[K,V]` / `Set[T]` field silently falls through to the `Value`-as-String fallback: invalid Rust natively (E0614/E0308) and wrong/silent on wasm (#655). Detect such a container anywhere in the field type (under List/Option/Result/Tuple/anon-record). A `Map`/`Set` reached only through a NAMED type is that type's own concern (its `: Codec` is checked by the leaf rule), so we stop at `Ty::Named`.
 fn codec_unsupported_container(ty: &Ty) -> Option<&'static str> {
@@ -164,14 +186,17 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
         for proto in protocols {
             let p = proto.as_str();
             if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
+            // `: Codec` is also `Encode` and `Decode` (C-435): the declared
+            // composition is judged once, not again through each part.
+            if super::protocols::implied_by_another(p, protocols) { continue; }
             // #1522: the Codec derive emits ONE encode/decode pair per type, so a
             // generic type's `T` field reaches codegen unresolved — check green,
             // a dozen rustc errors. A type parameter has no wire form; reject the
             // derive itself here until a monomorphizing derive exists.
-            if p == "Codec" && ty.contains_typevar() {
+            if super::protocols::is_codec_family(p) && ty.contains_typevar() {
                 if reported.insert((*type_name, *proto, sym("<generic>"))) {
                     diagnostics.push(err(
-                        format!("type '{}' derives 'Codec' but is generic — the Codec derive cannot encode a type parameter", type_name),
+                        format!("type '{}' derives '{}' but is generic — the Codec derive cannot encode a type parameter", type_name, p),
                         "The derive emits one encode/decode pair per type, and a type parameter has no wire form. Hand-write encode/decode for this type, or wrap each concrete instantiation in its own `: Codec` type.".to_string(),
                         format!("type {} : Codec", type_name),
                     ).with_code("E023"));
@@ -185,7 +210,6 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
         }
     }
 }
-/// Per-field derive-support check for a single (type, protocol, field) triple: the Codec-unsupported-container check, plus recursively requiring every leaf nominal in the field's type to derive the same protocol. `reported` dedupes diagnostics across (type, protocol, leaf) triples seen by earlier fields/protocols/types in the caller's loop nest. Verbatim text move out of [`validate_derive_field_support`].
 /// The (type, protocol) pair a field-recursive derive check is running for.
 ///
 /// Both are `Sym`, so as adjacent positional parameters they could be
@@ -196,6 +220,61 @@ struct DeriveSite {
     proto: Sym,
 }
 
+/// #4107 (R-secret-04): a `Secret[A]` FIELD decodes from A's wire form and
+/// is never encoded; A follows the ordinary field grammar (Secret[Bytes]
+/// is the Bytes E023). A Secret anywhere else in the field type has no
+/// wire form at all.
+///
+/// Returns true when the field holds a Secret (diagnosed here or accepted), so
+/// the ordinary field grammar does not judge it again.
+fn validate_secret_codec_field(
+    env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
+    reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
+    site: DeriveSite, field_name: &str, field_ty: &Ty,
+) -> bool {
+    let DeriveSite { type_name, proto } = site;
+    // An `Encode`-only type derives nothing but `encode`, and a Secret is
+    // never encoded (R-secret-04): the declaration has nothing to derive.
+    let (_, decodes) = super::protocols::codec_directions(&[proto]);
+    if !decodes && crate::secret_type::holds_secret(env, field_ty) {
+        if reported.insert((type_name, proto, sym("<encode-secret>"))) {
+            diagnostics.push(err(
+                format!("type '{}' derives '{}' but field '{}' holds a Secret, which is never encoded", type_name, proto, field_name),
+                "A Secret is read from input and never written out. Declare the type `: Decode` if it is input, or keep the Secret out of the type you send.".to_string(),
+                format!("type {} : {}", type_name, proto),
+            ).with_code("E023"));
+        }
+        return true;
+    }
+    let is_variant = matches!(env.types.get(&type_name), Some(Ty::Variant { .. }));
+    if let Some(payload) = crate::secret_type::secret_payload(field_ty).filter(|_| !is_variant) {
+        if let Some((offender, hint)) = codec_field_shape_error(payload)
+            && reported.insert((type_name, proto, sym(&offender)))
+        {
+            diagnostics.push(err(
+                format!("type '{}' derives 'Codec' but field '{}' is a Secret of {}, which the Codec derive cannot decode",
+                    type_name, field_name, offender),
+                hint,
+                format!("type {} : Codec", type_name),
+            ).with_code("E023"));
+        }
+        return true;
+    }
+    if secret_outside_codec_types(env, field_ty) {
+        if reported.insert((type_name, proto, sym("<nested-secret>"))) {
+            diagnostics.push(err(
+                format!("type '{}' derives 'Codec' but field '{}' holds a Secret inside '{}', which the Codec derive cannot decode",
+                    type_name, field_name, field_ty.display()),
+                "A Codec record decodes a Secret only as a field's own type (`password: Secret[String]`). Decode the inner shape into its own Codec type with Secret fields, or hand-write Type.decode.".to_string(),
+                format!("type {} : Codec", type_name),
+            ).with_code("E023"));
+        }
+        return true;
+    }
+    false
+}
+
+/// Per-field derive-support check for a single (type, protocol, field) triple: the Codec-unsupported-container check, plus recursively requiring every leaf nominal in the field's type to derive the same protocol. `reported` dedupes diagnostics across (type, protocol, leaf) triples seen by earlier fields/protocols/types in the caller's loop nest. Verbatim text move out of [`validate_derive_field_support`].
 fn validate_derive_field(
     env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
     reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
@@ -206,8 +285,12 @@ fn validate_derive_field(
     // two could be passed from different protocols at the call site. One name,
     // derived here.
     let p = proto.as_str();
+    // #4107 (R-secret-04): a Secret field is judged by its own rule.
+    if super::protocols::is_codec_family(p) && validate_secret_codec_field(env, diagnostics, reported, site, field_name, field_ty) {
+        return;
+    }
     // #655: the Codec derive has no Map/Set arm — reject such a field here rather than emitting invalid Rust / silent-wrong wasm. Same E023 family (a field that cannot satisfy Codec).
-    if p == "Codec" {
+    if super::protocols::is_codec_family(p) {
         if let Some(container) = codec_unsupported_container(field_ty) {
             if reported.insert((type_name, proto, sym(container))) {
                 diagnostics.push(err(
@@ -266,6 +349,11 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
         let type_ty = Ty::Named(*type_name, vec![]);
 
         for proto_name in protocol_names {
+            // A part of a declared composition (`Encode` of `Codec`) is
+            // judged through the composition, once (C-435).
+            if super::protocols::implied_by_another(proto_name.as_str(), protocol_names) {
+                continue;
+            }
             let proto_def = match env.protocols.get(proto_name) {
                 Some(p) => p.clone(),
                 None => continue,
@@ -289,6 +377,10 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 let target = ImplTarget { name: *type_name, is_generic, ty: &type_ty };
                 if !is_generic_protocol {
                     validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
+                    // #4158: effect-ness and `mut` modes are part of the
+                    // signature on a non-generic protocol too — an `effect`
+                    // impl of a pure method let a pure bounded caller run it.
+                    validate_protocol_method_modes(env, diagnostics, &target, *proto_name, method_sig);
                     continue;
                 }
                 let applied = crate::types::ProtocolMethodSig {
@@ -322,12 +414,18 @@ fn validate_protocol_method_impl(
     let ImplTarget { name: type_name, is_generic, ty: type_ty } = *target;
     // A derived method is keyed bare while an explicit one is keyed prefixed,
     // so the key has to be resolved rather than assumed (#1087).
-    let fn_key = super::registration::convention_fn_key(env, &type_name.to_string(), &method_sig.name.to_string())
-        .map_or_else(|| format!("{}.{}", type_name, method_sig.name), |k| k.to_string());
+    // A built-in conformer (`Int: Numeric`) satisfies its requirements with
+    // its stdlib module's functions and the operators; the conformance matrix
+    // gate checks those, not this per-declaration pass.
+    if super::protocols::is_builtin_conformer(type_name.as_str(), proto_name.as_str()) {
+        return;
+    }
+    let fn_key = super::protocols::requirement_fn_key(env, type_name.as_str(), method_sig.name.as_str())
+        .unwrap_or_else(|| format!("{}.{}", type_name, method_sig.name));
     let Some(sig) = env.functions.get(&sym(&fn_key)) else {
-        let is_builtin = matches!(proto_name.as_str(),
-            "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"
-            | "Numeric");
+        // A derivable built-in (Eq, Repr, Ord, Hash, Codec) may leave its
+        // requirements to auto-derive; any other protocol's must be written.
+        let is_builtin = super::protocols::builtin_protocol(proto_name.as_str()).is_some_and(|p| p.derivable);
         if !is_builtin {
             diagnostics.push(err(
                 format!("type '{}' declares protocol '{}' but missing method '{}'",
@@ -439,8 +537,14 @@ fn validate_protocol_method_modes(
     method_sig: &crate::types::ProtocolMethodSig,
 ) {
     let type_name = target.name;
-    let fn_key = super::registration::convention_fn_key(env, &type_name.to_string(), &method_sig.name.to_string())
-        .map_or_else(|| format!("{}.{}", type_name, method_sig.name), |k| k.to_string());
+    // A built-in conformer (`Int: Numeric`) satisfies its requirements with
+    // its stdlib module's functions and the operators; the conformance matrix
+    // gate checks those, not this per-declaration pass.
+    if super::protocols::is_builtin_conformer(type_name.as_str(), proto_name.as_str()) {
+        return;
+    }
+    let fn_key = super::protocols::requirement_fn_key(env, type_name.as_str(), method_sig.name.as_str())
+        .unwrap_or_else(|| format!("{}.{}", type_name, method_sig.name));
     let Some(sig) = env.functions.get(&sym(&fn_key)) else { return };
     if sig.is_effect != method_sig.is_effect {
         let (want, have) = if method_sig.is_effect { ("an `effect fn`", "a pure fn") } else { ("a pure fn", "an `effect fn`") };

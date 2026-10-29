@@ -23,5 +23,5 @@ bar"
 bar
 baz"
   println(int.to_string(string.len(multi)))
-  println(string.join(string.split(multi, "\n"), "|"))
+  println(list.join(string.split(multi, "\n"), "|"))
 }

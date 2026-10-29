@@ -38,7 +38,7 @@ impl Emitter<'_> {
 
     fn lower_host_leaf_op(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
         use crate::fs_meta::{
-            OP_HTTP_FRAMED_BYTES, OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, OP_HTTP_SERVE_BIND, OP_HTTP_SERVE_NEXT,
+            OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, OP_HTTP_SERVE_BIND, OP_HTTP_SERVE_NEXT,
             OP_HTTP_SERVE_REPLY, PROC_LEAVES,
         };
         // The http_framed leaves (#1710 increment 3): url in a, the
@@ -47,7 +47,6 @@ impl Emitter<'_> {
         let framed = match name {
             "__http_framed_text" => Some(OP_HTTP_FRAMED_TEXT),
             "__http_framed_status" => Some(OP_HTTP_FRAMED_STATUS),
-            "__http_framed_bytes" => Some(OP_HTTP_FRAMED_BYTES),
             "__http_framed_response" => Some(OP_HTTP_FRAMED_RESPONSE),
             _ => None,
         };
@@ -57,8 +56,7 @@ impl Emitter<'_> {
         if let Some(op) = framed.or(proc) {
             let [a, b] = args else { return unsup("host-leaf-arity") };
             self.fs_call_str2(a, b, op)?;
-            let t = if op == OP_HTTP_FRAMED_BYTES { self.fs_result_bytes()? } else { self.fs_result_string()? };
-            return Ok(Some(t));
+            return Ok(Some(self.fs_result_string()?));
         }
         // The http.serve loop's leaves (#2650): bind (port text), next (the
         // request as a List[String] of frames), reply (the response's cells
@@ -74,6 +72,26 @@ impl Emitter<'_> {
             }
             ("__http_serve_reply", [r]) => {
                 self.fs_call_1(r, OP_HTTP_SERVE_REPLY)?;
+                self.fs_result_unit()?
+            }
+            // The contained loop (#4203): the step closure's env pointer in
+            // the a_len slot; the host calls the closure itself.
+            ("__http_serve_run", [step]) => {
+                use crate::fs_meta::OP_HTTP_SERVE_RUN;
+                self.note_host_op(OP_HTTP_SERVE_RUN);
+                let got = self.lower_arg(step, None, ArgMode::Borrow)?;
+                if !matches!(got, SliceTy::Fn(_)) {
+                    return unsup("http-serve-run-step");
+                }
+                let env = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(env);
+                i.i32_const(OP_HTTP_SERVE_RUN).i32_const(0);
+                i.local_get(env);
+                i.i32_const(0).i32_const(0);
+                i.call(F_FS_CALL);
+                let _ = i;
+                self.release_i32();
                 self.fs_result_unit()?
             }
             // The http call handle's leaves (#2633), then the tcp family's

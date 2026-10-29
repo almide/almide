@@ -196,14 +196,14 @@ fn render_call(op: &str, pat: &str, hay: &str) -> String {
     let h = almd_lit(hay);
     let r = almd_lit(REP);
     match op {
-        "is_match" => format!("  println(b2s(regex.is_match({p}, {h})))\n"),
-        "full_match" => format!("  println(b2s(regex.full_match({p}, {h})))\n"),
-        "find" => format!("  println(ostr(regex.find({p}, {h})))\n"),
-        "find_all" => format!("  println(\"[\" + string.join(regex.find_all({p}, {h}), \"|\") + \"]\")\n"),
-        "split" => format!("  println(\"[\" + string.join(regex.split({p}, {h}), \"|\") + \"]\")\n"),
-        "captures" => format!("  println(olist(regex.captures({p}, {h})))\n"),
-        "replace" => format!("  println(\"<\" + regex.replace({p}, {h}, {r}) + \">\")\n"),
-        "replace_first" => format!("  println(\"<\" + regex.replace_first({p}, {h}, {r}) + \">\")\n"),
+        "is_match" => format!("  println(b2s(regex.is_match(regex.new({p}), {h})))\n"),
+        "full_match" => format!("  println(b2s(regex.is_full_match(regex.new({p}), {h})))\n"),
+        "find" => format!("  println(ostr(regex.find(regex.new({p}), {h})))\n"),
+        "find_all" => format!("  println(\"[\" + list.join(regex.find_all(regex.new({p}), {h}), \"|\") + \"]\")\n"),
+        "split" => format!("  println(\"[\" + list.join(regex.split(regex.new({p}), {h}), \"|\") + \"]\")\n"),
+        "captures" => format!("  println(olist(regex.captures(regex.new({p}), {h})))\n"),
+        "replace" => format!("  println(\"<\" + regex.replace(regex.new({p}), {h}, {r}) + \">\")\n"),
+        "replace_first" => format!("  println(\"<\" + regex.replace_first(regex.new({p}), {h}, {r}) + \">\")\n"),
         _ => unreachable!(),
     }
 }
@@ -213,8 +213,8 @@ import regex
 
 fn b2s(b: Bool) -> String = if b then \"T\" else \"F\"
 fn ostr(o: Option[String]) -> String = match o {{ some(s) => s, none => \"NONE\" }}
-fn olist(o: Option[List[String]]) -> String =
-  match o {{ some(xs) => \"[\" + string.join(xs, \"|\") + \"]\", none => \"NONE\" }}
+fn olist(o: Option[List[String?]]) -> String =
+  match o {{ some(xs) => \"[\" + list.join(xs |> list.map((x) => x ?? \"\"), \"|\") + \"]\", none => \"NONE\" }}
 
 fn main() -> Unit = {{
 ";
@@ -279,8 +279,7 @@ fn run_wasm(src_path: &Path, wasm_path: &Path) -> Option<String> {
     if let Ok(out) = Command::new("wasmtime")
         .arg(wasm_path.to_str().unwrap())
         .output()
-    {
-        if out.status.code() != Some(127) {
+        && out.status.code() != Some(127) {
             if !out.status.success() {
                 panic!(
                     "wasm run (wasmtime) failed:\n{}",
@@ -289,7 +288,6 @@ fn run_wasm(src_path: &Path, wasm_path: &Path) -> Option<String> {
             }
             return Some(String::from_utf8_lossy(&out.stdout).to_string());
         }
-    }
     let js = format!(
         "const{{readFileSync}}=require('fs');const{{WASI}}=require('wasi');\
          const w=new WASI({{version:'preview1',args:[],env:{{}}}});\

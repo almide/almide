@@ -1,12 +1,12 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-str", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasi", "crates/almide-wasm-vm", "crates/almide-spine", "crates/almide-verify"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-str", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-gpu-run", "crates/almide-wasi", "crates/almide-wasm-vm", "crates/almide-spine", "crates/almide-verify", "crates/almide-anchor-check"]
 # `cargo build` at the root builds the compiler AND the independent verifier
 # binary (#2152): `almide verify` execs `almide-verify` from next to itself and
 # has no linked fallback, so a build that produced one without the other would
 # ship a command that can only fail.
 default-members = [".", "crates/almide-verify"]
 resolver = "3"
-exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
+exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz", "tools/loom-fan-gate"]
 
 # Inheritance source for the commissioned greenfield crates (almide-layout,
 # almide-corpus, almide-wasm, almide-spine, almide-wasm-run). Inert for every
@@ -22,7 +22,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.68.0"
+version = "0.69.0"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 49 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
@@ -64,6 +64,9 @@ wat = "1"
 # validation, so the test harness validates before accepting a v1 module (invalid → the test
 # harness falls back to native execution; there is no v0 wasm emitter anymore).
 wasmparser = "0.262"
+# `almide verify` pins the SHA-256 of the file it certifies (#4011); almide-verify
+# recomputes it with its own implementation.
+sha2 = "0.11"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -89,9 +92,18 @@ embedded-host = ["dep:almide-wasm-run"]
 # no backing OS lock and the compiler never spawns build subprocesses.
 [target.'cfg(any(unix, windows))'.dependencies]
 fs2 = "0.4"
+# The in-tree HTTPS client self-update downloads with (#4181): the stdlib
+# `http` module's rustls client, so no `curl` from PATH is run. Native only:
+# `almide selfupdate` lives in the binary, and rustls' `getrandom` does not
+# build for the wasm32-unknown-unknown library target.
+almide-rt-core = { path = "crates/almide-rt-core" }
 
 # `almide run` on Windows waits for the program and ignores the console's
 # Ctrl-C itself, which the program also receives (#2809). Unix execs instead.
+# The effective uid that owns the private build-cache base (#4180).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 ctrlc = "3.5"
 
@@ -134,3 +146,14 @@ incremental = true
 inherits = "dev"
 debug = 0
 strip = "debuginfo"
+
+# The native build cache hashes every cached binary with SHA-256 on each hit
+# and after each build (#4180), the second inside the shared build-dir lock.
+# Unoptimized, `sha2` hashed at ~25 MB/s: a fifth of a debug `almide build`,
+# serialized across every test that builds natively. Optimizing this one leaf
+# crate changes no semantics (debug_assertions and overflow checks stay on for
+# the compiler's own crates).
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.ci-test.package.sha2]
+opt-level = 3

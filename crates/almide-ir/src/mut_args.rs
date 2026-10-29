@@ -22,8 +22,8 @@ use crate::{CallTarget, IrExpr, IrExprKind, VarId};
 /// every param a `@mutating(p)` attribute names (the older spelling), and the
 /// FIRST param for a bare `@mutating` (the receiver — the reading native borrow
 /// inference has always given it, and the one the runtime's `&mut` agrees
-/// with: `@mutating fn as_mut_ptr(b: Bytes)` is `almide_rt_bytes_as_mut_ptr(b:
-/// &mut ..)`). The IR lowering fills `IrFunction::mutated_params` from this,
+/// with: a bare `@mutating fn f(b: Bytes)` is `almide_rt_<module>_f(b: &mut
+/// ..)`). The IR lowering fills `IrFunction::mutated_params` from this,
 /// so a lowered fn and an unlowered declaration answer the same.
 pub fn declared_mut_positions(params: &[Param], attrs: &[Attribute]) -> Vec<usize> {
     let mut out: Vec<usize> = params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect();
@@ -63,6 +63,55 @@ pub fn stdlib_mut_positions(module: &str, func: &str) -> Option<Vec<usize>> {
         }
         _ => None,
     })
+}
+
+/// Is the bundled stdlib fn `module.func` written in Almide — declared without
+/// `@intrinsic`? A mono instance (`__almd_monoN_<fn>__<tys>`) answers for its
+/// generic. `false` for an intrinsic, an unknown name, or a non-bundled module.
+pub fn stdlib_fn_has_almide_body(module: &str, func: &str) -> bool {
+    if !almide_lang::stdlib_info::is_bundled_module(module) {
+        return false;
+    }
+    let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else {
+        return false;
+    };
+    let base = crate::mono_base_or_self(func);
+    program.decls.iter().any(|d| {
+        matches!(d, Decl::Fn { name, attrs, .. }
+            if name.as_str() == base && !attrs.iter().any(|a| a.name.as_str() == "intrinsic"))
+    })
+}
+
+/// Is `symbol` the runtime symbol some bundled stdlib fn DECLARES with
+/// `@intrinsic("symbol")`? Read from the declarations, so the answer is a
+/// property of the declaration, never of how the symbol happens to be spelled:
+/// a leaf `@intrinsic("almide_http_get")` is a runtime fn even when a
+/// wrapper with an Almide body calls it (#4217).
+pub fn is_bundled_intrinsic_symbol(symbol: &str) -> bool {
+    static SYMBOLS: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    SYMBOLS
+        .get_or_init(|| {
+            let mut out = std::collections::HashSet::new();
+            for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+                let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else {
+                    continue;
+                };
+                for d in &program.decls {
+                    let Decl::Fn { attrs, .. } = d else { continue };
+                    let declared = attrs
+                        .iter()
+                        .filter(|a| a.name.as_str() == "intrinsic")
+                        .filter_map(|a| a.args.first())
+                        .filter_map(|a| match &a.value {
+                            AttrValue::String { value } => Some(value.to_string()),
+                            _ => None,
+                        });
+                    out.extend(declared);
+                }
+            }
+            out
+        })
+        .contains(symbol)
 }
 
 /// Every bundled stdlib fn that writes a param, as `(module, func, positions)`,
@@ -186,9 +235,10 @@ mod tests {
     fn a_bundled_mutator_answers_from_its_declaration() {
         assert_eq!(stdlib_mut_positions("list", "push"), Some(vec![0]));
         assert_eq!(stdlib_mut_positions("list", "len"), None);
-        assert_eq!(stdlib_mut_positions("bytes", "set_uint16"), Some(vec![0]));
-        // A bare `@mutating` writes its receiver.
-        assert_eq!(stdlib_mut_positions("bytes", "as_mut_ptr"), Some(vec![0]));
+        assert_eq!(stdlib_mut_positions("bytes", "put_u8"), Some(vec![0]));
+        // A bare `@mutating` writes its receiver (no bundled fn spells it
+        // since `bytes.as_mut_ptr` left at epoch 15; the declaration rule is
+        // `declared_mut_positions_reads_a_bare_mutating_as_the_receiver`).
         assert_eq!(stdlib_mut_positions("no_such_module", "push"), None);
     }
 
@@ -199,5 +249,13 @@ mod tests {
         for (m, f, idxs) in &all {
             assert_eq!(stdlib_mut_positions(m, f).as_ref(), Some(idxs), "{m}.{f}");
         }
+    }
+
+    #[test]
+    fn declared_mut_positions_reads_a_bare_mutating_as_the_receiver() {
+        let src = "@mutating\nfn poke(b: Bytes, x: Int) -> Unit = _\n";
+        let program = almide_lang::parse_cached(src).expect("parse");
+        let Some(Decl::Fn { params, attrs, .. }) = program.decls.first() else { panic!("no fn") };
+        assert_eq!(declared_mut_positions(params, attrs), vec![0]);
     }
 }

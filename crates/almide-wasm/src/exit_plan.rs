@@ -400,13 +400,15 @@ fn check_window(
 }
 
 /// The surface ops that hand out the ADDRESS of a heap block's data
-/// (#3420): `bytes.data_ptr` / `as_ptr` / `as_mut_ptr`. The address is a
+/// (#3420): `ffi.address` and the deprecated `bytes.data_ptr` / `as_ptr` /
+/// `as_mut_ptr` it replaces (R-ffi-01). The address is a
 /// BORROW of the block — the host or a later read follows it — so the
 /// block must outlive every use of the pointer, exactly as under a `prim.*`
-/// body (bytes_rawptr.almd computes these as `prim.handle(b) + 12`).
+/// body (bytes_rawptr.almd, which ffi_bridge.almd calls, computes these as
+/// `prim.handle(b) + 12`).
+/// One set with the shared IR's address-hold rule (almide_ir::addr_hold, #4153).
 pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
-    matches!(target, almide_ir::CallTarget::Module { module, func, .. }
-        if module.as_str() == "bytes" && matches!(func.as_str(), "data_ptr" | "as_ptr" | "as_mut_ptr"))
+    almide_ir::addr_hold::is_address_op(target)
 }
 
 /// Does any call in `body` satisfy `hit`?
@@ -481,8 +483,38 @@ impl Emitter<'_> {
                 || matches!(t, almide_ir::CallTarget::Named { name }
                     if self.resolve_named_fn(name).is_some_and(|j| self.table.infos[j].yields_address))
         };
-        crate::rc_ownership::body_uses_prim(body) || any_call(body, &hit)
+        crate::rc_ownership::body_uses_prim(body) || any_call(body, &hit) || passes_a_handle(body)
     }
+}
+
+/// Does any call in `body` take a `Handle` (`Ty::RawPtr`) argument? A Handle
+/// handed to a callee may be a Region's base (ADR-0031 D3: the
+/// `@extern(wasm)` wrapper extern_region.rs builds passes `r.base, r.len` to
+/// the import), an address into a block this frame owns, so the frame is
+/// under the raw-address rule like an address op's: a tail transfer that
+/// released the Region before the jump handed the host the free-list header
+/// (#3420). Decided by the argument's type, so every Handle-taking call is
+/// covered, a foreign token's included (holding a block to the epilogue is
+/// only conservative there).
+fn passes_a_handle(body: &almide_ir::IrExpr) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.0 {
+                return;
+            }
+            if let almide_ir::IrExprKind::Call { args, .. } | almide_ir::IrExprKind::TailCall { args, .. } = &e.kind
+                && args.iter().any(|a| a.ty == almide_types::types::Ty::RawPtr)
+            {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.0
 }
 
 /// The params of a prim-using body a raw address may be derived from: any
@@ -515,7 +547,8 @@ pub(crate) fn raw_address_sources(body: &almide_ir::IrExpr, params: &[almide_ir:
                     let prim = matches!(target, almide_ir::CallTarget::Module { module, .. } if module.as_str() == "prim")
                         || is_raw_address_op(target);
                     let computed = matches!(target, almide_ir::CallTarget::Computed { .. });
-                    if prim || computed || e.ty == almide_types::types::Ty::Int {
+                    let handle_arg = args.iter().any(|a| a.ty == almide_types::types::Ty::RawPtr);
+                    if prim || computed || handle_arg || e.ty == almide_types::types::Ty::Int {
                         self.mark_in(args);
                     }
                     if let almide_ir::CallTarget::Computed { callee } = target {

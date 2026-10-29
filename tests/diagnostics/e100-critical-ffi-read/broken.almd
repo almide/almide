@@ -1,0 +1,10 @@
+// E100 (#4008): `--profile critical` refuses every `ffi` call, a bounds-checked
+// Region read included, whatever `--allow` grants: a critical program reaches
+// no memory outside its values.
+import ffi
+
+effect fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  let c = ffi.read(ffi.region(b), 0, 3)!
+  println(int.to_string(bytes.len(c)))
+}

@@ -148,6 +148,95 @@ pub fn harness_filter(program_args: &[String]) -> Option<&str> {
     program_args.iter().find(|a| !HARNESS_FLAGS.contains(&a.as_str())).map(String::as_str)
 }
 
+/// The libtest path of a test fn the native emitter wrote (`mod tests`, the
+/// walker's `rust_safe_fn_name` of the IR name — `test_name_map`'s left side).
+fn libtest_path(mangled: &str) -> String {
+    format!("tests::{mangled}")
+}
+
+/// A libtest path no emitted test can have (no Almide test fn is spelled in
+/// the `__almide_` space): what `--exact` gets when `--run` selected nothing,
+/// so the binary runs zero tests and still reports what it filtered out.
+const NO_TEST_SELECTED: &str = "tests::__almide_run_selected_no_test";
+
+/// Run one native (libtest) test binary for `file` the way `almide test`
+/// judges it, returning `(code, stdout, stderr)`.
+///
+/// Two things are decided here rather than by libtest:
+///
+/// - **Which tests run** (#4264). `--run <pattern>` is matched against each
+///   test's SOURCE name — the string in `test "…"`, what a failure prints —
+///   with the predicate the wasm leg's runner synthesis uses
+///   (`almide_base::names::test_name_matches_filter`). libtest only matches
+///   its own (mangled) fn names, so it is handed the selected tests' exact
+///   paths instead of the pattern: a name with a space, punctuation or a
+///   non-ASCII script used to select nothing.
+/// - **Whether every selected test finished** (#4255). The exit status is not
+///   the verdict: `process.exit(0)` inside a test ends the binary with 0
+///   before the remaining tests run, and reading that 0 as "all passed"
+///   greened a file whose later tests failed or never ran. Each emitted test
+///   appends its name to the ledger file named by `ALMIDE_TEST_LEDGER` when it
+///   reaches the end of its body (the `test_module` template) — the harness's
+///   own channel, not the program's stdout — and a status-0 run missing a
+///   selected test's record fails, naming the first test that never finished.
+pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
+    let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
+    let names = test_name_map(&source);
+    let filter = harness_filter(program_args);
+    let selected: Vec<&(String, String)> = names
+        .iter()
+        .filter(|(_, label)| filter.is_none_or(|p| almide_base::names::test_name_matches_filter(label, p)))
+        .collect();
+    let mut args: Vec<String> = HARNESS_FLAGS.iter().map(|f| f.to_string()).collect();
+    match filter {
+        // The source could not be enumerated (it does not parse — the build
+        // has already failed then): libtest's own matching is all there is.
+        Some(p) if names.is_empty() => args.push(p.to_string()),
+        Some(_) => {
+            args.push("--exact".to_string());
+            if selected.is_empty() {
+                args.push(NO_TEST_SELECTED.to_string());
+            }
+            args.extend(selected.iter().map(|(m, _)| libtest_path(m)));
+        }
+        None => {}
+    }
+    let ledger = native_test_log_path();
+    let _ = std::fs::remove_file(&ledger);
+    let (mut code, stdout, mut stderr) =
+        super::run::run_binary_captured_io_env(bin, &args, &[("ALMIDE_TEST_LEDGER", ledger.as_os_str())]);
+    let records = std::fs::read_to_string(&ledger).unwrap_or_default();
+    let _ = std::fs::remove_file(&ledger);
+    if code == 0 {
+        let finished: std::collections::HashSet<&str> = records.lines().collect();
+        let unfinished: Vec<&str> = selected
+            .iter()
+            .filter(|(m, _)| !finished.contains(m.as_str()))
+            .map(|(_, label)| label.as_str())
+            .collect();
+        if let Some(first) = unfinished.first() {
+            code = 1;
+            stderr.push_str(&format!(
+                "Error: the test binary exited with status 0 before every test finished (process.exit inside a test?)\n  first unfinished: test: {first}\n  never finished: {} of {} selected test(s)\n",
+                unfinished.len(),
+                selected.len()
+            ));
+        }
+    }
+    (code, stdout, stderr)
+}
+
+/// A fresh scratch path for one binary's completion ledger.
+fn native_test_log_path() -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("almide-test-{}-{n}-{nanos}.log", std::process::id()))
+}
+
 /// Report one failing test file as a STRUCTURED record: the assertion's `.almd`
 /// site, expected/found, and a real diff for multi-line strings, lists and
 /// records. Falls back to the raw captured output when nothing parses — a
@@ -240,7 +329,8 @@ impl TestFailure {
                 return out;
             }
         };
-        match Diff::of(expected, found) {
+        let diff = if self.message == DECLARED_REPR { None } else { Diff::of(expected, found) };
+        match diff {
             Some(d) => {
                 out.push_str(&format!("  hint: {}\n", d.hint()));
                 out.push_str("  diff: -expected +found\n");
@@ -268,6 +358,7 @@ impl TestFailure {
             .expected
             .as_deref()
             .zip(self.found.as_deref())
+            .filter(|_| self.message != DECLARED_REPR)
             .and_then(|(e, f)| Diff::of(e, f))
             .map(|d| d.render());
         let v = serde_json::json!({
@@ -391,6 +482,9 @@ pub(super) fn is_block_end(line: &str) -> bool {
 /// print `assertion \`left == right\` failed[: <msg>]` + `  left:` / ` right:`,
 /// and the `<msg>` is the `at line N` the builtin-lowering pass injected.
 fn classify(file: &str, payload: &[String]) -> TestFailure {
+    if let Some(f) = repr_assert(file, payload) {
+        return f;
+    }
     let head = payload[0].as_str();
     let (op, message) = head_op(head);
     let base = TestFailure {
@@ -412,6 +506,54 @@ fn classify(file: &str, payload: &[String]) -> TestFailure {
     // as two identical values.
     let expected = if op == "assert_ne" { format!("!= {right}") } else { right };
     TestFailure { expected: Some(expected), found: Some(left), ..base }
+}
+
+/// The message marking an assert over a type that declares its own repr
+/// (#4107): its expected/found are that repr's text, shown as they are.
+pub const DECLARED_REPR: &str = "(declared repr)";
+
+/// An in-test `assert_eq` / `assert_ne` over a type with a declared repr
+/// somewhere inside (#4107). The frontend lowers it to the harness
+/// `assert(cond, msg)` with `msg` = `assert_eq[ (declared repr)]` +
+/// `\n  expected: <r>\n  found: <l>`, both rendered through the declared
+/// repr; the payload ends with the injected ` (at line N)`. When the type
+/// itself declares its repr the pair is never field-diffed: a field diff is
+/// the structural renderer, which that type opted out of.
+fn repr_assert(file: &str, payload: &[String]) -> Option<TestFailure> {
+    let (op, own) = harness_head(payload.first()?.as_str())?;
+    let rest: Vec<&str> = payload[1..].iter().map(|l| l.as_str()).collect();
+    let e = rest.iter().position(|l| l.starts_with("  expected: "))?;
+    let v = rest.iter().position(|l| l.starts_with("  found: "))?;
+    if v < e {
+        return None;
+    }
+    let mut found = join_field(&rest[v..], "  found: ");
+    let mut line = None;
+    if let Some(cut) = found.rfind(" (at line ") {
+        line = site_line(&found[cut..]);
+        found.truncate(cut);
+    }
+    Some(TestFailure {
+        file: file.to_string(),
+        name: None,
+        line,
+        op: op.into(),
+        expected: Some(join_field(&rest[e..v], "  expected: ")),
+        found: Some(found),
+        message: if own { DECLARED_REPR.to_string() } else { String::new() },
+    })
+}
+
+/// The header of the harness form's message: `(op, the type itself declares
+/// its repr)`, or None for any other line.
+fn harness_head(head: &str) -> Option<(&'static str, bool)> {
+    match head {
+        "assert_eq" => Some(("assert_eq", false)),
+        "assert_ne" => Some(("assert_ne", false)),
+        "assert_eq (declared repr)" => Some(("assert_eq", true)),
+        "assert_ne (declared repr)" => Some(("assert_ne", true)),
+        _ => None,
+    }
 }
 
 /// `(op, message)` for a panic payload's first line. The site marker the
@@ -489,6 +631,14 @@ fn parse_t18(file: &str, output: &str) -> Vec<TestFailure> {
             found: None,
             message: l.trim_start_matches("Error: ").to_string(),
         };
+        // The harness form of an in-test `assert_eq` / `assert_ne` (#4262) on
+        // a wasm test lane: `Error: assertion failed: assert_eq[ (declared
+        // repr)]`, its `at:` line after `found:`. It reads back as the record
+        // the native lane's payload gives (`repr_assert`).
+        if let Some((hop, own)) = l.strip_prefix("Error: assertion failed: ").and_then(harness_head) {
+            f.op = hop.into();
+            f.message = if own { DECLARED_REPR.to_string() } else { String::new() };
+        }
         fill_t18_fields(&mut f, &lines[i + 1..]);
         out.push(f);
     }
@@ -532,8 +682,11 @@ fn fill_t18_fields(f: &mut TestFailure, rest: &[&str]) {
     if v < e {
         return;
     }
+    // `found` ends at a trailing `  at: line N` (the harness form puts the
+    // site last); the operands are C-418-escaped, so no value spans lines.
+    let found_end = body[v..].iter().position(|l| l.starts_with("  at: line ")).map_or(body.len(), |k| v + k);
     f.expected = Some(join_field(&body[e..v], "  expected: "));
-    f.found = Some(join_field(&body[v..], "  found: "));
+    f.found = Some(join_field(&body[v..found_end], "  found: "));
     if f.expected.as_deref().is_some_and(|s| s.starts_with("!= ")) {
         f.op = "assert_ne".into();
     }
@@ -658,6 +811,11 @@ fn units(v: &str) -> Option<(&'static str, Vec<String>)> {
     }
     if let Some(inner) = record_body(t) {
         return Some(("field", split_top_level(inner)));
+    }
+    // An assert operand is C-418-escaped (#4262): a multi-line string reads
+    // `one\ntwo` on one line, and still diffs line by line.
+    if !v.contains('\n') && v.contains("\\n") {
+        return Some(("line", v.split("\\n").map(|l| l.to_string()).collect()));
     }
     v.contains('\n').then(|| ("line", lines_of(v)))
 }
@@ -892,9 +1050,38 @@ mod tests {
         assert_eq!(parse("m.almd", "", out)[0].op, "assert_ne");
     }
 
+    /// #4262: an in-test `assert_eq` reaches the report as the harness form on
+    /// both test lanes, a libtest payload on native and a T18-shaped block on
+    /// wasm; both read back as one record, operands as printed (escaped).
+    #[test]
+    fn the_harness_form_reads_back_alike_on_both_test_lanes() {
+        let native = "---- tests::__test_almd_0000_t stdout ----\n\
+thread 'tests::__test_almd_0000_t' panicked at src/main.rs:9:5:\n\
+assert_eq\n  expected: x\n  found: A\\u{1b}[31mB\\u{202e}C\\nD (at line 3)\n";
+        let wasm = "Error: assertion failed: assert_eq\n  expected: x\n  found: A\\u{1b}[31mB\\u{202e}C\\nD\n  at: line 3\n";
+        let n = parse("t_test.almd", "", native);
+        let w = parse("t_test.almd", "", wasm);
+        assert_eq!(n.len(), 1, "{n:?}");
+        assert_eq!(w.len(), 1, "{w:?}");
+        for f in [&n[0], &w[0]] {
+            assert_eq!(f.op, "assert_eq");
+            assert_eq!(f.line, Some(3));
+            assert_eq!(f.expected.as_deref(), Some("x"));
+            assert_eq!(f.found.as_deref(), Some("A\\u{1b}[31mB\\u{202e}C\\nD"));
+            assert_eq!(f.message, "");
+        }
+    }
+
     #[test]
     fn multiline_strings_diff_by_line() {
         let d = Diff::of("\"a\\nB\\nc\"", "\"a\\nb\\nc\"").expect("line diff");
+        assert_eq!(d.hint(), "line 2 differs");
+        assert_eq!(d.render(), "      a\n    - B\n    + b\n      c\n");
+    }
+
+    #[test]
+    fn escaped_multiline_strings_diff_by_line() {
+        let d = Diff::of("a\\nB\\nc", "a\\nb\\nc").expect("line diff");
         assert_eq!(d.hint(), "line 2 differs");
         assert_eq!(d.render(), "      a\n    - B\n    + b\n      c\n");
     }
@@ -923,6 +1110,23 @@ mod tests {
     fn nested_commas_do_not_split_items() {
         assert_eq!(split_top_level("[1, 2], [3]"), vec!["[1, 2]", "[3]"]);
         assert_eq!(split_top_level("\"a, b\", c"), vec!["\"a, b\"", "c"]);
+    }
+
+    #[test]
+    fn a_declared_repr_assert_parses_and_is_never_field_diffed() {
+        let payload: Vec<String> = ["assert_eq (declared repr)", "  expected: User { name: b }", "  found: User { name: a } (at line 7)"]
+            .iter().map(|s| s.to_string()).collect();
+        let f = classify("m.almd", &payload);
+        assert_eq!(f.op, "assert_eq");
+        assert_eq!(f.line, Some(7));
+        assert_eq!(f.expected.as_deref(), Some("User { name: b }"));
+        assert_eq!(f.found.as_deref(), Some("User { name: a }"));
+        assert_eq!(f.render(), "  at:   m.almd:7\n  expected: User { name: b }\n  found:    User { name: a }\n");
+        // A type with a declared repr only INSIDE it keeps the field diff,
+        // over text the declaration already rendered.
+        let nested: Vec<String> = ["assert_eq", "  expected: L { u: \"b\", pw: Secret(***) }", "  found: L { u: \"a\", pw: Secret(***) } (at line 3)"]
+            .iter().map(|s| s.to_string()).collect();
+        assert!(classify("m.almd", &nested).render().contains("diff: -expected +found"));
     }
 
     #[test]

@@ -40,7 +40,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::Filter { lambda } => chain = format!("{}.filter({})", chain, render_expr(ctx, lambda)),
             IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
             IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
-            IterStep::Take { n } => chain = format!("{}.take(({}) as usize)", chain, render_expr(ctx, n)),
+            IterStep::Take { n } => chain = format!("{}.take(i64::max({}, 0) as usize)", chain, render_expr(ctx, n)), // #4147: a negative count is 0
             // `(usize, T)` re-indexed to Almide's `Int`, which is what the
             // `almide_rt_list_enumerate` twin returns — same pairs, same
             // order, no `Vec<(i64, T)>` in between (#2098).
@@ -50,7 +50,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     if let (true, Some((s, e))) = (reserved, &counted) {
         return format!(
             "{{ let __almide_rs: i64 = {s}; let __almide_re: i64 = {e}; let mut __almide_cv = Vec::new(); \
-             if __almide_cv.try_reserve_exact(__almide_re.saturating_sub(__almide_rs).max(0) as usize).is_err() {{ almide_abort(\"out of memory\"); }} \
+             if __almide_cv.try_reserve_exact(__almide_re.saturating_sub(__almide_rs).max(0) as usize).is_err() {{ almide_abort_oom(); }} \
              __almide_cv.extend({chain}); __almide_cv }}"
         );
     }
@@ -130,7 +130,7 @@ fn render_binop_matrix(ctx: &RenderContext, op: BinOp, (left, right): (&IrExpr, 
             };
             // `m * k` admits an `Int` scalar (the frontend's ScaleMatrix
             // dispatch); the runtime scales by an f64. Convert it the way
-            // the wasm legs do (`int.to_float`), or rustc refuses the i64
+            // the wasm legs do (`float.from`), or rustc refuses the i64
             // the checker accepted (#2894).
             let scalar = if matches!(scalar_ty, Ty::Int) { format!("(({scalar}) as f64)") } else { scalar.to_string() };
             let scalar = scalar.as_str();
@@ -353,7 +353,12 @@ fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym
     // for a module's own (#1835). The reserved prefix is the STRUCT's (the
     // #433 mangle), not a runtime helper's, so it is decided before the
     // invariant below.
-    if ctx.newtype_ctors.contains_key(&name) {
+    //
+    // A construction the checker typed as an ENUM's case is that case even
+    // when a newtype shares its spelling: a user's `| Path(String)` beside
+    // the stdlib's `mod type Path` (`value.Path`) was built as the stdlib's
+    // tuple struct (#4275).
+    if ctx.newtype_ctors.contains_key(&name) && !super::is_enum_case_of(ctx, name.as_str(), result_ty) {
         return render_call_expr(ctx, name.as_str(), args);
     }
     // Invariant: NormalizeRuntimeCallsPass collapses every
@@ -609,7 +614,7 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
             // A region twin's recursive field is an arena handle (#1991).
             format!("almide_rgn_alloc({})", rendered)
         } else if needs_box {
-            format!("std::boxed::Box::new({})", rendered)
+            format!("AlmideBox::new({})", rendered)
         } else {
             rendered
         }
@@ -817,10 +822,18 @@ pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
 /// (`almide_http_get_bytes`). That spelling is the runtime's own too, and a
 /// user-module fn never receives it (the normalizer only ever prefixes
 /// `almide_rt_`), so it is judged against the same registry (#2497: the
-/// `Result[Bytes, String]` of `http.get_bytes` reached a `let` binding raw —
+/// `Result[Bytes, String]` of the since-removed `http.get_bytes` reached a `let` binding raw —
 /// `let mut b: AlmideRcCow<Vec<u8>> = (almide_http_get_bytes(u))?;`, rustc
 /// E0308 after a green `check`, while every `almide_rt_` sibling glued).
+///
+/// A symbol some bundled fn declares `@intrinsic` is a runtime fn by its
+/// declaration, whatever its spelling coincides with: `almide_regex_find` is
+/// the runtime leaf even though `regex.find` (whose name the spelling decodes
+/// to) has an Almide body (#4217).
 fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
+    if almide_ir::mut_args::is_bundled_intrinsic_symbol(symbol) {
+        return true;
+    }
     let Some(rest) = symbol.strip_prefix("almide_") else {
         return false;
     };
@@ -831,9 +844,15 @@ fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
         }) => rest,
         None => return false,
     };
-    crate::generated::rust_runtime::RUST_RUNTIME_MODULES
-        .iter()
-        .any(|(m, _)| rest.strip_prefix(m).is_some_and(|r| r.starts_with('_')))
+    crate::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().any(|(m, _)| {
+        rest.strip_prefix(m).and_then(|r| r.strip_prefix('_')).is_some_and(|func| {
+            // A bundled stdlib fn with an Almide body (`bytes.get_i8`) renders
+            // as a generated fn in the runtime spelling, but its params are the
+            // mapped `&AlmideRcCow<Vec<u8>>` of user code: a Bytes global must
+            // reach it glued, exactly as it reaches a user fn.
+            !almide_ir::mut_args::stdlib_fn_has_almide_body(m, func)
+        })
+    })
 }
 
 /// The runtime modules whose intrinsic symbols are spelled `almide_<module>_…`
@@ -978,9 +997,17 @@ fn render_call_with_copied_global_places(
     let rendered: Vec<String> = args.iter().zip(places).map(|(a, place)| match place {
         Some((static_name, suffix)) => {
             let k = copy_in.len();
-            copy_in.push(format!(
-                "let mut __almide_gp{k} = {static_name}.with(|__almide_gc| (**__almide_gc.borrow()){suffix}.clone());"
-            ));
+            // The global stores the RAW Bytes/Matrix shape (#617); the callee's
+            // `&mut` param is the mapped `AlmideRcCow` one (a runtime callee's raw
+            // `&mut Vec<u8>` deref-coerces from it), and the write-back `.into()`
+            // turns it raw again.
+            let ty = match &a.kind {
+                IrExprKind::Borrow { expr: inner, .. } => &inner.ty,
+                _ => &a.ty,
+            };
+            let read = format!("{static_name}.with(|__almide_gc| (**__almide_gc.borrow()){suffix}.clone())");
+            let read = if suffix.is_empty() { rc_cow_result_glue(read, ty) } else { read };
+            copy_in.push(format!("let mut __almide_gp{k} = {read};"));
             write_back.push(if suffix.is_empty() {
                 format!("{static_name}.with(|__almide_gc| *__almide_gc.borrow_mut() = std::rc::Rc::new((__almide_gp{k}).into()));")
             } else {
@@ -1053,6 +1080,19 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
         && let IrExprKind::IndexAccess { object, .. } = &inner.kind
         && let IrExprKind::Var { id } = &object.kind
         && ctx.ann.global(*id).is_none()
+        && matches!(inner.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+    {
+        return format!("(&*{})", render_expr(ctx, inner));
+    }
+    // A Bytes/Matrix result of an ALMIDE-BODIED stdlib fn unwrapped in place
+    // (`bytes.len(unix.shm_read(f, 0, 2)!)`): the callee returns the mapped
+    // `AlmideRcCow`, and `&(call)?` hands the `?` match the raw param type as
+    // its expectation (E0308 on the arm). `*` checks its operand with no
+    // expectation, so `&*` deref-coerces exactly as a reference would.
+    if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &a.kind
+        && let IrExprKind::Unwrap { expr: call } | IrExprKind::Try { expr: call } = &inner.kind
+        && let IrExprKind::RuntimeCall { symbol: callee, .. } = &call.kind
+        && !rc_cow_symbol_is_native_runtime(callee.as_str())
         && matches!(inner.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
     {
         return format!("(&*{})", render_expr(ctx, inner));
@@ -1167,17 +1207,16 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         // Anonymous records get an inline literal repr.
         Ty::Record { .. } | Ty::OpenRecord { .. } => true,
         // Named records/variants → repr only when a generated impl exists —
-        // or the runtime's own, for a runtime-owned twin (`Endian`,
-        // `FileStat`, `ProcessStatus`) the program references under the
+        // or the runtime's own, for a runtime-owned twin (`FileStat`,
+        // `ProcessStatus`) the program references under the
         // reserved spelling: its impl lives in the runtime, so the route
         // holds with or without the bundled decl (#1829).
         //
         // Asked under the MODULE-QUALIFIED spelling too (#2496): a value
-        // built through `bytes.LittleEndian` types as `bytes.Endian`, and
-        // both these tables are keyed by the bare name `render_type` emits
-        // — so the qualified spelling fell to the `Display` path and rustc
-        // met `AlmideEndian` with no `Display` (E0277), while the bare
-        // `BigEndian` spelling of the same value printed fine.
+        // typed `fs.FileStat` and both these tables are keyed by the bare
+        // name `render_type` emits — so the qualified spelling fell to the
+        // `Display` path and rustc met the runtime type with no `Display`
+        // (E0277), while the bare spelling of the same value printed fine.
         // An opaque newtype renders as its WRAPPED type (#2496, #2860): a
         // repr-backed target takes the newtype's delegating `AlmideRepr`
         // impl, anything else the Display path through `.0`
@@ -1193,6 +1232,57 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         // Everything else (scalars, String, Bool, Unit, Fn, Unknown, …) stays on
         // the Display path.
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod runtime_symbol_declaration_tests {
+    use almide_lang::ast::Decl;
+
+    /// #4217: a symbol a bundled fn declares `@intrinsic` is a runtime fn by
+    /// that declaration. `almide_regex_find` decodes to `regex.find`, which
+    /// has an Almide body — classifying by the spelling called the runtime
+    /// leaf user code, and a `Bytes` result of such a leaf got no glue.
+    #[test]
+    fn a_declared_intrinsic_is_native_whatever_its_spelling_decodes_to() {
+        assert!(
+            almide_ir::mut_args::stdlib_fn_has_almide_body("regex", "find"),
+            "the precondition moved: regex.find no longer has an Almide body"
+        );
+        assert!(almide_ir::mut_args::is_bundled_intrinsic_symbol("almide_regex_find"));
+        assert!(super::rc_cow_symbol_is_native_runtime("almide_regex_find"));
+    }
+
+    /// #4217 (duplicate definition): a runtime symbol equal to the mangled
+    /// name `almide_rt_<module>_<fn>` of a non-generic Almide-bodied bundled
+    /// fn is defined twice in the generated crate (E0428) — once by the
+    /// runtime, once by the rendered body. Read from the declarations, so a
+    /// new leaf that collides is refused here rather than by rustc.
+    #[test]
+    fn no_intrinsic_symbol_is_the_mangled_name_of_an_almide_bodied_fn() {
+        let mut collisions = Vec::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else {
+                continue;
+            };
+            let ident = almide_base::names::module_ident(module);
+            for d in &program.decls {
+                let Decl::Fn { name, attrs, generics, .. } = d else { continue };
+                let intrinsic = attrs.iter().any(|a| a.name.as_str() == "intrinsic");
+                let generic = generics.as_ref().is_some_and(|g| !g.is_empty());
+                if intrinsic || generic {
+                    continue;
+                }
+                let mangled = format!("almide_rt_{}_{}", ident, name.as_str());
+                if almide_ir::mut_args::is_bundled_intrinsic_symbol(&mangled) {
+                    collisions.push(format!("{module}.{}", name.as_str()));
+                }
+            }
+        }
+        assert!(
+            collisions.is_empty(),
+            "an @intrinsic symbol equals the mangled name of these Almide-bodied fns: {collisions:?} — name the leaf `almide_rt_<module>___<leaf>`"
+        );
     }
 }
 

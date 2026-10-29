@@ -8,6 +8,8 @@ From AlmideTrust Require Import NameTotality.
 From AlmideTrust Require Import CapabilityBound.
 From AlmideTrust Require Import CapabilityReach.
 From AlmideTrust Require Import CallModes.
+From AlmideTrust Require Import BoundsCert.
+From AlmideTrust Require Import InitCert.
 From Stdlib Require Import Extraction.
 From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
@@ -49,4 +51,12 @@ Set Extraction Output Directory ".".
    fault-free, and discharges what it holds (`check_xc_abort_sound`); a v5
    cert, which never carries `t`, parses unchanged. The driver dispatches
    ownership to it. *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert.
+(* `check_bounds_cert` (BoundsCert, #4005) is the BOUNDS checker: it parses the
+   `;`-separated per-stretch bounds programs and decides `accepts` on each, so
+   `accept ⟹ every run of every program is Spatial and WellTyped`
+   (`check_bounds_cert_sound`, via SpatialCert.accepts_spatial). *)
+(* `check_init_cert` (InitCert, #4013) is the INIT checker: it parses the
+   `;`-separated construction sites and decides `site_ok` on each, so
+   `accept ⟹ every site's window leaves its block initialized over its whole
+   extent` (`check_init_cert_sound`, via InitCert.site_window). *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert.

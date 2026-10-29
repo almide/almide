@@ -39,7 +39,7 @@ effect fn main() -> Unit = {
 const ENV_SET: &str = r#"import env
 
 effect fn main() -> Unit = {
-  env.set("WASI_SERVICES_PIN", "1")
+  env.set("WASI_SERVICES_PIN", "1")!
   println("set")
 }
 "#;
@@ -47,7 +47,7 @@ effect fn main() -> Unit = {
 const ENV_ROUND_TRIP: &str = r#"import env
 
 effect fn main() -> Unit = {
-  env.set("WASI_SERVICES_PIN", "1")
+  env.set("WASI_SERVICES_PIN", "1")!
   println(env.get("WASI_SERVICES_PIN") ?? "(none)")
   println(int.to_string(list.len(env.args())))
 }
@@ -129,7 +129,7 @@ fn unreachable_stubs(wasm: &[u8]) -> usize {
 #[test]
 fn hello_ships_no_environ_or_args_service() {
     let (wasm, host_ops) = artifact("hello.almd", HELLO);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: false, fs: false, proc: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: false, env_vars: false, fs: false, proc: false });
     let (imports, defined) = shape(&wasm);
     expect_imports(&imports, &["fd_write"]);
     // The emitter's own module keeps its fixed helper slots as stubs; the
@@ -143,7 +143,7 @@ fn hello_ships_no_environ_or_args_service() {
 #[test]
 fn args_program_ships_the_args_pair_only() {
     let (wasm, host_ops) = artifact("args.almd", ARGS);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: true, fs: false, proc: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: true, env_vars: false, fs: false, proc: false });
     let (imports, defined) = shape(&wasm);
     let want: Vec<&str> = BASE.iter().chain(ARGS_PAIR.iter()).copied().collect();
     expect_imports(&imports, &want);
@@ -153,7 +153,7 @@ fn args_program_ships_the_args_pair_only() {
 #[test]
 fn env_get_program_ships_the_environ_pair_only() {
     let (wasm, host_ops) = artifact("env_get.almd", ENV_GET);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: false, args: false, fs: false, proc: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: false, args: false, env_vars: false, fs: false, proc: false });
     let (imports, defined) = shape(&wasm);
     let want: Vec<&str> = BASE.iter().chain(ENVIRON_PAIR.iter()).copied().collect();
     expect_imports(&imports, &want);
@@ -163,7 +163,7 @@ fn env_get_program_ships_the_environ_pair_only() {
 #[test]
 fn env_set_program_ships_the_overlay_shim_and_no_import() {
     let (wasm, host_ops) = artifact("env_set.almd", ENV_SET);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: true, args: false, fs: false, proc: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: true, args: false, env_vars: false, fs: false, proc: false });
     let (imports, defined) = shape(&wasm);
     expect_imports(&imports, &BASE);
     assert_eq!(defined, defined_without_services(&raw("env_set.almd", ENV_SET)) + 1, "the overlay-append shim, alone");
@@ -172,7 +172,7 @@ fn env_set_program_ships_the_overlay_shim_and_no_import() {
 #[test]
 fn full_env_surface_ships_the_whole_quartet() {
     let (wasm, host_ops) = artifact("env_round_trip.almd", ENV_ROUND_TRIP);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: true, args: true, fs: false, proc: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: true, args: true, env_vars: false, fs: false, proc: false });
     let (imports, defined) = shape(&wasm);
     let want: Vec<&str> = BASE.iter().chain(ENVIRON_PAIR.iter()).chain(ARGS_PAIR.iter()).copied().collect();
     expect_imports(&imports, &want);
@@ -268,12 +268,12 @@ fn process_program_ships_the_private_spawn_import_and_cabi_realloc() {
     const PROC: &str = r#"import process
 
 effect fn main() -> Unit = {
-  let s = process.exec_status("sh", ["-c", "printf hi"])!
+  let s = process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "printf hi"] })!
   println(s.stdout)
 }
 "#;
     let (wasm, host_ops) = artifact("proc.almd", PROC);
-    assert!(host_ops.contains(&83), "exec_status is op 83: {host_ops:?}");
+    assert!(host_ops.contains(&84), "output is op 84: {host_ops:?}");
     assert!(P1Services::from_ops(&host_ops).proc);
     let mut imports = Vec::new();
     let mut exports = Vec::new();

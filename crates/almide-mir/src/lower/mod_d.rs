@@ -5,7 +5,7 @@
 // this crate to; there is no boundary of meaning here, and `include!` at module
 // level is the one splice Rust allows (an impl-item position rejects it).
 
-/// A sized-int WIDENING conversion call (`int8.to_int64(x)`, `uint32.to_int64(x)`, …)
+/// A sized-int WIDENING conversion call (`int.__to_int64(x)` over any sized int)
 /// whose runtime is the IDENTITY on the canonical-i64 slot value: every integer width
 /// lives sign-/zero-extended in one i64 (the `Ty` docs + `extern_wasm_abi` pin this),
 /// and the Rust runtime is `n as i64` over that already-canonical value (`u64 as i64`
@@ -28,13 +28,7 @@ pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
 /// producers that hold an UNPACKED Module call (`lower_pure_module_value_call`)
 /// — one predicate, so the elision and the caps counter cannot drift apart.
 pub fn is_identity_int_widening(module: &str, func: &str, args: &[IrExpr]) -> bool {
-    if args.len() != 1 || func != "to_int64" {
-        return false;
-    }
-    if !matches!(
-        module,
-        "int" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
-    ) {
+    if args.len() != 1 || module != "int" || func != "__to_int64" {
         return false;
     }
     matches!(
@@ -51,7 +45,7 @@ pub fn is_identity_int_widening(module: &str, func: &str, args: &[IrExpr]) -> bo
     )
 }
 
-/// A `float.from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
+/// A `float.__from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
 /// the lowering emits ONE `PrimKind::F64FromInt` (a `f64.convert_i64_s` in the
 /// render, `as f64` natively) instead of the self-host runtime CALL, and
 /// `count_ir_calls` skips the node by this SAME predicate (`mir == ir` by
@@ -71,7 +65,7 @@ pub fn float_from_int_prim_call(e: &IrExpr) -> Option<&IrExpr> {
 /// The (module, func, args) core of [`float_from_int_prim_call`] — same
 /// single-predicate discipline as [`is_identity_int_widening`].
 pub fn is_float_from_int_prim(module: &str, func: &str, args: &[IrExpr]) -> bool {
-    module == "float" && func == "from_int" && args.len() == 1 && matches!(args[0].ty, Ty::Int)
+    module == "float" && func == "__from_int" && args.len() == 1 && matches!(args[0].ty, Ty::Int)
 }
 
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the
@@ -336,6 +330,15 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
     if let Some((k, _)) = layouts.get_key_value(name) {
         return Some(k.as_str());
     }
+    // A stdlib record spelled through its module (`process.ProcessCommand`)
+    // whose decl the bundled module registers under its bare name.
+    if let Some((module, bare)) = name.rsplit_once('.') {
+        if almide_lang::stdlib_info::stdlib_owned_type_owner(bare) == Some(module) {
+            if let Some((k, _)) = layouts.get_key_value(bare) {
+                return Some(k.as_str());
+            }
+        }
+    }
     let suffix = format!(".{name}");
     let mut found: Option<&'a str> = None;
     for k in layouts.keys() {
@@ -349,7 +352,7 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
     found
 }
 
-/// The bare spelling of a STDLIB-OWNED type name (`Value`, `Endian`, `Url`, …)
+/// The bare spelling of a STDLIB-OWNED type name (`Value`, `IpAddr`, `Url`, …)
 /// is that stdlib type's own canonical identity — the `Ty::Named("Value")`
 /// every linked registry body carries — and a user scope's declaration of the
 /// same name (`self.Value`, `m.Value`; #1828) is a different type that merely
@@ -357,7 +360,7 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
 /// it did, and `json.parse`'s `List[Value]` accumulator lowered against the
 /// user's `{ n: Int }` layout — its drops walked an Int as a handle, and the
 /// incumbent leg of `stdlib_type_shadow.almd` never terminated. A BUNDLED
-/// module's own qualified key (`bytes.Endian`) is still reachable by its bare
+/// module's own qualified key (`net.IpAddr`) is still reachable by its bare
 /// name, exactly as before.
 fn bare_is_stdlib_own_identity(bare: &str, qualified: &str) -> bool {
     almide_lang::stdlib_info::stdlib_type_vs_user_shadow(bare, qualified)

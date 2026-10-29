@@ -3,13 +3,28 @@
 # Usage:
 #   irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex
 #   .\install.ps1 v0.12.3                                    # specific version
+#   .\install.ps1 --skip-attestation                         # no `gh`: checksum only
+#   & ([scriptblock]::Create((irm <url above>))) --skip-attestation   # the same, piped
 #   $env:ALMIDE_INSTALL = "$HOME\bin"; .\install.ps1          # custom install dir
+#
+# The release attestation is verified with the GitHub CLI (`gh`). Without it
+# the installer refuses (security row 16), as `almide self-update` does:
+# `--skip-attestation` installs on the checksum alone, which proves the
+# archive is the one the release lists, not who built it.
 
 $ErrorActionPreference = 'Stop'
+# TLS 1.2 or newer for every download (#4181); the URLs below are https only.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $Repo = "almide/almide"
 $InstallDir = if ($env:ALMIDE_INSTALL) { $env:ALMIDE_INSTALL } else { "$env:USERPROFILE\.local\bin" }
-$Version = if ($args.Count -gt 0) { $args[0] } else { "latest" }
+$Version = "latest"
+$SkipAttestation = $false
+foreach ($A in $args) {
+    if ($A -eq "--skip-attestation" -or $A -eq "-SkipAttestation") { $SkipAttestation = $true }
+    elseif ("$A".StartsWith("-")) { Write-Host "error: unknown option: $A" -ForegroundColor Red; exit 1 }
+    else { $Version = "$A" }
+}
 
 $Archive = "almide-windows-x86_64.zip"
 
@@ -43,14 +58,45 @@ try {
 
     Write-Host "Verifying checksum..."
     $Checksums = Get-Content "$Tmp\checksums.sha256"
-    $Line = $Checksums | Where-Object { $_ -match [regex]::Escape($Archive) }
-    $Expected = ($Line -split '\s+')[0].ToLower()
+    # Match the file-name field exactly (optional leading `*`), never a
+    # substring: a `.sig` / `.sbom` line must not supply the hash (#4127).
+    $Expected = $null
+    foreach ($L in $Checksums) {
+        $F = $L.Trim() -split '\s+'
+        if ($F.Count -eq 2 -and $F[1].TrimStart('*') -eq $Archive) { $Expected = $F[0].ToLower(); break }
+    }
+    if (-not $Expected) {
+        Write-Host "error: no checksum listed for $Archive" -ForegroundColor Red
+        exit 1
+    }
     $Actual = (Get-FileHash "$Tmp\$Archive" -Algorithm SHA256).Hash.ToLower()
 
     if ($Expected -ne $Actual) {
         Write-Host "error: checksum mismatch" -ForegroundColor Red
         Write-Host "       expected: $Expected"
         Write-Host "       got:      $Actual"
+        exit 1
+    }
+
+    # --- Verify origin ---
+    # The checksum came from the same place as the archive: integrity, not
+    # origin (#4127). Verify the release's Sigstore attestation (#1534). Fail
+    # closed (security row 16): no `gh` means no install unless the command
+    # line says --skip-attestation.
+    if ($SkipAttestation) {
+        Write-Host "warning: --skip-attestation: installing without verifying the release attestation (the checksum proves integrity, not origin)"
+    } elseif (Get-Command gh -ErrorAction SilentlyContinue) {
+        Write-Host "Verifying the release attestation..."
+        & gh attestation verify "$Tmp\$Archive" -R $Repo | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "error: the release attestation did not verify; refusing to install" -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Host "error: gh not found, so the release attestation cannot be verified; refusing to install" -ForegroundColor Red
+        Write-Host "       install the GitHub CLI (https://cli.github.com) and run this again, or pass"
+        Write-Host "       --skip-attestation to install on the checksum alone:"
+        Write-Host "       & ([scriptblock]::Create((irm https://raw.githubusercontent.com/$Repo/main/tools/install.ps1))) --skip-attestation"
         exit 1
     }
 

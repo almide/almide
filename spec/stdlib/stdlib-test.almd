@@ -6,9 +6,9 @@ import int
 test "string.lines splits" {
   let lines = string.lines("hello\nworld\nfoo")
   assert_eq(list.len(lines), 3)
-  assert_eq(list.get_or(lines, 0, ""), "hello")
-  assert_eq(list.get_or(lines, 1, ""), "world")
-  assert_eq(list.get_or(lines, 2, ""), "foo")
+  assert_eq(list.get(lines, 0) ?? "", "hello")
+  assert_eq(list.get(lines, 1) ?? "", "world")
+  assert_eq(list.get(lines, 2) ?? "", "foo")
 }
 
 test "string.lines empty string" {
@@ -26,7 +26,7 @@ test "string.trim" {
 test "string.split and join roundtrip" {
   let parts = string.split("a,b,c", ",")
   assert_eq(list.len(parts), 3)
-  assert_eq(string.join(parts, ","), "a,b,c")
+  assert_eq(list.join(parts, ","), "a,b,c")
 }
 
 test "string.contains and starts/ends_with" {
@@ -65,19 +65,19 @@ test "string.get" {
   assert_eq(string.get("abc", 5), none)
 }
 
-test "string.to_bytes" {
-  let bytes = string.to_bytes("AB")
-  assert_eq(list.len(bytes), 2)
-  assert_eq(list.get_or(bytes, 0, 0), 65)
-  assert_eq(list.get_or(bytes, 1, 0), 66)
+test "bytes.from_string" {
+  let bs = bytes.to_list(bytes.from_string("AB"))
+  assert_eq(list.len(bs), 2)
+  assert_eq(list.get(bs, 0) ?? 0, 65)
+  assert_eq(list.get(bs, 1) ?? 0, 66)
 }
 
 test "list.get and get_or" {
   let xs = ["a", "b", "c"]
   assert_eq(list.get(xs, 0), some("a"))
   assert_eq(list.get(xs, 5), none)
-  assert_eq(list.get_or(xs, 1, "default"), "b")
-  assert_eq(list.get_or(xs, 5, "default"), "default")
+  assert_eq(list.get(xs, 1) ?? "default", "b")
+  assert_eq(list.get(xs, 5) ?? "default", "default")
 }
 
 test "list.len" {
@@ -296,43 +296,43 @@ test "list.all" {
   assert(not list.all([2, 3, 6], (x) => x % 2 == 0))
 }
 
-test "map.get_or" {
+test "map.get ??" {
   let m = map.set(map.new(), "key", "val")
-  assert_eq(map.get_or(m, "key", "default"), "val")
-  assert_eq(map.get_or(m, "missing", "default"), "default")
+  assert_eq(map.get(m, "key") ?? "default", "val")
+  assert_eq(map.get(m, "missing") ?? "default", "default")
 }
 
 test "simple hash fold" {
-  let data = string.to_bytes("test")
+  let data = bytes.to_list(bytes.from_string("test"))
   let h = list.fold(data, 5381, (h, b) => h * 33 + b)
   assert(h > 0, "hash should be positive")
 }
 
 // ============================================================
-// map.get_or
+// map.get with a ?? default
 // ============================================================
 test "hash deterministic" {
-  let h1 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
-  let h2 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
+  let h1 = list.fold(bytes.to_list(bytes.from_string("hello")), 5381, (h, b) => h * 33 + b)
+  let h2 = list.fold(bytes.to_list(bytes.from_string("hello")), 5381, (h, b) => h * 33 + b)
   assert_eq(h1, h2)
 }
 
 // ============================================================
 // hash function (cross-platform safe, within JS safe integer range)
 // ============================================================
-test "string.chars basic" {
-  assert_eq(string.chars("abc"), ["a", "b", "c"])
+test "string.to_list basic" {
+  assert_eq(string.to_list("abc"), ["a", "b", "c"])
 }
 
-test "string.chars empty" {
-  assert_eq(string.chars(""), [])
+test "string.to_list empty" {
+  assert_eq(string.to_list(""), [])
 }
 
 // ============================================================
-// string.chars
+// string.to_list
 // ============================================================
-test "string.chars single" {
-  assert_eq(string.chars("x"), ["x"])
+test "string.to_list single" {
+  assert_eq(string.to_list("x"), ["x"])
 }
 
 test "string.index_of found" {
@@ -369,17 +369,17 @@ test "string.repeat one" {
   assert_eq(string.repeat("hi", 1), "hi")
 }
 
-test "string.from_bytes roundtrip" {
+test "bytes.to_string_lossy roundtrip" {
   let s = "hello"
-  assert_eq(string.from_bytes(string.to_bytes(s)), s)
+  assert_eq(bytes.to_string_lossy(bytes.from_list(bytes.to_list(bytes.from_string(s)))), s)
 }
 
-test "string.from_bytes empty" {
-  assert_eq(string.from_bytes([]), "")
+test "bytes.to_string_lossy empty" {
+  assert_eq(bytes.to_string_lossy(bytes.from_list([])), "")
 }
 
 // ============================================================
-// string.from_bytes
+// bytes.to_string_lossy
 // ============================================================
 test "string.is_digit true" {
   assert(string.is_digit("0"))
@@ -441,7 +441,7 @@ test "string.is_whitespace false" {
 // string.is_whitespace
 // ============================================================
 test "string UFCS chars" {
-  assert_eq("abc".chars(), ["a", "b", "c"])
+  assert_eq("abc".to_list(), ["a", "b", "c"])
 }
 
 test "string UFCS is_digit" {
@@ -614,7 +614,7 @@ test "for...in with zip destructuring" {
 test "for...in with map entries destructuring" {
   let m = map.set(map.set(map.new(), "x", 1), "y", 2)
   var sum = 0
-  for (k, v) in map.entries(m) {
+  for (k, v) in map.to_list(m) {
     sum = sum + v
   }
   assert_eq(sum, 3)

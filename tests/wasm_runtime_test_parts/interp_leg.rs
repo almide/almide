@@ -59,10 +59,25 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //          `mod type SafeHtml = String` newtype is the interp's
         //          identity ctor + pass-through pattern (#1835).
         //   path — #1844: the next stop of availability_pure_batch after html
-        //          (`path.from_string`); a `mod type SafePath = String` twin.
+        //          (`path.join`).
         //   url  — #1844: closes stdlib_type_shadow (`url.parse`); pure
         //          string arithmetic over the bridge, no prim reached.
-        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "html", "path", "url"];
+        //   secret — #4107: `secret.new` / `secret.reveal` and the type's
+        //          declared `Secret.repr`, pure Almide (the declared-repr
+        //          walkers are frontend IR, so the interp runs them as is).
+        //   env / hash — row 20 (C-438, C-422): `env.secret` and the Secret
+        //          HMAC cells are pure Almide over the env floor and
+        //          sha256/sha512; lowered as modules, their effect fns carry
+        //          the Result their callers' `!` reads.
+        //   http   — row 22 (C-436): `http.decode_json[T]` is generic over the
+        //          caller's input type, so the self-host pool (lowered without
+        //          mono) has no body for it; lowered as a module here it is
+        //          monomorphized per input type like any user generic.
+        //   bigint — C-419 (bigint_text_and_pow_limits): the whole module is
+        //          pure Almide over a `{ neg, limbs }` record, and `from[S:
+        //          Numeric]` wants the per-type mono only a module lowering
+        //          gives, so the registry pool has no body for any of it.
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "bigint", "env", "hash", "html", "http", "path", "secret", "url"];
         let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
         for imp in &prog.imports {
             let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };

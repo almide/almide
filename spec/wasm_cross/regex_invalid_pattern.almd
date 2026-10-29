@@ -1,0 +1,70 @@
+// @contract: C-395
+// R-regex-02 (#3942): a pattern outside the engine's one grammar is refused,
+// where it used to be read leniently and match something nobody wrote —
+// `regex.is_match("(", "abc")` answered true, `regex.find("[", "abc")` none,
+// and `(?P<n>a)` was an ordinary group. `regex.compile` answers
+// err(reason); `regex.new` aborts with `Error: invalid regex: <reason>`, exit
+// 1. The reason is the first violation met left to right, worded the same on
+// every leg. A literal pattern is refused even earlier, by `almide check`
+// (E102), so every pattern below is built at run time.
+import regex
+
+fn reason(p: String) -> String = match regex.compile(p) {
+  ok(_) => "OK",
+  err(e) => e,
+}
+
+fn main() -> Unit = {
+  let cases = [
+    "(",
+    ")",
+    "a)",
+    "[",
+    "[a",
+    "[\\",
+    "*",
+    "+a",
+    "?",
+    "a**",
+    "a{",
+    "{2}",
+    "a{x}",
+    "a{,3}",
+    "a{2",
+    "a{3,1}",
+    "(?P<n>a)",
+    "(?<n>a)",
+    "(?=a)",
+    "(?!a)",
+    "(?<=a)",
+    "(?<!a)",
+    "a(?i)b",
+    "(?i:a)",
+    "(?x)a",
+    "\\",
+    "\\q",
+    "\\1",
+    "[\\q]",
+    "[\\D]",
+    "[z-a]",
+    "[a-\\]]",
+    "(?:x)(y)",
+    "(?i)AbC",
+    "(?im)^x$",
+    "[]a]",
+    "a{2,}?",
+    "a\\{x\\}",
+    ""
+  ]
+  for p in cases {
+    println("${p} => ${reason(p)}")
+  }
+  let deep = string.repeat("(", 251) + "a" + string.repeat(")", 251)
+  println("251 nested => ${reason(deep)}")
+  let ok_deep = string.repeat("(", 250) + "a" + string.repeat(")", 250)
+  println("250 nested => ${reason(ok_deep)}")
+  // regex.new on a pattern built at run time: the abort is the last line
+  let broken = "a(b" + "|c"
+  let re = regex.new(broken)
+  println("unreached ${regex.is_match(re, "ab")}")
+}

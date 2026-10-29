@@ -705,7 +705,7 @@ fn while_body_is_unit(e: &IrExpr) -> bool {
 }
 
 /// The root vars (with their types) of every FIELD-PATH receiver of an in-place
-/// mutator in a loop body (`list.pop(u.kids)` → `u`, `bytes.set_u8(d.a.buf, ..)` →
+/// mutator in a loop body (`list.pop(u.kids)` → `u`, `bytes.put_u8(d.a.buf, ..)` →
 /// `d`), in first-occurrence order. A nested loop pre-copies its own — not descended.
 fn collect_field_mutator_roots(stmts: &[IrStmt]) -> Vec<(VarId, Ty)> {
     use almide_ir::visit::{walk_expr, IrVisitor};

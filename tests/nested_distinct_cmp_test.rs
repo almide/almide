@@ -53,9 +53,9 @@ type W[T] = { v: T, c: C }
 effect fn main() -> Unit = {
   let deep: List[List[List[List[List[List[List[List[List[Int]]]]]]]]] = [[[[[[[[[1, 2]]]]]]]]]
   println("${deep}")
-  let u = (0 - 1).to_uint64()
+  let u = uint64.from_wrapping(0 - 1)
   let h = 0.1
-  let f = h.to_float32()
+  let f = float32.from(h)
   let m: List[List[List[List[List[List[List[List[(UInt64, Option[List[Map[String, List[Float32]]]])]]]]]]]] =
     [[[[[[[[(u, some([["k": [f]]]))]]]]]]]]
   println("${m}")

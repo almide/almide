@@ -41,7 +41,7 @@ fn wasm_module_global_list_mutated_through_closure() {
 
 #[test]
 fn wasm_module_global_map_mutated_through_closure() {
-    // Same, via `map.insert` invoked as an EXPRESSION on a `ModuleRc` global. The
+    // Same, via an index assign `g[k] = v` inside a closure on a `ModuleRc` global. The
     // Rust walker only special-cased list push/pop/clear, so map/string/bytes
     // mutators on a global mutated a discarded `(**c.borrow()).clone()` (silently
     // wrong); the mutator set is now the shared `is_inplace_mutator`. Inserts two
@@ -49,8 +49,8 @@ fn wasm_module_global_map_mutated_through_closure() {
     assert_cross_target_effect_main(
         "var g: Map[String, Int] = map.new()\n\
          effect fn main() -> Unit = {\n\
-         \x20 let f = () => { map.insert(g, \"a\", 1) }\n\
-         \x20 let h = () => { map.insert(g, \"b\", 2) }\n\
+         \x20 let f = () => { g[\"a\"] = 1 }\n\
+         \x20 let h = () => { g[\"b\"] = 2 }\n\
          \x20 f()\n\
          \x20 h()\n\
          \x20 println(int.to_string(map.len(g)))\n\
@@ -93,14 +93,14 @@ fn wasm_closure_selected_by_match_arm() {
 #[test]
 fn wasm_closure_in_map_from_list() {
     // A closure as the value of a `map.from_list([(k, closure)])` literal. The old
-    // boxing covered `map.insert`/`get_or` only; from_list's closures live inside a
+    // boxing covered the index assign and `map.get` only; from_list's closures live inside a
     // list-of-tuples literal. The unified pass boxes Fn positions inside a uniform
     // container's tuple elements, so the inner list-of-tuples is handled. len 1.
     assert_cross_target_effect_main(
         "effect fn main() -> Unit = {\n\
          \x20 var acc: List[Int] = []\n\
          \x20 let m: Map[String, () -> Unit] = map.from_list([(\"a\", () => { list.push(acc, 1) })])\n\
-         \x20 let f = map.get_or(m, \"a\", () => {})\n\
+         \x20 let f = map.get(m, \"a\") ?? (() => {})\n\
          \x20 f()\n\
          \x20 println(int.to_string(list.len(acc)))\n\
          }\n",
@@ -145,7 +145,7 @@ fn wasm_closure_list_in_record_field() {
 
 #[test]
 fn wasm_bytes_set_at_shared_through_closure() {
-    // `bytes.set_at` had no WASM dispatch arm -> fell through to an ICE in
+    // `bytes.put_u8`'s predecessor had no WASM dispatch arm -> fell through to an ICE in
     // emit_wasm. Native ran fine. A `set_at` arm (in-place index store, no realloc,
     // Unit return) was added. The Bytes buffer is shared by reference across the
     // writer/reader closures, so after the writer sets index 0 to 99 the reader
@@ -153,8 +153,8 @@ fn wasm_bytes_set_at_shared_through_closure() {
     assert_cross_target_effect_main(
         "effect fn main() -> Unit = {\n\
          \x20 var b: Bytes = bytes.from_list([1, 1, 1])\n\
-         \x20 let writer = () => { bytes.set_at(b, 0, 99); bytes.get_or(b, 0, -1) }\n\
-         \x20 let reader = () => { bytes.get_or(b, 0, -1) }\n\
+         \x20 let writer = () => { bytes.put_u8(b, 0, 99); bytes.get(b, 0) ?? -1 }\n\
+         \x20 let reader = () => { bytes.get(b, 0) ?? -1 }\n\
          \x20 println(int.to_string(reader()))\n\
          \x20 println(int.to_string(writer()))\n\
          \x20 println(int.to_string(reader()))\n\
@@ -218,7 +218,7 @@ fn wasm_global_named_rust_keyword() {
 #[test]
 fn wasm_global_name_collides_with_stdlib_param() {
     // A mutable global `n: Int` collides by name with the `n` parameter of stdlib
-    // numeric helpers (e.g. `int.to_int8_checked(n)`). The storage classifier's
+    // numeric helpers (e.g. `int8.from_checked(n)`). The storage classifier's
     // by-name fallback misclassified that parameter as the global, so its body
     // read `N.with(...)` (i64) where an f64 was expected -> rustc E0308. The
     // fallback is now restricted to ALMIDE_RT_-prefixed cross-module names.
@@ -402,7 +402,7 @@ fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
     let src = dir.path().join("dead.almd");
     std::fs::write(
         &src,
-        "import net\n\nlocal effect fn dead(h: String) -> Int = net.tcp_connect(h, 1)!\n\
+        "import net\n\nlocal effect fn dead(h: String) -> Int = list.len(net.lookup_host(h)!)\n\
          fn main() -> Unit = println(\"ok\")\n",
     )
     .unwrap();
@@ -449,7 +449,7 @@ const PREOPEN_PROBE_SRC: &str = "import fs\n\
      \n\
      effect fn main() -> Unit = {\n\
      \x20 let p = env.args()[0]\n\
-     \x20 match fs.write(p, \"PREOPEN-MULTI\") {\n\
+     \x20 match fs.write_text(p, \"PREOPEN-MULTI\") {\n\
      \x20   ok(_) => println(\"write=OK\"),\n\
      \x20   err(e) => println(\"write=ERR[\" + e + \"]\"),\n\
      \x20 }\n\

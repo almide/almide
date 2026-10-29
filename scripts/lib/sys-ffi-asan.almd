@@ -1,0 +1,22 @@
+// The runtime's foreign calls (runtime/rs/src/sys.rs, #4007) under
+// AddressSanitizer: .github/workflows/miri-nightly.yml's asan job runs this
+// beside spec/wasm_cross. Miri stops at a child process; ASan runs it.
+// Reaches set_signal (SIGPIPE ignored around a stdin write, then restored),
+// wait_exited_or_stopped (the timeout poll), thread_cpu_ns (the fan clock)
+// and, in every native main, the emitted SIGPIPE prelude and stack guard.
+import process
+
+effect fn main() -> Unit = {
+  // A child that exits without reading: the write meets EPIPE, not SIGPIPE.
+  let early = process.output(process.ProcessCommand { cmd: "true", args: [], stdin: string.repeat("x", 1048576) })
+  println(match early {
+    ok(_) => "early: returned",
+    err(_) => "early: returned",
+  })
+  let echoed = process.output(process.ProcessCommand { cmd: "cat", args: [], stdin: "hello" })!
+  println("cat=" + echoed.stdout)
+  let st = process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 3"], timeout_ms: 5000 })!
+  println("code=" + int.to_string(st.code))
+  let xs = fan.map(list.range(0, 64), (x) => ok(x * x))!
+  println("fan=" + int.to_string(list.fold(xs, 0, (a, b) => a + b)))
+}

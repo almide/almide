@@ -4,9 +4,10 @@
 //! language-specific packages (pip, npm, gem, etc.) without needing
 //! to parse Almide source or understand the IR format.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
 use almide_ir::*;
+use almide_lang::ast::{Decl, TypeExpr};
 use almide_lang::types::Ty;
 use almide_lang::types::constructor::TypeConstructorId;
 
@@ -213,6 +214,7 @@ struct ExtractCtx {
     record_names: RecordLookup,
     variant_names: VariantLookup,
     doc_info: HashMap<std::string::String, DocInfo>,
+    spelling: Spelling,
 }
 
 pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Option<&str>, version: Option<&str>) -> ModuleInterface {
@@ -220,6 +222,7 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
         record_names: build_record_lookup(program),
         variant_names: build_variant_lookup(program),
         doc_info: source.map(|s| extract_docs(s)).unwrap_or_default(),
+        spelling: source.map(|s| Spelling::read(program, s)).unwrap_or_default(),
     };
     ModuleInterface {
         module: module_name.to_string(),
@@ -233,18 +236,19 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
 
 /// The `types` section: every public type decl, with its ABI layout and docs.
 fn extract_types(program: &IrProgram, cx: &ExtractCtx) -> Vec<TypeExport> {
-    let ExtractCtx { record_names, variant_names, doc_info } = cx;
+    let ExtractCtx { record_names, variant_names, doc_info, spelling } = cx;
     let mut types = Vec::new();
     for td in &program.type_decls {
         if !matches!(td.visibility, IrVisibility::Public) { continue; }
         let generics = td.generics.as_ref()
             .filter(|g| !g.is_empty())
             .map(|g| g.iter().map(|p| p.name.to_string()).collect());
+        let written = spelling.types.get(td.name.as_str());
         let kind = match &td.kind {
             IrTypeDeclKind::Record { fields } => TypeKindExport::Record {
                 fields: fields.iter().map(|f| FieldExport {
                     name: f.name.to_string(),
-                    ty: resolve_ty(&f.ty, &record_names, &variant_names),
+                    ty: cx.spelled(written.and_then(|w| w.field(f.name.as_str())), &f.ty),
                     has_default: f.default.is_some(),
                 }).collect(),
             },
@@ -267,7 +271,7 @@ fn extract_types(program: &IrProgram, cx: &ExtractCtx) -> Vec<TypeExport> {
                 }).collect(),
             },
             IrTypeDeclKind::Alias { target } => TypeKindExport::Alias {
-                target: resolve_ty(target, &record_names, &variant_names),
+                target: cx.spelled(written, target),
             },
         };
         let abi = compute_abi(td);
@@ -287,7 +291,7 @@ fn extract_types(program: &IrProgram, cx: &ExtractCtx) -> Vec<TypeExport> {
 /// The `functions` section: every public fn (plus wasm imports, which are
 /// part of the contract whether or not they are `pub`).
 fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport> {
-    let ExtractCtx { record_names, variant_names, doc_info } = cx;
+    let ExtractCtx { record_names, variant_names, doc_info, spelling } = cx;
     let mut functions = Vec::new();
     for func in &program.functions {
         if func.is_test { continue; }
@@ -299,19 +303,28 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
             .filter(|g| !g.is_empty())
             .map(|g| g.iter().map(|p| p.name.to_string()).collect());
 
+        let name = user_fn_source_name(func.name.as_str()).to_string(); // #3483: an escaped entry fn
+        // The declaration as written, when its parameters line up with the IR's.
+        let written = spelling.fns.get(name.as_str()).filter(|(ps, _)| ps.len() == func.params.len());
+        let written_ret = written.map(|(_, r)| r);
         let (ret, error) = if func.is_effect {
             match &func.ret_ty {
                 Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-                    (resolve_ty(&args[0], &record_names, &variant_names),
+                    // The declared return of an effect fn is its success type,
+                    // unless the source spelled the Result itself.
+                    let ok_written = written_ret.and_then(|r| match r {
+                        TypeExpr::Generic { name, args: a } if name.as_str() == "Result" && a.len() == 2 => a.first(),
+                        other => Some(other),
+                    });
+                    (cx.spelled(ok_written, &args[0]),
                      Some(resolve_ty(&args[1], &record_names, &variant_names)))
                 }
-                other => (resolve_ty(other, &record_names, &variant_names), Some(TypeRef::String)),
+                other => (cx.spelled(written_ret, other), Some(TypeRef::String)),
             }
         } else {
-            (resolve_ty(&func.ret_ty, &record_names, &variant_names), None)
+            (cx.spelled(written_ret, &func.ret_ty), None)
         };
 
-        let name = user_fn_source_name(func.name.as_str()).to_string(); // #3483: an escaped entry fn
         let info = doc_info.get(&name);
         let import = func.extern_attrs.iter()
             .find(|a| a.target.as_str() == "wasm")
@@ -321,9 +334,9 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
             });
         functions.push(FunctionExport {
             name,
-            params: func.params.iter().map(|p| ParamExport {
+            params: func.params.iter().enumerate().map(|(i, p)| ParamExport {
                 name: p.name.to_string(),
-                ty: resolve_ty(&p.ty, &record_names, &variant_names),
+                ty: cx.spelled(written.map(|(ps, _)| &ps[i]), &p.ty),
                 is_mut: p.is_mut,
             }).collect(),
             ret,
@@ -343,7 +356,7 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
 
 /// The `constants` section: top-level lets, with values for literals.
 fn extract_constants(program: &IrProgram, cx: &ExtractCtx) -> Vec<ConstantExport> {
-    let ExtractCtx { record_names, variant_names, doc_info } = cx;
+    let ExtractCtx { record_names, variant_names, doc_info, .. } = cx;
     let mut constants = Vec::new();
     for tl in &program.top_lets {
         let name = program.var_table.get(tl.var).name.to_string();
@@ -457,7 +470,7 @@ fn resolve_ty_scalar(ty: &Ty) -> Option<TypeRef> {
         Ty::Float64 => named("Float64"),
         // #1832: the raw pointer and the bottom type used to fall through to
         // `Unknown`, which the signature index rendered as `?`.
-        Ty::RawPtr => named("RawPtr"),
+        Ty::RawPtr => named("Handle"),
         Ty::Never => named("Never"),
         _ => return None,
     })
@@ -541,6 +554,153 @@ fn resolve_ty_structural(ty: &Ty, records: &RecordLookup, variants: &VariantLook
         }
         _ => return None,
     })
+}
+
+// ── Alias spelling ──
+//
+// A transparent alias (`type HttpHandler = effect (HttpRequest) -> HttpResponse`)
+// is expanded by the checker, so the IR `Ty` of a parameter declared
+// `HttpHandler` no longer says so and the interface printed the expansion. The
+// declaration's own type expression still does. `Spelling` keeps each public
+// fn's and type's written type expressions, and `ExtractCtx::spelled` walks one
+// beside the IR `Ty`: wherever the source wrote the name of a public alias the
+// module declares, the interface keeps that name; everywhere else the `Ty`
+// decides, exactly as `resolve_ty` does. Nothing here knows any alias by name:
+// the set is read from the module's own type declarations.
+
+/// The written type expressions of one module, read from its source.
+#[derive(Default)]
+struct Spelling {
+    /// Public non-generic transparent aliases the module declares.
+    aliases: HashSet<std::string::String>,
+    /// fn name → (parameter types, return type), as written.
+    fns: HashMap<std::string::String, (Vec<TypeExpr>, TypeExpr)>,
+    /// type name → its right-hand side, as written.
+    types: HashMap<std::string::String, TypeExpr>,
+}
+
+impl Spelling {
+    fn read(program: &IrProgram, source: &str) -> Spelling {
+        let aliases = program.type_decls.iter()
+            .filter(|td| matches!(td.visibility, IrVisibility::Public))
+            .filter(|td| matches!(td.kind, IrTypeDeclKind::Alias { .. }))
+            .filter(|td| td.generics.as_ref().is_none_or(|g| g.is_empty()))
+            .map(|td| td.name.to_string())
+            .collect();
+        let tokens = almide_lang::lexer::Lexer::tokenize(source);
+        let Ok(ast) = almide_lang::parser::Parser::new(tokens).parse() else {
+            return Spelling { aliases, ..Spelling::default() };
+        };
+        let mut fns = HashMap::new();
+        let mut types = HashMap::new();
+        for d in &ast.decls {
+            match d {
+                Decl::Fn { name, params, return_type, .. } => {
+                    fns.entry(name.to_string()).or_insert_with(|| {
+                        (params.iter().map(|p| p.ty.clone()).collect(), return_type.clone())
+                    });
+                }
+                Decl::Type { name, ty, .. } => {
+                    types.entry(name.to_string()).or_insert_with(|| ty.clone());
+                }
+                _ => {}
+            }
+        }
+        Spelling { aliases, fns, types }
+    }
+}
+
+trait WrittenFields {
+    fn field(&self, name: &str) -> Option<&TypeExpr>;
+}
+
+impl WrittenFields for TypeExpr {
+    fn field(&self, name: &str) -> Option<&TypeExpr> {
+        match self {
+            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
+                fields.iter().find(|f| f.name.as_str() == name).map(|f| &f.ty)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl ExtractCtx {
+    /// `ty` serialized as `resolve_ty` does, except that a public alias the
+    /// `written` expression names stays named.
+    fn spelled(&self, written: Option<&TypeExpr>, ty: &Ty) -> TypeRef {
+        let base = resolve_ty(ty, &self.record_names, &self.variant_names);
+        let Some(te) = written else { return base };
+        if let TypeExpr::Simple { name } = te {
+            if self.spelling.aliases.contains(name.as_str()) {
+                return TypeRef::Named { name: name.to_string(), args: Vec::new() };
+            }
+        }
+        let written_kids: &[TypeExpr] = match te {
+            TypeExpr::Generic { args, .. } => args,
+            TypeExpr::Tuple { elements } => elements,
+            TypeExpr::Fn { params, ret, is_effect } => {
+                let Ty::Fn { params: tps, ret: tret, .. } = ty else { return base };
+                if params.len() != tps.len() { return base; }
+                let mut kids: Vec<TypeRef> =
+                    params.iter().zip(tps).map(|(w, t)| self.spelled(Some(w), t)).collect();
+                kids.push(self.spelled_fn_ret(*is_effect, ret, tret));
+                return with_children(base, kids);
+            }
+            _ => return base,
+        };
+        let ty_kids: &[Ty] = match ty {
+            Ty::Applied(_, args) | Ty::Named(_, args) => args,
+            Ty::Tuple(elements) => elements,
+            _ => return base,
+        };
+        if written_kids.len() != ty_kids.len() { return base; }
+        let kids = written_kids.iter().zip(ty_kids).map(|(w, t)| self.spelled(Some(w), t)).collect();
+        with_children(base, kids)
+    }
+
+    /// An `effect (…) -> T` type's return expands to `Result[T, String]`; the
+    /// written `T` then spells the success side.
+    fn spelled_fn_ret(&self, is_effect: bool, written: &TypeExpr, ty: &Ty) -> TypeRef {
+        let written_result = matches!(written, TypeExpr::Generic { name, args } if name.as_str() == "Result" && args.len() == 2);
+        match ty {
+            Ty::Applied(TypeConstructorId::Result, args) if is_effect && !written_result && args.len() == 2 => {
+                TypeRef::Result {
+                    ok: Box::new(self.spelled(Some(written), &args[0])),
+                    err: Box::new(resolve_ty(&args[1], &self.record_names, &self.variant_names)),
+                }
+            }
+            _ => self.spelled(Some(written), ty),
+        }
+    }
+}
+
+/// `base` with its direct children replaced, in the order `resolve_ty` builds
+/// them (a fn's parameters, then its return). A count that does not match
+/// leaves `base` as it is.
+fn with_children(base: TypeRef, kids: Vec<TypeRef>) -> TypeRef {
+    let mut it = kids.into_iter();
+    match base {
+        TypeRef::List { inner } if it.len() == 1 => TypeRef::List { inner: Box::new(it.next().unwrap_or(*inner)) },
+        TypeRef::Option { inner } if it.len() == 1 => TypeRef::Option { inner: Box::new(it.next().unwrap_or(*inner)) },
+        TypeRef::Set { inner } if it.len() == 1 => TypeRef::Set { inner: Box::new(it.next().unwrap_or(*inner)) },
+        TypeRef::Result { ok, err } if it.len() == 2 => TypeRef::Result {
+            ok: Box::new(it.next().unwrap_or(*ok)),
+            err: Box::new(it.next().unwrap_or(*err)),
+        },
+        TypeRef::Map { key, value } if it.len() == 2 => TypeRef::Map {
+            key: Box::new(it.next().unwrap_or(*key)),
+            value: Box::new(it.next().unwrap_or(*value)),
+        },
+        TypeRef::Tuple { elements } if it.len() == elements.len() => TypeRef::Tuple { elements: it.collect() },
+        TypeRef::Named { name, args } if it.len() == args.len() => TypeRef::Named { name, args: it.collect() },
+        TypeRef::Fn { params, ret } if it.len() == params.len() + 1 => {
+            let mut all: Vec<TypeRef> = it.collect();
+            let r = all.pop().unwrap_or(*ret);
+            TypeRef::Fn { params: all, ret: Box::new(r) }
+        }
+        other => other,
+    }
 }
 
 // ── ABI layout computation ──
@@ -677,6 +837,10 @@ fn extract_docs(source: &str) -> HashMap<std::string::String, DocInfo> {
     let lines: Vec<&str> = source.lines().collect();
 
     for (i, line) in lines.iter().enumerate() {
+        // #4035: only a top-level declaration (column 0) takes a doc — a
+        // body-level `let count = …` inside some fn is not a declaration and
+        // must not overwrite the doc of a public `fn count`.
+        if line.starts_with(|c: char| c.is_whitespace()) { continue; }
         if let Some(name) = detect_decl_name(line.trim()) {
             result.insert(name, collect_preceding_doc(&lines, i));
         }
@@ -850,5 +1014,26 @@ fn empty_doc() -> Unit = ()
         );
         assert_eq!(docs["plain"].doc.as_deref(), Some("Plain run still documents."));
         assert_eq!(docs["empty_doc"].doc.as_deref(), Some(""));
+    }
+
+    /// #4035: a body-level `let` that shares a public fn's name is not a
+    /// declaration — the top-level fn keeps its doc.
+    #[test]
+    fn a_body_level_let_does_not_take_a_top_level_fns_doc() {
+        let src = "\
+/// Number of elements satisfying `f`.
+fn count[A](xs: List[A], f: (A) -> Bool) -> Int = 0
+
+fn other(xs: List[Int]) -> Int = {
+  let count = 3
+  count
+}
+
+/// A top-level constant.
+let limit = 4
+";
+        let docs = extract_docs(src);
+        assert_eq!(docs["count"].doc.as_deref(), Some("Number of elements satisfying `f`."));
+        assert_eq!(docs["limit"].doc.as_deref(), Some("A top-level constant."));
     }
 }

@@ -198,10 +198,10 @@ fn escape_time_kernel(n: usize) -> String {
   var inside = 0
   var y = 0
   while y < {n} {{
-    let ci = 2.0 * float.from_int(y) / {n}.0 - 1.0
+    let ci = 2.0 * float.from(y) / {n}.0 - 1.0
     var x = 0
     while x < {n} {{
-      let cr = 2.0 * float.from_int(x) / {n}.0 - 1.5
+      let cr = 2.0 * float.from(x) / {n}.0 - 1.5
       var zr = 0.0
       var zi = 0.0
       var it = 0

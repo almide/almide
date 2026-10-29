@@ -3,19 +3,113 @@
 // Migrated mechanically from `stdlib/defs/random.toml` (4 fns). All
 // are `effect` (non-deterministic); the runtime impls stay in
 // `runtime/rs/src/random.rs`.
-/// Random Int in [min, max]; min if max <= min.
+/// Random Int in [min, max]; min if max <= min. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1); not crypto-grade.
+/// Random Float in [0, 1). Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
-/// Random element of xs; none when empty.
+/// Random element of xs; none when empty. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_choice")
-effect fn choice[T](xs: List[T]) -> T? = _
+effect fn choice[A](xs: List[A]) -> A? = _
 
-/// Random permutation of xs as a new list.
+/// Random permutation of xs as a new list. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
-effect fn shuffle[T](xs: List[T]) -> List[T] = _
+effect fn shuffle[A](xs: List[A]) -> List[A] = _
+
+/// n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
+@intrinsic("almide_rt_random_bytes")
+effect fn bytes(n: Int) -> Bytes = _
+
+// ── Seeded generator (R-random-01) ──
+// Plain fns: a seeded stream reads nothing from the environment, so every
+// draw is a pure function of the state, the same on every target. Each draw
+// returns the next state; reusing an old Rng repeats its values. The stream
+// is SplitMix64 (Steele, Lea, Flood 2014): add the golden gamma, then mix.
+/// A seeded random generator; its whole state is one 64-bit word.
+mod type Rng = Int
+
+// Logical (zero-filling) right shift of all 64 bits, n in 1..63.
+local fn rng_shr(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
+
+// The next state and its 64 mixed bits.
+local fn rng_next64(rng: Rng) -> (Int, Rng) = match rng {
+  Rng(s) => {
+    let state = s + -7046029254386353131
+    let z1 = int.bxor(state, rng_shr(state, 30)) * -4658895280553007687
+    let z2 = int.bxor(z1, rng_shr(z1, 27)) * -7723592293110705685
+    (int.bxor(z2, rng_shr(z2, 31)), Rng(state))
+  }
+}
+
+/// A generator whose stream is fixed by seed.
+@category
+fn seeded(seed: Int) -> Rng = Rng(seed)
+
+// Unsigned a < b over all 64 bits.
+local fn rng_ult(a: Int, b: Int) -> Bool = int.bxor(a, int.bshl(1, 63)) < int.bxor(
+  b,
+  int.bshl(1, 63),
+)
+
+// An unbiased draw in [0, span) by rejection; span is unsigned and non-zero.
+local fn rng_below(rng: Rng, span: Int) -> (Int, Rng) = {
+  let (z, next) = rng_next64(rng)
+  if span > 0 then {
+    // 63-bit draw; reject the top partial block so every residue is equally likely.
+    let r = rng_shr(z, 1)
+    let rem = (9223372036854775807 % span + 1) % span
+    if rem == 0 or r <= 9223372036854775807 - rem then (r % span, next) else rng_below(next, span)
+  } else if rng_ult(z, span) then (z, next)
+  else rng_below(next, span)
+}
+
+/// An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+@category
+fn next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng) = if max <= min then (min, rng)
+else {
+  let span = max - min + 1
+  if span == 0 then {
+    // The whole 64-bit range: every word is a valid draw.
+    let (z, next) = rng_next64(rng)
+    (z, next)
+  } else {
+    let (r, next) = rng_below(rng, span)
+    (min + r, next)
+  }
+}
+
+/// A Float in [0, 1) from the top 53 bits, and the next state.
+@category
+fn next_float(rng: Rng) -> (Float, Rng) = {
+  let (z, next) = rng_next64(rng)
+  (float.__from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
+}
+
+/// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+@category
+fn next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng) = if list.is_empty(xs) then (none, rng)
+else {
+  let (i, next) = next_int(rng, 0, list.len(xs) - 1)
+  (list.get(xs, i), next)
+}
+
+/// A uniform permutation of xs (Fisher-Yates) and the next state.
+@category
+fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
+  var ys = xs
+  var r = rng
+  var i = list.len(xs) - 1
+  while i > 0 {
+    let (j, next) = next_int(r, 0, i)
+    r = next
+    let t = ys[i]
+    ys[i] = ys[j]
+    ys[j] = t
+    i = i - 1
+  }
+  (ys, r)
+}

@@ -432,8 +432,8 @@ impl LowerCtx {
                     crate::lower::mutable_global_info(target).map(|(_, ty)| ty)
                 };
                 // Functional REBIND: `m[k] = v` ≡ `m = map.set(m, k, v)` (value
-                // semantics) — the SAME treatment the `map.insert(m, k, v)` CALL form
-                // already gets below; the repr dispatch suffixes the self-host
+                // semantics) — the SAME treatment the other in-place mutators
+                // already get below; the repr dispatch suffixes the self-host
                 // (set_skv/str/…) exactly like a source-level call. Both legs take this
                 // path (one shared rewrite, mir==ir symmetric); classify credits the
                 // MapInsert node with the one synthetic call. Needs the declared map ty
@@ -537,7 +537,7 @@ impl LowerCtx {
                 // loop with break/continue is WALLED, because the v0 wasm backend frees
                 // AFTER the break branch target and would leak).
                 IrExprKind::Break | IrExprKind::Continue => Ok(()),
-                // The v0 IN-PLACE mutators (`bytes.push`, `map.insert`, `list.push`,
+                // The v0 IN-PLACE mutators (`bytes.push`, `list.push`,
                 // `map.clear`, …) rewrite to their functional rebinds and re-dispatch
                 // through the Assign/FieldAssign path — see `rewrite_inplace_mutation`.
                 IrExprKind::Call { target: CallTarget::Module { .. }, .. } => {
@@ -658,28 +658,21 @@ impl LowerCtx {
     }
 }
 
-/// The MULTI-BYTE / typed-Endian in-place byte appends (the functional twins
-/// live in bytes_append_multi.almd / bytes_typed.almd; the typed Endian writes
-/// carry a third (endian) argument the functional twin dispatches on).
+/// The MULTI-BYTE in-place byte appends (the functional twins live in
+/// bytes_append_multi.almd).
 const BYTES_INPLACE_APPENDS: &[&str] = &[
     "push", "append_u8",
     "append_u16_le", "append_u16_be", "append_i16_le", "append_i16_be",
     "append_u32_le", "append_u32_be", "append_i32_le", "append_i32_be",
     "append_i64_le", "append_i64_be", "append_f32_le", "append_f32_be",
     "append_f64_le", "append_f64_be",
-    "write_uint16", "write_uint32", "write_int32", "write_float32",
-    // The BE serialization cursor (#1099): three are `append_*_be` under
-    // another name, `write_u8` is the 1-byte push, and bool/string have their
-    // own functional twins in bytes_append_multi.almd.
-    "write_u8", "write_u32_be", "write_i64_be", "write_f64_be",
-    "write_bool", "write_string_be",
+    "append_bool",
 ];
 
 /// Rewrite a v0 IN-PLACE mutator call in statement position to its functional
 /// rebind, or `None` when the call is not one (the effect-call path keeps it).
 /// v1 has value semantics, so `bytes.push(buf, x)` becomes `buf =
-/// bytes.append(buf, x)`, `map.insert(m, k, v)` becomes `m = map.set(m, k,
-/// v)`, `list.push(xs, v)` / `string.push(s, x)` become the one synthetic
+/// bytes.append(buf, x)`, `list.push(xs, v)` / `string.push(s, x)` become the one synthetic
 /// concat the source Call node already credits (mir <= ir holds), and
 /// `map.clear(m)` / `list.clear(xs)` rebind to the EMPTY literal of the
 /// receiver's own type (adds no call). Only a bare `Var` receiver qualifies
@@ -693,7 +686,6 @@ fn rewrite_inplace_mutation(expr: &IrExpr) -> Option<IrStmt> {
     };
     let (module, func) = (module.as_str(), func.as_str());
     rewrite_bytes_append(module, func, args)
-        .or_else(|| rewrite_map_mutation(module, func, args))
         .or_else(|| rewrite_push_concat(module, func, args))
         .or_else(|| rewrite_clear(module, func, args))
 }
@@ -715,20 +707,13 @@ fn rewrite_bytes_append(module: &str, func: &str, args: &[IrExpr]) -> Option<IrS
     }
     let IrExprKind::Var { id } = &args[0].kind else { return None };
     let fname = match func {
-        // The 1-byte pushes all route to the one `bytes.append` twin.
-        "push" | "append_u8" | "write_u8" => "append",
-        // The BE cursor writes ARE the append family under another name —
-        // same width, same order, same native byte layout.
-        "write_u32_be" => "append_u32_be",
-        "write_i64_be" => "append_i64_be",
-        "write_f64_be" => "append_f64_be",
+        // The 1-byte pushes both route to the one `bytes.append` twin.
+        "push" | "append_u8" => "append",
         _ => func,
     };
     let append = IrExpr {
         kind: IrExprKind::Call {
             target: CallTarget::Module { module: sym("bytes"), func: sym(fname), def_id: None },
-            // ALL args ride through — the typed Endian writes carry a
-            // third (endian) argument the functional twin dispatches on.
             args: args.to_vec(),
             type_args: vec![],
         },
@@ -737,29 +722,6 @@ fn rewrite_bytes_append(module: &str, func: &str, args: &[IrExpr]) -> Option<IrS
         def_id: None,
     };
     Some(IrStmt { kind: IrStmtKind::Assign { var: *id, value: append }, span: None })
-}
-
-/// `map.insert(m, k, v)` / `map.delete(m, k)` — v0 in-place map mutations:
-/// same functional-rebind treatment as bytes.push (`m = map.set(m, k, v)` /
-/// `m = map.remove(m, k)`); the repr dispatch then suffixes the self-host
-/// (set_skv/msv/… , remove_skv/str) exactly like a source-level call.
-fn rewrite_map_mutation(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
-    if module != "map" || !matches!(func, "insert" | "delete") {
-        return None;
-    }
-    let IrExprKind::Var { id } = &args[0].kind else { return None };
-    let fname = if func == "insert" { "set" } else { "remove" };
-    let call = IrExpr {
-        kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("map"), func: sym(fname), def_id: None },
-            args: args.to_vec(),
-            type_args: vec![],
-        },
-        ty: args[0].ty.clone(),
-        span: None,
-        def_id: None,
-    };
-    Some(IrStmt { kind: IrStmtKind::Assign { var: *id, value: call }, span: None })
 }
 
 /// `list.push(xs, v)` / `string.push(s, x)` — v0 in-place appends: the
@@ -826,7 +788,7 @@ fn rewrite_push_concat(module: &str, func: &str, args: &[IrExpr]) -> Option<IrSt
 /// store into the SHARED block) must never be reached from here — they are
 /// the alias-observes-clear defect the released 0.62.0 default route shipped.
 /// map / list / string rebind to a literal (adds no call); bytes rebinds to
-/// `bytes.new(0)` — one call for the one clear call the source node credits
+/// `bytes.zeros(0)` — one call for the one clear call the source node credits
 /// (mir <= ir holds). A `Var` receiver rebinds via Assign; a FIELD receiver
 /// (`string.clear(r.name)` — the C-132 mut-param write-back shape) routes
 /// through FieldAssign exactly as `list.push(b.xs, v)` does, so the record's
@@ -850,7 +812,7 @@ fn rewrite_clear(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
         "list" => IrExprKind::List { elements: vec![] },
         "string" => IrExprKind::LitStr { value: String::new() },
         _ => IrExprKind::Call {
-            target: CallTarget::Module { module: sym("bytes"), func: sym("new"), def_id: None },
+            target: CallTarget::Module { module: sym("bytes"), func: sym("zeros"), def_id: None },
             args: vec![IrExpr {
                 kind: IrExprKind::LitInt { value: 0 },
                 ty: Ty::Int,

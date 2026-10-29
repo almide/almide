@@ -1,157 +1,56 @@
 # int64
 
-Width conversions for `Int64` (64-bit signed integer). Auto-imported — no `import` needed.
+`Int64` (64-bit signed integer): bounds, arithmetic, bit operations, text, and the conversions
+into the type. Auto-imported — no `import` needed.
 
-`Int64` and the canonical `Int` share a representation but are distinct types, so
-`Int64` gets its own module for the same reason `int32` does: without it the only
-route was the `int.to_string(int.from_int64(x))` pivot, which a reader who has
-used `int32.to_string` has no reason to expect.
+`Int64` and the canonical `Int` share a representation but are distinct types,
+so `Int64` gets its own module for the same reason `int32` does: the bounds,
+arithmetic, text and conversions of the type live where its name says.
 
-Every function is a conversion and is **UFCS-dispatched**, so the method form is
-the idiomatic one:
+## Conversions
+
+A conversion is named after the type it builds (R-L0-40): `int64.from(x)` and its
+siblings take any numeric source — `Int`, a sized integer, `Float` or a sized float.
 
 ```almd
-let n: Int64 = 7
-let narrow = n.to_int16()    // resolves to int64.to_int16(n)
-let text = n.to_string()
+let x: Int64 = int64.from(12)
+let wide = int.from(x)                 // leaving Int64: the destination's `from`
+let same = int64.from_wrapping(-1)     // -1: Int is already 64 bits wide
+let fits = int64.from_checked(0.5)     // none: 0.5 has a fraction
+let top = int64.from_saturating(float.infinity()) // 9223372036854775807: clamped to the range
+let text = x.to_string()
 ```
 
-## Conversion semantics
-
-The bodies are pure Almide, routed through canonical `Int` (i64) as a dimensional
-pivot: `int.from_int64(x)` re-tags, then `int.to_<dst>(...)` narrows or widens.
-Both hops collapse — Rust folds the double cast, and the wasm renderer resolves
-them inline — so this costs nothing at runtime and both targets agree by
-construction.
-
-The rules match Rust's `as`:
-
-| Direction | Behaviour |
+| Function | Behaviour |
 |---|---|
-| Narrowing an integer | WRAPS (two's complement truncation), never traps |
-| Widening a signed integer | Sign-extends |
-| Widening an unsigned integer | Zero-extends |
-| Integer → float | Nearest representable, ties to even |
+| `int64.from(x)` | x toward zero; NaN, an infinity or a value outside Int64 aborts |
+| `int64.from_checked(x)` | `some` when Int64 holds x exactly, else `none` (a fraction, NaN, out of range) |
+| `int64.from_saturating(x)` | x toward zero, clamped to Int64's range; NaN is 0 |
+| `int64.from_wrapping(x)` | integer sources only: the low 64 bits, two's complement |
 
-Because narrowing wraps rather than trapping, convert deliberately: check the
-range first when a value must round-trip.
+To leave `Int64`, call the destination's family — `int.from(x)`, `float.from(x)`,
+`int16.from_wrapping(x)` and so on. `from` is the right call wherever the
+destination holds every value the source can carry; a narrowing destination
+chooses abort, `none`, clamp or wrap by name, never silently.
 
-## Functions
+> **Convert to `Int` before passing to an `Int`-taking function.** A sized value
+> is not implicitly widened, and the checker currently accepts the mismatch
+> where the generated code does not build ([#867]). `int.from(x)` is the idiom
+> that works on both targets.
 
-`to_int8`, `to_int16`, `to_int32`, `to_uint8`, `to_uint16`, `to_uint32`,
-`to_uint64`, `to_float32`, `to_float64` and `to_string`. There is no `to_int64` —
-that is the identity on this type. The exact set is the machine-owned signature
-index below.
+[#867]: https://github.com/almide/almide/issues/867
 
-## Checked / saturating narrowings and bounds
-
-Every **lossy** pair (source range does not fit the destination) also has
-`to_<dst>_checked` (`None` on overflow) and `to_<dst>_saturating` (clamp to the
-destination range); lossless pairs deliberately have only the plain form — an
-always-`Some` checked variant would be noise. `min_value()` / `max_value()`
-give this type's bounds. The whole surface is derived from the range table and
-machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
+`min_value()` / `max_value()` give this type's bounds. The exact surface is the
+machine-owned signature index below.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (37 functions)
 
 ```
-// Wraps to 8 bits; 128 becomes -128.
-// @since 0.37.0 or earlier
-int64.to_int8(x: Int64) -> Int8
-
-// Wraps to 16 bits; 32768 becomes -32768.
-// @since 0.37.0 or earlier
-int64.to_int16(x: Int64) -> Int16
-
-// Wraps to 32 bits; 2^31 becomes -2^31.
-// @since 0.37.0 or earlier
-int64.to_int32(x: Int64) -> Int32
-
-// Wraps to 8 bits; -1 becomes 255.
-// @since 0.37.0 or earlier
-int64.to_uint8(x: Int64) -> UInt8
-
-// Wraps to 16 bits; -1 becomes 65535.
-// @since 0.37.0 or earlier
-int64.to_uint16(x: Int64) -> UInt16
-
-// Wraps to 32 bits; -1 becomes 2^32-1.
-// @since 0.37.0 or earlier
-int64.to_uint32(x: Int64) -> UInt32
-
-// Wraps to 64 bits; -1 becomes 2^64-1.
-// @since 0.37.0 or earlier
-int64.to_uint64(x: Int64) -> UInt64
-
-// Float32 value; may round when abs(x) > 2^24.
-// @since 0.37.0 or earlier
-int64.to_float32(x: Int64) -> Float32
-
-// Float64 value; may round when abs(x) > 2^53.
-// @since 0.37.0 or earlier
-int64.to_float64(x: Int64) -> Float64
-
 // Decimal digits, with - when negative.
 // @since 0.37.0 or earlier
 int64.to_string(x: Int64) -> String
-
-// some(x), or none if outside -128..127.
-// @since 0.38.0
-int64.to_int8_checked(x: Int64) -> Option[Int8]
-
-// Clamps x to -128..127.
-// @since 0.38.0
-int64.to_int8_saturating(x: Int64) -> Int8
-
-// some(x), or none if outside -32768..32767.
-// @since 0.38.0
-int64.to_int16_checked(x: Int64) -> Option[Int16]
-
-// Clamps x to -32768..32767.
-// @since 0.38.0
-int64.to_int16_saturating(x: Int64) -> Int16
-
-// some(x), or none if outside -2^31..2^31-1.
-// @since 0.38.0
-int64.to_int32_checked(x: Int64) -> Option[Int32]
-
-// Clamps x to -2^31..2^31-1.
-// @since 0.38.0
-int64.to_int32_saturating(x: Int64) -> Int32
-
-// some(x), or none if outside 0..255.
-// @since 0.38.0
-int64.to_uint8_checked(x: Int64) -> Option[UInt8]
-
-// Clamps x to 0..255.
-// @since 0.38.0
-int64.to_uint8_saturating(x: Int64) -> UInt8
-
-// some(x), or none if outside 0..65535.
-// @since 0.38.0
-int64.to_uint16_checked(x: Int64) -> Option[UInt16]
-
-// Clamps x to 0..65535.
-// @since 0.38.0
-int64.to_uint16_saturating(x: Int64) -> UInt16
-
-// some(x), or none if outside 0..2^32-1.
-// @since 0.38.0
-int64.to_uint32_checked(x: Int64) -> Option[UInt32]
-
-// Clamps x to 0..2^32-1.
-// @since 0.38.0
-int64.to_uint32_saturating(x: Int64) -> UInt32
-
-// some(x), or none if x is negative.
-// @since 0.38.0
-int64.to_uint64_checked(x: Int64) -> Option[UInt64]
-
-// Negative x clamps to 0.
-// @since 0.38.0
-int64.to_uint64_saturating(x: Int64) -> UInt64
 
 // Smallest Int64: -2^63.
 // @since 0.38.0
@@ -160,6 +59,142 @@ int64.min_value() -> Int64
 // Largest Int64: 2^63-1.
 // @since 0.38.0
 int64.max_value() -> Int64
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int64.compare(a: Int64, b: Int64) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int64.min(a: Int64, b: Int64) -> Int64
+
+// Greater of a and b.
+// @since unreleased
+int64.max(a: Int64, b: Int64) -> Int64
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int64.floor_div(a: Int64, b: Int64) -> Int64
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int64.modulo(a: Int64, b: Int64) -> Int64
+
+// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+// @since unreleased
+int64.pow(base: Int64, exp: Int) -> Int64
+
+// True when x is a multiple of 2.
+// @since unreleased
+int64.is_even(x: Int64) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int64.is_odd(x: Int64) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int64.abs(x: Int64) -> Int64
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int64.sign(x: Int64) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int64.band(a: Int64, b: Int64) -> Int64
+
+// Bitwise OR.
+// @since unreleased
+int64.bor(a: Int64, b: Int64) -> Int64
+
+// Bitwise XOR.
+// @since unreleased
+int64.bxor(a: Int64, b: Int64) -> Int64
+
+// Bitwise complement of all 64 bits.
+// @since unreleased
+int64.bnot(x: Int64) -> Int64
+
+// a shifted left by n bits; n is taken mod 64.
+// @since unreleased
+int64.bshl(a: Int64, n: Int) -> Int64
+
+// Sign-filling right shift; n is taken mod 64.
+// @since unreleased
+int64.bshr(a: Int64, n: Int) -> Int64
+
+// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+// @since unreleased
+int64.count_leading_zeros(x: Int64) -> Int
+
+// Zero bits below the lowest set bit; 64 for 0.
+// @since unreleased
+int64.count_trailing_zeros(x: Int64) -> Int
+
+// Number of set bits among the 64.
+// @since unreleased
+int64.count_ones(x: Int64) -> Int
+
+// The 8 bytes in reverse order (endian flip).
+// @since unreleased
+int64.byte_swap(x: Int64) -> Int64
+
+// a + b wrapped to 64 bits.
+// @since unreleased
+int64.wrap_add(a: Int64, b: Int64) -> Int64
+
+// a - b wrapped to 64 bits.
+// @since unreleased
+int64.wrap_sub(a: Int64, b: Int64) -> Int64
+
+// a * b wrapped to 64 bits.
+// @since unreleased
+int64.wrap_mul(a: Int64, b: Int64) -> Int64
+
+// The 64 bits of a rotated left by n; n is taken mod 64.
+// @since unreleased
+int64.rotate_left(a: Int64, n: Int) -> Int64
+
+// The 64 bits of a rotated right by n; n is taken mod 64.
+// @since unreleased
+int64.rotate_right(a: Int64, n: Int) -> Int64
+
+// Bits needed to hold x; 0 for 0, 64 if negative.
+// @since unreleased
+int64.bit_length(x: Int64) -> Int
+
+// Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
+// @since unreleased
+int64.parse(s: String) -> Result[Int64, String]
+
+// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+// @since unreleased
+int64.to_string_radix(x: Int64, radix: Int) -> String
+
+// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+// @since unreleased
+int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]
+
+// x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
+// @since unreleased
+int64.from(x: S) -> Int64
+
+// some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
+// @since unreleased
+int64.from_checked(x: S) -> Option[Int64]
+
+// x as Int64, toward zero, clamped to Int64's range; NaN is 0.
+// @since unreleased
+int64.from_saturating(x: S) -> Int64
+
+// The low 64 bits of integer x as Int64 (two's complement).
+// @since unreleased
+int64.from_wrapping(x: S) -> Int64
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

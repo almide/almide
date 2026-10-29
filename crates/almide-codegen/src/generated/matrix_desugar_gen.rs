@@ -22,7 +22,7 @@ fn mk_mx(func: &str, args: Vec<IrExpr>) -> IrExpr {
 /// nodes are matrix-typed (matrix ops return Matrix).
 pub(super) fn desugar_matrix_fusion(method: &str, args: &[IrExpr]) -> Option<IrExpr> {
     match method {
-        "mul_scaled" if args.len() == 3 => Some(mk_mx("mul", vec![args[0usize].clone(), mk_mx("scale", vec![args[2usize].clone(), args[1usize].clone()])])),
+        "__mul_scaled" if args.len() == 3 => Some(mk_mx("__mul", vec![args[0usize].clone(), mk_mx("scale", vec![args[2usize].clone(), args[1usize].clone()])])),
         _ => None,
     }
 }

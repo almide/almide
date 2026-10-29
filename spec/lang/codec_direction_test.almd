@@ -1,0 +1,45 @@
+// @contract: C-435, C-436
+// C-435: `Codec` is `Encode + Decode`. A `: Codec` type conforms to both
+// halves, so it meets a `[T: Decode]` or `[T: Encode]` bound; a `: Decode`
+// type meets only the first. C-436: a fn declared `@input_sink` reads its
+// `Decode` type parameter's `decode_strict`, and each caller binds it to an
+// input type.
+import json
+
+type Note: Codec = { text: String }
+
+type NoteInput: Decode = { text: String }
+
+type NoteOut: Encode = { text: String }
+
+fn read_as[T: Decode](src: String) -> Result[T, String] = match json.parse(src) {
+  ok(v) => T.decode(v),
+  err(e) => err(e),
+}
+
+fn write_as[T: Encode](x: T) -> String = json.stringify(T.encode(x))
+
+@input_sink
+fn read_input[T: Decode](src: String) -> Result[T, String] = match json.parse(src) {
+  ok(v) => T.decode_strict(v),
+  err(e) => err("not json: " + e),
+}
+
+test "a Codec type meets a Decode bound and an Encode bound" {
+  let n: Note = read_as("{\"text\":\"a\"}")!
+  assert_eq(n.text, "a")
+  assert_eq(write_as(n), "{\"text\":\"a\"}")
+}
+
+test "a Decode type meets a Decode bound; an Encode type meets an Encode bound" {
+  let i: NoteInput = read_as("{\"text\":\"b\",\"zz\":1}")!
+  assert_eq(i.text, "b")
+  assert_eq(write_as(NoteOut { text: "c" }), "{\"text\":\"c\"}")
+}
+
+test "an input sink decodes strictly into its input type" {
+  let ok_r: Result[NoteInput, String] = read_input("{\"text\":\"d\"}")
+  assert_eq(ok_r |> result.map((x) => x.text), ok("d"))
+  let bad: Result[NoteInput, String] = read_input("{\"text\":\"d\",\"is_admin\":true}")
+  assert_eq(bad |> result.map((x) => x.text), err("unknown key 'is_admin'"))
+}

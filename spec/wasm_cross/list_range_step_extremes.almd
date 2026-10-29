@@ -1,0 +1,28 @@
+// @contract: C-420
+// list.range_step at the ends of Int (almide/almide#4197). The count used to
+// be `(end - start - 1) / step + 1`, and `end - start` wraps for bounds of
+// opposite sign (C-170), so these spans came out truncated to one element on
+// both legs. Every cell lists the full sequence: each value start + i * step,
+// strictly before end in the step's direction, and only values that are Ints.
+fn show(xs: List[Int]) -> String = xs |> list.map((x) => int.to_string(x)) |> list.join(",")
+
+fn main() -> Unit = {
+  let mn = int.min_value()
+  let mx = int.max_value()
+  // the issue's span: 18 elements, not 1
+  println(show(list.range_step(-9000000000000000000, 9000000000000000000, 1000000000000000000)))
+  // MIN..MAX by 2^62, up and down
+  println(show(list.range_step(mn, mx, 4611686018427387904)))
+  println(show(list.range_step(mx, mn, -4611686018427387904)))
+  // the widest steps: MAX up, MIN down
+  println(show(list.range_step(mn, mx, mx)))
+  println(show(list.range_step(mx, mn, mn)))
+  println(show(list.range_step(mx, mn, mn + 1)))
+  // a step past either end stops before the value would leave Int
+  println(show(list.range_step(9223372036854775800, mx, 3)))
+  println(show(list.range_step(-9223372036854775800, mn, -3)))
+  println(show(list.range_step(mx - 1, mx, 1)) + " " + show(list.range_step(mn + 1, mn, -1)))
+  // ordinary and empty cells keep their answers
+  println(show(list.range_step(0, 10, 3)) + " " + show(list.range_step(5, -1, -2)))
+  println("[" + show(list.range_step(mx, mn, 1)) + "] [" + show(list.range_step(mn, mx, -1)) + "] [" + show(list.range_step(mx, mx, 5)) + "]")
+}

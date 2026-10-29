@@ -12,38 +12,30 @@
 //
 // Operand frames reuse http_framed's decimal CHAR-length cells
 // (`<string.len>\n<payload>`), parsed by the host with the same char
-// arithmetic: the argument list is one cell per argument, and an operation
-// that needs a third operand (exec_in's / run_in's command, exec_with_stdin's input,
-// exec_status_timeout's bound) puts it in the first cell.
+// arithmetic: the argument list is one cell per argument, and the settings
+// `output` and `run` need past two operands (the deadline, directory, stdin
+// text, command) go in the first cells.
 import process
 
 fn __proc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.join("")
+// The registry-linked String join, not the protocol-generic `list.join[T: Text]`:
+// a self-host splice links after monomorphization, so a generic call here
+// resolves only when the entry program itself happens to load `list`.
+fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.__join_string("")
 
 effect fn __proc_exec(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_in(dir: String, argv: String) -> Result[String, String] = _
+// a = cmd, b = [timeout_ms, dir, stdin] ++ argv (op 84, `output`).
+effect fn __proc_output(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_with_stdin(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_exec_status(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_exec_status_timeout(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_run(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_run_in(dir: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_spawn(cmd: String, argv: String) -> Result[String, String] = _
+// a = dir, b = [cmd, stdin, timeout_ms] ++ argv (op 90, `run`).
+effect fn __proc_run_cmd(dir: String, argv: String) -> Result[String, String] = _
 
 effect fn __proc_kill(pid: String, signal: String) -> Result[String, String] = _
 
-// The two plain-fn surfaces (`is_alive`, `pid`) keep plain leaves: their
-// impls must return the raw type at the call site, as http_call's
-// non-blocking leaves do. The work is still the host's.
-fn __proc_is_alive(pid: String, unused: String) -> Result[String, String] = _
-
+// `pid` keeps a plain leaf: its impl returns the raw type at the call site,
+// as http_call's non-blocking leaves do. The work is still the host's.
 fn __proc_pid(unused: String, unused2: String) -> Result[String, String] = _
 
 // The status answer is `<code>\n<stdout chars>\n<stdout><stderr>`: the code
@@ -66,49 +58,19 @@ effect fn __process_exec_impl(cmd: String, args: List[String]) -> Result[String,
   __proc_argv(args),
 )
 
-effect fn __process_exec_in_impl(dir: String, cmd: String, args: List[String]) -> Result[String, String] = __proc_exec_in(
-  dir,
-  __proc_argv([cmd] + args),
-)
-
-effect fn __process_exec_with_stdin_impl(cmd: String, args: List[String], input: String) -> Result[String, String] = __proc_exec_with_stdin(
-  cmd,
-  __proc_argv([input] + args),
-)
-
-effect fn __process_exec_status_impl(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = {
-  let f = __proc_exec_status(cmd, __proc_argv(args))!
+effect fn __process_output_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_output(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
   ok(__proc_status(f))
 }
 
-effect fn __process_exec_status_timeout_impl(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = {
-  let f = __proc_exec_status_timeout(cmd, __proc_argv([int.to_string(timeout_ms)] + args))!
-  ok(__proc_status(f))
-}
-
-effect fn __process_run_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_run(cmd, __proc_argv(args))!
+effect fn __process_run_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let code = __proc_run_cmd(dir, __proc_argv([cmd, stdin, int.to_string(timeout_ms)] + args))!
   ok(int.parse(code) ?? -1)
-}
-
-effect fn __process_run_in_impl(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_run_in(dir, __proc_argv([cmd] + args))!
-  ok(int.parse(code) ?? -1)
-}
-
-effect fn __process_spawn_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let pid = __proc_spawn(cmd, __proc_argv(args))!
-  ok(int.parse(pid) ?? -1)
 }
 
 effect fn __process_kill_impl(pid: Int, signal: Int) -> Result[Unit, String] = {
   let _ = __proc_kill(int.to_string(pid), int.to_string(signal))!
   ok(())
-}
-
-fn __process_is_alive_impl(pid: Int) -> Bool = match __proc_is_alive(int.to_string(pid), "") {
-  ok("1") => true,
-  _ => false,
 }
 
 fn __process_pid_impl() -> Int = match __proc_pid("", "") {

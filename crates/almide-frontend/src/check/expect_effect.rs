@@ -94,6 +94,15 @@ impl Checker {
                 self.expect_expr(else_, &t);
             }
             ExprKind::Match { arms, .. } => arms.iter().for_each(|a| self.expect_expr(&a.body, &t)),
+            // `x ?? d`: the value is `x`'s payload or `d`, so `x` is expected
+            // as `Option[t]` (`map.get(handlers, k) ?? h` seeds the map's
+            // value type from the slot) and `d` as `t` — but only once `x` is
+            // inferred, and not when its payload holds pure closures: data
+            // that already holds them decides, as for a call's args.
+            ExprKind::UnwrapOr { expr: inner, fallback } => {
+                self.expect_expr(inner, &Ty::option(t.clone()));
+                self.qq_fallback_expect.insert(fallback.id, t);
+            }
             // A call's result: its generics are seeded from `t` before its
             // args are inferred (`seed_bindings_from_expected_ret`), so the
             // expectation reaches the args that produce the result.
@@ -164,8 +173,8 @@ impl Checker {
         self.pending_call_ret = self.call_expect.remove(&id);
     }
 
-    /// The generic bindings an expected result implies: `map.get_or(..) ->
-    /// V` in a handler slot binds `V` to the handler, so the slots of the
+    /// The generic bindings an expected result implies: `map.get(..) ?? d`
+    /// of type `V` in a handler slot binds `V` to the handler, so the slots of the
     /// args that produce `V` read it.
     pub(crate) fn bindings_from_expected_ret(&mut self, sig: Option<&crate::types::FnSig>) -> Bindings {
         let mut seeds = Bindings::new();
@@ -196,7 +205,7 @@ impl Checker {
     }
 
     /// Does `t` hold a fn value that is neither effect nor the carrier?
-    fn holds_pure_fn(&self, t: &Ty) -> bool {
+    pub(crate) fn holds_pure_fn(&self, t: &Ty) -> bool {
         let pure = |v: &Ty| matches!(v, Ty::Fn { is_effect: false, ret, .. } if !ret.is_result());
         self.type_holds(t, 0, &mut Expanded::new(), &pure)
     }

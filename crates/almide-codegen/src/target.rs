@@ -33,6 +33,7 @@ use super::pass_owned_source_hoist::OwnedSourceHoistPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_range_counting::RangeCountingVarsPass;
+use super::pass_str_view_rebind::StrViewRebindPass;
 use super::pass_metered_region_delegate::MeteredRegionDelegatePass;
 use super::pass_meter_charge::MeterChargePass;
 use super::pass_egg_saturation::EggSaturationPass;
@@ -51,6 +52,7 @@ use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_slice_binders::SliceBindersPass;
 use super::pass_str_map_key::StrMapKeyPass;
 use super::pass_thread_share::ThreadShareMarksPass;
+use super::pass_box_take::BoxTakeLoweringPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -235,6 +237,13 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // start — spelled as an `InlineRust` block on the final IR,
                 // after every pass that reads a variable occurrence.
                 .add(ThreadShareMarksPass)
+                // #4251/#4252: a recursive type's boxed field is an
+                // `AlmideBox`; each read of one becomes a place or a move —
+                // last, on the final ownership spelling.
+                .add(BoxTakeLoweringPass)
+                // #4296: which binding arms of a str-view match own their
+                // binder — read off the final arm bodies, so last of all.
+                .add(StrViewRebindPass)
         }
 
         Target::Wgsl => Pipeline::new()

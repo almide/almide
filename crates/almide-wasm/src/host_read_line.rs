@@ -1,19 +1,16 @@
 //! #2114: stdin lines grow through the existing owned-string accumulator.
 //! Stop only at LF/EOF; never consume a byte belonging to the next line.
-//! #2539: `read_line_opt` is the same walk, answering `none` at end of input.
+//! #2539: `io.read_line` answers `none` at end of input (R-io-01).
 use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
+use crate::work::Helper;
 use crate::*;
 
 impl Emitter<'_> {
-    pub(crate) fn io_read_line(&mut self) -> Result<(), EmitError> {
-        self.io_read_line_into(None)
-    }
-
-    /// #2539: the same line read, but `none` when not a single byte was
-    /// left — an empty line (just LF) is `some("")`, which `read_line`'s
-    /// bare String cannot say. `got` flips on the first byte taken.
+    /// #2539, R-io-01: `io.read_line` — `none` when not a single byte was
+    /// left; an empty line (just LF) is `some("")`. `got` flips on the
+    /// first byte taken.
     pub(crate) fn io_read_line_opt(&mut self) -> Result<(), EmitError> {
         let got = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(got);
@@ -49,6 +46,7 @@ impl Emitter<'_> {
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
         self.fs_call_stdin_take(1)?;
+        let lossy = self.work.helper(Helper::Utf8Lossy);
         {
             let mut i = self.f.instructions();
             i.i64_const(0xFFFF_FFFF).i64_and().i64_eqz().br_if(1);
@@ -73,7 +71,10 @@ impl Emitter<'_> {
             i.local_get(len).i32_const(1).i32_sub().local_set(len);
             i.br(0).end().end();
             i.local_get(line).local_get(len).i32_store(len_memarg());
-            i.local_get(line);
+            // #4142: the line's BYTES decode lossily — native's
+            // String::from_utf8_lossy, one U+FFFD per maximal invalid subpart —
+            // so a String never holds invalid UTF-8. The raw block is released.
+            i.local_get(line).call(lossy).local_get(line).call(F_DEC_FLAT);
         }
         self.release_i32();
         self.release_i32();

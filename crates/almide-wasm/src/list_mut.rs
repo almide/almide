@@ -198,7 +198,7 @@ impl Emitter<'_> {
             Ty::Bytes => IrExprKind::Call {
                 target: almide_ir::CallTarget::Module {
                     module: almide_base::intern::sym("bytes"),
-                    func: almide_base::intern::sym("new"),
+                    func: almide_base::intern::sym("zeros"),
                     def_id: None,
                 },
                 args: vec![IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }],
@@ -206,7 +206,7 @@ impl Emitter<'_> {
             },
             _ => return Ok(false),
         };
-        // Pinned: `bytes.new(0)`'s ownership mark is keyed by its address (#3143).
+        // Pinned: `bytes.zeros(0)`'s ownership mark is keyed by its address (#3143).
         let empty = self.owned_call_marks.pin(IrExpr { kind, ty: v.ty.clone(), span: None, def_id: None });
         self.lower_field_assign(&id, &path, &empty)?;
         Ok(true)

@@ -57,17 +57,17 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-019 | rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native | 0.24.0 | active | fixture | 2 |
 | C-020 | Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode | 0.24.0 | active | fixture | 1 |
 | C-021 | Whitespace trim / is_whitespace use the full Unicode White_Space property | 0.24.0 | active | fixture | 1 |
-| C-022 | string.from_bytes is UTF-8-lossy decode (inverse of to_bytes) | 0.24.0 | active | fixture | 1 |
+| C-022 | bytes.to_string_lossy is UTF-8-lossy decode (inverse of bytes.from_string) | 0.24.0 | active | fixture | 1 |
 | C-023 | float.to_string is shortest round-tripping decimal, byte-equal to Rust Display | 0.24.0 | active | fuzz(100000) | 2 |
 | C-024 | float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM) | 0.24.0 | active | fixture | 1 |
 | C-025 | float.to_fixed is round-half-to-even on the exact binary value | 0.24.0 | active | fuzz(1000) | 1 |
 | C-026 | Vendored-libm trig / exp / log / pow are byte-identical cross-target | 0.24.0 | active | fuzz(4000) | 3 |
 | C-027 | base64 encode/decode (standard + URL-safe) is byte-identical incl. errors | 0.24.0 | active | fixture | 1 |
-| C-028 | int.from_hex: trim, strip lowercase 0x repeatedly, sign after the prefix, then radix-16 — incl. native quirks | 0.24.0 | active | fixture | 1 |
+| C-028 | int.parse_radix(s, 16): trim, one optional sign, one optional 0x / 0X, then hex digits | 0.24.0 | active | fixture | 1 |
 | C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
-| C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 3 |
-| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 3 |
+| C-031 | value get/set/remove_path edge cases match the native oracle, which never fails on a path edge case | 0.24.0 | active | fixture | 3 |
+| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 5 |
 | C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 21 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
@@ -82,14 +82,14 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 6 |
 | C-045 | A List[String] param works across join / len / index / iteration | 0.24.0 | active | fixture | 3 |
 | C-046 | Record spread-update and cross-module monomorphization are byte-identical | 0.24.0 | active | fixture | 1 |
-| C-047 | math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap | 0.24.0 | active | fixture | 3 |
-| C-048 | int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64 | 0.24.0 | active | fixture | 1 |
+| C-047 | int.pow with a negative exponent is total — it aborts, never traps or wraps | 0.24.0 | active | fixture | 2 |
+| C-048 | int.wrap_* / int.rotate_* run on the 64-bit register and int.wrap saturates its mask for bits >= 64 | 0.24.0 | active | fixture | 1 |
 | C-049 | float.sign is f64::signum; float/math min/max ignore NaN | 0.24.0 | active | fixture | 1 |
-| C-050 | string.split(\"\") and string.run_length_encode are codepoint-granular | 0.24.0 | active | fixture | 1 |
+| C-050 | string.split(\"\") is codepoint-granular | 0.24.0 | active | fixture | 1 |
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 2 |
 | C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
 | C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 5 |
-| C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 9 |
+| C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 11 |
 | C-055 | list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets | 0.24.0 | active | fixture | 3 |
 | C-056 | list.product wraps on i64 overflow, consistent with list.sum and plain `*` | 0.24.0 | active | fixture | 1 |
 | C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
@@ -97,7 +97,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-059 | Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile | 0.25.0 | active | fixture | 1 |
 | C-060 | A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field | 0.26.7 | active | fixture | 2 |
 | C-061 | A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical | 0.26.9 | active | fixture | 1 |
-| C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
+| C-062 | A Region moves bytes byte-identically on both targets, and an access outside it is an err | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 3 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
@@ -131,7 +131,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-093 | Mutually-recursive variant types compile on both targets | 0.27.6 | active | fixture | 1 |
 | C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type | 0.27.6 | active | fixture | 1 |
 | C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 2 |
-| C-096 | process.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
+| C-096 | env.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
 | C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
@@ -164,10 +164,10 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-126 | Nested-lambda HOF params keep their inference link (no literal sig-generic pin) | 0.27.6 | active | fixture | 2 |
 | C-127 | unwrap_or sizes its payload from the default when the chain type is unresolved | 0.27.6 | active | fixture | 2 |
 | C-128 | datetime.format substitutes strftime specifiers identically on every backend | 0.28.1 | active | fixture | 1 |
-| C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
+| C-129 | list.chunk / list.window non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 5 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 3 |
-| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 30 |
+| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 31 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
@@ -188,7 +188,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-150 | Ctors over a heap var are value copies — the var stays live | 0.31.0 | active | fixture | 1 |
 | C-151 | Result combinators with a heap-Ok RESULT never link the scalar impl | 0.31.0 | active | fixture | 1 |
 | C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
-| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 5 |
+| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 6 |
 | C-154 | clamp with an invalid range aborts in the T6 form | 0.31.0 | active | fixture | 2 |
 | C-155 | to_fixed with out-of-domain decimals aborts in the T6 form | 0.31.0 | active | fixture | 3 |
 | C-156 | An if-merged some((String, String)) ctor is a real tracked Option | 0.32.0 | active | fixture | 1 |
@@ -196,7 +196,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-158 | A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor | 0.32.0 | active | fixture | 5 |
 | C-159 | list.binary_search returns the same index on both targets for duplicate keys | 0.32.0 | active | fixture | 1 |
 | C-160 | Pure-Almide bundled stdlib modules link and run byte-identically on wasm | 0.34.4 | active | fixture | 1 |
-| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 13 |
+| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 14 |
 | C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 1 |
 | C-163 | A heap-result if/match bound to a let/var executes the taken arm on both targets | 0.35.0 | active | fixture | 1 |
 | C-164 | List modifiers and suffix copies co-own tuple / record / nested-list elements | 0.35.0 | active | fixture | 1 |
@@ -219,7 +219,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-181 | args.positional returns every non-flag argument, and the args surface agrees across targets | 0.37.0 | active | fixture | 1 |
 | C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 2 |
 | C-183 | A loop-carried append of a list-of-scalar-records executes on both targets | 0.37.0 | active | fixture | 1 |
-| C-184 | The integer `^` operator is the same total exponentiation as math.pow on both targets | 0.37.0 | active | fixture | 1 |
+| C-184 | The integer `^` operator is the same total exponentiation as int.pow on both targets | 0.37.0 | active | fixture | 1 |
 | C-185 | A `??` chain returns the first Ok in source order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |
 | C-186 | Appending an inline index read to a list accumulator lowers and runs on both targets | 0.37.0 | active | fixture | 2 |
 | C-187 | An in-place mutator writing through a module-level `var` buffer behaves identically on both targets | 0.37.0 | active | fixture | 6 |
@@ -232,7 +232,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-194 | bytes.copy_from with a mutable-global destination writes through the storage slot | 0.38.1 | active | fixture | 1 |
 | C-195 | Value-position variant match over the checked-conversion family executes | 0.38.1 | active | fixture | 1 |
 | C-196 | Call-stack exhaustion is a defined abort at a per-target depth | 0.41.0 | active | fixture | 1 |
-| C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 10 |
+| C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 9 |
 | C-198 | The head-count-taking matrix entry points left the stdlib at dialect epoch 14 | 0.42.0 | active | fixture | 0 |
 | C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 2 |
 | C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 3 |
@@ -317,7 +317,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-279 | A zero-trip loop performs none of its body's effects or traps on either target | 0.57.1 | active | fixture | 1 |
 | C-280 | The kernel-conformance family behaves per the machine-checked λ_almd semantics on both targets | 0.57.1 | active | fixture | 1 |
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 3 |
-| C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
+| C-282 | matrix.get answers none out of range on both targets; the row reductions answer their identity | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
 | C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 8 |
 | C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 2 |
@@ -333,16 +333,16 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-295 | A checker-exhaustive match of guard-lowered box patterns still builds on native | 0.57.2 | active | fixture | 1 |
 | C-296 | The generated type x operation matrix runs byte-identical across targets | 0.57.2 | active | fixture | 70 |
 | C-297 | flat_map whose closure returns an aliased list field is drop-balanced on both targets | 0.57.2 | active | fixture | 1 |
-| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 16 |
+| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 17 |
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 2 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
 | C-302 | Numeric determinism family head: a Float result is a function of the program alone | 0.58.0 | active | fixture | 6 |
 | C-303 | Float operations round to nearest-even once each — no contraction, no FMA | 0.58.0 | active | fixture | 1 |
 | C-304 | Subnormal floats are preserved — no flush-to-zero on any target | 0.58.0 | active | fixture | 1 |
-| C-305 | Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/fpow within 1 ulp | 0.58.0 | active | fixture | 1 |
+| C-305 | Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/pow within 1 ulp | 0.58.0 | active | fixture | 1 |
 | C-306 | Signed zero: IEEE propagation, equality ignores the sign, min/max order -0 below +0 (IEEE 754-2019) | 0.60.0 | active | fixture | 2 |
-| C-307 | float.to_int truncates toward zero and saturates, NaN to 0; the checked family is exact-or-none | 0.58.0 | active | fixture | 2 |
+| C-307 | int.from_saturating of a Float truncates toward zero and saturates, NaN to 0; the from_checked family is exact-or-none | 0.58.0 | active | fixture | 2 |
 | C-308 | @bounded is a function attribute that changes nothing about types or values — a bounded function is an ordinary function | 0.60.0 | active | fixture | 1 |
 | C-309 | Subset, not dialect: a program's observable behaviour is identical with and without @bounded | 0.60.0 | active | fixture | 2 |
 | C-310 | Only counted loops with compile-time-constant range bounds are admissible in a @bounded function (E070) | 0.60.0 | active | fixture | 0 |
@@ -372,11 +372,11 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 4 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 2 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
-| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 3 |
-| C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 2 |
+| C-338 | The int bit family, float32.from_bits and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
 | C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
-| C-340 | The eager *_or family — option/result.unwrap_or, list/map/bytes.get_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |
-| C-341 | matrix.from_bytes_f32_le / _f16_le judge their offset on the buffer side, so an offset near i64::MAX is the all-zero matrix | 0.62.0 | active | fixture | 1 |
+| C-340 | The eager *_or family — option/result.unwrap_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |
+| C-341 | matrix.from_bytes_f16_le / _f32_le / _f64_le answer none when the data does not fit, judged on the buffer side so an offset near i64::MAX is none | 0.62.0 | active | fixture | 2 |
 | C-342 | bytes.copy_from with a negative length or offset copies nothing on both targets | 0.62.0 | active | fixture | 1 |
 | C-343 | A tail `!` over a declared-Result plain callee yields the payload in a lifted effect fn | 0.63.0 | active | fixture | 1 |
 | C-344 | guard-else-err inside a call-argument block after a Result bind runs on every leg | 0.63.0 | active | fixture | 1 |
@@ -390,12 +390,12 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-352 | Or-pattern guards are evaluated once per matching alternative, in source order | 0.63.0 | active | fixture | 3 |
 | C-353 | A matrix kernel's shape precondition is a defined abort on both targets | 0.63.0 | active | fixture | 1 |
 | C-354 | A matrix row range clamps like list.slice and a part count of 0 or less is the empty result | 0.63.0 | active | fixture | 1 |
-| C-355 | matrix.neg is IEEE negation, so the sign of a zero flips on both targets | 0.63.0 | active | fixture | 1 |
+| C-355 | Matrix negation `-m` is IEEE negation, so the sign of a zero flips on both targets | 0.63.0 | active | fixture | 1 |
 | C-356 | A non-finite Float in a Value stringifies as the JSON null on every leg | 0.63.0 | active | fixture | 1 |
-| C-357 | json.get_int is Int-only: a Float field is none, never truncated | 0.63.0 | active | fixture | 1 |
+| C-357 | value.get_int is Int-only: a Float field is none, never truncated | 0.63.0 | active | fixture | 1 |
 | C-358 | float.round, math.choose, int.rotate_* and math.log_gamma are exact over their whole domain on every leg | 0.63.0 | active | fixture | 4 |
 | C-359 | Pre-epoch timestamps floor to the day they belong to, and %Y renders any year | 0.63.0 | active | fixture | 1 |
-| C-360 | datetime.parse_iso applies the UTC offset and refuses an out-of-range field by name | 0.63.0 | active | fixture | 1 |
+| C-360 | datetime.parse_iso applies the UTC offset and refuses an out-of-range field by name | 0.63.0 | active | fixture | 2 |
 | C-361 | url.parse validates the host after the host:port split, and refuses the out-of-scope authorities by name | 0.63.0 | active | fixture | 1 |
 | C-362 | A `scoped` block's observables are its body's — the region is not observable | 0.64.0 | active | fixture | 1 |
 | C-363 | A `scoped fn` computes the same answer inside and outside a region | 0.64.0 | active | fixture | 1 |
@@ -411,11 +411,11 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-373 | var destructures with the let patterns and every bound name is mutable, identically on both targets | 0.67.0 | active | fixture | 1 |
 | C-374 | process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined | 0.67.0 | active | fixture | 0 |
 | C-375 | a serve-shaped program built for stock wasm is a wasi:http/handler@0.3.0 export that wasmtime serve runs with no flags and that answers what native answers | 0.67.0 | active | fixture | 0 |
-| C-376 | A raw address taken from a Bytes block stays valid until the call it is handed to returns | 0.67.0 | active | fixture | 1 |
+| C-376 | A Region holds the Bytes it views, so the block outlives every use of the view | 0.67.0 | active | fixture | 1 |
 | C-377 | net tcp: loopback, handle numbering, EOF, close, is_open and tcp_local_port agree on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-378 | net tcp: every failure reads as errno-free classified text from one table, identical on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-379 | net tcp: timeouts and tcp_available are guest-enforced on the stock WASI 0.3 component and answer what native and the embedded wasm lane answer | 0.68.0 | active | fixture | 0 |
-| C-380 | json.to_map holds one entry per key: a repeated object key keeps its first position and takes its last value, on every leg | 0.68.0 | active | fixture | 1 |
+| C-380 | An object's pairs built into a Map hold one entry per key: a repeated object key keeps its first position and takes its last value, on every leg | 0.68.0 | active | fixture | 1 |
 | C-381 | The testing asserts' failures outside test blocks abort in the T18 form on both targets | 0.68.0 | active | fixture | 8 |
 | C-382 | net unix sockets and shm files: bytes, descriptors received, readiness and shm contents agree on native and the embedded wasm lane; the stock artifact refuses them | 0.68.0 | active | fixture | 0 |
 | C-383 | net unix sockets and shm files: every failure is an err with the same text on native and the embedded wasm lane, and a descriptor the program does not hold is refused before any system call | 0.68.0 | active | fixture | 0 |
@@ -424,4 +424,55 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-386 | A record-form fan block is the record literal of its fields, run as parallel siblings | 0.68.0 | active | fixture | 2 |
 | C-387 | Identifiers are UAX #31 names held in NFC; compatibility characters are refused; a caseless name is type-side only by declaration; non-ASCII names run byte-identically on every leg | 0.68.0 | active | fixture | 1 |
 | C-388 | A bare call names the definition of its own scope, never a same-spelled fn of the entry program or another module | 0.68.0 | active | fixture | 2 |
+| C-389 | http.serve reads up to 64 connections at once and answers a request head not whole within 10 s with 408, so a slow client holds only its own connection | 0.69.0 | active | fixture | 0 |
+| C-390 | The zlib decoders bound their output: past the bound they stop with one err text on every leg | 0.69.0 | active | fixture | 1 |
+| C-391 | json.parse bounds nesting at 1000 levels with one err text on every leg | 0.69.0 | active | fixture | 1 |
+| C-392 | fs.open_root's family keeps every path inside its root: a path that leaves it by .., an absolute path or a symlink is refused with one message on every target | 0.69.0 | active | fixture | 1 |
+| C-393 | [permissions] fs bounds every fs call to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host | 0.69.0 | active | fixture | 0 |
+| C-394 | random.bytes draws n bytes from the platform CSPRNG: n = 0 is empty, a negative n aborts with one text on every leg | 0.69.0 | active | fixture | 2 |
+| C-395 | regex.new aborts and regex.compile answers err, with one reason on every leg, for a pattern outside the engine's grammar or past 20,000 states | 0.69.0 | active | fuzz(300) | 3 |
+| C-396 | fs.walk and fs.glob list a symlink as an entry and never descend into it, on every leg | 0.69.0 | active | fixture | 0 |
+| C-397 | fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner | 0.69.0 | active | fixture | 0 |
+| C-398 | path.join_within admits only a child that stays inside the base it is joined to, and refuses any other child | 0.69.0 | active | fixture | 1 |
+| C-399 | io.write and io.write_bytes emit exactly their bytes on every target and host | 0.68.0 | active | fixture | 1 |
+| C-400 | json.parse refuses a lone surrogate, an unknown or short escape, a raw control character, a noncharacter and an unterminated string, never deleting input | 0.69.0 | active | fixture | 2 |
+| C-401 | json.parse accepts exactly one RFC 8259 value: a duplicate key, trailing data, an unquoted key, a trailing comma, a missing separator, non-JSON whitespace and a malformed number are errs | 0.69.0 | active | fixture | 3 |
+| C-402 | url.parse cleans the input as WHATWG does, validates the scheme at the start, refuses a backslash, a control character, a % in the host and a non-canonical numeric host, and removes dot segments, %2e included | 0.69.0 | active | fixture | 2 |
+| C-403 | url.resolve cleans the reference by url.parse's rules and runs every path through the one dot-segment rule, %2e included | 0.69.0 | active | fixture | 1 |
+| C-404 | http.query_params is url.parse_query of the target after its first ?, one decoder on every leg, every pair kept in order and a bad escape an err | 0.69.0 | active | fixture | 1 |
+| C-405 | the socket host answers 400 to a request head RFC 9112 refuses: a bare LF or CR, a malformed request line, a non-origin target, whitespace before a header colon, a colon-less line, obs-fold, a missing or repeated Host | 0.69.0 | active | fixture | 0 |
+| C-406 | the router and the middleware before it read one canonical path: a non-canonical path and a parameter that decodes to a traversal are 400 | 0.69.0 | active | fixture | 0 |
+| C-407 | every http.serve response carries X-Content-Type-Options: nosniff unless the handler set the field | 0.69.0 | active | fixture | 0 |
+| C-408 | the buffered http client refuses a response that ended before its framing did, and caps the response head, as the call-handle client does | 0.69.0 | active | fixture | 0 |
+| C-409 | a handler's err never reaches the client: a fixed 500 body names the request's number, and stderr gets the err quoted under it | 0.69.0 | active | fixture | 0 |
+| C-410 | datetime.parse_iso refuses a year outside 0..=9999 by name instead of answering a wrapped instant | 0.69.0 | active | fixture | 1 |
+| C-411 | base64.decode and decode_url accept only the canonical padded form of their own alphabet | 0.69.0 | active | fixture | 1 |
+| C-412 | Case mapping never folds a non-ASCII scalar into ASCII: string.to_upper, to_lower and capitalize leave such a scalar unchanged | 0.69.0 | active | fixture | 2 |
+| C-413 | int.parse and float.parse accept only finite decimal text trimmed of ASCII whitespace | 0.69.0 | active | fixture | 6 |
+| C-414 | int.from_checked and int.from_saturating complete the Float to Int conversion trio | 0.69.0 | active | fixture | 1 |
+| C-415 | random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams | 0.69.0 | active | fixture | 0 |
+| C-416 | net reads and received descriptors are bounded: a read never pre-allocates its length, and at most 28 untaken descriptors wait per Unix socket | 0.69.0 | active | fixture | 0 |
+| C-417 | process.kill asks the kernel with kill(2), refuses a pid outside 1..=2147483647, answers fixed err texts, and is bounded by [permissions] proc as the kill command | 0.69.0 | active | fixture | 0 |
+| C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 4 |
+| C-419 | bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing | 0.69.0 | active | fixture | 1 |
+| C-420 | list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int | 0.69.0 | active | fixture | 1 |
+| C-421 | env.set refuses an empty name, `=` or NUL in the name and NUL in the value with the same err on every leg, and stores nothing | 0.69.0 | active | fixture | 1 |
+| C-422 | hash.hmac_sha256/512 take a Secret[Bytes] key, answer a Secret[Bytes] tag equal to the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag | 0.69.0 | active | fixture | 1 |
+| C-423 | bytes/string.is_equal_constant_time answer equality with no data-dependent branch | 0.69.0 | active | fixture | 1 |
+| C-424 | md5 and sha1 are not in the stdlib: a call to hash.md5, md5_hex, sha1 or sha1_hex is a check-time error whose hint names SHA-256 | 0.69.0 | active | fixture | 0 |
+| C-425 | A value prints through its type's declared repr wherever it is rendered; a Secret prints Secret(***) on every path | 0.69.0 | active | fixture | 1 |
+| C-426 | == on Secret[String] and Secret[Bytes] compares the revealed values; any other Secret, and a variant or map holding one, is E103 | 0.69.0 | active | fixture | 1 |
+| C-427 | A Codec record decodes a Secret field from its value's wire form and derives no encode (E023) | 0.69.0 | active | fixture | 1 |
+| C-428 | A `@skip` record field is neither decoded nor encoded and a `@skip_decode` field is never decoded but still encoded; both need a default | 0.69.0 | active | fixture | 1 |
+| C-429 | A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient | 0.69.0 | active | fixture | 2 |
+| C-430 | An attribute on a record field that the compiler does not read is a check error (E053); the field vocabulary is @builtin, @location, @skip, @skip_decode | 0.69.0 | active | fixture | 0 |
+| C-431 | the fs whole-file readers read a regular file of at most 1 GiB: a device, FIFO or socket errs Not a regular file without blocking, a larger file errs File too large, on every leg | 0.69.0 | active | fixture | 1 |
+| C-432 | A runtime-backed value (HttpRequest, HttpResponse, HttpCall) interpolates as its declared repr, bare and nested, on every leg; the http reprs count the headers and never show a header value | 0.69.0 | active | fixture | 2 |
+| C-433 | value.set_path refuses to build a value nested deeper than json.parse accepts, with parse's err text, on every leg | 0.69.0 | active | fixture | 1 |
+| C-434 | a runtime abort inside an http.serve handler fails only that request: the fixed C-409 500, one stderr line, and the server keeps serving | 0.69.0 | active | fixture | 0 |
+| C-435 | `Codec` is `Encode + Decode`: a `: Decode` type derives only `decode` (+ a record's `decode_strict`), a `: Encode` type only `encode`, and an input type skips no field | 0.69.0 | active | fixture | 1 |
+| C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 2 |
+| C-437 | A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error | 0.69.0 | active | fixture | 0 |
+| C-438 | env.secret(name) reads an environment variable as Option[Secret[String]]: env.get's value, rendered Secret(***), compared in constant time | 0.69.0 | active | fixture | 1 |
+| C-439 | env.vars lists the environment keyed and ordered by name with the program's own set and remove applied, and env.remove unsets a name or refuses it as env.set does, with the same bytes on every leg | 0.69.0 | active | fixture | 1 |
 

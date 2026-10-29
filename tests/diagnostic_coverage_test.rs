@@ -46,19 +46,20 @@ fn repo_root() -> PathBuf {
 }
 
 fn scan_diagnostic_codes() -> BTreeSet<String> {
-    // Scan every `crates/**/*.rs` for `with_code("E###")`; collect
-    // unique codes. Deliberately doesn't use a regex crate — the
-    // test crate stays dependency-light.
-    let root = repo_root().join("crates");
+    // Scan every `crates/**/*.rs` and `src/**/*.rs` for `with_code("E###")`;
+    // collect unique codes. The CLI crate raises some diagnostics itself
+    // (E109, `src/effect_value_gate.rs`), so `src/` is scanned too.
+    // Deliberately doesn't use a regex crate — the test crate stays
+    // dependency-light.
     let mut codes = BTreeSet::new();
     fn walk(dir: &Path, codes: &mut BTreeSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if path.file_name().map_or(false, |n| n == "target") { continue; }
+                if path.file_name().is_some_and(|n| n == "target") { continue; }
                 walk(&path, codes);
-            } else if path.extension().map_or(false, |e| e == "rs") {
+            } else if path.extension().is_some_and(|e| e == "rs") {
                 let Ok(text) = std::fs::read_to_string(&path) else { continue };
                 let mut rest = text.as_str();
                 while let Some(pos) = rest.find("with_code(\"E") {
@@ -71,7 +72,8 @@ fn scan_diagnostic_codes() -> BTreeSet<String> {
             }
         }
     }
-    walk(&root, &mut codes);
+    walk(&repo_root().join("crates"), &mut codes);
+    walk(&repo_root().join("src"), &mut codes);
     codes
 }
 
@@ -84,7 +86,7 @@ fn scan_cli_codes() -> BTreeSet<String> {
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, codes);
-            } else if path.extension().map_or(false, |e| e == "rs") {
+            } else if path.extension().is_some_and(|e| e == "rs") {
                 let Ok(text) = std::fs::read_to_string(&path) else { continue };
                 let mut rest = text.as_str();
                 while let Some(pos) = rest.find("error[E") {
@@ -142,7 +144,7 @@ fn scan_doc_codes() -> BTreeSet<String> {
 #[test]
 fn diagnostic_fixture_and_doc_coverage_report() {
     let codes = scan_diagnostic_codes();
-    assert!(!codes.is_empty(), "no diagnostic codes found under crates/");
+    assert!(!codes.is_empty(), "no diagnostic codes found under crates/ or src/");
 
     let fixtures = scan_fixture_codes();
     let docs = scan_doc_codes();
@@ -274,6 +276,12 @@ fn every_mechanical_verdict_emits_a_machine_applicable_repair_that_round_trips()
     let mut backlog: Vec<String> = Vec::new();
     let mut broken_round_trips: Vec<String> = Vec::new();
     let mut proven: Vec<String> = Vec::new();
+    // Every mechanical code on a full run; the CI slice (ALMIDE_CI_SLICE) of
+    // the codes, keyed by the code's doc, otherwise. A selected code is judged
+    // over ALL its families, so the backlog verdict stays per code.
+    let mechanical = almide_corpus::select(mechanical.into_iter().collect::<Vec<_>>(), "diagnostic_coverage::mechanical_round_trip", |c| {
+        format!("docs/diagnostics/{c}.md")
+    });
     for code in &mechanical {
         let prefix = format!("{}-", code.to_ascii_lowercase());
         let mut families: Vec<PathBuf> = std::fs::read_dir(&fixtures).expect("read tests/diagnostics")
@@ -400,11 +408,10 @@ fn uncoded_error_sites_ratchet() {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if path.file_name().map_or(false, |n| n == "target") { continue; }
+                if path.file_name().is_some_and(|n| n == "target") { continue; }
                 walk(&path, f);
-            } else if path.extension().map_or(false, |e| e == "rs") {
-                if let Ok(text) = std::fs::read_to_string(&path) { f(&path, &text); }
-            }
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(text) = std::fs::read_to_string(&path) { f(&path, &text); }
         }
     }
     walk(&root, &mut |path, text| {

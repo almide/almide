@@ -50,6 +50,7 @@ pub fn monomorphize(program: &mut IrProgram) {
     monomorphize_module_fns(program, false);
     let bound_fns = find_structurally_bounded_fns(&program.functions, &program.type_decls);
     if bound_fns.is_empty() {
+        route_declared_reprs(program);
         prune_generic_module_fns(program);
         // Mutual tail-call SCC collapse (#1043) rides monomorphize because
         // this is the ONE stage every consumer shares — v0 codegen, the v1
@@ -107,7 +108,7 @@ pub fn monomorphize(program: &mut IrProgram) {
         for ((fn_name, suffix), bindings) in &new {
             if let Some(orig) = program.functions.iter().find(|f| !f.is_test && f.name == *fn_name) {
                 let bindings = bind_from_conformances(orig, bindings, &program.protocol_conformance_args);
-                new_functions.push(specialize_function(orig, suffix, &bindings, &mut program.var_table, &global_vars));
+                new_functions.push(specialize_function(orig, suffix, &bindings, &mut program.var_table, &global_vars, &program.operator_requirements));
             }
         }
 
@@ -134,6 +135,7 @@ pub fn monomorphize(program: &mut IrProgram) {
     // alternation — no such shape exists in the corpus; the audit below
     // trips loudly if one appears.)
     monomorphize_module_fns(program, false);
+    route_declared_reprs(program);
     prune_generic_module_fns(program);
 
     // IMPORTANT: tests may share a name with a function (e.g. `fn wrap_all[T]`
@@ -578,7 +580,7 @@ fn specialize_discovered(
         let orig = program.modules[mi].functions[fi].clone();
         let bindings = bind_from_conformances(&orig, &bindings, &program.protocol_conformance_args);
         let mod_vt = &mut program.modules[mi].var_table;
-        let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt, &module_globals);
+        let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt, &module_globals, &program.operator_requirements);
         let new_name = specialized.name.to_string();
         program.modules[mi].functions.push(specialized);
         rename.insert(key, new_name);
@@ -609,6 +611,21 @@ fn prune_generic_module_fns(program: &mut IrProgram) {
                     .iter()
                     .any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
         });
+    }
+}
+
+/// The renderer rule's second run (#4239): every instance is concrete now,
+/// so a `${x}` a generic body wrote over `A` is routed through the declared
+/// repr of the type `A` became — before the generic module fns are pruned,
+/// because the declared reprs (`secret.Secret.repr[A]`) are such fns and the
+/// new calls to them are specialized by one more module round. To a fixed
+/// point: a module round can expose another instantiated segment.
+fn route_declared_reprs(program: &mut IrProgram) {
+    for _ in 0..8 {
+        if !almide_ir::declared_repr::route_instantiated_segments(program) {
+            break;
+        }
+        monomorphize_module_fns(program, false);
     }
 }
 

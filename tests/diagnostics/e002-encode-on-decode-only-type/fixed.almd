@@ -1,0 +1,6 @@
+// A type that is also written out declares both directions.
+import json
+
+type User: Codec = { name: String }
+
+effect fn main() -> Unit = println(json.stringify(User.encode(User { name: "m" })))

@@ -79,7 +79,7 @@ impl LowerCtx {
         // on the canonical-i64 slot: forward the operand, NO CallFn. The caps
         // counter skips the IR node by the same predicate, so any producer that
         // EMITS the call breaches `mir <= ir` — which is exactly what happened when
-        // the widening sat in ARGUMENT position (`to_int8_checked(int.to_int64(v))`)
+        // the widening sat in ARGUMENT position (`to_int8_checked(int.__to_int64(v))`)
         // or in a heap-result arm's interpolation part (`"${x.to_int64()}"`):
         // `lower_scalar_call_form` elides the operand position, but every other
         // producer funnels here (#958's C-195 fixture, `classify` mir 6 > ir 5).
@@ -95,14 +95,14 @@ impl LowerCtx {
                 })
                 .map(Some);
         }
-        // `float.from_int(x)` — the single-instruction sitofp floor, same
+        // `float.__from_int(x)` — the single-instruction sitofp floor, same
         // counter-alignment reasoning as the widening above.
         if crate::lower::is_float_from_int_prim(module, func, args) {
             let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::shaped(
                     args[0].span,
                     WallShape::CallArgument,
-                    "float.from_int operand outside the scalar subset not in this brick",
+                    "float.__from_int operand outside the scalar subset not in this brick",
                 )
             })?;
             let dst = self.fresh_value();
@@ -431,7 +431,7 @@ impl LowerCtx {
         // in-place `list.pop` (the same &mut protocol over a list receiver). The
         // native oracle's semantics (RcCow + borrow inference) split by receiver:
         //   - a LOCAL var: `make_mut` COWs a SHARED block at the mutation — so
-        //     `var b = a; bytes.set_at(b, …)` must not write through `a` (#794;
+        //     `var b = a; bytes.put_u8(b, …)` must not write through `a` (#794;
         //     this lowered as a silently-shared write). Emit `MakeUnique` first.
         //   - a BORROWED PARAM: passed `&mut` through the call, so the write IS
         //     caller-visible (var_in_if_skinning's blend writes its non-mut
@@ -496,11 +496,11 @@ impl LowerCtx {
     /// reader had nothing to act on.
     /// #2503 / C-033: an argument in a `mut`-PARAMETER position of a PURE user
     /// fn, read through THIS frame's copy-on-write. The callee writes the buffer
-    /// in place (`bytes.set_at(b, …)` on its param is a bare write-through —
+    /// in place (`bytes.put_u8(b, …)` on its param is a bare write-through —
     /// [`Self::cow_inplace_receiver`]'s param arm) and the C-132 move-mode
     /// rewrite hands it back for this site to store, so the site is a mutation
     /// of the caller's var and takes the same rc-gated `MakeUnique` a direct
-    /// `bytes.set_at(b, …)` here would: a shared block copies and the var is
+    /// `bytes.put_u8(b, …)` here would: a shared block copies and the var is
     /// repointed at the unique copy, so an alias bound BEFORE the call keeps its
     /// pre-write bytes; an unaliased buffer (rc == 1) is not copied at all, and
     /// `alias_safety` elides the guard outright where the var provably never
@@ -595,7 +595,7 @@ impl LowerCtx {
                 }
                 Ok(())
             }
-            // A RECORD-FIELD receiver (`bytes.set_at(p2.buf, …)`) — the two-level
+            // A RECORD-FIELD receiver (`bytes.put_u8(p2.buf, …)`) — the two-level
             // record+field COW (#794).
             Some(IrExprKind::Member { object, field }) => {
                 self.two_level_field_cow(object, *field).ok_or_else(|| {
@@ -619,7 +619,7 @@ impl LowerCtx {
 
     /// #906: COW the STORAGE SLOT of a mutable module-level `var` before an in-place
     /// mutator writes through it — nendo's module-level scratch arena
-    /// (`var g_pool = bytes.new(N)` + `bytes.set_f32_le(g_pool, …)`), which walled with
+    /// (`var g_pool = bytes.zeros(N)` + `bytes.put_f32_le(g_pool, …)`), which walled with
     /// "use of unbound var" because a mutable global never enters `value_of`.
     ///
     /// The slot owns the block, so this is the two-level COW with the RECORD level
@@ -631,7 +631,7 @@ impl LowerCtx {
     /// writes the uniquely-owned block, so every later read of the global sees the write.
     ///
     /// This is the native oracle's semantics exactly: there the global is an `RcCow` and
-    /// the mutator's `make_mut` COWs a shared block, so `let snap = g; bytes.set_at(g, …)`
+    /// the mutator's `make_mut` COWs a shared block, so `let snap = g; bytes.put_u8(g, …)`
     /// leaves `snap` at the pre-write value — verified against the native leg.
     fn mutable_global_cow(
         &mut self,
@@ -702,7 +702,7 @@ impl LowerCtx {
 /// #3261 / #3265: the vars whose block, or a block on their field path, may be
 /// released or written in place before scope end somewhere in `body`:
 /// - the receiver root of an in-place mutator (`list.pop(cell.words)`,
-///   `list.pop(xs)`, `bytes.set_u8(p.buf, …)`): the two-level field COW
+///   `list.pop(xs)`, `bytes.put_u8(p.buf, …)`): the two-level field COW
 ///   releases the var's old block, and a unique list is popped in place;
 /// - the target of a write (`xs = …`, `xs[i] = …`, `cell.f = …`, `m[k] = …`,
 ///   and a `mut`-param call's write-back `xs = f(xs)`): under a branch or a
@@ -760,6 +760,8 @@ pub(crate) fn place_root(e: &IrExpr) -> Option<VarId> {
 }
 
 pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
+    // `bytes.__set_*` is the width primitive under the checked `bytes.put_*`.
+    let func = if module == "bytes" { func.strip_prefix("__").unwrap_or(func) } else { func };
     (module == "bytes"
         && (func.starts_with("set_")
             || func.starts_with("write_")

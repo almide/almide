@@ -1,0 +1,10 @@
+// @expect-fail: integer string conversion exceeds the limit of 4300 digits
+// @contract: C-419
+// bigint.to_string of a 4301-digit value (10^4300) aborts with the limit text on both
+// legs (#4196) — the exact-length check, not the bit-length pre-check, decides here.
+import bigint
+
+fn main() -> Unit = {
+  let p = bigint.pow(bigint.from(10), 4300)
+  println(bigint.to_string(p))
+}

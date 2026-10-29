@@ -45,15 +45,14 @@ pub fn run_self(args: &[&str], overlay: Option<&OverlayEnv>, timeout: Duration) 
     use std::io::Read;
     let exe = std::env::current_exe().map_err(|e| format!("cannot locate the almide binary: {}", e))?;
     let mut cmd = std::process::Command::new(exe);
+    if let Some(ov) = overlay {
+        // Before the subcommand: the overlay is a top-level argument (#4129).
+        cmd.arg("--survive-overlay").arg(&ov.target).arg("--survive-overlay-text").arg(&ov.text_file);
+    }
     cmd.args(args)
-        .env_remove("ALMIDE_SURVIVE_OVERLAY")
-        .env_remove("ALMIDE_SURVIVE_OVERLAY_TEXT")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    if let Some(ov) = overlay {
-        cmd.env("ALMIDE_SURVIVE_OVERLAY", &ov.target).env("ALMIDE_SURVIVE_OVERLAY_TEXT", &ov.text_file);
-    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -128,7 +127,7 @@ pub fn declared_contracts(text: &str) -> Vec<String> {
 
 fn walk_almd(dir: &Path, out: &mut Vec<PathBuf>) {
     let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if (name.starts_with('.') && name != "." && name != "..") || name == "target" || name == "node_modules" {
+    if super::project_scope::is_skipped_dir(name) {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else { return };

@@ -15,24 +15,26 @@ impl<'a> Interpreter<'a> {
             // (C-277's fixture, #1416; `with_capacity`/`set.new` likewise).
             "new" if args.is_empty() => Some(Flow::val(Value::Map(Rc::new(Vec::new())))),
             "len" | "size" => Some(self.map_len(args)),
+            // Element-type-blind, so served here: the pool's `map.is_empty`
+            // body is the Int-keyed core, and a map keyed by a record (the
+            // declared-repr walker over `Map[Secret[String], Int]`) abstained
+            // on it (#4240).
+            "is_empty" => Some(self.map_is_empty(args)),
             "get" => Some(self.map_get(args)),
             // `map.contains` is the stdlib's KEY-membership name
             // (stdlib/map.almd: `fn contains[K, V](m, key) -> Bool`) —
             // same op as the `contains_key`/`has` aliases.
             "contains" | "contains_key" | "has" => Some(self.map_contains_key(args)),
-            // `map.set` is FUNCTIONAL (`-> Map`, returns a new map); the
-            // mutating `map.insert` (`mut m, .. -> Unit`) is intercepted by the
-            // in-place-mutation guard above.
+            // `map.set` is FUNCTIONAL (`-> Map`, returns a new map).
             "set" => Some(self.map_set(args)),
             "keys" => Some(self.map_keys(args)),
             "values" => Some(self.map_values(args)),
             // Served natively so a String-keyed map never reaches the pool's
             // scalar core impl (the wrong-impl guard walled these on
-            // Map[String, _], #1226). All three are element-type-blind over
-            // the insertion-ordered entry list both backends share.
-            "get_or" => Some(self.map_get_or(args)),
+            // Map[String, _], #1226). Both are element-type-blind over the
+            // insertion-ordered entry list both backends share.
             "from_list" => Some(self.map_from_list(args)),
-            "entries" | "to_list" => Some(self.map_entries(args)),
+            "to_list" => Some(self.map_entries(args)),
             // v0's AlmideMap semantics exactly: remove keeps order, merge is
             // a's entries then b's upserted in (FIRST position, LAST value).
             "remove" => Some(self.map_remove(args)),
@@ -63,15 +65,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn map_get_or(&mut self, args: &[Value]) -> Flow {
-        match (args.first(), args.get(1), args.get(2)) {
-            (Some(Value::Map(e)), Some(k), Some(d)) => Flow::val(
-                e.iter().find(|(ek, _)| ek == k).map(|(_, v)| v.clone()).unwrap_or_else(|| d.clone()),
-            ),
-            _ => Flow::Abort("internal: map.get_or bad args".into()),
-        }
-    }
-
     /// Insertion order with upsert-in-place — v0's AlmideMap `from_list`
     /// (FIRST position, LAST value), the same rule `map_insert` implements.
     fn map_from_list(&mut self, args: &[Value]) -> Flow {
@@ -96,7 +89,7 @@ impl<'a> Interpreter<'a> {
             Some(Value::Map(e)) => Flow::val(Value::list(
                 e.iter().map(|(k, v)| Value::tuple(vec![k.clone(), v.clone()])).collect(),
             )),
-            _ => Flow::Abort("internal: map.entries on non-map".into()),
+            _ => Flow::Abort("internal: map.to_list on non-map".into()),
         }
     }
 
@@ -160,6 +153,7 @@ impl<'a> Interpreter<'a> {
             // a time.
             "from_list" => Some(self.set_from_list(args)),
             "len" | "size" => Some(self.set_len(args)),
+            "is_empty" => Some(self.set_is_empty(args)),
             "contains" | "has" => Some(self.set_contains(args)),
             "insert" | "add" => Some(self.set_insert(args)),
             "to_list" => Some(self.set_to_list(args)),
@@ -221,6 +215,20 @@ impl<'a> Interpreter<'a> {
         let mut out: Vec<Value> = a.iter().filter(|x| !b.contains(x)).cloned().collect();
         out.extend(b.iter().filter(|x| !a.contains(x)).cloned());
         Flow::val(Value::Set(Rc::new(out)))
+    }
+
+    fn set_is_empty(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Set(e)) => Flow::val(Value::Bool(e.is_empty())),
+            _ => Flow::Abort("internal: set.is_empty on non-set".into()),
+        }
+    }
+
+    fn map_is_empty(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Map(e)) => Flow::val(Value::Bool(e.is_empty())),
+            _ => Flow::Abort("internal: map.is_empty on non-map".into()),
+        }
     }
 
     fn set_len(&mut self, args: &[Value]) -> Flow {

@@ -23,9 +23,9 @@ fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>"
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("readdir")!
   let f = d + "/f.txt"
-  fs.write(f, "hi\n")!
+  fs.write_text(f, "hi\n")!
   let e = d + "/empty.txt"
-  fs.write(e, "")!
+  fs.write_text(e, "")!
   let missing = d + "/nope.txt"
   // A DIRECTORY at the path: the same err on every reader, plain and _if_exists.
   println(match fs.read_text(d) {
@@ -37,7 +37,7 @@ effect fn main() -> Unit = {
     err(m) => "lines=err(${redact(m, d)})",
   })
   println(match fs.read_bytes(d) {
-    ok(bs) => "bytes=ok(${list.len(bs)})",
+    ok(bs) => "bytes=ok(${bytes.len(bs)})",
     err(m) => "bytes=err(${redact(m, d)})",
   })
   println(match fs.read_text_if_exists(d) {
@@ -49,7 +49,7 @@ effect fn main() -> Unit = {
     err(m) => "lines_if=err(${redact(m, d)})",
   })
   println(match fs.read_bytes_if_exists(d) {
-    ok(o) => "bytes_if=ok(${list.len(o ?? [])})",
+    ok(o) => "bytes_if=ok(${o |> option.map((b) => bytes.len(b)) ?? 0})",
     err(m) => "bytes_if=err(${redact(m, d)})",
   })
   // A REGULAR FILE beside it still reads: the errno carry must not err on success.

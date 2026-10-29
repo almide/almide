@@ -10,7 +10,7 @@ impl LowerCtx {
         let faithful = self.check_call_module_faithful(module.as_str(), func.as_str(), args)?;
         self.seed_call_module_heap_read_shape(dst, ty, module.as_str(), func.as_str(), faithful);
         self.seed_call_module_heap_drop_route(dst, ty);
-        // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the
+        // A `Value` result (value.string/int/… or a Value-returning combinator) drops via the
         // runtime-tag-dispatched DropValue (a heap-payload Value owns one handle).
         if crate::lower::is_value_ty(ty) {
             self.value_handles.insert(dst);
@@ -56,7 +56,15 @@ impl LowerCtx {
             let is_closure_arg = matches!(
                 &a.kind,
                 IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
-            ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
+            ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id))
+                // A Fn-typed var bound to a tracked closure BLOCK (`let triple =
+                // make_multiplier(3)`) is passed as the combinator's closure, as
+                // the value position already passes it (`lower_pure_module_value_call`
+                // has no data-arg guard) — the in-test assert binds `list.map(xs,
+                // triple)` before comparing it (#4262).
+                || (matches!(a.ty, Ty::Fn { .. })
+                    && matches!(&a.kind, IrExprKind::Var { id }
+                        if self.value_of.get(id).is_some_and(|v| self.closure_values.contains(v))));
             // `List[<Fn>]` (B36) and `Map[String, <Fn>]` (the mclo family — the
             // hval handle-level twins + `$__drop_map_mclo`) are representable
             // closure CONTAINERS — excluded from the wall.
@@ -128,6 +136,22 @@ impl LowerCtx {
         }
     }
 
+    /// Seed only the READ shape of a real Option/Result block bound at `dst`
+    /// (no drop route: whoever produced the block owns that), so `x == y`,
+    /// `match x` and `x ?? d` over the let-bound value read its tag.
+    pub(crate) fn seed_variant_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let shape = match ty {
+            Ty::Applied(TC::Option, a) if a.len() == 1 => crate::lower::VariantShape::Option,
+            Ty::Applied(TC::Result, a) if a.len() == 2 => match crate::lower::result_family(ty) {
+                crate::lower::ResultFamily::HeapOk => crate::lower::VariantShape::ResultHeapOk,
+                crate::lower::ResultFamily::Scalar => crate::lower::VariantShape::ResultScalar,
+            },
+            _ => return,
+        };
+        self.value_shapes.entry(dst).or_insert(shape);
+    }
+
     fn seed_call_module_heap_read_shape(
         &mut self,
         dst: ValueId,
@@ -148,8 +172,15 @@ impl LowerCtx {
         // track the bound result so a later `match` over the var EXECUTES.
         if is_self_host_option_module_fn(module, func) {
             self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
+        } else if faithful {
+            // Any FAITHFUL module call's Option/Result result is a real block of
+            // the v1 variant layout — the self-host body built it through the
+            // same ctor rails a user fn's does (`seed_call_named_heap_read_shape`).
+            // The in-test assert binds its operands first (#4262) and must compare
+            // them as the direct call operands did.
+            self.seed_variant_read_shape(dst, ty);
         }
-        // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
+        // A FUNCTION-valued module-call result (`let f = map.get(m, k) ?? d` —
         // the closure-valued map read): the result IS a closure block — track it
         // so a later `f()` dispatches via CallIndirect, and its scope-end drop
         // routes to the recursive `$__drop_closure` (`closure_values` drives
@@ -164,14 +195,6 @@ impl LowerCtx {
         // below add only the refinements that need &self layout knowledge
         // (the variant-err classes), which the shared seeder cannot host yet.
         let materialized = crate::lower::is_self_host_materialized_result_fn(module, func)
-            // An ELEMENT-SHARING accessor whose element type IS a Result
-            // (`list.get_or([r0, r1], i, d)` over Result elements — the #1527
-            // List-argument view family): the hshare route shares a REAL
-            // materialized block back (the view admits only real elements), so
-            // the bound var must carry the same type-keyed read shape the
-            // match-subject path would seed — without it a later `match` over
-            // the var fell to the untracked linearization wall.
-            || (module == "list" && func == "get_or")
             // The unwrap_or family's result is the Ok payload / the default —
             // a REAL block for every REGISTERED route (an unregistered repr
             // routes `_x` and walls before any bind exists). Without the seed,
@@ -275,7 +298,7 @@ impl LowerCtx {
             return true;
         }
         if crate::lower::is_list_str_str_ty(ty) {
-            // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
+            // `List[(String,String)]` (map.to_list) — DropListStrStr frees each tuple's two
             // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
             self.value_drops.entry(dst).or_default().str_str_elems = true;
             return true;

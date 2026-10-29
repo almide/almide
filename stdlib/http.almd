@@ -1,20 +1,20 @@
 // http — bundled-Almide stdlib module.
 //
-// Migrated to `@intrinsic` + per-fn borrow overrides. `HttpRequest` /
-// `HttpResponse` are nominal types backed by Rust structs in
+// `HttpRequest` / `HttpResponse` are nominal types backed by Rust structs in
 // `runtime/rs/src/http.rs`. They are NOT named `Request`/`Response` so the
 // emitted Rust aliases never collide with a user/dependency `enum Response`.
+// Both are an `HttpMessage` (R-http-12): `header`, `header_values`, `headers`,
+// `body`, `body_bytes`, `set_header`, `set_body` and `set_body_bytes` are one
+// generic function each, dispatching to the per-type `__http_request_*` /
+// `__http_response_*` requirements below. A header list is
+// `List[(String, String)]` in wire order, a repeated field kept (R-http-09);
+// it crosses to the runtime flat, `[k1, v1, k2, v2, …]`.
 //
 // ABI split (drives the `@borrow_ref` / `@consume` sprinkling below):
-// - Accessors (`get_body` / `get_header` / `req_*` / `query_params`)
-//   take `&AlmideHttp{Response,Request}` + `&str` keys — plain
-//   `@intrinsic` resolves the `&str` via the default `String → RefStr`
-//   inference; the struct param needs `@borrow_ref`.
-// - Mutators (`set_status` / `set_header` / `set_cookie`) take the
-//   struct owned (`mut resp: AlmideHttpResponse`) — the default Ref
-//   would break, so `@consume(resp)`.
-// - HTTP client (`get`/`post`/...) take `&str` URLs and bodies —
-//   plain pass-through once `Map` heads get `@borrow_ref(headers)`.
+// - Readers take `&AlmideHttp{Response,Request}` + `&str` keys — the struct
+//   param needs `@borrow_ref`.
+// - Writers take the struct owned (`mut resp: AlmideHttpResponse`) — the
+//   default Ref would break, so `@consume`.
 //
 // `serve`'s handler slot is EFFECT-typed (#1055): the lambda checked against
 // it gets effect-fn body ergonomics (`!` with propagation, effect calls), and
@@ -23,211 +23,223 @@
 // A handler `Err` becomes the loop's 500 response; a pure handler is
 // Ok-wrapped by the checker's carrier typing, so both spellings arrive
 // uniform.
+import html
 import json
+import url
 
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
-@concurrent(f)
-effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
+@concurrent(handler)
+@category("Net.listen")
+effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 // ── Response builders ──
 /// Reply with Content-Type text/plain.
 @intrinsic("almide_rt_http_response")
 fn response(status: Int, body: String) -> HttpResponse = _
 
-// Safe HTML response — body must be SafeHtml (XSS-proof by construction).
-// Use html.escape() or html.raw() to create SafeHtml values.
-// Note: http is a bundled stdlib module and cannot import html directly.
-// Users call: http.response(status, html.to_string(body))
-// A convenience wrapper will be added when cross-bundled-module calls are supported.
+/// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
+fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
+  response(status, html.to_string(body)),
+  "Content-Type",
+  "text/html; charset=utf-8",
+)
+
 /// Reply with Content-Type application/json.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with headers as-is; no default Content-Type.
-@intrinsic("almide_rt_http_with_headers")
-@borrow_ref(headers)
-fn with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse = _
+/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
+fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
+  let flat = __flat(headers)
+  http.__with_headers(status, body, flat)
+}
+
+@intrinsic("almide_rt_http___with_headers")
+@borrow_ref(flat)
+fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
 /// 302 with Location url and empty body.
 @intrinsic("almide_rt_http_redirect")
 fn redirect(url: String) -> HttpResponse = _
 
-// ── Response accessors/mutators ──
+// ── Response status ──
 /// resp with code set; not range-checked.
 @intrinsic("almide_http_set_status")
 @consume(resp)
-fn status(resp: HttpResponse, code: Int) -> HttpResponse = _
+fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
-/// Payload text; lossy UTF-8 when fetched.
-@intrinsic("almide_http_get_body")
-@borrow_ref(resp)
-fn body(resp: HttpResponse) -> String = _
-
-/// Case-insensitive upsert of header key.
-@intrinsic("almide_http_set_header")
-@consume(resp)
-fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse = _
-
-/// First value for key, any case; none if absent.
-@intrinsic("almide_http_get_header")
-@borrow_ref(resp)
-fn get_header(resp: HttpResponse, key: String) -> String? = _
-
-// Read side of the response record (#1791). `status_code` is the GETTER
-// twin of `status(resp, code)`; `header_values` keeps a repeated field
-// (`Set-Cookie`) whole where `get_header` answers the first occurrence;
-// `headers` is the lowercased-name map, first value wins — the one rule
-// `get_header` / `req_header` already apply — so a repeated field is read
-// through `header_values`, never through the map.
-/// HTTP status; 0 if the status line was bad.
+/// HTTP status code; 0 if the status line was bad.
 @intrinsic("almide_http_status_code")
 @borrow_ref(resp)
-fn status_code(resp: HttpResponse) -> Int = _
+fn status(resp: HttpResponse) -> Int = _
 
-/// Map by lowercased name; first value wins.
-@intrinsic("almide_http_headers")
-@borrow_ref(resp)
-fn headers(resp: HttpResponse) -> Map[String, String] = _
+// ── Headers and body of either message (R-http-12) ──
+/// First value of header name, any case; none if absent.
+fn header[M: HttpMessage](m: M, name: String) -> String? = m.__self_header(name)
 
-/// Every value for key, wire order; [] if absent.
+/// Every value of header name, any case, in wire order; [] if absent.
+fn header_values[M: HttpMessage](m: M, name: String) -> List[String] = m.__self_header_values(name)
+
+/// Every header as (name, value), wire spelling and order, repeats kept.
+fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
+
+/// Body text; a fetched body is decoded as lossy UTF-8.
+fn body[M: HttpMessage](m: M) -> String = m.__self_body()
+
+/// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
+
+/// m with header name set, any case: the first match replaced in place, else appended.
+fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
+  name,
+  value,
+)
+
+/// m with its body replaced.
+fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
+
+/// m with its body replaced by body, decoded as lossy UTF-8.
+fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
+
+// The response's HttpMessage requirements.
+@intrinsic("almide_http_get_header")
+@borrow_ref(m)
+fn __http_response_header(m: HttpResponse, name: String) -> String? = _
+
 @intrinsic("almide_http_header_values")
-@borrow_ref(resp)
-fn header_values(resp: HttpResponse, key: String) -> List[String] = _
+@borrow_ref(m)
+fn __http_response_header_values(m: HttpResponse, name: String) -> List[String] = _
+
+fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(http.__http_response_headers_flat(m))
+
+@intrinsic("almide_http_headers_flat")
+@borrow_ref(m)
+fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
+
+@intrinsic("almide_http_get_body")
+@borrow_ref(m)
+fn __http_response_body(m: HttpResponse) -> String = _
+
+@intrinsic("almide_http_get_body_bytes")
+@borrow_ref(m)
+fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
+
+@intrinsic("almide_http_set_header")
+@consume(m)
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+
+@intrinsic("almide_http_set_body")
+@consume(m)
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
+  m,
+  bytes.to_string_lossy(body),
+)
+
+// The request's HttpMessage requirements.
+@intrinsic("almide_http_req_header")
+@borrow_ref(m)
+fn __http_request_header(m: HttpRequest, name: String) -> String? = _
+
+@intrinsic("almide_http_req_header_values")
+@borrow_ref(m)
+fn __http_request_header_values(m: HttpRequest, name: String) -> List[String] = _
+
+fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(http.__http_request_headers_flat(m))
+
+@intrinsic("almide_http_req_headers_flat")
+@borrow_ref(m)
+fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
+
+@intrinsic("almide_http_req_body")
+@borrow_ref(m)
+fn __http_request_body(m: HttpRequest) -> String = _
+
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
+
+@intrinsic("almide_http_req_set_header")
+@consume(m)
+fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> HttpRequest = _
+
+@intrinsic("almide_http_req_set_body")
+@consume(m)
+fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
+
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
+  m,
+  bytes.to_string_lossy(body),
+)
+
+// A header list crosses to the runtime flat: [k1, v1, k2, v2, …].
+fn __flat(xs: List[(String, String)]) -> List[String] = xs |> list.flat_map(((k, v)) => [k, v])
+
+fn __pairs(flat: List[String]) -> List[(String, String)] = list.range(0, list.len(flat) / 2) |> list.map((i) => (list.get(flat, 2 * i) ?? "", list.get(flat, 2 * i + 1) ?? ""))
 
 // ── Request accessors (pure) ──
 /// Request method as sent, e.g. GET.
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
-fn req_method(req: HttpRequest) -> String = _
+fn method(req: HttpRequest) -> String = _
 
-/// Request target, query string included.
+/// Request target, query string included (a full URL for a request built to send).
 @intrinsic("almide_http_req_path")
 @borrow_ref(req)
-fn req_path(req: HttpRequest) -> String = _
+fn path(req: HttpRequest) -> String = _
 
-/// Body text; empty without a Content-Length.
-@intrinsic("almide_http_req_body")
-@borrow_ref(req)
-fn req_body(req: HttpRequest) -> String = _
-
-/// First value for key, any case; none if absent.
-@intrinsic("almide_http_req_header")
-@borrow_ref(req)
-fn req_header(req: HttpRequest, key: String) -> String? = _
-
-/// Decoded query map; last duplicate wins.
-@intrinsic("almide_http_query_params")
-@borrow_ref(req)
-fn query_params(req: HttpRequest) -> Map[String, String] = _
-
-// Percent-decode a URL component (`+` → space, `%XX` → byte). `query_params`
-// already decodes its values; use this for manually-extracted query/form text.
-/// + to space, %XX to byte; bad escapes kept.
-@intrinsic("almide_http_url_decode")
-fn url_decode(s: String) -> String = _
+// The query is `url.parse_query` of the target's text after its FIRST `?`:
+// one decoder, defined once, the same on every leg (ALS-R5, C-404, #4117).
+// Every pair is kept in arrival order (a repeated key appears as often as it
+// was sent), a bare key has value "", `+` is a space, and a bad escape or
+// invalid UTF-8 is an err naming http.query_params.
+// Example: match http.query_params(http.new_request("GET", "/p?a=1?b=2&a=3", "", [])) { ok(ps) => ps == [("a", "1?b=2"), ("a", "3")], err(_) => false }
+// Example: match http.query_params(http.new_request("GET", "/p?k=%zz", "", [])) { ok(_) => false, err(e) => e == "http.query_params: invalid percent escape" }
+/// url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
+fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.path(req))) {
+  ok(ps) => ok(ps),
+  err(e) => err(string.replace(e, "url.parse_query", "http.query_params")),
+}
 
 // ── HTTP client (effect) ──
+// ANY complete response is `Ok` — a 404 or a 3xx included; `Err` is a
+// transport failure only. Redirects are NEVER followed: the 3xx and its
+// `Location` header are the answer. The one-shot forms are `get` / `request`
+// (the body text) and `get_response` / `send` (the whole response); `start`
+// is the handle.
 /// Body even for a 404; err only on transport.
 @intrinsic("almide_http_get")
 effect fn get(url: String) -> Result[String, String] = _
 
-/// Reply body of a POST; JSON type by default.
-@intrinsic("almide_http_post")
-effect fn post(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a PUT; JSON type by default.
-@intrinsic("almide_http_put")
-effect fn put(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a PATCH; JSON type by default.
-@intrinsic("almide_http_patch")
-effect fn patch(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a DELETE; any status is ok.
-@intrinsic("almide_http_delete")
-effect fn delete(url: String) -> Result[String, String] = _
-
 /// Reply body for any method; any status is ok.
+@category("Net.fetch")
+effect fn request(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[String, String] = http.__request(
+  method,
+  url,
+  body,
+  __flat(headers),
+)
+
 @intrinsic("almide_http_request")
-@borrow_ref(headers)
-effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
+@borrow_ref(flat)
+effect fn __request(method: String, url: String, body: String, flat: List[String]) -> Result[String, String] = _
 
-// Status-preserving client: returns `(status_code, body)` for ANY complete
-// response — a 404 is `Ok((404, body))`, not an `Err`. `Err` is only a
-// transport failure (connection / TLS / timeout). Use these when you need to
-// branch on the numeric status; `get` / `request` collapse it into the body.
-/// (status, body); a 404 is ok, not err.
-@intrinsic("almide_http_get_status")
-effect fn get_status(url: String) -> Result[(Int, String), String] = _
-
-/// (status, body) for any method; 3xx not followed.
-@intrinsic("almide_http_request_status")
-@borrow_ref(headers)
-effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = _
-
-// Full-response client (#1791): the `*_response` twin of EVERY verb-shaped
-// String client above — same parameters, `Result[HttpResponse, String]` back.
-// FAMILY RULE (machine-checked by tests/http_response_family_gate_test.rs):
-// each of get / post / put / patch / delete / request has exactly one
-// `<verb>_response` twin with the same parameter list; the body-only fn is
-// the `body` projection of its twin and `request_status` the (status, body)
-// projection, so the three shapes answer from ONE exchange. Intentional
-// omissions: `get_status` / `get_bytes` / `request_bytes` are result-SHAPE
-// variants, not verbs (they get no twin), and `request_stream` carries no
-// response record (its body is delivered chunk-wise to the callback).
-//
-// ANY complete response is `Ok` — a 404 or a 3xx included; `Err` is a
-// transport failure only. Redirects are NEVER followed: the 3xx and its
-// `Location` header are the answer, and the response is always to the URL
-// the caller passed. Header names keep their wire spelling and a repeated
-// field keeps every occurrence — read them with `get_header` (first),
-// `header_values` (all) or `headers` (lowercased map, first wins).
 /// Whole reply, 404 included; redirects not followed.
 @intrinsic("almide_http_get_response")
 effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 
-/// Whole reply to a POST; any status is ok.
-@intrinsic("almide_http_post_response")
-effect fn post_response(url: String, body: String) -> Result[HttpResponse, String] = _
+/// Sends req to the URL its target names; the whole reply, any status; redirects not followed.
+@category("Net.fetch")
+effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
+  http.method(req),
+  http.path(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
+)
 
-/// Whole reply to a PUT; any status is ok.
-@intrinsic("almide_http_put_response")
-effect fn put_response(url: String, body: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply to a PATCH; any status is ok.
-@intrinsic("almide_http_patch_response")
-effect fn patch_response(url: String, body: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply to a DELETE; any status is ok.
-@intrinsic("almide_http_delete_response")
-effect fn delete_response(url: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply for any method; 3xx not followed.
 @intrinsic("almide_http_request_response")
-@borrow_ref(headers)
-effect fn request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String] = _
-
-// Binary client: returns the raw response body as `Bytes` with no UTF-8
-// conversion, so binary payloads (images, audio — e.g. TTS mp3/wav) survive
-// byte-identical. The String client above corrupts non-UTF-8 bodies.
-/// Raw body bytes, not UTF-8 decoded.
-@intrinsic("almide_http_get_bytes")
-effect fn get_bytes(url: String) -> Result[Bytes, String] = _
-
-/// Raw body bytes for any method and headers.
-@intrinsic("almide_http_request_bytes")
-@borrow_ref(headers)
-effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = _
-
-// Streaming HTTP request. The on_chunk callback is invoked with each
-// raw body chunk as it arrives on the wire. Supports `Transfer-Encoding:
-// chunked` (Server-Sent Events shape) and plain bodies. The callback is
-// the caller's job to do SSE line splitting / event parsing.
-/// Body chunks to on_chunk; err on a non-2xx.
-@intrinsic("almide_http_request_stream")
-@borrow_ref(headers)
-effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = _
+@borrow_ref(flat)
+effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
 
 // ── Call handle and per-call limits (#2631) ──
 //
@@ -240,34 +252,28 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 // byte counts). A fired limit is `err("request timeout: total_ms <n>
 // exceeded")` / `err("request timeout: idle_ms <n> exceeded")`; a cancelled
 // call is `err("request cancelled")`. ALMIDE_HTTP_TIMEOUT_SECS stays the
-// default of the calls that take no limits.
+// default of the calls that take no limits. A streamed body is read with
+// `read_new` between `poll`s (R-http-01: the callback clients are gone).
 //
 // FAMILY RULE (machine-checked by tests/http_call_family_gate_test.rs): the
-// handle has exactly the five verbs start / poll / read_new / wait / cancel,
-// and every streaming client (request_stream; the OpenAI and Anthropic clients
-// moved to package almide/llm at dialect epoch 14) has exactly one
-// `<name>_with_limits` twin: the
-// same parameters with `limits: HttpLimits` inserted before the callback, the
-// same return type, built on the handle. Intentional omissions: the one-shot
-// clients (get / request / *_response / *_status / *_bytes) get no twin —
-// `start` + `wait` is their limited form, answering the `request_response`
-// record.
+// handle has exactly the five verbs start / poll / read_new / wait / cancel.
 /// Per-call limits in ms; 0 = no limit.
 type HttpLimits = { total_ms: Int, idle_ms: Int }
 
-/// Begins a request; returns at once with a handle.
-effect fn start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
-  method,
-  url,
-  body,
-  headers,
+/// Begins sending req; returns at once with a handle.
+@category("Net.fetch")
+effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
+  http.method(req),
+  http.path(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
 )
 
 @intrinsic("almide_rt_http___call_start")
-@borrow_ref(headers)
-effect fn __call_start(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+@borrow_ref(flat)
+effect fn __call_start(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
 
 /// Never blocks: none while running, then the result.
 @intrinsic("almide_http_call_poll")
@@ -289,21 +295,6 @@ effect fn wait(c: HttpCall) -> Result[HttpResponse, String] = _
 @borrow_ref(c)
 effect fn cancel(c: HttpCall) -> Unit = _
 
-/// request_stream bounded by per-call limits.
-effect fn request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Result[Unit, String] = __request_stream_limited(
-  method,
-  url,
-  body,
-  headers,
-  limits.total_ms,
-  limits.idle_ms,
-  on_chunk,
-)
-
-@intrinsic("almide_rt_http___request_stream_limited")
-@borrow_ref(headers)
-effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
-
 // ── Server: handlers, routes, middleware (#2588) ──
 //
 // A handler is a plain function from a request to a response, and so are a
@@ -313,10 +304,10 @@ effect fn __request_stream_limited(method: String, url: String, body: String, he
 // passed as arguments, never through a mutable context.
 //
 // FAMILY RULE (#2588, gated by proofs/target-availability.toml): every
-// HttpRequest reader — req_method / req_path / req_body / req_header /
-// query_params / param — answers a request built by `new_request`, so the
-// availability probe builds its HttpRequest argument that way and no reader
-// is `unprobed` on any leg.
+// HttpRequest reader — method / path / header / header_values / headers /
+// body / body_bytes / query_params / param — answers a request built by
+// `new_request`, so the availability probe builds its HttpRequest argument
+// that way and no reader is `unprobed` on any leg.
 /// Request to response; a router is one too.
 type HttpHandler = effect (HttpRequest) -> HttpResponse
 
@@ -326,10 +317,15 @@ type HttpMiddleware = (HttpHandler) -> HttpHandler
 /// Route table row; build it with route or mount.
 type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 
-/// Request built in code; target keeps its ?query.
-@intrinsic("almide_rt_http_new_request")
-@borrow_ref(headers)
-fn new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest = _
+/// Request built in code; target keeps its ?query (a full URL for send / start).
+fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = {
+  let flat = __flat(headers)
+  http.__new_request(method, target, body, flat)
+}
+
+@intrinsic("almide_rt_http___new_request")
+@borrow_ref(flat)
+fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.
 @intrinsic("almide_http_param")
@@ -345,9 +341,23 @@ fn __with_params(req: HttpRequest, flat: List[String]) -> HttpRequest = _
 @consume(req)
 fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 
-@intrinsic("almide_http_set_body")
-@consume(resp)
-fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
+// The declared reprs of the two value types (#4204, after #2647): what
+// `${req}` / `${resp}` shows, bare or nested in a record, list or option, on
+// every leg. The headers are COUNTED, never listed — a logged request does not
+// carry its Authorization / Cookie values. Named after the runtime-backed row
+// (`stdlib_info::runtime_backed_repr_surface`), so the display engine finds
+// them from the type, not from a list.
+@intrinsic("almide_http_req_repr")
+@borrow_ref(req)
+fn __http_request_repr(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_call_repr")
+@borrow_ref(c)
+fn __http_call_repr(c: HttpCall) -> String = _
+
+@intrinsic("almide_http_resp_repr")
+@borrow_ref(resp)
+fn __http_response_repr(resp: HttpResponse) -> String = _
 
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
@@ -363,7 +373,7 @@ fn __query_of(target: String) -> String = match string.index_of(target, "?") {
 fn __parts(path: String) -> List[String] = string.split(path, "/") |> list.filter((s) => s != "")
 
 // A path segment percent-decoded; `+` is a literal plus in a path.
-fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "%2B"))
+fn __decode_part(s: String) -> String = url.decode_form(string.replace(s, "+", "%2B")) ?? s
 
 fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
 
@@ -373,8 +383,55 @@ fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefAB
 // the path per char, O(L²) in the request.
 fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) |> list.any((p) => not __hex_pair(p))
 
+// ONE canonical path for the router and the middleware in front of it (C-406,
+// #4133): the router answers 400 to a path it would otherwise read differently
+// from a `req_path` guard — an empty segment (`//admin`), a `.` or `..`
+// segment, a percent-encoded unreserved byte (`%61dmin`, `%2e`), a backslash
+// or a control character. What reaches a handler through the router is
+// therefore exactly what a middleware's `req_path` check saw. `%2F` stays
+// encoded (an encoded slash is not a separator), and a trailing `/` is kept.
+// `%XX` that decodes to an unreserved character (RFC 3986: ALPHA / DIGIT /
+// "-" / "." / "_" / "~"), which a canonical path spells literally.
+fn __encodes_unreserved(p: String) -> Bool = match url.decode_component("%" + string.take(p, 2)) {
+  ok(c) => string.len(c) == 1 and string.contains(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~",
+    c,
+  ),
+  err(_) => false,
+}
+
+fn __canonical(path: String) -> Bool = {
+  let segs = string.split(string.drop(path, 1), "/")
+  let n = list.len(segs)
+  let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
+  let dot = segs |> list.any((s) => s == "." or s == "..")
+  let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
+  let odd = string.to_list(path) |> list.any((c) => c == "\\" or (string.to_codepoint(c) ?? 0) < 32 or (string.to_codepoint(c) ?? 0) == 127)
+  not empty_inner and not dot and not unreserved and not odd
+}
+
+// A bound parameter (C-406, #4134) must not decode to `.` or `..` or hold a
+// `/`, `\` or NUL: `/u/..%2F..%2Fetc%2Fpasswd` would hand a handler
+// `../../etc/passwd`. A `{name...}` tail is checked segment by segment; the
+// anonymous `{...}` of a mount is checked by the sub-app's own router.
+fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(
+  v,
+  "\\",
+) or string.contains(v, "\u{0}")
+
+fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
+  let fixed = segs |> list.take_while((s) => not __is_rest(s))
+  let n = list.len(fixed)
+  let fixed_bad = list.zip(fixed, parts) |> list.any(((s, part)) => __is_param(s) and __param_bad(__decode_part(part)))
+  let rest_bad = match list.get(segs, n) {
+    some(r) => __name_of(r) != "" and (list.drop(parts, n) |> list.any((part) => __param_bad(__decode_part(part)))),
+    none => false,
+  }
+  fixed_bad or rest_bad
+}
+
 fn __hex_pair(p: String) -> Bool = {
-  let cs = string.chars(string.take(p, 2))
+  let cs = string.to_list(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
@@ -401,11 +458,11 @@ fn __pattern_path(pattern: String) -> String = match string.index_of(pattern, " 
 @concurrent(handler)
 fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
   let p = string.trim(pattern)
-  let method = match string.index_of(p, " ") {
+  let verb = match string.index_of(p, " ") {
     some(i) => string.take(p, i),
     none => "",
   }
-  { method: method, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
+  { method: verb, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
 }
 
 /// Sub-app under prefix: /api/x reaches it as /x.
@@ -418,7 +475,7 @@ fn mount(prefix: String, sub: HttpHandler) -> HttpRoute = {
 // The anonymous `{...}` binds the rest of the path undecoded, so the sub-app
 // decodes each segment exactly once.
 fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
-  let q = __query_of(http.req_path(req))
+  let q = __query_of(http.path(req))
   let rest = http.param(req, "") ?? ""
   sub(http.__with_path(req, "/" + rest + (if q == "" then "" else "?" + q)))!
 }
@@ -496,7 +553,7 @@ else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(
 )
 else not string.contains(s, "{") and not string.contains(s, "}")
 
-fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
+fn __method_ok(m: String) -> Bool = string.to_list(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
 fn __pattern_problems(r: HttpRoute) -> List[String] = {
   let last = list.len(r.segments) - 1
@@ -527,26 +584,35 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
   )
 }
 
+@category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
-  let method = http.req_method(req)
-  let path = __path_of(http.req_path(req))
-  if not string.starts_with(path, "/") then http.response(
+  let verb = http.method(req)
+  let target_path = __path_of(http.path(req))
+  if not string.starts_with(target_path, "/") then http.response(
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(path) then http.response(
+  else if __bad_escape(target_path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
+  else if not __canonical(target_path) then http.response(
+    400,
+    "Bad Request: the path is not in canonical form",
+  )
   else {
-    let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
-    let via_get = method == "HEAD" and list.is_empty(exact)
+    let exact = hits |> list.filter(((r, _)) => r.method == verb or r.method == "")
+    let via_get = verb == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
     else exact
     match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
-      some((r, bound)) => {
+      some((r, bound)) => if __bad_binding(r.segments, __parts(target_path)) then http.response(
+        400,
+        "Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
+      )
+      else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__set_body(res, "") else res
+        if via_get then http.__http_response_set_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -556,15 +622,15 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
 // The route table's lambda computes the matching routes itself: `routes` stays
 // a capture, never a param a callee would have to own.
 fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => {
-  let parts = __parts(__path_of(http.req_path(req)))
+  let parts = __parts(__path_of(http.path(req)))
   let hits = routes |> list.filter_map((r) => __bind(r.segments, parts) |> option.map((bound) => (r, bound)))
   __dispatch(hits, req)!
 }
 
 /// Route table as a handler; err on conflicting routes.
-fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
-  let problems = __problems(routes)
-  if list.is_empty(problems) then ok(__table(routes)) else err("http.router: " + list.join(
+fn router(xs: List[HttpRoute]) -> Result[HttpHandler, String] = {
+  let problems = __problems(xs)
+  if list.is_empty(problems) then ok(__table(xs)) else err("http.router: " + list.join(
     problems,
     "; ",
   ))
@@ -583,9 +649,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 // the rest of the list on every step (`list.take`), O(n²) in middleware.
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+// Row 22 (C-436): T is an input type — a `: Decode` record that is not also
+// `Encode`; a `Codec` T is E110 at the call (`@input_sink`). The body decodes
+// with `T.decode_strict`, so a key outside T's fields (an input type skips no
+// field, E053) is `400 Bad Request: unknown key '<k>'`.
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.__http_request_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },

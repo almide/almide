@@ -22,7 +22,7 @@ fn show_str(mut s: String) -> Unit = {
 }
 
 fn show_map(mut m: Map[String, Int]) -> Unit = {
-  map.insert(m, "a", 1)
+  m = map.set(m, "a", 1)
   println("map ${m}")
 }
 
@@ -66,7 +66,7 @@ effect fn main() -> Unit = {
   show_str(s)
   var m: Map[String, Int] = [:]
   show_map(m)
-  var b = bytes.new(1)
+  var b = bytes.zeros(1)
   show_bytes(b)
   var p: P = { x: 1, tags: ["t"] }
   show_rec(p)

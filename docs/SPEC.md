@@ -734,7 +734,7 @@ for item in items {
   println(item)
 }
 
-for (k, v) in map.entries(config) {
+for (k, v) in map.to_list(config) {
   println(k + " = " + v)
 }
 
@@ -1244,7 +1244,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 16. Standard Library
 
-987 functions across 42 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+1308 functions across 49 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 16.1 Auto-Imported Modules
 
@@ -1615,7 +1615,7 @@ fn summary(config: Config) -> String =
 effect fn load(path: String) -> Result[Config, ConfigError] = {
   let text = fs.read_text(path)
   let raw = json.parse(text)
-  json.get_string(raw, "root")
+  value.get_string(raw, "root")
     |> option.ok_or("missing root")
     |> result.map((r) => { root: r, bare: false, description: "" })
 }

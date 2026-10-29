@@ -5,4 +5,4 @@
 // one call name. The `json_object` / `json_array` twins that lived here were
 // the retired `json.object` / `json.array` aliases, dropped with the E040
 // window — construction is `value.object` / `value.array`.
-fn json_stringify(v: Value) -> String = value.stringify(v)
+fn json_stringify(v: Value) -> String = value.__stringify(v)

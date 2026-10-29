@@ -2,227 +2,300 @@
 
 # Standard library
 
-Every public function of the 44 stdlib modules, 999 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1322 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
 | Module | Functions | Types |
 |---|---:|---:|
-| [args](#args) | 6 | 0 |
+| [args](#args) | 3 | 0 |
 | [base64](#base64) | 4 | 0 |
-| [bytes](#bytes) | 146 | 1 |
-| [compute](#compute) | 6 | 0 |
-| [datetime](#datetime) | 22 | 0 |
-| [duration](#duration) | 6 | 0 |
+| [bigint](#bigint) | 24 | 1 |
+| [bool](#bool) | 3 | 0 |
+| [bytes](#bytes) | 178 | 0 |
+| [compute](#compute) | 7 | 0 |
+| [datetime](#datetime) | 18 | 0 |
+| [deque](#deque) | 60 | 0 |
+| [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
-| [error](#error) | 3 | 0 |
-| [float](#float) | 46 | 0 |
-| [float32](#float32) | 10 | 0 |
-| [float64](#float64) | 10 | 0 |
-| [fs](#fs) | 34 | 1 |
-| [hash](#hash) | 4 | 0 |
+| [ffi](#ffi) | 7 | 0 |
+| [float](#float) | 27 | 0 |
+| [float32](#float32) | 24 | 0 |
+| [float64](#float64) | 24 | 0 |
+| [fs](#fs) | 37 | 1 |
+| [hash](#hash) | 11 | 0 |
+| [heap](#heap) | 16 | 0 |
 | [hex](#hex) | 3 | 0 |
-| [html](#html) | 5 | 0 |
-| [http](#http) | 48 | 4 |
-| [int](#int) | 72 | 0 |
-| [int16](#int16) | 22 | 0 |
-| [int32](#int32) | 24 | 0 |
-| [int64](#int64) | 26 | 0 |
-| [int8](#int8) | 20 | 0 |
-| [io](#io) | 8 | 0 |
-| [json](#json) | 15 | 0 |
-| [list](#list) | 67 | 0 |
-| [map](#map) | 25 | 0 |
-| [math](#math) | 23 | 0 |
-| [matrix](#matrix) | 46 | 0 |
-| [net](#net) | 26 | 2 |
+| [html](#html) | 8 | 0 |
+| [http](#http) | 35 | 4 |
+| [int](#int) | 47 | 0 |
+| [int16](#int16) | 37 | 0 |
+| [int32](#int32) | 37 | 0 |
+| [int64](#int64) | 37 | 0 |
+| [int8](#int8) | 37 | 0 |
+| [io](#io) | 12 | 0 |
+| [json](#json) | 3 | 0 |
+| [list](#list) | 74 | 0 |
+| [map](#map) | 37 | 0 |
+| [math](#math) | 27 | 0 |
+| [matrix](#matrix) | 27 | 0 |
+| [net](#net) | 16 | 2 |
 | [option](#option) | 14 | 0 |
-| [path](#path) | 10 | 0 |
-| [process](#process) | 17 | 1 |
-| [random](#random) | 4 | 0 |
-| [regex](#regex) | 8 | 0 |
+| [path](#path) | 11 | 0 |
+| [process](#process) | 13 | 2 |
+| [random](#random) | 10 | 0 |
+| [regex](#regex) | 16 | 1 |
 | [result](#result) | 15 | 0 |
-| [set](#set) | 19 | 0 |
-| [string](#string) | 50 | 0 |
+| [secret](#secret) | 2 | 0 |
+| [set](#set) | 42 | 0 |
+| [string](#string) | 87 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 18 | 0 |
-| [uint32](#uint32) | 22 | 0 |
-| [uint64](#uint64) | 26 | 0 |
-| [uint8](#uint8) | 14 | 0 |
-| [url](#url) | 6 | 1 |
-| [value](#value) | 20 | 0 |
-| [zlib](#zlib) | 10 | 0 |
+| [uint16](#uint16) | 35 | 0 |
+| [uint32](#uint32) | 35 | 0 |
+| [uint64](#uint64) | 35 | 0 |
+| [uint8](#uint8) | 35 | 0 |
+| [unix](#unix) | 10 | 0 |
+| [url](#url) | 9 | 1 |
+| [uuid](#uuid) | 7 | 0 |
+| [value](#value) | 29 | 0 |
+| [zlib](#zlib) | 11 | 0 |
 
 ## args
 
 [args.md](args.md)
 
-- `effect args.raw() -> List[String]` — Same as env.args; argv[0] excluded.
-- `effect args.flag(name: String) -> Bool` — True on --name or -<first letter of name>.
-- `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v; none if absent.
-- `effect args.option_or(name: String, fallback: String) -> String` — option(name), or fallback when absent.
-- `effect args.positional() -> List[String]` — Args not starting with -; option values too.
-- `effect args.positional_at(i: Int) -> Option[String]` — i-th positional arg; none if out of range.
+- `effect args.has_flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
+- `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v before `--`; none if absent.
+- `effect args.positional(options: List[String]) -> List[String]` — Args before `--` that are not flags or values of the named options, then all after `--`.
 
 ## base64
 
 [base64.md](base64.md)
 
 - `base64.encode(b: Bytes) -> String` — Standard base64 with + / and = padding.
-- `base64.decode(s: String) -> Result[Bytes, String]` — Bytes from base64; padding optional; err if bad.
+- `base64.decode(s: String) -> Result[Bytes, String]` — Bytes from padded canonical base64 (+ /); err otherwise.
 - `base64.encode_url(b: Bytes) -> String` — URL-safe base64 (- _), still = padded.
-- `base64.decode_url(s: String) -> Result[Bytes, String]` — Same as decode; accepts either alphabet.
+- `base64.decode_url(s: String) -> Result[Bytes, String]` — Bytes from padded canonical URL-safe base64 (- _); err otherwise.
+
+## bigint
+
+[bigint.md](bigint.md)
+
+- `bigint.parse(s: String) -> Result[BigInt, String]` — BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
+- `bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` — BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk, and on more than 4300 digits in a radix that is not a power of two; radix outside 2..36 aborts.
+- `bigint.to_string(x: BigInt) -> String` — Decimal digits, with - when negative; more than 4300 digits aborts.
+- `bigint.to_string_radix(x: BigInt, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does a radix that is not a power of two when the text would pass 4300 digits.
+- `bigint.compare(a: BigInt, b: BigInt) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `bigint.min(a: BigInt, b: BigInt) -> BigInt` — Lesser of a and b.
+- `bigint.max(a: BigInt, b: BigInt) -> BigInt` — Greater of a and b.
+- `bigint.clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt` — x limited to lo..hi; aborts when lo > hi.
+- `bigint.abs(x: BigInt) -> BigInt` — Magnitude of x.
+- `bigint.sign(x: BigInt) -> Int` — -1, 0 or 1 by the sign of x; 0 for 0.
+- `bigint.is_even(x: BigInt) -> Bool` — True when x is a multiple of 2.
+- `bigint.is_odd(x: BigInt) -> Bool` — True when x is not a multiple of 2.
+- `bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` — Quotient rounded toward -inf; b == 0 aborts.
+- `bigint.modulo(a: BigInt, b: BigInt) -> BigInt` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `bigint.pow(base: BigInt, exp: Int) -> BigInt` — base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
+- `bigint.bit_length(x: BigInt) -> Int` — Bits needed to hold the magnitude of x; 0 for 0.
+- `bigint.band(a: BigInt, b: BigInt) -> BigInt` — Bitwise AND.
+- `bigint.bor(a: BigInt, b: BigInt) -> BigInt` — Bitwise OR.
+- `bigint.bxor(a: BigInt, b: BigInt) -> BigInt` — Bitwise XOR.
+- `bigint.bnot(x: BigInt) -> BigInt` — Bitwise complement; equals -x - 1.
+- `bigint.bshl(a: BigInt, n: Int) -> BigInt` — a shifted left by n bits (a * 2^n); n < 0 aborts.
+- `bigint.bshr(a: BigInt, n: Int) -> BigInt` — a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+- `bigint.from(x: S) -> BigInt` — x as BigInt, toward zero; NaN or an infinity aborts.
+- `bigint.from_checked(x: S) -> Option[BigInt]` — some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
+
+## bool
+
+[bool.md](bool.md)
+
+- `bool.to_string(b: Bool) -> String` — "true" or "false"; bool.parse reads it back.
+- `bool.parse(s: String) -> Result[Bool, String]` — ok(true) for "true", ok(false) for "false", err for anything else.
+- `bool.compare(a: Bool, b: Bool) -> Int` — Negative if a < b, 0 if equal, positive if a > b; false < true.
 
 ## bytes
 
 [bytes.md](bytes.md)
 
-- `bytes.append_f32_be(mut b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, BE.
-- `bytes.append_f32_le(mut b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, LE.
-- `bytes.append_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
-- `bytes.append_f64_le(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, LE.
-- `bytes.append_i16_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
-- `bytes.append_i16_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
-- `bytes.append_i32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.append_i32_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
-- `bytes.append_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
-- `bytes.append_i64_le(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, LE.
-- `bytes.append_u16_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
-- `bytes.append_u16_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
-- `bytes.append_u32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.append_u32_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
-- `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
-- `bytes.as_mut_ptr(b: Bytes) -> RawPtr` — Mutable address of the data; null if empty.
-- `bytes.as_ptr(b: Bytes) -> RawPtr` — Address of the data; null if empty.
-- `bytes.chunks(b: Bytes, size: Int) -> List[Bytes]` — size-byte pieces, last may be short; [] if size <= 0.
+- `bytes.append_f32_be(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f32, BE.
+- `bytes.append_f32_le(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f32, LE.
+- `bytes.append_f64_be(mut b: Bytes, x: Float) -> Unit` — Appends x as 8-byte f64, BE.
+- `bytes.append_f64_le(mut b: Bytes, x: Float) -> Unit` — Appends x as 8-byte f64, LE.
+- `bytes.append_i16_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, BE.
+- `bytes.append_i16_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, LE.
+- `bytes.append_i32_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, BE.
+- `bytes.append_i32_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, LE.
+- `bytes.append_i64_be(mut b: Bytes, x: Int) -> Unit` — Appends x as 8 bytes, BE.
+- `bytes.append_i64_le(mut b: Bytes, x: Int) -> Unit` — Appends x as 8 bytes, LE.
+- `bytes.append_u16_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, BE.
+- `bytes.append_u16_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, LE.
+- `bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, BE.
+- `bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, LE.
+- `bytes.append_u8(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits; 256 becomes 0.
 - `bytes.clear(mut b: Bytes) -> Unit` — Truncates b to length 0 in place.
-- `bytes.cmp(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
-- `bytes.concat(a: Bytes, b: Bytes) -> Bytes` — New Bytes holding a then b.
-- `bytes.contains(b: Bytes, pattern: Bytes) -> Bool` — True if pattern occurs in b, or pattern is empty.
-- `bytes.copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into dst; clamped to fit.
-- `bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int` — Writes up to cap bytes to ptr; count, 0 if null.
-- `bytes.data_ptr(b: Bytes) -> Int` — Address of the data as an Int; target-specific.
+- `bytes.compare(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
+- `bytes.contains(b: Bytes, needle: Bytes) -> Bool` — True if needle occurs in b, or needle is empty.
+- `bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into b; clamped to fit.
 - `bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` — True if b ends with suffix, or suffix is empty.
-- `bytes.eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
-- `bytes.fill(mut b: Bytes, val: Int) -> Unit` — Sets every byte to val's low 8 bits in place.
+- `bytes.is_eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
+- `bytes.fill(mut b: Bytes, x: Int) -> Unit` — Sets every byte to x's low 8 bits in place.
 - `bytes.from_list(xs: List[Int]) -> Bytes` — xs as bytes, low 8 bits each; -1 becomes 255.
-- `bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes` — Copy of len bytes at ptr; empty if null or len <= 0.
 - `bytes.from_string(s: String) -> Bytes` — UTF-8 encoding of s.
 - `bytes.get(b: Bytes, i: Int) -> Option[Int]` — Byte at index i, or none when out of range.
-- `bytes.get_or(b: Bytes, i: Int, default: Int) -> Int` — Byte at index i, or default when out of range.
-- `bytes.index_of(b: Bytes, pattern: Bytes) -> Option[Int]` — First offset of pattern, or none; some(0) if empty.
-- `bytes.insert(b: Bytes, pos: Int, val: Int) -> Bytes` — Copy with val's low byte at pos, clamped to 0..len.
+- `bytes.index_of(b: Bytes, needle: Bytes) -> Option[Int]` — First offset of needle, or none; some(0) if empty.
+- `bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with x's low byte at i, clamped to 0..len.
 - `bytes.is_empty(b: Bytes) -> Bool` — True when b holds no bytes.
 - `bytes.is_valid_utf8(b: Bytes) -> Bool` — Whether b is valid UTF-8; true when empty.
 - `bytes.len(b: Bytes) -> Int` — Byte count; 0 for an empty buffer.
-- `bytes.lines(b: Bytes) -> List[Bytes]` — Pieces split at LF; CR kept; a final LF adds no piece.
-- `bytes.map_each(b: Bytes, f: (Int) -> Int) -> Bytes` — f applied per byte; results cut to low 8 bits.
-- `bytes.new(len: Int) -> Bytes` — len zero bytes; empty if len <= 0.
-- `bytes.pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes` — Left-padded with val to target_len; as-is if longer.
-- `bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes` — Right-padded with val to target_len; as-is if longer.
-- `bytes.push(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits in place.
-- `bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit` — Sets byte i to val's low 8 bits; no-op out of range.
+- `bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes` — f applied per byte; results cut to low 8 bits.
+- `bytes.zeros(n: Int) -> Bytes` — n zero bytes; empty if n <= 0.
+- `bytes.pad_start(b: Bytes, n: Int, fill: Int) -> Bytes` — Left-padded with fill to length n; as-is if longer.
+- `bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes` — Right-padded with fill to length n; as-is if longer.
+- `bytes.push(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits in place.
 - `bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` — Copies src_start..src_end to dst; no-op if it won't fit.
-- `bytes.read_bool(b: Bytes, pos: Int) -> Bool` — Byte at pos != 0; false if out of range.
-- `bytes.read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool])` — (pos+1, byte != 0); (pos, none) at EOF.
-- `bytes.read_f16_le(b: Bytes, pos: Int) -> Float` — f16 LE at pos; 0.0 if out of range.
-- `bytes.read_f16_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+2, f16 LE); (pos, none) at EOF.
-- `bytes.read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f16 LE from pos; 0.0 past the end.
-- `bytes.read_f32_be(b: Bytes, pos: Int) -> Float` — f32 BE at pos; 0.0 if out of range.
-- `bytes.read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f32 BE from pos; 0.0 past the end.
-- `bytes.read_f32_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+4, f32 BE); (pos, none) at EOF.
-- `bytes.read_f32_le(b: Bytes, pos: Int) -> Float` — f32 LE at pos; 0.0 if out of range.
-- `bytes.read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f32 LE from pos; 0.0 past the end.
-- `bytes.read_f32_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+4, f32 LE); (pos, none) at EOF.
-- `bytes.read_f64_be(b: Bytes, pos: Int) -> Float` — f64 BE at pos; 0.0 if out of range.
-- `bytes.read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f64 BE from pos; 0.0 past the end.
-- `bytes.read_f64_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+8, f64 BE); (pos, none) at EOF.
-- `bytes.read_f64_le(b: Bytes, pos: Int) -> Float` — f64 LE at pos; 0.0 if out of range.
-- `bytes.read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f64 LE from pos; 0.0 past the end.
-- `bytes.read_f64_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+8, f64 LE); (pos, none) at EOF.
-- `bytes.read_i16_be(b: Bytes, pos: Int) -> Int` — i16 BE at pos; 0 if out of range.
-- `bytes.read_i16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, i16 BE); (pos, none) at EOF.
-- `bytes.read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i16 BE from pos; 0 past the end.
-- `bytes.read_i16_le(b: Bytes, pos: Int) -> Int` — i16 LE at pos; 0 if out of range.
-- `bytes.read_i16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, i16 LE); (pos, none) at EOF.
-- `bytes.read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i16 LE from pos; 0 past the end.
-- `bytes.read_i32_be(b: Bytes, pos: Int) -> Int` — i32 BE at pos; 0 if out of range.
-- `bytes.read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i32 BE from pos; 0 past the end.
-- `bytes.read_i32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, i32 BE); (pos, none) at EOF.
-- `bytes.read_i32_le(b: Bytes, pos: Int) -> Int` — i32 LE at pos; 0 if out of range.
-- `bytes.read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i32 LE from pos; 0 past the end.
-- `bytes.read_i32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, i32 LE); (pos, none) at EOF.
-- `bytes.read_i64_be(b: Bytes, pos: Int) -> Int` — i64 BE at pos; 0 if out of range.
-- `bytes.read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i64 BE from pos; 0 past the end.
-- `bytes.read_i64_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+8, i64 BE); (pos, none) at EOF.
-- `bytes.read_i64_le(b: Bytes, pos: Int) -> Int` — i64 LE at pos; 0 if out of range.
-- `bytes.read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i64 LE from pos; 0 past the end.
-- `bytes.read_i64_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+8, i64 LE); (pos, none) at EOF.
-- `bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]` — Up to count u32-LE-prefixed strings; stops if cut off.
-- `bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String` — len bytes at pos, lossy UTF-8; empty if out of range.
-- `bytes.read_string_be(b: Bytes, pos: Int) -> String` — String after a u32 BE length at pos; empty if cut off.
-- `bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])` — Cursor form of read_string_be; (pos, none) if cut off.
-- `bytes.read_u16_be(b: Bytes, pos: Int) -> Int` — u16 BE at pos; 0 if out of range.
-- `bytes.read_u16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, u16 BE); (pos, none) at EOF.
-- `bytes.read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u16 BE from pos; 0 past the end.
-- `bytes.read_u16_le(b: Bytes, pos: Int) -> Int` — u16 LE at pos; 0 if out of range.
-- `bytes.read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u16 LE from pos; 0 past the end.
-- `bytes.read_u16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, u16 LE); (pos, none) at EOF.
-- `bytes.read_u32_be(b: Bytes, pos: Int) -> Int` — u32 BE at pos; 0 if out of range.
-- `bytes.read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u32 BE from pos; 0 past the end.
-- `bytes.read_u32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, u32 BE); (pos, none) at EOF.
-- `bytes.read_u32_le(b: Bytes, pos: Int) -> Int` — u32 LE at pos; 0 if out of range.
-- `bytes.read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u32 LE from pos; 0 past the end.
-- `bytes.read_u32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, u32 LE); (pos, none) at EOF.
-- `bytes.read_u8(b: Bytes, pos: Int) -> Int` — Byte at pos; 0 if out of range.
-- `bytes.read_u8_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+1, byte); (pos, none) at EOF.
-- `bytes.remove_at(b: Bytes, pos: Int) -> Bytes` — Copy without the byte at pos; as-is if out of range.
+- `bytes.remove_at(b: Bytes, i: Int) -> Bytes` — Copy without the byte at pos; as-is if out of range.
 - `bytes.repeat(b: Bytes, n: Int) -> Bytes` — b concatenated n times; empty if n <= 0.
 - `bytes.reverse(b: Bytes) -> Bytes` — Copy with the byte order reversed.
-- `bytes.set(b: Bytes, i: Int, val: Int) -> Bytes` — Copy with byte i set to val; as-is if out of range.
-- `bytes.set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 BE at pos; no-op out of range.
-- `bytes.set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 LE at pos; no-op out of range.
-- `bytes.set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 BE at pos; no-op out of range.
-- `bytes.set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 LE at pos; no-op out of range.
-- `bytes.set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 BE at pos; no-op out of range.
-- `bytes.set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 LE at pos; no-op out of range.
-- `bytes.set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 BE at pos; no-op out of range.
-- `bytes.set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 LE at pos; no-op out of range.
-- `bytes.set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 BE at pos; no-op out of range.
-- `bytes.set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 LE at pos; no-op out of range.
-- `bytes.set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 BE at pos; no-op out of range.
-- `bytes.set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 LE at pos; no-op out of range.
-- `bytes.set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 BE at pos; no-op out of range.
-- `bytes.set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 LE at pos; no-op out of range.
-- `bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes val's low byte at pos; no-op out of range.
+- `bytes.set(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with byte i set to x; as-is if out of range.
 - `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` — pos + n, capped at len.
-- `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` — Offset past count u32-LE-prefixed records.
-- `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end capped at len; empty if start >= end.
+- `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end, each clamped to 0..len; empty if start >= end.
 - `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` — Pieces between sep matches; [b] for an empty sep.
 - `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` — True if b begins with prefix, or prefix is empty.
-- `bytes.take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])` — (pos+n, n-byte copy); (pos, none) if out of range.
+- `bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool` — True if a and b hold the same bytes, in time that depends only on their lengths: no early exit on the first differing byte.
 - `bytes.to_list(b: Bytes) -> List[Int]` — Each byte as an Int in 0..255.
 - `bytes.to_string(b: Bytes) -> Result[String, String]` — UTF-8 decode; err "invalid UTF-8: ..." if bad.
 - `bytes.to_string_lossy(b: Bytes) -> String` — UTF-8 decode; invalid sequences become U+FFFD.
-- `bytes.write_bool(mut b: Bytes, val: Bool) -> Unit` — Appends 1 for true, 0 for false.
-- `bytes.write_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
-- `bytes.write_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
-- `bytes.write_string_be(mut b: Bytes, s: String) -> Unit` — Appends s after a u32 BE byte-length prefix.
-- `bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.write_u8(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
+- `bytes.append_bool(mut b: Bytes, x: Bool) -> Unit` — Appends 1 for true, 0 for false.
 - `bytes.xor(a: Bytes, b: Bytes) -> Bytes` — Bytewise XOR, as long as the shorter input.
-- `bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16` — UInt16 at offset; 0 if out of range.
-- `bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32` — UInt32 at offset; 0 if out of range.
-- `bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32` — Int32 at offset; 0 if out of range.
-- `bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32` — Float32 at offset; 0 if out of range.
-- `bytes.write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit` — Appends value as 2 bytes in endian order.
-- `bytes.write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as 0..255; none outside 0..len.
+- `bytes.next_u8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u8(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
+- `bytes.get_i8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as a signed -128..127; none outside 0..len.
+- `bytes.next_i8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.put_i8(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
+- `bytes.append_i8(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits in place; -1 becomes 255.
+- `bytes.get_bool(b: Bytes, pos: Int) -> Option[Bool]` — The byte at pos != 0; none outside 0..len.
+- `bytes.next_bool(b: Bytes, pos: Int) -> (Option[Bool], Int)` — (get_bool(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.put_bool(mut b: Bytes, pos: Int, x: Bool) -> Unit` — Writes 1 for true, 0 for false at pos in place; pos outside 0..len aborts.
+- `bytes.get_u16_le(b: Bytes, pos: Int) -> Option[Int]` — The u16 LE at pos; none unless 2 bytes fit.
+- `bytes.next_u16_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_u16_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u16 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_u16_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u16 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_u16_be(b: Bytes, pos: Int) -> Option[Int]` — The u16 BE at pos; none unless 2 bytes fit.
+- `bytes.next_u16_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_u16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u16 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_u16_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u16 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i16_le(b: Bytes, pos: Int) -> Option[Int]` — The i16 LE at pos; none unless 2 bytes fit.
+- `bytes.next_i16_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_i16_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i16 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_i16_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i16 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i16_be(b: Bytes, pos: Int) -> Option[Int]` — The i16 BE at pos; none unless 2 bytes fit.
+- `bytes.next_i16_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_i16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i16 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_i16_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i16 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_u32_le(b: Bytes, pos: Int) -> Option[Int]` — The u32 LE at pos; none unless 4 bytes fit.
+- `bytes.next_u32_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_u32_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u32 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_u32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u32 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_u32_be(b: Bytes, pos: Int) -> Option[Int]` — The u32 BE at pos; none unless 4 bytes fit.
+- `bytes.next_u32_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_u32_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u32 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_u32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u32 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i32_le(b: Bytes, pos: Int) -> Option[Int]` — The i32 LE at pos; none unless 4 bytes fit.
+- `bytes.next_i32_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_i32_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i32 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_i32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i32 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i32_be(b: Bytes, pos: Int) -> Option[Int]` — The i32 BE at pos; none unless 4 bytes fit.
+- `bytes.next_i32_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_i32_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i32 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_i32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i32 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i64_le(b: Bytes, pos: Int) -> Option[Int]` — The i64 LE at pos; none unless 8 bytes fit.
+- `bytes.next_i64_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i64_le(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_i64_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i64 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_i64_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i64 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i64_be(b: Bytes, pos: Int) -> Option[Int]` — The i64 BE at pos; none unless 8 bytes fit.
+- `bytes.next_i64_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i64_be(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_i64_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i64 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_i64_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i64 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f32_le(b: Bytes, pos: Int) -> Option[Float]` — The f32 LE at pos; none unless 4 bytes fit.
+- `bytes.next_f32_le(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_f32_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f32 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_f32_le(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f32 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f32_be(b: Bytes, pos: Int) -> Option[Float]` — The f32 BE at pos; none unless 4 bytes fit.
+- `bytes.next_f32_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_f32_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f32 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_f32_be(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f32 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f64_le(b: Bytes, pos: Int) -> Option[Float]` — The f64 LE at pos; none unless 8 bytes fit.
+- `bytes.next_f64_le(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f64_le(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_f64_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f64 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_f64_le(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f64 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f64_be(b: Bytes, pos: Int) -> Option[Float]` — The f64 BE at pos; none unless 8 bytes fit.
+- `bytes.next_f64_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f64_be(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_f64_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f64 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_f64_be(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f64 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f16_le(b: Bytes, pos: Int) -> Option[Float]` — The f16 LE at pos as a Float; none unless 2 bytes fit.
+- `bytes.next_f16_le(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_f16_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f16 LE from pos; none unless all fit or if count < 0.
+- `bytes.get_f16_be(b: Bytes, pos: Int) -> Option[Float]` — The f16 BE at pos as a Float; none unless 2 bytes fit.
+- `bytes.next_f16_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f16 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_f16_le(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x rounded to f16 LE at pos in place; a window outside 0..len aborts.
+- `bytes.put_f16_be(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x rounded to f16 BE at pos in place; a window outside 0..len aborts.
+- `bytes.append_f16_le(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f16 (nearest even; overflow is inf), LE.
+- `bytes.append_f16_be(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f16 (nearest even; overflow is inf), BE.
+- `bytes.next_bytes(b: Bytes, pos: Int, n: Int) -> (Option[Bytes], Int)` — (the n bytes at pos, pos + n); (none, pos) unless they fit or if n < 0.
+- `bytes.append_bytes(mut b: Bytes, src: Bytes) -> Unit` — Appends src's bytes to b in place.
+- `bytes.new() -> Bytes` — An empty byte buffer.
+- `bytes.chunk(b: Bytes, n: Int) -> List[Bytes]` — n-byte pieces in order, the last may be short; n <= 0 aborts.
+- `bytes.pop(mut b: Bytes) -> Option[Int]` — Removes and returns the last byte; none if b is empty.
+- `bytes.take(b: Bytes, n: Int) -> Bytes` — The first n bytes; all of b past its length; empty if n < 0.
+- `bytes.drop(b: Bytes, n: Int) -> Bytes` — b without its first n bytes; empty past its length; all of b if n < 0.
+- `bytes.take_end(b: Bytes, n: Int) -> Bytes` — The last n bytes; all of b past its length; empty if n < 0.
+- `bytes.drop_end(b: Bytes, n: Int) -> Bytes` — b without its last n bytes; empty past its length; all of b if n < 0.
+- `bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` — (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
+- `bytes.first(b: Bytes) -> Option[Int]` — The first byte, or none if b is empty.
+- `bytes.last(b: Bytes) -> Option[Int]` — The last byte, or none if b is empty.
+- `bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` — The bytes for which f is true.
+- `bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B` — f folded over the bytes, left to right.
+- `bytes.any(b: Bytes, f: (Int) -> Bool) -> Bool` — True when f holds for some byte; false for empty b.
+- `bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool` — True when f holds for every byte; true for empty b.
+- `bytes.count(b: Bytes, f: (Int) -> Bool) -> Int` — How many bytes satisfy f.
+- `bytes.find(b: Bytes, f: (Int) -> Bool) -> Option[Int]` — The first byte satisfying f, or none.
+- `bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Option[Int]` — Index of the first byte satisfying f, or none.
+- `bytes.enumerate(b: Bytes) -> List[(Int, Int)]` — (index, byte) pairs from 0.
+- `bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` — Bytes paired with ys; stops at the shorter.
+- `bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` — f over bytes paired with ys; stops at the shorter.
+- `bytes.filter_map(b: Bytes, f: (Int) -> Option[B]) -> List[B]` — The some results of f over the bytes, in order.
+- `bytes.find_map(b: Bytes, f: (Int) -> Option[B]) -> Option[B]` — The first some result of f over the bytes, or none.
+- `bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Option[Int]` — f folded over the bytes from the first; none if b is empty.
+- `bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]` — The running fold over the bytes, init excluded.
+- `bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])` — (bytes where f is true, the rest), each in order.
+- `bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]` — Bytes grouped by f's key, each group in order.
+- `bytes.sort(b: Bytes) -> List[Int]` — The bytes in ascending order.
+- `bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]` — The bytes ordered by f's key; equal keys keep their order.
+- `bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]` — The bytes ordered by cmp (negative = first argument first); stable.
+- `bytes.min(b: Bytes) -> Option[Int]` — The smallest byte; none if empty.
+- `bytes.max(b: Bytes) -> Option[Int]` — The largest byte; none if empty.
+- `bytes.min_by(b: Bytes, f: (Int) -> K) -> Option[Int]` — The first byte with the smallest key; none if empty.
+- `bytes.max_by(b: Bytes, f: (Int) -> K) -> Option[Int]` — The last byte with the largest key; none if empty.
+- `bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]` — The first smallest byte by cmp; none if empty.
+- `bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]` — The last largest byte by cmp; none if empty.
+- `bytes.sum(b: Bytes) -> Int` — The sum of the bytes; 0 for empty b.
+- `bytes.product(b: Bytes) -> Int` — The product of the bytes, wrapping; 1 for empty b.
+- `bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes` — The longest prefix whose bytes all satisfy f.
+- `bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes` — b after the longest prefix whose bytes all satisfy f.
+- `bytes.window(b: Bytes, n: Int) -> List[Bytes]` — Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+- `bytes.dedup(b: Bytes) -> Bytes` — b with each run of equal adjacent bytes collapsed to one.
+- `bytes.intersperse(b: Bytes, sep: Int) -> Bytes` — The bytes of b with sep between each pair.
+- `bytes.unique(b: Bytes) -> Bytes` — The first occurrence of each byte value, in order.
+- `bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` — The first byte of each key f gives, in order.
+- `bytes.last_index_of(b: Bytes, needle: Bytes) -> Option[Int]` — Byte index of the last needle, or none; an empty needle is found at len.
+- `bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes` — b with every non-overlapping from replaced by to, left to right.
+- `bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes` — b with the first from replaced by to.
+- `bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Option[Bytes]` — b without prefix, or none when b does not start with it.
+- `bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Option[Bytes]` — b without suffix, or none when b does not end with it.
+- `bytes.count_matches(b: Bytes, needle: Bytes) -> Int` — Non-overlapping occurrences of needle; len + 1 for an empty needle.
 
 ## compute
 
@@ -234,6 +307,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `compute.s(n: Int) -> Compute` — n seconds of deterministic compute time; negative n aborts.
 - `compute.min(n: Int) -> Compute` — n minutes of deterministic compute time; negative n aborts.
 - `compute.h(n: Int) -> Compute` — n hours of deterministic compute time; negative n aborts.
+- `compute.compare(a: Compute, b: Compute) -> Int` — Negative if a < b, 0 if equal, positive if a > b.
 
 ## datetime
 
@@ -244,23 +318,84 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.add_minutes(ts: Int, n: Int) -> Int` — ts + n * 60; n may be negative.
 - `datetime.add_seconds(ts: Int, n: Int) -> Int` — ts + n; n may be negative.
 - `datetime.day(ts: Int) -> Int` — Calendar day 1..31 (UTC).
-- `datetime.diff_seconds(a: Int, b: Int) -> Int` — a - b; positive when a is later.
 - `datetime.format(ts: Int, pattern: String) -> String` — Replaces %Y %m %d %H %M %S (UTC); no %% escape.
-- `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int` — UTC epoch secs; out-of-range fields roll over.
-- `datetime.from_unix(seconds: Int) -> Int` — Identity: seconds are already a timestamp.
+- `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]` — UTC epoch secs; a field out of range is err, as in parse_iso.
 - `datetime.hour(ts: Int) -> Int` — UTC hour of day, 0..23.
-- `datetime.is_after(a: Int, b: Int) -> Bool` — a > b; false when equal.
-- `datetime.is_before(a: Int, b: Int) -> Bool` — a < b; false when equal.
 - `datetime.minute(ts: Int) -> Int` — UTC minute, 0..59.
 - `datetime.month(ts: Int) -> Int` — UTC month, 1..12.
 - `effect datetime.now() -> Int` — Wall-clock Unix seconds (not monotonic).
 - `effect datetime.monotonic_ns() -> Int` — Monotonic ns since first call; compare differences.
-- `datetime.parse_iso(s: String) -> Result[Int, String]` — Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
+- `effect datetime.now_ms() -> Int` — Wall-clock milliseconds since the Unix epoch (not monotonic).
+- `datetime.parse_iso(s: String) -> Result[Int, String]` — Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
 - `datetime.second(ts: Int) -> Int` — UTC second, 0..59.
 - `datetime.to_iso(ts: Int) -> String` — YYYY-MM-DDTHH:MM:SSZ in UTC.
-- `datetime.to_unix(ts: Int) -> Int` — Identity: a timestamp is already Unix seconds.
 - `datetime.weekday(ts: Int) -> String` — English day name in UTC; 0 is Thursday.
 - `datetime.year(ts: Int) -> Int` — Calendar year in UTC.
+
+## deque
+
+[deque.md](deque.md)
+
+- `deque.new() -> Deque[A]` — An empty deque.
+- `deque.from_list(xs: List[A]) -> Deque[A]` — A deque of xs, front to back.
+- `deque.to_list(d: Deque[A]) -> List[A]` — The elements, front to back.
+- `deque.len(d: Deque[A]) -> Int` — Element count; 0 for an empty deque.
+- `deque.is_empty(d: Deque[A]) -> Bool` — true iff d has no elements.
+- `deque.push(mut d: Deque[A], x: A) -> Unit` — Appends x at the back in place.
+- `deque.push_front(mut d: Deque[A], x: A) -> Unit` — Adds x at the front in place.
+- `deque.pop(mut d: Deque[A]) -> Option[A]` — Removes and yields the last element; none when empty.
+- `deque.pop_front(mut d: Deque[A]) -> Option[A]` — Removes and yields the first element; none when empty.
+- `deque.first(d: Deque[A]) -> Option[A]` — The first element, or none when empty.
+- `deque.last(d: Deque[A]) -> Option[A]` — The last element, or none when empty.
+- `deque.get(d: Deque[A], i: Int) -> Option[A]` — Element at index i from the front, or none when out of range.
+- `deque.contains(d: Deque[A], x: A) -> Bool` — true if some element == x.
+- `deque.clear(mut d: Deque[A]) -> Unit` — Removes every element of d in place.
+- `deque.map(d: Deque[A], f: (A) -> B) -> Deque[B]` — Deque of f(x), front to back; f runs front to back.
+- `deque.filter(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — Elements where f holds, order kept.
+- `deque.fold(d: Deque[A], init: B, f: (B, A) -> B) -> B` — Folds f(acc, x) front to back.
+- `deque.any(d: Deque[A], f: (A) -> Bool) -> Bool` — true if f holds for some element; false when empty.
+- `deque.all(d: Deque[A], f: (A) -> Bool) -> Bool` — true if f holds for every element; true when empty.
+- `deque.count(d: Deque[A], f: (A) -> Bool) -> Int` — Number of elements where f holds.
+- `deque.find(d: Deque[A], f: (A) -> Bool) -> Option[A]` — The element nearest the front where f holds, or none.
+- `deque.reverse(d: Deque[A]) -> Deque[A]` — Elements back to front.
+- `deque.take(d: Deque[A], n: Int) -> Deque[A]` — First n elements, as list.take.
+- `deque.drop(d: Deque[A], n: Int) -> Deque[A]` — All but the first n, as list.drop.
+- `deque.take_end(d: Deque[A], n: Int) -> Deque[A]` — Last n elements, as list.take_end.
+- `deque.drop_end(d: Deque[A], n: Int) -> Deque[A]` — All but the last n, as list.drop_end.
+- `deque.slice(d: Deque[A], start: Int, end: Int) -> Deque[A]` — Indices start..<end, as list.slice.
+- `deque.set(d: Deque[A], i: Int, x: A) -> Deque[A]` — Copy with slot i = x, as list.set.
+- `deque.insert(d: Deque[A], i: Int, x: A) -> Deque[A]` — Copy with x at i, as list.insert.
+- `deque.remove_at(d: Deque[A], i: Int) -> Deque[A]` — Copy without slot i, as list.remove_at.
+- `deque.enumerate(d: Deque[A]) -> List[(Int, A)]` — (index, element) pairs, index from 0 at the front.
+- `deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]` — Elements paired with ys by position; stops at the shorter.
+- `deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over (element, ys element) pairs; stops at the shorter.
+- `deque.filter_map(d: Deque[A], f: (A) -> Option[B]) -> List[B]` — The somes f gives, front to back.
+- `deque.find_map(d: Deque[A], f: (A) -> Option[B]) -> Option[B]` — The first some f gives, or none; f is not called after the hit.
+- `deque.reduce(d: Deque[A], f: (A, A) -> A) -> Option[A]` — Left fold seeded by the first element; none when empty.
+- `deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]` — Running fold values front to back, init excluded.
+- `deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])` — (elements where f holds, the rest), order kept.
+- `deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]` — Key f(x) -> elements; keys in first-seen order.
+- `deque.sort(d: Deque[A]) -> List[A]` — Elements in ascending order; Floats in IEEE totalOrder.
+- `deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]` — Elements sorted by key f(x), stable; f runs once per element.
+- `deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]` — Elements sorted by cmp, stable: negative puts a first.
+- `deque.min(d: Deque[A]) -> Option[A]` — Least element, or none when empty.
+- `deque.max(d: Deque[A]) -> Option[A]` — Greatest element, or none when empty.
+- `deque.min_by(d: Deque[A], f: (A) -> K) -> Option[A]` — Element with the least key f(x); the nearest the front on ties.
+- `deque.max_by(d: Deque[A], f: (A) -> K) -> Option[A]` — Element with the greatest key f(x); the nearest the front on ties.
+- `deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]` — Least element by cmp; the nearest the front on ties.
+- `deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest element by cmp; the nearest the front on ties.
+- `deque.find_index(d: Deque[A], f: (A) -> Bool) -> Option[Int]` — Index from the front of the first x where f holds, or none.
+- `deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — Longest front run where f holds.
+- `deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — The rest after the longest front run where f holds.
+- `deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]` — Runs of n from the front, as list.chunk.
+- `deque.window(d: Deque[A], n: Int) -> List[Deque[A]]` — All n-long runs, as list.window.
+- `deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])` — (first n, the rest), as list.split_at.
+- `deque.dedup(d: Deque[A]) -> Deque[A]` — Adjacent equal runs collapsed, as list.dedup.
+- `deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` — sep between adjacent elements.
+- `deque.unique(d: Deque[A]) -> Deque[A]` — Duplicates removed; the occurrence nearest the front kept.
+- `deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` — The first element per distinct key f(x).
+- `deque.sum(d: Deque[A]) -> A` — Sum of the elements; 0 when empty; integers wrap on overflow.
+- `deque.product(d: Deque[A]) -> A` — Product of the elements; 1 when empty; integers wrap on overflow.
 
 ## duration
 
@@ -272,157 +407,202 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `duration.s(n: Int) -> Duration` — n seconds of wall-clock time; negative n aborts.
 - `duration.min(n: Int) -> Duration` — n minutes of wall-clock time; negative n aborts.
 - `duration.h(n: Int) -> Duration` — n hours of wall-clock time; negative n aborts.
+- `duration.compare(a: Duration, b: Duration) -> Int` — Negative if a < b, 0 if equal, positive if a > b.
 
 ## env
 
 [env.md](env.md)
 
-- `effect env.unix_timestamp() -> Int` — Wall-clock seconds since the Unix epoch.
 - `effect env.args() -> List[String]` — Program arguments, argv[0] excluded.
 - `effect env.get(name: String) -> Option[String]` — Value of name, or none if unset.
-- `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns.
+- `effect env.secret(name: String) -> Option[Secret[String]]` — Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset.
+- `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
+- `effect env.remove(name: String) -> Unit` — Removes name for this process and later spawns; ok if unset; err if name is empty or holds `=` or NUL.
+- `effect env.vars() -> Map[String, String]` — Every environment variable of this process, keyed and ordered by name.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
-- `effect env.millis() -> Int` — Wall-clock ms since the Unix epoch.
 - `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.
-- `effect env.temp_dir() -> String` — Host temp dir; may end with /.
 - `env.os() -> String` — Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 
-## error
+## ffi
 
-[error.md](error.md)
+[ffi.md](ffi.md)
 
-- `error.chain(outer: String, cause: String) -> String` — outer + "\ncaused by: " + cause.
-- `error.context(r: Result[T, String], msg: String) -> Result[T, String]` — err(e) becomes err("msg: e"); ok unchanged.
-- `error.message(r: Result[T, String]) -> String` — Error text of r; "" when r is ok.
+- `ffi.region(b: Bytes) -> Region` — A read-only view of b; b lives as long as the view.
+- `effect ffi.alloc(n: Int) -> Region` — A fresh writable region of n zero bytes; err if n is negative.
+- `ffi.len(r: Region) -> Int` — The region's length in bytes.
+- `ffi.is_writable(r: Region) -> Bool` — True if write may change the region (ffi.alloc and writable foreign regions).
+- `effect ffi.read(r: Region, off: Int, n: Int) -> Bytes` — Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+- `effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit` — Writes b at off; err if the region is read-only or b does not fit.
+- `effect ffi.to_bytes(r: Region) -> Bytes` — A copy of the whole region as Bytes.
 
 ## float
 
 [float.md](float.md)
 
-- `float.to_string(n: Float) -> String` — Shortest round-trip digits, no exponent; 2.0 keeps .0.
-- `float.to_int(n: Float) -> Int` — Truncates toward 0, saturating; NaN gives 0.
-- `float.from_int(n: Int) -> Float` — Nearest Float; may round when |n| > 2^53.
-- `float.parse(s: String) -> Result[Float, String]` — Float from trimmed s; takes 1e3, inf, NaN; err on junk.
-- `float.to_fixed(n: Float, decimals: Int) -> String` — Fixed-point, ties to even; decimals outside 0..4096 abort.
+- `float.to_string(x: Float) -> String` — Shortest round-trip digits, no exponent; 2.0 keeps .0.
+- `float.parse(s: String) -> Result[Float, String]` — Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
+- `float.to_fixed(x: Float, decimals: Int) -> String` — Fixed-point, ties to even; decimals outside 0..4096 abort.
 - `float.to_bits(f: Float) -> Int` — IEEE-754 bits as Int; any NaN gives the canonical NaN.
-- `float.sqrt(n: Float) -> Float` — Square root; NaN below 0, -0.0 stays -0.0.
-- `float.abs(n: Float) -> Float` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
-- `float.floor(n: Float) -> Float` — Round toward -inf; -0.5 gives -1.0.
-- `float.ceil(n: Float) -> Float` — Round toward +inf; -0.5 gives -0.0.
-- `float.round(n: Float) -> Float` — Nearest whole value; halves round away from zero.
+- `float.abs(x: Float) -> Float` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float.floor(x: Float) -> Float` — Round toward -inf; -0.5 gives -1.0.
+- `float.ceil(x: Float) -> Float` — Round toward +inf; -0.5 gives -0.0.
+- `float.round(x: Float) -> Float` — Nearest whole value; halves round away from zero.
 - `float.min(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
 - `float.max(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
-- `float.clamp(n: Float, lo: Float, hi: Float) -> Float` — n limited to lo..hi; lo > hi or a NaN bound aborts.
-- `float.sign(n: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
-- `float.is_nan(n: Float) -> Bool` — True only for NaN (unequal to itself).
-- `float.is_infinite(n: Float) -> Bool` — True for inf and -inf; false for NaN.
-- `float.to_int8(n: Float) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_int16(n: Float) -> Int16` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_int32(n: Float) -> Int32` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint8(n: Float) -> UInt8` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint16(n: Float) -> UInt16` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint32(n: Float) -> UInt32` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint64(n: Float) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_float32(n: Float) -> Float32` — Nearest Float32; overflow gives inf.
-- `float.to_int64(n: Float) -> Int64` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_float64(n: Float) -> Float64` — Same f64 value; always exact.
-- `float.from_float32(n: Float32) -> Float` — Exact widening; never rounds.
-- `float.from_float64(n: Float64) -> Float` — Same f64 value; always exact.
-- `float.to_int8_checked(n: Float) -> Option[Int8]` — some iff n is an integer in -128..127.
-- `float.to_int16_checked(n: Float) -> Option[Int16]` — some iff n is an integer in -32768..32767.
-- `float.to_int32_checked(n: Float) -> Option[Int32]` — some iff n is an integer in -2^31..2^31-1.
-- `float.to_int64_checked(n: Float) -> Option[Int64]` — some iff n is an integer in -2^63..2^63-1.
-- `float.to_uint8_checked(n: Float) -> Option[UInt8]` — some iff n is an integer in 0..255.
-- `float.to_uint16_checked(n: Float) -> Option[UInt16]` — some iff n is an integer in 0..65535.
-- `float.to_uint32_checked(n: Float) -> Option[UInt32]` — some iff n is an integer in 0..2^32-1.
-- `float.to_uint64_checked(n: Float) -> Option[UInt64]` — some iff n is an integer in 0..2^64-1.
-- `float.to_float32_checked(n: Float) -> Option[Float32]` — some if n is exact in Float32; NaN and ±inf give none.
-- `float.to_int8_saturating(n: Float) -> Int8` — Truncates, clamps to -128..127; NaN gives 0.
-- `float.to_int16_saturating(n: Float) -> Int16` — Truncates, clamps to -32768..32767; NaN gives 0.
-- `float.to_int32_saturating(n: Float) -> Int32` — Truncates, clamps to Int32 range; NaN gives 0.
-- `float.to_int64_saturating(n: Float) -> Int64` — Truncates, clamps to Int64 range; NaN gives 0.
-- `float.to_uint8_saturating(n: Float) -> UInt8` — Truncates, clamps to 0..255; NaN gives 0.
-- `float.to_uint16_saturating(n: Float) -> UInt16` — Truncates, clamps to 0..65535; NaN gives 0.
-- `float.to_uint32_saturating(n: Float) -> UInt32` — Truncates, clamps to 0..2^32-1; NaN gives 0.
-- `float.to_uint64_saturating(n: Float) -> UInt64` — Truncates, clamps to 0..2^64-1; NaN gives 0.
+- `float.clamp(x: Float, lo: Float, hi: Float) -> Float` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float.sign(n: Float) -> Float   (deprecated — use float.signum)` — 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+- `float.signum(x: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float.is_nan(x: Float) -> Bool` — True only for NaN (unequal to itself).
+- `float.is_infinite(x: Float) -> Bool` — True for inf and -inf; false for NaN.
+- `float.trunc(x: Float) -> Float` — Round toward 0; -0.5 gives -0.0.
+- `float.is_finite(x: Float) -> Bool` — True unless x is inf, -inf or NaN.
+- `float.pow(base: Float, exp: Float) -> Float` — base to the exp; NaN for a negative base with a fractional exp.
+- `float.compare(a: Float, b: Float) -> Int` — -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+- `float.from_bits(bits: Int) -> Float` — Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+- `float.infinity() -> Float` — Positive infinity.
+- `float.nan() -> Float` — The one quiet NaN (bits 0x7ff8000000000000).
+- `float.epsilon() -> Float` — Gap between 1.0 and the next Float: 2^-52.
+- `float.max_value() -> Float` — Largest finite Float, about 1.7976931348623157e308.
+- `float.min_value() -> Float` — Most negative finite Float (= -max_value()), not the smallest positive.
+- `float.from(x: S) -> Float` — x as the nearest Float (ties to even); NaN stays NaN.
+- `float.from_checked(x: S) -> Option[Float]` — some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
 
 ## float32
 
 [float32.md](float32.md)
 
-- `float32.to_int8(x: Float32) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_int16(x: Float32) -> Int16` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_int32(x: Float32) -> Int32` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_int64(x: Float32) -> Int64` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint8(x: Float32) -> UInt8` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint16(x: Float32) -> UInt16` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint32(x: Float32) -> UInt32` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint64(x: Float32) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_float64(x: Float32) -> Float64` — Exact widening; never rounds.
 - `float32.to_string(x: Float32) -> String` — Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
+- `float32.compare(a: Float32, b: Float32) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+- `float32.min(a: Float32, b: Float32) -> Float32` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
+- `float32.max(a: Float32, b: Float32) -> Float32` — Greater; a NaN operand is ignored; 0.0 > -0.0.
+- `float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float32.is_nan(x: Float32) -> Bool` — True only for NaN.
+- `float32.is_infinite(x: Float32) -> Bool` — True for inf and -inf; false for NaN.
+- `float32.is_finite(x: Float32) -> Bool` — True unless x is inf, -inf or NaN.
+- `float32.abs(x: Float32) -> Float32` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float32.floor(x: Float32) -> Float32` — Round toward -inf; -0.5 gives -1.0.
+- `float32.ceil(x: Float32) -> Float32` — Round toward +inf; -0.5 gives -0.0.
+- `float32.round(x: Float32) -> Float32` — Nearest whole value; halves round away from zero.
+- `float32.trunc(x: Float32) -> Float32` — Round toward 0; -0.5 gives -0.0.
+- `float32.signum(x: Float32) -> Float32` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float32.to_bits(x: Float32) -> Int` — The 32 IEEE-754 binary32 bits as a non-negative Int; any NaN gives 0x7fc00000.
+- `float32.from_bits(bits: Int) -> Float32` — Float32 whose binary32 bits are the low 32 bits of bits.
+- `float32.infinity() -> Float32` — Positive infinity.
+- `float32.nan() -> Float32` — The one quiet NaN (bits 0x7fc00000).
+- `float32.epsilon() -> Float32` — Gap between 1.0 and the next Float32: 2^-23.
+- `float32.max_value() -> Float32` — Largest finite Float32, about 3.4028235e38.
+- `float32.min_value() -> Float32` — Most negative finite Float32 (= -max_value()), not the smallest positive.
+- `float32.parse(s: String) -> Result[Float32, String]` — Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
+- `float32.from(x: S) -> Float32` — x as the nearest Float32 (ties to even), rounded once; NaN stays NaN.
+- `float32.from_checked(x: S) -> Option[Float32]` — some(x as Float32) when Float32 holds x exactly, else none (a rounded value, NaN).
 
 ## float64
 
 [float64.md](float64.md)
 
-- `float64.to_int8(x: Float64) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_int16(x: Float64) -> Int16` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_int32(x: Float64) -> Int32` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_int64(x: Float64) -> Int64` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint8(x: Float64) -> UInt8` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint16(x: Float64) -> UInt16` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint32(x: Float64) -> UInt32` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint64(x: Float64) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_float32(x: Float64) -> Float32` — Nearest Float32; overflow becomes infinity.
 - `float64.to_string(x: Float64) -> String` — Plain decimal, never an exponent; 2.0 keeps .0.
+- `float64.compare(a: Float64, b: Float64) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+- `float64.min(a: Float64, b: Float64) -> Float64` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
+- `float64.max(a: Float64, b: Float64) -> Float64` — Greater; a NaN operand is ignored; 0.0 > -0.0.
+- `float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float64.is_nan(x: Float64) -> Bool` — True only for NaN.
+- `float64.is_infinite(x: Float64) -> Bool` — True for inf and -inf; false for NaN.
+- `float64.is_finite(x: Float64) -> Bool` — True unless x is inf, -inf or NaN.
+- `float64.abs(x: Float64) -> Float64` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float64.floor(x: Float64) -> Float64` — Round toward -inf; -0.5 gives -1.0.
+- `float64.ceil(x: Float64) -> Float64` — Round toward +inf; -0.5 gives -0.0.
+- `float64.round(x: Float64) -> Float64` — Nearest whole value; halves round away from zero.
+- `float64.trunc(x: Float64) -> Float64` — Round toward 0; -0.5 gives -0.0.
+- `float64.signum(x: Float64) -> Float64` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float64.to_bits(x: Float64) -> Int` — The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
+- `float64.from_bits(bits: Int) -> Float64` — Float64 whose IEEE-754 binary64 bits are bits.
+- `float64.infinity() -> Float64` — Positive infinity.
+- `float64.nan() -> Float64` — The one quiet NaN (bits 0x7ff8000000000000).
+- `float64.epsilon() -> Float64` — Gap between 1.0 and the next Float64: 2^-52.
+- `float64.max_value() -> Float64` — Largest finite Float64, about 1.7976931348623157e308.
+- `float64.min_value() -> Float64` — Most negative finite Float64 (= -max_value()), not the smallest positive.
+- `float64.parse(s: String) -> Result[Float64, String]` — Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
+- `float64.from(x: S) -> Float64` — x as the nearest Float64 (ties to even); NaN stays NaN.
+- `float64.from_checked(x: S) -> Option[Float64]` — some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
 
 ## fs
 
 [fs.md](fs.md)
 
-- `effect fs.read_text(path: String) -> String` — Whole file as UTF-8; err if missing or not UTF-8.
-- `effect fs.read_bytes(path: String) -> List[Int]` — Bytes as Ints 0..255; err if missing.
-- `effect fs.write(path: String, content: String) -> Unit` — Overwrites or creates; err if no parent dir.
-- `effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit` — Writes low byte of each Int (-1 -> 255).
-- `effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit` — Writes data verbatim, replacing the file.
-- `effect fs.append(path: String, content: String) -> Unit` — Appends content; creates the file if missing.
+- `effect fs.read_text(path: String) -> String` — Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
+- `effect fs.read_bytes(path: String) -> Bytes` — Whole regular file (<= 1 GiB) as Bytes; err if missing.
+- `effect fs.write_text(path: String, content: String) -> Unit` — Overwrites or creates; err if no parent dir.
+- `effect fs.write_bytes(path: String, data: Bytes) -> Unit` — Writes data verbatim, replacing the file.
+- `effect fs.append_text(path: String, content: String) -> Unit` — Appends content; creates the file if missing.
+- `effect fs.append_bytes(path: String, data: Bytes) -> Unit` — Appends data verbatim; creates the file if missing.
 - `effect fs.mkdir_p(path: String) -> Unit` — Creates dir and parents; ok if it exists.
 - `effect fs.exists(path: String) -> Bool` — False if missing or a dangling symlink.
-- `effect fs.read_lines(path: String) -> List[String]` — CRLF-aware lines; a final newline adds no line.
+- `effect fs.read_lines(path: String) -> List[String]` — CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 - `effect fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> A` — Streamed fold over lines; err if missing.
 - `effect fs.for_each_line(path: String, f: (String) -> Unit) -> Unit` — Calls f per line, streamed; may err mid-file.
 - `effect fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` — Folds lines starting in bytes [start, end).
 - `effect fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` — Parallel chunk partials, in order; [] if empty.
 - `effect fs.read_text_if_exists(path: String) -> Option[String]` — Text, or none if missing; err if not UTF-8.
-- `effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]` — Bytes as Ints, or none if missing.
+- `effect fs.read_bytes_if_exists(path: String) -> Option[Bytes]` — File Bytes, or none if missing.
 - `effect fs.read_lines_if_exists(path: String) -> Option[List[String]]` — read_lines result, or none if missing.
-- `effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]` — File Bytes, or none if missing.
 - `effect fs.remove(path: String) -> Unit` — Deletes a file or empty dir; err if missing.
 - `effect fs.list_dir(path: String) -> List[String]` — Sorted names (not paths); err if not a dir.
 - `effect fs.is_dir(path: String) -> Bool` — True for a dir; follows symlinks.
 - `effect fs.is_file(path: String) -> Bool` — True for a regular file; follows symlinks.
 - `effect fs.copy(src: String, dst: String) -> Unit` — Copies src to dst; overwrites dst.
 - `effect fs.rename(src: String, dst: String) -> Unit` — Moves src to dst; replaces an existing dst.
-- `effect fs.walk(dir: String) -> List[String]` — Sorted paths below dir, recursive; dirs too.
+- `effect fs.walk(dir: String) -> List[String]` — Sorted paths below dir; links listed, not followed.
 - `effect fs.remove_all(path: String) -> Unit` — Deletes a tree or file; err if missing.
-- `effect fs.file_size(path: String) -> Int` — Size in bytes; err if missing.
-- `effect fs.temp_dir() -> String` — Host temp dir; may end with /.
+- `effect fs.temp_dir() -> String` — Host temp dir; a location, not a safe name.
 - `effect fs.stat(path: String) -> FileStat` — Size, kind and mtime; err if missing.
-- `effect fs.glob(pattern: String) -> List[String]` — Sorted * and ** matches; [] if base is absent.
-- `effect fs.create_temp_file(prefix: String) -> String` — New empty file temp_dir/prefix+nanos; its path.
-- `effect fs.create_temp_dir(prefix: String) -> String` — New dir temp_dir/prefix+nanos; its path.
+- `effect fs.glob(pattern: String) -> List[String]` — Sorted * and ** matches; links not followed.
+- `effect fs.create_temp_file(prefix: String) -> String` — New private file, random name; its path.
+- `effect fs.create_temp_dir(prefix: String) -> String` — New private dir, random name; its path.
 - `effect fs.is_symlink(path: String) -> Bool` — True for a symlink, even a dangling one.
-- `effect fs.modified_at(path: String) -> Int` — Mtime in Unix seconds; err if missing.
-- `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole file as Bytes; err if missing.
+- `effect fs.open_root(dir: String) -> FsRoot` — dir as an FsRoot; err if dir is not a directory.
+- `effect fs.root_read_text(root: FsRoot, path: String) -> String` — read_text of path inside root; err if it escapes.
+- `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes of path inside root; err if it escapes.
+- `effect fs.root_write_text(root: FsRoot, path: String, content: String) -> Unit` — write of content to path inside root; err if it escapes.
+- `effect fs.root_list_dir(root: FsRoot, path: String) -> List[String]` — list_dir of path inside root; err if it escapes.
+- `effect fs.root_exists(root: FsRoot, path: String) -> Bool` — exists of path inside root; err if it escapes.
+- `effect fs.root_remove(root: FsRoot, path: String) -> Unit` — remove of path inside root; err if it escapes.
 
 ## hash
 
 [hash.md](hash.md)
 
-- `hash.fnv1a32(s: String) -> Int` — 32-bit FNV-1a of s's UTF-8; non-negative Int.
-- `hash.fnv1a32_bytes(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
+- `hash.fnv1a32(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
 - `hash.sha256(b: Bytes) -> Bytes` — 32-byte SHA-256 digest of b.
-- `hash.sha256_hex(s: String) -> String` — SHA-256 of s's UTF-8, 64 lowercase hex chars.
+- `hash.sha256_hex(b: Bytes) -> String` — SHA-256 of b as 64 lowercase hex chars.
+- `hash.crc32(b: Bytes) -> Int` — CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
+- `hash.adler32(b: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty b.
+- `hash.sha512(b: Bytes) -> Bytes` — 64-byte SHA-512 digest of b.
+- `hash.sha512_hex(b: Bytes) -> String` — SHA-512 of b as 128 lowercase hex chars.
+- `hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` — 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time.
+- `hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` — 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time.
+- `hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
+- `hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
+
+## heap
+
+[heap.md](heap.md)
+
+- `heap.new() -> Heap[A]` — An empty heap; the least element comes out first.
+- `heap.new_by(f: (A) -> K) -> Heap[A]` — An empty heap ordered by key f(x); the least key comes out first.
+- `heap.new_with(cmp: (A, A) -> Int) -> Heap[A]` — An empty heap ordered by cmp; negative puts a first.
+- `heap.from_list(xs: List[A]) -> Heap[A]` — A heap of xs in the natural order; equal elements leave in list order.
+- `heap.push(mut h: Heap[A], x: A) -> Unit` — Adds x in place.
+- `heap.pop(mut h: Heap[A]) -> Option[A]` — Removes and yields the first element out; none when empty.
+- `heap.clear(mut h: Heap[A]) -> Unit` — Removes every element of h in place; the order is kept.
+- `heap.peek(h: Heap[A]) -> Option[A]` — The element pop would yield next, or none when empty.
+- `heap.len(h: Heap[A]) -> Int` — Element count; 0 for an empty heap.
+- `heap.is_empty(h: Heap[A]) -> Bool` — true iff h has no elements.
+- `heap.to_list(h: Heap[A]) -> List[A]` — The elements in pop order.
+- `heap.contains(h: Heap[A], x: A) -> Bool` — true if some element == x.
+- `heap.any(h: Heap[A], f: (A) -> Bool) -> Bool` — true if f holds for some element; false when empty.
+- `heap.all(h: Heap[A], f: (A) -> Bool) -> Bool` — true if f holds for every element; true when empty.
+- `heap.count(h: Heap[A], f: (A) -> Bool) -> Int` — Number of elements where f holds.
+- `heap.filter(h: Heap[A], f: (A) -> Bool) -> Heap[A]` — The elements where f holds, in a heap of the same order; equal elements keep the order they went in.
 
 ## hex
 
@@ -436,286 +616,299 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [html.md](html.md)
 
-- `html.escape(s: String) -> SafeHtml` — s with & < > " ' turned into HTML entities.
+- `html.escape(s: String) -> SafeHtml` — s with & < > " ' turned into HTML entities; text context only.
 - `html.raw(s: String) -> SafeHtml` — s as SafeHtml, unescaped; trusted input only.
 - `html.to_string(h: SafeHtml) -> String` — HTML text inside h, as-is.
 - `html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml` — a then b as one SafeHtml; nothing re-escaped.
 - `html.empty() -> SafeHtml` — SafeHtml of the empty string.
+- `html.attr(name: String, value: String) -> SafeHtml` — name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+- `html.url_attr(name: String, url: String) -> SafeHtml` — name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+- `html.script_json(v: Value) -> SafeHtml` — json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
 
 ## http
 
 [http.md](http.md)
 
-- `effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
+- `effect http.serve(port: Int, handler: HttpHandler) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
 - `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
+- `http.html(status: Int, body: SafeHtml) -> HttpResponse` — Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
-- `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse` — Reply with headers as-is; no default Content-Type.
+- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
 - `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.
-- `http.status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
-- `http.body(resp: HttpResponse) -> String` — Payload text; lossy UTF-8 when fetched.
-- `http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse` — Case-insensitive upsert of header key.
-- `http.get_header(resp: HttpResponse, key: String) -> Option[String]` — First value for key, any case; none if absent.
-- `http.status_code(resp: HttpResponse) -> Int` — HTTP status; 0 if the status line was bad.
-- `http.headers(resp: HttpResponse) -> Map[String, String]` — Map by lowercased name; first value wins.
-- `http.header_values(resp: HttpResponse, key: String) -> List[String]` — Every value for key, wire order; [] if absent.
-- `http.req_method(req: HttpRequest) -> String` — Request method as sent, e.g.
-- `http.req_path(req: HttpRequest) -> String` — Request target, query string included.
-- `http.req_body(req: HttpRequest) -> String` — Body text; empty without a Content-Length.
-- `http.req_header(req: HttpRequest, key: String) -> Option[String]` — First value for key, any case; none if absent.
-- `http.query_params(req: HttpRequest) -> Map[String, String]` — Decoded query map; last duplicate wins.
-- `http.url_decode(s: String) -> String` — + to space, %XX to byte; bad escapes kept.
+- `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
+- `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
+- `http.header(m: M, name: String) -> Option[String]` — First value of header name, any case; none if absent.
+- `http.header_values(m: M, name: String) -> List[String]` — Every value of header name, any case, in wire order; [] if absent.
+- `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
+- `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
+- `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
+- `http.set_body(m: M, body: String) -> M` — m with its body replaced.
+- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
+- `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
+- `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
+- `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
 - `effect http.get(url: String) -> String` — Body even for a 404; err only on transport.
-- `effect http.post(url: String, body: String) -> String` — Reply body of a POST; JSON type by default.
-- `effect http.put(url: String, body: String) -> String` — Reply body of a PUT; JSON type by default.
-- `effect http.patch(url: String, body: String) -> String` — Reply body of a PATCH; JSON type by default.
-- `effect http.delete(url: String) -> String` — Reply body of a DELETE; any status is ok.
-- `effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String` — Reply body for any method; any status is ok.
-- `effect http.get_status(url: String) -> (Int, String)` — (status, body); a 404 is ok, not err.
-- `effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)` — (status, body) for any method; 3xx not followed.
+- `effect http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` — Reply body for any method; any status is ok.
 - `effect http.get_response(url: String) -> HttpResponse` — Whole reply, 404 included; redirects not followed.
-- `effect http.post_response(url: String, body: String) -> HttpResponse` — Whole reply to a POST; any status is ok.
-- `effect http.put_response(url: String, body: String) -> HttpResponse` — Whole reply to a PUT; any status is ok.
-- `effect http.patch_response(url: String, body: String) -> HttpResponse` — Whole reply to a PATCH; any status is ok.
-- `effect http.delete_response(url: String) -> HttpResponse` — Whole reply to a DELETE; any status is ok.
-- `effect http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse` — Whole reply for any method; 3xx not followed.
-- `effect http.get_bytes(url: String) -> Bytes` — Raw body bytes, not UTF-8 decoded.
-- `effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes` — Raw body bytes for any method and headers.
-- `effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit` — Body chunks to on_chunk; err on a non-2xx.
-- `effect http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall` — Begins a request; returns at once with a handle.
+- `effect http.send(req: HttpRequest) -> HttpResponse` — Sends req to the URL its target names; the whole reply, any status; redirects not followed.
+- `effect http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall` — Begins sending req; returns at once with a handle.
 - `effect http.poll(c: HttpCall) -> Option[Result[HttpResponse, String]]` — Never blocks: none while running, then the result.
 - `effect http.read_new(c: HttpCall) -> String` — Body text since the last read_new; never blocks.
 - `effect http.wait(c: HttpCall) -> HttpResponse` — Blocks until the call ends; any status is ok.
 - `effect http.cancel(c: HttpCall) -> Unit` — Closes the connection; the call ends as err.
-- `effect http.request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit` — request_stream bounded by per-call limits.
-- `http.new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest` — Request built in code; target keeps its ?query.
+- `http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` — Request built in code; target keeps its ?query (a full URL for send / start).
 - `http.param(req: HttpRequest, name: String) -> Option[String]` — Router-bound path parameter, decoded; none if unbound.
-- `http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — "GET /users/{id}" to a route; no method = any.
-- `http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — Sub-app under prefix: /api/x reaches it as /x.
-- `http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` — Route table as a handler; err on conflicting routes.
-- `http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]` — Applies middleware; the first is the outermost.
-- `http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` — JSON body through decode; err is a 400 response.
+- `http.route(pattern: String, handler: HttpHandler) -> HttpRoute` — "GET /users/{id}" to a route; no method = any.
+- `http.mount(prefix: String, sub: HttpHandler) -> HttpRoute` — Sub-app under prefix: /api/x reaches it as /x.
+- `http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]` — Route table as a handler; err on conflicting routes.
+- `http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` — Applies middleware; the first is the outermost.
+- `http.decode_json(req: HttpRequest) -> Result[T, HttpResponse]` — JSON body into input type T, strictly; err is a 400 response.
 
 ## int
 
 [int.md](int.md)
 
-- `int.to_string(n: Int) -> String` — Decimal digits, with - when negative.
-- `int.to_hex(n: Int) -> String` — Lowercase hex, no 0x; -1 gives 16 f digits.
-- `int.parse(s: String) -> Result[Int, String]` — Decimal Int from trimmed s; err on junk or overflow.
-- `int.from_hex(s: String) -> Result[Int, String]` — Hex, any case, 0x optional; err on junk or > 2^63-1.
-- `int.to_float(n: Int) -> Float` — Nearest Float; may round when |n| > 2^53.
-- `int.bits_to_float(bits: Int) -> Float` — Float whose IEEE-754 binary64 bits are bits.
-- `int.bits_to_f32(bits: Int) -> Float` — Low 32 bits read as binary32, widened to Float.
-- `int.abs(n: Int) -> Int` — Magnitude of n; min_value wraps to itself.
+- `int.to_string(x: Int) -> String` — Decimal digits, with - when negative.
+- `int.to_hex(x: Int) -> String` — Lowercase hex, no 0x; -1 gives 16 f digits.
+- `int.parse(s: String) -> Result[Int, String]` — Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
+- `int.abs(x: Int) -> Int` — Magnitude of x; min_value wraps to itself.
 - `int.min(a: Int, b: Int) -> Int` — Lesser of a and b.
 - `int.max(a: Int, b: Int) -> Int` — Greater of a and b.
-- `int.clamp(n: Int, lo: Int, hi: Int) -> Int` — n limited to lo..hi; aborts when lo > hi.
-- `int.is_even(n: Int) -> Bool` — True when n % 2 == 0; exact for negatives.
-- `int.is_odd(n: Int) -> Bool` — True when n % 2 != 0; -3 counts as odd.
+- `int.clamp(x: Int, lo: Int, hi: Int) -> Int` — x limited to lo..hi; aborts when lo > hi.
+- `int.is_even(x: Int) -> Bool` — True when x % 2 == 0; exact for negatives.
+- `int.is_odd(x: Int) -> Bool` — True when x % 2 != 0; -3 counts as odd.
 - `int.band(a: Int, b: Int) -> Int` — Bitwise AND over all 64 bits.
 - `int.bor(a: Int, b: Int) -> Int` — Bitwise OR over all 64 bits.
 - `int.bxor(a: Int, b: Int) -> Int` — Bitwise XOR over all 64 bits.
-- `int.bnot(a: Int) -> Int` — Bitwise complement; equals -a - 1.
+- `int.bnot(x: Int) -> Int` — Bitwise complement; equals -x - 1.
 - `int.bshl(a: Int, n: Int) -> Int` — a shifted left by n bits; n is taken mod 64.
 - `int.bshr(a: Int, n: Int) -> Int` — Arithmetic (sign-filling) right shift; n mod 64.
-- `int.count_leading_zeros(n: Int) -> Int` — Leading zero bits of the 64-bit word; 64 for 0.
-- `int.count_trailing_zeros(n: Int) -> Int` — Trailing zero bits; 64 for 0.
-- `int.pop_count(n: Int) -> Int` — Number of set bits; 64 for -1.
-- `int.bit_reverse(n: Int) -> Int` — The 64 bits in reverse order; 1 gives min_value.
-- `int.byte_swap(n: Int) -> Int` — The 8 bytes in reverse order (endian flip).
-- `int.bit_width(n: Int) -> Int` — Bits needed to hold n; 0 for 0, 64 if negative.
-- `int.log2_floor(n: Int) -> Int` — Floor of log2(n); -1 when n <= 0.
-- `int.log2_ceil(n: Int) -> Int` — Ceiling of log2(n); 0 when n <= 1.
-- `int.next_power_of_two(n: Int) -> Int` — Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
-- `int.prev_power_of_two(n: Int) -> Int` — Greatest power of 2 <= n; 0 when n <= 0.
-- `int.wrap_add(a: Int, b: Int, bits: Int) -> Int` — (a + b) mod 2^bits, non-negative when bits < 64.
-- `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int` — (a * b) mod 2^bits, non-negative when bits < 64.
-- `int.rotate_right(a: Int, n: Int, bits: Int) -> Int` — Low bits of a rotated right by n mod bits; bits <= 0 aborts.
-- `int.rotate_left(a: Int, n: Int, bits: Int) -> Int` — Low bits of a rotated left by n mod bits; bits <= 0 aborts.
-- `int.to_u32(a: Int) -> Int` — Low 32 bits as unsigned; -1 becomes 4294967295.
-- `int.to_u8(a: Int) -> Int` — Low 8 bits as unsigned; 300 becomes 44.
-- `int.to_int8(n: Int) -> Int8` — Wraps to 8 bits; 200 becomes -56.
-- `int.to_int16(n: Int) -> Int16` — Wraps to 16 bits; 40000 becomes -25536.
-- `int.to_int32(n: Int) -> Int32` — Wraps to 32 bits; 2^31 becomes -2^31.
-- `int.to_uint8(n: Int) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int.to_uint16(n: Int) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int.to_uint32(n: Int) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int.to_uint64(n: Int) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int.to_float32(n: Int) -> Float32` — Float32 value; may round when |n| > 2^24.
-- `int.to_float64(n: Int) -> Float64` — Float64 value; may round when |n| > 2^53.
-- `int.to_int64(n: Int) -> Int64` — Same value as Int64; always exact.
-- `int.from_int8(n: Int8) -> Int` — Sign-extending widen; always exact.
-- `int.from_int16(n: Int16) -> Int` — Sign-extending widen; always exact.
-- `int.from_int32(n: Int32) -> Int` — Sign-extending widen; always exact.
-- `int.from_int64(n: Int64) -> Int` — Same value as Int; always exact.
-- `int.from_uint8(n: UInt8) -> Int` — Zero-extending widen; always exact.
-- `int.from_uint16(n: UInt16) -> Int` — Zero-extending widen; always exact.
-- `int.from_uint32(n: UInt32) -> Int` — Zero-extending widen; always exact.
-- `int.from_uint64(n: UInt64) -> Int` — Reinterprets bits; values >= 2^63 go negative.
-- `int.to_int8_checked(n: Int) -> Option[Int8]` — some(n), or none outside -128..127.
-- `int.to_int16_checked(n: Int) -> Option[Int16]` — some(n), or none outside -32768..32767.
-- `int.to_int32_checked(n: Int) -> Option[Int32]` — some(n), or none outside -2^31..2^31-1.
-- `int.to_uint8_checked(n: Int) -> Option[UInt8]` — some(n), or none outside 0..255.
-- `int.to_uint16_checked(n: Int) -> Option[UInt16]` — some(n), or none outside 0..65535.
-- `int.to_uint32_checked(n: Int) -> Option[UInt32]` — some(n), or none outside 0..2^32-1.
-- `int.to_uint64_checked(n: Int) -> Option[UInt64]` — some(n), or none if n is negative.
-- `int.to_float32_checked(n: Int) -> Option[Float32]` — some(f), or none if the f32 does not hold n exactly.
-- `int.to_int8_saturating(n: Int) -> Int8` — Clamps n to -128..127.
-- `int.to_int16_saturating(n: Int) -> Int16` — Clamps n to -32768..32767.
-- `int.to_int32_saturating(n: Int) -> Int32` — Clamps n to -2^31..2^31-1.
-- `int.to_uint8_saturating(n: Int) -> UInt8` — Clamps n to 0..255.
-- `int.to_uint16_saturating(n: Int) -> UInt16` — Clamps n to 0..65535.
-- `int.to_uint32_saturating(n: Int) -> UInt32` — Clamps n to 0..2^32-1.
-- `int.to_uint64_saturating(n: Int) -> UInt64` — Negative n clamps to 0.
-- `int.from_uint64_checked(n: UInt64) -> Option[Int]` — some(n), or none if n exceeds 2^63-1.
-- `int.from_uint64_saturating(n: UInt64) -> Int` — Clamps n to at most 2^63-1.
+- `int.count_leading_zeros(x: Int) -> Int` — Leading zero bits of the 64-bit word; 64 for 0.
+- `int.count_trailing_zeros(x: Int) -> Int` — Trailing zero bits; 64 for 0.
+- `int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)` — Number of set bits; 64 for -1.
+- `int.count_ones(x: Int) -> Int` — Number of set bits; 64 for -1.
+- `int.bit_reverse(x: Int) -> Int` — The 64 bits in reverse order; 1 gives min_value.
+- `int.byte_swap(x: Int) -> Int` — The 8 bytes in reverse order (endian flip).
+- `int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)` — Bits needed to hold n; 0 for 0, 64 if negative.
+- `int.bit_length(x: Int) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
+- `int.log2_floor(x: Int) -> Int` — Floor of log2(x); -1 when x <= 0.
+- `int.log2_ceil(x: Int) -> Int` — Ceiling of log2(x); 0 when x <= 1.
+- `int.next_power_of_two(x: Int) -> Int` — Least power of 2 >= x; 1 if x <= 1; min_value past 2^62.
+- `int.prev_power_of_two(x: Int) -> Int` — Greatest power of 2 <= x; 0 when x <= 0.
+- `int.wrap_add(a: Int, b: Int) -> Int` — a + b wrapped to 64 bits.
+- `int.wrap_mul(a: Int, b: Int) -> Int` — a * b wrapped to 64 bits.
+- `int.rotate_right(a: Int, n: Int) -> Int` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `int.rotate_left(a: Int, n: Int) -> Int` — The 64 bits of a rotated left by n; n is taken mod 64.
 - `int.min_value() -> Int` — Smallest Int: -2^63.
 - `int.max_value() -> Int` — Largest Int: 2^63-1.
+- `int.compare(a: Int, b: Int) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int.sign(x: Int) -> Int` — -1, 0 or 1 by the sign of x; 0 for 0.
+- `int.pow(base: Int, exp: Int) -> Int` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `int.floor_div(a: Int, b: Int) -> Int` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int.modulo(a: Int, b: Int) -> Int` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int.wrap(x: Int, bits: Int) -> Int` — x mod 2^bits, non-negative when bits < 64; bits <= 0 aborts, bits >= 64 keeps x.
+- `int.wrap_sub(a: Int, b: Int) -> Int` — a - b wrapped to 64 bits.
+- `int.bshr_logical(a: Int, n: Int) -> Int` — Zero-filling right shift of the 64 bits; n is taken mod 64.
+- `int.to_string_radix(x: Int, radix: Int) -> String` — Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
+- `int.parse_radix(s: String, radix: Int) -> Result[Int, String]` — Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk or overflow; radix outside 2..36 aborts.
+- `int.from(x: S) -> Int` — x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+- `int.from_checked(x: S) -> Option[Int]` — some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+- `int.from_saturating(x: S) -> Int` — x as Int, toward zero, clamped to Int's range; NaN is 0.
+- `int.from_wrapping(x: S) -> Int` — The low 64 bits of integer x as Int (two's complement).
 
 ## int16
 
 [int16.md](int16.md)
 
-- `int16.to_int8(x: Int16) -> Int8` — Wraps to 8 bits; 128 becomes -128.
-- `int16.to_int32(x: Int16) -> Int32` — Sign-extending widen; always exact.
-- `int16.to_int64(x: Int16) -> Int64` — Sign-extending widen; always exact.
-- `int16.to_uint8(x: Int16) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int16.to_uint16(x: Int16) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int16.to_uint32(x: Int16) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int16.to_uint64(x: Int16) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int16.to_float32(x: Int16) -> Float32` — Same value as Float32; always exact.
-- `int16.to_float64(x: Int16) -> Float64` — Same value as Float64; always exact.
 - `int16.to_string(x: Int16) -> String` — Decimal digits, with - when negative.
-- `int16.to_int8_checked(x: Int16) -> Option[Int8]` — some(x), or none if outside -128..127.
-- `int16.to_int8_saturating(x: Int16) -> Int8` — Clamps x to -128..127.
-- `int16.to_uint8_checked(x: Int16) -> Option[UInt8]` — some(x), or none if outside 0..255.
-- `int16.to_uint8_saturating(x: Int16) -> UInt8` — Clamps x to 0..255.
-- `int16.to_uint16_checked(x: Int16) -> Option[UInt16]` — some(x), or none if x is negative.
-- `int16.to_uint16_saturating(x: Int16) -> UInt16` — Negative x clamps to 0.
-- `int16.to_uint32_checked(x: Int16) -> Option[UInt32]` — some(x), or none if x is negative.
-- `int16.to_uint32_saturating(x: Int16) -> UInt32` — Negative x clamps to 0.
-- `int16.to_uint64_checked(x: Int16) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int16.to_uint64_saturating(x: Int16) -> UInt64` — Negative x clamps to 0.
 - `int16.min_value() -> Int16` — Smallest Int16: -32768.
 - `int16.max_value() -> Int16` — Largest Int16: 32767.
+- `int16.compare(a: Int16, b: Int16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int16.min(a: Int16, b: Int16) -> Int16` — Lesser of a and b.
+- `int16.max(a: Int16, b: Int16) -> Int16` — Greater of a and b.
+- `int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` — x limited to lo..hi; aborts when lo > hi.
+- `int16.floor_div(a: Int16, b: Int16) -> Int16` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int16.modulo(a: Int16, b: Int16) -> Int16` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int16.pow(base: Int16, exp: Int) -> Int16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+- `int16.is_even(x: Int16) -> Bool` — True when x is a multiple of 2.
+- `int16.is_odd(x: Int16) -> Bool` — True when x is not a multiple of 2.
+- `int16.abs(x: Int16) -> Int16` — Magnitude of x; min_value wraps to itself.
+- `int16.sign(x: Int16) -> Int` — -1, 0 or 1 by the sign of x.
+- `int16.band(a: Int16, b: Int16) -> Int16` — Bitwise AND.
+- `int16.bor(a: Int16, b: Int16) -> Int16` — Bitwise OR.
+- `int16.bxor(a: Int16, b: Int16) -> Int16` — Bitwise XOR.
+- `int16.bnot(x: Int16) -> Int16` — Bitwise complement of all 16 bits.
+- `int16.bshl(a: Int16, n: Int) -> Int16` — a shifted left by n bits; n is taken mod 16.
+- `int16.bshr(a: Int16, n: Int) -> Int16` — Sign-filling right shift; n is taken mod 16.
+- `int16.count_leading_zeros(x: Int16) -> Int` — Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+- `int16.count_trailing_zeros(x: Int16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
+- `int16.count_ones(x: Int16) -> Int` — Number of set bits among the 16.
+- `int16.byte_swap(x: Int16) -> Int16` — The 2 bytes in reverse order (endian flip).
+- `int16.wrap_add(a: Int16, b: Int16) -> Int16` — a + b wrapped to 16 bits.
+- `int16.wrap_sub(a: Int16, b: Int16) -> Int16` — a - b wrapped to 16 bits.
+- `int16.wrap_mul(a: Int16, b: Int16) -> Int16` — a * b wrapped to 16 bits.
+- `int16.rotate_left(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated left by n; n is taken mod 16.
+- `int16.rotate_right(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated right by n; n is taken mod 16.
+- `int16.bit_length(x: Int16) -> Int` — Bits needed to hold x; 0 for 0, 16 if negative.
+- `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from ASCII-trimmed s; err on junk or outside -32768..32767.
+- `int16.to_string_radix(x: Int16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]` — Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
+- `int16.from(x: S) -> Int16` — x as Int16, toward zero; NaN, an infinity or a value outside Int16 aborts.
+- `int16.from_checked(x: S) -> Option[Int16]` — some(x as Int16) when Int16 holds x exactly, else none (a fraction, NaN, out of range).
+- `int16.from_saturating(x: S) -> Int16` — x as Int16, toward zero, clamped to Int16's range; NaN is 0.
+- `int16.from_wrapping(x: S) -> Int16` — The low 16 bits of integer x as Int16 (two's complement).
 
 ## int32
 
 [int32.md](int32.md)
 
-- `int32.to_int8(x: Int32) -> Int8` — Wraps to 8 bits; 128 becomes -128.
-- `int32.to_int16(x: Int32) -> Int16` — Wraps to 16 bits; 32768 becomes -32768.
-- `int32.to_int64(x: Int32) -> Int64` — Sign-extending widen; always exact.
-- `int32.to_uint8(x: Int32) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int32.to_uint16(x: Int32) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int32.to_uint32(x: Int32) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int32.to_uint64(x: Int32) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int32.to_float32(x: Int32) -> Float32` — Float32 value; may round when abs(x) > 2^24.
-- `int32.to_float64(x: Int32) -> Float64` — Same value as Float64; always exact.
 - `int32.to_string(x: Int32) -> String` — Decimal digits, with - when negative.
-- `int32.to_int8_checked(x: Int32) -> Option[Int8]` — some(x), or none if outside -128..127.
-- `int32.to_int8_saturating(x: Int32) -> Int8` — Clamps x to -128..127.
-- `int32.to_int16_checked(x: Int32) -> Option[Int16]` — some(x), or none if outside -32768..32767.
-- `int32.to_int16_saturating(x: Int32) -> Int16` — Clamps x to -32768..32767.
-- `int32.to_uint8_checked(x: Int32) -> Option[UInt8]` — some(x), or none if outside 0..255.
-- `int32.to_uint8_saturating(x: Int32) -> UInt8` — Clamps x to 0..255.
-- `int32.to_uint16_checked(x: Int32) -> Option[UInt16]` — some(x), or none if outside 0..65535.
-- `int32.to_uint16_saturating(x: Int32) -> UInt16` — Clamps x to 0..65535.
-- `int32.to_uint32_checked(x: Int32) -> Option[UInt32]` — some(x), or none if x is negative.
-- `int32.to_uint32_saturating(x: Int32) -> UInt32` — Negative x clamps to 0.
-- `int32.to_uint64_checked(x: Int32) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int32.to_uint64_saturating(x: Int32) -> UInt64` — Negative x clamps to 0.
 - `int32.min_value() -> Int32` — Smallest Int32: -2147483648.
 - `int32.max_value() -> Int32` — Largest Int32: 2147483647.
+- `int32.compare(a: Int32, b: Int32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int32.min(a: Int32, b: Int32) -> Int32` — Lesser of a and b.
+- `int32.max(a: Int32, b: Int32) -> Int32` — Greater of a and b.
+- `int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` — x limited to lo..hi; aborts when lo > hi.
+- `int32.floor_div(a: Int32, b: Int32) -> Int32` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int32.modulo(a: Int32, b: Int32) -> Int32` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int32.pow(base: Int32, exp: Int) -> Int32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+- `int32.is_even(x: Int32) -> Bool` — True when x is a multiple of 2.
+- `int32.is_odd(x: Int32) -> Bool` — True when x is not a multiple of 2.
+- `int32.abs(x: Int32) -> Int32` — Magnitude of x; min_value wraps to itself.
+- `int32.sign(x: Int32) -> Int` — -1, 0 or 1 by the sign of x.
+- `int32.band(a: Int32, b: Int32) -> Int32` — Bitwise AND.
+- `int32.bor(a: Int32, b: Int32) -> Int32` — Bitwise OR.
+- `int32.bxor(a: Int32, b: Int32) -> Int32` — Bitwise XOR.
+- `int32.bnot(x: Int32) -> Int32` — Bitwise complement of all 32 bits.
+- `int32.bshl(a: Int32, n: Int) -> Int32` — a shifted left by n bits; n is taken mod 32.
+- `int32.bshr(a: Int32, n: Int) -> Int32` — Sign-filling right shift; n is taken mod 32.
+- `int32.count_leading_zeros(x: Int32) -> Int` — Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+- `int32.count_trailing_zeros(x: Int32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
+- `int32.count_ones(x: Int32) -> Int` — Number of set bits among the 32.
+- `int32.byte_swap(x: Int32) -> Int32` — The 4 bytes in reverse order (endian flip).
+- `int32.wrap_add(a: Int32, b: Int32) -> Int32` — a + b wrapped to 32 bits.
+- `int32.wrap_sub(a: Int32, b: Int32) -> Int32` — a - b wrapped to 32 bits.
+- `int32.wrap_mul(a: Int32, b: Int32) -> Int32` — a * b wrapped to 32 bits.
+- `int32.rotate_left(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated left by n; n is taken mod 32.
+- `int32.rotate_right(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated right by n; n is taken mod 32.
+- `int32.bit_length(x: Int32) -> Int` — Bits needed to hold x; 0 for 0, 32 if negative.
+- `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
+- `int32.to_string_radix(x: Int32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]` — Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+- `int32.from(x: S) -> Int32` — x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
+- `int32.from_checked(x: S) -> Option[Int32]` — some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
+- `int32.from_saturating(x: S) -> Int32` — x as Int32, toward zero, clamped to Int32's range; NaN is 0.
+- `int32.from_wrapping(x: S) -> Int32` — The low 32 bits of integer x as Int32 (two's complement).
 
 ## int64
 
 [int64.md](int64.md)
 
-- `int64.to_int8(x: Int64) -> Int8` — Wraps to 8 bits; 128 becomes -128.
-- `int64.to_int16(x: Int64) -> Int16` — Wraps to 16 bits; 32768 becomes -32768.
-- `int64.to_int32(x: Int64) -> Int32` — Wraps to 32 bits; 2^31 becomes -2^31.
-- `int64.to_uint8(x: Int64) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int64.to_uint16(x: Int64) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int64.to_uint32(x: Int64) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int64.to_uint64(x: Int64) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int64.to_float32(x: Int64) -> Float32` — Float32 value; may round when abs(x) > 2^24.
-- `int64.to_float64(x: Int64) -> Float64` — Float64 value; may round when abs(x) > 2^53.
 - `int64.to_string(x: Int64) -> String` — Decimal digits, with - when negative.
-- `int64.to_int8_checked(x: Int64) -> Option[Int8]` — some(x), or none if outside -128..127.
-- `int64.to_int8_saturating(x: Int64) -> Int8` — Clamps x to -128..127.
-- `int64.to_int16_checked(x: Int64) -> Option[Int16]` — some(x), or none if outside -32768..32767.
-- `int64.to_int16_saturating(x: Int64) -> Int16` — Clamps x to -32768..32767.
-- `int64.to_int32_checked(x: Int64) -> Option[Int32]` — some(x), or none if outside -2^31..2^31-1.
-- `int64.to_int32_saturating(x: Int64) -> Int32` — Clamps x to -2^31..2^31-1.
-- `int64.to_uint8_checked(x: Int64) -> Option[UInt8]` — some(x), or none if outside 0..255.
-- `int64.to_uint8_saturating(x: Int64) -> UInt8` — Clamps x to 0..255.
-- `int64.to_uint16_checked(x: Int64) -> Option[UInt16]` — some(x), or none if outside 0..65535.
-- `int64.to_uint16_saturating(x: Int64) -> UInt16` — Clamps x to 0..65535.
-- `int64.to_uint32_checked(x: Int64) -> Option[UInt32]` — some(x), or none if outside 0..2^32-1.
-- `int64.to_uint32_saturating(x: Int64) -> UInt32` — Clamps x to 0..2^32-1.
-- `int64.to_uint64_checked(x: Int64) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int64.to_uint64_saturating(x: Int64) -> UInt64` — Negative x clamps to 0.
 - `int64.min_value() -> Int64` — Smallest Int64: -2^63.
 - `int64.max_value() -> Int64` — Largest Int64: 2^63-1.
+- `int64.compare(a: Int64, b: Int64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int64.min(a: Int64, b: Int64) -> Int64` — Lesser of a and b.
+- `int64.max(a: Int64, b: Int64) -> Int64` — Greater of a and b.
+- `int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` — x limited to lo..hi; aborts when lo > hi.
+- `int64.floor_div(a: Int64, b: Int64) -> Int64` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int64.modulo(a: Int64, b: Int64) -> Int64` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int64.pow(base: Int64, exp: Int) -> Int64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `int64.is_even(x: Int64) -> Bool` — True when x is a multiple of 2.
+- `int64.is_odd(x: Int64) -> Bool` — True when x is not a multiple of 2.
+- `int64.abs(x: Int64) -> Int64` — Magnitude of x; min_value wraps to itself.
+- `int64.sign(x: Int64) -> Int` — -1, 0 or 1 by the sign of x.
+- `int64.band(a: Int64, b: Int64) -> Int64` — Bitwise AND.
+- `int64.bor(a: Int64, b: Int64) -> Int64` — Bitwise OR.
+- `int64.bxor(a: Int64, b: Int64) -> Int64` — Bitwise XOR.
+- `int64.bnot(x: Int64) -> Int64` — Bitwise complement of all 64 bits.
+- `int64.bshl(a: Int64, n: Int) -> Int64` — a shifted left by n bits; n is taken mod 64.
+- `int64.bshr(a: Int64, n: Int) -> Int64` — Sign-filling right shift; n is taken mod 64.
+- `int64.count_leading_zeros(x: Int64) -> Int` — Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+- `int64.count_trailing_zeros(x: Int64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
+- `int64.count_ones(x: Int64) -> Int` — Number of set bits among the 64.
+- `int64.byte_swap(x: Int64) -> Int64` — The 8 bytes in reverse order (endian flip).
+- `int64.wrap_add(a: Int64, b: Int64) -> Int64` — a + b wrapped to 64 bits.
+- `int64.wrap_sub(a: Int64, b: Int64) -> Int64` — a - b wrapped to 64 bits.
+- `int64.wrap_mul(a: Int64, b: Int64) -> Int64` — a * b wrapped to 64 bits.
+- `int64.rotate_left(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated left by n; n is taken mod 64.
+- `int64.rotate_right(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `int64.bit_length(x: Int64) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
+- `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
+- `int64.to_string_radix(x: Int64, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]` — Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+- `int64.from(x: S) -> Int64` — x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
+- `int64.from_checked(x: S) -> Option[Int64]` — some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
+- `int64.from_saturating(x: S) -> Int64` — x as Int64, toward zero, clamped to Int64's range; NaN is 0.
+- `int64.from_wrapping(x: S) -> Int64` — The low 64 bits of integer x as Int64 (two's complement).
 
 ## int8
 
 [int8.md](int8.md)
 
-- `int8.to_int16(x: Int8) -> Int16` — Sign-extending widen; always exact.
-- `int8.to_int32(x: Int8) -> Int32` — Sign-extending widen; always exact.
-- `int8.to_int64(x: Int8) -> Int64` — Sign-extending widen; always exact.
-- `int8.to_uint8(x: Int8) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int8.to_uint16(x: Int8) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int8.to_uint32(x: Int8) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int8.to_uint64(x: Int8) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int8.to_float32(x: Int8) -> Float32` — Same value as Float32; always exact.
-- `int8.to_float64(x: Int8) -> Float64` — Same value as Float64; always exact.
 - `int8.to_string(x: Int8) -> String` — Decimal digits, with - when negative.
-- `int8.to_uint8_checked(x: Int8) -> Option[UInt8]` — some(x), or none if x is negative.
-- `int8.to_uint8_saturating(x: Int8) -> UInt8` — Negative x clamps to 0.
-- `int8.to_uint16_checked(x: Int8) -> Option[UInt16]` — some(x), or none if x is negative.
-- `int8.to_uint16_saturating(x: Int8) -> UInt16` — Negative x clamps to 0.
-- `int8.to_uint32_checked(x: Int8) -> Option[UInt32]` — some(x), or none if x is negative.
-- `int8.to_uint32_saturating(x: Int8) -> UInt32` — Negative x clamps to 0.
-- `int8.to_uint64_checked(x: Int8) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int8.to_uint64_saturating(x: Int8) -> UInt64` — Negative x clamps to 0.
 - `int8.min_value() -> Int8` — Smallest Int8: -128.
 - `int8.max_value() -> Int8` — Largest Int8: 127.
+- `int8.compare(a: Int8, b: Int8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int8.min(a: Int8, b: Int8) -> Int8` — Lesser of a and b.
+- `int8.max(a: Int8, b: Int8) -> Int8` — Greater of a and b.
+- `int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` — x limited to lo..hi; aborts when lo > hi.
+- `int8.floor_div(a: Int8, b: Int8) -> Int8` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int8.modulo(a: Int8, b: Int8) -> Int8` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int8.pow(base: Int8, exp: Int) -> Int8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+- `int8.is_even(x: Int8) -> Bool` — True when x is a multiple of 2.
+- `int8.is_odd(x: Int8) -> Bool` — True when x is not a multiple of 2.
+- `int8.abs(x: Int8) -> Int8` — Magnitude of x; min_value wraps to itself.
+- `int8.sign(x: Int8) -> Int` — -1, 0 or 1 by the sign of x.
+- `int8.band(a: Int8, b: Int8) -> Int8` — Bitwise AND.
+- `int8.bor(a: Int8, b: Int8) -> Int8` — Bitwise OR.
+- `int8.bxor(a: Int8, b: Int8) -> Int8` — Bitwise XOR.
+- `int8.bnot(x: Int8) -> Int8` — Bitwise complement of all 8 bits.
+- `int8.bshl(a: Int8, n: Int) -> Int8` — a shifted left by n bits; n is taken mod 8.
+- `int8.bshr(a: Int8, n: Int) -> Int8` — Sign-filling right shift; n is taken mod 8.
+- `int8.count_leading_zeros(x: Int8) -> Int` — Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+- `int8.count_trailing_zeros(x: Int8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
+- `int8.count_ones(x: Int8) -> Int` — Number of set bits among the 8.
+- `int8.byte_swap(x: Int8) -> Int8` — The bytes in reverse order; one byte, so x itself.
+- `int8.wrap_add(a: Int8, b: Int8) -> Int8` — a + b wrapped to 8 bits.
+- `int8.wrap_sub(a: Int8, b: Int8) -> Int8` — a - b wrapped to 8 bits.
+- `int8.wrap_mul(a: Int8, b: Int8) -> Int8` — a * b wrapped to 8 bits.
+- `int8.rotate_left(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated left by n; n is taken mod 8.
+- `int8.rotate_right(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated right by n; n is taken mod 8.
+- `int8.bit_length(x: Int8) -> Int` — Bits needed to hold x; 0 for 0, 8 if negative.
+- `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from ASCII-trimmed s; err on junk or outside -128..127.
+- `int8.to_string_radix(x: Int8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]` — Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+- `int8.from(x: S) -> Int8` — x as Int8, toward zero; NaN, an infinity or a value outside Int8 aborts.
+- `int8.from_checked(x: S) -> Option[Int8]` — some(x as Int8) when Int8 holds x exactly, else none (a fraction, NaN, out of range).
+- `int8.from_saturating(x: S) -> Int8` — x as Int8, toward zero, clamped to Int8's range; NaN is 0.
+- `int8.from_wrapping(x: S) -> Int8` — The low 8 bits of integer x as Int8 (two's complement).
 
 ## io
 
 [io.md](io.md)
 
-- `effect io.read_line() -> String` — Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
-- `effect io.read_line_opt() -> Option[String]` — Next stdin line, newline cut; none at EOF, some("") for an empty line.
-- `effect io.print(s: String) -> Unit` — Writes s, no newline, then flushes.
-- `effect io.read_all() -> String` — Rest of stdin as text; empty at EOF.
-- `effect io.read_byte() -> Int` — Next stdin byte 0..255, or -1 at EOF.
-- `effect io.read_n_bytes(n: Int) -> List[Int]` — Up to n stdin bytes; [] if n <= 0.
-- `io.write_bytes(data: List[Int]) -> Unit` — Low byte of each Int to stdout; unflushed.
-- `io.write(data: Bytes) -> Unit` — Raw data to stdout; no newline.
+- `effect io.read_line() -> Option[String]` — Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
+- `effect io.read_all() -> String` — Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
+- `effect io.print(s: String) -> Unit` — Writes s to stdout, no newline, then flushes.
+- `effect io.eprint(s: String) -> Unit` — Writes s to stderr, no newline.
+- `effect io.stdin() -> Stdin` — Standard input, for io.read / read_exact / read_to_end.
+- `effect io.stdout() -> Stdout` — Standard output, for io.write.
+- `effect io.stderr() -> Stderr` — Standard error, for io.write.
+- `effect io.read(h: H, max: Int) -> Bytes` — Up to max bytes from h; empty once h has ended; err if max < 0.
+- `effect io.read_exact(h: H, n: Int) -> Bytes` — Exactly n bytes from h; err if h ends first, naming how many arrived.
+- `effect io.read_to_end(h: H) -> Bytes` — Every byte until h ends.
+- `effect io.write(h: H, data: Bytes) -> Unit` — Writes all of data to h.
+- `effect io.close(h: H) -> Unit` — Closes h; closing twice is ok.
 
 ## json
 
 [json.md](json.md)
 
-- `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored.
+- `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 - `json.stringify(v: Value) -> String` — Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
-- `json.stringify_pretty(j: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
-- `json.get_string(j: Value, key: String) -> Option[String]` — String at key; none if absent or non-string.
-- `json.get_int(j: Value, key: String) -> Option[Int]` — Int at key; none if absent or not an Int (a Float is never truncated).
-- `json.get_float(j: Value, key: String) -> Option[Float]` — Float at key (Int widens); none if absent.
-- `json.get_bool(j: Value, key: String) -> Option[Bool]` — Bool at key; none if absent or non-Bool.
-- `json.get_array(j: Value, key: String) -> Option[List[Value]]` — Array at key; none if absent or non-array.
-- `json.root() -> JsonPath` — Empty path: the whole value.
-- `json.field(path: JsonPath, name: String) -> JsonPath` — path extended by object key name.
-- `json.index(path: JsonPath, i: Int) -> JsonPath` — path plus index i; negative i counts from end.
-- `json.get_path(j: Value, path: JsonPath) -> Option[Value]` — Value at path, or none if a step misses.
-- `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]` — j with value at path; missing keys created.
-- `json.remove_path(j: Value, path: JsonPath) -> Value` — j minus the entry at path; unchanged if absent.
-- `json.to_map(j: Value) -> Option[Map[String, String]]` — Object as key->string map (non-strings as JSON).
+- `json.stringify_pretty(v: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
 
 ## list
 
@@ -724,29 +917,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.len(xs: List[A]) -> Int` — Element count; 0 for an empty list.
 - `list.length(xs: List[A]) -> Int   (deprecated — use list.len)` — Alias of list.len.
 - `list.get(xs: List[A], i: Int) -> Option[A]` — Element at index i, or none when out of range.
-- `list.get_or(xs: List[A], i: Int, default: A) -> A` — Element at i, or default when out of range.
-- `list.set(xs: List[A], i: Int, val: A) -> List[A]` — Copy with slot i = val; no-op if i out of range.
+- `list.set(xs: List[A], i: Int, x: A) -> List[A]` — Copy with slot i = x; no-op if i out of range.
 - `list.swap(xs: List[A], i: Int, j: Int) -> List[A]` — Copy with i and j swapped; no-op if either OOB.
 - `list.sort(xs: List[A]) -> List[A]` — Ascending copy; Floats in IEEE totalOrder.
 - `list.reverse(xs: List[A]) -> List[A]` — Elements in reverse order.
 - `list.contains(xs: List[A], x: A) -> Bool` — true if some element == x; NaN never matches.
 - `list.enumerate(xs: List[A]) -> List[(Int, A)]` — (index, element) pairs, index from 0.
 - `list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]` — Pairs by position; stops at the shorter list.
-- `list.flatten(xss: List[List[T]]) -> List[T]` — Inner lists concatenated in order.
-- `list.take(xs: List[A], n: Int) -> List[A]` — First n elements; all if n >= len or n < 0.
-- `list.drop(xs: List[A], n: Int) -> List[A]` — All but the first n; [] if n >= len or n < 0.
-- `list.tail(xs: List[A]) -> List[A]` — All but the first element; [] when empty.
+- `list.flatten(xs: List[List[A]]) -> List[A]` — Inner lists concatenated in order.
+- `list.take(xs: List[A], n: Int) -> List[A]` — First n elements; all if n >= len, [] if n < 0.
+- `list.drop(xs: List[A], n: Int) -> List[A]` — All but the first n; [] if n >= len, all if n < 0.
 - `list.unique(xs: List[A]) -> List[A]` — Duplicates removed; first occurrences kept.
 - `list.index_of(xs: List[A], x: A) -> Option[Int]` — Index of the first x, or none.
 - `list.last(xs: List[A]) -> Option[A]` — Final element, or none when empty.
-- `list.chunk(xs: List[A], n: Int) -> List[List[A]]` — Runs of n, last may be short; n = 0 aborts.
-- `list.sum(xs: List[Int]) -> Int` — Sum; 0 when empty; wraps on overflow.
-- `list.product(xs: List[Int]) -> Int` — Product; 1 when empty; wraps on overflow.
+- `list.chunk(xs: List[A], n: Int) -> List[List[A]]` — Runs of n, last may be short; n <= 0 aborts.
+- `list.sum(xs: List[A]) -> A` — Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
+- `list.product(xs: List[A]) -> A` — Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
 - `list.first(xs: List[A]) -> Option[A]` — Head element, or none when empty.
 - `list.is_empty(xs: List[A]) -> Bool` — true iff xs has no elements.
 - `list.min(xs: List[A]) -> Option[A]` — Least element, or none when empty.
 - `list.max(xs: List[A]) -> Option[A]` — Greatest element, or none when empty.
-- `list.join(xs: List[String], sep: String) -> String` — Strings joined by sep; empty string for [].
+- `list.join(xs: List[T], sep: T) -> T` — The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
 - `list.map(xs: List[A], f: (A) -> B) -> List[B]` — f applied to each element, in order.
 - `list.filter(xs: List[A], f: (A) -> Bool) -> List[A]` — Elements where f is true, order kept.
 - `list.find(xs: List[A], f: (A) -> Bool) -> Option[A]` — First element where f holds, or none.
@@ -768,26 +959,35 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over pairs; stops at the shorter list.
 - `list.unique_by(xs: List[A], f: (A) -> K) -> List[A]` — First element per distinct key f(x).
 - `list.range(start: Int, end: Int) -> List[Int]` — start up to end, exclusive; [] if end <= start.
-- `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` — Indices start..<end, clamped; [] if start >= end.
-- `list.insert(xs: List[A], i: Int, val: A) -> List[A]` — Copy with val at i; i >= len or i < 0 appends.
+- `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` — Indices start..<end, each clamped to 0..len; [] if start >= end.
+- `list.insert(xs: List[A], i: Int, x: A) -> List[A]` — Copy with x at i; i >= len or i < 0 appends.
 - `list.remove_at(xs: List[A], i: Int) -> List[A]` — Copy without slot i; no-op if i out of range.
-- `list.repeat(val: A, n: Int) -> List[A]` — n copies of val; [] for n <= 0.
+- `list.repeat(x: A, n: Int) -> List[A]` — n copies of x; [] for n <= 0.
 - `list.intersperse(xs: List[A], sep: A) -> List[A]` — sep between adjacent elements.
-- `list.windows(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n = 0 aborts.
 - `list.dedup(xs: List[A]) -> List[A]` — Adjacent equal runs collapsed; not global.
-- `list.take_end(xs: List[A], n: Int) -> List[A]` — Last n elements; all if n >= len or n < 0.
-- `list.drop_end(xs: List[A], n: Int) -> List[A]` — All but the last n; [] if n >= len or n < 0.
-- `list.shuffle(xs: List[A]) -> List[A]` — Random permutation; unseeded, differs per run.
-- `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n = 0 aborts.
-- `list.binary_search(xs: List[Int], target: Int) -> Option[Int]` — Index of target in ascending xs, or none.
+- `list.take_end(xs: List[A], n: Int) -> List[A]` — Last n elements; all if n >= len, [] if n < 0.
+- `list.drop_end(xs: List[A], n: Int) -> List[A]` — All but the last n; [] if n >= len, all if n < 0.
+- `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
+- `list.binary_search(xs: List[A], target: A) -> Option[Int]` — Index of target in xs sorted ascending (list.sort's order), or none.
 - `list.push(mut xs: List[A], x: A) -> Unit` — Appends x to xs in place.
 - `list.with_capacity(cap: Int) -> List[A]` — Empty list; cap is only a preallocation hint.
 - `list.pop(mut xs: List[A]) -> Option[A]` — Removes and yields the last element; none if empty.
 - `list.clear(mut xs: List[A]) -> Unit` — Removes every element of xs in place.
-- `list.bundled_probe(n: Int) -> Int` — n + 1; bundled-dispatch smoke fn.
-- `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []).
-- `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
+- `list.split_at(xs: List[A], n: Int) -> (List[A], List[A])` — (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
+- `list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]` — [seed, f(seed), ...] of length n; [] if n <= 0.
 - `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]` — The first some that f gives, or none; f is not called after the hit.
+- `list.new() -> List[A]` — An empty list; the same value as [].
+- `list.from_list(xs: List[A]) -> List[A]` — xs itself; the Container constructor from a list.
+- `list.to_list(xs: List[A]) -> List[A]` — xs itself; the Container view as a list.
+- `list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` — Stable sort by cmp: negative puts a first, 0 keeps input order.
+- `list.min_by(xs: List[A], f: (A) -> K) -> Option[A]` — Element with the least key f(x); the first on ties; f runs once per x.
+- `list.max_by(xs: List[A], f: (A) -> K) -> Option[A]` — Element with the greatest key f(x); the first on ties; f runs once per x.
+- `list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` — Least element by cmp; the first on ties; none when empty.
+- `list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest element by cmp; the first on ties; none when empty.
+- `list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Option[Int]` — Index of target among keys f(x) of xs sorted by key, or none.
+- `list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]` — Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+- `list.unzip(xs: List[(A, B)]) -> (List[A], List[B])` — (firsts, seconds) of a list of pairs; the inverse of zip.
+- `list.range_step(start: Int, end: Int, step: Int) -> List[Int]` — start, start + step, ...
 
 ## map
 
@@ -795,57 +995,73 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `map.new() -> Map[K, V]` — An empty Map[K, V].
 - `map.get(m: Map[K, V], key: K) -> Option[V]` — Value for key, or none when absent.
-- `map.get_or(m: Map[K, V], key: K, default: V) -> V` — Value for key, or default when absent.
 - `map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` — Copy with key -> value; an existing key is overwritten and keeps its position.
 - `map.contains(m: Map[K, V], key: K) -> Bool` — true when key is present.
 - `map.remove(m: Map[K, V], key: K) -> Map[K, V]` — Copy without key; unchanged if absent.
 - `map.keys(m: Map[K, V]) -> List[K]` — Every key, in insertion order.
 - `map.values(m: Map[K, V]) -> List[V]` — Every value, in key insertion order.
 - `map.len(m: Map[K, V]) -> Int` — Entry count; 0 for an empty map.
-- `map.entries(m: Map[K, V]) -> List[(K, V)]` — (key, value) pairs in insertion order.
+- `map.to_list(m: Map[K, V]) -> List[(K, V)]` — (key, value) pairs in insertion order.
 - `map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` — a plus b's entries; b wins on shared keys.
 - `map.is_empty(m: Map[K, V]) -> Bool` — true iff m has no entries.
-- `map.from_list(pairs: List[(K, V)]) -> Map[K, V]` — Map of pairs; a repeated key takes the last value.
+- `map.from_list(xs: List[(K, V)]) -> Map[K, V]` — Map of the pairs xs; a repeated key takes the last value.
 - `map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` — Same keys and order, values replaced by f(v).
-- `map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]` — Entries where f(k, v) holds, order kept.
-- `map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A` — Folds f(acc, k, v) in insertion order.
-- `map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool` — true if some f(k, v) holds; false when empty.
-- `map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool` — true if every f(k, v) holds; true when empty.
-- `map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int` — Number of entries where f(k, v) holds.
-- `map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]` — First (k, v) where f holds, or none.
+- `map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]` — Entries where f((k, v)) holds, order kept.
+- `map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A` — Folds f(acc, (k, v)) in insertion order.
+- `map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` — true if some f((k, v)) holds; false when empty.
+- `map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` — true if every f((k, v)) holds; true when empty.
+- `map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int` — Number of entries where f((k, v)) holds.
+- `map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> Option[(K, V)]` — First (k, v) where f holds, or none.
 - `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` — Copy with key's value f(v); no-op if absent.
 - `map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` — key -> f(old) if present, else init appended.
-- `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` — In-place key -> value; an existing key is overwritten and keeps its position.
-- `map.delete(mut m: Map[K, V], key: K) -> Unit` — Removes key in place; no-op when absent.
 - `map.clear(mut m: Map[K, V]) -> Unit` — Removes every entry of m in place.
+- `map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` — (index, (key, value)) pairs in insertion order, index from 0.
+- `map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` — Entries paired with ys by position; stops at the shorter.
+- `map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` — f over (entry, ys element) pairs; stops at the shorter.
+- `map.filter_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> List[B]` — The somes f gives over the entries, in insertion order.
+- `map.find_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> Option[B]` — The first some f gives over the entries, or none; f is not called after the hit.
+- `map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]` — Left fold of the entries seeded by the first; none when empty.
+- `map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` — Running fold values over the entries, init excluded.
+- `map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` — (entries where f holds, the rest), insertion order kept.
+- `map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` — Key f(entry) -> entries; keys in first-seen order.
+- `map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` — Entries sorted by key f(entry), stable; f runs once per entry.
+- `map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` — Entries sorted by cmp, stable: negative puts a first.
+- `map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]` — Entry with the least f(entry); the first on ties.
+- `map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]` — Entry with the greatest f(entry); the first on ties.
+- `map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]` — Least entry by cmp; the first on ties.
+- `map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]` — Greatest entry by cmp; the first on ties.
 
 ## math
 
 [math.md](math.md)
 
-- `math.abs(n: Int) -> Int` — Magnitude of n; min_value wraps to itself.
 - `math.atan(x: Float) -> Float` — Arctangent in radians, within -pi/2..pi/2.
 - `math.choose(n: Int, k: Int) -> Int` — Binomial n over k; 0 if k < 0 or k > n; overflow wraps.
 - `math.cos(x: Float) -> Float` — Cosine of x radians; NaN for infinite x.
 - `math.e() -> Float` — Euler's number, 2.718281828459045.
 - `math.exp(x: Float) -> Float` — e to the x; overflows to inf above ~709.78.
-- `math.factorial(n: Int) -> Int` — Product 1..n; 1 for n <= 0; wraps past 20.
-- `math.fmax(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
-- `math.fmin(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
-- `math.fpow(base: Float, exp: Float) -> Float` — base to the exp; NaN for negative base, fractional exp.
+- `math.factorial(n: Int) -> Int` — Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 - `math.log(x: Float) -> Float` — Natural log; -inf at 0, NaN for negative x.
 - `math.log10(x: Float) -> Float` — Base-10 log; -inf at 0, NaN for negative x.
 - `math.log2(x: Float) -> Float` — Base-2 log; -inf at 0, NaN for negative x.
 - `math.log_gamma(x: Float) -> Float` — ln|Gamma(x)| on the whole line; inf at the poles.
-- `math.max(a: Int, b: Int) -> Int` — Greater of a and b.
-- `math.min(a: Int, b: Int) -> Int` — Lesser of a and b.
 - `math.pi() -> Float` — The circle constant, 3.141592653589793.
-- `math.pow(base: Int, exp: Int) -> Int` — base to the exp, wrapping; negative exp aborts.
-- `math.sign(n: Int) -> Int` — -1, 0 or 1 by the sign of n.
 - `math.sin(x: Float) -> Float` — Sine of x radians; NaN for infinite x.
 - `math.sqrt(x: Float) -> Float` — Square root; NaN below 0, -0.0 stays -0.0.
 - `math.tan(x: Float) -> Float` — Tangent of x radians; NaN for infinite x.
 - `math.tanh(x: Float) -> Float` — Hyperbolic tangent in -1..1; inf gives 1.0.
+- `math.asin(x: Float) -> Float` — Arcsine in radians, within -pi/2..pi/2; NaN outside -1..1.
+- `math.acos(x: Float) -> Float` — Arccosine in radians, within 0..pi; NaN outside -1..1.
+- `math.atan2(y: Float, x: Float) -> Float` — Angle of the point (x, y) in radians, within -pi..pi.
+- `math.expm1(x: Float) -> Float` — e to the x, minus 1, accurate near 0; -1.0 below about -38.
+- `math.log1p(x: Float) -> Float` — Natural log of 1 + x, accurate near 0; -inf at -1, NaN below.
+- `math.sinh(x: Float) -> Float` — Hyperbolic sine; overflows to +-inf past about 710.
+- `math.cosh(x: Float) -> Float` — Hyperbolic cosine, at least 1.0; overflows to inf past about 710.
+- `math.hypot(a: Float, b: Float) -> Float` — sqrt(a*a + b*b) without overflow or underflow on the way.
+- `math.cbrt(x: Float) -> Float` — Real cube root; negative x gives a negative root.
+- `math.asinh(x: Float) -> Float` — Inverse hyperbolic sine.
+- `math.acosh(x: Float) -> Float` — Inverse hyperbolic cosine, at least 0.0; NaN below 1.0.
+- `math.atanh(x: Float) -> Float` — Inverse hyperbolic tangent; +-inf at +-1, NaN outside -1..1.
 
 ## matrix
 
@@ -855,79 +1071,50 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.ones(rows: Int, cols: Int) -> Matrix` — rows x cols of 1.0; negatives clamp to 0.
 - `matrix.shape(m: Matrix) -> (Int, Int)` — (rows, cols); (0, 0) with no rows.
 - `matrix.transpose(m: Matrix) -> Matrix` — cols x rows copy; r x 0 becomes 0 x 0.
-- `matrix.from_lists(rows: List[List[Float]]) -> Matrix` — Matrix of equal-length rows; [] is 0 x 0.
-- `matrix.select_rows(m: Matrix, row_ids: List[Int]) -> Matrix` — Rows at row_ids; id < 0 is row 0, past end zeros.
-- `matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix` — base rows then extra; empty side gives other.
-- `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` — x times f32 LE W^T.
-- `matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix` — f32 LE rows at row_ids; past-data rows are 0.
+- `matrix.from_lists(xs: List[List[Float]]) -> Matrix` — Matrix of the equal-length rows xs; [] is 0 x 0.
 - `matrix.to_lists(m: Matrix) -> List[List[Float]]` — Rows as lists; r x 0 gives r empty rows.
-- `matrix.get(m: Matrix, row: Int, col: Int) -> Float` — Element at (row, col); out of range aborts.
+- `matrix.get(m: Matrix, row: Int, col: Int) -> Option[Float]` — Element at (row, col); none out of range.
 - `matrix.rows(m: Matrix) -> Int` — Row count; 0 for an empty matrix.
 - `matrix.cols(m: Matrix) -> Int` — Width of row 0; 0 when there are no rows.
-- `matrix.add(a: Matrix, b: Matrix) -> Matrix` — Elementwise a + b; shapes truncate to overlap.
-- `matrix.mul(a: Matrix, b: Matrix) -> Matrix` — Matrix product; cols(a) == rows(b) is not checked.
 - `matrix.scale(m: Matrix, s: Float) -> Matrix` — Every element times s.
-- `matrix.fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix` — a*ka + b*kb in one pass; shapes truncate.
-- `matrix.fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix` — a*ka + b*kb + c*kc; shapes truncate.
-- `matrix.sub(a: Matrix, b: Matrix) -> Matrix` — Elementwise a - b; shapes truncate to overlap.
-- `matrix.div(a: Matrix, b: Matrix) -> Matrix` — Elementwise a / b; x/0.0 is inf or NaN.
-- `matrix.neg(m: Matrix) -> Matrix` — Every element negated.
-- `matrix.pow(m: Matrix, exp: Float) -> Matrix` — Elementwise x^exp; x < 0, fractional exp: NaN.
 - `matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` — f applied to every element.
-- `matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f32 LE rows x cols at offset; all 0 if data short.
+- `matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f32 LE rows x cols of b at offset; none if b is short.
 - `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` — Row-major f64 LE, 8 bytes per element.
 - `matrix.to_bytes_f32_le(m: Matrix) -> Bytes` — Row-major f32 LE, 4 bytes each (rounded).
-- `matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f16 LE rows x cols at offset; all 0 if data short.
-- `matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f64 LE rows x cols at offset; all 0 if data short.
+- `matrix.to_bytes_f16_le(m: Matrix) -> Bytes` — Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
+- `matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f16 LE rows x cols of b at offset; none if b is short.
+- `matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f64 LE rows x cols of b at offset; none if b is short.
 - `matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` — bias added to each row; cols cut to bias.
 - `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` — n slices cols/n wide, remainder dropped; [] if n = 0.
-- `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.
+- `matrix.concat_cols(xs: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.
 - `matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix   (deprecated — use matrix.concat_cols)` — Alias of matrix.concat_cols.
-- `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` — x W^T + bias; empty x or W gives 0 x 0.
-- `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` — x W^T; empty x or W gives 0 x 0.
-- `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` — Rows [start, end), end clamped to the row count.
-- `matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix` — 1-D conv over rows; [] if input too short.
+- `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` — Rows [start, end), each bound clamped to 0..row count.
 - `matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` — Rows at indices; out of range is a zero row.
 - `matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` — Row r dot vec; 0.0 if r is out of range.
 - `matrix.row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float   (deprecated — use matrix.dot_row)` — Alias of matrix.dot_row.
-- `matrix.zeros_f32(rows: Int, cols: Int) -> Matrix[Float32]` — Float32 rows x cols of 0.0; negatives clamp.
-- `matrix.ones_f32(rows: Int, cols: Int) -> Matrix[Float32]` — Float32 rows x cols of 1.0; negatives clamp.
-- `matrix.mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]` — Float32 product; cols(a) == rows(b) is not checked.
-- `matrix.mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]` — alpha * (a x b), Float32.
-- `matrix.mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]` — a x transpose(b), Float32.
-- `matrix.mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]` — alpha * (a x transpose(b)), Float32.
-- `matrix.mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix` — Same as scale(mul(a, b), alpha).
+- `matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` — f over each pair of same-position elements; a shape mismatch aborts.
+- `matrix.concat_rows(xs: List[Matrix]) -> Matrix` — Rows of every matrix, top to bottom; empty members skipped, a width mismatch aborts.
 
 ## net
 
 [net.md](net.md)
 
-- `effect net.tcp_connect(host: String, port: Int) -> Int` — Connected stream handle; err if refused.
-- `effect net.tcp_read(stream: Int, len: Int) -> Bytes` — Up to len bytes; empty once the peer closed; err if len < 0.
-- `effect net.tcp_write(stream: Int, data: Bytes) -> Unit` — Sends all of data, flushed; err if closed.
-- `effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes` — Exactly len bytes; err on early EOF, naming how many arrived.
-- `effect net.tcp_close(stream: Int) -> Unit` — Shuts down the stream; twice is ok.
-- `net.tcp_is_open(stream: Int) -> Bool` — False after tcp_close; a peer close is not seen.
-- `effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes` — Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-- `effect net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit` — Sets read/write timeout; <= 0 clears it.
-- `effect net.tcp_available(stream: Int) -> Int` — Bytes readable now, capped at 65536; 0 if none.
-- `effect net.tcp_listen(host: String, port: Int) -> Int` — Listener bound to host:port; err if in use.
-- `effect net.tcp_local_port(listener: Int) -> Int` — The port a listener is bound to: the one the OS chose when it listened on port 0.
-- `effect net.tcp_accept(listener: Int) -> Int` — Blocks for the next client; its stream handle.
-- `effect net.tcp_close_listener(listener: Int) -> Unit` — Stops listening; closing twice is ok.
-- `effect net.unix_connect(path: String) -> Int` — Stream socket connected to the listener at path; its descriptor.
-- `effect net.unix_listen(path: String) -> Int` — Listener bound at path, which must not exist yet.
-- `effect net.unix_accept(listener: Int) -> Int` — Blocks for the next connection; its descriptor.
-- `effect net.unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit` — Sends all of data, the descriptors fds riding with its first byte.
-- `effect net.unix_recv(sock: Int, max: Int) -> Bytes` — Up to max bytes, blocking; empty once the peer closed.
-- `effect net.unix_take_fds(sock: Int) -> List[Int]` — Descriptors received on sock and not yet taken, oldest first.
-- `effect net.unix_poll(fd: Int, timeout_ms: Int) -> Bool` — True if fd is readable within timeout_ms; < 0 waits forever.
-- `effect net.unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]` — The fds readable within timeout_ms, in order; < 0 waits for one.
-- `effect net.unix_close(fd: Int) -> Unit` — Closes a socket, listener or received descriptor.
-- `effect net.shm_create(size: Int) -> Int` — New zero-filled unnamed file of size bytes; its descriptor.
-- `effect net.shm_resize(fd: Int, size: Int) -> Unit` — Grows or shrinks the file fd to size bytes.
-- `effect net.shm_write(fd: Int, offset: Int, data: Bytes) -> Unit` — Writes data into fd at byte offset.
-- `effect net.shm_read(fd: Int, offset: Int, len: Int) -> Bytes` — Up to len bytes of fd from offset; fewer at its end.
+- `effect net.tcp_connect(host: String, port: Int) -> TcpStream` — A stream connected to host:port; err if refused.
+- `effect net.tcp_is_open(stream: TcpStream) -> Bool` — False after io.close; a peer close is not seen.
+- `effect net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes` — Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
+- `effect net.tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Unit` — Sets read/write timeout; <= 0 clears it.
+- `effect net.tcp_available(stream: TcpStream) -> Int` — Bytes readable now, capped at 65536; 0 if none.
+- `effect net.tcp_listen(host: String, port: Int) -> TcpListener` — A listener bound to host:port; err if in use.
+- `effect net.tcp_local_port(listener: TcpListener) -> Int` — The port a listener is bound to: the one the OS chose when it listened on port 0.
+- `effect net.tcp_accept(listener: TcpListener) -> TcpStream` — Blocks for the next client; its stream.
+- `effect net.udp_bind(host: String, port: Int) -> UdpSocket` — A UDP socket bound to host:port; port 0 lets the OS choose.
+- `effect net.udp_local_port(sock: UdpSocket) -> Int` — The port sock is bound to.
+- `effect net.udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit` — Sends data as one datagram to host:port.
+- `effect net.udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket` — Blocks for the next datagram: at most max bytes of it, and its sender.
+- `effect net.lookup_host(host: String) -> List[IpAddr]` — The addresses host resolves to, each once; err if none.
+- `net.parse_ip(s: String) -> Result[IpAddr, String]` — The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
+- `net.ip_to_string(ip: IpAddr) -> String` — ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
+- `net.is_loopback(ip: IpAddr) -> Bool` — True for 127.0.0.0/8 and ::1.
 
 ## option
 
@@ -945,67 +1132,78 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `option.zip(a: Option[A], b: Option[B]) -> Option[(A, B)]` — some((x, y)) when both are some, else none.
 - `option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]` — o when some, else f(); f runs only for none.
 - `option.to_list(o: Option[A]) -> List[A]` — [v] for some(v), [] for none.
-- `option.collect(xs: List[Option[T]]) -> Option[List[T]]` — some(values) if no element is none, else none.
-- `option.collect_map(xs: List[T], f: (T) -> Option[U]) -> Option[List[U]]` — some of all f(x), or none; f runs on every x.
+- `option.collect(xs: List[Option[A]]) -> Option[List[A]]` — some(values) if no element is none, else none.
+- `option.collect_map(xs: List[A], f: (A) -> Option[B]) -> Option[List[B]]` — some of all f(x), or none; f runs on every x.
 
 ## path
 
 [path.md](path.md)
 
-- `path.from_string(s: String) -> Result[SafePath, String]` — SafePath of s; err if any segment is "..".
-- `path.trusted(s: String) -> SafePath` — SafePath of s with no traversal check.
-- `path.to_string(p: SafePath) -> String` — Path text inside p, unchanged.
 - `path.join(base: String, child: String) -> String` — base/child; an absolute child replaces base.
-- `path.dirname(p: String) -> String` — p minus last segment; "" if no slash.
-- `path.basename(p: String) -> String` — Last non-empty segment; "" for / or empty p.
-- `path.extension(p: String) -> Option[String]` — After basename's last dot; none if no dot or dotfile.
-- `path.is_absolute(p: String) -> Bool` — True when p starts with /.
-- `path.stem(p: String) -> String` — Basename minus last extension; dotfiles as-is.
-- `path.normalize(p: String) -> String` — Resolves .
+- `path.join_within(base: String, child: String) -> Result[String, String]` — base/child; err if child could leave base.
+- `path.dirname(path: String) -> String` — path minus last segment; "" if no slash.
+- `path.basename(path: String) -> String` — Last non-empty segment; "" for / or empty path.
+- `path.extension(path: String) -> Option[String]` — After basename's last dot; none if no dot or dotfile.
+- `path.is_absolute(path: String) -> Bool` — True when path starts with /.
+- `path.stem(path: String) -> String` — Basename minus last extension; dotfiles as-is.
+- `path.normalize(path: String) -> String` — Resolves .
+- `path.components(path: String) -> List[String]` — Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
+- `path.relative_to(path: String, base: String) -> Option[String]` — path relative to base, lexically; "." when equal; none when not under base.
+- `path.with_extension(path: String, ext: String) -> String` — path with its last extension replaced by ext; "" removes it; unchanged without a file name.
 
 ## process
 
 [process.md](process.md)
 
 - `effect process.exec(cmd: String, args: List[String]) -> String` — Stdout on exit 0; else err with stderr text.
+- `effect process.output(c: ProcessCommand) -> ProcessStatus` — Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
+- `effect process.run(c: ProcessCommand) -> Int` — Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+- `effect process.start(c: ProcessCommand) -> ProcessChild` — Starts c in its own process group and returns at once; its output is captured.
+- `effect process.poll(c: ProcessChild) -> Option[Result[ProcessStatus, String]]` — Never blocks: none while c runs, then its outcome (err past its deadline).
+- `effect process.wait(c: ProcessChild) -> ProcessStatus` — Blocks until c ends; its outcome.
+- `effect process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus` — SIGTERM to c's group, grace_ms to end, then SIGKILL; again after the end is the same outcome.
+- `effect process.read_new_stdout(c: ProcessChild) -> String` — What c wrote to stdout since the last read; never blocks.
+- `effect process.read_new_stderr(c: ProcessChild) -> String` — What c wrote to stderr since the last read; never blocks.
+- `effect process.child_pid(c: ProcessChild) -> Int` — The OS process id of c, for process.kill.
+- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 - `effect process.exit(code: Int) -> Never` — Ends with code 0..=255; others abort, exit 1.
-- `effect process.args() -> List[String]` — Full argv, program name at index 0.
-- `effect process.stdin_lines() -> List[String]` — All stdin lines; err on non-UTF-8 input.
-- `effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String` — exec in dir; err is stderr, maybe empty.
-- `effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String` — exec with input piped in; err may be empty.
-- `effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus` — Code and output; code -1 if killed by signal.
-- `effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus` — exec_status, but kills cmd and errs at timeout_ms.
-- `effect process.run(cmd: String, args: List[String]) -> Int` — Run cmd on this terminal; exit code, -1 if signalled.
-- `effect process.run_in(dir: String, cmd: String, args: List[String]) -> Int` — run in dir; exit code, -1 if signalled.
-- `effect process.exec_attached(cmd: String, args: List[String]) -> Int   (deprecated — use process.run)` — Alias of process.run.
-- `process.pid() -> Int` — OS process ID of this program.
-- `process.env(key: String) -> Option[String]` — Variable value, or none if unset.
-- `effect process.spawn(cmd: String, args: List[String]) -> Int` — Pid of cmd started in the background.
-- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
-- `process.sleep(ms: Int) -> Unit` — Blocks ms milliseconds; negative is 0.
-- `process.is_alive(pid: Int) -> Bool` — True while pid exists, zombies included.
+- `effect process.pid() -> Int` — OS process ID of this program.
 
 ## random
 
 [random.md](random.md)
 
 - `effect random.int(min: Int, max: Int) -> Int` — Random Int in [min, max]; min if max <= min.
-- `effect random.float() -> Float` — Random Float in [0, 1); not crypto-grade.
-- `effect random.choice(xs: List[T]) -> Option[T]` — Random element of xs; none when empty.
-- `effect random.shuffle(xs: List[T]) -> List[T]` — Random permutation of xs as a new list.
+- `effect random.float() -> Float` — Random Float in [0, 1).
+- `effect random.choice(xs: List[A]) -> Option[A]` — Random element of xs; none when empty.
+- `effect random.shuffle(xs: List[A]) -> List[A]` — Random permutation of xs as a new list.
+- `effect random.bytes(n: Int) -> Bytes` — n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
+- `random.seeded(seed: Int) -> Rng` — A generator whose stream is fixed by seed.
+- `random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)` — An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+- `random.next_float(rng: Rng) -> (Float, Rng)` — A Float in [0, 1) from the top 53 bits, and the next state.
+- `random.next_choice(rng: Rng, xs: List[A]) -> (Option[A], Rng)` — A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+- `random.next_shuffle(rng: Rng, xs: List[A]) -> (List[A], Rng)` — A uniform permutation of xs (Fisher-Yates) and the next state.
 
 ## regex
 
 [regex.md](regex.md)
 
-- `regex.is_match(pat: String, s: String) -> Bool` — pat matches somewhere in s (unanchored).
-- `regex.full_match(pat: String, s: String) -> Bool` — pat matches the whole of s.
-- `regex.find(pat: String, s: String) -> Option[String]` — Leftmost match of pat in s, or none.
-- `regex.find_all(pat: String, s: String) -> List[String]` — All non-overlapping matches, in order.
-- `regex.replace(pat: String, s: String, rep: String) -> String` — All matches replaced by literal rep (no $1).
-- `regex.replace_first(pat: String, s: String, rep: String) -> String` — First match replaced by literal rep.
-- `regex.split(pat: String, s: String) -> List[String]` — Text between matches; [s] if no match.
-- `regex.captures(pat: String, s: String) -> Option[List[String]]` — [whole, group1, ...] of first match, or none.
+- `regex.new(pattern: String) -> Regex` — The Regex for `pattern`; aborts with `Error: invalid regex: <reason>` when it is refused.
+- `regex.compile(pattern: String) -> Result[Regex, String]` — The Regex for `pattern`, or err(reason) when it is refused.
+- `regex.is_match(re: Regex, s: String) -> Bool` — re matches somewhere in s.
+- `regex.is_full_match(re: Regex, s: String) -> Bool` — re matches the whole of s.
+- `regex.full_match(re: Regex, s: String) -> Bool   (deprecated — use regex.is_full_match)` — re matches the whole of s (renamed regex.is_full_match).
+- `regex.find(re: Regex, s: String) -> Option[String]` — Leftmost match of re in s, or none.
+- `regex.find_all(re: Regex, s: String) -> List[String]` — All non-overlapping matches, in order.
+- `regex.index_of(re: Regex, s: String) -> Option[Int]` — Code-point index where the leftmost match starts, or none.
+- `regex.replace(re: Regex, s: String, rep: String) -> String` — All matches replaced by literal rep (`$1` is not read).
+- `regex.replace_first(re: Regex, s: String, rep: String) -> String` — First match replaced by literal rep.
+- `regex.replace_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` — All matches replaced by f([whole, group1, ...]).
+- `regex.replace_first_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` — First match replaced by f([whole, group1, ...]).
+- `regex.split(re: Regex, s: String) -> List[String]` — Text between matches; [s] if no match.
+- `regex.captures(re: Regex, s: String) -> Option[List[Option[String]]]` — [whole, group1, ...] of the first match, or none; a group that took no part is none.
+- `regex.captures_all(re: Regex, s: String) -> List[List[Option[String]]]` — [whole, group1, ...] of every match, in order.
+- `regex.escape(s: String) -> String` — s with every regex metacharacter escaped, so it matches itself.
 
 ## result
 
@@ -1020,12 +1218,19 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `result.is_err(r: Result[A, E]) -> Bool` — true for err(_), false for ok(_).
 - `result.to_option(r: Result[A, E]) -> Option[A]` — some(v) for ok(v); none for err, e dropped.
 - `result.to_err_option(r: Result[A, E]) -> Option[E]` — some(e) for err(e); none for ok.
-- `result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])` — (ok values, err values), each in list order.
+- `result.partition(xs: List[Result[A, E]]) -> (List[A], List[E])` — (ok values, err values), each in list order.
 - `result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]` — Inner result of ok(inner); outer err kept.
 - `result.to_list(r: Result[A, E]) -> List[A]` — [v] for ok(v), [] for err.
 - `result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]` — ok((x, y)) if both ok, else the first err.
 - `result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]` — r when ok, else f(e); f runs only on err.
-- `result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]` — err(err_val) if pred fails on ok; err kept.
+- `result.filter(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]` — err(err_val) if f fails on ok; err kept.
+
+## secret
+
+[secret.md](secret.md)
+
+- `secret.new(x: A) -> Secret[A]` — x wrapped so that every renderer prints it as `Secret(***)`.
+- `secret.reveal(s: Secret[A]) -> A` — The value s wraps.
 
 ## set
 
@@ -1033,9 +1238,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `set.new() -> Set[A]` — An empty Set[A].
 - `set.from_list(xs: List[A]) -> Set[A]` — Distinct elements of xs in first-seen order.
-- `set.insert(s: Set[A], value: A) -> Set[A]` — Copy with value appended; unchanged if present.
-- `set.remove(s: Set[A], value: A) -> Set[A]` — Copy without value; unchanged if absent.
-- `set.contains(s: Set[A], value: A) -> Bool` — true when value is a member.
+- `set.insert(s: Set[A], x: A) -> Set[A]` — Copy with x appended; unchanged if present.
+- `set.remove(s: Set[A], x: A) -> Set[A]` — Copy without x; unchanged if absent.
+- `set.contains(s: Set[A], x: A) -> Bool` — true when x is a member.
 - `set.len(s: Set[A]) -> Int` — Member count; 0 for an empty set.
 - `set.is_empty(s: Set[A]) -> Bool` — true iff s has no members.
 - `set.to_list(s: Set[A]) -> List[A]` — Members in insertion order.
@@ -1050,6 +1255,29 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B` — Folds f(acc, x) in insertion order.
 - `set.any(s: Set[A], f: (A) -> Bool) -> Bool` — true if f holds for some member; false if empty.
 - `set.all(s: Set[A], f: (A) -> Bool) -> Bool` — true if f holds for every member; true if empty.
+- `set.count(s: Set[A], f: (A) -> Bool) -> Int` — Number of members where f holds.
+- `set.find(s: Set[A], f: (A) -> Bool) -> Option[A]` — First member, in insertion order, where f holds, or none.
+- `set.clear(mut s: Set[A]) -> Unit` — Removes every member of s in place.
+- `set.enumerate(s: Set[A]) -> List[(Int, A)]` — (index, member) pairs in insertion order, index from 0.
+- `set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]` — Members paired with ys by position; stops at the shorter.
+- `set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over (member, ys element) pairs; stops at the shorter.
+- `set.filter_map(s: Set[A], f: (A) -> Option[B]) -> List[B]` — The somes f gives, in insertion order.
+- `set.find_map(s: Set[A], f: (A) -> Option[B]) -> Option[B]` — The first some f gives, or none; f is not called after the hit.
+- `set.reduce(s: Set[A], f: (A, A) -> A) -> Option[A]` — Left fold seeded by the first member; none when empty.
+- `set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]` — Running fold values in insertion order, init excluded.
+- `set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])` — (members where f holds, the rest), insertion order kept.
+- `set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]` — Key f(x) -> members; keys in first-seen order.
+- `set.sort(s: Set[A]) -> List[A]` — Members in ascending order; Floats in IEEE totalOrder.
+- `set.sort_by(s: Set[A], f: (A) -> B) -> List[A]` — Members sorted by key f(x), stable; f runs once per member.
+- `set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]` — Members sorted by cmp, stable: negative puts a first.
+- `set.min(s: Set[A]) -> Option[A]` — Least member, or none when empty.
+- `set.max(s: Set[A]) -> Option[A]` — Greatest member, or none when empty.
+- `set.min_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the least key f(x); the first on ties.
+- `set.max_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the greatest key f(x); the first on ties.
+- `set.min_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Least member by cmp; the first on ties.
+- `set.max_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest member by cmp; the first on ties.
+- `set.sum(s: Set[A]) -> A` — Sum of the elements; 0 when empty; integers wrap on overflow.
+- `set.product(s: Set[A]) -> A` — Product of the elements; 1 when empty; integers wrap on overflow.
 
 ## string
 
@@ -1058,38 +1286,37 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.trim(s: String) -> String` — s without leading/trailing whitespace.
 - `string.split(s: String, sep: String) -> List[String]` — Pieces around sep; empty pieces kept.
 - `string.split_once(s: String, sep: String) -> Option[(String, String)]` — Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
-- `string.join(list: List[String], sep: String) -> String` — Items with sep between; "" for [].
 - `string.len(s: String) -> Int` — Codepoint count (not bytes).
 - `string.length(s: String) -> Int   (deprecated — use string.len)` — Alias of string.len.
-- `string.contains(s: String, sub: String) -> Bool` — sub occurs in s; true for empty sub.
+- `string.contains(s: String, needle: String) -> Bool` — needle occurs in s; true for empty needle.
+- `string.is_equal_constant_time(a: String, b: String) -> Bool` — True if a and b hold the same UTF-8 bytes, in time that depends only on their lengths: no early exit on the first differing byte.
 - `string.starts_with(s: String, prefix: String) -> Bool` — s begins with prefix; "" always matches.
 - `string.ends_with(s: String, suffix: String) -> Bool` — s ends with suffix; "" always matches.
 - `string.slice(s: String, start: Int, end: Int) -> String` — Codepoints [start, end), clamped to s.
 - `string.byte_slice(s: String, start: Int, end: Int) -> Option[String]` — Byte range [start, end); none if bad or mid-char.
-- `string.pad_start(s: String, n: Int, ch: String) -> String` — Left-padded to n chars with ch; never truncates.
-- `string.to_bytes(s: String) -> List[Int]` — UTF-8 bytes of s as Ints 0..255.
-- `string.capitalize(s: String) -> String` — First char uppercased, rest untouched.
-- `string.to_upper(s: String) -> String` — Unicode uppercase; may lengthen s.
-- `string.to_lower(s: String) -> String` — Unicode lowercase, not just ASCII.
+- `string.pad_start(s: String, n: Int, fill: String) -> String` — Left-padded to n chars with fill; never truncates.
+- `string.capitalize(s: String) -> String` — First char uppercased as to_upper does, rest untouched.
+- `string.to_upper(s: String) -> String` — Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
+- `string.to_lower(s: String) -> String` — Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 - `string.replace(s: String, from: String, to: String) -> String` — Every from replaced by to.
 - `string.get(s: String, i: Int) -> Option[String]` — Codepoint at i, or none if out of range.
 - `string.lines(s: String) -> List[String]` — Split on \n or \r\n; endings dropped.
-- `string.chars(s: String) -> List[String]` — Each codepoint as a one-char string.
+- `string.to_list(s: String) -> List[String]` — Each codepoint as a one-char string.
 - `string.index_of(s: String, needle: String) -> Option[Int]` — Codepoint index of first needle, or none.
 - `string.repeat(s: String, n: Int) -> String` — s repeated n times; empty for n <= 0.
-- `string.from_bytes(bytes: List[Int]) -> String` — Lossy UTF-8 decode; bad sequences become U+FFFD.
 - `string.is_digit(s: String) -> Bool` — All ASCII 0-9; false for empty s.
 - `string.is_alpha(s: String) -> Bool` — All Unicode letters; false for empty s.
 - `string.is_alphanumeric(s: String) -> Bool` — All letters/digits; false for empty s.
 - `string.is_whitespace(s: String) -> Bool` — All whitespace; true for empty s.
 - `string.is_upper(s: String) -> Bool` — Has letters, all uppercase; others ignored.
 - `string.is_lower(s: String) -> Bool` — Has letters, all lowercase; others ignored.
-- `string.codepoint(s: String) -> Option[Int]` — Scalar value of first char; none if s empty.
-- `string.from_codepoint(n: Int) -> String` — One-char string; "" if n is not a scalar.
-- `string.pad_end(s: String, n: Int, ch: String) -> String` — Right-padded to n chars with ch; never truncates.
+- `string.to_codepoint(s: String) -> Option[Int]` — Scalar value of s when s is exactly one codepoint; none otherwise.
+- `string.from_codepoint(n: Int) -> Option[String]` — One-char string of n; none if n is not a Unicode scalar value.
+- `string.pad_end(s: String, n: Int, fill: String) -> String` — Right-padded to n chars with fill; never truncates.
 - `string.trim_start(s: String) -> String` — s without leading whitespace.
 - `string.trim_end(s: String) -> String` — s without trailing whitespace.
-- `string.count(s: String, sub: String) -> Int` — Non-overlapping sub count; len+1 if sub empty.
+- `string.count_matches(s: String, needle: String) -> Int` — Non-overlapping needle count; len+1 if needle empty.
+- `string.count(s: String, f: (String) -> Bool) -> Int` — Number of characters for which f is true.
 - `string.is_empty(s: String) -> Bool` — True only for ""; " " is not empty.
 - `string.reverse(s: String) -> String` — Codepoints reversed; not grapheme-aware.
 - `string.strip_prefix(s: String, prefix: String) -> Option[String]` — s without prefix, or none if s lacks it.
@@ -1098,128 +1325,241 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.last_index_of(s: String, needle: String) -> Option[Int]` — Codepoint index of last needle, or none.
 - `string.first(s: String) -> Option[String]` — Leading codepoint, or none if empty.
 - `string.last(s: String) -> Option[String]` — Final codepoint, or none if empty.
-- `string.take(s: String, n: Int) -> String` — First n codepoints; all of s if n < 0.
-- `string.take_end(s: String, n: Int) -> String` — Last n codepoints; all of s if n < 0.
-- `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; "" if n < 0.
-- `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; "" if n < 0.
-- `string.run_length_encode(s: String) -> List[(String, Int)]` — (char, count) per run of equal codepoints.
-- `string.push(mut s: String, suffix: String) -> Unit` — Appends suffix to s in place.
+- `string.take(s: String, n: Int) -> String` — First n codepoints; "" if n < 0.
+- `string.take_end(s: String, n: Int) -> String` — Last n codepoints; "" if n < 0.
+- `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; s if n < 0.
+- `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; s if n < 0.
+- `string.push(mut s: String, x: String) -> Unit` — Appends x to s in place.
+- `string.pop(mut s: String) -> Option[String]` — Removes and returns the last character; none if s is empty.
 - `string.clear(mut s: String) -> Unit` — Empties s in place.
+- `string.compare(a: String, b: String) -> Int` — Negative if a sorts before b, 0 if equal, positive after; codepoint order.
+- `string.byte_len(s: String) -> Int` — UTF-8 byte count (string.len counts codepoints).
+- `string.to_utf16(s: String) -> List[Int]` — UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
+- `string.from_utf16(xs: List[Int]) -> Result[String, String]` — String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
+- `string.filter(s: String, f: (String) -> Bool) -> String` — The characters of s for which f is true.
+- `string.fold(s: String, init: B, f: (B, String) -> B) -> B` — f folded over the characters of s, left to right.
+- `string.insert(s: String, i: Int, x: String) -> String` — s with x inserted before character i; i outside 0..=len aborts.
+- `string.remove_at(s: String, i: Int) -> String` — s without character i; i outside 0..len aborts.
+- `string.new() -> String` — The empty string.
+- `string.from_list(xs: List[String]) -> String` — The strings of xs joined with nothing between.
+- `string.enumerate(s: String) -> List[(Int, String)]` — (index, character) pairs from 0.
+- `string.zip(s: String, ys: List[B]) -> List[(String, B)]` — Characters paired with ys; stops at the shorter.
+- `string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]` — f over characters paired with ys; stops at the shorter.
+- `string.filter_map(s: String, f: (String) -> Option[B]) -> List[B]` — The some results of f over the characters, in order.
+- `string.find_map(s: String, f: (String) -> Option[B]) -> Option[B]` — The first some result of f over the characters, or none.
+- `string.reduce(s: String, f: (String, String) -> String) -> Option[String]` — f folded over the characters from the first; none if s is empty.
+- `string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]` — The running fold over the characters, init excluded.
+- `string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])` — (characters where f is true, the rest), each in order.
+- `string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]` — Characters grouped by f's key, each group in order.
+- `string.sort(s: String) -> List[String]` — The characters in codepoint order.
+- `string.sort_by(s: String, f: (String) -> B) -> List[String]` — The characters ordered by f's key; equal keys keep their order.
+- `string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]` — The characters ordered by cmp (negative = first argument first); stable.
+- `string.min(s: String) -> Option[String]` — The smallest character in codepoint order; none if empty.
+- `string.max(s: String) -> Option[String]` — The largest character in codepoint order; none if empty.
+- `string.min_by(s: String, f: (String) -> K) -> Option[String]` — The first character with the smallest key; none if empty.
+- `string.max_by(s: String, f: (String) -> K) -> Option[String]` — The last character with the largest key; none if empty.
+- `string.min_with(s: String, cmp: (String, String) -> Int) -> Option[String]` — The first smallest character by cmp; none if empty.
+- `string.max_with(s: String, cmp: (String, String) -> Int) -> Option[String]` — The last largest character by cmp; none if empty.
+- `string.find_index(s: String, f: (String) -> Bool) -> Option[Int]` — Index of the first character where f is true, or none.
+- `string.take_while(s: String, f: (String) -> Bool) -> String` — The longest prefix whose characters all satisfy f.
+- `string.drop_while(s: String, f: (String) -> Bool) -> String` — s after the longest prefix whose characters all satisfy f.
+- `string.chunk(s: String, n: Int) -> List[String]` — Runs of n characters, the last may be shorter; n <= 0 aborts.
+- `string.window(s: String, n: Int) -> List[String]` — Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+- `string.split_at(s: String, n: Int) -> (String, String)` — (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
+- `string.dedup(s: String) -> String` — s with each run of equal adjacent characters collapsed to one.
+- `string.intersperse(s: String, sep: String) -> String` — The characters of s with sep between each pair.
+- `string.unique(s: String) -> String` — The first occurrence of each character, in order.
+- `string.unique_by(s: String, f: (String) -> K) -> String` — The first character of each key f gives, in order.
 
 ## testing
 
 [testing.md](testing.md)
 
-- `testing.assert_aborts(expected: String, f: () -> T) -> Unit` — Fails unless f, run alone in a child, aborts with text containing expected.
+- `testing.assert_aborts(expected: String, f: () -> A) -> Unit` — Fails unless f, run alone in a child, aborts with text containing expected.
 - `testing.assert_contains(haystack: String, needle: String) -> Unit` — Fails unless needle is in haystack; "" passes.
 - `testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit` — Fails unless abs(a - b) < tolerance (strict).
-- `testing.assert_gt(a: Int, b: Int) -> Unit` — Fails unless a > b; equal fails.
-- `testing.assert_lt(a: Int, b: Int) -> Unit` — Fails unless a < b; equal fails.
-- `testing.assert_some(opt: Option[A]) -> Unit` — Fails when opt is none.
-- `testing.assert_ok(result: Result[A, B]) -> Unit` — Fails when result is an err.
-- `testing.assert_none(opt: Option[A]) -> Unit` — Fails when opt is some.
-- `testing.assert_err(result: Result[A, B]) -> Unit` — Fails when result is ok.
+- `testing.assert_gt(a: A, b: A) -> Unit` — Fails unless a > b; equal fails.
+- `testing.assert_lt(a: A, b: A) -> Unit` — Fails unless a < b; equal fails.
+- `testing.assert_some(o: Option[A]) -> Unit` — Fails when o is none.
+- `testing.assert_ok(r: Result[A, B]) -> Unit` — Fails when r is an err.
+- `testing.assert_none(o: Option[A]) -> Unit` — Fails when o is some.
+- `testing.assert_err(r: Result[A, B]) -> Unit` — Fails when r is ok.
 - `testing.assert_snapshot(actual: String, expected: String) -> Unit` — Fails unless actual == expected; --update-snapshots rewrites.
 
 ## uint16
 
 [uint16.md](uint16.md)
 
-- `uint16.to_int8(x: UInt16) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint16.to_int16(x: UInt16) -> Int16` — Wraps to 16 bits; 65535 becomes -1.
-- `uint16.to_int32(x: UInt16) -> Int32` — Zero-extending widen; always exact.
-- `uint16.to_int64(x: UInt16) -> Int64` — Zero-extending widen; always exact.
-- `uint16.to_uint8(x: UInt16) -> UInt8` — Wraps to 8 bits; 256 becomes 0.
-- `uint16.to_uint32(x: UInt16) -> UInt32` — Zero-extending widen; always exact.
-- `uint16.to_uint64(x: UInt16) -> UInt64` — Zero-extending widen; always exact.
-- `uint16.to_float32(x: UInt16) -> Float32` — Same value as Float32; always exact.
-- `uint16.to_float64(x: UInt16) -> Float64` — Same value as Float64; always exact.
 - `uint16.to_string(x: UInt16) -> String` — Decimal digits; never a sign.
-- `uint16.to_int8_checked(x: UInt16) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint16.to_int8_saturating(x: UInt16) -> Int8` — Clamps x to at most 127.
-- `uint16.to_int16_checked(x: UInt16) -> Option[Int16]` — some(x), or none if x exceeds 32767.
-- `uint16.to_int16_saturating(x: UInt16) -> Int16` — Clamps x to at most 32767.
-- `uint16.to_uint8_checked(x: UInt16) -> Option[UInt8]` — some(x), or none if x exceeds 255.
-- `uint16.to_uint8_saturating(x: UInt16) -> UInt8` — Clamps x to at most 255.
 - `uint16.min_value() -> UInt16` — Smallest UInt16: 0.
 - `uint16.max_value() -> UInt16` — Largest UInt16: 65535.
+- `uint16.compare(a: UInt16, b: UInt16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint16.min(a: UInt16, b: UInt16) -> UInt16` — Lesser of a and b.
+- `uint16.max(a: UInt16, b: UInt16) -> UInt16` — Greater of a and b.
+- `uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` — x limited to lo..hi; aborts when lo > hi.
+- `uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint16.modulo(a: UInt16, b: UInt16) -> UInt16` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint16.pow(base: UInt16, exp: Int) -> UInt16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+- `uint16.is_even(x: UInt16) -> Bool` — True when x is a multiple of 2.
+- `uint16.is_odd(x: UInt16) -> Bool` — True when x is not a multiple of 2.
+- `uint16.band(a: UInt16, b: UInt16) -> UInt16` — Bitwise AND.
+- `uint16.bor(a: UInt16, b: UInt16) -> UInt16` — Bitwise OR.
+- `uint16.bxor(a: UInt16, b: UInt16) -> UInt16` — Bitwise XOR.
+- `uint16.bnot(x: UInt16) -> UInt16` — Bitwise complement of all 16 bits.
+- `uint16.bshl(a: UInt16, n: Int) -> UInt16` — a shifted left by n bits; n is taken mod 16.
+- `uint16.bshr(a: UInt16, n: Int) -> UInt16` — Zero-filling right shift; n is taken mod 16.
+- `uint16.count_leading_zeros(x: UInt16) -> Int` — Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+- `uint16.count_trailing_zeros(x: UInt16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
+- `uint16.count_ones(x: UInt16) -> Int` — Number of set bits among the 16.
+- `uint16.byte_swap(x: UInt16) -> UInt16` — The 2 bytes in reverse order (endian flip).
+- `uint16.wrap_add(a: UInt16, b: UInt16) -> UInt16` — a + b wrapped to 16 bits.
+- `uint16.wrap_sub(a: UInt16, b: UInt16) -> UInt16` — a - b wrapped to 16 bits.
+- `uint16.wrap_mul(a: UInt16, b: UInt16) -> UInt16` — a * b wrapped to 16 bits.
+- `uint16.rotate_left(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated left by n; n is taken mod 16.
+- `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
+- `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
+- `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` — UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+- `uint16.from(x: S) -> UInt16` — x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
+- `uint16.from_checked(x: S) -> Option[UInt16]` — some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint16.from_saturating(x: S) -> UInt16` — x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
+- `uint16.from_wrapping(x: S) -> UInt16` — The low 16 bits of integer x as UInt16 (two's complement).
 
 ## uint32
 
 [uint32.md](uint32.md)
 
-- `uint32.to_int8(x: UInt32) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint32.to_int16(x: UInt32) -> Int16` — Wraps to 16 bits; 65535 becomes -1.
-- `uint32.to_int32(x: UInt32) -> Int32` — Wraps to 32 bits; 2^32-1 becomes -1.
-- `uint32.to_int64(x: UInt32) -> Int64` — Zero-extending widen; always exact.
-- `uint32.to_uint8(x: UInt32) -> UInt8` — Wraps to 8 bits; 256 becomes 0.
-- `uint32.to_uint16(x: UInt32) -> UInt16` — Wraps to 16 bits; 65536 becomes 0.
-- `uint32.to_uint64(x: UInt32) -> UInt64` — Zero-extending widen; always exact.
-- `uint32.to_float32(x: UInt32) -> Float32` — Float32 value; may round when x > 2^24.
-- `uint32.to_float64(x: UInt32) -> Float64` — Same value as Float64; always exact.
 - `uint32.to_string(x: UInt32) -> String` — Decimal digits; never a sign.
-- `uint32.to_int8_checked(x: UInt32) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint32.to_int8_saturating(x: UInt32) -> Int8` — Clamps x to at most 127.
-- `uint32.to_int16_checked(x: UInt32) -> Option[Int16]` — some(x), or none if x exceeds 32767.
-- `uint32.to_int16_saturating(x: UInt32) -> Int16` — Clamps x to at most 32767.
-- `uint32.to_int32_checked(x: UInt32) -> Option[Int32]` — some(x), or none if x exceeds 2^31-1.
-- `uint32.to_int32_saturating(x: UInt32) -> Int32` — Clamps x to at most 2^31-1.
-- `uint32.to_uint8_checked(x: UInt32) -> Option[UInt8]` — some(x), or none if x exceeds 255.
-- `uint32.to_uint8_saturating(x: UInt32) -> UInt8` — Clamps x to at most 255.
-- `uint32.to_uint16_checked(x: UInt32) -> Option[UInt16]` — some(x), or none if x exceeds 65535.
-- `uint32.to_uint16_saturating(x: UInt32) -> UInt16` — Clamps x to at most 65535.
 - `uint32.min_value() -> UInt32` — Smallest UInt32: 0.
 - `uint32.max_value() -> UInt32` — Largest UInt32: 4294967295.
+- `uint32.compare(a: UInt32, b: UInt32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint32.min(a: UInt32, b: UInt32) -> UInt32` — Lesser of a and b.
+- `uint32.max(a: UInt32, b: UInt32) -> UInt32` — Greater of a and b.
+- `uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` — x limited to lo..hi; aborts when lo > hi.
+- `uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint32.modulo(a: UInt32, b: UInt32) -> UInt32` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint32.pow(base: UInt32, exp: Int) -> UInt32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+- `uint32.is_even(x: UInt32) -> Bool` — True when x is a multiple of 2.
+- `uint32.is_odd(x: UInt32) -> Bool` — True when x is not a multiple of 2.
+- `uint32.band(a: UInt32, b: UInt32) -> UInt32` — Bitwise AND.
+- `uint32.bor(a: UInt32, b: UInt32) -> UInt32` — Bitwise OR.
+- `uint32.bxor(a: UInt32, b: UInt32) -> UInt32` — Bitwise XOR.
+- `uint32.bnot(x: UInt32) -> UInt32` — Bitwise complement of all 32 bits.
+- `uint32.bshl(a: UInt32, n: Int) -> UInt32` — a shifted left by n bits; n is taken mod 32.
+- `uint32.bshr(a: UInt32, n: Int) -> UInt32` — Zero-filling right shift; n is taken mod 32.
+- `uint32.count_leading_zeros(x: UInt32) -> Int` — Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+- `uint32.count_trailing_zeros(x: UInt32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
+- `uint32.count_ones(x: UInt32) -> Int` — Number of set bits among the 32.
+- `uint32.byte_swap(x: UInt32) -> UInt32` — The 4 bytes in reverse order (endian flip).
+- `uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32` — a + b wrapped to 32 bits.
+- `uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32` — a - b wrapped to 32 bits.
+- `uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32` — a * b wrapped to 32 bits.
+- `uint32.rotate_left(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated left by n; n is taken mod 32.
+- `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
+- `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
+- `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` — UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
+- `uint32.from(x: S) -> UInt32` — x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
+- `uint32.from_checked(x: S) -> Option[UInt32]` — some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint32.from_saturating(x: S) -> UInt32` — x as UInt32, toward zero, clamped to UInt32's range; NaN is 0.
+- `uint32.from_wrapping(x: S) -> UInt32` — The low 32 bits of integer x as UInt32 (two's complement).
 
 ## uint64
 
 [uint64.md](uint64.md)
 
-- `uint64.to_int8(x: UInt64) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint64.to_int16(x: UInt64) -> Int16` — Wraps to 16 bits; 65535 becomes -1.
-- `uint64.to_int32(x: UInt64) -> Int32` — Wraps to 32 bits; 2^32-1 becomes -1.
-- `uint64.to_int64(x: UInt64) -> Int64` — Wraps to 64 bits; 2^64-1 becomes -1.
-- `uint64.to_uint8(x: UInt64) -> UInt8` — Wraps to 8 bits; 256 becomes 0.
-- `uint64.to_uint16(x: UInt64) -> UInt16` — Wraps to 16 bits; 65536 becomes 0.
-- `uint64.to_uint32(x: UInt64) -> UInt32` — Wraps to 32 bits; 2^32 becomes 0.
-- `uint64.to_float32(x: UInt64) -> Float32` — Float32 value; may round when x > 2^24.
-- `uint64.to_float64(x: UInt64) -> Float64` — Float64 value; may round when x > 2^53.
 - `uint64.to_string(x: UInt64) -> String` — Decimal digits, no sign; exact up to 2^64-1.
-- `uint64.to_int8_checked(x: UInt64) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint64.to_int8_saturating(x: UInt64) -> Int8` — Clamps x to at most 127.
-- `uint64.to_int16_checked(x: UInt64) -> Option[Int16]` — some(x), or none if x exceeds 32767.
-- `uint64.to_int16_saturating(x: UInt64) -> Int16` — Clamps x to at most 32767.
-- `uint64.to_int32_checked(x: UInt64) -> Option[Int32]` — some(x), or none if x exceeds 2^31-1.
-- `uint64.to_int32_saturating(x: UInt64) -> Int32` — Clamps x to at most 2^31-1.
-- `uint64.to_int64_checked(x: UInt64) -> Option[Int64]` — some(x), or none if x exceeds 2^63-1.
-- `uint64.to_int64_saturating(x: UInt64) -> Int64` — Clamps x to at most 2^63-1.
-- `uint64.to_uint8_checked(x: UInt64) -> Option[UInt8]` — some(x), or none if x exceeds 255.
-- `uint64.to_uint8_saturating(x: UInt64) -> UInt8` — Clamps x to at most 255.
-- `uint64.to_uint16_checked(x: UInt64) -> Option[UInt16]` — some(x), or none if x exceeds 65535.
-- `uint64.to_uint16_saturating(x: UInt64) -> UInt16` — Clamps x to at most 65535.
-- `uint64.to_uint32_checked(x: UInt64) -> Option[UInt32]` — some(x), or none if x exceeds 2^32-1.
-- `uint64.to_uint32_saturating(x: UInt64) -> UInt32` — Clamps x to at most 2^32-1.
 - `uint64.min_value() -> UInt64` — Smallest UInt64: 0.
 - `uint64.max_value() -> UInt64` — Largest UInt64: 2^64-1.
+- `uint64.compare(a: UInt64, b: UInt64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint64.min(a: UInt64, b: UInt64) -> UInt64` — Lesser of a and b.
+- `uint64.max(a: UInt64, b: UInt64) -> UInt64` — Greater of a and b.
+- `uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` — x limited to lo..hi; aborts when lo > hi.
+- `uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint64.modulo(a: UInt64, b: UInt64) -> UInt64` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint64.pow(base: UInt64, exp: Int) -> UInt64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `uint64.is_even(x: UInt64) -> Bool` — True when x is a multiple of 2.
+- `uint64.is_odd(x: UInt64) -> Bool` — True when x is not a multiple of 2.
+- `uint64.band(a: UInt64, b: UInt64) -> UInt64` — Bitwise AND.
+- `uint64.bor(a: UInt64, b: UInt64) -> UInt64` — Bitwise OR.
+- `uint64.bxor(a: UInt64, b: UInt64) -> UInt64` — Bitwise XOR.
+- `uint64.bnot(x: UInt64) -> UInt64` — Bitwise complement of all 64 bits.
+- `uint64.bshl(a: UInt64, n: Int) -> UInt64` — a shifted left by n bits; n is taken mod 64.
+- `uint64.bshr(a: UInt64, n: Int) -> UInt64` — Zero-filling right shift; n is taken mod 64.
+- `uint64.count_leading_zeros(x: UInt64) -> Int` — Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+- `uint64.count_trailing_zeros(x: UInt64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
+- `uint64.count_ones(x: UInt64) -> Int` — Number of set bits among the 64.
+- `uint64.byte_swap(x: UInt64) -> UInt64` — The 8 bytes in reverse order (endian flip).
+- `uint64.wrap_add(a: UInt64, b: UInt64) -> UInt64` — a + b wrapped to 64 bits.
+- `uint64.wrap_sub(a: UInt64, b: UInt64) -> UInt64` — a - b wrapped to 64 bits.
+- `uint64.wrap_mul(a: UInt64, b: UInt64) -> UInt64` — a * b wrapped to 64 bits.
+- `uint64.rotate_left(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated left by n; n is taken mod 64.
+- `uint64.rotate_right(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `uint64.bit_length(x: UInt64) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
+- `uint64.to_string_radix(x: UInt64, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
+- `uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]` — UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
+- `uint64.from(x: S) -> UInt64` — x as UInt64, toward zero; NaN, an infinity or a value outside UInt64 aborts.
+- `uint64.from_checked(x: S) -> Option[UInt64]` — some(x as UInt64) when UInt64 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint64.from_saturating(x: S) -> UInt64` — x as UInt64, toward zero, clamped to UInt64's range; NaN is 0.
+- `uint64.from_wrapping(x: S) -> UInt64` — The low 64 bits of integer x as UInt64 (two's complement).
 
 ## uint8
 
 [uint8.md](uint8.md)
 
-- `uint8.to_int8(x: UInt8) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint8.to_int16(x: UInt8) -> Int16` — Zero-extending widen; always exact.
-- `uint8.to_int32(x: UInt8) -> Int32` — Zero-extending widen; always exact.
-- `uint8.to_int64(x: UInt8) -> Int64` — Zero-extending widen; always exact.
-- `uint8.to_uint16(x: UInt8) -> UInt16` — Zero-extending widen; always exact.
-- `uint8.to_uint32(x: UInt8) -> UInt32` — Zero-extending widen; always exact.
-- `uint8.to_uint64(x: UInt8) -> UInt64` — Zero-extending widen; always exact.
-- `uint8.to_float32(x: UInt8) -> Float32` — Same value as Float32; always exact.
-- `uint8.to_float64(x: UInt8) -> Float64` — Same value as Float64; always exact.
 - `uint8.to_string(x: UInt8) -> String` — Decimal digits; never a sign.
-- `uint8.to_int8_checked(x: UInt8) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint8.to_int8_saturating(x: UInt8) -> Int8` — Clamps x to at most 127.
 - `uint8.min_value() -> UInt8` — Smallest UInt8: 0.
 - `uint8.max_value() -> UInt8` — Largest UInt8: 255.
+- `uint8.compare(a: UInt8, b: UInt8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint8.min(a: UInt8, b: UInt8) -> UInt8` — Lesser of a and b.
+- `uint8.max(a: UInt8, b: UInt8) -> UInt8` — Greater of a and b.
+- `uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` — x limited to lo..hi; aborts when lo > hi.
+- `uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint8.modulo(a: UInt8, b: UInt8) -> UInt8` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint8.pow(base: UInt8, exp: Int) -> UInt8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+- `uint8.is_even(x: UInt8) -> Bool` — True when x is a multiple of 2.
+- `uint8.is_odd(x: UInt8) -> Bool` — True when x is not a multiple of 2.
+- `uint8.band(a: UInt8, b: UInt8) -> UInt8` — Bitwise AND.
+- `uint8.bor(a: UInt8, b: UInt8) -> UInt8` — Bitwise OR.
+- `uint8.bxor(a: UInt8, b: UInt8) -> UInt8` — Bitwise XOR.
+- `uint8.bnot(x: UInt8) -> UInt8` — Bitwise complement of all 8 bits.
+- `uint8.bshl(a: UInt8, n: Int) -> UInt8` — a shifted left by n bits; n is taken mod 8.
+- `uint8.bshr(a: UInt8, n: Int) -> UInt8` — Zero-filling right shift; n is taken mod 8.
+- `uint8.count_leading_zeros(x: UInt8) -> Int` — Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+- `uint8.count_trailing_zeros(x: UInt8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
+- `uint8.count_ones(x: UInt8) -> Int` — Number of set bits among the 8.
+- `uint8.byte_swap(x: UInt8) -> UInt8` — The bytes in reverse order; one byte, so x itself.
+- `uint8.wrap_add(a: UInt8, b: UInt8) -> UInt8` — a + b wrapped to 8 bits.
+- `uint8.wrap_sub(a: UInt8, b: UInt8) -> UInt8` — a - b wrapped to 8 bits.
+- `uint8.wrap_mul(a: UInt8, b: UInt8) -> UInt8` — a * b wrapped to 8 bits.
+- `uint8.rotate_left(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated left by n; n is taken mod 8.
+- `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
+- `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
+- `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` — UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
+- `uint8.from(x: S) -> UInt8` — x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
+- `uint8.from_checked(x: S) -> Option[UInt8]` — some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint8.from_saturating(x: S) -> UInt8` — x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
+- `uint8.from_wrapping(x: S) -> UInt8` — The low 8 bits of integer x as UInt8 (two's complement).
+
+## unix
+
+[unix.md](unix.md)
+
+- `effect unix.connect(path: String) -> Fd` — Stream socket connected to the listener at path.
+- `effect unix.listen(path: String) -> Fd` — Listener bound at path, which must not exist yet.
+- `effect unix.accept(listener: Fd) -> Fd` — Blocks for the next connection on listener.
+- `effect unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` — Sends all of data, the descriptors fds riding with its first byte.
+- `effect unix.take_fds(sock: Fd) -> List[Fd]` — Descriptors received on sock and not yet taken, oldest first.
+- `effect unix.select(xs: List[Fd], timeout_ms: Int) -> List[Fd]` — The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+- `effect unix.shm_create(size: Int) -> Fd` — New zero-filled unnamed file of size bytes.
+- `effect unix.shm_resize(fd: Fd, size: Int) -> Unit` — Grows or shrinks the file fd to size bytes.
+- `effect unix.shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit` — Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+- `effect unix.shm_read(fd: Fd, offset: Int, len: Int) -> Bytes` — Up to len bytes of fd from offset; fewer at its end.
 
 ## url
 
@@ -1227,16 +1567,31 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `url.encode_component(s: String) -> String` — All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
 - `url.decode_component(s: String) -> Result[String, String]` — Percent-decoded s; err on bad escape/UTF-8; + kept.
-- `url.parse(s: String) -> Result[Url, String]` — Url from s; err without ://, on an empty/invalid host, userinfo, an IPv6 literal, or a bad port.
+- `url.parse(s: String) -> Result[Url, String]` — Url from s, cleaned as WHATWG does; err on a bad scheme, host or port, a backslash or control char, userinfo, IPv6.
 - `url.to_string(u: Url) -> String` — URL text of u; empty query/fragment omitted.
-- `url.query_pairs(query: String) -> List[(String, String)]` — Undecoded (k, v) pairs; bare key gets "".
-- `url.build_query(pairs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
+- `url.build_query(xs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
+- `url.encode_form(s: String) -> String` — Like encode_component, but a space becomes +.
+- `url.decode_form(s: String) -> Result[String, String]` — + as space, then percent-decoded; err on bad escape/UTF-8.
+- `url.parse_query(query: String) -> Result[List[(String, String)], String]` — Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
+- `url.resolve(base: Url, ref: String) -> Result[Url, String]` — ref cleaned as parse does, resolved against base (RFC 3986 5.2); err when the result is not a URL.
+
+## uuid
+
+[uuid.md](uuid.md)
+
+- `effect uuid.v4() -> Uuid` — A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+- `effect uuid.v7() -> Uuid` — A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+- `uuid.parse(s: String) -> Result[Uuid, String]` — The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+- `uuid.to_string(u: Uuid) -> String` — u as 8-4-4-4-12 lowercase hex digits.
+- `uuid.from_bytes(b: Bytes) -> Result[Uuid, String]` — The Uuid of exactly 16 bytes b; err for any other length.
+- `uuid.to_bytes(u: Uuid) -> Bytes` — The 16 bytes of u.
+- `uuid.compare(a: Uuid, b: Uuid) -> Int` — Negative, zero or positive as a orders before, with or after b, byte by byte.
 
 ## value
 
 [value.md](value.md)
 
-- `value.array(items: List[Value]) -> Value` — Wraps items as an Array Value.
+- `value.array(xs: List[Value]) -> Value` — Wraps xs as an Array Value.
 - `value.as_array(v: Value) -> Result[List[Value], String]` — Array items; err if v is another kind.
 - `value.as_bool(v: Value) -> Result[Bool, String]` — Bool payload; err otherwise (no truthiness).
 - `value.as_float(v: Value) -> Result[Float, String]` — Float payload (Int widens); err otherwise.
@@ -1247,27 +1602,37 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `value.int(n: Int) -> Value` — Value holding the Int n.
 - `value.merge(a: Value, b: Value) -> Value` — Shallow merge, b's keys win; b if not both objects.
 - `value.null() -> Value` — The JSON null Value.
-- `value.object(pairs: List[(String, Value)]) -> Value` — Wraps pairs as an Object; duplicate keys kept.
+- `value.object(xs: List[(String, Value)]) -> Value` — Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 - `value.omit(v: Value, keys: List[String]) -> Value` — v minus the listed keys; non-objects as-is.
-- `value.pick(v: Value, keys: List[String]) -> Value` — Only the listed keys of v; non-objects as-is.
-- `value.str(s: String) -> Value` — Value holding the String s.
-- `value.stringify(v: Value) -> String` — Compact JSON; NaN/inf print as null.
-- `value.to_camel_case(v: Value) -> Value` — Top-level keys to camelCase; nested untouched.
-- `value.to_snake_case(v: Value) -> Value` — Top-level keys to snake_case; userID -> user_i_d.
-- `value.field(v: Value, key: String) -> Result[Value, String]` — Value at key; err if missing or v not an Object.
-- `value.keys(v: Value) -> List[String]` — Object keys in order; [] for non-objects.
+- `value.pick(v: Value, keys: List[String]) -> Value` — Only the listed keys of v; a non-object picks to {}.
+- `value.string(s: String) -> Value` — Value holding the String s.
+- `value.as_object(v: Value) -> Result[List[(String, Value)], String]` — Object pairs in order; err if v is another kind.
+- `value.get(v: Value, key: String) -> Option[Value]` — Value at key; none if absent or v is not an Object.
+- `value.get_string(v: Value, key: String) -> Option[String]` — String at key; none if absent or another kind.
+- `value.get_int(v: Value, key: String) -> Option[Int]` — Int at key; none if absent or not an Int (a Float is never truncated).
+- `value.get_float(v: Value, key: String) -> Option[Float]` — Float at key (an Int widens); none if absent or another kind.
+- `value.get_bool(v: Value, key: String) -> Option[Bool]` — Bool at key; none if absent or another kind.
+- `value.get_array(v: Value, key: String) -> Option[List[Value]]` — Array items at key; none if absent or another kind.
+- `value.get_object(v: Value, key: String) -> Option[List[(String, Value)]]` — Object pairs at key; none if absent or another kind.
+- `value.root() -> Path` — The empty path: the whole value.
+- `value.key(p: Path, name: String) -> Path` — p extended by the object key name.
+- `value.index(p: Path, i: Int) -> Path` — p extended by the array index i; a negative i is out of range.
+- `value.get_path(v: Value, p: Path) -> Option[Value]` — Value at p, or none if a step misses.
+- `value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]` — v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
+- `value.remove_path(v: Value, p: Path) -> Value` — v minus the entry at p; unchanged if absent; null for the root.
 
 ## zlib
 
 [zlib.md](zlib.md)
 
-- `effect zlib.compress(data: Bytes) -> Bytes` — Zlib-framed DEFLATE of data; bytes vary by target.
-- `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
-- `effect zlib.decompress(data: Bytes) -> Bytes` — Inflated zlib stream; err on corrupt input.
-- `effect zlib.deflate(data: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
-- `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
-- `effect zlib.inflate(data: Bytes) -> Bytes` — Raw DEFLATE decoded; err on a corrupt stream.
-- `effect zlib.gzip(data: Bytes) -> Bytes` — RFC 1952 gzip of data; bytes vary by target.
-- `effect zlib.gunzip(data: Bytes) -> Bytes` — Gzip member decoded; err on bad header, CRC or empty input.
-- `zlib.crc32(data: Bytes) -> Int` — CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
-- `zlib.adler32(data: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty data.
+- `effect zlib.compress(b: Bytes) -> Bytes` — Zlib-framed DEFLATE of b; bytes vary by target.
+- `effect zlib.compress_level(b: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
+- `zlib.decompress(b: Bytes) -> Result[Bytes, String]` — Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
+- `zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like decompress, output bound max_len bytes; max_len <= 0 aborts.
+- `effect zlib.deflate(b: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
+- `effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
+- `zlib.inflate(b: Bytes) -> Result[Bytes, String]` — Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
+- `zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like inflate, output bound max_len bytes; max_len <= 0 aborts.
+- `effect zlib.gzip(b: Bytes) -> Bytes` — RFC 1952 gzip of b; bytes vary by target.
+- `zlib.gunzip(b: Bytes) -> Result[Bytes, String]` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
+- `zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.

@@ -16,20 +16,20 @@ fn apply_u32(f: (Int) -> UInt32) -> UInt32 = f(1)
 // A capture the const-folder cannot turn back into a literal — the point is that the
 // value travels through an env SLOT, so a folded literal would prove nothing.
 fn main() -> Unit = {
-  let d: Float = float.sqrt(2.0)
+  let d: Float = math.sqrt(2.0)
   println(float.to_string(apply_float((s) => d)))
-  let e: Int8 = int.to_int8(7)
-  println(int.to_string(int.from_int8(apply_i8((s) => e))))
-  let g: UInt32 = int.to_uint32(4294967295)
-  println(int.to_string(int.from_uint32(apply_u32((s) => g))))
+  let e: Int8 = int8.from(7)
+  println(int.to_string(int.from(apply_i8((s) => e))))
+  let g: UInt32 = uint32.from(4294967295)
+  println(int.to_string(int.from(apply_u32((s) => g))))
   // The stdlib higher-order path over the same capture: `scale` is read out of the
   // env once per element.
-  let scale: Float = float.sqrt(2.0)
+  let scale: Float = math.sqrt(2.0)
   let xs: List[Float] = [1.0, 2.0, 3.0]
   println(float.to_string(xs |> list.map((x) => x * scale) |> list.fold(0.0, ((a, b) => a + b))))
   // The Result combinator the fuzz finding actually came in through: the recovery
   // closure returns a captured Float, and the err arm is the one that runs.
-  let fallback: Float = float.sqrt(3.0)
+  let fallback: Float = math.sqrt(3.0)
   let v: Result[Float, String] = err("boom")
   println(float.to_string(result.unwrap_or_else(v, (s) => fallback)))
   // The ok arm, so the capture is proven live on the path that does NOT use it.
@@ -38,6 +38,6 @@ fn main() -> Unit = {
   // A closure capturing scalars of MIXED widths at once — they share the scalar
   // region and each slot must read back as its own value.
   let base: Int = 10
-  let bump: Int16 = int.to_int16(3)
-  println(int.to_string(int.from_int8(apply_i8((s) => int.to_int8(base + int.from_int16(bump))))))
+  let bump: Int16 = int16.from(3)
+  println(int.to_string(int.from(apply_i8((s) => int8.from_wrapping(base + int.from(bump))))))
 }

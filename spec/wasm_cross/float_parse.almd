@@ -1,4 +1,4 @@
-// @contract: C-024
+// @contract: C-024, C-413
 // Regression: WASM float.parse must produce the SAME f64 as native
 // (Rust `s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even.
 // The old WASM parser accumulated the mantissa in f64 (`acc*10+digit`, `*10^exp`),
@@ -7,6 +7,14 @@
 // big-integer arithmetic in SELF-HOSTED Almide (stdlib/float_parse.almd),
 // reusing the Dragon4 bignum. Each parse is printed via the (shortest-round-trip)
 // float.to_string so any 1-ULP error would show as different bytes.
+// C-413 (#4121): float.parse is finite-only — a literal past f64::MAX answers
+// `float literal out of range` and an inf / nan spelling `invalid float literal`,
+// so those rows print through `show` instead of unwrapping.
+fn show(s: String) -> String = match float.parse(s) {
+  ok(v) => float.to_string(v),
+  err(e) => "err(${e})",
+}
+
 effect fn main() -> Unit = {
   // Classic non-exact decimals (each was wrong by ≥1 ULP before).
   println(float.to_string(float.parse("0.1")!))
@@ -29,8 +37,8 @@ effect fn main() -> Unit = {
   // Overflow / largest finite / smallest normal.
   println(float.to_string(float.parse("1.7976931348623157e308")!))
   println(float.to_string(float.parse("1e308")!))
-  println(float.to_string(float.parse("1e309")!))
-  // inf
+  println(show("1e309"))
+  // err(float literal out of range)
   println(float.to_string(float.parse("2.2250738585072014e-308")!))
   // Subnormals (were 0 before): smallest subnormal and rounding around it.
   println(float.to_string(float.parse("5e-324")!))
@@ -44,22 +52,22 @@ effect fn main() -> Unit = {
   // underflow → 0
   // Exponent saturation: a huge base-10 exponent must give inf/0, never wrap the
   // i32 exponent accumulator (e.g. "1e4294967296" used to wrap to exp 0 → 1.0).
-  println(float.to_string(float.parse("1e2147483648")!))
-  // inf
-  println(float.to_string(float.parse("1e4294967296")!))
-  // inf
+  println(show("1e2147483648"))
+  // err(float literal out of range)
+  println(show("1e4294967296"))
+  // err(float literal out of range)
   println(float.to_string(float.parse("1e-2147483649")!))
   // 0
-  println(float.to_string(float.parse("1e1000000000000")!))
-  // inf
+  println(show("1e1000000000000"))
+  // err(float literal out of range)
   // Leading zeros must NOT consume the significand-digit budget — this is the flat
   // decimal `float.to_string` emits for a tiny float, so parse(to_string(x)) == x.
   println(float.to_string(float.parse("0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507385850720138")!))
-  // Non-finite + sign.
-  println(float.to_string(float.parse("inf")!))
-  println(float.to_string(float.parse("-inf")!))
-  println(float.to_string(float.parse("infinity")!))
-  println(float.to_string(float.parse("nan")!))
+  // Non-finite spellings are refused (C-413).
+  println(show("inf"))
+  println(show("-inf"))
+  println(show("infinity"))
+  println(show("nan"))
   println(float.to_string(float.parse("-0")!))
   // -0
   // Error strings must byte-match Rust's ParseFloatError.

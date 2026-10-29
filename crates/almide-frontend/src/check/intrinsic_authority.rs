@@ -23,12 +23,38 @@
 //! The judgement is by ORIGIN, never by module name: a user module named
 //! `list` is still a user module. A source is the stdlib when the module
 //! driver says it is a bundled module (compiled into the binary, no path), or
-//! when it is a file named after an embedded stdlib source in a directory
-//! named `stdlib` — so `stdlib/fs_read_text.almd` checked on its own is the
-//! stdlib and `spec/stdlib/fs_test.almd` is not. When the checker has no
+//! when it is a file in a directory named `stdlib` whose text is exactly the
+//! embedded stdlib source of its name — so `stdlib/fs_read_text.almd`
+//! checked on its own is the stdlib, `spec/stdlib/fs_test.almd` is not, and
+//! neither is a package that copies the layout with its own text (#4100). When the checker has no
 //! origin at all (no source path and not inside a bundled module — the LSP's
 //! in-memory analysis) it abstains, as E084 does, rather than guess.
+//!
+//! One explicit grant exists for the invoker: `--stdlib-authority <dir>` on
+//! the command line ([`grant_stdlib_authority`]) treats every source under
+//! `<dir>` as the stdlib's own. A harness that builds a MODIFIED copy of a
+//! stdlib source (a differential test forcing an engine path) needs it, since
+//! its text no longer matches the embedded one. It is a flag, never a
+//! manifest key or an environment variable: the person running the compiler
+//! already controls the build, and a dependency cannot pass flags.
 use super::{Checker, err};
+
+static STDLIB_AUTHORITY_DIRS: std::sync::RwLock<Vec<std::path::PathBuf>> = std::sync::RwLock::new(Vec::new());
+
+/// Grant stdlib authority to every source under `dir` for the rest of this
+/// process (`--stdlib-authority`). `Err` when `dir` is not a directory.
+pub fn grant_stdlib_authority(dir: &std::path::Path) -> Result<(), String> {
+    let canonical = std::fs::canonicalize(dir)
+        .ok()
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| format!("--stdlib-authority {}: not a directory", dir.display()))?;
+    STDLIB_AUTHORITY_DIRS.write().unwrap_or_else(|p| p.into_inner()).push(canonical);
+    Ok(())
+}
+
+fn under_granted_dir(path: &std::path::Path) -> bool {
+    STDLIB_AUTHORITY_DIRS.read().unwrap_or_else(|p| p.into_inner()).iter().any(|d| path.starts_with(d))
+}
 use crate::ast::{Attribute, Decl, Span};
 use almide_base::intern::Sym;
 
@@ -42,15 +68,26 @@ impl Checker {
         let file = self.source_file.as_deref()?;
         let raw = std::path::Path::new(file);
         let path = std::fs::canonicalize(raw).unwrap_or_else(|_| raw.to_path_buf());
+        if under_granted_dir(&path) {
+            return Some(true);
+        }
         let in_stdlib_dir = path
             .parent()
             .and_then(|d| d.file_name())
             .is_some_and(|d| d == "stdlib");
-        let embedded_stem = path
+        // #4100: identity, not layout. A file is the stdlib's only when its
+        // text IS the embedded source of that name (the compiler's own
+        // copy); a package laid out as `stdlib/string.almd` with its own
+        // `@intrinsic`s is not. The text compared is the one under check.
+        let embedded_identity = path
             .file_stem()
             .and_then(|s| s.to_str())
-            .is_some_and(|s| almide_lang::embedded::source_of(s).is_some());
-        Some(in_stdlib_dir && embedded_stem)
+            .and_then(almide_lang::embedded::source_of)
+            .is_some_and(|embedded| match self.source_text.as_deref() {
+                Some(text) => text == embedded,
+                None => std::fs::read_to_string(&path).is_ok_and(|t| t == embedded),
+            });
+        Some(in_stdlib_dir && embedded_identity)
     }
 
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
@@ -118,6 +155,168 @@ impl Checker {
             format!("call to prim.{field}"),
         )
         .with_code("E085");
+        if let Some(sp) = span {
+            diagnostic.file = self.source_file.clone();
+            diagnostic.line = Some(sp.line);
+            diagnostic.col = Some(sp.col);
+            if sp.end_col > sp.col {
+                diagnostic.end_col = Some(sp.end_col);
+            }
+        }
+        self.emit(diagnostic);
+    }
+
+    /// #4008: record where this user file leaves the memory-safety guarantee
+    /// (`outside_guarantee`). An `@extern` fn's body is foreign code, and a
+    /// `@region(len = …)` clause on one is the binding's unchecked word for a
+    /// foreign buffer's length (ADR-0031). A `Handle` is the opaque foreign
+    /// token only foreign code reads through, so judging by TYPE finds every
+    /// spelling of one (call, alias, fn value, a helper's parameter). A
+    /// `Region` access is bounds-checked against the length its mint knew,
+    /// so `ffi.read` / `ffi.write` alone are not recorded. The stdlib's own sources, and a source whose origin is
+    /// unknown (the language server), are not recorded.
+    pub(super) fn record_outside_guarantee(&mut self, program: &crate::ast::Program) {
+        if self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let file = self.source_file.clone().unwrap_or_default();
+        let at = |span: Option<Span>| span.map(|s| format!("{file}:{}", s.line)).unwrap_or_else(|| file.clone());
+        let mut found = Vec::new();
+        for decl in &program.decls {
+            if let Decl::Fn { name, extern_attrs, attrs, span, .. } = decl
+                && !extern_attrs.is_empty()
+            {
+                found.push(format!("@extern fn `{name}` ({})", at(*span)));
+                // ADR-0031 D2: a `@region(len = …)` clause is the binding's
+                // word for a foreign buffer's length — trusted, so counted.
+                if attrs.iter().any(|a| a.name.as_str() == almide_lang::stdlib_info::REGION_ATTR) {
+                    found.push(format!("@region length of `{name}` ({})", at(*span)));
+                }
+            }
+            let (label, body) = match decl {
+                Decl::Fn { name, body: Some(b), .. } => (format!("fn `{name}`"), b),
+                Decl::TopLet { name, value, .. } => (format!("`{name}`"), value),
+                Decl::Test { name, body, .. } => (format!("test \"{name}\""), body),
+                _ => continue,
+            };
+            let mut first: Option<Option<Span>> = None;
+            crate::ast::visit_expr(body, &mut |e| {
+                if first.is_none()
+                    && self.type_map.get(&e.id).is_some_and(|t| {
+                        let t = super::resolve_ty(t, &self.uf);
+                        t.any_child_recursive(&|c| matches!(c, almide_lang::types::Ty::RawPtr))
+                            || matches!(t, almide_lang::types::Ty::RawPtr)
+                    })
+                {
+                    first = Some(e.span);
+                }
+            });
+            if let Some(span) = first {
+                found.push(format!("a Handle in {label} ({})", at(span)));
+            }
+        }
+        self.outside_guarantee.extend(found);
+    }
+
+    /// E100 (#4043) for a `module.field` spelling — a call, a pipe target or a
+    /// fn value — that names a `@memory_unsafe` stdlib fn. The module is the
+    /// one the file WROTE; it counts only when it resolves to the stdlib
+    /// module through this file's imports and no local binding shadows it.
+    pub(crate) fn reject_unopted_memory_unsafe_member(&mut self, module: &Sym, field: &Sym, span: Option<Span>) {
+        if self.env.lookup_var(module.as_str()).is_some() {
+            return;
+        }
+        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else {
+            // A stdlib module the file never imported (`b |> ffi.region`
+            // without `import ffi`): a spelling that reaches it anyway — a
+            // pipe stage resolves the stage by name — is still the module's
+            // fn, and still needs the opt-in.
+            if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) || almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                self.reject_unopted_memory_unsafe(module.as_str(), field.as_str(), span);
+            }
+            return;
+        };
+        if !self.env.import_table.resolves_to_stdlib(module.as_str(), canonical.as_str()) {
+            return;
+        }
+        self.reject_unopted_memory_unsafe(canonical.as_str(), field.as_str(), span);
+    }
+
+    /// E100 (#4043) for a callee as written: `m.f`, or a bare selectively
+    /// imported name. The direct call and the pipe stage both pass here.
+    pub(crate) fn reject_unopted_memory_unsafe_callee(&mut self, callee: &crate::ast::Expr) {
+        use crate::ast::ExprKind;
+        match &callee.kind {
+            ExprKind::Ident { name, .. } => self.reject_unopted_memory_unsafe_bare(name.as_str(), callee.span),
+            ExprKind::Member { object, field, .. } => {
+                if let ExprKind::Ident { name, .. } = &object.kind {
+                    self.reject_unopted_memory_unsafe_member(name, field, object.span);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// E100 (#4043) for a bare name a selective import brought in
+    /// (`import bytes.{from_raw_ptr}` then `from_raw_ptr(p, n)`).
+    pub(crate) fn reject_unopted_memory_unsafe_bare(&mut self, name: &str, span: Option<Span>) {
+        if self.env.lookup_var(name).is_some() {
+            return;
+        }
+        let Some(qualified) = self.env.import_table.resolve_direct(name) else { return };
+        if let Some((module, func)) = qualified.rsplit_once('.') {
+            self.reject_unopted_memory_unsafe(module, func, span);
+        }
+    }
+
+    /// E100 (#4043): a `@memory_unsafe` stdlib fn (the `ffi` surface) called
+    /// from a file that did not write
+    /// `import ffi`. The import is the opt-in, the one line a reader looks at
+    /// to learn that a file reads or writes memory outside its values, so a
+    /// file with neither `import ffi` nor `@extern` stays inside the
+    /// memory-safety guarantee on every target. The property is read from the
+    /// `@memory_unsafe` declaration, never from a list of names. The stdlib's
+    /// own sources are exempt, as for E085; an unknown origin abstains.
+    /// Under `--profile critical` the profile refuses the call itself (E100
+    /// with the profile's message), so this one stays silent there.
+    pub(crate) fn reject_unopted_memory_unsafe(&mut self, module: &str, func: &str, span: Option<Span>) {
+        use almide_lang::stdlib_info::{MEMORY_UNSAFE_OPT_IN, is_memory_unsafe_stdlib_fn};
+        if !is_memory_unsafe_stdlib_fn(module, func) {
+            return;
+        }
+        let opt_in = almide_base::intern::sym(MEMORY_UNSAFE_OPT_IN);
+        if self.env.import_table.stdlib.contains(&opt_in) {
+            // The call is what the import is FOR: a file whose only raw-memory
+            // use is a deprecated `bytes` spelling still uses `import ffi`, so
+            // neither E060 nor `almide fmt` may take the opt-in away.
+            let written = self.env.import_table.written_name_of(opt_in);
+            self.env.import_table.mark_used(written.as_str());
+            return;
+        }
+        if self.profile_critical || self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let at = span.map(|s| (s.line, s.col));
+        if at.is_some() && self.diagnostics.iter().any(|d| d.code == Some("E100") && d.line.zip(d.col) == at) {
+            return;
+        }
+        let key = format!("{module}.{func}");
+        let rewrite = match self.deprecation_of(&key).and_then(|d| d.use_instead.map(|u| (u, d.note))) {
+            Some((replacement, note)) => format!(
+                "add `import {MEMORY_UNSAFE_OPT_IN}` and write `{replacement}` in place of the deprecated `{key}`{}",
+                note.map(|n| format!(" ({n})")).unwrap_or_default()
+            ),
+            None => format!("add `import {MEMORY_UNSAFE_OPT_IN}` to this file"),
+        };
+        let hint = format!(
+            "`{key}` reaches memory outside Almide's values — a Region over memory foreign code can also reach; `import {MEMORY_UNSAFE_OPT_IN}` is the opt-in that marks a file as leaving the memory-safety guarantee — {rewrite}. Without raw memory, use the bounded `bytes` functions (`bytes.slice`, `bytes.get`, `bytes.copy_from`)"
+        );
+        let mut diagnostic = err(
+            format!("`{key}` is outside the memory-safety guarantee and needs `import {MEMORY_UNSAFE_OPT_IN}` in this file"),
+            hint,
+            format!("call to {key}"),
+        )
+        .with_code("E100");
         if let Some(sp) = span {
             diagnostic.file = self.source_file.clone();
             diagnostic.line = Some(sp.line);

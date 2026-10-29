@@ -5,6 +5,9 @@
 //! `IO` / `Net`, and a plain-fn `@extern` counted as pure — so a project that
 //! denied `Rand` used randomness freely, and a foreign call reached the host
 //! with no category at all.
+//!
+//! Since #4155 the names are ADR-0026 D2's leaves and parents: `println` is
+//! `IO.stdout`, `io.read_line` `IO.stdin`, and ⊤ is all fourteen leaves.
 use std::path::Path;
 use std::process::Command;
 
@@ -36,7 +39,7 @@ fn check(allow: &[&str], main: &str, extra: &[&str]) -> (bool, String) {
 }
 
 const RANDOM: &str = "import random\n\neffect fn main() -> Unit = {\n  let n = random.int(1, 6)!\n  println(\"${n}\")\n}\n";
-const STDIN: &str = "import io\n\neffect fn main() -> Unit = println(io.read_line())\n";
+const STDIN: &str = "import io\n\neffect fn main() -> Unit = println((io.read_line() ?? \"\"))\n";
 const PATH_URL: &str = "import path\nimport url\n\nfn main() -> Unit = {\n  println(path.join(\"a\", \"b\"))\n  println(url.encode_component(\"a b\"))\n}\n";
 const EXTERN: &str = "@extern(rust, \"host\", \"push\")\nfn push(x: Int) -> Unit\n\nfn main() -> Unit = push(1)\n";
 const CALENDAR: &str = "fn main() -> Unit = println(datetime.to_iso(0))\n";
@@ -45,44 +48,52 @@ const CALENDAR: &str = "fn main() -> Unit = println(datetime.to_iso(0))\n";
 fn random_is_rand() {
     let (ok, text) = check(&["IO"], RANDOM, &[]);
     assert!(!ok && text.contains("Rand is not in [permissions].allow"), "{text}");
-    let (ok, text) = check(&["Rand"], RANDOM, &[]);
+    let (ok, text) = check(&["Rand", "IO.stdout"], RANDOM, &[]);
     assert!(ok, "{text}");
 }
 
 #[test]
 fn the_io_module_is_io() {
     let (ok, text) = check(&["Net"], STDIN, &[]);
-    assert!(!ok && text.contains("IO is not in [permissions].allow"), "{text}");
+    assert!(!ok && text.contains("IO.stdin is not in [permissions].allow"), "{text}");
+    let (ok, text) = check(&["IO.stdout"], STDIN, &[]);
+    assert!(!ok && text.contains("IO.stdin is not in [permissions].allow"), "{text}");
     let (ok, text) = check(&["IO"], STDIN, &[]);
     assert!(ok, "{text}");
 }
 
 #[test]
 fn path_and_url_are_pure() {
-    let (ok, text) = check(&["Rand"], PATH_URL, &[]);
+    let (ok, text) = check(&["IO.stdout"], PATH_URL, &[]);
     assert!(ok, "{text}");
 }
 
 #[test]
 fn datetime_calendar_math_is_not_the_clock() {
-    let (ok, text) = check(&["Rand"], CALENDAR, &[]);
+    let (ok, text) = check(&["IO.stdout"], CALENDAR, &[]);
     assert!(ok, "{text}");
 }
 
-/// ⊤ is every category: allowing five of six is still a violation, and the
+const EVERY: [&str; 9] = ["FS", "Net", "IO", "Env", "Proc", "Time", "Rand", "Fan", "Abort"];
+
+/// ⊤ is every leaf: granting all but one is still a violation, and the
 /// missing one is named.
 #[test]
 fn a_plain_fn_extern_is_every_category() {
-    let five = ["IO", "Net", "Env", "Time", "Rand"];
-    let (ok, text) = check(&five, EXTERN, &[]);
-    assert!(!ok && text.contains("Fan is not in [permissions].allow"), "{text}");
-    let (ok, text) = check(&["IO", "Net", "Env", "Time", "Rand", "Fan"], EXTERN, &[]);
-    assert!(ok, "{text}");
+    let (ok, text) = check(&EVERY[..8], EXTERN, &[]);
+    assert!(!ok && text.contains("Abort is not in [permissions].allow"), "{text}");
+    let (ok, text) = check(&["FS", "Net", "IO", "Env", "Time", "Rand", "Fan", "Abort"], EXTERN, &[]);
+    assert!(!ok && text.contains("Proc is not in [permissions].allow"), "{text}");
+    // Every leaf granted: the only remark is the warning that `Proc` comes
+    // with no command list.
+    let (ok, text) = check(&EVERY, EXTERN, &[]);
+    assert!(ok && text.contains("warning: [permissions].allow grants `Proc`"), "{text}");
 }
 
 #[test]
 fn check_effects_reports_the_extern_and_its_caller() {
-    let (_, text) = check(&["IO", "Net", "Env", "Time", "Rand", "Fan"], EXTERN, &["--effects"]);
-    assert!(text.contains("push  → {IO, Net, Env, Time, Rand, Fan}"), "{text}");
-    assert!(text.contains("main  → {IO, Net, Env, Time, Rand, Fan}"), "{text}");
+    let (_, text) = check(&EVERY, EXTERN, &["--effects"]);
+    let top = "{FS.read, FS.write, Net.fetch, Net.listen, IO.stdin, IO.stdout, IO.stderr, Env.read, Env.write, Proc, Time, Rand, Fan, Abort}";
+    assert!(text.contains(&format!("push  → {top}")), "{text}");
+    assert!(text.contains(&format!("main  → {top}")), "{text}");
 }

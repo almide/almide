@@ -1,8 +1,8 @@
-// E030 (#3755): list.min over a runtime-backed handle. A JsonPath has no
-// declaration and no order; check used to accept it while native rustc
-// rejected the monomorph (AlmideJsonPath: Ord).
-import json
+// E030 (#3755): list.min over a runtime-backed handle. An HttpRequest has no
+// declared order; check used to accept a min over such a handle while native
+// rustc rejected the monomorph (the handle is not Ord).
+import http
 fn main() -> Unit = {
-  let ps = [json.field(json.root(), "b"), json.field(json.root(), "a")]
-  println("${option.is_some(list.min(ps))}")
+  let rs = [http.new_request("GET", "/b", "", []), http.new_request("GET", "/a", "", [])]
+  println("${option.is_some(list.min(rs))}")
 }

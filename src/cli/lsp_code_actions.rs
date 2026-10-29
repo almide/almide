@@ -141,7 +141,7 @@ fn collect_workspace_symbols_from_file(file_path: &std::path::Path, query: &str,
     let tokens = crate::lexer::Lexer::tokenize(&source);
     let mut parser = crate::parser::Parser::new(tokens);
     let prog = match parser.parse() { Ok(p) => p, Err(_) => return };
-    let file_uri = match Uri::from_str(&format!("file://{}", file_path.display())) { Ok(u) => u, Err(_) => return };
+    let file_uri = match path_to_uri(file_path) { Some(u) => u, None => return };
     for decl in &prog.decls {
         let (name, kind, span) = match decl {
             crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), SymbolKind::FUNCTION, span),
@@ -175,14 +175,19 @@ fn compute_workspace_symbols(query: &str, workspace_root: &Option<std::path::Pat
     results
 }
 
+/// The workspace index's sweep. The skip rule applies to the directories it
+/// FINDS, not to the root it was given: a workspace that itself lives in a
+/// dot-directory (a temp dir, `~/.config/x`) is still indexed (#4186).
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name.starts_with('.') || name == "target" || name == "node_modules" { return; }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let p = entry.path();
-            if p.is_dir() { collect_almd_files(&p, out); }
-            else if p.extension().map_or(false, |e| e == "almd") { out.push(p); }
+            // Symlinks are neither followed nor collected (#4140).
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                if !super::project_scope::is_skipped_dir(&entry.file_name().to_string_lossy()) { collect_almd_files(&p, out); }
+            }
+            else if kind.is_file() && p.extension().map_or(false, |e| e == "almd") { out.push(p); }
         }
     }
 }
@@ -206,6 +211,40 @@ fn uri_to_path(uri: &Uri) -> Option<String> {
         return Some(decoded[1..].to_string());
     }
     Some(decoded)
+}
+
+/// Filesystem path → `file://` URI, the inverse of [`uri_to_path`]. A
+/// Windows path keeps forward slashes and gets the third slash before its
+/// drive letter; the `\\?\` prefix `canonicalize` adds on Windows is dropped
+/// (`\\?\UNC\srv\share` becomes `//srv/share`); every byte outside the
+/// unreserved set, `/` and `:` is percent-encoded. The old inline
+/// `format!("file://{}", path.display())` built `file://\\?\C:\…` from the
+/// canonical workspace root, the URI parse failed, and the workspace index
+/// silently returned no symbol on Windows.
+fn path_to_uri(path: &std::path::Path) -> Option<Uri> {
+    let raw = path.display().to_string();
+    let s = if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
+        format!("//{}", unc)
+    } else {
+        raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
+    }
+    .replace('\\', "/");
+    let mut enc = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':') {
+            enc.push(b as char);
+        } else {
+            enc.push_str(&format!("%{:02X}", b));
+        }
+    }
+    let uri = if enc.starts_with("//") {
+        format!("file:{}", enc)
+    } else if enc.starts_with('/') {
+        format!("file://{}", enc)
+    } else {
+        format!("file:///{}", enc)
+    };
+    Uri::from_str(&uri).ok()
 }
 
 /// Minimal RFC 3986 percent-decoding (multi-byte UTF-8 sequences decode
@@ -265,6 +304,29 @@ mod uri_to_path_tests {
     fn non_file_scheme_is_none() {
         assert_eq!(conv("untitled:Untitled-1"), None);
     }
+
+    fn to_uri(p: &str) -> String {
+        path_to_uri(std::path::Path::new(p)).map(|u| u.as_str().to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn path_to_uri_shapes() {
+        assert_eq!(to_uri("/tmp/x.almd"), "file:///tmp/x.almd");
+        assert_eq!(to_uri("/tmp/a b/あ.almd"), "file:///tmp/a%20b/%E3%81%82.almd");
+        // The Windows shapes are plain strings, so they are checked on every
+        // host: `Path::display` passes the backslashes through unchanged.
+        assert_eq!(to_uri(r"C:\Users\x.almd"), "file:///C:/Users/x.almd");
+        assert_eq!(to_uri(r"\\?\C:\Users\x.almd"), "file:///C:/Users/x.almd");
+        assert_eq!(to_uri(r"\\?\UNC\srv\share\x.almd"), "file://srv/share/x.almd");
+    }
+
+    #[test]
+    fn path_to_uri_round_trips_through_uri_to_path() {
+        for p in ["/tmp/x.almd", "/tmp/a b/あ.almd", "C:/Users/x.almd"] {
+            let u = path_to_uri(std::path::Path::new(p)).unwrap();
+            assert_eq!(uri_to_path(&u).as_deref(), Some(p));
+        }
+    }
 }
 
 fn publish_diagnostics(connection: &Connection, uri: &Uri, diags: &[Diagnostic]) {
@@ -321,11 +383,15 @@ fn find_project_toml(file_path: &str) -> Option<std::path::PathBuf> {
 }
 
 /// Dependency source dirs for the project owning `file_path`, cached per
-/// almide.toml. `allow_fetch` is true only on didOpen: `fetch_all_deps`
-/// shells out to git and writes almide.lock, which must never run on a
-/// keystroke (#927). With `allow_fetch` false a cache miss resolves to no
-/// deps instead of touching the network. A failed fetch caches the empty
-/// list, so one broken manifest cannot re-trigger fetch storms.
+/// almide.toml. The server NEVER fetches: dependencies resolve from what is
+/// already on disk (`resolve_cached_deps`: path dependencies and checkouts
+/// already in the cache), with no `git` run and no almide.lock write.
+/// Opening a file of an untrusted project is not consent to contact the
+/// hosts its manifest names or to write into its tree (#4128); `almide
+/// build` is the command that fetches. `allow_fetch` (true on didOpen)
+/// now only means "resolve on a cache miss"; with it false a miss resolves
+/// to no deps. A failed resolve caches the empty list, so one broken
+/// manifest cannot re-trigger resolve storms (#927).
 ///
 /// An entry is keyed on the CONTENT of `almide.toml` and `almide.lock`
 /// (#3097): it used to be kept for the life of the server, so adding,
@@ -344,7 +410,7 @@ fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: 
         None => {}
     }
     let deps: Vec<(crate::project::PkgId, std::path::PathBuf)> = crate::project::parse_toml(&toml).ok()
-        .and_then(|proj| crate::project_fetch::fetch_all_deps(&proj).ok())
+        .and_then(|proj| crate::project_fetch::resolve_cached_deps(&proj).ok())
         .map(|deps| deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect())
         .unwrap_or_default();
     cache.insert(toml.clone(), (manifest_fingerprint(&toml), deps.clone()));
@@ -356,8 +422,8 @@ fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: 
 fn manifest_fingerprint(toml: &std::path::Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    std::fs::read(toml).ok().hash(&mut h);
-    std::fs::read(toml.with_file_name("almide.lock")).ok().hash(&mut h);
+    crate::project::read_project_file_bytes(toml).ok().hash(&mut h);
+    crate::project::read_project_file_bytes(&toml.with_file_name("almide.lock")).ok().hash(&mut h);
     h.finish()
 }
 

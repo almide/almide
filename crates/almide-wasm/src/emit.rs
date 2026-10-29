@@ -58,7 +58,11 @@ pub fn emit_library_with_ops(
 
 fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
     // Transparent newtypes erase FIRST, so both passes read one tree
-    // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
+    // (#1423 stage 4: the html SafeHtml row).
+    // ADR-0031 D3: a Region argument of an `@extern(wasm)` import is split
+    // into (base, len) before anything reads the program.
+    let split = crate::extern_region::split_region_params(ir);
+    let ir = split.as_ref().unwrap_or(ir);
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
     let desugared = front_desugar::desugar(ir);
@@ -261,6 +265,7 @@ fn emit_program_pass(
     // call_indirect types, lifted lambdas).
     let reach = crate::global_reach::global_reach(&program_fns, &table, &global_map);
     let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), global_reach: reach.into(), ..FnWork::default() };
+    work.deep_global_base.set(crate::deep_walk::global_base(global_decls.len()));
     work.bounded_lines.set(bounded_lines);
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();

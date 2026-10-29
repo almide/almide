@@ -23,8 +23,11 @@ fn mk_project(almide_min: Option<&str>) -> Project {
             almide_min: almide_min.map(String::from),
         },
         dependencies: vec![],
-        permissions: vec![],
+        permissions: None,
         proc_allow: None,
+        fs_allow: None,
+        native_grants: vec![],
+        trust_owners: vec![],
         native_deps: vec![],
         root: std::path::PathBuf::from("."),
     }

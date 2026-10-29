@@ -54,9 +54,10 @@ pub enum SigType {
     Bytes,
     Matrix,
     Value,
-    Endian,
     /// A stdlib nominal type the grammar builds ([`super::nominal`]).
     Nominal(&'static str),
+    /// `secret.Secret[A]` (#4107): built with `secret.new`, read with `secret.reveal`.
+    Secret(Box<SigType>),
     /// `Never`: the call does not return. It has no value, so no goal
     /// unifies with it; a program calls such a function only as its last
     /// statement ([`super::catalogue::NEVER_RETURNING`]).
@@ -88,7 +89,6 @@ impl SigType {
                     "Bytes" => Some(SigType::Bytes),
                     "Matrix" => Some(SigType::Matrix),
                     "Value" => Some(SigType::Value),
-                    "Endian" => Some(SigType::Endian),
                     // The fixed-width numbers the value grammar builds; other
                     // nominal types enter via mutation.
                     other => match GenType::sized(other) {
@@ -120,6 +120,7 @@ impl SigType {
                     // A Set is built with `set.from_list`; its element
                     // must be hashable (checked at `instantiate`).
                     ("Set", 1) => Some(SigType::Set(Box::new(Self::from_type_expr(&args[0])?))),
+                    ("Secret", 1) => Some(SigType::Secret(Box::new(Self::from_type_expr(&args[0])?))),
                     // A nominal spelled with arguments (`Matrix[Float32]`).
                     (_, 1) => match &args[0] {
                         TypeExpr::Simple { name: arg } => {
@@ -160,7 +161,7 @@ impl SigType {
                     out.push(n.clone());
                 }
             }
-            SigType::List(e) | SigType::Option(e) | SigType::Set(e) => e.collect_vars(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => e.collect_vars(out),
             SigType::Result(a, b) | SigType::Tuple2(a, b) | SigType::Map(a, b) => {
                 a.collect_vars(out);
                 b.collect_vars(out);
@@ -203,7 +204,7 @@ impl SigType {
                 bind_slot_to_string(err, out);
                 ok.collect_forced_bindings(out);
             }
-            SigType::List(e) | SigType::Option(e) | SigType::Set(e) => e.collect_forced_bindings(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => e.collect_forced_bindings(out),
             SigType::Tuple2(a, b) => {
                 a.collect_forced_bindings(out);
                 b.collect_forced_bindings(out);
@@ -240,11 +241,11 @@ impl SigType {
             SigType::Bytes => Some(GenType::Bytes),
             SigType::Matrix => Some(GenType::Matrix),
             SigType::Value => Some(GenType::Value),
-            SigType::Endian => Some(GenType::Endian),
             SigType::Nominal(k) => Some(GenType::Nominal(k)),
             SigType::Var(n) => subst.get(n).cloned(),
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
+            SigType::Secret(e) => Some(GenType::Secret(Box::new(e.instantiate(subst)?))),
             // The error slot is fixed to String regardless of the bound
             // variable, or is the nominal the signature names
             // (`Result[T, HttpResponse]`, GenType::ResultNom). Any other
@@ -288,7 +289,6 @@ impl SigType {
             | (SigType::Bytes, GenType::Bytes)
             | (SigType::Matrix, GenType::Matrix)
             | (SigType::Value, GenType::Value) => true,
-            | (SigType::Endian, GenType::Endian) => true,
             (SigType::Nominal(a), GenType::Nominal(b)) => a == b,
             (SigType::Sized(a), GenType::Sized(b)) => a == b,
             (SigType::Var(n), g) => match subst.get(n) {
@@ -300,6 +300,7 @@ impl SigType {
             },
             (SigType::List(e), GenType::List(g)) => e.unify_with_goal(g, subst),
             (SigType::Option(e), GenType::Option(g)) => e.unify_with_goal(g, subst),
+            (SigType::Secret(e), GenType::Secret(g)) => e.unify_with_goal(g, subst),
             // Result error slot: goal carries no error type (fixed
             // String), so only the ok arm is unified — unless the slot
             // names a nominal, whose goal is a ResultNom of that nominal.

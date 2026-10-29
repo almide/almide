@@ -71,11 +71,24 @@
 - 根拠の L0 規則: R-L0-00（`stringify` は JS と同じ綴り。多数派はないが衝突もない）。
 - issue: なし
 
+### R-json-04 `parse` の入れ子の深さに上限を置く — ○ 採用
+
+- いま: `json.parse` は再帰下降で、入れ子の深さに上限がありません（`runtime/rs/src/json.rs:47-223`、`stdlib/json_parse.almd`）。`[[[[…]]]]` を深く重ねた文字列は、スタックの溢れの abort（C-196）で終わります。
+- 案: 配列と object の入れ子が 1000 段を超えたら `err("json: nesting deeper than 1000")` を返します。
+- 根拠の L0 規則: R-L0-47 の 2。上限を変える関数は置きません（R-L0-47 の 3 の例外）。比べた言語のうち、深さを変えられるのは Rust の `serde_json` の `disable_recursion_limit` だけで、それも上限を外すだけです。
+- (a) Go `encoding/json`（10000）、Rust `serde_json`（128）、Python `json`（再帰の上限、既定でおよそ 1000）。
+- (d) 意味変更（1000 段を超える入れ子が abort から err になる）。いま 1000 段を超えて成功している入力は、native のスタックの大きさ次第で、すでに abort しうる範囲です。
+- issue: #4020
+
+### 関連: Codec で型に decode するとき（R-L0-48）
+
+`json.parse` の値を型に読み込むのは、Codec が導出する `T.decode` と `T.decode_strict` です（json のモジュールの関数ではありません）。知らないキーを拒むのは `decode_strict`、入力から読ませないフィールドは `@skip_decode` です。規則は L0 の R-L0-48 にあります。
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `parse` | `json.parse(text: String) -> Result[Value, String]` | JS `JSON.parse` / Python `loads` (F) / Go `Unmarshal` / Elixir `JSON.decode` | 意味変更（後ろの余計な文字は err） | R-json-02 |
+| `parse` | `json.parse(text: String) -> Result[Value, String]` | JS `JSON.parse` / Python `loads` (F) / Go `Unmarshal` / Elixir `JSON.decode` | 意味変更（後ろの余計な文字は err。入れ子が 1000 段を超えたら err） | R-json-02、R-json-04 |
 | `stringify` | `json.stringify(v: Value) -> String` | JS `JSON.stringify` / Python `dumps` (F) / Go `Marshal` / Elixir `JSON.encode!` | 据え置き | R-json-03 |
 | `stringify_pretty` | `json.stringify_pretty(j: Value) -> String` | Go `MarshalIndent` / Python `dumps(indent=2)` (F) / serde `to_string_pretty` | 据え置き | R-json-03 |
 | `get_string` | `json.get_string(j: Value, key: String) -> Option[String]` | Kotlin pkg `jsonPrimitive.contentOrNull` / serde `as_str()` | 撤去 → `value.get_string` | R-json-01 |

@@ -30,15 +30,8 @@ use almide_base::span::Span;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// ADR-0022's admitted builtins — the writes and aborts a plain `fn` may make
-/// and a `@pure` fn may not — with what each does.
-const OUTPUT_ABORT_BUILTINS: &[(&str, &str)] = &[
-    ("println", "writes to stdout"),
-    ("eprintln", "writes to stderr"),
-    ("panic", "aborts the program"),
-    ("assert", "aborts the program when it fails"),
-    ("assert_eq", "aborts the program when it fails"),
-    ("assert_ne", "aborts the program when it fails"),
-];
+/// and a `@pure` fn may not — with what each does: the one builtin table.
+use super::builtin_calls::OUTPUT_ABORT_BUILTINS;
 
 /// What one recorded call reaches.
 #[derive(Clone, Debug)]
@@ -209,8 +202,11 @@ impl Checker {
                 let does = OUTPUT_ABORT_BUILTINS.iter().find(|(n, _)| n == b).map_or("", |(_, d)| d);
                 Some((b.to_string(), does.to_string()))
             }
-            PurityCallee::Stdlib(m, f) => almide_ir::effect::stdlib_call_effect(m.as_str(), f.as_str())
-                .map(|e| (format!("{m}.{f}"), format!("has the {e} effect"))),
+            PurityCallee::Stdlib(m, f) => {
+                let cats = almide_ir::effect::stdlib_call_effect(m.as_str(), f.as_str());
+                let names: Vec<&str> = cats.iter().map(|e| e.name()).collect();
+                (!cats.is_empty()).then(|| (format!("{m}.{f}"), format!("has the {} effect", names.join(", "))))
+            }
             PurityCallee::User(k) if self.env.extern_fns.contains(k) => {
                 Some((k.to_string(), "is an `@extern` fn, whose body cannot be checked".to_string()))
             }

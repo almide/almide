@@ -1,13 +1,15 @@
 diff --git a/crates/almide-wasm/src/matrix.rs b/crates/almide-wasm/src/matrix.rs
-index 14a412b5a..42f2add77 100644
+index 92f1e0b2d..d7d4a0c5d 100644
 --- a/crates/almide-wasm/src/matrix.rs
 +++ b/crates/almide-wasm/src/matrix.rs
-@@ -183,7 +183,7 @@ impl Emitter<'_> {
-             // form as `xs[i]`. Compared as i64 BEFORE any cast, so a
-             // negative can never wrap past the test.
-             let msg = self.pool.intern("matrix index out of bounds");
--            for (idx, ext_off) in [(hr, 0), (hc, 4)] {
-+            for (idx, ext_off) in [(hr, 0)] { // [MUTANT: col bound dropped]
-                 {
-                     let mut i = self.f.instructions();
-                     i.local_get(idx).i64_const(0).i64_lt_s();
+@@ -210,9 +210,7 @@ impl Emitter<'_> {
+                 i.local_get(hm).i32_load(slot_memarg(0)).i64_extend_i32_u();
+                 i.i64_ge_s().i32_or();
+                 i.local_get(hc).i64_const(0).i64_lt_s().i32_or();
+-                i.local_get(hc);
+-                i.local_get(hm).i32_load(slot_memarg(4)).i64_extend_i32_u();
+-                i.i64_ge_s().i32_or();
++                // [MUTANT: col upper bound dropped]
+                 i.if_(BlockType::Result(ValType::I32));
+                 i.i32_const(almide_layout::NULL_ADDR as i32);
+                 i.else_();

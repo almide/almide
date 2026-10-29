@@ -1,0 +1,57 @@
+// ffi — memory at the foreign-function boundary (R-ffi-01, #3853, ADR-0031).
+//
+// The native oracle for the three `local` raw operations of stdlib/ffi.almd;
+// the wasm bodies are in stdlib/ffi_bridge.almd. They are reached only through
+// `ffi.read` / `ffi.write` / `ffi.to_bytes`, which check `0 <= off` and
+// `off + n <= len` against the Region's own length — and, for a write, its
+// permission — in Almide before calling here. The length came from the mint
+// (`ffi.region`: the Bytes it views; `ffi.alloc`: the requested size; an
+// `@extern` with `@region(len = …)`: the binding's declared length), never
+// from the caller of a read or write.
+
+// An EMPTY buffer has no data region, so its address is NULL on both targets:
+// `Vec::as_ptr` of an empty Vec is a dangling sentinel, and a write through it
+// was UB (C-062).
+pub fn almide_rt_ffi_address(b: &Vec<u8>) -> *mut u8 {
+    if b.is_empty() { std::ptr::null_mut() } else { b.as_ptr() as *mut u8 }
+}
+
+pub fn almide_rt_ffi_load(base: *mut u8, off: i64, n: i64) -> Vec<u8> {
+    if base.is_null() || n <= 0 || off < 0 { return Vec::new(); }
+    // SAFETY: `ffi.read` checked `off + n <= len` for the Region `base` came
+    // from, and the Region keeps its owner (or its foreign release guard)
+    // alive while it is borrowed here (ADR-0031 D2).
+    unsafe { std::slice::from_raw_parts(base.add(off as usize), n as usize).to_vec() }
+}
+
+pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &Vec<u8>) {
+    if base.is_null() || b.is_empty() || off < 0 { return; }
+    // SAFETY: `ffi.write` checked the Region is writable (it came from
+    // `ffi.alloc`, whose buffer no Almide value aliases, or from a foreign
+    // `@region` declaration) and that `off + len(b) <= len`.
+    unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), base.add(off as usize), b.len()); }
+}
+
+// The release guard of a foreign Region (ADR-0031 D6): the `@extern(c)`
+// wrapper of a fn declared `@region(len = …, release = "f")` stores this
+// closure in the Region it builds, with `release` the glue's call of `f`.
+// Every copy of the Region shares the one `Rc`, so the guard drops — and
+// calls `release(base)` once — when the last copy goes away. Almide code never
+// frees, so there is no double free and no use after free on the Almide side.
+pub struct AlmideFfiReleaseGuard<F: FnMut(*mut u8)> {
+    base: *mut u8,
+    release: F,
+}
+
+impl<F: FnMut(*mut u8)> Drop for AlmideFfiReleaseGuard<F> {
+    fn drop(&mut self) {
+        if !self.base.is_null() {
+            (self.release)(self.base)
+        }
+    }
+}
+
+pub fn almide_rt_ffi_release_guard<F: FnMut(*mut u8) + 'static>(base: *mut u8, release: F) -> std::rc::Rc<dyn Fn() -> ()> {
+    let guard = AlmideFfiReleaseGuard { base, release };
+    std::rc::Rc::new(move || { let _ = &guard; })
+}

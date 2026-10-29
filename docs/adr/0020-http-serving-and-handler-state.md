@@ -492,7 +492,7 @@ handler-local value, or to `kv.update(meta, "boot", (b) => some(b ?? drawn))!`.
 | Host | Instance model | What the program can observe (pillars 1–2 hold) |
 |---|---|---|
 | native (`almide run`, a binary) | one process; a pool of worker threads, each with its own app instance, at most `max_in_flight` at once (§5.5) | responses; `kv`; whole log lines, in an unspecified order across requests; timing |
-| embedded lane (`almide run --target wasm`) | one instance, sequential, in accept order (unchanged from C-367) | the same answers; a slow request delays the next one (timing only) |
+| embedded lane (`almide run --target wasm`) | one instance, sequential, in the order requests arrive whole; the host reads up to 64 connections at once through native's pool (C-367, C-389, #4021) | the same answers; a slow handler delays the next request (timing only), a slow client does not |
 | `wasmtime serve` 47, P2 component (`wasi:http/incoming-handler@0.2.x`; wasmtime 47 carries `wasi:http@0.2.12`) | a fresh instance per request, never concurrent (`--max-instance-reuse-count` defaults to 1 for P2, and "setting it to more than 1 will have no effect for WASIp2 components since they cannot be called concurrently", `serve --help`, serve.rs:141-155) | the same answers; `kv` is E081 (§4.4); hyper writes the head (§7) |
 | `wasmtime serve` 47, P3 component (`wasi:http/handler@0.3.0`) | reuse up to 128, up to 16 concurrent per instance, dropped after 1 s idle; needs `-W component-model-more-async-builtins -S p3 -S http` (measured by the #2659 prototype: it does not load without the `-W` flag) | the same answers, provided the guest shell serializes handlers within an instance (see below) |
 | Spin 3.x / 4.x | P2: a fresh instance per request; 3.6 P3: reused "both concurrently and serially" (spinframework.dev/blog/announcing-spin-3-6) | the same answers; not measured here |
@@ -640,6 +640,19 @@ also bounds a request or header line (8 KiB: `414` / `431`) and the header count
 (100: `431`), decodes a chunked request body, and answers `501` to any other
 transfer coding. `ServeLimits` and `serve_with_limits` land with the worker
 pool (#2665) and pass their values to `http_server_next_with`.
+
+**Status (2026-10-23, #4021, C-389).** Connection I/O runs on a bounded pool
+in the shared core (`http_server_pool`): an accept thread admits up to 64
+connections and stops accepting at 64 (the kernel backlog is the
+backpressure); each connection's worker reads its request and writes its
+response. The request head must arrive whole within 10 s of accept, else
+`408` (a client that sent nothing is closed unanswered); the body and the
+wait for the handler stay under the 30 s request timeout and its `503`. The
+handler still runs on the thread that called `serve`, one request at a time in
+the order requests arrive whole: the per-worker app factory, the
+process-global stdout and the per-worker RNG seed of §5.5 are still #2665. So
+a slow client no longer stalls the server on either socket host, and a slow
+handler still does.
 
 **The listening address (#2826, #2829).** `http.serve` keeps binding
 `0.0.0.0:<port>`. C-367 states that address, and a server deployed in a

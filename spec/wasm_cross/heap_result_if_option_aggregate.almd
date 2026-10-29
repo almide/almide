@@ -34,7 +34,7 @@ effect fn main() -> Unit = {
     none => println("f none"),
   }
   match hits(3) {
-    some(xs) => println("h ${int.to_string(list.get_or(xs, 0, 0))},${int.to_string(list.get_or(xs, 1, 0))}"),
+    some(xs) => println("h ${int.to_string(list.get(xs, 0) ?? 0)},${int.to_string(list.get(xs, 1) ?? 0)}"),
     none => println("h none"),
   }
   match hits(0 - 1) {

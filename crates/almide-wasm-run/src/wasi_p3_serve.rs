@@ -25,6 +25,9 @@
 //   op 71 next                 the framed request once, then no request — the
 //                              guest's loop ends and `main` returns.
 //   op 72 reply                the response cells, copied for `handle`.
+//   op 75 run                  err ("not served"): the guest runs its loop
+//                              itself (#4203; the host's own 500 answers a
+//                              trap and the instance is discarded).
 //
 // Each request runs in an arena (#3444): `handle` saves the guest
 // allocator's state and the shim's heap-pointing caches on entry and
@@ -143,7 +146,8 @@ struct ServeTexts {
     /// One (ptr, len) pair per `method` case, in discriminant order.
     method_table: i32,
     /// The answers native's server core gives a request it refuses: the
-    /// status, its reason as the body, `Content-Type: text/plain` — as cells.
+    /// status, its reason as the body, `Content-Type: text/plain` and the
+    /// core's `X-Content-Type-Options: nosniff` default (C-407) — as cells.
     r413: ServePiece,
     r414: ServePiece,
     r431: ServePiece,
@@ -172,7 +176,7 @@ impl ServeTexts {
         }
         let cells = |status: i64| -> Vec<u8> {
             let reason = http_server_reason(status);
-            [status.to_string().as_str(), reason, "Content-Type", "text/plain"]
+            [status.to_string().as_str(), reason, "Content-Type", "text/plain", "X-Content-Type-Options", "nosniff"]
                 .iter()
                 .map(|c| format!("{}\n{c}", c.chars().count()))
                 .collect::<String>()
@@ -255,7 +259,7 @@ struct ServeFns {
     cell: u32,
 }
 
-/// `(op, a_ptr, a_len, b_ptr, b_len) -> i64`: ops 70..=72, guest-side.
+/// `(op, a_ptr, a_len, b_ptr, b_len) -> i64`: ops 70..=72 and 75, guest-side.
 fn shim_serve_op(g: P3Globals, s: ServeGlobals) -> Function {
     let (op, a_ptr, a_len) = (0u32, 1u32, 2u32);
     let p = 5u32;
@@ -282,6 +286,12 @@ fn shim_serve_op(g: P3Globals, s: ServeGlobals) -> Function {
     i.local_get(p).global_set(s.rep_ptr);
     i.local_get(a_len).global_set(s.rep_len);
     i.i32_const(3).global_set(s.state);
+    i.end();
+    // op 75 (#4203): err, "not served" — the export runs one request per
+    // instance and the host discards an instance that traps, so the guest
+    // runs its loop itself.
+    i.local_get(op).i32_const(75).i32_eq().if_(BlockType::Empty);
+    i.i64_const(1 << 32).return_();
     i.end();
     // op 70 (and 72's answer): ok.
     i.i64_const(0);

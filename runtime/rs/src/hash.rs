@@ -23,8 +23,7 @@ fn fnv1a32(data: &[u8]) -> i64 {
     h as i64
 }
 
-pub fn almide_rt_hash_fnv1a32(s: &str) -> i64 { fnv1a32(s.as_bytes()) }
-pub fn almide_rt_hash_fnv1a32_bytes(b: &Vec<u8>) -> i64 { fnv1a32(b) }
+pub fn almide_rt_hash_fnv1a32(b: &Vec<u8>) -> i64 { fnv1a32(b) }
 
 const ALMIDE_SHA_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -88,4 +87,4 @@ fn sha256(data: &[u8]) -> Vec<u8> {
 
 pub fn almide_rt_hash_sha256(b: &Vec<u8>) -> Vec<u8> { sha256(b) }
 
-pub fn almide_rt_hash_sha256_hex(s: &str) -> AlmideString { let __almide_out: String = sha256(s.as_bytes()).iter().map(|b| format!("{:02x}", b)).collect(); __almide_out.into() }
+pub fn almide_rt_hash_sha256_hex(b: &Vec<u8>) -> AlmideString { let __almide_out: String = sha256(b).iter().map(|b| format!("{:02x}", b)).collect(); __almide_out.into() }

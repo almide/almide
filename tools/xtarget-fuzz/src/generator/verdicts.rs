@@ -51,35 +51,19 @@ pub const VERDICTS: &[Verdict] = &[
         canon: "{xs}",
         domain: &[],
     },
-    Verdict {
-        func: "list.shuffle",
-        holds: "list.len(v) == list.len({xs}) and list.all({xs}, (e) => list.count(v, (f) => f == e) == list.count({xs}, (f) => f == e))",
-        canon: "{xs}",
-        domain: &[],
-    },
     Verdict { func: "datetime.now", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
-    Verdict { func: "env.unix_timestamp", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
-    Verdict { func: "env.millis", holds: concat!("v >= ", epoch_floor_s!(), "000"), canon: "0", domain: &[] },
+    Verdict { func: "datetime.now_ms", holds: concat!("v >= ", epoch_floor_s!(), "000"), canon: "0", domain: &[] },
     Verdict { func: "datetime.monotonic_ns", holds: "v >= 0", canon: "0", domain: &[] },
-    // argv[0] is the program as the host names it (a native path, the wasm
-    // runner's name); the arguments after it are the sandbox's.
-    Verdict { func: "process.args", holds: "list.len(v) >= 1", canon: "[\"prog\"] + list.drop(v, 1)", domain: &[] },
     Verdict { func: "fs.stat", holds: concat!("v.modified >= ", epoch_floor_s!()), canon: "v", domain: &[] },
-    Verdict { func: "fs.modified_at", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
     Verdict { func: "process.pid", holds: "v > 0", canon: "1", domain: &[] },
     Verdict { func: "env.os", holds: "list.contains([\"macos\", \"linux\", \"windows\", \"wasi\", \"unknown\"], v)", canon: "\"os\"", domain: &[] },
     Verdict { func: "env.cwd", holds: "string.len(v) > 0", canon: "\".\"", domain: &[] },
-    Verdict { func: "env.temp_dir", holds: "string.len(v) > 0", canon: "\"tmp\"", domain: &[] },
     Verdict { func: "fs.temp_dir", holds: "string.len(v) > 0", canon: "\"tmp\"", domain: &[] },
     Verdict { func: "fs.create_temp_file", holds: "string.contains(v, {prefix})", canon: "{prefix}", domain: &[] },
     Verdict { func: "fs.create_temp_dir", holds: "string.contains(v, {prefix})", canon: "{prefix}", domain: &[] },
-    Verdict { func: "process.is_alive", holds: "v or {pid} != process.pid()", canon: "false", domain: &[] },
     // Unit results: nothing to check but that the call returns, with a
     // short, non-negative wait.
     Verdict { func: "env.sleep_ms", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
-    Verdict { func: "process.sleep", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
-    // A child's pid; the fixed command set exits at once.
-    Verdict { func: "process.spawn", holds: "v > 0", canon: "0", domain: &[] },
     // A signal reaches only a child of this program's own: a generated pid
     // could name any process on the host. Past every pid_max, the fallback
     // fails with ESRCH.
@@ -88,69 +72,16 @@ pub const VERDICTS: &[Verdict] = &[
         holds: "true",
         canon: "()",
         domain: &[
-            ("pid", "match process.spawn(\"/bin/sleep\", [\"1\"]) { ok(p) => p, err(_) => 2147483000 }"),
+            (
+                "pid",
+                "match process.start(process.ProcessCommand { cmd: \"/bin/sleep\", args: [\"1\"] }) { ok(c) => process.child_pid(c) ?? 2147483000, err(_) => 2147483000 }",
+            ),
             ("signal", "int.abs({signal}) % 2 * 6 + 9"),
         ],
     },
-    // How much of the echo has arrived is the network's timing.
-    Verdict { func: "net.tcp_read", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
-    // A timeout the echo can beat on any host: a 1 ms one races it.
-    Verdict {
-        func: "net.tcp_read_timeout",
-        holds: "bytes.len(v) <= {len} or {len} < 0",
-        canon: "bytes.from_list([])",
-        domain: &[("timeout_ms", "1000 + int.abs({timeout_ms}) % 1000")],
-    },
-    // A socket's handle counts the sockets opened before it: two paths that
-    // each open one see different handles. The value the program goes on
-    // with is the handle itself (the legs number them alike).
-    Verdict { func: "net.tcp_connect", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.tcp_listen", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.tcp_accept", holds: "v >= 0", canon: "v", domain: &[] },
-    // The OS picks a listener's ephemeral port.
-    Verdict { func: "net.tcp_local_port", holds: "v > 0 and v < 65536", canon: "0", domain: &[] },
-    Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
-    // Exactly len of the 11 echoed bytes: never more than arrive.
-    Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },
-    // net's Unix sockets and shared-memory files (#3620): a descriptor is the
-    // OS's lowest free number, and the legs do not start from the same free
-    // numbers (on Linux the embedded host holds one more descriptor than a
-    // native program; C-382 leaves raw numbers to the host). The program goes
-    // on with 0, which every leg refuses alike (C-383's held-descriptor rule).
-    Verdict { func: "net.unix_connect", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "net.unix_listen", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "net.unix_accept", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "net.shm_create", holds: "v >= 0", canon: "0", domain: &[] },
-    // The descriptors that arrived: new ones, so numbered by what is open.
-    Verdict { func: "net.unix_take_fds", holds: "list.all(v, (f) => f >= 0)", canon: "list.map(v, (f) => 0)", domain: &[] },
-    // A wait never blocks for long: a sink stream never becomes readable,
-    // so a generated timeout would hold the run that long (a negative one
-    // forever).
-    Verdict { func: "net.unix_poll", holds: "true", canon: "v", domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")] },
-    Verdict {
-        func: "net.unix_wait",
-        holds: "list.all(v, (f) => list.contains({fds}, f))",
-        canon: "list.map(v, (f) => 0)",
-        domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")],
-    },
-    // A buffer's address reads back the buffer while it lives (checked on
-    // its first byte: the probe's check stays O(1)); a generated program goes
-    // on with null, so it never holds an address past its buffer.
-    Verdict {
-        func: "bytes.as_ptr",
-        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
-        canon: "bytes.as_ptr(bytes.from_list([]))",
-        domain: &[],
-    },
-    Verdict {
-        func: "bytes.as_mut_ptr",
-        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
-        canon: "bytes.as_ptr(bytes.from_list([]))",
-        domain: &[],
-    },
-    Verdict { func: "bytes.data_ptr", holds: "v > 0 or bytes.len({b}) == 0", canon: "0", domain: &[] },
-    // Through a generated (null) pointer nothing is written or read.
-    Verdict { func: "bytes.copy_to_ptr", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
+    // net's and unix's calls take and return opaque handles (`net.TcpStream`,
+    // `unix.Fd`), outside the generator's type universe: none is catalogued,
+    // so none has a verdict until the generator builds handles.
     // An http call handle (#2631) against the loopback fixture. Whether the
     // exchange has ended when `poll` looks is the network's timing: `none`,
     // or the very result `wait` answers (an ended call's outcome never
@@ -180,7 +111,7 @@ pub const VERDICTS: &[Verdict] = &[
 ];
 
 /// A fresh call to the fixture, for a call that would disturb a shared one.
-const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/16\", \"\", map.new(), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }";
+const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(http.new_request(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/16\", \"\", []), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }";
 
 /// The O(1) form of a property checked inside a timed loop, where the full
 /// check's own cost (a membership scan, a per-element count) would be
@@ -189,7 +120,6 @@ const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(\"GET\", \"http://\" + (env
 const PROBES: &[(&str, &str)] = &[
     ("random.choice", "match v { some(_) => not list.is_empty({xs}), none => list.is_empty({xs}) }"),
     ("random.shuffle", "list.len(v) == list.len({xs})"),
-    ("list.shuffle", "list.len(v) == list.len({xs})"),
     // The probe's call has ended before the loop (its recipe waits), so
     // poll answers it; comparing that answer with `wait`'s would time a
     // second copy of the body as poll's.

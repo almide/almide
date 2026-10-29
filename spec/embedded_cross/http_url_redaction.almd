@@ -1,0 +1,27 @@
+// @contract: C-328
+// An error that names the URL never shows the userinfo password (#4205):
+// the text between the userinfo's first `:` and its `@` reads `***` (Go
+// net/http's stripPassword), an empty password included, and a user name
+// with no `:` is kept. The user, host, path, query and fragment stay as the
+// program wrote them. The invalid-url class, which every lane finds before
+// it dials, on native, the embedded lane and the stock p3 component
+// (tests/http_error_class_cross_test.rs runs all three and refuses any
+// output holding the password); http_url_redaction_dial.almd is the
+// connect class.
+import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {
+  match r {
+    ok(_) => println("${tag}: unexpected ok"),
+    err(e) => println("${tag}: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show("password", http.get("ftp://alice:s3cret@example.com/p?token=abc123&x=1#frag"))
+  show("user-only", http.get("ftp://alice@example.com/p?token=abc123"))
+  show("empty-password", http.get("ftp://alice:@example.com/p"))
+  show("no-scheme", http.get("alice:s3cret@example.com/p"))
+  show("slashes", http.get("HTTP:alice:s3cret@example.com"))
+  show("query-at", http.get("ftp://example.com/p?next=http://bob:pw@c/#x:y@z"))
+}

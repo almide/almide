@@ -154,6 +154,15 @@ impl Checker {
 
     /// `ast::Pattern::RecordPattern` arm of [`Self::bind_pattern`]. Verbatim text move.
     fn bind_pattern_record(&mut self, name: &Sym, fields: &[ast::FieldPattern], ty: &Ty) {
+        // Destructuring reads the fields: of an opaque record outside its
+        // module it is refused like `s.hidden` (E033, #4107) — judged on the
+        // subject's type and, when the head names a type rather than a
+        // record-variant case, on the type the head names.
+        self.reject_foreign_opaque_record(&resolve_ty(ty, &self.uf), "destructure");
+        if self.env.lookup_ctor_written(name.as_str(), self.current_module_prefix.as_deref()).is_none() {
+            let head = self.record_type_canon(name);
+            self.reject_foreign_opaque_record(&Ty::Named(head, vec![]), "destructure");
+        }
         let resolved = self.env.resolve_named(ty);
         // Normalize module-qualified names: "varlib.Circle" → "Circle" (mirrors
         // the Constructor arm above, and `lower_pattern`'s already-fixed #412

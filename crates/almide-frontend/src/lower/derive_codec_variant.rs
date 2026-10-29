@@ -34,6 +34,11 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                 let mut pat_fields = vec![];
                 let mut entries: Vec<(String, Ty, IrExpr)> = vec![];
                 for f in fields {
+                    // `@skip` (#4108): never written — the pattern only skips it.
+                    if !crate::attr_vocab::codec_field_use(&f.attrs).encoded {
+                        pat_fields.push(IrFieldPattern { name: f.name.to_string(), pattern: Some(IrPattern::Wildcard) });
+                        continue;
+                    }
                     // `_f_` prefix: see auto_derive_decode — a payload field named
                     // `v`/`tag`/`payload` must not shadow the fn's own locals.
                     let pv = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
@@ -54,7 +59,7 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                     let worker_name = format!("{}.__enc_case_{}", type_name, case.name);
                     let mut wparams: Vec<(VarId, String, Ty)> = vec![];
                     let mut wentries: Vec<(String, Ty, IrExpr)> = vec![];
-                    for f in fields {
+                    for f in fields.iter().filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).encoded) {
                         let pv2 = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
                         wparams.push((pv2, format!("_f_{}", f.name), f.ty.clone()));
                         wentries.push((
@@ -135,7 +140,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
 
     // TUPLE-FREE tag/payload split (so neither side materializes a `(String, Value)` tuple the
     // trust-spine cannot lower): read the tag via `value.variant_tag(_v)` (Result[String, String])
-    // and the payload via `value.field(_v, _tag)` (Result[Value, String]) — both simple Results the
+    // and the payload via `value.__field(_v, _tag)` (Result[Value, String]) — both simple Results the
     // trust-spine already lowers, wrapped as `match tag { ok(_tag) => match field { ok(_payload) =>
     // <if-chain>, err(e) => err(e) }, err(e) => err(e) }`.
     let var_tag = wk.vt.alloc(sym("_tag"), Ty::String, Mutability::Let, None);
@@ -221,13 +226,11 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                     },
                     ty: type_ty.clone(), span: None, def_id: None,
                 };
-                IrExpr {
-                    kind: IrExprKind::Block {
-                        stmts,
-                        expr: Some(Box::new(IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(ctor) }, ty: result_ty.clone(), span: None, def_id: None })),
-                    },
-                    ty: result_ty.clone(), span: None, def_id: None,
-                }
+                let bind_arr = stmts.remove(0);
+                let body = e_(IrExprKind::Block { stmts, expr: Some(Box::new(e_(IrExprKind::ResultOk { expr: Box::new(ctor) }, result_ty.clone()))) }, result_ty.clone());
+                let arr = e_(IrExprKind::Var { id: arr_var }, arr_ty.clone());
+                let guarded = tuple_arity_guard(arr, fields.len(), case.name.as_str(), &type_name, &result_ty, body);
+                e_(IrExprKind::Block { stmts: vec![bind_arr], expr: Some(Box::new(guarded)) }, result_ty.clone())
             }
             IrVariantKind::Record { fields } => {
                 // Payload is `{ "field": value, … }` (see variant encode). Decode each
@@ -236,7 +239,13 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                 let mut field_pairs = vec![];
                 for f in fields {
                     let key = f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string());
-                    let decoded = if f.ty.is_option() {
+                    let decoded = if !crate::attr_vocab::codec_field_use(&f.attrs).decoded {
+                        // `@skip` / `@skip_decode` (#4108): never read from the
+                        // payload; the declared default (required, E104) is the value.
+                        let mut d = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
+                        if matches!(d.ty, Ty::Unknown) { d.ty = f.ty.clone(); }
+                        d
+                    } else if f.ty.is_option() {
                         let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
                         let payload = IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None };
                         if let Some(inline) = decode_option_field_inline(wk, payload.clone(), &key, &inner_ty, &value_ty) {
@@ -261,7 +270,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                         let get_field = IrExpr {
                             kind: IrExprKind::Try { expr: Box::new(IrExpr {
                                 kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+                                    target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
                                     args: vec![
                                         IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None },
                                         IrExpr { kind: IrExprKind::LitStr { value: key.clone() }, ty: Ty::String, span: None, def_id: None },
@@ -301,10 +310,10 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
         };
     }
 
-    // Inner: `match value.field(_v, _tag) { ok(_payload) => <if-chain>, err(_e2) => err(_e2) }`.
+    // Inner: `match value.__field(_v, _tag) { ok(_payload) => <if-chain>, err(_e2) => err(_e2) }`.
     let field_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
             args: vec![
                 IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                 IrExpr { kind: IrExprKind::Var { id: var_tag }, ty: Ty::String, span: None, def_id: None },
@@ -327,16 +336,16 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
         },
         ty: result_ty.clone(), span: None, def_id: None,
     };
-    // `let _tag = value.keys(_v) |> list.get(0) ?? ""` — the variant tag (first Object key) as a
-    // PLAIN String (NOT a Result), built from RECOGNIZED self-host module calls (value.keys /
+    // `let _tag = value.__keys(_v) |> list.get(0) ?? ""` — the variant tag (first Object key) as a
+    // PLAIN String (NOT a Result), built from RECOGNIZED self-host module calls (value.__keys /
     // list.get / `??`) so the trust-spine materializes it. A simple `let` bind (not the Ok-payload of
     // an outer Result-match, which the trust-spine walls when it wraps a heap-String subject whose arm
-    // re-borrows the same param). A non-Object `_v` → `value.keys` returns `[]` → `""` → `value.field`
+    // re-borrows the same param). A non-Object `_v` → `value.__keys` returns `[]` → `""` → `value.__field`
     // then yields the same "expected Object" the strict tuple path did.
     let keys_ty = Ty::list(Ty::String);
     let keys_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("keys"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("__keys"), def_id: None },
             args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None }],
             type_args: vec![],
         },
@@ -599,6 +608,12 @@ pub(super) fn derive_container_helpers(
         },
         value_ty.clone(),
     );
+    // #4165: the element's error carries its index (`at cmds[0]`), exactly as
+    // native's `almide_rt_value_decode_list` frames it — a call into the
+    // `T.__list_dec_at` worker below, not an inline match (a `Try { match … }`
+    // in bind position is outside the structural leg's lowering subset).
+    let res_t = Ty::result(t.clone(), Ty::String);
+    let at_name = format!("{}.__list_dec_at", type_name);
     let bind_x = IrStmt {
         kind: IrStmtKind::Bind {
             var: x_d,
@@ -607,9 +622,12 @@ pub(super) fn derive_container_helpers(
             value: e(
                 IrExprKind::Try {
                     expr: Box::new(call_named(
-                        &decode_name,
-                        vec![elem_d],
-                        Ty::result(t.clone(), Ty::String),
+                        &at_name,
+                        vec![
+                            call_named(&decode_name, vec![elem_d], res_t.clone()),
+                            evar(i_d, &Ty::Int),
+                        ],
+                        res_t.clone(),
                     )),
                 },
                 t.clone(),
@@ -617,6 +635,46 @@ pub(super) fn derive_container_helpers(
         },
         span: None,
     };
+    // T.__list_dec_at(r, i) = match r { ok(_) => r, err(e) => err(__err_at_index(e, i)) }
+    // (the ok arm passes the param through — an Option-payload result ctor
+    // would wall the v1 spine, see derive_codec's err_at_index_worker).
+    let r_at = vt.alloc(sym("_r"), res_t.clone(), Mutability::Let, None);
+    let i_at = vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let e_at = vt.alloc(sym("_we"), Ty::String, Mutability::Let, None);
+    let f_dec_at = mk_fn(
+        &at_name,
+        vec![(r_at, "_r", res_t.clone()), (i_at, "_i", Ty::Int)],
+        res_t.clone(),
+        e(
+            IrExprKind::Match {
+                subject: Box::new(evar(r_at, &res_t)),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: evar(r_at, &res_t),
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::Err {
+                            inner: Box::new(IrPattern::Bind { var: e_at, ty: Ty::String }),
+                        },
+                        guard: None,
+                        body: e(
+                            IrExprKind::ResultErr {
+                                expr: Box::new(call_named(
+                                    "__err_at_index",
+                                    vec![evar(e_at, &Ty::String), evar(i_at, &Ty::Int)],
+                                    Ty::String,
+                                )),
+                            },
+                            res_t.clone(),
+                        ),
+                    },
+                ],
+            },
+            res_t.clone(),
+        ),
+    );
     let appended_d = e(
         IrExprKind::BinOp {
             op: BinOp::ConcatList,
@@ -697,7 +755,7 @@ pub(super) fn derive_container_helpers(
         ),
     );
 
-    // __decode_option_T(v, key) = match value.field(v, key) {
+    // __decode_option_T(v, key) = match value.__field(v, key) {
     //   err(_) => ok(none),
     //   ok(fv) => if fv == value.null() then ok(none)
     //             else { let x = T.decode(fv)?; ok(some(x)) }
@@ -748,7 +806,7 @@ pub(super) fn derive_container_helpers(
             IrExprKind::Match {
                 subject: Box::new(call_mod(
                     "value",
-                    "field",
+                    "__field",
                     vec![evar(v_f, &value_ty), evar(key_f, &Ty::String)],
                     Ty::result(value_ty.clone(), Ty::String),
                 )),
@@ -794,5 +852,5 @@ pub(super) fn derive_container_helpers(
         ),
     );
 
-    vec![f_enc_list, f_enc_go, f_dec_list, f_dec_go, f_enc_opt, f_dec_opt]
+    vec![f_enc_list, f_enc_go, f_dec_list, f_dec_go, f_dec_at, f_enc_opt, f_dec_opt]
 }

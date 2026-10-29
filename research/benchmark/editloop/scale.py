@@ -18,8 +18,10 @@ into a single project that type-checks clean.
 
 RUNGS are nested prefixes of that byte-sorted list at cumulative-line targets, so
 rung k's sources are a subset of rung k+1's and the only variable is size. Rung 0
-is the entry alone: the constant floor (process spawn + the auto-imported bundled
-stdlib every check pays regardless of project size). Marginal time is measured
+is the entry alone: the constant floor (process spawn and the front end's fixed
+cost; since #4071 an auto-imported bundled module is loaded only when a source
+reaches it, so the floor no longer checks the stdlib and every corpus rung
+does — the ratio anchor moved for it). Marginal time is measured
 against that floor, which is what makes the slope a statement about the project's
 lines rather than about the compiler's startup.
 
@@ -119,6 +121,8 @@ INTRINSIC_RE = re.compile(r"^\s*@(?:wasm_)?intrinsic\b", re.M)
 # like any module's.
 PRIM_REF_RE = re.compile(r"\bprim\.")
 PRIM_IMPORT_RE = re.compile(r"^import prim$", re.M)
+RAWPTR_RE = re.compile(r"\bHandle\b")
+FFI_IMPORT_RE = re.compile(r"^import ffi$", re.M)
 PRIM_DECL_RE = re.compile(r"^((?:effect )?fn (\w+)(?:\[[^\]]*\])?\(([^)]*)\).*?) = _$")
 
 
@@ -139,7 +143,11 @@ def prim_stand_in():
 
 
 def to_stand_in(text):
-    """Point a copied stdlib source's `prim.*` at the `mprim` stand-in."""
+    """Point a copied stdlib source's `prim.*` at the `mprim` stand-in, and give a
+    copy that handles a `Handle` (ADR-0031, was `RawPtr`) the `import ffi` a user file needs to call the
+    raw-memory functions (E100, #4043); the stdlib's own sources are exempt."""
+    if RAWPTR_RE.search(text) and not FFI_IMPORT_RE.search(text):
+        text = "import ffi\n" + text
     had_import = PRIM_IMPORT_RE.search(text) is not None
     text = PRIM_IMPORT_RE.sub("import mprim", text)
     if not PRIM_REF_RE.search(text):

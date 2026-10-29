@@ -179,6 +179,13 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         Ok(ir) => ir,
         Err(e) => { wall("lower", e); return None; }
     };
+    // `[permissions]` bound the wasm test lane as they bound the native one
+    // (#4159 audit: this lane ran a test the manifest forbids). A refusal
+    // falls to the native fallback, which refuses it with the report.
+    if wasm_test_permissions_refuse(test_file, &ir) {
+        wall("permissions", "[permissions] refuse this program".to_string());
+        return None;
+    }
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the counters as `almide run
     // --target wasm` does; the embedded run below prints the line.
     let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT").then(almide_wasm::alloc_count::CountGuard::set);
@@ -257,15 +264,55 @@ impl WasmTestRunner {
     }
 }
 
-/// A finished run's verdict from whether it exited 0 — shared by both runners
-/// so the classification is one rule. `selected` is how many tests the runner
-/// was synthesized over ([`almide_driver::test_runner::runs_test`]): the runner
-/// runs them in order and any failure ends the run non-zero, so a run that
-/// exited 0 ran all of them. The count is NOT read off stdout (#3489): the
+/// How a wasm test run ended, as the HARNESS saw it (#4255). The exit status
+/// alone is not the verdict: `process.exit(0)` inside a test ends the run with
+/// status 0 before the runner `main` reached the remaining tests, and reading
+/// that 0 as "every test passed" greened a file whose later tests failed or
+/// never ran.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RunEnd {
+    /// The runner `main` ran to its end: every selected test reported.
+    Completed,
+    /// Status 0, but the runner did not reach its end.
+    ExitedZeroEarly,
+    /// A non-zero status: a failing test, an abort, a trap.
+    Failed,
+}
+
+impl RunEnd {
+    /// The embedded host knows whether `main` returned.
+    fn embedded(r: &almide_wasm_run::RunResult) -> RunEnd {
+        match (r.exit, r.main_returned) {
+            (0, true) => RunEnd::Completed,
+            (0, false) => RunEnd::ExitedZeroEarly,
+            _ => RunEnd::Failed,
+        }
+    }
+
+    /// A stock runtime reports only the status, so a status-0 run is checked
+    /// against the runner's per-test headers: fewer `test: ` lines than
+    /// selected tests means the run stopped before reaching the rest. (An exit
+    /// inside the LAST selected test is invisible to this lane; the embedded
+    /// host, the default, sees it.)
+    fn stock(success: bool, stdout: &str, selected: usize) -> RunEnd {
+        if !success {
+            return RunEnd::Failed;
+        }
+        let started = stdout.lines().filter(|l| l.starts_with("test: ")).count();
+        if started < selected { RunEnd::ExitedZeroEarly } else { RunEnd::Completed }
+    }
+}
+
+/// A finished run's verdict from how it ENDED ([`RunEnd`]) — shared by both
+/// runners so the classification is one rule. `selected` is how many tests the
+/// runner was synthesized over ([`almide_driver::test_runner::runs_test`]): the
+/// runner runs them in order and any failure ends the run non-zero, so a run
+/// that reached the end of `main` ran all of them (exit status 0 alone does
+/// not say that, #4255). The count is NOT read off stdout (#3489): the
 /// runner's `ok` line shares stdout with the tests, and a test that printed
 /// `ok` counted as a test.
-fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize), bytes_len: usize, success: bool, stdout: &str, stderr: &str) -> WasmTestOutcome {
-    if success {
+fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize), bytes_len: usize, run: RunEnd, stdout: &str, stderr: &str) -> WasmTestOutcome {
+    if run == RunEnd::Completed {
         let ran = selected;
         return WasmTestOutcome::Pass {
             file: test_file.to_string(),
@@ -284,6 +331,13 @@ fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize),
     }
     let mut detail = String::new();
     if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
+    if run == RunEnd::ExitedZeroEarly {
+        detail.push_str(&format!(
+            "  the test run ended with exit status 0 before every test reported (process.exit inside a test?) — {} of {} selected test(s) never finished\n",
+            selected.saturating_sub(stdout.lines().filter(|l| l.starts_with("test: ")).count().saturating_sub(1)),
+            selected,
+        ));
+    }
     // From the failure block when there is one: the first
     // stderr lines may be the program's own (#2538), which
     // `printed` carries under their own label.
@@ -374,7 +428,24 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
             module_diags.iter().flat_map(|(_, _, ds)| ds.iter()).filter(|d| d.level == diagnostic::Level::Error),
         ));
     }
+    // E109 (#4151): the gate every route runs.
+    let refused = almide::effect_value_gate::effect_value_diagnostics(&ir_program, "");
+    if !refused.is_empty() {
+        return Err(render_error_summary(refused.iter()));
+    }
     Ok(ir_program)
+}
+
+/// `[permissions]` on a wasm test lane: the entry file's project manifest,
+/// judged on the lowered program. The violations are printed by the gate;
+/// `true` refuses the file on this lane.
+fn wasm_test_permissions_refuse(test_file: &str, ir: &almide::ir::IrProgram) -> bool {
+    match crate::project::permissions_project_for(test_file) {
+        Some(proj) if proj.permissions.is_some() || proj.proc_allow.is_some() => {
+            super::enforce_project_permissions(ir, &proj).is_err()
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run_filter: Option<&str>) -> WasmTestOutcome {
@@ -392,6 +463,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     let prof = almide_base::env::flag("ALMIDE_PROFILE");
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
+    // `[permissions] fs` (#4084): the embedded host bounds a test run to the
+    // granted directories exactly as it bounds `almide run --target wasm`.
+    // The manifest is the working directory's, as every build route reads it
+    // (`compile_driver`), so every file of one run sets the same scope.
+    almide_wasm_run::set_fs_scope(cwd_fs_scope());
     let (mut program, source_text, parse_errors) = parse_file(test_file);
     // Counted before any filtering so the summary can say what `--run` excluded.
     let declared_tests = program
@@ -424,6 +500,9 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
         Ok(ir) => ir,
         Err(detail) => return compile_error(detail),
     };
+    if wasm_test_permissions_refuse(test_file, &ir_program) {
+        return compile_error("[permissions] refuse this program".to_string());
+    }
     mark(prof, &mut marks, "lower_modules");
     // Nothing to run on any leg — the v1 renderer would refuse this program
     // ("no `main` and no test blocks") and the refusal read as a WALL, i.e. a
@@ -466,11 +545,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             return match almide_wasm_run::run_wasm_unbounded(&module.almide) {
                 Ok(r) => {
                     report_alloc_count(&r);
-                    wasm_run_outcome(test_file, counts, module.reported_len(), r.exit == 0, &r.stdout, &r.stderr)
+                    wasm_run_outcome(test_file, counts, module.reported_len(), RunEnd::embedded(&r), &r.stdout, &r.stderr)
                 }
                 // A module the host cannot instantiate FAILS, as the CLI's
                 // non-zero exit did — it is not a benign skip.
-                Err(e) => wasm_run_outcome(test_file, counts, module.reported_len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
+                Err(e) => wasm_run_outcome(test_file, counts, module.reported_len(), RunEnd::Failed, "", &format!("Error: embedded wasm host: {e:#}\n")),
             };
         }
         // A stock runtime cannot start the fresh instance an abort site runs
@@ -500,14 +579,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             }
         }
         match cmd.arg(&wasm_path).output() {
-            Ok(result) => wasm_run_outcome(
-                test_file,
-                counts,
-                wasi.len(),
-                result.status.success(),
-                &String::from_utf8_lossy(&result.stdout),
-                &String::from_utf8_lossy(&result.stderr),
-            ),
+            Ok(result) => {
+                let stdout = String::from_utf8_lossy(&result.stdout);
+                let end = RunEnd::stock(result.status.success(), &stdout, counts.1);
+                wasm_run_outcome(test_file, counts, wasi.len(), end, &stdout, &String::from_utf8_lossy(&result.stderr))
+            }
             Err(e) => skip_env(format!("ALMIDE_TEST_WASM_RUNNER=wasmtime, and the `wasmtime` CLI did not start: {e}")),
         }
     };
@@ -638,6 +714,16 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
+/// The working directory's `[permissions] fs` roots (anchored to the
+/// manifest), or `None` without a manifest or without the key.
+fn cwd_fs_scope() -> Option<Vec<String>> {
+    let manifest = std::path::Path::new("almide.toml");
+    if !manifest.exists() {
+        return None;
+    }
+    crate::project::parse_toml(manifest).ok().and_then(|p| p.fs_allow)
+}
+
 pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
     let run_filter: Option<String> = run_filter.map(str::to_string);
     let scratch = scratch.clone();
@@ -663,7 +749,7 @@ pub(super) fn run_native_fallback_phase(fallback: &[String], program_args: &std:
         let worker_dir = scratch.native_worker_dir(&tf);
         let (built, (code, stdout, stderr)) = guard_worker_panic(
             || match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => (true, super::run::run_binary_captured_io(&bin, &args)),
+                Ok(bin) => (true, super::test_report::run_native_test_binary(&tf, &bin, &args)),
                 Err(e) => (false, (1, format!("Compile error for {}:\n{}", tf, e), String::new())),
             },
             |msg| (false, (1, format!("Compile error for {}:\n{}", tf, msg), String::new())),

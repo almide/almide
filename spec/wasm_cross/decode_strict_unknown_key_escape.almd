@@ -1,0 +1,54 @@
+// @contract: C-429, C-436, C-418
+// #4263: the key `T.decode_strict` and `http.decode_json[T]` refuse is the
+// input's, so the derived text writes it by C-418's rule: a key carrying ESC,
+// U+202E, a newline, a C1 control or an isolate reads `\u{1b}`, `\u{202e}`,
+// `\n`, `\u{85}`, `\u{2066}` in `unknown key '<k>'` and in the 400 body, at
+// every depth and in every position a key is refused (a record, a list
+// element, a nested record, a key after a variant's tag, a variant's record
+// payload). The quote and the backslash are kept, and an ordinary key reads
+// back as is. An unknown tag echoes nothing. The same bytes on every leg.
+import http
+import json
+
+type Geo: Decode = { lat: Float }
+
+type Item: Decode = { name: String, geo: Geo? }
+
+type Order: Decode = { items: List[Item] }
+
+type Command: Decode = | Rename { name: String } | Delete
+
+fn key(k: String) -> String = json.stringify(value.string(k))
+
+fn doc(text: String) -> Value = json.parse(text) ?? value.null()
+
+fn order(text: String) -> String = match Order.decode_strict(doc(text)) {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+fn command(text: String) -> String = match Command.decode_strict(doc(text)) {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+fn post(text: String) -> String = match http.decode_json[Order](http.new_request("POST", "/orders", text, [])) {
+  ok(_) => "ok",
+  err(bad) => "${bad}",
+}
+
+effect fn main() -> Unit = {
+  let h = key("A\u{1b}[31mB\u{202e}C\nD")
+  let c1 = key("x\u{85}y\u{2066}z")
+  let plain = key("it's a\\b")
+  println(order("{\"items\": [], " + h + ": 1}"))
+  println(order("{\"items\": [{\"name\": \"n\", " + h + ": 1}]}"))
+  println(order("{\"items\": [{\"name\": \"n\", \"geo\": {\"lat\": 1.0, " + c1 + ": 2}}]}"))
+  println(order("{\"items\": [], " + plain + ": 1}"))
+  println(order("{\"items\": [{\"name\": \"n\"}]}"))
+  println(command("{\"Delete\": null, " + h + ": 1}"))
+  println(command("{\"Rename\": {\"name\": \"n\", " + c1 + ": 1}}"))
+  println(command("{" + h + ": null}"))
+  println(post("{\"items\": [], " + h + ": 1}"))
+  println(post("{\"items\": [{\"name\": \"n\", \"geo\": {\"lat\": 1.0, " + c1 + ": 2}}]}"))
+}

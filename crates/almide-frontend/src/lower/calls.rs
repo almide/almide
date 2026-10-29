@@ -29,6 +29,9 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     // become `n * <ns factor>` typed Int. The nominal Compute/Duration types
     // exist only in the checker (the clock firewall); MIR and both renderers
     // see a plain i64 of nanoseconds.
+    if let Some(cmp) = lower_time_compare_call(ctx, callee, args, span) {
+        return cmp;
+    }
     if let Some(erased) = lower_time_ctor(ctx, callee, args, span) {
         return erased;
     }
@@ -311,14 +314,25 @@ fn desugar_assert_outside_test(
     ir_args: &[IrExpr],
     span: Option<ast::Span>,
 ) -> Option<IrExpr> {
-    if ctx.in_test {
-        return None;
-    }
     let CallTarget::Named { name } = target else { return None };
     let n = name.as_str();
     let is_assert = (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
         || (n == "assert" && !ir_args.is_empty());
     if !is_assert {
+        return None;
+    }
+    if ctx.in_test {
+        // Inside a test the harness forms report the assert, so the test
+        // fails alone and the run goes on. An `assert_eq` / `assert_ne` becomes
+        // the harness `assert(cond, msg)` with its operands shown as every
+        // other route shows them (`assert_shown`): through a declared repr
+        // (#4107), escaped by C-418 (#4262). Left to the leg, native's
+        // `assert_eq!` printed Rust `Debug` (quoted, and not C-418's escape)
+        // while the wasm test lane printed the operands raw
+        // (`test_report::repr_assert` reads the harness form back).
+        if matches!(n, "assert_eq" | "assert_ne") {
+            return Some(declared_repr_test_assert(ctx, n, ir_args.to_vec(), span));
+        }
         return None;
     }
     Some(desugar_assert_abort(ctx, n, ir_args.to_vec(), span))
@@ -594,6 +608,47 @@ fn strip_result_ok(ty: &Ty) -> Ty {
     }
 }
 
+/// An in-test `assert_eq` / `assert_ne` (#4107, #4262):
+/// `assert(<comparison>, "assert_eq\n  expected: <r>\n  found: <l>")`, the
+/// operands bound once and shown by `assert_shown` (declared repr, C-418).
+fn declared_repr_test_assert(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ir_args: Vec<IrExpr>,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    let (mut stmts, vars) = bind_assert_operands(ctx, ir_args, span);
+    let negate = name == "assert_ne";
+    let cond = ctx.lower_secret_eq(vars[0].clone(), vars[1].clone(), negate).unwrap_or_else(|| ctx.mk(
+        IrExprKind::BinOp {
+            op: if negate { BinOp::Neq } else { BinOp::Eq },
+            left: Box::new(vars[0].clone()),
+            right: Box::new(vars[1].clone()),
+        },
+        Ty::Bool,
+        span,
+    ));
+    let (expected, found) = if negate { (vars[0].clone(), vars[0].clone()) } else { (vars[1].clone(), vars[0].clone()) };
+    // The header says when the operand type ITSELF declares its repr: the
+    // report then shows the two renderings as they are, never a field diff
+    // (`test_report::repr_assert`).
+    let own = if ctx.find_explicit_convention_fn(&vars[0].ty, "repr").is_some() { " (declared repr)" } else { "" };
+    let parts = vec![
+        IrStringPart::Lit { value: format!("{name}{own}\n  expected: {}", if negate { "!= " } else { "" }) },
+        IrStringPart::Expr { expr: assert_shown(ctx, expected, span) },
+        IrStringPart::Lit { value: "\n  found: ".into() },
+        IrStringPart::Expr { expr: assert_shown(ctx, found, span) },
+    ];
+    let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
+    let call = ctx.mk(
+        IrExprKind::Call { target: CallTarget::Named { name: sym("assert") }, args: vec![cond, msg], type_args: vec![] },
+        Ty::Unit,
+        span,
+    );
+    stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None });
+    ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(ctx.mk(IrExprKind::Unit, Ty::Unit, span))) }, Ty::Unit, span)
+}
+
 /// Build the ALS-T18 abort form for a non-test assert:
 /// ```text
 /// { let __a0 = l; let __a1 = r;
@@ -625,8 +680,12 @@ fn desugar_assert_abort(
     span: Option<ast::Span>,
 ) -> IrExpr {
     let (mut stmts, vars) = bind_assert_operands(ctx, ir_args, span);
+    // #4107: a Secret operand compares in constant time (R-secret-03).
+    let secret_cmp = |ctx: &mut LowerCtx, negate: bool| {
+        ctx.lower_secret_eq(vars[0].clone(), vars[1].clone(), negate)
+    };
     let cond = match name {
-        "assert_eq" | "assert_snapshot" => ctx.mk(
+        "assert_eq" | "assert_snapshot" => secret_cmp(ctx, false).unwrap_or_else(|| ctx.mk(
             IrExprKind::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(vars[0].clone()),
@@ -634,8 +693,8 @@ fn desugar_assert_abort(
             },
             Ty::Bool,
             span,
-        ),
-        "assert_ne" => ctx.mk(
+        )),
+        "assert_ne" => secret_cmp(ctx, true).unwrap_or_else(|| ctx.mk(
             IrExprKind::BinOp {
                 op: BinOp::Neq,
                 left: Box::new(vars[0].clone()),
@@ -643,7 +702,7 @@ fn desugar_assert_abort(
             },
             Ty::Bool,
             span,
-        ),
+        )),
         _ => vars[0].clone(),
     };
     // `  at: line <N>\n` — the assertion's own source line, baked in as a
@@ -656,9 +715,9 @@ fn desugar_assert_abort(
     let parts: Vec<IrStringPart> = match name {
         "assert_eq" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
-            IrStringPart::Expr { expr: vars[1].clone() },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[1].clone(), span) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[0].clone(), span) },
         ],
         // The snapshot block (#1314): same field order as assert_eq — `found`
         // LAST so the accept step can take it verbatim to the end of the
@@ -666,20 +725,20 @@ fn desugar_assert_abort(
         // coarse for a value that is about to be written back into source).
         "assert_snapshot" => vec![
             IrStringPart::Lit { value: format!("Error: snapshot mismatch{at}\n  expected: ") },
-            IrStringPart::Expr { expr: vars[1].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[1].clone()) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
         ],
         "assert_ne" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: != ") },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[0].clone(), span) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: assert_shown(ctx, vars[0].clone(), span) },
         ],
         _ if vars.len() >= 2 => {
             let mut p = vec![
                 IrStringPart::Lit { value: "Error: assertion failed: ".into() },
-                IrStringPart::Expr { expr: vars[1].clone() },
+                IrStringPart::Expr { expr: ctx.render_declared(vars[1].clone()) },
             ];
             if !at.is_empty() {
                 p.push(IrStringPart::Lit { value: at.clone() });
@@ -713,6 +772,8 @@ fn desugar_assert_abort(
 include!("calls_target.rs");
 
 include!("calls_time.rs");
+
+include!("calls_time_compare.rs");
 
 include!("calls_testing_assert.rs");
 

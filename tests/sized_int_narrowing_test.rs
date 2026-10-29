@@ -2,14 +2,14 @@
 //! checker (#867). It used to be accepted — `compatible`'s literal-coercion
 //! rule was symmetric — and the emitted Rust then failed with E0308
 //! (`expected i64, found i32`), breaking the check-accepted-must-build
-//! invariant for the whole `<narrow>.to_<narrower-than-i64>()` family.
+//! invariant for the whole `<narrower-than-i64>.from(x)` family.
 //!
 //! The rule is directional on purpose:
 //! - INTO a sized slot stays open — that is how an `Int`-typed literal is
 //!   contextually typed (`let x: Int32 = 42`).
 //! - OUT of a sized value into `Int`/`Int64` is closed — no literal ever
 //!   types that direction, so it is always a real value that needs the
-//!   explicit, lossless `.to_int64()`.
+//!   explicit, lossless `int.from(x)`.
 //! - `Int` ↔ `Int64` (and `Float` ↔ `Float64`) bridge freely: same width,
 //!   same runtime repr.
 
@@ -36,23 +36,23 @@ fn check(dir: &std::path::Path, source: &str) -> String {
 
 const REJECTED: &[&str] = &[
     // The filed repro: an Int32-returning conversion passed to an Int slot.
-    "effect fn main() -> Unit = {\n  let u: UInt8 = 200\n  println(int.to_string(u.to_int32()))\n}",
+    "effect fn main() -> Unit = {\n  let u: UInt8 = 200\n  println(int.to_string(int32.from(u)))\n}",
     // Same family, other widths.
-    "effect fn main() -> Unit = {\n  let u: UInt16 = 9\n  println(int.to_string(u.to_int8()))\n}",
+    "effect fn main() -> Unit = {\n  let u: UInt16 = 9\n  println(int.to_string(int8.from_wrapping(u)))\n}",
     // Float sibling: a Float32 value where Float is expected.
     "effect fn main() -> Unit = {\n  let f: Float32 = 1.5\n  println(float.to_string(f))\n}",
     // Annotation position — the same direction stated as a binding.
-    "effect fn main() -> Unit = {\n  let u: UInt8 = 200\n  let a: Int = u.to_int32()\n  println(int.to_string(a))\n}",
+    "effect fn main() -> Unit = {\n  let u: UInt8 = 200\n  let a: Int = int32.from(u)\n  println(int.to_string(a))\n}",
     "effect fn main() -> Unit = {\n  let f: Float32 = 1.5\n  var g: Float = f\n  g = 2.0\n  println(float.to_string(g))\n}",
 ];
 
 const ACCEPTED: &[&str] = &[
     // The documented idiom: widen explicitly first.
-    "effect fn main() -> Unit = {\n  let u: UInt8 = 200\n  println(int.to_string(u.to_int64()))\n}",
+    "effect fn main() -> Unit = {\n  let u: UInt8 = 200\n  println(int.to_string(int64.from(u)))\n}",
     // Literal coercion into sized slots must keep working.
     "fn f(x: Int32) -> Int32 = x\n\neffect fn main() -> Unit = {\n  println(int32.to_string(f(5)))\n}",
     // Int ↔ Int64 same-width bridging.
-    "effect fn main() -> Unit = {\n  let u: UInt8 = 7\n  let w: Int64 = u.to_int64()\n  println(int.to_string(w))\n}",
+    "effect fn main() -> Unit = {\n  let u: UInt8 = 7\n  let w: Int64 = int64.from(u)\n  println(int.to_string(w))\n}",
     // Sized comparisons against literals, both operand orders.
     "effect fn main() -> Unit = {\n  let u: UInt8 = 3\n  if u == 3 then println(\"a\") else println(\"b\")\n  assert_eq(u, 3)\n}",
     // Annotated literal bindings — the coercion direction that must stay open.
@@ -69,7 +69,7 @@ fn narrow_sized_value_into_int_slot_is_rejected() {
             "must be rejected by check (it cannot build):\n{src}\ngot:\n{out}"
         );
         assert!(
-            out.contains("to_int64") || out.contains("to_float64"),
+            out.contains("int.from(x)") || out.contains("float.from(x)"),
             "the hint must name the explicit widening idiom:\n{src}\ngot:\n{out}"
         );
     }

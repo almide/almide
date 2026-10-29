@@ -21,10 +21,11 @@ include!("net_error_core.rs");
 pub struct AlmideNetTables {
     streams: Vec<Option<std::net::TcpStream>>,
     listeners: Vec<Option<std::net::TcpListener>>,
+    udps: Vec<Option<std::net::UdpSocket>>,
 }
 
-fn almide_net_slot<T>(v: &mut Vec<Option<T>>, x: T) -> i64 {
-    match v.iter().position(|s| s.is_none()) {
+fn almide_net_slot<T: AlmideNetSlotKind>(v: &mut Vec<Option<T>>, x: T) -> i64 {
+    let h = match v.iter().position(|s| s.is_none()) {
         Some(i) => {
             v[i] = Some(x);
             i as i64
@@ -33,24 +34,89 @@ fn almide_net_slot<T>(v: &mut Vec<Option<T>>, x: T) -> i64 {
             v.push(Some(x));
             (v.len() - 1) as i64
         }
+    };
+    almide_net_note(T::opened(h));
+    h
+}
+
+/// A handle an `http.serve` handler opened (#4203).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlmideNetOpened {
+    Stream(i64),
+    Listener(i64),
+    Udp(i64),
+}
+
+/// Which table a slot belongs to.
+pub trait AlmideNetSlotKind {
+    fn opened(h: i64) -> AlmideNetOpened;
+}
+
+impl AlmideNetSlotKind for std::net::TcpStream {
+    fn opened(h: i64) -> AlmideNetOpened {
+        AlmideNetOpened::Stream(h)
     }
+}
+
+impl AlmideNetSlotKind for std::net::TcpListener {
+    fn opened(h: i64) -> AlmideNetOpened {
+        AlmideNetOpened::Listener(h)
+    }
+}
+
+impl AlmideNetSlotKind for std::net::UdpSocket {
+    fn opened(h: i64) -> AlmideNetOpened {
+        AlmideNetOpened::Udp(h)
+    }
+}
+
+// The handles opened on THIS thread while an `http.serve` handler runs on it
+// (#4203). The table is one per process (native, #4199) or per run
+// (embedded), but the record is per thread: a handler runs on the serve
+// loop's thread, so a `fan` arm's thread or another serve loop's opens are
+// never in it, and an abort closes only what its own handler opened.
+thread_local! {
+    static ALMIDE_NET_REQUEST: std::cell::RefCell<Option<Vec<AlmideNetOpened>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn almide_net_note(o: AlmideNetOpened) {
+    ALMIDE_NET_REQUEST.with(|r| {
+        if let Some(log) = r.borrow_mut().as_mut() {
+            log.push(o);
+        }
+    });
+}
+
+/// Start recording this thread's opens (a handler call begins).
+pub fn almide_net_request_begin() {
+    ALMIDE_NET_REQUEST.with(|r| *r.borrow_mut() = Some(Vec::new()));
+}
+
+/// Whether this thread is recording.
+pub fn almide_net_request_active() -> bool {
+    ALMIDE_NET_REQUEST.with(|r| r.borrow().is_some())
+}
+
+/// Stop recording; answers what this thread opened since the begin.
+pub fn almide_net_request_end() -> Vec<AlmideNetOpened> {
+    ALMIDE_NET_REQUEST.with(|r| r.borrow_mut().take().unwrap_or_default())
 }
 
 /// The slot behind `h`: the invalid-handle err past the end (a negative
 /// handle included), the closed err for an emptied slot.
-fn almide_net_get<'a, T>(v: &'a mut [Option<T>], kind: &str, h: i64) -> Result<&'a mut T, String> {
+fn almide_net_get<'a, T>(v: &'a mut [Option<T>], kind: &'static str, h: i64) -> Result<&'a mut T, String> {
     let i = usize::try_from(h).ok().filter(|i| *i < v.len()).ok_or_else(|| net_err_invalid_handle(kind, h))?;
     v[i].as_mut().ok_or_else(|| net_err_closed_handle(kind, h))
 }
 
-fn almide_net_len(f: &str, len: i64) -> Result<usize, String> {
+fn almide_net_len(f: &'static str, len: i64) -> Result<usize, String> {
     usize::try_from(len).map_err(|_| net_err_negative_len(f, len))
 }
 
 /// Resolve `host:port`. An IP literal (IPv6 bare or in brackets) is parsed,
 /// never looked up; a name goes to the platform resolver.
-fn almide_net_resolve(f: &str, host: &str, port: i64) -> Result<Vec<std::net::SocketAddr>, String> {
-    let head = format!("{f}({host}:{port})");
+fn almide_net_resolve(f: &'static str, host: &str, port: i64) -> Result<Vec<std::net::SocketAddr>, String> {
+    let head = format!("{f}({}:{port})", almide_rt_errtext_escape(host));
     let port = u16::try_from(port).map_err(|_| net_err_port_range(&head))?;
     let bare = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
     if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
@@ -66,7 +132,7 @@ fn almide_net_resolve(f: &str, host: &str, port: i64) -> Result<Vec<std::net::So
 }
 
 /// Try each address in turn; the last failure classifies the err.
-fn almide_net_each<T>(f: &str, host: &str, port: i64, mut go: impl FnMut(&std::net::SocketAddr) -> std::io::Result<T>) -> Result<T, String> {
+fn almide_net_each<T>(f: &'static str, host: &str, port: i64, mut go: impl FnMut(&std::net::SocketAddr) -> std::io::Result<T>) -> Result<T, String> {
     let addrs = almide_net_resolve(f, host, port)?;
     let mut last = None;
     for a in &addrs {
@@ -75,7 +141,7 @@ fn almide_net_each<T>(f: &str, host: &str, port: i64, mut go: impl FnMut(&std::n
             Err(e) => last = Some(e),
         }
     }
-    let head = format!("{f}({host}:{port})");
+    let head = format!("{f}({}:{port})", almide_rt_errtext_escape(host));
     Err(last.map_or_else(|| net_err_unresolvable(&head, host), |e| net_io_error_text(&head, &e)))
 }
 
@@ -118,12 +184,16 @@ impl AlmideNetTables {
     pub fn tcp_read_exact(&mut self, h: i64, len: i64) -> Result<Vec<u8>, String> {
         let n = almide_net_len("tcp_read_exact", len)?;
         let s = self.stream(h)?;
-        let mut buf = vec![0u8; n];
-        let mut got = 0;
-        while got < n {
-            match std::io::Read::read(s, &mut buf[got..]) {
-                Ok(0) => return Err(net_err_short_read(got, len)),
-                Ok(k) => got += k,
+        // The answer grows with the bytes that arrive (#4123): `len` is the
+        // program's number, and allocating it up front aborted the process on
+        // a huge one before a single byte was read.
+        let mut chunk = vec![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
+        let mut buf = Vec::new();
+        while buf.len() < n {
+            let want = (n - buf.len()).min(chunk.len());
+            match std::io::Read::read(s, &mut chunk[..want]) {
+                Ok(0) => return Err(net_err_short_read(buf.len(), len)),
+                Ok(k) => buf.extend_from_slice(&chunk[..k]),
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(net_io_error_text("tcp_read_exact", &e)),
             }
@@ -176,6 +246,26 @@ impl AlmideNetTables {
     }
 
     /// Closing a closed stream is ok; a handle never issued is not.
+    /// Close each handle in `opened` that is still open (#4203: what an
+    /// aborted handler opened and left open). Answers how many it closed.
+    pub fn close_opened(&mut self, opened: &[AlmideNetOpened]) -> usize {
+        let mut n = 0;
+        for o in opened {
+            let closed = match *o {
+                AlmideNetOpened::Stream(h) => self
+                    .streams
+                    .get_mut(h as usize)
+                    .and_then(Option::take)
+                    .map(|s| s.shutdown(std::net::Shutdown::Both))
+                    .is_some(),
+                AlmideNetOpened::Listener(h) => self.listeners.get_mut(h as usize).and_then(Option::take).is_some(),
+                AlmideNetOpened::Udp(h) => self.udps.get_mut(h as usize).and_then(Option::take).is_some(),
+            };
+            n += usize::from(closed);
+        }
+        n
+    }
+
     pub fn tcp_close(&mut self, h: i64) -> Result<(), String> {
         let i = usize::try_from(h).ok().filter(|i| *i < self.streams.len())
             .ok_or_else(|| net_err_invalid_handle("TcpStream", h))?;
@@ -195,17 +285,91 @@ impl AlmideNetTables {
     pub fn tcp_is_open(&self, h: i64) -> bool {
         usize::try_from(h).ok().and_then(|i| self.streams.get(i)).is_some_and(|s| s.is_some())
     }
+
+    // ── UDP (R-net-02): its own table, counting from 0 like the tcp ones ──
+
+    fn udp(&mut self, h: i64) -> Result<&mut std::net::UdpSocket, String> {
+        almide_net_get(&mut self.udps, "UdpSocket", h)
+    }
+
+    pub fn udp_bind(&mut self, host: &str, port: i64) -> Result<i64, String> {
+        let u = almide_net_each("udp_bind", host, port, |a| std::net::UdpSocket::bind(a))?;
+        Ok(almide_net_slot(&mut self.udps, u))
+    }
+
+    pub fn udp_local_port(&mut self, h: i64) -> Result<i64, String> {
+        let a = self.udp(h)?.local_addr().map_err(|e| net_io_error_text("udp_local_port", &e))?;
+        Ok(a.port() as i64)
+    }
+
+    /// One datagram; err unless all of `data` went out in it.
+    pub fn udp_send_to(&mut self, h: i64, data: &[u8], host: &str, port: i64) -> Result<(), String> {
+        let addrs = almide_net_resolve("udp_send_to", host, port)?;
+        let u = self.udp(h)?;
+        let sent = u.send_to(data, addrs[0]).map_err(|e| net_io_error_text("udp_send_to", &e))?;
+        if sent != data.len() {
+            return Err(format!("udp_send_to: sent {sent} of {} bytes", data.len()));
+        }
+        Ok(())
+    }
+
+    /// The next datagram, at most `max` bytes of it (the rest is dropped, as
+    /// the OS does), and the sender's address and port. A huge `max` sizes no
+    /// buffer: a datagram is at most 65535 bytes.
+    pub fn udp_recv_from(&mut self, h: i64, max: i64) -> Result<(Vec<u8>, String, i64), String> {
+        let n = almide_net_len("udp_recv_from", max)?;
+        let u = self.udp(h)?;
+        let mut buf = vec![0u8; n.min(65535)];
+        loop {
+            match u.recv_from(&mut buf) {
+                Ok((k, from)) => {
+                    buf.truncate(k);
+                    return Ok((buf, from.ip().to_string(), from.port() as i64));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(net_io_error_text("udp_recv_from", &e)),
+            }
+        }
+    }
+
+    /// Closing a closed socket is ok; a handle never issued is not.
+    pub fn udp_close(&mut self, h: i64) -> Result<(), String> {
+        let i = usize::try_from(h).ok().filter(|i| *i < self.udps.len())
+            .ok_or_else(|| net_err_invalid_handle("UdpSocket", h))?;
+        self.udps[i].take();
+        Ok(())
+    }
 }
 
-/// One `read` of at most `n` bytes; 0 bytes is EOF (or `n == 0`).
+/// The addresses `host` resolves to, in the resolver's order, each once; an
+/// IP literal is itself. Err when there are none.
+pub fn almide_net_lookup_host(host: &str) -> Result<Vec<String>, String> {
+    let addrs = almide_net_resolve("lookup_host", host, 0)?;
+    let mut out: Vec<String> = Vec::new();
+    for a in addrs {
+        let ip = a.ip().to_string();
+        if !out.contains(&ip) {
+            out.push(ip);
+        }
+    }
+    Ok(out)
+}
+
+/// The most one read takes into memory at a time (#4123): a read's buffer is
+/// never the program's `len` itself, which a huge `len` turned into an
+/// allocation failure that aborted the process.
+const ALMIDE_NET_READ_CHUNK: usize = 64 * 1024;
+
+/// One `read` of at most `n` bytes — at most 64 KiB of them, as a read may
+/// always answer fewer than asked; 0 bytes is EOF (or `n == 0`).
 /// A zero-length read answers empty WITHOUT the syscall: Linux's `recv` on
 /// a zero-length buffer waits for data where macOS returns at once, so
 /// `tcp_read(c, 0)` on an idle stream hung on Linux (#3679's CI).
-fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &str) -> Result<Vec<u8>, String> {
+fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &'static str) -> Result<Vec<u8>, String> {
     if n == 0 {
         return Ok(Vec::new());
     }
-    let mut buf = vec![0u8; n];
+    let mut buf = vec![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
     loop {
         match std::io::Read::read(s, &mut buf) {
             Ok(k) => {

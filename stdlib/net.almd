@@ -1,124 +1,281 @@
-// net — TCP networking, Unix-domain sockets and shared-memory files.
+// net — TCP, UDP, name lookup and IP addresses: what wasi:sockets carries
+// (R-L1-26). Unix-domain sockets and shared memory are `unix`. Requires
+// `import net`.
 //
-// TcpStream and TcpListener are opaque Int handles. The unix_* and shm_*
-// functions speak raw file descriptors instead: a descriptor is what crosses
-// to a peer (unix_send) and what arrives from one (unix_take_fds).
-// Requires `import net`.
-/// Opaque Int handle to a TCP connection.
-type TcpStream = Int
+// The handles are opaque (R-net-05): only this module makes a TcpStream,
+// TcpListener or UdpSocket, so a bare Int or another kind of handle never
+// reaches a call. Reading, writing and closing are io's (R-net-07):
+// `io.read(s, n)`, `io.read_exact(s, n)`, `io.write(s, data)`, `io.close(h)`.
+/// A connected TCP stream; Read, Write and Close.
+mod type TcpStream: Read, Write, Close = Int
 
-/// Opaque Int handle to a listening socket.
-type TcpListener = Int
+/// A listening TCP socket; Close.
+mod type TcpListener: Close = Int
 
-// ── Connect ──
-/// Connected stream handle; err if refused.
-@intrinsic("almide_rt_net_tcp_connect")
-effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+/// A bound UDP socket; Close.
+mod type UdpSocket: Close = Int
 
-// ── Read / Write ──
-/// Up to len bytes; empty once the peer closed; err if len < 0.
-@intrinsic("almide_rt_net_tcp_read")
-effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
+/// One received datagram and where it came from.
+type UdpPacket = { data: Bytes, host: String, port: Int }
 
-/// Sends all of data, flushed; err if closed.
-@intrinsic("almide_rt_net_tcp_write")
-effect fn tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
+/// An IP address: four octets, or eight 16-bit groups.
+type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
 
-/// Exactly len bytes; err on early EOF, naming how many arrived.
-@intrinsic("almide_rt_net_tcp_read_exact")
-effect fn tcp_read_exact(stream: Int, len: Int) -> Result[Bytes, String] = _
+// ── TCP ──
+/// A stream connected to host:port; err if refused.
+@category("Net.fetch")
+effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_connect(host, port)!))
 
-// ── Close ──
-/// Shuts down the stream; twice is ok.
-@intrinsic("almide_rt_net_tcp_close")
-effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
+/// False after io.close; a peer close is not seen.
+effect fn tcp_is_open(stream: TcpStream) -> Bool = net.__os_tcp_is_open(__tcp(stream))
 
-// ── Status ──
-/// False after tcp_close; a peer close is not seen.
-@intrinsic("almide_rt_net_tcp_is_open")
-fn tcp_is_open(stream: Int) -> Bool = _
-
-// ── Timeout ──
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-@intrinsic("almide_rt_net_tcp_read_timeout")
-effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read_timeout(
+  __tcp(stream),
+  len,
+  timeout_ms,
+)!)
 
 /// Sets read/write timeout; <= 0 clears it.
-@intrinsic("almide_rt_net_tcp_set_timeout")
-effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = net.__os_tcp_set_timeout(
+  __tcp(stream),
+  timeout_ms,
+)
 
-// ── Available bytes ──
 /// Bytes readable now, capped at 65536; 0 if none.
-@intrinsic("almide_rt_net_tcp_available")
-effect fn tcp_available(stream: Int) -> Result[Int, String] = _
+effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = net.__os_tcp_available(__tcp(stream))
 
-// ── Server ──
-/// Listener bound to host:port; err if in use.
-@intrinsic("almide_rt_net_tcp_listen")
-effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+/// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
+@category("Net.listen")
+effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(net.__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
-@intrinsic("almide_rt_net_tcp_local_port")
-effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
+@category("Net.listen")
+effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = net.__os_tcp_local_port(__listener(listener))
 
-/// Blocks for the next client; its stream handle.
-@intrinsic("almide_rt_net_tcp_accept")
-effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
+/// Blocks for the next client; its stream.
+@category("Net.listen")
+effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_accept(__listener(listener))!))
 
-/// Stops listening; closing twice is ok.
-@intrinsic("almide_rt_net_tcp_close_listener")
-effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
+// ── UDP (R-net-02) ──
+/// A UDP socket bound to host:port; port 0 lets the OS choose.
+effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(net.__os_udp_bind(host, port)!))
 
-// ── Unix-domain sockets ──
-/// Stream socket connected to the listener at path; its descriptor.
-@intrinsic("almide_rt_net_unix_connect")
-effect fn unix_connect(path: String) -> Result[Int, String] = _
+/// The port sock is bound to.
+effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = net.__os_udp_local_port(__udp(sock))
 
-/// Listener bound at path, which must not exist yet.
-@intrinsic("almide_rt_net_unix_listen")
-effect fn unix_listen(path: String) -> Result[Int, String] = _
+/// Sends data as one datagram to host:port.
+effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = net.__os_udp_send_to(
+  __udp(sock),
+  data,
+  host,
+  port,
+)
 
-/// Blocks for the next connection; its descriptor.
-@intrinsic("almide_rt_net_unix_accept")
-effect fn unix_accept(listener: Int) -> Result[Int, String] = _
+/// Blocks for the next datagram: at most max bytes of it, and its sender.
+effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] = {
+  let (data, host, port) = net.__os_udp_recv_from(__udp(sock), max)!
+  ok(UdpPacket { data: data, host: host, port: port })
+}
 
-/// Sends all of data, the descriptors fds riding with its first byte.
-@intrinsic("almide_rt_net_unix_send")
-effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
+// ── Names and addresses (R-net-03) ──
+/// The addresses host resolves to, each once; err if none.
+@category("Net.fetch")
+effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
+  let texts = net.__os_lookup_host(host)!
+  ok(texts |> list.filter_map((t) => parse_ip(t)?))
+}
 
-/// Up to max bytes, blocking; empty once the peer closed.
-@intrinsic("almide_rt_net_unix_recv")
-effect fn unix_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
+/// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
+@category
+fn parse_ip(s: String) -> Result[IpAddr, String] =
+  if string.contains(s, ":") then __parse_v6(s) else __parse_v4(s, s)
 
-/// Descriptors received on sock and not yet taken, oldest first.
-@intrinsic("almide_rt_net_unix_take_fds")
-effect fn unix_take_fds(sock: Int) -> List[Int] = _
+/// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
+@category
+fn ip_to_string(ip: IpAddr) -> String = match ip {
+  V4(a, b, c, d) => "${a}.${b}.${c}.${d}",
+  V6(gs) => __v6_text(gs),
+}
 
-/// True if fd is readable within timeout_ms; < 0 waits forever.
-@intrinsic("almide_rt_net_unix_poll")
-effect fn unix_poll(fd: Int, timeout_ms: Int) -> Result[Bool, String] = _
+/// True for 127.0.0.0/8 and ::1.
+@category
+fn is_loopback(ip: IpAddr) -> Bool = match ip {
+  V4(a, _, _, _) => a == 127,
+  V6(gs) => gs == [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
+}
 
-/// The fds readable within timeout_ms, in order; < 0 waits for one.
-@intrinsic("almide_rt_net_unix_wait")
-effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
+// ── The handles' I/O requirements (R-L0-44) ──
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read(
+  __tcp(h),
+  max,
+)!)
 
-/// Closes a socket, listener or received descriptor.
-@intrinsic("almide_rt_net_unix_close")
-effect fn unix_close(fd: Int) -> Result[Unit, String] = _
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = net.__os_tcp_write(
+  __tcp(h),
+  data,
+)
 
-// ── Shared-memory files ──
-/// New zero-filled unnamed file of size bytes; its descriptor.
-@intrinsic("almide_rt_net_shm_create")
-effect fn shm_create(size: Int) -> Result[Int, String] = _
+effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = net.__os_tcp_close(__tcp(h))
 
-/// Grows or shrinks the file fd to size bytes.
-@intrinsic("almide_rt_net_shm_resize")
-effect fn shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
+@category("Net.listen")
+effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = net.__os_tcp_close_listener(__listener(h))
 
-/// Writes data into fd at byte offset.
-@intrinsic("almide_rt_net_shm_write")
-effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
+effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = net.__os_udp_close(__udp(h))
 
-/// Up to len bytes of fd from offset; fewer at its end.
-@intrinsic("almide_rt_net_shm_read")
-effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+local fn __tcp(s: TcpStream) -> Int = match s {
+  TcpStream(n) => n
+}
+
+local fn __listener(l: TcpListener) -> Int = match l {
+  TcpListener(n) => n
+}
+
+local fn __udp(u: UdpSocket) -> Int = match u {
+  UdpSocket(n) => n
+}
+
+// ── Address text ──
+local fn __octet(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 3 or (string.len(t) > 1 and string.starts_with(t, "0")) then none
+  else match int.parse(t) {
+    ok(n) => if n >= 0 and n <= 255 and string.to_list(t) |> list.all((c) => string.contains("0123456789", c)) then some(n) else none,
+    err(_) => none,
+  }
+
+local fn __parse_v4(t: String, whole: String) -> Result[IpAddr, String] = {
+  let parts = string.split(t, ".") |> list.map((p) => __octet(p))
+  match parts {
+    [some(a), some(b), some(c), some(d)] => ok(V4(a, b, c, d)),
+    _ => err("net.parse_ip: not an IP address: \"${whole}\""),
+  }
+}
+
+local fn __group(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 4 then none
+  else if string.to_list(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.parse_radix(
+    t,
+    16,
+  )?
+  else none
+
+// One side of a `::` (or the whole address without one) as its groups; an
+// IPv4 tail counts as two.
+local fn __v6_side(t: String) -> List[Int?] =
+  if t == "" then []
+  else {
+    let parts = string.split(t, ":")
+    let last = list.get(parts, list.len(parts) - 1) ?? ""
+    if string.contains(last, ".") then match __parse_v4(last, last) {
+      ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
+      _ => [none],
+    } else parts |> list.map((p) => __group(p))
+  }
+
+local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
+  let bad = err("net.parse_ip: not an IP address: \"${s}\"")
+  let halves = string.split(s, "::")
+  match halves {
+    [whole] => {
+      let gs = __v6_side(whole)
+      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g)))
+      else bad
+    },
+    [head, tail] => {
+      let h = __v6_side(head)
+      let t = __v6_side(tail)
+      let n = list.len(h) + list.len(t)
+      if n > 7 or not (h + t |> list.all((g) => g != none)) then bad
+      else ok(V6((h |> list.filter_map((g) => g)) + list.repeat(0, 8 - n) + (t |> list.filter_map((g) => g))))
+    },
+    _ => bad,
+  }
+}
+
+// RFC 5952: lowercase hex without leading zeros, the longest run of two or
+// more zero groups (the first when tied) as `::`.
+local fn __v6_text(gs: List[Int]) -> String = {
+  let hex = gs |> list.map((g) => string.to_lower(int.to_hex(g)))
+  let (start, len) = __zero_run(gs, 0, -1, 0, -1, 0)
+  if len < 2 then list.join(hex, ":")
+  else list.join(list.take(hex, start), ":") + "::" + list.join(list.drop(hex, start + len), ":")
+}
+
+// The longest zero run as (start, length): i the position, (cs, cl) the
+// current run, (bs, bl) the best so far.
+local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -> (Int, Int) =
+  if i >= list.len(gs) then (if cl > bl then (cs, cl) else (bs, bl))
+  else if (list.get(gs, i) ?? 1) == 0 then (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl)
+  else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
+  else if cl > bl then __zero_run(gs, i + 1, -1, 0, cs, cl)
+  else __zero_run(gs, i + 1, -1, 0, bs, bl)
+
+// ── The runtime leaves (handles as the core's table indices) ──
+@intrinsic("almide_rt_net___os_tcp_connect")
+@category("Net.fetch")
+effect fn __os_tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_read")
+effect fn __os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_write")
+effect fn __os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_close")
+effect fn __os_tcp_close(stream: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_is_open")
+effect fn __os_tcp_is_open(stream: Int) -> Bool = _
+
+@intrinsic("almide_rt_net___os_tcp_read_timeout")
+effect fn __os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_set_timeout")
+effect fn __os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_available")
+effect fn __os_tcp_available(stream: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_listen")
+@category("Net.listen")
+effect fn __os_tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_local_port")
+@category("Net.listen")
+effect fn __os_tcp_local_port(listener: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_accept")
+@category("Net.listen")
+effect fn __os_tcp_accept(listener: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_close_listener")
+@category("Net.listen")
+effect fn __os_tcp_close_listener(listener: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_udp_bind")
+effect fn __os_udp_bind(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_udp_local_port")
+effect fn __os_udp_local_port(sock: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_udp_send_to")
+effect fn __os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_udp_recv_from")
+effect fn __os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = _
+
+@intrinsic("almide_rt_net___os_udp_close")
+effect fn __os_udp_close(sock: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_lookup_host")
+@category("Net.fetch")
+effect fn __os_lookup_host(host: String) -> Result[List[String], String] = _

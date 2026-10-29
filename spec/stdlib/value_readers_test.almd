@@ -1,0 +1,46 @@
+// value's key readers, as_object and the path family (R-value-02, -03, -07).
+test "value.get and the get_<kind> family answer an Option" {
+  let v = value.object([
+    ("s", value.string("x")),
+    ("i", value.int(2)),
+    ("f", value.float(1.5)),
+    ("b", value.bool(true)),
+    ("a", value.array([value.int(1)])),
+    ("o", value.object([("k", value.null())]))
+  ])
+  assert_eq(value.get(v, "i"), some(value.int(2)))
+  assert_eq(value.get(v, "missing"), none)
+  assert_eq(value.get(value.int(1), "i"), none)
+  assert_eq(value.get_string(v, "s"), some("x"))
+  assert_eq(value.get_string(v, "i"), none)
+  assert_eq(value.get_int(v, "i"), some(2))
+  assert_eq(value.get_int(v, "f"), none)
+  assert_eq(value.get_float(v, "i"), some(2.0))
+  assert_eq(value.get_bool(v, "b"), some(true))
+  assert_eq(value.get_array(v, "a"), some([value.int(1)]))
+  assert_eq(value.get_object(v, "o"), some([("k", value.null())]))
+  assert_eq(value.get_object(v, "s"), none)
+}
+
+test "value.as_object reads the pairs in order" {
+  let v = value.object([("b", value.int(1)), ("a", value.int(2))])
+  assert_eq(value.as_object(v), ok([("b", value.int(1)), ("a", value.int(2))]))
+  assert_eq(value.as_object(value.int(3)), err("expected Object, received Int"))
+}
+
+test "value paths get, set and remove" {
+  let v = value.object([
+    ("a", value.array([value.int(1), value.int(2)]))
+  ])
+  let p = value.index(value.key(value.root(), "a"), 1)
+  assert_eq(value.get_path(v, p), some(value.int(2)))
+  assert_eq(value.get_path(v, value.index(value.key(value.root(), "a"), -1)), none)
+  assert_eq(value.get_path(v, value.root()), some(v))
+  let w = value.set_path(v, p, value.string("x")) ?? value.null()
+  assert_eq(value.get_path(w, p), some(value.string("x")))
+  let deep = value.set_path(v, value.key(value.key(value.root(), "n"), "m"), value.int(7)) ?? value.null()
+  assert_eq(value.get_path(deep, value.key(value.key(value.root(), "n"), "m")), some(value.int(7)))
+  let r = value.remove_path(v, p)
+  assert_eq(value.get_path(r, value.key(value.root(), "a")), some(value.array([value.int(1)])))
+  assert_eq(value.remove_path(v, value.key(value.root(), "zz")), v)
+}

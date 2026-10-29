@@ -75,8 +75,8 @@ impl Checker {
                 self.emit(super::err(
                     format!("operator '-' cannot negate the unsigned type {}", name),
                     format!(
-                        "Negate the signed value before converting — `(-128).to_{}()` — \
-                         or subtract from zero in the unsigned type (`0.to_{}() - x`)",
+                        "Negate the signed value before converting — `{}.from_wrapping(-128)` — \
+                         or subtract from zero in the unsigned type (`{}.from(0) - x`)",
                         name.to_lowercase(), name.to_lowercase()),
                     "operator -").with_code("E001"));
             }
@@ -360,15 +360,40 @@ impl Checker {
         }
     }
 
+    /// The operators a Matrix operand admits, each lowered to one matrix
+    /// operation on every leg: `+ - * /` between two Matrix values
+    /// (elementwise, `*` the matrix product) and `*` with an Int or Float
+    /// scale on either side (R-matrix-14). Anything else — `m / 2.0`,
+    /// `m + 1`, `%`, `^` — has no matrix operation behind it and is refused
+    /// here rather than reaching lowering as a scalar `BinOp` on a Matrix
+    /// (an IR verify ICE). An operand still being inferred is let through.
+    pub(super) fn check_matrix_operands(&mut self, op: &str, lc: &Ty, rc: &Ty) -> Ty {
+        let pending = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+        let scale = |t: &Ty| matches!(t, Ty::Int | Ty::Float) || pending(t);
+        let both = (*lc == Ty::Matrix || pending(lc)) && (*rc == Ty::Matrix || pending(rc));
+        let ok = match op {
+            "+" | "-" | "/" => both,
+            "*" => both || (*lc == Ty::Matrix && scale(rc)) || (scale(lc) && *rc == Ty::Matrix),
+            _ => false,
+        };
+        if !ok {
+            self.emit(super::err(
+                format!("operator '{}' is not defined for {} and {}", op, lc.display(), rc.display()),
+                "A Matrix takes `+`, `-`, `*` and `/` with another Matrix (elementwise; `*` is the matrix product) \
+                 and `*` with an Int or Float scale; for anything else map the elements (`matrix.map(m, (x) => x / 2.0)`)",
+                format!("operator {}", op)));
+        }
+        Ty::Matrix
+    }
+
     /// `-`/`*`/`/`/`%`/`^` arm of [`Self::infer_expr_g2_binary`]: Matrix
     /// arithmetic, numeric-operand and mixed-sized-width diagnostics, and
     /// same-width/Float-promotion result-type resolution. Verbatim text move.
     fn infer_binop_arith(&mut self, op: &Sym, lt: &Ty, rt: &Ty, left: &ast::Expr, right: &ast::Expr) -> Ty {
         let lc = resolve_ty(lt, &self.uf);
         let rc = resolve_ty(rt, &self.uf);
-        // Matrix operators: *, +, - on Matrix types
         if lc == Ty::Matrix || rc == Ty::Matrix {
-            Ty::Matrix
+            self.check_matrix_operands(op.as_str(), &lc, &rc)
         } else {
             // Sized Numeric Types (Stage 1c): same-width
             // arithmetic accepts every sized numeric variant.
@@ -413,10 +438,10 @@ impl Checker {
                 self.emit(super::err(
                     format!(
                         "operator '{}' mixes sized numeric types {} and {} — \
-                         explicit conversion required (e.g. `.to_{}()`)",
+                         explicit conversion required (e.g. `{}.from(x)`)",
                         op, lc.display(), rc.display(),
                         lc.display().to_lowercase()),
-                    "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                    "Convert one side with `<type>.from(x)` (`int32.from(x)`, `float64.from(x)`) before the op",
                     format!("operator {}", op)));
                 lc
             } else if lc.compatible(&rc) && is_sized_scalar(&lc) {
@@ -491,6 +516,17 @@ impl Checker {
                     "== requires both operands to have the same type — convert one side \
                      (or compare the payloads after unwrapping)",
                     format!("operator {}", op)).with_code("E037"));
+            } else if scalar_kind_mismatch(&lc, &rc) {
+                // #4018: two concrete scalars of different kinds (`1 == "1"`,
+                // `true == 0`) passed check the same way and were refused only
+                // by rustc E0308 natively and a ty-mismatch wall on wasm.
+                // Numeric widths are left to the literal-typing rules: only
+                // kinds that no coercion relates are reported.
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "== requires both operands to have the same type — convert one side \
+                     (`int.to_string(n)`, `int.parse(s)`)",
+                    format!("operator {}", op)).with_code("E037"));
             }
             // #1116: `none == none` (both sides `Option[?0]`, never pinned)
             // passed check and died as rustc E0282. Queue the unified operand
@@ -501,7 +537,8 @@ impl Checker {
             });
             // #2606: and for the post-solve Eq check — a function anywhere in
             // the operand type has no equality.
-            self.deferred_eq_checks.push((lt.clone(), left.span, format!("operator '{}'", op)));
+            let in_fn = self.generic_fn_key();
+            self.deferred_eq_checks.push(super::EqSite { ty: lt.clone(), span: left.span, what: format!("operator '{}'", op), in_fn, generic_compare: false });
         }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
@@ -513,12 +550,7 @@ impl Checker {
         // works (deep structural). #652
         if matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
             let lc = resolve_ty(lt, &self.uf);
-            let orderable = matches!(lc,
-                Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
-                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
-            if !orderable {
+            if !self.is_orderable_operand(&lc) {
                 self.emit(super::err(
                     format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
                     "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
@@ -526,6 +558,19 @@ impl Checker {
             }
         }
         Ty::Bool
+    }
+
+    /// Does `< <= > >=` apply to an operand of resolved type `lc` (#652)? A
+    /// scalar orderable type, an unresolved one (reported elsewhere), or a
+    /// declared type ordered by its protocol's `compare` (BigInt: Integer).
+    fn is_orderable_operand(&self, lc: &Ty) -> bool {
+        matches!(lc,
+            Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
+            | Ty::Unknown | Ty::TypeVar(_) | Ty::Never)
+            || matches!(lc, Ty::Named(n, _) if crate::canonicalize::protocols::type_requires(
+                &self.env, n.as_str(), crate::canonicalize::protocols::ORDER_REQUIREMENT))
     }
 
     /// `and`/`or` arm of [`Self::infer_expr_g2_binary`]. Verbatim text move.

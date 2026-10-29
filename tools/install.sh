@@ -2,15 +2,29 @@
 # Almide installer — downloads a prebuilt binary from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh
-#   curl -fsSL ... | sh -s -- v0.12.3          # specific version
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh
+#   curl --proto '=https' --tlsv1.2 -fsSL ... | sh -s -- v0.12.3          # specific version
+#   curl --proto '=https' --tlsv1.2 -fsSL ... | sh -s -- --skip-attestation  # no `gh`: checksum only
 #   ALMIDE_INSTALL=~/bin sh install.sh          # custom install dir
+#
+# The release attestation is verified with the GitHub CLI (`gh`). Without it
+# the installer refuses (security row 16), as `almide self-update` does:
+# `--skip-attestation` installs on the checksum alone, which proves the
+# archive is the one the release lists, not who built it.
 
 set -eu
 
 REPO="almide/almide"
 INSTALL_DIR="${ALMIDE_INSTALL:-${HOME}/.local/bin}"
-VERSION="${1:-latest}"
+VERSION="latest"
+SKIP_ATTESTATION=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-attestation) SKIP_ATTESTATION=1 ;;
+    -*) echo "error: unknown option: $arg" >&2; exit 1 ;;
+    *) VERSION="$arg" ;;
+  esac
+done
 
 # --- Detect platform ---
 
@@ -53,37 +67,71 @@ CHECKSUM_URL="${BASE}/almide-checksums.sha256"
 
 # --- Download ---
 
+# Every download (#4181): ignore ~/.curlrc (-q, which must come first), https
+# only, a redirect only to https, and TLS 1.2 or newer.
+CURL="curl -q --proto =https --proto-redir =https --tlsv1.2 -fsSL"
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "Downloading ${ARCHIVE}..."
-if ! curl -fsSL "$URL" -o "${TMP}/${ARCHIVE}"; then
+if ! $CURL "$URL" -o "${TMP}/${ARCHIVE}"; then
   echo "error: download failed" >&2
   echo "       check that the version exists: https://github.com/${REPO}/releases" >&2
   exit 1
 fi
 
-curl -fsSL "$CHECKSUM_URL" -o "${TMP}/checksums.sha256"
+$CURL "$CHECKSUM_URL" -o "${TMP}/checksums.sha256"
 
 # --- Verify checksum ---
 
 echo "Verifying checksum..."
 cd "$TMP"
-EXPECTED="$(grep "$ARCHIVE" checksums.sha256 | cut -d' ' -f1)"
+# Match the file-name field exactly (an optional leading `*` is the binary
+# marker), never a substring: a `.sig` / `.sbom` line for the same archive
+# must not supply the hash (#4127).
+EXPECTED="$(awk -v a="$ARCHIVE" '{ n = $2; sub(/^\*/, "", n) } NF == 2 && n == a { print tolower($1); exit }' checksums.sha256)"
+if [ -z "$EXPECTED" ]; then
+  echo "error: no checksum listed for ${ARCHIVE}" >&2
+  exit 1
+fi
 
+# Fail closed (#4127): no hash tool means no install. This used to warn and
+# install the archive unverified.
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL="$(sha256sum "$ARCHIVE" | cut -d' ' -f1)"
 elif command -v shasum >/dev/null 2>&1; then
   ACTUAL="$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)"
 else
-  echo "warning: could not verify checksum (sha256sum/shasum not found)" >&2
-  ACTUAL="$EXPECTED"
+  echo "error: could not verify checksum (sha256sum/shasum not found); refusing to install" >&2
+  exit 1
 fi
+ACTUAL="$(printf '%s' "$ACTUAL" | tr 'A-F' 'a-f')"
 
 if [ "$EXPECTED" != "$ACTUAL" ]; then
   echo "error: checksum mismatch" >&2
   echo "       expected: $EXPECTED" >&2
   echo "       got:      $ACTUAL" >&2
+  exit 1
+fi
+
+# --- Verify origin ---
+# The checksum came from the same place as the archive: integrity, not origin
+# (#4127). Every release asset carries a Sigstore attestation (#1534). Fail
+# closed (security row 16): no `gh` means no install unless the command line
+# says `--skip-attestation`.
+if [ "$SKIP_ATTESTATION" = 1 ]; then
+  echo "warning: --skip-attestation: installing without verifying the release attestation (the checksum proves integrity, not origin)" >&2
+elif command -v gh >/dev/null 2>&1; then
+  echo "Verifying the release attestation..."
+  if ! gh attestation verify "$ARCHIVE" -R "$REPO" >/dev/null; then
+    echo "error: the release attestation did not verify; refusing to install" >&2
+    exit 1
+  fi
+else
+  echo "error: gh not found, so the release attestation cannot be verified; refusing to install" >&2
+  echo "       install the GitHub CLI (https://cli.github.com) and run this again, or pass" >&2
+  echo "       --skip-attestation (sh -s -- --skip-attestation) to install on the checksum alone" >&2
   exit 1
 fi
 

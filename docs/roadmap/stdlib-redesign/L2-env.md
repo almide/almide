@@ -1,7 +1,7 @@
 <!-- description: Stdlib redesign L2/L3 — env: the owner of argv, environment variables, cwd, OS name and sleep; the twins in process/args/fs/datetime retire into their owners -->
 # L2/L3: env
 
-> Last updated: 2026-10-21
+> Last updated: 2026-10-26
 > 前提: [L0](L0-conventions.md)・[L1](L1-categories.md)（R-L1-25 の持ち分表がこのページの土台）
 > 出典: Rust https://doc.rust-lang.org/std/env/ ・ Go https://pkg.go.dev/os ・ Python https://docs.python.org/3/library/os.html ・ TS/JS https://nodejs.org/api/process.html ・ Gleam https://gleam-stdlib.hexdocs.pm/ （env は stdlib に無い）・ Elixir https://hexdocs.pm/elixir/System.html ・ OCaml https://ocaml.org/manual/latest/api/Sys.html ・ Kotlin https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.system/ ・ Swift https://developer.apple.com/documentation/foundation/processinfo
 > 9 言語の綴りは [facts/naming-conventions.md §20](facts/naming-conventions.md) と [facts/categories.md §1.H・§3.10](facts/categories.md) の確認済みの表から取りました。
@@ -61,7 +61,8 @@
 - (b) `vars` は `wasi:cli/environment` の `get-environment` そのものです。`remove` は `env.set` と同じく、p1 shim の guest 側の上書き記録（op 37、#3223）で wasm でも同じに動きます。新しい host op は要りません。結果は ADR-0027 D2 の固定された env で決定的です。
 - (c) 「全部の環境変数を出す」課題で、LLM は他言語の癖で 1 関数を探します。無いと書けません。
 - (d) 追加。使用数 0。
-- ゲート案: env の 4 つ組（get/vars/set/remove）が全部あることを、family の行列テストで確かめます。
+- ゲート案: env の 4 つ組（get/vars/set/remove）が全部あることを、family の行列テストで確かめます（`tests/env_variable_family_gate_test.rs`）。
+- 実装（#3908）: `remove` は `set` と同じ名前の検査（空の名前、`=`、NUL）をするので、`set` と同じく `Result[Unit, String]` を返します（`env.remove: empty name` など）。
 - issue: #3908
 
 ### R-env-03 `env.get` を `??` で受ける形を、自前の effect fn と同じにする — ○ 採用（R-L0-17 に従う）
@@ -79,21 +80,36 @@
 - issue: R-L0-17 と同じ issue（新規）
 - issue: #3900
 
+### R-env-04 待ち時間・タイムアウトの引数を `Duration` にする — × 不採用
+
+- 内容: `env.sleep_ms(ms: Int)`、`net.tcp_set_timeout(stream, timeout_ms: Int)`、`net.tcp_read_timeout`、`unix.select(xs, timeout_ms: Int)`、`process.stop(c, grace_ms: Int)` の時間の引数を `Duration` にし、`sleep_ms` を `sleep` に改名する案です。
+- 理由: 9 言語で待ち時間を時間の型で受け取るのは Go（`time.Duration`）・Rust（`Duration`）・Swift（`Duration`）・Kotlin（`delay` の `Duration` 版）の 4 つで、5 言語の基準に届きません。JS・Elixir・Kotlin はミリ秒の整数、Python・OCaml は秒の数で受け取ります。Almide は量を単位つきの名前の `Int` で表すと決めています（`sleep_ms`・`add_seconds`。L2-datetime の「時間の量を受け取る関数の型」）。`Duration` は ADR-0001 のとおり `fan` の予算と期限のための型で、数値を読み出す関数を持ちません（S7）。待ちの関数だけ `Duration` にすると、`Int` のミリ秒を持っている呼び出し側が `duration.ms(x)` で包む手間が増え、名前に単位がある今の形より読み誤りが減る根拠もありません。
+- 再検討の条件: `Duration` に読み出し関数を足す判断（ADR-0001 S7 の見直し）をしたとき。
+- issue: なし
+
+### R-env-05 資格情報を `Secret[String]` で読む `env.secret` を足す — ○ 採用（2026-10-26）
+
+- いま: API のトークンや webhook の鍵は `env.get` で `String` として読みます。`String` はどの描画にもそのまま出て（ログ、assert の失敗）、`==` は最初に違うバイトで返るので、比較の時間からトークンが漏れます（セキュリティ表の行 20）。
+- 案: `effect fn env.secret(name: String) -> Secret[String]?`。`env.get(name)` と同じ値を `secret.new` で包んで返します。値はどこでも `Secret(***)` と表示し（C-425）、`==` は定数時間の比較です（C-426）。`env.get` は据え置きます。
+- 根拠: 秘密は生まれた所から `Secret` にする（L2-secret）。`hash.hmac_sha256` の鍵が `Secret[Bytes]` になったので（L2-hash の R-hash-07）、その鍵の出どころも `Secret` で返します。
+- 契約: C-438（`spec/wasm_cross/env_secret.almd`）。
+- issue: なし
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
 | `env.args` | `effect fn args() -> List[String]` | Rust `env::args` / Go `os.Args` / Python `sys.argv` / Elixir `System.argv`（argv[0] を除くのは Elixir・Kotlin・Deno） | 据え置き | R-env-01（ここに集める） |
 | `env.get` | `effect fn get(name: String) -> String?` | Rust `var` / Go `LookupEnv` / Python `environ.get` / OCaml `getenv_opt` / Elixir `get_env` | 据え置き | R-env-01、R-env-03 |
-| `env.set` | `effect fn set(name: String, value: String) -> Unit` | Rust `set_var` / Go `Setenv` / Elixir `put_env` | 据え置き | — |
+| `env.set` | `effect fn set(name: String, value: String) -> Unit` | Rust `set_var` / Go `Setenv` / Elixir `put_env` | 据え置き（空の名前、名前の `=` と NUL、値の NUL は err。#4200、C-421） | — |
 | `env.cwd` | `effect fn cwd() -> String` | Rust `current_dir` / Go `Getwd` / Python `getcwd` / OCaml `getcwd` | 据え置き | — |
 | `env.os` | `fn os() -> String` | Rust `consts::OS` / Go `GOOS` / OCaml `os_type` | 据え置き（target ごとの定数。C-189） | — |
 | `env.sleep_ms` | `effect fn sleep_ms(ms: Int) -> Unit` | Rust `thread::sleep` / Go `time.Sleep` / Python `time.sleep` / Elixir `Process.sleep` | 据え置き（説明文だけ直す） | R-env-01 |
 | `env.temp_dir` | `effect fn temp_dir() -> String` | Rust `env::temp_dir` / Go `os.TempDir` / Elixir `System.tmp_dir` | 撤去（→ `fs.temp_dir`） | R-env-01 |
 | `env.unix_timestamp` | `effect fn unix_timestamp() -> Int` | Python `time.time` / Elixir `os_time` | 撤去（→ `datetime.now`） | R-env-01 |
 | `env.millis` | `effect fn millis() -> Int` | JS `Date.now()` / Elixir `os_time(:millisecond)` | 撤去（→ `datetime.now_ms` へ移動） | R-env-01 |
-| `env.vars` | `effect fn vars() -> Map[String, String]`（案） | Rust `vars` / Go `Environ` / Python `environ` / Elixir `get_env/0` | 追加 | R-env-02 |
-| `env.remove` | `effect fn remove(name: String) -> Unit`（案） | Rust `remove_var` / Go `Unsetenv` / Elixir `delete_env` | 追加 | R-env-02 |
+| `env.vars` | `effect fn vars() -> Map[String, String]` | Rust `vars` / Go `Environ` / Python `environ` / Elixir `get_env/0` | 追加 | R-env-02 |
+| `env.remove` | `effect fn remove(name: String) -> Result[Unit, String]` | Rust `remove_var` / Go `Unsetenv` / Elixir `delete_env` | 追加 | R-env-02 |
+| `env.secret` | `effect fn secret(name: String) -> Secret[String]?` | — | 追加（値は `Secret` で生まれる） | R-env-05 |
 
 ## L0 への差し戻し（処理済み）
 

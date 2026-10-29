@@ -14,7 +14,7 @@ use std::process::Command;
 
 use almide::diagnostic::Diagnostic;
 use almide::project::{
-    manifest_warnings, parse_toml, DEPENDENCY_KEYS, PACKAGE_KEYS, PACKAGE_METADATA_KEYS, PERMISSION_KEYS, TARGET_PLATFORM_KEYS, TOP_LEVEL_KEYS,
+    manifest_warnings, parse_toml, DEPENDENCY_KEYS, PACKAGE_KEYS, PACKAGE_METADATA_KEYS, PERMISSION_KEYS, TARGET_PLATFORM_KEYS, TOP_LEVEL_KEYS, TRUST_KEYS,
 };
 
 fn scratch(tag: &str) -> PathBuf {
@@ -41,7 +41,7 @@ fn parsed(tag: &str, text: &str) -> String {
     let _ = std::fs::remove_dir_all(&dir);
     // `root` and each `declared_at` name the scratch directory, which differs
     // per tag; only what the keys say is compared.
-    format!("{:?} {:?} {:?} {:?} {:?}", p.package, p.dependencies, p.permissions, p.proc_allow, p.native_deps)
+    format!("{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}", p.package, p.dependencies, p.permissions, p.proc_allow, p.fs_allow, p.native_grants, p.trust_owners, p.native_deps)
         .replace(&dir.display().to_string(), "<dir>")
 }
 
@@ -175,6 +175,10 @@ fn every_accepted_key_changes_the_parse() {
             "dependency key `{key}` is listed but changes nothing"
         );
     }
+    for key in TRUST_KEYS {
+        let text = format!("{pkg}[trust]\n{key} = [\"github.com/alice\"]\n");
+        assert_ne!(parsed(&format!("trust-{key}"), &text), base, "[trust].{key} is listed but changes nothing");
+    }
     for key in TARGET_PLATFORM_KEYS {
         let text = format!("{pkg}[target.'cfg(unix)'.{key}]\nlibc = \"0.2\"\n");
         assert_ne!(parsed(&format!("target-{key}"), &text), base, "[target.*].{key} is listed but changes nothing");
@@ -186,6 +190,7 @@ fn every_accepted_key_changes_the_parse() {
             "native-deps" => format!("{pkg}[native-deps]\nlibc = \"0.2\"\n"),
             "permissions" => format!("{pkg}[permissions]\nallow = [\"IO\"]\n"),
             "target" => format!("{pkg}[target.'cfg(unix)'.native-deps]\nlibc = \"0.2\"\n"),
+            "trust" => format!("{pkg}[trust]\nowners = [\"github.com/alice\"]\n"),
             other => panic!("top-level table `{other}` has no case here — add one that sets it"),
         };
         assert_ne!(parsed(&format!("top-{key}"), &text), base, "[{key}] is listed but changes nothing");

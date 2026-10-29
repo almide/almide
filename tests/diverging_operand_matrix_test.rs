@@ -119,7 +119,9 @@ fn cells() -> Vec<(String, String, i32, &'static str, String)> {
 }
 
 fn program_with_main(cells: &[(String, String, i32, &str, String)], main: &str) -> String {
-    let mut src = PRELUDE.to_string();
+    // The dispatching main reads its cell name from argv (`env.args()`); the
+    // import goes on top only then, so a single-cell main has no unused one.
+    let mut src = if main.contains("env.args()") { format!("import env\n\n{PRELUDE}") } else { PRELUDE.to_string() };
     for (_, fn_src, ..) in cells {
         src.push('\n');
         src.push_str(fn_src);
@@ -135,7 +137,7 @@ fn dispatch_main(cells: &[(String, String, i32, &str, String)]) -> String {
         arms.push_str(&format!("    \"{name}\" => {name}()!,\n"));
     }
     format!(
-        "effect fn main() -> Unit = {{\n  let which = list.get(process.args(), 1) ?? \"\"\n  println(\"start\")\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n  println(\"unreachable\")\n}}\n"
+        "effect fn main() -> Unit = {{\n  let which = list.get(env.args(), 0) ?? \"\"\n  println(\"start\")\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n  println(\"unreachable\")\n}}\n"
     )
 }
 

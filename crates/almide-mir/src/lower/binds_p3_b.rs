@@ -411,7 +411,7 @@ impl LowerCtx {
         };
         // The element's drop kind (`classify_list_elem_drop`): a recursive-drop record
         // (`$__drop_list_<R>`), a `(String,String)` tuple (`Op::DropListStrStr` — the
-        // map.entries / `[(k,v), …]` literal shape), OR an Option/Result CTOR element
+        // map.to_list / `[(k,v), …]` literal shape), OR an Option/Result CTOR element
         // (`[some(1), none]`, `[ok(1), err("x")]` — the collect-test shapes): a Flat class
         // (scalar payload — the per-element `rc_dec` of `DropListStr` is exact) or a LenLoop
         // class (owned handle slots — the generated `$__drop_list_lenlist`). Anything else →

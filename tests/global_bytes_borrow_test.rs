@@ -27,7 +27,7 @@ fn almide_bin() -> String {
 }
 
 const SRC: &str = r#"
-var pending: Bytes = bytes.new(0)
+var pending: Bytes = bytes.zeros(0)
 var chunks: List[Bytes] = []
 var last: Bytes? = none
 let TBL = bytes.from_list([16, 32, 48])
@@ -45,9 +45,9 @@ effect fn main() -> Unit = {
   println(int.to_string(maybe(last)))
   // An immutable global is a static place: borrowed by a user fn and by a
   // runtime fn, it is never moved out of.
-  println("${int.to_string(size(TBL))} ${int.to_string(bytes.read_u8(TBL, 2))}")
+  println("${int.to_string(size(TBL))} ${int.to_string(bytes.get(TBL, 2) ?? 0)}")
   // Still the global's own value: nothing above moved or changed it.
-  pending = bytes.concat(pending, bytes.from_string("!"))
+  pending = pending + bytes.from_string("!")
   println("${int.to_string(size(pending))} ${bytes.to_string_lossy(pending)}")
 }
 "#;
@@ -83,7 +83,7 @@ fn global_bytes_passed_to_user_fns_on_wasm() {
 /// The same globals and fns in a non-entry module, called from inside it —
 /// where a call to the module's own fn is spelled `almide_rt_buf_<fn>`.
 const MODULE_SRC: &str = r#"
-var pending: Bytes = bytes.new(0)
+var pending: Bytes = bytes.zeros(0)
 var chunks: List[Bytes] = []
 var last: Bytes? = none
 let TBL = bytes.from_list([16, 32, 48])
@@ -97,7 +97,7 @@ fn report() -> String = {
   chunks = [bytes.from_string("de"), bytes.from_string("fgh")]
   let first = "${int.to_string(size(pending))} ${int.to_string(total(chunks))} ${int.to_string(maybe(last))}"
   last = some(pending)
-  pending = bytes.concat(pending, bytes.from_string("!"))
+  pending = pending + bytes.from_string("!")
   "${first}\n${int.to_string(maybe(last))} ${int.to_string(size(TBL))} ${int.to_string(size(pending))} ${bytes.to_string_lossy(pending)}"
 }
 "#;

@@ -1,0 +1,33 @@
+// @contract: C-418
+// An fs error text that embeds a path escapes every control and bidi
+// character in it (#4126), so a path cannot forge a log line or drive the
+// reader's terminal: `\n` `\r` `\t`, else `\u{<lowercase hex>}` for C0, DEL,
+// C1 (U+0085 included) and every format, line or paragraph separator
+// character (General Category Cf / Zl / Zp: the bidi controls U+061C,
+// U+200E/F, U+202A..=U+202E, U+2066..=U+2069; U+2028 / U+2029; the
+// invisible U+200B, U+2060, U+FEFF; the Tags block, #4265). Quote and
+// backslash are kept as they are, and so is every other character (U+00A0,
+// U+200A and a combining accent here). The same bytes on
+// native, the stock artifact's fs service (WAT) and every other leg: the
+// printed text holds no raw byte below 0x20 but the line ends.
+import fs
+
+effect fn main() -> Unit = {
+  let p = "/almide-c419-missing/a\nb\u{1b}[31mc\u{7f}d\u{85}e\u{202e}fg\t\r\u{2069}h\\i\"j\u{9f}k\u{a0}l\u{61c}m\u{1}n\u{200e}o"
+  match fs.read_text(p) {
+    ok(_) => println("unexpected ok"),
+    err(e) => println(e),
+  }
+  match fs.copy(p, "/almide-c419-missing/\u{1b}]0;title\u{7}") {
+    ok(_) => println("unexpected ok"),
+    err(e) => println(e),
+  }
+  match fs.read_text("/almide-c419-missing/a\u{2028}b\u{2029}c\u{200b}d\u{2060}e\u{feff}f\u{e0041}\u{e0042}g\u{ad}h\u{200a}i\u{301}") {
+    ok(_) => println("unexpected ok"),
+    err(e) => println(e),
+  }
+  match fs.read_text("/almide-c419-missing/plain C:\\dir\\file \"q\".txt") {
+    ok(_) => println("unexpected ok"),
+    err(e) => println(e),
+  }
+}

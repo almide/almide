@@ -135,6 +135,26 @@
 | `set.count` | `set.count(s: Set[A], f: (A) -> Bool) -> Int`（案） | Kotlin `count {}` / Elixir `Enum.count/2` / Swift `count(where:)` / Gleam — | 追加 | R-set-01 |
 | `set.find` | `set.find(s: Set[A], f: (A) -> Bool) -> Option[A]`（案） | Kotlin `find` / Elixir `Enum.find` / Swift `first(where:)` / Rust `iter().find` | 追加 | R-set-01 |
 | `set.clear` | `set.clear(mut s: Set[A]) -> Unit` | Rust `clear` / Python `clear` / JS `clear` / Kotlin `clear` | 追加 | R-L0-04（`clear` の行列） |
+| `set.enumerate` | （追加）`set.enumerate(s: Set[A]) -> List[(Int, A)]` | Swift `enumerated` / Rust `enumerate` | 追加 | R-L0-42 |
+| `set.zip` | （追加）`set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]` | Swift `zip` / Rust `zip` | 追加 | R-L0-42 |
+| `set.zip_with` | （追加）`set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]` | Kotlin `zip(other, f)` | 追加 | R-L0-42 |
+| `set.filter_map` | （追加）`set.filter_map(s: Set[A], f: (A) -> B?) -> List[B]` | Swift `compactMap` / Rust `filter_map` | 追加 | R-L0-42 |
+| `set.find_map` | （追加）`set.find_map(s: Set[A], f: (A) -> B?) -> B?` | Rust `find_map` | 追加 | R-L0-42 |
+| `set.reduce` | （追加）`set.reduce(s: Set[A], f: (A, A) -> A) -> A?` | Swift `reduce` / Rust `reduce` | 追加 | R-L0-42 |
+| `set.scan` | （追加）`set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]` | Rust `scan` / Kotlin `runningFold` | 追加 | R-L0-42 |
+| `set.partition` | （追加）`set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])` | Kotlin `partition` | 追加 | R-L0-42 |
+| `set.group_by` | （追加）`set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]` | Kotlin `groupBy` / Swift `Dictionary(grouping:)` | 追加 | R-L0-42 |
+| `set.sort` | （追加）`set.sort(s: Set[A]) -> List[A]` | Swift `sorted()` | 追加 | R-L0-42 |
+| `set.sort_by` | （追加）`set.sort_by(s: Set[A], f: (A) -> B) -> List[A]` | Kotlin `sortedBy` | 追加 | R-L0-42 |
+| `set.sort_with` | （追加）`set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]` | Swift `sorted(by:)` | 追加 | R-L0-42 |
+| `set.min` | （追加）`set.min(s: Set[A]) -> A?` | Swift `min()` / Rust `min` | 追加 | R-L0-42 |
+| `set.max` | （追加）`set.max(s: Set[A]) -> A?` | Swift `max()` / Rust `max` | 追加 | R-L0-42 |
+| `set.min_by` | （追加）`set.min_by(s: Set[A], f: (A) -> K) -> A?` | Kotlin `minByOrNull` | 追加 | R-L0-42 |
+| `set.max_by` | （追加）`set.max_by(s: Set[A], f: (A) -> K) -> A?` | Kotlin `maxByOrNull` | 追加 | R-L0-42 |
+| `set.min_with` | （追加）`set.min_with(s: Set[A], cmp: (A, A) -> Int) -> A?` | Swift `min(by:)` | 追加 | R-L0-42 |
+| `set.max_with` | （追加）`set.max_with(s: Set[A], cmp: (A, A) -> Int) -> A?` | Swift `max(by:)` | 追加 | R-L0-42 |
+| `set.sum` | （追加）`set.sum[A: Numeric](s: Set[A]) -> A` | Rust `sum` / Kotlin `sum` | 追加 | R-L0-42 |
+| `set.product` | （追加）`set.product[A: Numeric](s: Set[A]) -> A` | Rust `product` | 追加 | R-L0-42 |
 
 L3 の行数: 21（現行 19 + 追加 2）。判定の内訳: 据え置き 19、追加 2。
 

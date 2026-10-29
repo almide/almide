@@ -12,8 +12,8 @@ fn make() -> List[String] = {
 
 fn main() -> Unit = {
   let r = make()
-  println(list.get_or(r, 0, "z"))
-  println(list.get_or(r, 1, "z"))
+  println(list.get(r, 0) ?? "z")
+  println(list.get(r, 1) ?? "z")
   let r2 = make()
   println(list.join(r2, "-"))
 }

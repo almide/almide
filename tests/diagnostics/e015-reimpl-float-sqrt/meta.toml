@@ -1,3 +1,0 @@
-expects_code = "E015"
-expects_error = "same signature as stdlib `float.sqrt`"
-hint_substring = "equivalent behaviour is not established"

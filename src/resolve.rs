@@ -145,7 +145,7 @@ fn resolve_self_import(
         let mod_path = &path[1..]; // skip "self"
         // The canonical name is the whole path under src/ (#2654) — aliases
         // are handled by the import table.
-        let mod_name_owned = self_module_canonical(mod_path);
+        let mod_name_owned = self_module_canonical(mod_path, ctx.dep_paths);
         let mod_name = mod_name_owned.as_str();
         let display_name = mod_name;
 
@@ -238,13 +238,18 @@ pub fn resolve_imports_with_deps(
         }
     }
 
-    // Auto-load bundled stdlib modules that have Tier 1 (auto-import) behavior.
-    // These are written in Almide but available without explicit `import`.
-    for name in stdlib::AUTO_IMPORT_BUNDLED {
-        if !ctx.loaded_names.contains(*name) {
-            if let Some(source) = stdlib::get_bundled_source(name) {
-                load_bundled_module(name, source, &mut ctx)?;
-            }
+    // Auto-imported bundled stdlib modules (written in Almide, nameable
+    // without an `import`) load only when a loaded source reaches them
+    // (#4071) — the one rule `bundled_reach` derives, shared with the
+    // single-file resolver `almide_mir::pipeline::bundled_self_modules`.
+    let reached = almide_frontend::bundled_reach::reached_auto_bundled(
+        std::iter::once(program).chain(ctx.loaded.iter().map(|(_, p, _, _)| p)),
+    );
+    for name in reached {
+        if !ctx.loaded_names.contains(name)
+            && let Some(source) = stdlib::get_bundled_source(name)
+        {
+            load_bundled_module(name, source, &mut ctx)?;
         }
     }
 
@@ -268,16 +273,18 @@ fn load_bundled_module(name: &str, source: &'static str, ctx: &mut ResolveCtx) -
         .ok_or_else(|| format!("parse error in bundled stdlib '{}'", name))?
         .clone();
 
-    // Recursively resolve this module's imports
+    // Recursively resolve this module's imports, in resolve_named_import's
+    // order: a module with a bundled Almide source is loaded even when its
+    // name is also a stdlib module, so a bundled module that calls another's
+    // Almide bodies (`http.query_params` → `url.parse_query`, C-404) links it
+    // whether or not the program imports it itself.
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
-            if !stdlib::is_stdlib_module(dep_name) {
-                if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
-                    load_bundled_module(dep_name, dep_source, ctx)?;
-                } else {
-                    load_module(dep_name, ctx)?;
-                }
+            if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
+                load_bundled_module(dep_name, dep_source, ctx)?;
+            } else if !stdlib::is_stdlib_module(dep_name) {
+                load_module(dep_name, ctx)?;
             }
         }
     }
@@ -298,7 +305,7 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
             // Always the canonical name (the whole path under src/), not the
             // alias — aliases are handled by import_table, and module identity
             // must be stable (#2654).
-            let sub_mod_name = self_module_canonical(sub_mod_path);
+            let sub_mod_name = self_module_canonical(sub_mod_path, ctx.dep_paths);
             load_self_module(&sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
         }
     } else {
@@ -329,9 +336,19 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
 /// module never share one key (#2864). Under the bare key the project's `int`
 /// replaced the stdlib's, and the stdlib bodies that call `int.*` (the
 /// sized-int modules) lost their callees on the native leg.
-pub fn self_module_canonical(mod_path: &[crate::intern::Sym]) -> String {
+///
+/// A path that is a DEPENDENCY package's name (`src/llm.almd` beside a
+/// dependency `llm`, direct or transitive) keeps `self.` the same way
+/// (#4270): a dependency's `import llm` loads the package under the bare
+/// key, so the project's module under that key made the dependency's import
+/// resolve to the project's file — reported as a circular import when that
+/// file was still loading.
+pub fn self_module_canonical(mod_path: &[crate::intern::Sym], dep_paths: &[(project::PkgId, PathBuf)]) -> String {
     let joined = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-    if stdlib::is_stdlib_module(&joined) || stdlib::get_bundled_source(&joined).is_some() {
+    if stdlib::is_stdlib_module(&joined)
+        || stdlib::get_bundled_source(&joined).is_some()
+        || dep_paths.iter().any(|(pkg, _)| pkg.name == joined)
+    {
         format!("self.{joined}")
     } else {
         joined
@@ -750,10 +767,19 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, P
     if let Some(hint) = almide_frontend::removed_spellings::removed_module_hint(name) {
         return Err(format!("module '{name}' not found\n  hint: {hint}"));
     }
+    // #4109: a near stdlib module, dependency or almide package first. The
+    // hint a writer acts on must not point at `almide add <guessed name>`,
+    // the first step of installing a typo-squatted package.
+    let deps: Vec<&str> = dep_paths.iter().map(|(p, _)| p.name.as_str()).collect();
+    let hint = crate::trust::import_hint(name, &deps).unwrap_or_else(|| {
+        format!(
+            "Create {name}.almd in the same directory. If `{name}` is a package you already trust, add it to [dependencies] in almide.toml; do not add a package whose name you guessed"
+        )
+    });
     Err(format!(
-        "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory, or add to [dependencies] in almide.toml",
+        "module '{}' not found\n  searched: {}\n  hint: {}",
         name,
         local_candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
-        name,
+        hint,
     ))
 }

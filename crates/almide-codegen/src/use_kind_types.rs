@@ -84,6 +84,16 @@ pub enum Site {
     /// through a reference, never moved. Any other comparison operand is an
     /// [`Site::Operand`].
     Compare,
+    /// The `String` subject of a `match` against string literals (#4294):
+    /// `MatchSubject` matches it through a `&str` view
+    /// (`match &*s { "a" => .. }`, `s.as_str()` for a `&String` binder), so
+    /// it is read through a reference, never moved — the match twin of
+    /// [`Site::Compare`]. Recorded before `MatchSubject` spells the `Borrow`,
+    /// so the borrow verdict and the clone pass read the rule the certifier
+    /// reads off the rewritten subject. An arm that binds the subject binds
+    /// a `&str` into it and copies it out itself where the binder is wanted
+    /// as a value (#4296), so a binding arm reads the subject too.
+    StrView,
     /// Any other read that keeps the value where it is: a non-concat binary
     /// or unary operand, a range bound, an index or key, a condition, a
     /// guard, a macro or inline-template argument, a `take` count, the

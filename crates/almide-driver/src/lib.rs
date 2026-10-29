@@ -78,6 +78,11 @@ pub fn optimize_half(ir: &mut IrProgram) {
     // replacement is itself a diverging block an operand may hold.
     almide_ir::diverge::cut_diverging_operands(ir);
     almide_optimize::optimize::optimize_program(ir);
+    // The address-hold rule (C-376, #4153): a let-bound address of a `var`
+    // holds the block it points into for the binding's scope, on every leg.
+    // After the optimizer, so DCE never sees the hold (it is read once, by
+    // the address op, and must stay a distinct binding).
+    almide_ir::addr_hold::hold_address_blocks(ir);
     almide_ir::reclassify_top_lets(ir);
 }
 
@@ -85,6 +90,10 @@ pub fn optimize_half(ir: &mut IrProgram) {
 /// linker sees the monomorphized call graph.
 pub fn link_half(ir: &mut IrProgram) {
     almide_optimize::mono::monomorphize(ir);
+    // After mono, so a generic caller (`http.decode_json[T]`) names its
+    // concrete `T.decode_strict`: an `@on_demand` derive nothing reaches is
+    // dropped, on every leg alike.
+    almide_optimize::on_demand::prune_unreached(ir);
     almide_frontend::ir_link::ir_link(ir);
 }
 

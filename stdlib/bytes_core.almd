@@ -19,32 +19,19 @@ fn bytes_from_string(s: String) -> Bytes = {
 
 fn bytes_len(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
 
-// bytes.data_ptr(b) -> the address of b's first data byte (header + 12) — the wasm twin of
-// native's `as_ptr` (#907: nendo hands `data_ptr(buf) + off` to the webgl host, which reads
-// the texture bytes straight out of linear memory at that address).
-fn bytes_data_ptr(b: Bytes) -> Int = prim.handle(b) + 12
-
 fn bytes_is_empty(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
   n == 0
 }
 
-fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
-  let h = prim.handle(b)
-  let n = prim.load32(h + 4)
-  if i >= 0 then {
-    if i < n then prim.load8(h + 12 + i) else default
-  } else default
-}
-
-// Fill n bytes at p with zero (bytes.new returns a zeroed block; alloc_bytes leaves it raw).
+// Fill n bytes at p with zero (bytes.zeros returns a zeroed block; alloc_bytes leaves it raw).
 fn __zerofill(p: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   prim.store8(p + i, 0)
   __zerofill(p, n, i + 1)
 }
 
-// bytes.new(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
+// bytes.zeros(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
 // No stdlib allocation guard (ratified A, 2026-08-17): measured on 0.57.0, this
 // leg's floor turns every unsatisfiable size — 2.5 GiB in a full heap, u32::MAX,
 // i64::MAX — into the defined `Error: out of memory`, never a trap. A 2^31 guard
@@ -59,7 +46,7 @@ fn bytes_new(len: Int) -> Bytes = {
   b
 }
 
-// bytes.concat(a, b) -> a fresh Bytes holding a's bytes then b's bytes.
+// bytes.__concat(a, b) -> a fresh Bytes holding a's bytes then b's bytes.
 fn bytes_concat(a: Bytes, b: Bytes) -> Bytes = {
   let an = prim.load32(prim.handle(a) + 4)
   let bn = prim.load32(prim.handle(b) + 4)
@@ -102,15 +89,14 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   let blen = prim.load32(prim.handle(b) + 4)
   // An EMPTY base is empty at ANY count (#2690) — the copy recursion runs n times.
   let n = if count > 0 and blen > 0 then count else 0
-  // `blen * n` must not WRAP (#2782): `[1, 2, 3]` × 6148914691236517206 is 2
-  // in i64, sized a 2-byte block and the copy recursion wrote past it into an
-  // out-of-bounds trap. A product past i64 is unsatisfiable, so it is the
-  // floor's own `Error: out of memory` (C-197) — tested by division, never on
-  // the wrapped product; below that the floor judges the size as before.
-  // `wrap_bound` is the largest count whose product fits i64 — an overflow
-  // bound, not an allocation ceiling (the floor still owns that).
-  let wrap_bound = if blen > 0 then 9223372036854775807 / blen else 0
-  if n > wrap_bound then prim.die(prim.handle("Error: out of memory\n")) else ()
+  // A result past the repeat family's shared 2^31-byte ceiling ABORTS in the
+  // T6 form (C-054/C-161), the `string_repeat` guard verbatim: without it
+  // `bytes.repeat([1, 2], 2^30 + 1)` was a 2 GiB success natively and
+  // `out of memory` here (#4154). Tested by DIVISION, never on the product:
+  // `blen * n` WRAPS for a huge n (#2782 — `[1, 2, 3]` × 6148914691236517206
+  // is 2 in i64), so a guard computed from it tests nothing.
+  // Keep in sync with ALMIDE_BYTES_REPEAT_MAX_BYTES in runtime/rs/src/bytes.rs.
+  if blen > 0 and n > 2147483648 / blen then prim.die(prim.handle("Error: repeat result too large\n")) else ()
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out
@@ -145,13 +131,13 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
   else __byteq(pb, ps, sn, 0)
 }
 
-// bytes.slice(b, start, end) -> the [start, end) byte range (v0 clamps each index to
-// [0, len] with negative wrapping to len; a start >= end yields an empty Bytes).
+// bytes.slice(b, start, end) -> the [start, end) byte range (each index clamps to
+// [0, len], a negative one being 0, #4147; a start >= end yields an empty Bytes).
 fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
   let len = prim.load32(prim.handle(b) + 4)
-  let s = if start < 0 then len
+  let s = if start < 0 then 0
   else (if start > len then len else start)
-  let e0 = if end < 0 then len
+  let e0 = if end < 0 then 0
   else (if end > len then len else end)
   let e = if e0 > s then e0 else s
   let m = e - s
@@ -178,7 +164,7 @@ fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int =
     }
   }
 
-// bytes.cmp(a, b) -> -1 / 0 / 1 (lexicographic).
+// bytes.compare(a, b) -> -1 / 0 / 1 (lexicographic).
 fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
   let na = prim.load32(prim.handle(a) + 4)
   let nb = prim.load32(prim.handle(b) + 4)
@@ -232,7 +218,7 @@ else {
   __fillval(p, n, val, i + 1)
 }
 
-// bytes.pad_left(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
+// bytes.pad_start(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let t = if target_len > n then target_len else n
@@ -244,7 +230,7 @@ fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   out
 }
 
-// bytes.pad_right(b, target_len, val) -> b suffixed with `val` bytes up to target_len (no-op if longer).
+// bytes.pad_end(b, target_len, val) -> b suffixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let t = if target_len > n then target_len else n
@@ -289,12 +275,107 @@ fn bytes_to_list(b: Bytes) -> List[Int] = {
   out
 }
 
-// Is the pn-byte pattern at pp found in the bn-byte haystack at pb, scanning from position i?
-fn __contains_at(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Bool = if i + pn > bn then false
+// ── Substring search: Knuth–Morris–Pratt (#4206) ─────────────────────────────────────────────
+// bytes.contains / index_of / split share this one linear search (bytes.last_index_of, replace,
+// replace_first and count_matches in stdlib/bytes.almd go through index_of and split). The
+// position-by-position compare it replaced re-read up to pn bytes at every start, O(bn·pn): a
+// haystack of `a`s and a needle of `a`s ending in `b` took 10.9 s at 200,000 bytes. The failure
+// table `t` (pn i64 slots, slot q = the longest proper border of pat[0..=q]) lets the haystack
+// index only move forward, so one search is O(bn + pn). The native leg runs the same algorithm
+// (runtime/rs/src/bytes.rs).
+// The border length after reading byte c in state k: fall back through the table while the next
+// pattern byte differs, then extend by one on a match.
+fn __bk_step(pp: Int, t: Int, k: Int, c: Int) -> Int =
+  if k > 0 and prim.load8(pp + k) != c then __bk_step(pp, t, prim.load64(t + (k - 1) * 8), c)
+  else if prim.load8(pp + k) == c then k + 1
+  else k
+
+fn __bk_fill(pp: Int, pn: Int, t: Int, q: Int, k: Int) -> Int = if q >= pn then 0
 else {
-  let eq = __byteq(pb + i, pp, pn, 0)
-  if eq then true
-  else __contains_at(pb, pp, bn, pn, i + 1)
+  let k1 = __bk_step(pp, t, k, prim.load8(pp + q))
+  prim.store64(t + q * 8, k1)
+  __bk_fill(pp, pn, t, q + 1, k1)
+}
+
+// Fill the table at t for the pn-byte (pn >= 1) pattern at pp.
+fn __bk_table(pp: Int, pn: Int, t: Int) -> Int = {
+  prim.store64(t, 0)
+  __bk_fill(pp, pn, t, 1, 0)
+}
+
+// The first match start at or after i (state k), or -1 once the rest cannot hold one.
+fn __bk_scan(pb: Int, bn: Int, pp: Int, pn: Int, t: Int, i: Int, k: Int) -> Int =
+  if bn - i < pn - k then 0 - 1
+  else {
+    let k1 = __bk_step(pp, t, k, prim.load8(pb + i))
+    if k1 == pn then i + 1 - pn
+    else __bk_scan(pb, bn, pp, pn, t, i + 1, k1)
+  }
+
+// The first start of the pn-byte pattern at pp in the bn-byte haystack at pb, or -1; an empty
+// pattern is found at 0. The table is a scratch list dropped at scope end.
+fn __bk_index(pb: Int, bn: Int, pp: Int, pn: Int) -> Int = if pn == 0 then 0
+else if pn > bn then 0 - 1
+else {
+  let tbl = prim.alloc_list(pn)
+  let t = prim.handle(tbl) + 12
+  let _t = __bk_table(pp, pn, t)
+  __bk_scan(pb, bn, pp, pn, t, 0, 0)
+}
+
+// bytes.split(b, sep): the pieces between the non-overlapping matches, left to right, the tail
+// always pushed; an empty sep gives [copy of b]. Each piece is a FRESH owned Bytes MOVED into the
+// result (prim.alloc_list_str + store_str, the nested-ownership List[Bytes] builder list.map_str
+// uses); the result list owns and frees them. Sources borrowed. Byte-matches runtime/rs/src/bytes.rs.
+// The two passes (count, then fill) each resume a search where the last separator ended, so
+// both are one forward walk with one table.
+fn __bk_piece(bh: Int, start: Int, end: Int) -> Bytes = {
+  let n = end - start
+  let piece = prim.alloc_bytes(n)
+  let _x = __bytecopy(prim.handle(piece) + 12, bh + 12 + start, n, 0)
+  piece
+}
+
+fn __bk_count(bh: Int, blen: Int, seph: Int, seplen: Int, t: Int, from: Int, acc: Int) -> Int = {
+  let pos = __bk_scan(bh + 12, blen, seph + 12, seplen, t, from, 0)
+  if pos < 0 then acc
+  else __bk_count(bh, blen, seph, seplen, t, pos + seplen, acc + 1)
+}
+
+fn __bk_split_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, t: Int, from: Int, idx: Int) -> Int = {
+  let found = __bk_scan(bh + 12, blen, seph + 12, seplen, t, from, 0)
+  let pos = if found < 0 then blen else found
+  let piece = __bk_piece(bh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if found < 0 then idx + 1
+  else __bk_split_fill(lh, bh, blen, seph, seplen, t, pos + seplen, idx + 1)
+}
+
+fn __bk_split_whole(bh: Int, blen: Int) -> List[Bytes] = {
+  let result = prim.alloc_list_str(1)
+  let piece = __bk_piece(bh, 0, blen)
+  prim.store_str(prim.handle(result) + 12, piece)
+  result
+}
+
+fn __bk_split_general(bh: Int, blen: Int, seph: Int, seplen: Int) -> List[Bytes] = {
+  let tbl = prim.alloc_list(seplen)
+  let t = prim.handle(tbl) + 12
+  let _t = __bk_table(seph + 12, seplen, t)
+  let nseps = __bk_count(bh, blen, seph, seplen, t, 0, 0)
+  let result = prim.alloc_list_str(nseps + 1)
+  let _x = __bk_split_fill(prim.handle(result), bh, blen, seph, seplen, t, 0, 0)
+  result
+}
+
+@implements("bytes.split")
+fn bytes_split(b: Bytes, sep: Bytes) -> List[Bytes] = {
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __bk_split_whole(bh, blen)
+  else __bk_split_general(bh, blen, seph, seplen)
 }
 
 // bytes.contains(b, pat) -> does b contain pat as a contiguous sub-sequence? (empty pat = true)
@@ -303,11 +384,7 @@ fn bytes_contains(b: Bytes, pat: Bytes) -> Bool = {
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
-  if pn == 0 then true
-  else {
-    if pn > bn then false
-    else __contains_at(pb, pp, bn, pn, 0)
-  }
+  __bk_index(pb, bn, pp, pn) >= 0
 }
 
 // XOR n bytes of pa with pb into dst.
@@ -372,7 +449,7 @@ fn __sext16(u: Int) -> Int = if u >= 32768 then u - 65536 else u
 
 fn __sext32(u: Int) -> Int = if u >= 2147483648 then u - 4294967296 else u
 
-// bytes.read_u16_be(b, pos) -> the unsigned big-endian u16 at pos (0 if out of range).
+// bytes.__read_u16_be(b, pos) -> the unsigned big-endian u16 at pos (0 if out of range).
 fn bytes_read_u16_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -388,7 +465,7 @@ fn bytes_read_u16_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i16_be(b, pos) -> the signed big-endian i16 at pos (0 if out of range).
+// bytes.__read_i16_be(b, pos) -> the signed big-endian i16 at pos (0 if out of range).
 fn bytes_read_i16_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -405,7 +482,7 @@ fn bytes_read_i16_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i16_le(b, pos) -> the signed little-endian i16 at pos (0 if out of range).
+// bytes.__read_i16_le(b, pos) -> the signed little-endian i16 at pos (0 if out of range).
 fn bytes_read_i16_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -422,7 +499,7 @@ fn bytes_read_i16_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i32_be(b, pos) -> the signed big-endian i32 at pos (0 if out of range).
+// bytes.__read_i32_be(b, pos) -> the signed big-endian i32 at pos (0 if out of range).
 fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -445,16 +522,6 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_u8(b, pos) -> the byte at pos (0 if out of range).
-fn bytes_read_u8(b: Bytes, pos: Int) -> Int = {
-  let h = prim.handle(b)
-  let n = prim.load32(h + 4)
-  if pos < 0 then 0
-  else {
-    if pos < n then prim.load8(h + 12 + pos) else 0
-  }
-}
-
 // bytes indexing `buf[i]` — the CHECKED element read: a negative / past-len index
 // aborts `Error: index out of bounds` + exit 1 (v0's behavior on both targets),
 // unlike read_u8's 0-for-OOB convention.
@@ -472,7 +539,7 @@ fn __byte_nonzero(addr: Int) -> Bool = {
   v != 0
 }
 
-// bytes.read_bool(b, pos) -> is the byte at pos non-zero? (false if out of range).
+// bytes.__read_bool(b, pos) -> is the byte at pos non-zero? (false if out of range).
 fn bytes_read_bool(b: Bytes, pos: Int) -> Bool = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
@@ -482,7 +549,7 @@ fn bytes_read_bool(b: Bytes, pos: Int) -> Bool = {
   }
 }
 
-// bytes.read_u16_le(b, pos) -> the unsigned little-endian u16 at pos (0 if out of range).
+// bytes.__read_u16_le(b, pos) -> the unsigned little-endian u16 at pos (0 if out of range).
 fn bytes_read_u16_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -498,7 +565,7 @@ fn bytes_read_u16_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_u32_be(b, pos) -> the unsigned big-endian u32 at pos (0 if out of range).
+// bytes.__read_u32_be(b, pos) -> the unsigned big-endian u32 at pos (0 if out of range).
 fn bytes_read_u32_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -520,7 +587,7 @@ fn bytes_read_u32_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_u32_le(b, pos) -> the unsigned little-endian u32 at pos (0 if out of range).
+// bytes.__read_u32_le(b, pos) -> the unsigned little-endian u32 at pos (0 if out of range).
 fn bytes_read_u32_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -542,7 +609,7 @@ fn bytes_read_u32_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i32_le(b, pos) -> the signed little-endian i32 at pos (0 if out of range).
+// bytes.__read_i32_le(b, pos) -> the signed little-endian i32 at pos (0 if out of range).
 fn bytes_read_i32_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -565,7 +632,7 @@ fn bytes_read_i32_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i64_be(b, pos) -> the signed big-endian i64 at pos (full width, 0 if out of range).
+// bytes.__read_i64_be(b, pos) -> the signed big-endian i64 at pos (full width, 0 if out of range).
 fn bytes_read_i64_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -599,7 +666,7 @@ fn bytes_read_i64_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i64_le(b, pos) -> the signed little-endian i64 at pos (full width, 0 if out of range).
+// bytes.__read_i64_le(b, pos) -> the signed little-endian i64 at pos (full width, 0 if out of range).
 fn bytes_read_i64_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -633,7 +700,7 @@ fn bytes_read_i64_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_f64_be(b, pos) -> the big-endian IEEE-754 f64 at pos (0.0 if out of range). The
+// bytes.__read_f64_be(b, pos) -> the big-endian IEEE-754 f64 at pos (0.0 if out of range). The
 // 8 bytes form the i64 bit pattern; prim.ffrombits reinterprets it as the Float.
 fn bytes_read_f64_be(b: Bytes, pos: Int) -> Float = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -669,7 +736,7 @@ fn bytes_read_f64_be(b: Bytes, pos: Int) -> Float = {
   }
 }
 
-// bytes.read_f64_le(b, pos) -> the little-endian IEEE-754 f64 at pos (0.0 if out of range).
+// bytes.__read_f64_le(b, pos) -> the little-endian IEEE-754 f64 at pos (0.0 if out of range).
 fn bytes_read_f64_le(b: Bytes, pos: Int) -> Float = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -720,26 +787,17 @@ fn bytes_get(b: Bytes, i: Int) -> Int? = {
   else if i >= len then __byte_none() else __byte_some_at(h, i)
 }
 
-// First position >= i where the pn-byte pattern at pp matches the haystack at pb, or -1. The
-// empty-pattern (pn=0) case naturally returns 0 (__byteq of 0 bytes is true); pn>bn returns -1.
-fn __b_idx_find(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Int = if i + pn > bn then -1
-else {
-  let eq = __byteq(pb + i, pp, pn, 0)
-  if eq then i
-  else __b_idx_find(pb, pp, bn, pn, i + 1)
-}
-
 // bytes.index_of(b, pat) -> Some(first index of pat in b), or None (empty pat = Some(0)).
 fn bytes_index_of(b: Bytes, pat: Bytes) -> Int? = {
   let bn = prim.load32(prim.handle(b) + 4)
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
-  let idx = __b_idx_find(pb, pp, bn, pn, 0)
+  let idx = __bk_index(pb, bn, pp, pn)
   if idx < 0 then __byte_none() else __byte_some_idx(idx)
 }
 
-// bytes.eof(b, pos) -> is pos at/past the end? v0 casts pos to usize, so a NEGATIVE pos wraps to
+// bytes.is_eof(b, pos) -> is pos at/past the end? v0 casts pos to usize, so a NEGATIVE pos wraps to
 // a huge unsigned value that is always >= len → true (the past-end sentinel). Reads the header.
 // A negative pos folds to n (so `p >= n` holds), matching the usize-wrap; the tail is a bare
 // comparison (the proven Bool-returning shape).
@@ -836,7 +894,7 @@ fn bytes_skip(b: Bytes, pos: Int, n: Int) -> Int = {
   if np > len then len else np
 }
 
-// bytes.read_f32_le(b, pos) -> the little-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out
+// bytes.__read_f32_le(b, pos) -> the little-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out
 // of range). Assemble the 4 LE bytes into the u32 bit pattern, then prim.bits_to_f32 = f32::from_bits
 // as f64 (NOT ffrombits, which is the f64 identity). Out-of-range / negative pos -> +0.0.
 fn bytes_read_f32_le(b: Bytes, pos: Int) -> Float = {
@@ -861,7 +919,7 @@ fn bytes_read_f32_le(b: Bytes, pos: Int) -> Float = {
   }
 }
 
-// bytes.read_f32_be(b, pos) -> the big-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out of
+// bytes.__read_f32_be(b, pos) -> the big-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out of
 // range).
 fn bytes_read_f32_be(b: Bytes, pos: Int) -> Float = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -936,7 +994,7 @@ fn bytes_to_string(b: Bytes) -> Result[String, String] = {
   }
 }
 
-// ── bytes.map_each ── every byte through `f` (once, in order), the result truncated
+// ── bytes.map ── every byte through `f` (once, in order), the result truncated
 // to u8 (native: `f(*x as i64) as u8`).
 fn __bme_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {

@@ -1,15 +1,14 @@
 //! C-210 over the whole bytes float-writer family (#3658).
 //!
 //! Every bytes float writer is a NaN-observation boundary: the appends
-//! (`append_f32/f64_le/be`), the in-place sets (`set_f32/f64_le/be`,
-//! `set_float32`) and the cursor writes (`write_f64_be`, `write_float32`).
+//! (`append_f32/f64_le/be`) and the in-place puts (`put_f32/f64_le/be`).
 //! Each writes the canonical NaN — f64 `0x7FF8000000000000`, f32 `0x7FC00000`
 //! — on native and on `--target wasm`, whatever sign and payload the NaN
-//! carries. Before #3658 only the appends canonicalized; the sets and writes
+//! carries. Before #3658 only the appends canonicalized; the in-place writes
 //! put the raw bits in the buffer on both backends while the interpreter
 //! canonicalized, so the third oracle disagreed with both.
 //!
-//! The NaN comes from `int.bits_to_float(-256)`: sign set, a low payload — the
+//! The NaN comes from `float.from_bits(-256)`: sign set, a low payload — the
 //! pattern no host's arithmetic produces, so a raw write cannot pass by
 //! accident on aarch64 (where `0.0 / 0.0` is already canonical). The bits are
 //! read through an `effect fn` so the folder cannot see the value.
@@ -21,29 +20,19 @@ const PER_RUN_LIMIT: Duration = Duration::from_secs(120);
 const PROGRAM: &str = r#"effect fn nan_bits() -> Int = 0 - 256
 
 effect fn main() -> Unit = {
-  let x = int.bits_to_float(nan_bits()!)
-  let x32 = float.to_float32(x)
-  var a = bytes.new(0)
+  let x = float.from_bits(nan_bits()!)
+  var a = bytes.zeros(0)
   bytes.append_f64_le(a, x)
   bytes.append_f64_be(a, x)
   bytes.append_f32_le(a, x)
   bytes.append_f32_be(a, x)
   println("append=${bytes.to_list(a)}")
-  var s = bytes.new(24)
-  bytes.set_f64_le(s, 0, x)
-  bytes.set_f64_be(s, 8, x)
-  bytes.set_f32_le(s, 16, x)
-  bytes.set_f32_be(s, 20, x)
+  var s = bytes.zeros(24)
+  bytes.put_f64_le(s, 0, x)
+  bytes.put_f64_be(s, 8, x)
+  bytes.put_f32_le(s, 16, x)
+  bytes.put_f32_be(s, 20, x)
   println("set=${bytes.to_list(s)}")
-  var u = bytes.new(8)
-  bytes.set_float32(u, 0, x32, LittleEndian)
-  bytes.set_float32(u, 4, x32, BigEndian)
-  println("set_float32=${bytes.to_list(u)}")
-  var w = bytes.new(0)
-  bytes.write_f64_be(w, x)
-  bytes.write_float32(w, x32, LittleEndian)
-  bytes.write_float32(w, x32, BigEndian)
-  println("write=${bytes.to_list(w)}")
 }
 "#;
 
@@ -56,8 +45,6 @@ fn expected() -> String {
     [
         format!("append=[{F64_LE}, {F64_BE}, {F32_LE}, {F32_BE}]"),
         format!("set=[{F64_LE}, {F64_BE}, {F32_LE}, {F32_BE}]"),
-        format!("set_float32=[{F32_LE}, {F32_BE}]"),
-        format!("write=[{F64_BE}, {F32_LE}, {F32_BE}]"),
     ]
     .join("\n")
 }

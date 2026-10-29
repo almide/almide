@@ -28,20 +28,16 @@ effect fn more(x: Bytes, y: Bytes) -> String = {
   }
   put(x)
   twice(y)
-  "${list.len(acc)} ${bytes.get_or(acc[1], 1, 0)} ${bytes.get_or(acc[2], 0, 0)} ${bytes.len(acc[0])}"
+  "${list.len(acc)} ${bytes.get(acc[1], 1) ?? 0} ${bytes.get(acc[2], 0) ?? 0} ${bytes.len(acc[0])}"
 }
 
-fn local_computed(xs: List[Bytes], i: Int) -> Int = bytes.len(xs[i + 1]) + bytes.get_or(
-  xs[i * 2],
-  0,
-  0,
-)
+fn local_computed(xs: List[Bytes], i: Int) -> Int = bytes.len(xs[i + 1]) + bytes.get(xs[i * 2], 0) ?? 0
 
 fn from_global() -> Int = {
   stash = stash + [
     bytes.from_list([4, 5])
   ]
-  bytes.len(stash[0]) + bytes.get_or(stash[0], 0, 0)
+  bytes.len(stash[0]) + bytes.get(stash[0], 0) ?? 0
 }
 
 effect fn main() -> Unit = {

@@ -2,6 +2,6 @@
 // key has no Ord (bare Float routes to the totalOrder twins, nested does not).
 fn main() -> Unit = {
   let xs: List[Int] = [1, 2]
-  let s = list.sort_by(xs, (x) => (int.to_float(x), x))
+  let s = list.sort_by(xs, (x) => (float.from(x), x))
   println(int.to_string(list.len(s)))
 }

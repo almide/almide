@@ -1,35 +1,35 @@
 import bytes
 
-fn mg(m: Bytes, off: Int) -> Float = bytes.read_f32_le(m, off)
+fn mg(m: Bytes, off: Int) -> Float = bytes.get_f32_le(m, off) ?? 0.0
 
 effect fn main() -> Unit = {
-  var jm = bytes.new(64)
-  bytes.set_f32_le(jm, 0, 1.0)
-  bytes.set_f32_le(jm, 20, 1.0)
-  bytes.set_f32_le(jm, 40, 1.0)
-  bytes.set_f32_le(jm, 60, 1.0)
-  var verts = bytes.new(44)
-  bytes.set_f32_le(verts, 0, 3.0)
+  var jm = bytes.zeros(64)
+  bytes.put_f32_le(jm, 0, 1.0)
+  bytes.put_f32_le(jm, 20, 1.0)
+  bytes.put_f32_le(jm, 40, 1.0)
+  bytes.put_f32_le(jm, 60, 1.0)
+  var verts = bytes.zeros(44)
+  bytes.put_f32_le(verts, 0, 3.0)
   // px
-  bytes.set_f32_le(verts, 4, 4.0)
+  bytes.put_f32_le(verts, 4, 4.0)
   // py
-  bytes.set_f32_le(verts, 8, 5.0)
+  bytes.put_f32_le(verts, 8, 5.0)
   // pz
-  bytes.set_f32_le(verts, 12, 0.0)
+  bytes.put_f32_le(verts, 12, 0.0)
   // nx
-  bytes.set_f32_le(verts, 16, 1.0)
+  bytes.put_f32_le(verts, 16, 1.0)
   // ny
-  bytes.set_f32_le(verts, 20, 0.0)
+  bytes.put_f32_le(verts, 20, 0.0)
   // nz
   var i = 0
   while i < 1 {
     let dst = i * 44
-    let px = bytes.read_f32_le(verts, dst)
-    let py = bytes.read_f32_le(verts, dst + 4)
-    let pz = bytes.read_f32_le(verts, dst + 8)
-    let nx = bytes.read_f32_le(verts, dst + 12)
-    let ny = bytes.read_f32_le(verts, dst + 16)
-    let nz = bytes.read_f32_le(verts, dst + 20)
+    let px = bytes.get_f32_le(verts, dst) ?? 0.0
+    let py = bytes.get_f32_le(verts, dst + 4) ?? 0.0
+    let pz = bytes.get_f32_le(verts, dst + 8) ?? 0.0
+    let nx = bytes.get_f32_le(verts, dst + 12) ?? 0.0
+    let ny = bytes.get_f32_le(verts, dst + 16) ?? 0.0
+    let nz = bytes.get_f32_le(verts, dst + 20) ?? 0.0
     let w0 = 0.6
     let w1 = 0.4
     let j0 = 0
@@ -76,13 +76,13 @@ effect fn main() -> Unit = {
       snz = snz + w1 * (mg(jm, mo + 8) * nx + mg(jm, mo + 24) * ny + mg(jm, mo + 40) * nz)
     } else {
     }
-    bytes.set_f32_le(verts, dst, sx)
-    bytes.set_f32_le(verts, dst + 4, sy)
-    bytes.set_f32_le(verts, dst + 8, sz)
+    bytes.put_f32_le(verts, dst, sx)
+    bytes.put_f32_le(verts, dst + 4, sy)
+    bytes.put_f32_le(verts, dst + 8, sz)
     i = i + 1
   }
-  let rx = bytes.read_f32_le(verts, 0)
-  let ry = bytes.read_f32_le(verts, 4)
-  let rz = bytes.read_f32_le(verts, 8)
+  let rx = bytes.get_f32_le(verts, 0) ?? 0.0
+  let ry = bytes.get_f32_le(verts, 4) ?? 0.0
+  let rz = bytes.get_f32_le(verts, 8) ?? 0.0
   println("x=" + float.to_string(rx) + " y=" + float.to_string(ry) + " z=" + float.to_string(rz))
 }

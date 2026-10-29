@@ -1,0 +1,3 @@
+expects_code = "E114"
+expects_error = "`wrap` reaches itself through `unwrap` at a growing type: `unwrap`'s `U` is `List[T]` at this call"
+hint_substring = "Recurse at the type `wrap` was called with"

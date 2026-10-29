@@ -9,12 +9,12 @@ type Cache = { memo: Map[String, Bool] }
 fn seen(mut c: Cache, k: String) -> Bool =
   if map.contains(c.memo, k) then true
   else {
-    map.insert(c.memo, k, true)
+    c.memo = map.set(c.memo, k, true)
     false
   }
 
 fn note(mut c: Cache, k: String) -> Unit = {
-  map.insert(c.memo, k, true)
+  c.memo = map.set(c.memo, k, true)
 }
 
 effect fn run(items: List[String]) -> Int = {

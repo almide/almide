@@ -65,9 +65,7 @@ const TAILS: &[(&str, Ret, &str)] = &[
     ("early_exit_passed", Ret::Int, "guard s.n < 1000 else bumpv(s, 100)\n  bump(s, 1)\n  bumpv(s, 2)"),
 ];
 
-const PRELUDE: &str = r#"import process
-
-type S = { n: Int, xs: List[Int] }
+const PRELUDE: &str = r#"type S = { n: Int, xs: List[Int] }
 
 fn bump(mut s: S, k: Int) -> Unit = { s.n = s.n + k }
 
@@ -117,7 +115,9 @@ fn cells() -> Vec<Cell> {
 }
 
 fn program_with_main(cells: &[Cell], main: &str) -> String {
-    let mut src = PRELUDE.to_string();
+    // The dispatching main reads its cell name from argv (`env.args()`); the
+    // import goes on top only then, so a single-cell main has no unused one.
+    let mut src = if main.contains("env.args()") { format!("import env\n\n{PRELUDE}") } else { PRELUDE.to_string() };
     for c in cells {
         src.push('\n');
         src.push_str(&c.fn_src);
@@ -130,7 +130,7 @@ fn program_with_main(cells: &[Cell], main: &str) -> String {
 fn dispatch_main(cells: &[Cell]) -> String {
     let arms: String = cells.iter().map(|c| format!("    \"{}\" => {{\n  {}\n    }},\n", c.name, c.call)).collect();
     format!(
-        "effect fn main() -> Unit = {{\n  let which = list.get(process.args(), 1) ?? \"\"\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n}}\n"
+        "effect fn main() -> Unit = {{\n  let which = list.get(env.args(), 0) ?? \"\"\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n}}\n"
     )
 }
 

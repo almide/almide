@@ -2,7 +2,7 @@
 // #558: a callee whose FIRST parameter is Result/Option must NOT have that
 // arg auto-?'d — it consumes the Result itself. The exemption is derived from
 // SIGNATURES, generalizing the old hardcoded result/option module list to any
-// USER fn taking a Result first (and to error.message/testing.assert_ok). Two
+// USER fn taking a Result first (and to result.to_err_option/testing.assert_ok). Two
 // proofs that need no bundled-module import (the determinism harness loads no
 // stdlib modules): a USER fn taking Result-first, and the result.unwrap_or
 // intrinsic. Before the fix, `take(inner(0), ..)` unwrapped the arg — native

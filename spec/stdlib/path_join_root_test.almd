@@ -1,0 +1,22 @@
+// path.join onto the root keeps the root (#4072).
+import path
+
+test "joining onto the root keeps its slash" {
+  assert_eq(path.join("/", "a"), "/a")
+  assert_eq(path.join("/", "a/b"), "/a/b")
+}
+
+test "the other join shapes are unchanged" {
+  assert_eq(path.join("/usr", "a"), "/usr/a")
+  assert_eq(path.join("/usr/", "a"), "/usr/a")
+  assert_eq(path.join("a", "/b"), "/b")
+  assert_eq(path.join("", "a"), "a")
+  assert_eq(path.join("a", "b"), "a/b")
+}
+
+test "components of an absolute path join back from the root" {
+  let p = "/x/y"
+  let parts = path.components(p)
+  let rest = list.drop(parts, 1)
+  assert_eq(rest |> list.fold("/", (acc, seg) => path.join(acc, seg)), p)
+}

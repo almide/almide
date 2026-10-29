@@ -1,17 +1,3 @@
-// math — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2d).
-//
-// Migrated mechanically from the matching `stdlib/defs/*.toml`.
-// Signatures (including any generic type params) match the legacy
-// TOML definitions byte-for-byte; the Rust runtime in
-// `runtime/rs/src/math.rs` stays as the implementation target.
-// On WASM the math fns are SELF-HOSTED (`stdlib/math_trig.almd`,
-// `math_exp.almd`, `math_log.almd`, `math_atan.almd`, `math_tanh.almd`, …),
-// registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
-// dispatched through `emit_wasm/calls_math.rs`, retired in c71eff7b.)
-/// Magnitude of n; min_value wraps to itself.
-@intrinsic("almide_rt_math_abs")
-fn abs(n: Int) -> Int = _
-
 /// Arctangent in radians, within -pi/2..pi/2.
 @intrinsic("almide_rt_math_atan")
 fn atan(x: Float) -> Float = _
@@ -34,21 +20,13 @@ fn e() -> Float = _
 @intrinsic("almide_rt_math_exp")
 fn exp(x: Float) -> Float = _
 
-/// Product 1..n; 1 for n <= 0; wraps past 20.
+/// Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
-/// Greater; a NaN operand is ignored; 0.0 > -0.0.
-@intrinsic("almide_rt_math_fmax")
-fn fmax(a: Float, b: Float) -> Float = _
-
-/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-@intrinsic("almide_rt_math_fmin")
-fn fmin(a: Float, b: Float) -> Float = _
-
 /// base to the exp; NaN for negative base, fractional exp.
 @intrinsic("almide_rt_math_fpow")
-fn fpow(base: Float, exp: Float) -> Float = _
+fn __fpow(base: Float, exp: Float) -> Float = _
 
 /// Natural log; -inf at 0, NaN for negative x.
 @intrinsic("almide_rt_math_log")
@@ -68,25 +46,17 @@ fn log2(x: Float) -> Float = _
 @intrinsic("almide_rt_math_log_gamma")
 fn log_gamma(x: Float) -> Float = _
 
-/// Greater of a and b.
-@intrinsic("almide_rt_math_max")
-fn max(a: Int, b: Int) -> Int = _
-
-/// Lesser of a and b.
-@intrinsic("almide_rt_math_min")
-fn min(a: Int, b: Int) -> Int = _
-
 /// The circle constant, 3.141592653589793.
 @intrinsic("almide_rt_math_pi")
 fn pi() -> Float = _
 
 /// base to the exp, wrapping; negative exp aborts.
 @intrinsic("almide_rt_math_pow")
-fn pow(base: Int, exp: Int) -> Int = _
+fn __pow(base: Int, exp: Int) -> Int = _
 
 /// -1, 0 or 1 by the sign of n.
 @intrinsic("almide_rt_math_sign")
-fn sign(n: Int) -> Int = _
+fn __sign(n: Int) -> Int = _
 
 /// Sine of x radians; NaN for infinite x.
 @intrinsic("almide_rt_math_sin")
@@ -103,3 +73,354 @@ fn tan(x: Float) -> Float = _
 /// Hyperbolic tangent in -1..1; inf gives 1.0.
 @intrinsic("almide_rt_math_tanh")
 fn tanh(x: Float) -> Float = _
+
+// ── Inverse trig, hyperbolic, hypot, cbrt, expm1, log1p (R-math-02/04/05) ──
+// Pure Almide on every target: transcriptions of the vendored musl libm
+// 0.2.16 kernels (FreeBSD msun) with the f64 operations in the same order,
+// so native and wasm run the same code and agree bit for bit. cbrt is the
+// FreeBSD s_cbrt.c kernel (no fused multiply-add), not libm's newer
+// correctly-rounded one. A NaN made from non-NaN operands is the fixed
+// +qNaN 0x7FF8000000000000 (C-055), as every other math function returns.
+local fn m_bits(x: Float) -> Int = float.to_bits(x)
+
+local fn m_from(b: Int) -> Float = int.__bits_to_float(b)
+
+// The high 32 bits as an unsigned word (the musl `get_high_word`).
+local fn m_hi(x: Float) -> Int = int.band(int.bshr(m_bits(x), 32), 4294967295)
+
+local fn m_lo(x: Float) -> Int = int.band(m_bits(x), 4294967295)
+
+local fn m_fabs(x: Float) -> Float = m_from(int.band(m_bits(x), 9223372036854775807))
+
+local fn m_signed(neg: Bool, x: Float) -> Float = if neg then -x else x
+
+local fn m_fix_nan(r: Float, operand_is_nan: Bool) -> Float =
+  if float.is_nan(r) and not operand_is_nan then m_from(9221120237041090560) else r
+
+// R(x^2) of the asin/acos kernels.
+local fn m_asin_r(z: Float) -> Float = {
+  let p = z * (1.66666666666666657415e-01 + z * (-3.25565818622400915405e-01 + z * (2.01212532134862925881e-01 + z * (-4.00555345006794114027e-02 + z * (7.91534994289814532176e-04 + z * 3.47933107596021167570e-05)))))
+  let q = 1.0 + z * (-2.40339491173441421878e+00 + z * (2.02094576023350569471e+00 + z * (-6.88283971605453293030e-01 + z * 7.70381505559019352791e-02)))
+  p / q
+}
+
+local fn m_asin(x: Float) -> Float = {
+  let pio2_hi = 1.57079632679489655800e+00
+  let pio2_lo = 6.12323399573676603587e-17
+  let hx = m_hi(x)
+  let ix = int.band(hx, 2147483647)
+  if ix >= 1072693248 then {
+    if int.bor(ix - 1072693248, m_lo(x)) == 0 then x * pio2_hi + m_from(4066750463515557888)
+    else 0.0 / (x - x)
+  } else if ix < 1071644672 then {
+    if ix >= 1048576 and ix < 1045430272 then x else x + x * m_asin_r(x * x)
+  } else {
+    let z = (1.0 - m_fabs(x)) * 0.5
+    let s = math.sqrt(z)
+    let r = m_asin_r(z)
+    let y = if ix >= 1072640819 then pio2_hi - (2.0 * (s + s * r) - pio2_lo)
+    else {
+      let f = m_from(int.band(m_bits(s), -4294967296))
+      let c = (z - f * f) / (s + f)
+      0.5 * pio2_hi - (2.0 * s * r - (pio2_lo - 2.0 * c) - (0.5 * pio2_hi - 2.0 * f))
+    }
+    m_signed(int.bshr(hx, 31) != 0, y)
+  }
+}
+
+/// Arcsine in radians, within -pi/2..pi/2; NaN outside -1..1.
+fn asin(x: Float) -> Float = m_fix_nan(m_asin(x), float.is_nan(x))
+
+local fn m_acos(x: Float) -> Float = {
+  let pio2_hi = 1.57079632679489655800e+00
+  let pio2_lo = 6.12323399573676603587e-17
+  let x1p_120 = m_from(4066750463515557888)
+  let hx = m_hi(x)
+  let ix = int.band(hx, 2147483647)
+  if ix >= 1072693248 then {
+    if int.bor(ix - 1072693248, m_lo(x)) == 0 then {
+      if int.bshr(hx, 31) != 0 then 2.0 * pio2_hi + x1p_120 else 0.0
+    } else 0.0 / (x - x)
+  } else if ix < 1071644672 then {
+    if ix <= 1012924416 then pio2_hi + x1p_120
+    else pio2_hi - (x - (pio2_lo - x * m_asin_r(x * x)))
+  } else if int.bshr(hx, 31) != 0 then {
+    let z = (1.0 + x) * 0.5
+    let s = math.sqrt(z)
+    let w = m_asin_r(z) * s - pio2_lo
+    2.0 * (pio2_hi - (s + w))
+  } else {
+    let z = (1.0 - x) * 0.5
+    let s = math.sqrt(z)
+    let df = m_from(int.band(m_bits(s), -4294967296))
+    let c = (z - df * df) / (s + df)
+    let w = m_asin_r(z) * s + c
+    2.0 * (df + w)
+  }
+}
+
+/// Arccosine in radians, within 0..pi; NaN outside -1..1.
+fn acos(x: Float) -> Float = m_fix_nan(m_acos(x), float.is_nan(x))
+
+local fn m_atan2(y: Float, x: Float) -> Float = {
+  let pi_v = 3.1415926535897931160e+00
+  let pi_lo = 1.2246467991473531772e-16
+  let hx = m_hi(x)
+  let lx = m_lo(x)
+  let hy = m_hi(y)
+  let ly = m_lo(y)
+  let m = int.bor(int.band(int.bshr(hy, 31), 1), int.band(int.bshr(hx, 30), 2))
+  let ix = int.band(hx, 2147483647)
+  let iy = int.band(hy, 2147483647)
+  if float.is_nan(x) or float.is_nan(y) then x + y
+  else if int.bor(int.band(hx - 1072693248, 4294967295), lx) == 0 then math.atan(y)
+  else if int.bor(iy, ly) == 0 then match m {
+    0 => y,
+    1 => y,
+    2 => pi_v,
+    _ => -pi_v,
+  } else if int.bor(ix, lx) == 0 then {
+    if int.band(m, 1) != 0 then -pi_v / 2.0 else pi_v / 2.0
+  } else if ix == 2146435072 then {
+    if iy == 2146435072 then match m {
+      0 => pi_v / 4.0,
+      1 => -pi_v / 4.0,
+      2 => 3.0 * pi_v / 4.0,
+      _ => -3.0 * pi_v / 4.0,
+    } else match m {
+      0 => 0.0,
+      1 => -0.0,
+      2 => pi_v,
+      _ => -pi_v,
+    }
+  } else if int.band(ix + 67108864, 4294967295) < iy or iy == 2146435072 then {
+    if int.band(m, 1) != 0 then -pi_v / 2.0 else pi_v / 2.0
+  } else {
+    let z = if int.band(m, 2) != 0 and int.band(iy + 67108864, 4294967295) < ix then 0.0
+    else math.atan(m_fabs(y / x))
+    match m {
+      0 => z,
+      1 => -z,
+      2 => pi_v - (z - pi_lo),
+      _ => (z - pi_lo) - pi_v,
+    }
+  }
+}
+
+/// Angle of the point (x, y) in radians, within -pi..pi.
+fn atan2(y: Float, x: Float) -> Float = m_atan2(y, x)
+
+/// e to the x, minus 1, accurate near 0; -1.0 below about -38.
+fn expm1(x: Float) -> Float = {
+  let ln2_hi = 6.93147180369123816490e-01
+  let ln2_lo = 1.90821492927058770002e-10
+  let hx = int.band(m_hi(x), 2147483647)
+  let sgn = int.bshr(m_hi(x), 31)
+  if hx >= 1078159482 and float.is_nan(x) then x
+  else if hx >= 1078159482 and sgn != 0 then -1.0
+  else if hx >= 1078159482 and x > 7.09782712893383973096e+02 then x * m_from(9214364837600034816)
+  else if hx <= 1071001154 and hx < 1016070144 then x
+  else {
+    let reduce = hx > 1071001154
+    let near = hx < 1072734898
+    let k = if not reduce then 0
+    else if near then {
+      if sgn == 0 then 1 else -1
+    } else float.__to_int(1.44269504088896338700e+00 * x + (if sgn != 0 then -0.5 else 0.5))
+    let hl = if not reduce then (x, 0.0)
+    else if near then {
+      if sgn == 0 then (x - ln2_hi, ln2_lo) else (x + ln2_hi, -ln2_lo)
+    } else {
+      let t = float.__from_int(k)
+      (x - t * ln2_hi, t * ln2_lo)
+    }
+    let x1 = if reduce then hl.0 - hl.1
+    else x
+    let c = if reduce then (hl.0 - x1) - hl.1
+    else 0.0
+    let hfx = 0.5 * x1
+    let hxs = x1 * hfx
+    let r1 = 1.0 + hxs * (-3.33333333333331316428e-02 + hxs * (1.58730158725481460165e-03 + hxs * (-7.93650757867487942473e-05 + hxs * (4.00821782732936239552e-06 + hxs * -2.01099218183624371326e-07))))
+    let t = 3.0 - r1 * hfx
+    let e0 = hxs * ((r1 - t) / (6.0 - x1 * t))
+    if k == 0 then x1 - (x1 * e0 - hxs)
+    else {
+      let e1 = (x1 * (e0 - c) - c) - hxs
+      if k == -1 then 0.5 * (x1 - e1) - 0.5
+      else if k == 1 then {
+        if x1 < -0.25 then -2.0 * (e1 - (x1 + 0.5)) else 1.0 + 2.0 * (x1 - e1)
+      } else {
+        let twopk = m_from(int.bshl(1023 + k, 52))
+        if k < 0 or k > 56 then {
+          let y0 = x1 - e1 + 1.0
+          let y1 = if k == 1024 then y0 * 2.0 * m_from(9214364837600034816) else y0 * twopk
+          y1 - 1.0
+        } else {
+          let uf = m_from(int.bshl(1023 - k, 52))
+          if k < 20 then (x1 - e1 + (1.0 - uf)) * twopk else (x1 - (e1 + uf) + 1.0) * twopk
+        }
+      }
+    }
+  }
+}
+
+local fn m_log1p(x: Float) -> Float = {
+  let ln2_hi = 6.93147180369123816490e-01
+  let ln2_lo = 1.90821492927058770002e-10
+  let hx = m_hi(x)
+  let small = hx < 1071284858 or int.bshr(hx, 31) > 0
+  if small and hx >= 3220176896 then {
+    if x == -1.0 then x / 0.0 else (x - x) / 0.0
+  } else if small and int.band(int.bshl(hx, 1), 4294967295) < 2034237440 then x
+  else if not small and hx >= 2146435072 then x
+  else {
+    let direct = small and hx <= 3218259652
+    let parts = if direct then (0, 0.0, x)
+    else {
+      let u = 1.0 + x
+      let hu0 = m_hi(u) + 1072693248 - 1072079006
+      let k = int.bshr(hu0, 20) - 1023
+      let c = if k < 54 then {
+        let c0 = if k >= 2 then 1.0 - (u - x) else x - (u - 1.0)
+        c0 / u
+      } else 0.0
+      let hu = int.band(hu0, 1048575) + 1072079006
+      let f = m_from(int.bor(int.bshl(hu, 32), m_lo(u))) - 1.0
+      (k, c, f)
+    }
+    let f = parts.2
+    let hfsq = 0.5 * f * f
+    let s = f / (2.0 + f)
+    let z = s * s
+    let w = z * z
+    let t1 = w * (3.999999999940941908e-01 + w * (2.222219843214978396e-01 + w * 1.531383769920937332e-01))
+    let t2 = z * (6.666666666666735130e-01 + w * (2.857142874366239149e-01 + w * (1.818357216161805012e-01 + w * 1.479819860511658591e-01)))
+    let r = t2 + t1
+    let dk = float.__from_int(parts.0)
+    s * (hfsq + r) + (dk * ln2_lo + parts.1) - hfsq + f + dk * ln2_hi
+  }
+}
+
+/// Natural log of 1 + x, accurate near 0; -inf at -1, NaN below.
+fn log1p(x: Float) -> Float = m_fix_nan(m_log1p(x), float.is_nan(x))
+
+// exp(x - 1416.0996...) * 2^1021 * 2^1021: exp near the overflow edge.
+local fn m_expo2(x: Float) -> Float = {
+  let scale = m_from(int.bshl(2044, 52))
+  math.exp(x - m_from(4653942887746821515)) * scale * scale
+}
+
+/// Hyperbolic sine; overflows to +-inf past about 710.
+fn sinh(x: Float) -> Float = {
+  let h = if int.bshr(m_bits(x), 63) != 0 then -0.5 else 0.5
+  let absx = m_fabs(x)
+  let w = m_hi(absx)
+  if w < 1082535490 then {
+    let t = expm1(absx)
+    if w < 1072693248 then {
+      if w < 1072693248 - 27262976 then x else h * (2.0 * t - t * t / (t + 1.0))
+    } else h * (t + t / (t + 1.0))
+  } else 2.0 * h * m_expo2(absx)
+}
+
+/// Hyperbolic cosine, at least 1.0; overflows to inf past about 710.
+fn cosh(x: Float) -> Float = {
+  let ax = m_fabs(x)
+  let w = m_hi(ax)
+  if w < 1072049730 then {
+    if w < 1072693248 - 27262976 then 1.0
+    else {
+      let t = expm1(ax)
+      1.0 + t * t / (2.0 * (1.0 + t))
+    }
+  } else if w < 1082535490 then {
+    let t = math.exp(ax)
+    0.5 * (t + 1.0 / t)
+  } else m_expo2(ax)
+}
+
+// x*x as an exact (hi, lo) pair (Dekker split at 2^27 + 1).
+local fn m_sq(x: Float) -> (Float, Float) = {
+  let xc = x * 134217729.0
+  let xh = x - xc + xc
+  let xl = x - xh
+  let hi = x * x
+  (hi, xh * xh - hi + 2.0 * xh * xl + xl * xl)
+}
+
+/// sqrt(a*a + b*b) without overflow or underflow on the way.
+fn hypot(a: Float, b: Float) -> Float = {
+  let ua = int.band(m_bits(a), 9223372036854775807)
+  let ub = int.band(m_bits(b), 9223372036854775807)
+  let uxi = if ua < ub then ub else ua
+  let uyi = if ua < ub then ua else ub
+  let ex = int.bshr(uxi, 52)
+  let ey = int.bshr(uyi, 52)
+  let x = m_from(uxi)
+  let y = m_from(uyi)
+  if ey == 2047 then y
+  else if ex == 2047 or uyi == 0 then x
+  else if ex - ey > 64 then x + y
+  else {
+    let x1p700 = m_from(7759702157959364608)
+    let x1p_700 = m_from(1454662679640670208)
+    let scaled = if ex > 1023 + 510 then (x1p700, x * x1p_700, y * x1p_700)
+    else if ey < 1023 - 450 then (x1p_700, x * x1p700, y * x1p700) else (1.0, x, y)
+    let sx = m_sq(scaled.1)
+    let sy = m_sq(scaled.2)
+    scaled.0 * math.sqrt(sy.1 + sx.1 + sy.0 + sx.0)
+  }
+}
+
+/// Real cube root; negative x gives a negative root.
+fn cbrt(x: Float) -> Float = {
+  let hx0 = int.band(m_hi(x), 2147483647)
+  let sub = hx0 < 1048576
+  let hx = if sub then int.band(m_hi(x * m_from(4850376798678024192)), 2147483647) else hx0
+  if hx0 >= 2146435072 then x + x
+  else if sub and hx == 0 then x
+  else {
+    let hw = if sub then hx / 3 + 696219795 else hx / 3 + 715094163
+    let t0 = m_from(int.bor(int.band(m_bits(x), int.bshl(1, 63)), int.bshl(hw, 32)))
+    let r0 = (t0 * t0) * (t0 / x)
+    let t1 = t0 * ((1.87595182427177009643 + r0 * (-1.88497979543377169875 + r0 * 1.621429720105354466140)) + ((r0 * r0) * r0) * (-0.758397934778766047437 + r0 * 0.145996192886612446982))
+    let t = m_from(int.band(m_bits(t1) + 2147483648, -1073741824))
+    let s = t * t
+    let r1 = x / s
+    let w = t + t
+    let r = (r1 - t) / (w + r1)
+    t + t * r
+  }
+}
+
+/// Inverse hyperbolic sine.
+fn asinh(x: Float) -> Float = {
+  let ex = int.band(int.bshr(m_bits(x), 52), 2047)
+  let ax = m_fabs(x)
+  let y = if ex >= 1023 + 26 then math.log(ax) + 0.693147180559945309417232121458176568
+  else if ex >= 1023 + 1 then math.log(2.0 * ax + 1.0 / (math.sqrt(ax * ax + 1.0) + ax))
+  else if ex >= 1023 - 26 then m_log1p(ax + ax * ax / (math.sqrt(ax * ax + 1.0) + 1.0)) else ax
+  m_signed(int.bshr(m_bits(x), 63) != 0, y)
+}
+
+local fn m_acosh(x: Float) -> Float = {
+  let ex = int.band(int.bshr(m_bits(x), 52), 2047)
+  if ex < 1023 + 1 then m_log1p(x - 1.0 + math.sqrt((x - 1.0) * (x - 1.0) + 2.0 * (x - 1.0)))
+  else if ex < 1023 + 26 then math.log(2.0 * x - 1.0 / (x + math.sqrt(x * x - 1.0)))
+  else math.log(x) + 0.693147180559945309417232121458176568
+}
+
+/// Inverse hyperbolic cosine, at least 0.0; NaN below 1.0.
+fn acosh(x: Float) -> Float = m_fix_nan(m_acosh(x), float.is_nan(x))
+
+local fn m_atanh(x: Float) -> Float = {
+  let ex = int.band(int.bshr(m_bits(x), 52), 2047)
+  let y = m_fabs(x)
+  let r = if ex < 1023 - 1 then {
+    if ex < 1023 - 32 then y else 0.5 * m_log1p(2.0 * y + 2.0 * y * y / (1.0 - y))
+  } else 0.5 * m_log1p(2.0 * (y / (1.0 - y)))
+  m_signed(int.bshr(m_bits(x), 63) != 0, r)
+}
+
+/// Inverse hyperbolic tangent; +-inf at +-1, NaN outside -1..1.
+fn atanh(x: Float) -> Float = m_fix_nan(m_atanh(x), float.is_nan(x))

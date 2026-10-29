@@ -8,23 +8,23 @@ fn main() -> Unit = {
   println(int.to_string(list.len(items)))
   // Parse object + get
   let obj = json.parse('{"name":"almide","version":42}') ?? value.null()
-  let name = value.field(obj, "name") ?? value.null()
+  let name = value.get(obj, "name") ?? value.null()
   let name_str = value.as_string(name) ?? "?"
   println(name_str)
-  let ver = value.field(obj, "version") ?? value.null()
+  let ver = value.get(obj, "version") ?? value.null()
   let ver_int = value.as_int(ver) ?? -1
   println(int.to_string(ver_int))
   // Nested
   let nested = json.parse('{"data":{"x":10}}') ?? value.null()
-  let data = value.field(nested, "data") ?? value.null()
-  let x = value.field(data, "x") ?? value.null()
+  let data = value.get(nested, "data") ?? value.null()
+  let x = value.get(data, "x") ?? value.null()
   let x_val = value.as_int(x) ?? -1
   println(int.to_string(x_val))
   // Stringify roundtrip
   let v = json.parse("[true, false, null]") ?? value.null()
-  println(value.stringify(v))
+  println(json.stringify(v))
   // Missing key
-  let missing = value.field(obj, "nonexistent") ?? value.null()
-  let r = value.stringify(missing)
+  let missing = value.get(obj, "nonexistent") ?? value.null()
+  let r = json.stringify(missing)
   println(r)
 }

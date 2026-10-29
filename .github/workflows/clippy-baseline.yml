@@ -16,16 +16,21 @@ on:
 env:
   RUST_TOOLCHAIN: "1.96.0"
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   strict:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-clippy-${{ env.RUST_TOOLCHAIN }}
       - name: Clippy warning ratchet, strict (a count below the file is red here)

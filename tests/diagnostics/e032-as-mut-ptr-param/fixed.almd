@@ -1,9 +1,0 @@
-// The fix: the helper declares the parameter `mut`, and the caller passes a `var`.
-fn poke(mut dst: Bytes, src: Bytes) -> Int = bytes.copy_to_ptr(src, bytes.as_mut_ptr(dst), 4)
-
-fn main() -> Unit = {
-  var dst = bytes.from_list([0, 0, 0, 0])
-  let src = bytes.from_list([1, 2, 3, 4])
-  let _ = poke(dst, src)
-  println(int.to_string(bytes.get_or(dst, 0, 9)))
-}

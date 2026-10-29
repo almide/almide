@@ -1,6 +1,7 @@
 import fs
 import process
 import datetime
+import env
 
 let FNV_OFFSET = 1469598103934665603
 let FNV_PRIME = 1099511628211
@@ -28,13 +29,13 @@ fn minihash(data: List[Int]) -> String = {
   var h = FNV_OFFSET
   for b in data {
     h = int.bxor(h, b)
-    h = int.wrap_mul(h, FNV_PRIME, 64)
+    h = int.wrap_mul(h, FNV_PRIME)
   }
   to_hex16(h)
 }
 
 fn hash_str(s: String) -> String =
-  minihash(string.to_bytes(s))
+  minihash(bytes.to_list(bytes.from_string(s)))
 
 fn parse_commit_files(content: String) -> Map[String, String] = {
   let lines = string.split(content, "\n")
@@ -66,8 +67,8 @@ effect fn cmd_init() -> Result[Unit, String] = {
   }
   fs.mkdir_p(".minigit/objects")!
   fs.mkdir_p(".minigit/commits")!
-  fs.write(".minigit/index", "")!
-  fs.write(".minigit/HEAD", "")!
+  fs.write_text(".minigit/index", "")!
+  fs.write_text(".minigit/HEAD", "")!
   ok(())
 }
 
@@ -78,13 +79,13 @@ effect fn cmd_add(filename: String) -> Result[Unit, String] = {
   }
   let content = fs.read_text(filename)!
   let hash = hash_str(content)
-  fs.write(".minigit/objects/" + hash, content)!
+  fs.write_text(".minigit/objects/" + hash, content)!
   let index_content = fs.read_text(".minigit/index")? ?? ""
   let lines = list.filter(string.split(index_content, "\n"), (l) => string.len(l) > 0)
   guard not list.contains(lines, filename) else {
     ok(())
   }
-  fs.write(".minigit/index", index_content + filename + "\n")!
+  fs.write_text(".minigit/index", index_content + filename + "\n")!
   ok(())
 }
 
@@ -99,7 +100,7 @@ effect fn cmd_commit(message: String) -> Result[Unit, String] = {
   let head_content = fs.read_text(".minigit/HEAD")? ?? ""
   let parent = string.trim(head_content)
   let parent_str = if string.len(parent) > 0 then parent else "NONE"
-  let ts = datetime.to_unix(datetime.now())
+  let ts = datetime.now()
   var commit_text = "parent: " + parent_str + "\n"
   commit_text = commit_text + "timestamp: " + int.to_string(ts) + "\n"
   commit_text = commit_text + "message: " + message + "\n"
@@ -110,9 +111,9 @@ effect fn cmd_commit(message: String) -> Result[Unit, String] = {
     commit_text = commit_text + fname + " " + fhash + "\n"
   }
   let commit_hash = hash_str(commit_text)
-  fs.write(".minigit/commits/" + commit_hash, commit_text)!
-  fs.write(".minigit/HEAD", commit_hash)!
-  fs.write(".minigit/index", "")!
+  fs.write_text(".minigit/commits/" + commit_hash, commit_text)!
+  fs.write_text(".minigit/HEAD", commit_hash)!
+  fs.write_text(".minigit/index", "")!
   println("Committed " + commit_hash)
   ok(())
 }
@@ -221,10 +222,10 @@ effect fn cmd_checkout(commit_hash: String) -> Result[Unit, String] = {
   let files = parse_commit_files(content)
   for (fname, blob_hash) in files {
     let blob_content = fs.read_text(".minigit/objects/" + blob_hash)!
-    fs.write(fname, blob_content)!
+    fs.write_text(fname, blob_content)!
   }
-  fs.write(".minigit/HEAD", commit_hash)!
-  fs.write(".minigit/index", "")!
+  fs.write_text(".minigit/HEAD", commit_hash)!
+  fs.write_text(".minigit/index", "")!
   println("Checked out " + commit_hash)
   ok(())
 }
@@ -234,8 +235,8 @@ effect fn cmd_reset(commit_hash: String) -> Result[Unit, String] = {
     println("Invalid commit")
     err("invalid commit")
   }
-  fs.write(".minigit/HEAD", commit_hash)!
-  fs.write(".minigit/index", "")!
+  fs.write_text(".minigit/HEAD", commit_hash)!
+  fs.write_text(".minigit/index", "")!
   println("Reset to " + commit_hash)
   ok(())
 }
@@ -252,7 +253,7 @@ effect fn cmd_rm(filename: String) -> Result[Unit, String] = {
   for l in new_lines {
     new_content = new_content + l + "\n"
   }
-  fs.write(".minigit/index", new_content)!
+  fs.write_text(".minigit/index", new_content)!
   ok(())
 }
 
@@ -287,21 +288,21 @@ effect fn cmd_show(commit_hash: String) -> Result[Unit, String] = {
 }
 
 effect fn main() -> Unit = {
-  let args = process.args()
-  let cmd = list.get(args, 1) ?? ""
+  let args = env.args()
+  let cmd = list.get(args, 0) ?? ""
   match cmd {
     "init" => {
       cmd_init()!
     },
     "add" => {
-      let fname = list.get(args, 2) ?? ""
+      let fname = list.get(args, 1) ?? ""
       match cmd_add(fname) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "commit" => {
-      let msg = list.get(args, 3) ?? ""
+      let msg = list.get(args, 2) ?? ""
       match cmd_commit(msg) {
         ok(_) => (),
         err(_) => process.exit(1),
@@ -314,36 +315,36 @@ effect fn main() -> Unit = {
       cmd_log()!
     },
     "diff" => {
-      let h1 = list.get(args, 2) ?? ""
-      let h2 = list.get(args, 3) ?? ""
+      let h1 = list.get(args, 1) ?? ""
+      let h2 = list.get(args, 2) ?? ""
       match cmd_diff(h1, h2) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "checkout" => {
-      let hash = list.get(args, 2) ?? ""
+      let hash = list.get(args, 1) ?? ""
       match cmd_checkout(hash) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "reset" => {
-      let hash = list.get(args, 2) ?? ""
+      let hash = list.get(args, 1) ?? ""
       match cmd_reset(hash) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "rm" => {
-      let fname = list.get(args, 2) ?? ""
+      let fname = list.get(args, 1) ?? ""
       match cmd_rm(fname) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "show" => {
-      let hash = list.get(args, 2) ?? ""
+      let hash = list.get(args, 1) ?? ""
       match cmd_show(hash) {
         ok(_) => (),
         err(_) => process.exit(1),

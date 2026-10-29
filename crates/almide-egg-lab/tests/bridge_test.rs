@@ -575,14 +575,14 @@ fn lifted_shape_matches_parsed_shape_after_fusion() {
 
 // ── Matrix fusion round-trip tests ─────────────────────────────────
 
-/// `matrix.mul(a, b)` lifts to a `MatrixMul` node with two slot
+/// `a * b` (`matrix.__mul(a, b)`) lifts to a `MatrixMul` node with two slot
 /// leaves. The bridge's round-trip must preserve the semantics: lift
-/// then lower reproduces a `matrix.mul` call on the same args.
+/// then lower reproduces a `matrix.__mul` call on the same args.
 #[test]
 fn matrix_mul_lifts_and_lowers_verbatim() {
     let a = matrix_var(0);
     let b = matrix_var(1);
-    let ir = matrix_call("mul", vec![a, b]);
+    let ir = matrix_call("__mul", vec![a, b]);
 
     let mut bridge = Bridge::new();
     let (rec, _root) = bridge.lift(&ir);
@@ -593,10 +593,10 @@ fn matrix_mul_lifts_and_lowers_verbatim() {
     match &lowered.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
             assert_eq!(module.as_str(), "matrix");
-            assert_eq!(func.as_str(), "mul");
+            assert_eq!(func.as_str(), "__mul");
             assert_eq!(args.len(), 2);
         }
-        other => panic!("expected matrix.mul call, got {:?}", other),
+        other => panic!("expected matrix.__mul call, got {:?}", other),
     }
 }
 
@@ -611,7 +611,7 @@ fn matrix_mul_scaled_reorders_arguments_correctly() {
     let s = scalar_var(2);
 
     let scale = matrix_call("scale", vec![b, s]);
-    let mul = matrix_call("mul", vec![a, scale]);
+    let mul = matrix_call("__mul", vec![a, scale]);
 
     let mut bridge = Bridge::new();
     let (rec, root) = bridge.lift(&mul);
@@ -634,7 +634,7 @@ fn matrix_mul_scaled_reorders_arguments_correctly() {
     let IrExprKind::Call { args, target: CallTarget::Module { func, .. }, .. } = &lowered.kind else {
         panic!("expected Call, got {:?}", lowered.kind);
     };
-    assert_eq!(func.as_str(), "mul_scaled");
+    assert_eq!(func.as_str(), "__mul_scaled");
     // args[0] should be the `a` var (VarId 0), args[1] the scalar s
     // (VarId 2), args[2] the `b` var (VarId 1).
     let arg_ids: Vec<u32> = args
@@ -645,6 +645,40 @@ fn matrix_mul_scaled_reorders_arguments_correctly() {
         })
         .collect();
     assert_eq!(arg_ids, vec![0, 2, 1]);
+}
+
+fn matrix_binop(op: BinOp, left: IrExpr, right: IrExpr) -> IrExpr {
+    IrExpr {
+        kind: IrExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+        ty: Ty::Matrix,
+        span: None, def_id: None,
+    }
+}
+
+fn saturate_to_string(expr: &IrExpr) -> String {
+    let mut bridge = Bridge::new();
+    let (rec, root) = bridge.lift(expr);
+    let runner = Runner::default().with_iter_limit(64).with_node_limit(10_000).with_expr(&rec).run(&fusion_rules());
+    let canonical_root = runner.egraph.find(root);
+    let (_, best) = Extractor::new(&runner.egraph, FusionCost).find_best(canonical_root);
+    best.to_string()
+}
+
+/// The operator spellings (R-matrix-14) fuse as the calls do: `a * scale(b, s)`,
+/// `scale(a, s) * b` and `a * (b * s)` all reach `__mul_scaled`.
+#[test]
+fn matrix_operators_fuse_like_the_calls() {
+    let rhs = matrix_binop(BinOp::MulMatrix, matrix_var(0), matrix_call("scale", vec![matrix_var(1), scalar_var(2)]));
+    assert_eq!(saturate_to_string(&rhs), "(matrix_mul_scaled _slot_0 _slot_2 _slot_1)");
+    let lhs = matrix_binop(BinOp::MulMatrix, matrix_call("scale", vec![matrix_var(0), scalar_var(2)]), matrix_var(1));
+    assert_eq!(saturate_to_string(&lhs), "(matrix_mul_scaled _slot_0 _slot_1 _slot_2)");
+    let scaled_op = IrExpr {
+        kind: IrExprKind::BinOp { op: BinOp::ScaleMatrix, left: Box::new(scalar_var(2)), right: Box::new(matrix_var(1)) },
+        ty: Ty::Matrix,
+        span: None, def_id: None,
+    };
+    let nested = matrix_binop(BinOp::MulMatrix, matrix_var(0), scaled_op);
+    assert_eq!(saturate_to_string(&nested), "(matrix_mul_scaled _slot_0 _slot_2 _slot_1)");
 }
 
 /// Build a `Block { stmts; trailing }` IR fragment from a list of
@@ -680,7 +714,7 @@ fn matrix_var_ref(id: u32) -> IrExpr {
 
 /// Let-split chain matching the `mul_scaled_rhs` shape:
 ///   let scaled = matrix.scale(b, s)
-///   matrix.mul(a, scaled)
+///   a * scaled
 /// Bridge must inline the chain into the trailing expression so egg
 /// can recognise the rewrite.
 #[test]
@@ -691,7 +725,7 @@ fn matrix_let_split_chain_fuses_via_inline() {
     let scaled_id = 12;
 
     let scaled_value = matrix_call("scale", vec![b, s]);
-    let trailing = matrix_call("mul", vec![a, matrix_var_ref(scaled_id)]);
+    let trailing = matrix_call("__mul", vec![a, matrix_var_ref(scaled_id)]);
 
     let ir = block_lets(vec![(VarId(scaled_id), scaled_value)], trailing);
 
@@ -720,10 +754,10 @@ fn matrix_let_split_with_duplicate_use_is_not_inlined() {
     let a = matrix_var(0);
     let b = matrix_var(1);
     let mul_id = 10;
-    let mul_value = matrix_call("mul", vec![a, b]);
-    // Trailing references mul twice: matrix.add(mul, mul). Bridge
+    let mul_value = matrix_call("__mul", vec![a, b]);
+    // Trailing references mul twice: mul + mul. Bridge
     // must not inline.
-    let trailing = matrix_call("add", vec![matrix_var_ref(mul_id), matrix_var_ref(mul_id)]);
+    let trailing = matrix_call("__add", vec![matrix_var_ref(mul_id), matrix_var_ref(mul_id)]);
     let ir = block_lets(vec![(VarId(mul_id), mul_value)], trailing);
 
     // The Block lifts as a single opaque slot; the slot table

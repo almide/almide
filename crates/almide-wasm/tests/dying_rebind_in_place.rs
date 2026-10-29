@@ -5,7 +5,7 @@
 //! source is never read again. The first in-place write on `a` then met the
 //! block at rc 2 and copied it whole, so a push / set loop in either shape
 //! stayed quadratic in bytes — whatever the mutator (`list.push`,
-//! `bytes.set_u8`, `bytes.append_u8`, a string append). The rebind of a
+//! `bytes.put_u8`, `bytes.append_u8`, a string append). The rebind of a
 //! source that dies there now MOVES the credit, so the write finds rc 1.
 //!
 //! Each row runs its loop N and 2N times and pins the bytes the allocator
@@ -71,10 +71,10 @@ fn len_line(n: u32) -> String {
 fn a_fold_accumulator_rebound_into_a_var_is_written_in_place() {
     in_place("fold list.push", |n| fold("[]", "list.push(a, x)", "list.len(r)", n), len_line);
     in_place("fold string append", |n| fold(r#""""#, r#"a = a + "b""#, "string.len(r)", n), len_line);
-    in_place("fold bytes.append_u8", |n| fold("bytes.new(0)", "bytes.append_u8(a, x % 256)", "bytes.len(r)", n), len_line);
+    in_place("fold bytes.append_u8", |n| fold("bytes.zeros(0)", "bytes.append_u8(a, x % 256)", "bytes.len(r)", n), len_line);
     in_place(
-        "fold bytes.set_u8",
-        |n| fold("bytes.new(4096)", "bytes.set_u8(a, x % 4096, x % 256)", "bytes.len(r)", n),
+        "fold bytes.put_u8",
+        |n| fold("bytes.zeros(4096)", "bytes.put_u8(a, x % 4096, x % 256)", "bytes.len(r)", n),
         |_| "4096\n".to_string(),
     );
 }
@@ -85,12 +85,12 @@ fn a_param_rebound_into_a_var_before_a_self_tail_call_is_written_in_place() {
     in_place("tail string append", |n| tail("String", r#""""#, r#"a = a + "b""#, "string.len(r)", n), len_line);
     in_place(
         "tail bytes.append_u8",
-        |n| tail("Bytes", "bytes.new(0)", "bytes.append_u8(a, x % 256)", "bytes.len(r)", n),
+        |n| tail("Bytes", "bytes.zeros(0)", "bytes.append_u8(a, x % 256)", "bytes.len(r)", n),
         len_line,
     );
     in_place(
-        "tail bytes.set_u8",
-        |n| tail("Bytes", "bytes.new(4096)", "bytes.set_u8(a, x % 4096, x % 256)", "bytes.len(r)", n),
+        "tail bytes.put_u8",
+        |n| tail("Bytes", "bytes.zeros(4096)", "bytes.put_u8(a, x % 4096, x % 256)", "bytes.len(r)", n),
         |_| "4096\n".to_string(),
     );
 }
@@ -122,10 +122,10 @@ fn main() -> Unit = {
   let held = [7]
   let t = go(held, 0)
   println("${held} ${t}")
-  var b = bytes.new(2)
+  var b = bytes.zeros(2)
   var c = b
-  bytes.set_u8(c, 0, 5)
-  println("${bytes.get_or(b, 0, 0 - 1)} ${bytes.get_or(c, 0, 0 - 1)}")
+  bytes.put_u8(c, 0, 5)
+  println("${bytes.get(b, 0) ?? (0 - 1)} ${bytes.get(c, 0) ?? (0 - 1)}")
   println(keep("hi"))
   let base = "x"
   let both = list.fold(list.range(0, 2), base, (acc, k) => {

@@ -1,0 +1,24 @@
+// @contract: C-394
+// random.bytes(n) (#3938, R-random-02) is the one cryptographically secure
+// source of randomness: n bytes from the platform CSPRNG, getrandom /
+// getentropy on native and wasi:random get-random-bytes on wasm. The bytes
+// are nondeterministic, so the fixture prints only what is fixed: the
+// lengths (300 crosses getentropy's 256-byte chunk), the empty draw at
+// n = 0, that two 32-byte draws differ (equal with probability 2^-256), and
+// that the bytes past the first chunk are drawn too (all zero with
+// probability 2^-352). It never prints a drawn byte. The abort on a
+// negative n is spec/wasm_cross/random_bytes_negative_abort.almd.
+import random
+
+effect fn main() -> Unit = {
+  let a = random.bytes(32)
+  let b = random.bytes(32)
+  println("len 32: ${bytes.len(a)} ${bytes.len(b)}")
+  println("two draws differ: ${a != b}")
+  println("len 0: ${bytes.len(random.bytes(0))}")
+  println("len 1: ${bytes.len(random.bytes(1))}")
+  println("len 256: ${bytes.len(random.bytes(256))}")
+  let c = random.bytes(300)
+  println("len 300: ${bytes.len(c)}")
+  println("tail drawn: ${bytes.slice(c, 256, 300) != bytes.zeros(44)}")
+}

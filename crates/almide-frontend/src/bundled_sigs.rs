@@ -182,6 +182,19 @@ pub fn bundled_effect_fn_has_body(module: &str, func: &str) -> bool {
                 && !attrs.iter().any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic"))))
 }
 
+/// The complement within effect fns: `func` is an effect fn of bundled
+/// `module` dispatched to a runtime template (`@intrinsic`, `@inline_rust`,
+/// `@wasm_intrinsic`, `@extern`), whose call returns its declared value.
+pub fn bundled_effect_fn_is_template(module: &str, func: &str) -> bool {
+    let Some(source) = super::stdlib::get_bundled_source(module) else { return false };
+    let Some(program) = almide_lang::parse_cached(source) else { return false };
+    program.decls.iter().any(|d| matches!(d,
+        ast::Decl::Fn { name, effect: Some(true), extern_attrs, attrs, .. }
+            if name.as_str() == func
+                && (!extern_attrs.is_empty()
+                    || attrs.iter().any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic")))))
+}
+
 /// Parse the bundled source for `module` and extract every fn
 /// declaration's signature. Returns `None` if the module is not
 /// bundled or parsing fails outright.
@@ -192,10 +205,24 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
     let source = super::stdlib::get_bundled_source(module)?;
     let program = almide_lang::parse_cached(source)?;
 
+    // A module that declares a type under a builtin's bare name (value's
+    // `mod type Path`) answers that spelling with its own type in its own
+    // signatures (#2858), as it does when the module itself is checked.
+    // Without this the signature table read `fn root() -> Path` as the
+    // builtin `Path` (= String), so a caller typed through the table (the
+    // MIR pipeline, which links no bundled module) saw `value.root()` as a
+    // `String` that a `value.Path` slot refuses.
+    let builtin_named: Vec<Sym> = program.decls.iter().filter_map(|d| match d {
+        ast::Decl::Type { name, .. }
+            if crate::canonicalize::resolve::builtin_type_head(
+                name.as_str(), crate::canonicalize::resolve::TypeSpelling::Bare,
+            ).is_some() => Some(*name),
+        _ => None,
+    }).collect();
     let mut out = HashMap::new();
     for decl in &program.decls {
         if let ast::Decl::Fn { name, params, return_type, effect, generics, attrs, .. } = decl {
-            let sig = build_fn_sig(params, return_type, effect, generics, attrs);
+            let sig = build_fn_sig(params, return_type, effect, generics, attrs, &builtin_named);
             out.insert(*name, sig);
         }
     }
@@ -208,6 +235,7 @@ fn build_fn_sig(
     effect: &Option<bool>,
     generics: &Option<Vec<ast::GenericParam>>,
     attrs: &[ast::Attribute],
+    builtin_named: &[Sym],
 ) -> FnSig {
     // Build a `known_types` map that resolves each generic param name
     // (`[A, B]`) to `Ty::TypeVar(name)`. Without this, the shared
@@ -225,7 +253,13 @@ fn build_fn_sig(
     for g in &gnames {
         known_types.insert(*g, almide_lang::types::Ty::TypeVar(*g));
     }
-    let resolver_ctx = if gnames.is_empty() { None } else { Some(&known_types) };
+    for n in builtin_named {
+        known_types.insert(
+            crate::canonicalize::resolve::builtin_named_type_key(None, n.as_str()),
+            almide_lang::types::Ty::Named(*n, vec![]),
+        );
+    }
+    let resolver_ctx = if known_types.is_empty() { None } else { Some(&known_types) };
     let ptys: Vec<(Sym, almide_lang::types::Ty)> = params
         .iter()
         .map(|p| (p.name, crate::canonicalize::resolve::resolve_type_expr(&p.ty, resolver_ctx)))
@@ -274,7 +308,7 @@ pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
 }
 
 /// #1839: the bundled module that DECLARES the nominal type `name` (bare
-/// spelling — `Endian` → `bytes`, `FileStat` → `fs`), `None` for every other
+/// spelling — `IpAddr` → `net`, `FileStat` → `fs`), `None` for every other
 /// name. Enumerated from the bundled sources themselves, so a new `type` in
 /// any bundled module joins `ir_link`'s type-owner pull with no table to
 /// maintain; `bundled_type_decls_are_unique_by_name` (tests/) pins that no

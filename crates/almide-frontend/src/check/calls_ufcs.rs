@@ -7,7 +7,7 @@
 
 impl Checker {
     /// The `Member { object, field }` callee arm of [`Self::check_call_with_type_args`] — `object.field(...)`: static module/alias/TypeName/codec resolution, then the UFCS ladder (Fn-typed record field, builtin-module method, convention method, protocol method on a TypeVar, user-fn UFCS, cross-module UFCS), falling back to the E002 "no method syntax" diagnostic or a callable-object constraint. Verbatim text move: each step is an independent guard that either returns a resolved `Ty` or falls through to the next.
-    fn check_call_target_member(
+    pub(super) fn check_call_target_member(
         &mut self,
         object: &mut ast::Expr,
         field: &Sym,
@@ -47,6 +47,7 @@ impl Checker {
         {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span, Some(args));
             self.reject_user_prim(mod_name, field, object.span);
+            self.reject_unopted_memory_unsafe_member(mod_name, field, object.span);
         }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
@@ -63,6 +64,21 @@ impl Checker {
             let arg_refs: Vec<&ast::Expr> = args.iter().collect();
             self.validate_mut_args(&format!("{}.{}", if let ExprKind::Ident { name, .. } = &object.kind { name.as_str() } else { "?" }, field), &arg_refs);
             return result;
+        }
+        // A removed spelling whose whole module is gone (`error.chain`): the
+        // object no longer names a module, so the walk below would report an
+        // undefined variable and skip the ledger. Name the removal (E002).
+        if !shadowed_by_local
+            && let ExprKind::Ident { name, .. } = &object.kind
+            && self.env.import_table.resolve(name.as_str()).is_none()
+            && crate::removed_spellings::lookup(&format!("{}.{}", name, field)).is_some()
+        {
+            let full = format!("{}.{}", name, field);
+            let prev = self.callee_span_hint.take();
+            self.callee_span_hint = callee_span_snapshot;
+            let ty = self.emit_unresolved_call_diagnostic(&full);
+            self.callee_span_hint = prev;
+            return ty;
         }
         // UFCS method: obj.method(args) -> module.method(obj, args)
         let obj_ty = self.infer_expr(object);
@@ -120,6 +136,19 @@ impl Checker {
         // the callable-object constrain below and E001'd "expected P but got
         // fn() -> …" — but the object was never a function; the METHOD is
         // what does not exist. Name that directly.
+        if field == "encode" && self.reject_secret_encode(&obj_concrete) {
+            return Ty::Named(sym("Value"), vec![]);
+        }
+        if let Ty::Named(n, _) = &obj_concrete
+            && let Some(hint) = self.missing_codec_direction_hint(*n, field.as_str())
+        {
+            self.emit(super::err(
+                format!("undefined method '{}' on {}", field, obj_concrete.display()),
+                hint,
+                format!("method call .{}()", field),
+            ).with_code("E002"));
+            return Ty::Unknown;
+        }
         if matches!(&obj_concrete, Ty::Named(..) | Ty::Record { .. }) && !obj_concrete.contains_typevar() {
             let type_name = obj_concrete.display();
             self.emit(super::err(
@@ -170,8 +199,8 @@ impl Checker {
     /// Validate `mut`-parameter arguments for a UFCS METHOD call.
     ///
     /// `obj.m(a, b)` desugars to `module.m(obj, a, b)`, so the receiver is argument 0 —
-    /// and for the in-place stdlib mutators (`list.push(mut xs, x)`, `map.insert(mut m, …)`,
-    /// `bytes.set_at(mut b, …)`) argument 0 IS the `mut` parameter. The static-resolution
+    /// and for the in-place stdlib mutators (`list.push(mut xs, x)`, `bytes.put_u8(mut b, …)`)
+    /// argument 0 IS the `mut` parameter. The static-resolution
     /// branch above passes only the explicit args, which is right for `module.fn(...)`
     /// where there is no receiver; reusing that list here indexed a vector the receiver was
     /// not in, so the receiver was never checked.
@@ -203,6 +232,7 @@ impl Checker {
                 (start >= s.col).then_some(ast::Span { col: start, ..s })
             });
             self.warn_if_deprecated_method(module, field.as_str(), method_span);
+            self.reject_unopted_memory_unsafe(module, field.as_str(), method_span.or(callee_span));
             let mut all_args = vec![obj_ty.clone()];
             all_args.extend(arg_tys.iter().cloned());
             let ty = self.check_named_call(&key, &all_args);
@@ -265,6 +295,13 @@ impl Checker {
                             // — a let-binding, a match subject — type-check against a shape
                             // codegen never emits, so `check` passed and rustc rejected the
                             // generated code (#1545).
+                            // #4158: an `effect` protocol method dispatched through a
+                            // bound is an effect call, as the concrete method is
+                            // (every conformance must match the declaration's
+                            // effect-ness, `validate_protocol_method_modes`).
+                            if method_sig.is_effect {
+                                self.check_effect_isolation_via_bound(&format!("{}.{}", proto_name, field));
+                            }
                             if method_sig.is_effect && !ret.is_result() {
                                 return Some(Ty::result(ret, Ty::String));
                             }
@@ -324,10 +361,26 @@ impl Checker {
             ).with_code("E002"));
             return Some(Ty::Unknown);
         }
+        if field == "encode" && self.reject_secret_encode(&Ty::Named(almide_base::intern::sym(module), vec![])) {
+            return Some(Ty::Named(almide_base::intern::sym("Value"), vec![]));
+        }
         // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
         let module_funcs = crate::stdlib::module_functions_current(module);
-        let suggestion = almide_base::diagnostic::suggest(field, module_funcs.iter().copied());
-        let hint = if let Some(close) = &suggestion {
+        // A spelling a dialect epoch removed (`.to_uint16()` on an Int): the
+        // ledger's repair is the answer, never a near-match — the nearest
+        // name is often the internal `__` carrier the removal left behind.
+        let removal = crate::removed_spellings::lookup(&format!("{}.{}", module, field));
+        let suggestion = if removal.is_some() {
+            None
+        } else {
+            almide_base::diagnostic::suggest(field, module_funcs.iter().copied())
+        };
+        let hint = if let Some(r) = removal {
+            format!(
+                "Almide doesn't use method-call syntax, and there is no `{m}.{field}` either: {repair}",
+                m = module, field = field, repair = crate::removed_spellings::hint(r)
+            )
+        } else if let Some(close) = &suggestion {
             format!(
                 "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
                 m = module, close = close, field = field
@@ -540,7 +593,9 @@ impl Checker {
             Ty::UInt16 => Some(sym("UInt16")),
             Ty::UInt32 => Some(sym("UInt32")),
             Ty::UInt64 => Some(sym("UInt64")),
+            Ty::Int64 => Some(sym("Int64")),
             Ty::Float32 => Some(sym("Float32")),
+            Ty::Float64 => Some(sym("Float64")),
             Ty::String => Some(sym("String")),
             Ty::Bool => Some(sym("Bool")),
             Ty::Bytes => Some(sym("Bytes")),

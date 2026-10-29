@@ -62,6 +62,15 @@ impl<'a> Interpreter<'a> {
             "result" => Self::eval_container_op_result,
             _ => return None,
         };
+        // The generic `list.sum` / `list.product` [A: Numeric] reached as an
+        // unmonomorphized `list.*` call: only the STATIC element type says
+        // which number type's fold answers it (a sized Int is a `Value::Int`
+        // too), so an element type outside Int / Float abstains.
+        let op: Op<'a> = match (module, func) {
+            ("list", "sum") => Self::numeric_list_fold(tys.as_deref())?,
+            ("list", "product") => Self::numeric_list_fold(tys.as_deref())?,
+            _ => op,
+        };
         // INSIDE the pool tier a heap value is its address, so a native op
         // over a real container would store or compare an ARGUMENT's address
         // (`map.set(acc, k, v)` with a String `k` a body just built): two
@@ -111,8 +120,6 @@ impl<'a> Interpreter<'a> {
             "first" | "head" => Some(self.list_first(args)),
             "last" => Some(self.list_last(args)),
             "get" => Some(self.list_get(args)),
-            "get_or" => Some(self.list_get_or(args)),
-            "binary_search" => Some(self.list_binary_search(args)),
             "contains" => Some(self.list_contains(args)),
             // First index of an equal element — `PartialEq` equality, the same
             // relation `contains` uses (measured against native on the corpus;
@@ -134,12 +141,12 @@ impl<'a> Interpreter<'a> {
             "concat" => Some(self.list_concat(args)),
             // Structural, element-type-blind — served natively so a heap-element
             // list never reaches the pool's Int-declared core impl (the
-            // wrong-impl guard walled chunk/windows on List[String], #1226).
-            // Semantics mirror stdlib/list_chunk.almd EXACTLY: chunk(0) /
-            // windows(0) abort in the T6 form; a negative chunk size is one
-            // chunk holding everything; windows past the length are none.
+            // wrong-impl guard walled chunk/window on List[String], #1226).
+            // Semantics mirror stdlib/list_chunk.almd EXACTLY: a size of 0
+            // or less aborts in the T6 form (#4147); windows past the length
+            // are none.
             "chunk" => Some(self.list_chunk(args)),
-            "windows" | "window" => Some(self.list_windows(args)),
+            "window" => Some(self.list_window(args)),
             // Element-type-blind too: the registry core `list_repeat` is
             // Int-declared, so a Float element reached its `prim.store64` as
             // "a non-address" and every `list.repeat(0.0, n)` zero row left
@@ -161,7 +168,8 @@ impl<'a> Interpreter<'a> {
         let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
             return Flow::Abort("internal: list.chunk bad args".into());
         };
-        if *n == 0 {
+        // A size of 0 or less aborts: a negative size is 0 (#4147).
+        if *n <= 0 {
             return Flow::Abort("chunk size must be positive".into());
         }
         let total = xs.len() as i64;
@@ -173,13 +181,13 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::list(out))
     }
 
-    /// `list.windows(xs, n)` — n == 0 aborts, n < 0 or n > len is the empty
+    /// `list.window(xs, n)` — n <= 0 aborts (#4147), n > len is the empty
     /// list, else the len-n+1 overlapping sub-slices.
-    fn list_windows(&mut self, args: &[Value]) -> Flow {
+    fn list_window(&mut self, args: &[Value]) -> Flow {
         let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
-            return Flow::Abort("internal: list.windows bad args".into());
+            return Flow::Abort("internal: list.window bad args".into());
         };
-        if *n == 0 {
+        if *n <= 0 {
             return Flow::Abort("window size must be positive".into());
         }
         let total = xs.len() as i64;
@@ -285,9 +293,46 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::list(r))
     }
 
-    fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+    /// The fold answering the generic `list.sum` / `list.product` for the
+    /// call's static element type, or none (abstain) outside Int / Float.
+    #[allow(clippy::type_complexity)]
+    fn numeric_list_fold(
+        tys: Option<&[almide_lang::types::Ty]>,
+    ) -> Option<fn(&mut Interpreter<'a>, &str, &[Value]) -> Option<Flow>> {
+        match list_elem_ty(tys)? {
+            almide_lang::types::Ty::Int => Some(Self::eval_container_op_list_agg_int),
+            almide_lang::types::Ty::Float => Some(Self::list_float_fold),
+            _ => None,
+        }
+    }
+
+    /// `list.sum` / `list.product` over `List[Int]`: the Int instances
+    /// `int.__sum` / `int.__product` answer with (wrapping, C-056).
+    fn eval_container_op_list_agg_int(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "sum" => Some(self.list_sum(args)),
+            _ => Some(self.list_product(args)),
+        }
+    }
+
+    /// `list.sum` / `list.product` over `List[Float]`: `float.__sum` /
+    /// `float.__product`'s left fold from 0.0 / 1.0 (an empty list is the
+    /// Float identity, never the Int 0 the untyped `list_sum` would answer).
+    fn list_float_fold(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let items = args.first().and_then(|v| v.as_iter_items())?;
+        let (init, step): (f64, fn(f64, f64) -> f64) =
+            if func == "sum" { (0.0, |a, b| a + b) } else { (1.0, |a, b| a * b) };
+        let mut acc = init;
+        for v in items.iter() {
+            let Value::Float(f) = v else { return None };
+            acc = step(acc, *f);
+        }
+        Some(Flow::val(Value::Float(acc)))
+    }
+
+    fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        match func {
+            "__sum_int" => Some(self.list_sum(args)),
             // Structural, element-type-blind, mirroring the v0 runtime
             // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
             // equals, unique keeps first occurrences, both under the same
@@ -297,10 +342,16 @@ impl<'a> Interpreter<'a> {
             "flatten" => Some(self.list_flatten(args)),
             "intersperse" => Some(self.list_intersperse(args)),
             "zip" => Some(self.list_zip(args)),
-            "product" => Some(self.list_product(args)),
+            "__product_int" => Some(self.list_product(args)),
             "min" => Some(self.list_min_max(args, false)),
             "max" => Some(self.list_min_max(args, true)),
-            "join" => Some(self.list_join(args)),
+            "__join_string" => Some(self.list_join(args)),
+            // The generic `list.join[T: Text]` as an UNMONOMORPHIZED self-hosted
+            // body calls it: the stdlib pool lowers without mono, so there is no
+            // `list.join` body for String parts to reach — its String instance
+            // is the join above. A Bytes join (T = Bytes) falls through and
+            // abstains.
+            "join" if matches!(args.get(1), Some(Value::Str(_))) => Some(self.list_join(args)),
             "sort" => Some(self.list_sort(args)),
             "enumerate" => Some(self.list_enumerate(args)),
             _ => self.eval_container_op_list_slice(func, args),
@@ -329,8 +380,8 @@ impl<'a> Interpreter<'a> {
     fn eval_list_slice_a(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         let items = args.first().and_then(|v| v.as_iter_items())?;
         let n = items.len();
-        // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
-        let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
+        // A count or range bound, clamped into [0, n]: a negative one is 0 (#4147).
+        let count = |i: i64| -> usize { if i < 0 { 0 } else { (i as usize).min(n) } };
         let int_arg = |k: usize| -> Option<i64> {
             match args.get(k) { Some(Value::Int(i)) => Some(*i), _ => None }
         };
@@ -340,7 +391,6 @@ impl<'a> Interpreter<'a> {
             "drop" => out(items[count(int_arg(1)?)..].to_vec()),
             "take_end" => { let k = count(int_arg(1)?); out(items[n - k..].to_vec()) }
             "drop_end" => { let k = count(int_arg(1)?); out(items[..n - k].to_vec()) }
-            "tail" => out(if n == 0 { Vec::new() } else { items[1..].to_vec() }),
             _ => None,
         }
     }
@@ -352,8 +402,8 @@ impl<'a> Interpreter<'a> {
     fn eval_list_slice_b(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         let items = args.first().and_then(|v| v.as_iter_items())?;
         let n = items.len();
-        // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
-        let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
+        // A count or range bound, clamped into [0, n]: a negative one is 0 (#4147).
+        let count = |i: i64| -> usize { if i < 0 { 0 } else { (i as usize).min(n) } };
         // An unsigned index; `None` when out of range (the no-op / default path).
         let index = |i: i64| -> Option<usize> {
             if i < 0 { None } else { let u = i as usize; (u < n).then_some(u) }
@@ -464,27 +514,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    // The native oracle IS Rust std's branchless binary_search (C-159: the
-    // duplicate-key index is pinned to it on both backends), so the third
-    // vote calls it directly on the extracted i64s.
-    fn list_binary_search(&mut self, args: &[Value]) -> Flow {
-        match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
-            (Some(items), Some(Value::Int(target))) => {
-                let xs: Option<Vec<i64>> = items
-                    .iter()
-                    .map(|v| if let Value::Int(n) = v { Some(*n) } else { None })
-                    .collect();
-                match xs {
-                    Some(xs) => Flow::val(Value::Option(
-                        xs.binary_search(target).ok().map(|i| Box::new(Value::Int(i as i64))),
-                    )),
-                    None => Flow::Unsupported("list.binary_search non-Int elements".into()),
-                }
-            }
-            _ => Flow::Abort("internal: list.binary_search bad args".into()),
-        }
-    }
-
     fn list_contains(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
             (Some(v), Some(x)) => match v.as_iter_slice() {
@@ -549,28 +578,6 @@ impl<'a> Interpreter<'a> {
                     .collect(),
             )),
             None => Flow::Abort("internal: list.enumerate on non-list".into()),
-        }
-    }
-
-    // get_or(xs, i, default) — the OOB/negative index yields the default
-    // (runtime/rs list.rs get_or; the Value-level twin of list_get's some/none).
-    pub(crate) fn list_get_or(&mut self, args: &[Value]) -> Flow {
-        fn at(items: &[Value], i: i64, default: &Value) -> Flow {
-            if i < 0 || (i as usize) >= items.len() {
-                Flow::val(default.clone())
-            } else {
-                Flow::val(items[i as usize].clone())
-            }
-        }
-        match (args.first(), args.get(1), args.get(2)) {
-            (Some(v), Some(Value::Int(i)), Some(default)) => match v.as_iter_slice() {
-                Some(items) => at(items, *i, default),
-                None => match v.as_iter_items() {
-                    Some(items) => at(&items, *i, default),
-                    None => Flow::Abort("internal: list.get_or bad args".into()),
-                },
-            },
-            _ => Flow::Abort("internal: list.get_or bad args".into()),
         }
     }
 
@@ -730,20 +737,25 @@ impl<'a> Interpreter<'a> {
 /// `list.insert`, `map.set`, `set.insert` — all `-> NewContainer`) are NOT
 /// listed and remain fully supported.
 ///
-/// `bytes` is matched by PREFIX rather than by name. Only three of its mutators
-/// (`push`, `set_at`, `copy_within`) spell `mut` on the receiver; the ~40 in the
-/// `set_*` / `append_*` / `write_*` families do not — they are `@intrinsic`s whose
+/// `bytes` is matched by PREFIX rather than by name. Only two of its mutators
+/// (`push`, `copy_within`) spell `mut` on the receiver; the ~30 in the
+/// `set_*` / `append_*` families do not — they are `@intrinsic`s whose
 /// mutation lives in the native signature (`&mut Vec<u8>`), invisible to the `.almd`
 /// declaration. So an enumerated list here had nothing to be checked against and
-/// silently fell behind: `bytes.set_f32_le` reported the generic "unknown
+/// silently fell behind: `bytes.put_f32_le` reported the generic "unknown
 /// capability" abstain instead of naming what it actually is, which is what the
-/// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`/
-/// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
+/// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`
+/// in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
 pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
+    // `bytes.__set_*` is the width primitive under the checked `bytes.put_*`.
+    let func = if module == "bytes" { func.strip_prefix("__").unwrap_or(func) } else { func };
     if module == "bytes"
-        && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))
+        && (func.starts_with("set_")
+            || func.starts_with("put_")
+            || func.starts_with("append_"))
+        && crate::inplace::bytes_write_op(func).is_some()
     {
         return true;
     }
@@ -752,15 +764,23 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
         ("list", "push")
             | ("list", "pop")
             | ("list", "clear")
-            | ("map", "insert")
-            | ("map", "delete")
             | ("map", "clear")
             | ("string", "push")
             | ("string", "clear")
             | ("bytes", "push")
+            | ("bytes", "pop")
             | ("bytes", "clear")
             | ("bytes", "fill")
             | ("bytes", "copy_from")
             | ("bytes", "copy_within")
     )
+}
+
+/// The element type of a call's first argument when it is statically a `List[T]`.
+fn list_elem_ty(tys: Option<&[almide_lang::types::Ty]>) -> Option<&almide_lang::types::Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    match tys?.first()? {
+        almide_lang::types::Ty::Applied(C::List, a) if a.len() == 1 => a.first(),
+        _ => None,
+    }
 }

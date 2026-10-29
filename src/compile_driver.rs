@@ -252,15 +252,62 @@ pub(crate) fn cwd_project() -> Option<project::Project> {
 pub(crate) fn optimize_gate_and_link(
     ir: &mut almide::ir::IrProgram,
     proj: Option<&project::Project>,
+    entry: (&str, &str),
     verify: impl FnOnce(&almide::ir::IrProgram) -> Result<(), String>,
 ) -> Result<(), String> {
+    // E109 (#4151): judged on the lowered program before the optimizer
+    // rewrites it, the IR `check` judges too.
+    enforce_effect_values(ir, entry)?;
     almide_driver::optimize_half(ir);
     verify(ir)?;
     if let Some(proj) = proj {
         cli::enforce_project_permissions(ir, proj)?;
+    } else {
+        almide_wasm_run::set_fs_scope(None);
     }
     almide_driver::link_half(ir);
     Ok(())
+}
+
+/// The whole lowered program — the entry and every user module — for the
+/// gates `almide check` runs after its own type check (E109 and
+/// `[permissions]`): check lowers only the entry, so a module's function was
+/// never judged there. Re-runs the build's front end with warnings silenced
+/// (check has printed them); `None` when it fails, which check has reported.
+pub(crate) fn whole_program_ir(file: &str) -> Option<almide::ir::IrProgram> {
+    let was = crate::SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::Relaxed);
+    // A debug-build assertion in module lowering (`increment_use` on a
+    // `self.` module lowered from outside its package directory) must not
+    // turn a clean `check` into a crash: the gates then judge the entry's own
+    // IR, as before this change, and the build route reports the defect.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let ir = std::panic::catch_unwind(|| {
+        let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, _, self_versioned) =
+            parse_and_resolve_for_compile(file).ok()?;
+        let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
+        let mut module_irs = std::collections::HashMap::new();
+        typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs).ok()?.0
+    })
+    .ok()
+    .flatten();
+    std::panic::set_hook(hook);
+    crate::SUPPRESS_WARNINGS.store(was, std::sync::atomic::Ordering::Relaxed);
+    ir
+}
+
+/// E109 (#4151): refuse a pure fn that runs an `effect fn` reached through a
+/// function value. `entry` is the entry file and its source, for rendering.
+pub(crate) fn enforce_effect_values(ir: &almide::ir::IrProgram, entry: (&str, &str)) -> Result<(), String> {
+    let diags = almide::effect_value_gate::effect_value_diagnostics(ir, entry.0);
+    if diags.is_empty() {
+        return Ok(());
+    }
+    for d in &diags {
+        err(&format!("{}", diagnostic_render::display_with_source(d, entry.1)));
+    }
+    err(&format!("\n{} error(s) found", diags.len()));
+    Err(format!("{} error(s) found", diags.len()))
 }
 
 /// `try_compile_with_ir`'s parse + project/dep resolution phase. Extracted
@@ -323,7 +370,7 @@ fn typecheck_and_lower_for_compile(
     resolved: &mut resolve::ResolvedModules,
     self_versioned: &resolve::SelfVersionedNames,
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
-) -> Result<Option<almide::ir::IrProgram>, String> {
+) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
     let canon = canonicalize::canonicalize_program(
         program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
@@ -354,17 +401,18 @@ fn typecheck_and_lower_for_compile(
     // An imported module's own type errors are fatal for the importer too:
     // a program that cannot be checked cannot be trusted to build (#862).
     report_module_diagnostics(&module_diags)?;
-    Ok(ir_program)
+    // #4008: the entry and every user module are checked by now.
+    Ok((ir_program, std::mem::take(&mut checker.outside_guarantee)))
 }
 
 /// `try_compile_with_ir`'s post-typecheck IR pipeline: optimize, verify
 /// integrity, check `[permissions]`, monomorphize, and link dependency
 /// modules into the root. Extracted verbatim.
-fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>) -> Result<(), String> {
+fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>, entry: (&str, &str)) -> Result<(), String> {
     // The driver's two halves with the integrity check and the `[permissions]`
     // gate (Security Layer 2) between them — the sequence the wasm route shares.
     match ir_program.as_mut() {
-        Some(ir) => optimize_gate_and_link(ir, parsed_project.as_ref(), verify_ir_or_err),
+        Some(ir) => optimize_gate_and_link(ir, parsed_project.as_ref(), entry, verify_ir_or_err),
         None => Ok(()),
     }
 }
@@ -375,16 +423,27 @@ fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, pars
 /// codegen's own meter ([`codegen_metered`], #3673) without a second
 /// type-check.
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
+    try_compile_reporting(file, no_check, codegen_opts).map(|(code, metered, _)| (code, metered))
+}
+
+/// [`try_compile_with_ir`], plus where the user code leaves the
+/// memory-safety guarantee (#4008), which `almide build` names on its
+/// `Built` line. Empty under `--no-check`, which checks nothing.
+pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>, Vec<String>), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
+    let mut outside_guarantee = Vec::new();
     if !no_check {
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
-        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+        (ir_program, outside_guarantee) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
 
-    optimize_verify_and_link(&mut ir_program, &parsed_project)?;
+    // `[permissions]` come from the entry file's own project (#4159 audit),
+    // whatever directory the command runs in.
+    let permissions_project = project::permissions_project_for(file).or(parsed_project);
+    optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
 
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
@@ -393,7 +452,39 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         codegen::CodegenOutput::Source(s) => s,
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     };
-    Ok((code, metered))
+    Ok((code, metered, outside_guarantee))
+}
+
+/// Each dependency package's capability set (#4093, `almide deps`): the
+/// effect categories its functions reach, by the same inference
+/// `[permissions].allow` is checked on (`EffectInferencePass`, where an
+/// `@extern` fn is every category). `entry` is a program that imports the
+/// cwd package's direct dependencies; a package reached only through them is
+/// measured over the modules they load. Keyed by package name; a package
+/// none of whose modules was loaded is absent. `Err` when the dependencies do
+/// not compile (the diagnostics were printed).
+pub(crate) fn dependency_capabilities(entry: &str) -> Result<std::collections::HashMap<String, std::collections::BTreeSet<String>>, String> {
+    use almide::codegen::pass::NanoPass;
+    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, _proj, self_versioned) = parse_and_resolve_for_compile(entry)?;
+    let package_of: std::collections::HashMap<String, String> = resolved.modules.iter()
+        .filter_map(|(name, _, pkg, _)| pkg.as_ref().map(|p| (name.clone(), p.name.clone())))
+        .collect();
+    let parsed = ParsedSource { file: entry, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
+    let mut module_irs = std::collections::HashMap::new();
+    let (ir, _) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+    let ir = ir.ok_or("the dependencies did not parse")?;
+    let ir = almide::codegen::pass_effect_inference::EffectInferencePass.run(ir, codegen::pass::Target::Rust).program;
+    let mut caps: std::collections::HashMap<String, std::collections::BTreeSet<String>> = std::collections::HashMap::new();
+    for module in &ir.modules {
+        let Some(pkg) = package_of.get(&module.name.to_string()) else { continue };
+        let set = caps.entry(pkg.clone()).or_default();
+        for func in &module.functions {
+            if let Some(fe) = ir.effect_map.functions.get(&format!("{}.{}", module.name, func.name)) {
+                set.extend(fe.transitive.iter().map(|e| e.to_string()));
+            }
+        }
+    }
+    Ok(caps)
 }
 
 /// #3673: build a metered program's linked IR with the codegen's own

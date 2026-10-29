@@ -30,6 +30,7 @@ FIXTURE_DIR="${1:-spec/wasm_cross}"
 HARNESS="tools/wasmgen-harness"
 LEDGER="${DETERMINISM_WALLED_LEDGER:-proofs/determinism-walled-baseline.txt}"
 source scripts/lib/determinism-walled.sh
+source scripts/lib/determinism-select.sh
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -52,7 +53,8 @@ fail=0; n=0
 WALL_RC=3
 walled=0
 : > "$WORK/walled.txt"
-for fix in "$FIXTURE_DIR"/*.almd; do
+determinism_select "$FIXTURE_DIR" "$WORK/selected.txt"
+while read -r fix <&3; do
   [ -e "$fix" ] || continue
   name="$(basename "$fix")"
   cp "$fix" "$WORK/in.almd"
@@ -77,7 +79,7 @@ for fix in "$FIXTURE_DIR"/*.almd; do
     fail=1
   fi
   n=$((n+1))
-done
+done 3< "$WORK/selected.txt"
 
 echo "----"
 if [ "$fail" -ne 0 ]; then
@@ -101,7 +103,7 @@ fi
 # being measured in the move. They are named in the ledger with their cause
 # issues (#2744, #2746, #2747); each fix deletes a row and lowers this number.
 MAX_WALLED=0
-corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
+corpus=$(wc -l < "$WORK/selected.txt" | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
   exit 1
@@ -115,5 +117,5 @@ if [ "$rows" -ne "$MAX_WALLED" ]; then
   echo "::error::host-determinism: MAX_WALLED=$MAX_WALLED but $LEDGER has $rows rows — the ceiling and the named walls must move together"
   exit 1
 fi
-check_walled_ledger "$LEDGER" "$WORK/walled.txt" host-determinism || exit 1
+check_walled_ledger "$LEDGER" "$WORK/walled.txt" host-determinism "$WORK/selected.txt" || exit 1
 echo "host-architecture codegen determinism: $n/$corpus emitted fixtures byte-identical across x86-64 and wasm32 ($walled walled, ceiling $MAX_WALLED)"

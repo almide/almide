@@ -15,7 +15,7 @@ import net
 effect fn main() -> Unit = {
   let r: Result[HttpResponse, String] = http.get_response("http://127.0.0.1:9/x")
   println("${result.is_ok(r)}")
-  let c: Result[Int, String] = net.tcp_connect("127.0.0.1", 9)
+  let c: Result[net.TcpStream, String] = net.tcp_connect("127.0.0.1", 9)
   println("${result.is_ok(c)}")
 }
 "#;

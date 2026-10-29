@@ -10,7 +10,7 @@
 //
 // The room test SUBTRACTS rather than adding: `pos + N` overflows i64 for a `pos`
 // near the top of the domain, and the wrapped negative passed `<= n`, so the store
-// went ahead and `base + pos` wrapped into the buffer. `bytes.set_f32_le(b,
+// went ahead and `base + pos` wrapped into the buffer. `bytes.__set_f32_le(b,
 // i64::MAX, 4.0)` left native's buffer untouched (its guard is a checked_add) and
 // MUTATED the wasm one — a silent write, exit 0 on both (differential fuzz, seed
 // 510754018593 index 222, mutating spec/wasm_cross/matrix_select_rows.almd, where
@@ -27,13 +27,6 @@ fn bytes_set_u8(b: Bytes, pos: Int, val: Int) -> Unit = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos < n then __msb(base + pos, val) else 0)
-  else 0
-}
-
-fn bytes_set_at(b: Bytes, i: Int, val: Int) -> Unit = {
-  let n = prim.load32(prim.handle(b) + 4)
-  let base = prim.handle(b) + 12
-  let _ = if i >= 0 then (if i < n then __msb(base + i, val) else 0)
   else 0
 }
 
@@ -180,7 +173,7 @@ fn bytes_fill(b: Bytes, val: Int) -> Unit = {
 // the block the receiver SHARES with every alias bound before the clear (a `let bb = b` holder,
 // the caller behind a `mut` parameter), so the alias observed the clear. Both legs lower
 // `bytes.clear(b)` as a var write-back of a fresh empty block instead (the structural arm
-// `lower_bytes_clear`, the incumbent's `rewrite_clear` to `bytes.new(0)`), the C-033 discipline.
+// `lower_bytes_clear`, the incumbent's `rewrite_clear` to `bytes.zeros(0)`), the C-033 discipline.
 fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
 
 // Float sets are NaN-OBSERVATION boundaries like every bytes float writer

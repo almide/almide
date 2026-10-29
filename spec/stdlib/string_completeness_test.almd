@@ -12,15 +12,15 @@ test "string.reverse single char" {
 }
 
 test "string.count occurrences" {
-  assert_eq(string.count("banana", "an"), 2)
+  assert_eq(string.count_matches("banana", "an"), 2)
 }
 
 test "string.count no match" {
-  assert_eq(string.count("hello", "xyz"), 0)
+  assert_eq(string.count_matches("hello", "xyz"), 0)
 }
 
 test "string.count empty substring" {
-  let n = string.count("abc", "")
+  let n = string.count_matches("abc", "")
   assert(n >= 0)
 }
 
@@ -144,28 +144,28 @@ test "string.is_lower false" {
   assert(not string.is_lower("Abc"))
 }
 
-test "string.codepoint on A" {
-  assert_eq(string.codepoint("A"), some(65))
+test "string.to_codepoint on A" {
+  assert_eq(string.to_codepoint("A"), some(65))
 }
 
-test "string.codepoint on empty" {
-  assert_eq(string.codepoint(""), none)
+test "string.to_codepoint on empty" {
+  assert_eq(string.to_codepoint(""), none)
 }
 
 test "string.from_codepoint 65" {
-  assert_eq(string.from_codepoint(65), "A")
+  assert_eq(string.from_codepoint(65), some("A"))
 }
 
-test "string.to_bytes and from_bytes roundtrip" {
-  let bytes = string.to_bytes("Hi")
-  assert_eq(string.from_bytes(bytes), "Hi")
+test "bytes.from_string and to_string_lossy roundtrip" {
+  let bs = bytes.to_list(bytes.from_string("Hi"))
+  assert_eq(bytes.to_string_lossy(bytes.from_list(bs)), "Hi")
 }
 
-test "string.to_bytes known values" {
-  let bytes = string.to_bytes("AB")
-  assert_eq(list.len(bytes), 2)
-  assert_eq(list.get(bytes, 0), some(65))
-  assert_eq(list.get(bytes, 1), some(66))
+test "bytes.from_string known values" {
+  let bs = bytes.to_list(bytes.from_string("AB"))
+  assert_eq(list.len(bs), 2)
+  assert_eq(list.get(bs, 0), some(65))
+  assert_eq(list.get(bs, 1), some(66))
 }
 
 test "string.lines splits on newline" {
@@ -193,4 +193,27 @@ test "string.get in bounds" {
 
 test "string.get out of bounds" {
   assert_eq(string.get("hello", 10), none)
+}
+
+test "string.to_codepoint is some only for one codepoint" {
+  assert_eq(string.to_codepoint("é"), some(233))
+  assert_eq(string.to_codepoint("ab"), none)
+}
+
+test "string.from_codepoint is none past the scalar range" {
+  assert_eq(string.from_codepoint(55296), none)
+  assert_eq(string.from_codepoint(1114112), none)
+}
+
+test "string.count counts characters, count_matches counts a needle" {
+  assert_eq(string.count("banana", (c) => c == "a"), 3)
+  assert_eq(string.count_matches("banana", "an"), 2)
+}
+
+test "string.pop removes the last character" {
+  var s = "hé"
+  assert_eq(string.pop(s), some("é"))
+  assert_eq(s, "h")
+  var e = ""
+  assert_eq(string.pop(e), none)
 }

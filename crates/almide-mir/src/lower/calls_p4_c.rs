@@ -139,7 +139,7 @@ impl LowerCtx {
             return;
         }
         if crate::lower::is_list_str_str_ty(ty) {
-            // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
+            // `List[(String,String)]` (map.to_list) arg temp — DropListStrStr frees each tuple's
             // two Strings; the flat heap_elem_lists fallback would leak them.
             self.value_drops.entry(dst).or_default().str_str_elems = true;
             return;
@@ -168,7 +168,7 @@ impl LowerCtx {
         }
         if crate::lower::is_map_msv_ty(ty) {
             // `Map[String, Map[String, String]]` arg temp (the inline nested-map literal
-            // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
+            // fed straight to `map.get` — map_fold_heap_acc's r7): `$__drop_map_msv`
             // sweeps each last-ref inner map; the flat fallback leaked the whole nested
             // map per iteration (loop OOM).
             self.value_drops.entry(dst).or_default().named_route = Some("map_msv".to_string());
@@ -241,7 +241,7 @@ impl LowerCtx {
         if repr.is_heap() {
             self.live_heap_handles.push(dst);
             self.seed_call_arg_heap_drop_route(dst, ty);
-            // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.str(s))`) drops via the
+            // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.string(s))`) drops via the
             // runtime-tag-dispatched `Op::DropValue` (recursive — an Array frees its element Values, a
             // Str its String), NOT a flat `Op::Drop` (which would leak the nested payload). Without
             // this a tag-5 Array / tag-4 Str passed as an argument leaks at the call-site scope end.

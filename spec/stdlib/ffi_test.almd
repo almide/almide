@@ -1,0 +1,77 @@
+// ffi — Regions at the foreign-function boundary (R-ffi-01, ADR-0031). A
+// Region carries its own length: every read and write is checked against it,
+// and an access outside it is an err, never a read or write of other memory.
+// The base address differs per target and is never observed.
+import ffi
+
+fn bytes_of(r: Result[Bytes, String]) -> List[Int] = match r {
+  ok(b) => bytes.to_list(b),
+  err(_) => [-1],
+}
+
+fn failed[T](r: Result[T, String]) -> Bool = match r {
+  ok(_) => false,
+  err(_) => true,
+}
+
+test "a region of a Bytes value has its length and is read-only" {
+  let r = ffi.region(bytes.from_list([65, 66, 67, 68]))
+  assert_eq(ffi.len(r), 4)
+  assert(not ffi.is_writable(r))
+  assert_eq(ffi.len(ffi.region(bytes.new())), 0)
+}
+
+test "read copies n bytes at an offset inside the region" {
+  let r = ffi.region(bytes.from_list([65, 66, 67, 68]))
+  assert_eq(bytes_of(ffi.read(r, 0, 4)), [65, 66, 67, 68])
+  assert_eq(bytes_of(ffi.read(r, 1, 2)), [66, 67])
+  assert_eq(bytes_of(ffi.read(r, 4, 0)), [])
+}
+
+test "read outside the region is err" {
+  let r = ffi.region(bytes.from_list([1, 2, 3]))
+  assert(failed(ffi.read(r, 0, 4)))
+  assert(failed(ffi.read(r, 3, 1)))
+  assert(failed(ffi.read(r, -1, 1)))
+  assert(failed(ffi.read(r, 0, -1)))
+  assert(failed(ffi.read(r, 9223372036854775807, 1)))
+  assert(failed(ffi.read(ffi.region(bytes.new()), 0, 1)))
+}
+
+test "a region of a Bytes value refuses every write" {
+  let b = bytes.from_list([1, 2, 3])
+  let r = ffi.region(b)
+  assert(failed(ffi.write(r, 0, bytes.from_list([9]))))
+  assert_eq(bytes.to_list(b), [1, 2, 3])
+}
+
+test "alloc gives a fresh zeroed writable region" {
+  let r = ffi.alloc(4) ?? ffi.region(bytes.new())
+  assert_eq(ffi.len(r), 4)
+  assert(ffi.is_writable(r))
+  assert_eq(bytes_of(ffi.read(r, 0, 4)), [0, 0, 0, 0])
+  assert(failed(ffi.alloc(-1)))
+}
+
+test "write puts bytes at an offset inside an allocated region" {
+  let r = ffi.alloc(5) ?? ffi.region(bytes.new())
+  assert(not failed(ffi.write(r, 0, bytes.from_string("hello"))))
+  assert_eq(bytes.to_string(ffi.to_bytes(r) ?? bytes.new()) ?? "", "hello")
+  assert(not failed(ffi.write(r, 4, bytes.from_list([33]))))
+  assert_eq(bytes.to_string(ffi.to_bytes(r) ?? bytes.new()) ?? "", "hell!")
+}
+
+test "write outside an allocated region is err and changes nothing" {
+  let r = ffi.alloc(3) ?? ffi.region(bytes.new())
+  assert(failed(ffi.write(r, 2, bytes.from_list([1, 2]))))
+  assert(failed(ffi.write(r, -1, bytes.from_list([1]))))
+  assert(failed(ffi.write(r, 9223372036854775807, bytes.from_list([1]))))
+  assert_eq(bytes_of(ffi.read(r, 0, 3)), [0, 0, 0])
+}
+
+test "two allocations never share memory" {
+  let a = ffi.alloc(2) ?? ffi.region(bytes.new())
+  let b = ffi.alloc(2) ?? ffi.region(bytes.new())
+  assert(not failed(ffi.write(a, 0, bytes.from_list([5, 6]))))
+  assert_eq(bytes_of(ffi.read(b, 0, 2)), [0, 0])
+}

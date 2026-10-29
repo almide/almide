@@ -51,21 +51,21 @@ test "int.bnot minus one" {
   assert_eq(int.bnot(-1), 0)
 }
 
-test "int.to_float roundtrip" {
-  let f = int.to_float(100)
-  assert_eq(float.to_int(f), 100)
+test "float.from roundtrip" {
+  let f = float.from(100)
+  assert_eq(int.from_saturating(f), 100)
 }
 
-test "int.to_float basic" {
-  assert_eq(int.to_float(42), 42.0)
+test "float.from basic" {
+  assert_eq(float.from(42), 42.0)
 }
 
-test "int.to_float zero" {
-  assert_eq(int.to_float(0), 0.0)
+test "float.from zero" {
+  assert_eq(float.from(0), 0.0)
 }
 
-test "int.to_float negative" {
-  assert_eq(int.to_float(-5), -5.0)
+test "float.from negative" {
+  assert_eq(float.from(-5), -5.0)
 }
 
 test "int.abs zero" {

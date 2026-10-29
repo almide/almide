@@ -28,24 +28,6 @@ fn main() -> Unit = {
 ["a", "b", "c"]
 ```
 
-### `string.join(list: List[String], sep: String) -> String`
-
-Join a list of strings with a separator.
-
-```almd run
-fn main() -> Unit = {
-  println(string.join(["a", "b", "c"], "-"))
-}
-```
-```output
-a-b-c
-```
-
-`len`, `get`, `slice`, and search-result positions count Unicode codepoints,
-not UTF-8 bytes or grapheme clusters. `to_bytes` returns UTF-8 byte values as
-`List[Int]`; prefer `bytes.from_string` for a compact buffer. Byte offsets from
-a lexer belong to `byte_slice`, not `slice`.
-
 ### `string.len(s: String) -> Int`
 
 Return the number of characters in a string.
@@ -59,7 +41,7 @@ fn main() -> Unit = {
 5
 ```
 
-### `string.contains(s: String, sub: String) -> Bool`
+### `string.contains(s: String, needle: String) -> Bool`
 
 Check if a string contains a substring.
 
@@ -118,7 +100,7 @@ fn main() -> Unit = {
 ell
 ```
 
-### `string.pad_start(s: String, n: Int, ch: String) -> String`
+### `string.pad_start(s: String, n: Int, fill: String) -> String`
 
 Pad a string on the left to reach a target length.
 
@@ -131,22 +113,9 @@ fn main() -> Unit = {
 00042
 ```
 
-### `string.to_bytes(s: String) -> List[Int]`
-
-Convert a string to a list of UTF-8 byte values.
-
-```almd run
-fn main() -> Unit = {
-  println("${string.to_bytes("Hi")}")
-}
-```
-```output
-[72, 105]
-```
-
 ### `string.capitalize(s: String) -> String`
 
-Capitalize the first character of a string.
+Capitalize the first character of a string. The first character is upper-cased by the same rule as `string.to_upper`, so a non-ASCII first character whose uppercase would contain ASCII (`ı`, `ß`, `ﬁ`) is left as it is.
 
 ```almd run
 fn main() -> Unit = {
@@ -159,7 +128,9 @@ Hello
 
 ### `string.to_upper(s: String) -> String`
 
-Convert all characters to uppercase.
+Convert all characters to uppercase, using Unicode's default (locale-independent) full case mapping, which may lengthen the string.
+
+One deliberate exception: a non-ASCII character whose uppercase would contain an ASCII character is left unchanged, so text never folds into ASCII. `string.to_upper("adm\u{131}n")` is `"ADMıN"`, not `"ADMIN"`, and `ß`, `ſ` and the ligatures `ﬀ`–`ﬆ` stay as they are. Rust, Python and JavaScript fold these (Go folds `ı` and `ſ`); Almide does not, so a name that passed a check on the raw text cannot become `"ADMIN"` afterwards. The mapping is locale-independent and is not for identity comparison: compare identifiers as ASCII, or normalize them explicitly.
 
 ```almd run
 fn main() -> Unit = {
@@ -172,7 +143,9 @@ HELLO
 
 ### `string.to_lower(s: String) -> String`
 
-Convert all characters to lowercase.
+Convert all characters to lowercase, using Unicode's default (locale-independent) full case mapping, including the word-final `ς` rule for `Σ`.
+
+As with `string.to_upper`, a non-ASCII character whose lowercase would contain an ASCII character is left unchanged: `string.to_lower("\u{212A}ey")` (Kelvin sign) is `"\u{212A}ey"`, not `"key"`, and `İ` (U+0130) stays `İ`. The mapping is locale-independent and is not for identity comparison.
 
 ```almd run
 fn main() -> Unit = {
@@ -229,13 +202,13 @@ fn main() -> Unit = {
 ["a", "b", "c"]
 ```
 
-### `string.chars(s: String) -> List[String]`
+### `string.to_list(s: String) -> List[String]`
 
 Split a string into individual characters.
 
 ```almd run
 fn main() -> Unit = {
-  println("${string.chars("abc")}")
+  println("${string.to_list("abc")}")
 }
 ```
 ```output
@@ -273,19 +246,6 @@ fn main() -> Unit = {
 ```
 ```output
 ababab
-```
-
-### `string.from_bytes(bytes: List[Int]) -> String`
-
-Create a string from a list of UTF-8 byte values.
-
-```almd run
-fn main() -> Unit = {
-  println(string.from_bytes([72, 105]))
-}
-```
-```output
-Hi
 ```
 
 ### `string.is_digit(s: String) -> Bool`
@@ -366,7 +326,7 @@ fn main() -> Unit = {
 true
 ```
 
-### `string.codepoint(s: String) -> Option[Int]`
+### `string.to_codepoint(s: String) -> Option[Int]`
 
 Return the Unicode codepoint of the first character, or none for empty string.
 
@@ -377,8 +337,8 @@ fn show(o: Option[Int]) -> String = match o {
 }
 
 fn main() -> Unit = {
-  println(show(string.codepoint("A")))
-  println(show(string.codepoint("")))
+  println(show(string.to_codepoint("A")))
+  println(show(string.to_codepoint("")))
 }
 ```
 ```output
@@ -386,20 +346,21 @@ some(65)
 none
 ```
 
-### `string.from_codepoint(n: Int) -> String`
+### `string.from_codepoint(n: Int) -> String?`
 
-Create a single-character string from a Unicode codepoint.
+Create a single-character string from a Unicode codepoint; none when n is
+not a Unicode scalar value (negative, a surrogate, or past U+10FFFF).
 
 ```almd run
 fn main() -> Unit = {
-  println(string.from_codepoint(65))
+  println(string.from_codepoint(65) ?? "")
 }
 ```
 ```output
 A
 ```
 
-### `string.pad_end(s: String, n: Int, ch: String) -> String`
+### `string.pad_end(s: String, n: Int, fill: String) -> String`
 
 Pad a string on the right to reach a target length.
 
@@ -438,13 +399,13 @@ fn main() -> Unit = {
 hello
 ```
 
-### `string.count(s: String, sub: String) -> Int`
+### `string.count_matches(s: String, sub: String) -> Int`
 
 Count occurrences of a substring.
 
 ```almd run
 fn main() -> Unit = {
-  println(int.to_string(string.count("banana", "an")))
+  println(int.to_string(string.count_matches("banana", "an")))
 }
 ```
 ```output
@@ -644,7 +605,7 @@ hel
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (50 functions)
+## Signature index (87 functions)
 
 ```
 // s without leading/trailing whitespace.
@@ -659,10 +620,6 @@ string.split(s: String, sep: String) -> List[String]
 // @since 0.57.0
 string.split_once(s: String, sep: String) -> Option[(String, String)]
 
-// Items with sep between; "" for [].
-// @since 0.5.0 or earlier
-string.join(list: List[String], sep: String) -> String
-
 // Codepoint count (not bytes).
 // @since 0.5.0 or earlier
 string.len(s: String) -> Int
@@ -671,9 +628,16 @@ string.len(s: String) -> Int
 // @since 0.19.2 or earlier
 string.length(s: String) -> Int   (deprecated — use string.len)
 
-// sub occurs in s; true for empty sub.
+// needle occurs in s; true for empty needle.
 // @since 0.6.0 or earlier
-string.contains(s: String, sub: String) -> Bool
+string.contains(s: String, needle: String) -> Bool
+
+// True if a and b hold the same UTF-8 bytes, in time that depends only on
+// their lengths: no early exit on the first differing byte. Use it to compare
+// a token or signature header; `==` returns at the first difference. A length
+// mismatch is false at once (lengths are public).
+// @since unreleased
+string.is_equal_constant_time(a: String, b: String) -> Bool
 
 // s begins with prefix; "" always matches.
 // @since 0.6.0 or earlier
@@ -691,23 +655,19 @@ string.slice(s: String, start: Int, end: Int) -> String
 // @since 0.63.0
 string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 
-// Left-padded to n chars with ch; never truncates.
+// Left-padded to n chars with fill; never truncates.
 // @since 0.6.1 or earlier
-string.pad_start(s: String, n: Int, ch: String) -> String
+string.pad_start(s: String, n: Int, fill: String) -> String
 
-// UTF-8 bytes of s as Ints 0..255.
-// @since 0.5.0 or earlier
-string.to_bytes(s: String) -> List[Int]
-
-// First char uppercased, rest untouched.
+// First char uppercased as to_upper does, rest untouched.
 // @since 0.5.13 or earlier
 string.capitalize(s: String) -> String
 
-// Unicode uppercase; may lengthen s.
+// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 // @since 0.5.0 or earlier
 string.to_upper(s: String) -> String
 
-// Unicode lowercase, not just ASCII.
+// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 // @since 0.5.0 or earlier
 string.to_lower(s: String) -> String
 
@@ -725,7 +685,7 @@ string.lines(s: String) -> List[String]
 
 // Each codepoint as a one-char string.
 // @since 0.5.0 or earlier
-string.chars(s: String) -> List[String]
+string.to_list(s: String) -> List[String]
 
 // Codepoint index of first needle, or none.
 // @since 0.5.0 or earlier
@@ -734,10 +694,6 @@ string.index_of(s: String, needle: String) -> Option[Int]
 // s repeated n times; empty for n <= 0.
 // @since 0.5.0 or earlier
 string.repeat(s: String, n: Int) -> String
-
-// Lossy UTF-8 decode; bad sequences become U+FFFD.
-// @since 0.5.0 or earlier
-string.from_bytes(bytes: List[Int]) -> String
 
 // All ASCII 0-9; false for empty s.
 // @since 0.6.0 or earlier
@@ -763,17 +719,17 @@ string.is_upper(s: String) -> Bool
 // @since 0.6.0 or earlier
 string.is_lower(s: String) -> Bool
 
-// Scalar value of first char; none if s empty.
+// Scalar value of s when s is exactly one codepoint; none otherwise.
 // @since 0.6.0 or earlier
-string.codepoint(s: String) -> Option[Int]
+string.to_codepoint(s: String) -> Option[Int]
 
-// One-char string; "" if n is not a scalar.
+// One-char string of n; none if n is not a Unicode scalar value.
 // @since 0.6.0 or earlier
-string.from_codepoint(n: Int) -> String
+string.from_codepoint(n: Int) -> Option[String]
 
-// Right-padded to n chars with ch; never truncates.
+// Right-padded to n chars with fill; never truncates.
 // @since 0.6.1 or earlier
-string.pad_end(s: String, n: Int, ch: String) -> String
+string.pad_end(s: String, n: Int, fill: String) -> String
 
 // s without leading whitespace.
 // @since 0.5.0 or earlier
@@ -783,9 +739,13 @@ string.trim_start(s: String) -> String
 // @since 0.5.0 or earlier
 string.trim_end(s: String) -> String
 
-// Non-overlapping sub count; len+1 if sub empty.
+// Non-overlapping needle count; len+1 if needle empty.
+// @since unreleased
+string.count_matches(s: String, needle: String) -> Int
+
+// Number of characters for which f is true.
 // @since 0.5.0 or earlier
-string.count(s: String, sub: String) -> Int
+string.count(s: String, f: (String) -> Bool) -> Int
 
 // True only for ""; " " is not empty.
 // @since 0.6.0 or earlier
@@ -819,33 +779,185 @@ string.first(s: String) -> Option[String]
 // @since 0.7.0 or earlier
 string.last(s: String) -> Option[String]
 
-// First n codepoints; all of s if n < 0.
+// First n codepoints; "" if n < 0.
 // @since 0.7.0 or earlier
 string.take(s: String, n: Int) -> String
 
-// Last n codepoints; all of s if n < 0.
+// Last n codepoints; "" if n < 0.
 // @since 0.7.0 or earlier
 string.take_end(s: String, n: Int) -> String
 
-// s minus first n codepoints; "" if n < 0.
+// s minus first n codepoints; s if n < 0.
 // @since 0.7.0 or earlier
 string.drop(s: String, n: Int) -> String
 
-// s minus last n codepoints; "" if n < 0.
+// s minus last n codepoints; s if n < 0.
 // @since 0.7.0 or earlier
 string.drop_end(s: String, n: Int) -> String
 
-// (char, count) per run of equal codepoints.
-// @since 0.14.6 or earlier
-string.run_length_encode(s: String) -> List[(String, Int)]
-
-// Appends suffix to s in place.
+// Appends x to s in place.
 // @since 0.23.3 or earlier
-string.push(mut s: String, suffix: String) -> Unit
+string.push(mut s: String, x: String) -> Unit
+
+// Removes and returns the last character; none if s is empty.
+// @since unreleased
+string.pop(mut s: String) -> Option[String]
 
 // Empties s in place.
 // @since 0.23.3 or earlier
 string.clear(mut s: String) -> Unit
+
+// Negative if a sorts before b, 0 if equal, positive after; codepoint order.
+// @since unreleased
+string.compare(a: String, b: String) -> Int
+
+// UTF-8 byte count (string.len counts codepoints).
+// @since unreleased
+string.byte_len(s: String) -> Int
+
+// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
+// @since unreleased
+string.to_utf16(s: String) -> List[Int]
+
+// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
+// @since unreleased
+string.from_utf16(xs: List[Int]) -> Result[String, String]
+
+// The characters of s for which f is true.
+// @since unreleased
+string.filter(s: String, f: (String) -> Bool) -> String
+
+// f folded over the characters of s, left to right.
+// @since unreleased
+string.fold(s: String, init: B, f: (B, String) -> B) -> B
+
+// s with x inserted before character i; i outside 0..=len aborts.
+// @since unreleased
+string.insert(s: String, i: Int, x: String) -> String
+
+// s without character i; i outside 0..len aborts.
+// @since unreleased
+string.remove_at(s: String, i: Int) -> String
+
+// The empty string.
+// @since unreleased
+string.new() -> String
+
+// The strings of xs joined with nothing between.
+// @since unreleased
+string.from_list(xs: List[String]) -> String
+
+// (index, character) pairs from 0.
+// @since unreleased
+string.enumerate(s: String) -> List[(Int, String)]
+
+// Characters paired with ys; stops at the shorter.
+// @since unreleased
+string.zip(s: String, ys: List[B]) -> List[(String, B)]
+
+// f over characters paired with ys; stops at the shorter.
+// @since unreleased
+string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]
+
+// The some results of f over the characters, in order.
+// @since unreleased
+string.filter_map(s: String, f: (String) -> Option[B]) -> List[B]
+
+// The first some result of f over the characters, or none.
+// @since unreleased
+string.find_map(s: String, f: (String) -> Option[B]) -> Option[B]
+
+// f folded over the characters from the first; none if s is empty.
+// @since unreleased
+string.reduce(s: String, f: (String, String) -> String) -> Option[String]
+
+// The running fold over the characters, init excluded.
+// @since unreleased
+string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]
+
+// (characters where f is true, the rest), each in order.
+// @since unreleased
+string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])
+
+// Characters grouped by f's key, each group in order.
+// @since unreleased
+string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]
+
+// The characters in codepoint order.
+// @since unreleased
+string.sort(s: String) -> List[String]
+
+// The characters ordered by f's key; equal keys keep their order.
+// @since unreleased
+string.sort_by(s: String, f: (String) -> B) -> List[String]
+
+// The characters ordered by cmp (negative = first argument first); stable.
+// @since unreleased
+string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]
+
+// The smallest character in codepoint order; none if empty.
+// @since unreleased
+string.min(s: String) -> Option[String]
+
+// The largest character in codepoint order; none if empty.
+// @since unreleased
+string.max(s: String) -> Option[String]
+
+// The first character with the smallest key; none if empty.
+// @since unreleased
+string.min_by(s: String, f: (String) -> K) -> Option[String]
+
+// The last character with the largest key; none if empty.
+// @since unreleased
+string.max_by(s: String, f: (String) -> K) -> Option[String]
+
+// The first smallest character by cmp; none if empty.
+// @since unreleased
+string.min_with(s: String, cmp: (String, String) -> Int) -> Option[String]
+
+// The last largest character by cmp; none if empty.
+// @since unreleased
+string.max_with(s: String, cmp: (String, String) -> Int) -> Option[String]
+
+// Index of the first character where f is true, or none.
+// @since unreleased
+string.find_index(s: String, f: (String) -> Bool) -> Option[Int]
+
+// The longest prefix whose characters all satisfy f.
+// @since unreleased
+string.take_while(s: String, f: (String) -> Bool) -> String
+
+// s after the longest prefix whose characters all satisfy f.
+// @since unreleased
+string.drop_while(s: String, f: (String) -> Bool) -> String
+
+// Runs of n characters, the last may be shorter; n <= 0 aborts.
+// @since unreleased
+string.chunk(s: String, n: Int) -> List[String]
+
+// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+// @since unreleased
+string.window(s: String, n: Int) -> List[String]
+
+// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
+// @since unreleased
+string.split_at(s: String, n: Int) -> (String, String)
+
+// s with each run of equal adjacent characters collapsed to one.
+// @since unreleased
+string.dedup(s: String) -> String
+
+// The characters of s with sep between each pair.
+// @since unreleased
+string.intersperse(s: String, sep: String) -> String
+
+// The first occurrence of each character, in order.
+// @since unreleased
+string.unique(s: String) -> String
+
+// The first character of each key f gives, in order.
+// @since unreleased
+string.unique_by(s: String, f: (String) -> K) -> String
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

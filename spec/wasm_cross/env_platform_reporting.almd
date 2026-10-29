@@ -1,5 +1,5 @@
 // @contract: C-189
-// env.os / env.temp_dir / fs.temp_dir — the ONLY stdlib observables exempt
+// env.os / fs.temp_dir — the ONLY stdlib observables exempt
 // from the native == wasm law, and the fixture that keeps that exemption
 // CLOSED.
 //
@@ -16,8 +16,7 @@
 // C-112, where random.int's draw is nondeterministic — the certified
 // observable is the deterministic INVARIANT that holds identically on both:
 // os is a member of the closed platform set, and the temp dir is a
-// non-empty path that is absolute on every posix host, with fs.temp_dir
-// and env.temp_dir agreeing byte-for-byte (one observable, two spellings).
+// non-empty path that is absolute on every posix host.
 // Both legs print the same bytes.
 //
 // Everything else in the process-environment surface stays byte-identical:
@@ -39,11 +38,7 @@ effect fn main() -> Unit = {
   // Non-empty on every host; absolute everywhere except Windows, whose temp
   // dir is a drive path. Checking both keeps the assertion true on all three
   // native platforms AND on the WASI leg without weakening it to "non-empty".
-  let tmp = env.temp_dir()
+  let tmp = fs.temp_dir()
   let shaped = string.len(tmp) > 0 and (os == "windows" or string.starts_with(tmp, "/"))
   if shaped then println("temp_dir:shaped") else println("temp_dir:MALFORMED")
-  // One observable, two spellings: fs.temp_dir must agree with env.temp_dir
-  // byte-for-byte on every leg.
-  let ftmp = fs.temp_dir()
-  if ftmp == tmp then println("fs_temp_dir:agrees") else println("fs_temp_dir:DIVERGES")
 }

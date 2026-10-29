@@ -1,4 +1,4 @@
-//! `random.float` / `random.choice` / `random.shuffle` and `list.shuffle`
+//! `random.float` / `random.choice` / `random.shuffle`
 //! (#2749): native arms over the entropy host op (32, the one `random.int`'s
 //! linked body already reaches through `prim.random_get`).
 //!
@@ -55,7 +55,7 @@ impl Emitter<'_> {
                 Ok(Some(Some(Lowered::scalar(FLOAT))))
             }
             ("random", "choice", [xs]) => self.lower_random_choice(xs).map(Some),
-            ("random" | "list", "shuffle", [xs]) => self.lower_random_shuffle(xs).map(Some),
+            ("random", "shuffle", [xs]) => self.lower_random_shuffle(xs).map(Some),
             _ => Ok(None),
         }
     }

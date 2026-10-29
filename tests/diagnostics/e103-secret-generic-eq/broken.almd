@@ -1,0 +1,11 @@
+// A generic `==` is one structural compare for every instantiation, so a
+// Secret never reaches it: the call that makes `A` a Secret is refused.
+import secret
+
+fn same[A](a: A, b: A) -> Bool = a == b
+
+fn main() -> Unit = {
+  let a = secret.new(1234)
+  let b = secret.new(1234)
+  println(if same(a, b) then "same pin" else "different pin")
+}

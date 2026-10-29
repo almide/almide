@@ -139,7 +139,7 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
 /// module names, lower the entry program, lower each resolved user module
 /// (bundled stdlib included so `@inline_rust` fns reach the bundled-dispatch
 /// path), link, optimize, and monomorphize. Extracted verbatim.
-fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
+fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules, entry: (&str, &str)) -> Result<almide::ir::IrProgram, ()> {
     // Pre-register versioned names before root lowering
     almide::wasm_leg::register_versioned_module_names(checker, &resolved.modules);
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
@@ -161,8 +161,8 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // gate judges this route exactly as it does the native build, on the same
     // post-optimize, pre-mono IR. This route's integrity check is
     // `verify_wasm_ir`, after the link.
-    let proj = crate::compile_driver::cwd_project();
-    crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), |_| Ok(())).map_err(|_| ())?;
+    let proj = project::permissions_project_for(entry.0).or_else(crate::compile_driver::cwd_project);
+    crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), entry, |_| Ok(())).map_err(|_| ())?;
 
     Ok(ir_program)
 }
@@ -472,13 +472,18 @@ fn report_structural_wall_site() {
 /// PCC-verified v1 trust-spine output — the caller MUST NOT post-process it (wasm-opt would replace
 /// the verified bytes with an unverified transform), so `--verified` ships exactly what was verified.
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>), ()> {
-    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _)| (b, o))
+    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _, _)| (b, o))
 }
+
+/// What [`compile_to_wasm_bytes_surfaced`] returns: the bytes, the host ops,
+/// the host-visible surface, and the places the build leaves the
+/// memory-safety guarantee (#4008).
+pub(crate) type SurfacedWasm = (Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface, Vec<String>);
 
 /// [`compile_to_wasm_bytes`] plus the program's host-visible surface (the
 /// `pub fn` exports, the `@extern(wasm, ..)` imports, whether `main` exists),
 /// read from the IR before routing — what `--host js` marshals (#2265).
-pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
+pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<SurfacedWasm, ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
     // Read off the source before the checker desugars it (#2659).
     let serve_shape = almide::serve_export::check_serve_shape(&program);
@@ -492,12 +497,18 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // requests alone, not on what the free lists hold (canonical_alloc.rs).
     let _canonical_alloc = almide_base::env::flag("ALMIDE_WASM_CANONICAL_ALLOC")
         .then(almide_wasm::canonical_alloc::CanonicalGuard::set);
+    // ALMIDE_WASM_CHECKED_ALLOC (#4009): poison freed blocks and check the
+    // poison on reuse — a write after free traps (checked_alloc.rs).
+    let _checked_alloc = almide_base::env::flag("ALMIDE_WASM_CHECKED_ALLOC")
+        .then(almide_wasm::checked_alloc::CheckedGuard::set);
 
     // The route resolves the module list itself (once, off disk, through the
     // same resolver) and hands the FRESH un-inferred programs to whichever
     // leg renders — the capture that used to live here (#782).
     let mut checker = typecheck_wasm_program(file, &source_text, &mut program, &resolved)?;
-    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
+    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved, (file, &source_text))?;
+    // #4008: the entry and every user module are checked by now.
+    let outside_guarantee = std::mem::take(&mut checker.outside_guarantee);
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
     let package: std::collections::HashSet<String> = resolved
@@ -541,5 +552,5 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         err(&message);
         return Err(());
     }
-    Ok((bytes, host_ops, surface))
+    Ok((bytes, host_ops, surface, outside_guarantee))
 }

@@ -5,7 +5,8 @@ use crate::types::Ty;
 use almide_base::intern::{Sym, sym};
 use super::LowerCtx;
 use super::derive_codec::{
-    auto_derive_encode, auto_derive_decode, CodecWk,
+    auto_derive_encode, auto_derive_decode, auto_derive_decode_strict, CodecWk,
+    auto_derive_record_strict, auto_derive_variant_strict,
     auto_derive_variant_encode, auto_derive_variant_decode,
     derive_container_helpers,
 };
@@ -40,9 +41,18 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
         };
 
         for conv in derives {
+            // The codec directions are derived once below, from the table.
+            if crate::canonicalize::protocols::is_codec_family(conv.as_str()) { continue; }
             let fn_name = format!("{}.{}", td.name, conv.to_lowercase());
             if fn_names.contains(fn_name.as_str()) { continue; }
-            auto.extend(derive_one(ctx, td, &type_ty, fields.as_deref(), conv, &fn_names));
+            auto.extend(derive_one(ctx, td, &type_ty, fields.as_deref(), conv));
+        }
+        // C-435: `Encode` derives `encode`, `Decode` derives `decode` (and a
+        // record's `decode_strict`), `Codec` is both — read off the protocol
+        // table, so a decode-only input type has no `encode` to send it out.
+        let (enc, dec) = crate::canonicalize::protocols::codec_directions(derives);
+        if enc || dec {
+            auto.extend(derive_codec(ctx, td, &type_ty, fields.as_deref(), &fn_names, CodecDirs { encode: enc, decode: dec }));
         }
     }
     auto
@@ -61,7 +71,6 @@ fn derive_one(
     type_ty: &Ty,
     fields: Option<&[IrFieldDecl]>,
     conv: &str,
-    fn_names: &std::collections::HashSet<&str>,
 ) -> Vec<IrFunction> {
     match conv {
         "Repr" => {
@@ -82,7 +91,6 @@ fn derive_one(
             }
         }
         "Eq" => derive_eq(ctx, td, type_ty, fields),
-        "Codec" => derive_codec(ctx, td, type_ty, fields, fn_names),
         _ => Vec::new(),
     }
 }
@@ -104,7 +112,14 @@ fn derive_eq(
     Vec::new()
 }
 
-/// `encode` / `decode`, plus the container helpers every Codec type provides.
+/// Which codec directions a type's declared protocols derive (C-435).
+#[derive(Copy, Clone)]
+struct CodecDirs {
+    encode: bool,
+    decode: bool,
+}
+
+/// `encode` / `decode`, plus the container helpers of each derived direction.
 ///
 /// `encode` and `decode` are checked for individually rather than as a pair: a
 /// type may hand-write one and derive the other.
@@ -114,28 +129,56 @@ fn derive_codec(
     type_ty: &Ty,
     fields: Option<&[IrFieldDecl]>,
     fn_names: &std::collections::HashSet<&str>,
+    dirs: CodecDirs,
 ) -> Vec<IrFunction> {
     let mut out = Vec::new();
-    let wants = |suffix: &str| !fn_names.contains(format!("{}.{}", td.name, suffix).as_str());
+    let wants = |suffix: &str| {
+        let derived = if suffix == "encode" { dirs.encode } else { dirs.decode };
+        derived && !fn_names.contains(format!("{}.{}", td.name, suffix).as_str())
+    };
     // Nested-container shapes generate per-type workers on demand (#1065);
     // `wk` collects them across the encode/decode builders, memoized by name.
     let mut workers = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let ctx_env = ctx.env;
+    // The strict family's span in `out` and in `workers` (C-436).
+    let mut strict_from = (0, 0);
+    let mut strict_to = (0, 0);
     {
+        // A type derives `Decode` when its protocol closure holds it; keyed
+        // leniently (bare or qualified), like the derive-field checks.
+        let strict_types = |n: Sym| {
+            let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+            [n, sym(bare)].iter().filter_map(|k| ctx_env.type_protocols.get(k)).flatten()
+                .any(|p| crate::canonicalize::protocols::codec_directions(&[*p]).1)
+        };
         let mut wk = CodecWk {
             vt: &mut ctx.var_table,
             type_name: td.name.as_str(),
             out: &mut workers,
             seen: &mut seen,
+            strict_types: &strict_types,
         };
         match (fields, &td.kind) {
             (Some(fields), _) => {
-                if wants("encode") {
+                // #4107 (R-secret-04): a Secret field is decoded, never encoded.
+                let holds_secret = fields.iter().any(|f| crate::secret_type::holds_secret(ctx_env, &f.ty));
+                if wants("encode") && !holds_secret {
                     out.push(auto_derive_encode(&mut wk, type_ty, fields));
                 }
                 if wants("decode") {
                     out.push(auto_derive_decode(&mut wk, type_ty, fields));
                 }
+                // C-436: the strict walk exists whenever `decode` does, so an
+                // enclosing type's strict decode can enter this one.
+                strict_from = (out.len(), wk.out.len());
+                if dirs.decode {
+                    out.push(auto_derive_record_strict(&mut wk, fields));
+                }
+                if wants(crate::canonicalize::protocols::STRICT_DECODE_METHOD) {
+                    out.push(auto_derive_decode_strict(&mut wk, type_ty));
+                }
+                strict_to = (out.len(), wk.out.len());
             }
             (None, IrTypeDeclKind::Variant { cases, .. }) => {
                 if wants("encode") {
@@ -144,16 +187,40 @@ fn derive_codec(
                 if wants("decode") {
                     out.push(auto_derive_variant_decode(&mut wk, type_ty, cases));
                 }
+                strict_from = (out.len(), wk.out.len());
+                if dirs.decode {
+                    out.push(auto_derive_variant_strict(&mut wk, cases));
+                }
+                if wants(crate::canonicalize::protocols::STRICT_DECODE_METHOD) {
+                    out.push(auto_derive_decode_strict(&mut wk, type_ty));
+                }
+                strict_to = (out.len(), wk.out.len());
             }
             (None, _) => {}
         }
     }
+    // The strict walk exists for every `Decode` type but runs only where a
+    // sink or a `T.decode_strict` call reaches it: stamped `@on_demand`, it
+    // is dropped after mono when nothing does, so a program that never
+    // decodes strictly ships none of it.
+    let stamp = |f: &mut IrFunction| f.attrs.push(almide_lang::ast::Attribute { name: sym(almide_ir::ON_DEMAND_ATTR), args: vec![], span: None });
+    out[strict_from.0..strict_to.0].iter_mut().for_each(stamp);
+    workers[strict_from.1..strict_to.1].iter_mut().for_each(stamp);
     out.append(&mut workers);
     // The four container helpers (`__{en,de}code_{list,option}_T`, #790 piece 1)
     // every Codec type provides — real bodies the v1 leg links; on v0 the
     // BuiltinLowering call-rewrite keeps them unused (DCE'd).
     if !fn_names.contains(format!("__encode_list_{}", td.name).as_str()) {
-        out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty));
+        // A Secret-holding type has no `encode`, so no encode helpers (#4107);
+        // a decode-only or encode-only type has the helpers of its one
+        // direction (C-435).
+        let no_encode = !dirs.encode || fields.is_some_and(|fs| fs.iter().any(|f| crate::secret_type::holds_secret(ctx_env, &f.ty)));
+        let no_decode = !dirs.decode;
+        let is_enc = |n: &str| n.starts_with("__encode_") || n.ends_with(".__list_enc_go");
+        let is_dec = |n: &str| n.starts_with("__decode_") || n.ends_with(".__list_dec_go") || n.ends_with(".__list_dec_at");
+        out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty)
+            .into_iter()
+            .filter(|f| !(no_encode && is_enc(f.name.as_str()) || no_decode && is_dec(f.name.as_str()))));
     }
     out
 }

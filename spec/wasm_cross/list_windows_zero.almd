@@ -1,5 +1,5 @@
 // @contract: C-129
-// `list.windows(xs, 0)` is a domain error (ALS-T4): it aborts with
+// `list.window(xs, 0)` is a domain error (ALS-T4): it aborts with
 // "Error: window size must be positive" + exit 1 on BOTH targets. This is the
 // silent-wrong killer: wasm previously returned len+1 EMPTY windows
 // (num_win = len - 0 + 1) while native panicked raw — a value-vs-abort
@@ -8,6 +8,6 @@ fn zero(x: Int) -> Int = x - x
 
 fn main() -> Unit = {
   println("before")
-  let ws = list.windows([1, 2, 3], zero(7))
+  let ws = list.window([1, 2, 3], zero(7))
   println(int.to_string(list.len(ws)))
 }

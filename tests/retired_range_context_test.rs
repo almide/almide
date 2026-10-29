@@ -13,7 +13,7 @@ fn retired_ranges_report_the_enclosing_grammar() {
     ] {
         let mut parser = Parser::new(Lexer::tokenize(source));
         let _ = parser.parse();
-        let diagnostic = parser.errors.iter().find(|d| d.code.as_deref() == Some("E031"))
+        let diagnostic = parser.errors.iter().find(|d| d.code == Some("E031"))
             .unwrap_or_else(|| panic!("{source}\n{:?}", parser.errors));
         assert!(diagnostic.hint.contains(hint), "{diagnostic:?}");
         assert_eq!(diagnostic.line, Some(1));

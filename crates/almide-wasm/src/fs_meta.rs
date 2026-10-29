@@ -15,16 +15,17 @@ mod fs_fallible;
 /// The fallible `fs.fold_lines`, split out for the file budget.
 #[path = "fs_fold.rs"]
 mod fs_fold;
+/// The rooted family's descriptor calls (#4084).
+#[path = "fs_root.rs"]
+pub(crate) mod fs_root;
 
-pub(crate) const OP_FILE_SIZE: i32 = 17;
-pub(crate) const OP_MODIFIED_AT: i32 = 18;
+// Ops 17 / 18 (fs.file_size / fs.modified_at) are retired: fs.stat carries both.
 pub(crate) const OP_COPY: i32 = 19;
 pub(crate) const OP_RENAME: i32 = 20;
 pub(crate) const OP_CREATE_TEMP_FILE: i32 = 21;
 pub(crate) const OP_IS_SYMLINK: i32 = 22;
 pub(crate) const OP_WALK: i32 = 23;
 pub(crate) const OP_READ_LINES_IF_EXISTS: i32 = 24;
-pub(crate) const OP_READ_BYTES_IF_EXISTS: i32 = 25;
 pub(crate) const OP_ENV_GET: i32 = 26;
 pub(crate) const OP_ENV_OS: i32 = 27;
 pub(crate) const OP_TEMP_DIR: i32 = 28;
@@ -59,6 +60,11 @@ pub(crate) const OP_SLEEP_MS: i32 = 36;
 /// later env.get observes the set exactly as native's process-level
 /// setenv does. Stock-p1 artifacts keep the defined refusal.
 pub(crate) const OP_ENV_SET: i32 = 37;
+/// env.vars' leaf `__environ` (#3908): no operands; answers frames, one
+/// `name=value` per variable of the environment the program started with,
+/// then one per overlay entry (op 37's sets, and `env.remove`'s marks with
+/// the value NUL) — the guest's Almide body lets the later entry win.
+pub(crate) const OP_ENV_VARS: i32 = 77;
 /// The http string client (#1710 increment 1): url in a, body in b, the
 /// method IS the op. Served on the embedded host by the transcribed
 /// native client; ops 40-42 are the fan prefetch protocol, so this
@@ -72,10 +78,9 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 /// decimal-length (method, body, headers) frame in b — CHAR-count cells,
 /// `<len>\n<payload>`, built by stdlib/http_framed.almd and parsed by the
 /// embedded host with the same char arithmetic. 48 answers the body text,
-/// 49 answers `<status>\n<body>` (split guest-side), 50 answers raw bytes.
+/// 49 answers `<status>\n<body>` (split guest-side). 50 (raw bytes) is retired.
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
-pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
 /// The full-response leaf (ADR-0023 step 4): `<status>\n<hlen>\n`, hlen chars
 /// of header cells (name, value), then the body. Served by the p3 shim only.
 pub(crate) const OP_HTTP_FRAMED_RESPONSE: i32 = 65;
@@ -88,6 +93,19 @@ pub(crate) const OP_HTTP_FRAMED_RESPONSE: i32 = 65;
 pub(crate) const OP_HTTP_SERVE_BIND: i32 = 70;
 pub(crate) const OP_HTTP_SERVE_NEXT: i32 = 71;
 pub(crate) const OP_HTTP_SERVE_REPLY: i32 = 72;
+/// The contained serve loop (#4203): the closure env of the guest's serve
+/// loop rides a_len (scalar, null a_ptr — the op-35 discipline). The
+/// embedded host calls the closure through the exported table and contains
+/// a handler abort to its request; a host without containment answers err
+/// and the guest runs the loop itself. A module naming this op exports its
+/// table and globals (assembly.rs) so the host can put the instance back.
+pub(crate) const OP_HTTP_SERVE_RUN: i32 = 75;
+/// A deliberate exit (#4203): `process.exit` sends this op, which answers
+/// nothing and reaches nothing, just before its exit import. The runtime's
+/// own aborts never send it, so a host that contains a handler abort (op 75)
+/// tells an abort from a program that printed `Error: …` and then exited 1.
+/// Every other host answers 0.
+pub(crate) const OP_EXIT_MARK: i32 = 76;
 /// fs.stat / fs.glob (#1423 stage 4): the two metadata surfaces the
 /// structural leg had no arm for. 38 answers the four FileStat fields as
 /// a 32-byte LE buffer (size, is_dir, is_file, modified — each an i64);
@@ -118,17 +136,13 @@ pub(crate) const OP_HTTP_CALL_DROP: i32 = 59;
 /// The leaf → op table, in WIT order.
 pub(crate) const PROC_LEAVES: &[(&str, i32)] = &[
     ("__proc_exec", 80),
-    ("__proc_exec_in", 81),
-    ("__proc_exec_with_stdin", 82),
-    ("__proc_exec_status", 83),
-    ("__proc_exec_status_timeout", 84),
-    ("__proc_run", 85),
-    ("__proc_spawn", 86),
+    // R-process-02: `output` took exec_status_timeout's op (the WIT case it
+    // renamed); 81..=83, 86 and 88 served the surface ProcessCommand replaced.
+    ("__proc_output", 84),
     ("__proc_kill", 87),
-    ("__proc_is_alive", 88),
     ("__proc_pid", 89),
-    // #3379: appended, so the earlier ops keep their numbers.
-    ("__proc_run_in", 90),
+    // R-process-07: `run` over its settings record took run_in's op.
+    ("__proc_run_cmd", 90),
 ];
 /// The tcp family (#3620, the net/tcp design step 2): ops 91..=103, one per
 /// `__net_*` leaf in stdlib/net_wasm.almd, two operands and an ok / err
@@ -160,11 +174,11 @@ pub const OP_ABORT_SITE_SELECTED: i32 = 118;
 pub const ABORT_SITE_OPS: [i32; 2] = [OP_ABORT_SITE_RUN, OP_ABORT_SITE_SELECTED];
 pub(crate) const OP_STAT: i32 = 38;
 pub(crate) const OP_GLOB: i32 = 39;
-/// `read_bytes_raw` / `read_bytes_raw_if_exists`: ops 14 / 25's bodies under
-/// their own call name, so a failure names what the writer wrote (#2890,
-/// the #2090 class).
-const OP_READ_BYTES_RAW: i32 = 63;
-const OP_READ_BYTES_RAW_IF_EXISTS: i32 = 64;
+/// `read_bytes` / `read_bytes_if_exists` (Bytes, R-fs-01): ops 14 / 25's
+/// bodies under their own op, so a failure names what the writer wrote
+/// (#2890, the #2090 class).
+const OP_READ_BYTES: i32 = 63;
+const OP_READ_BYTES_IF_EXISTS: i32 = 64;
 
 impl Emitter<'_> {
     /// The fs surfaces past fs.rs's set. Ok(None) = not handled.
@@ -174,11 +188,6 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
-            ("file_size" | "modified_at", [p]) => {
-                let op = if func == "file_size" { OP_FILE_SIZE } else { OP_MODIFIED_AT };
-                self.fs_call_1(p, op)?;
-                self.fs_result_i64()?
-            }
             ("copy" | "rename", [a, b]) => {
                 let op = if func == "copy" { OP_COPY } else { OP_RENAME };
                 self.fs_call_str2(a, b, op)?;
@@ -219,21 +228,12 @@ impl Emitter<'_> {
                     Ok(())
                 })?
             }
-            ("read_bytes_if_exists", [p]) => {
-                self.fs_call_1(p, OP_READ_BYTES_IF_EXISTS)?;
-                let ih = self.types.intern(INT);
-                let lh = self.types.intern(SliceTy::List(ih));
-                self.fs_if_exists_wrap(lh, |em| {
-                    em.fs_decode_byte_list()?;
-                    Ok(())
-                })?
-            }
-            ("read_bytes_raw", [p]) => {
-                self.fs_call_1(p, OP_READ_BYTES_RAW)?;
+            ("read_bytes", [p]) => {
+                self.fs_call_1(p, OP_READ_BYTES)?;
                 self.fs_result_bytes()?
             }
-            ("read_bytes_raw_if_exists", [p]) => {
-                self.fs_call_1(p, OP_READ_BYTES_RAW_IF_EXISTS)?;
+            ("read_bytes_if_exists", [p]) => {
+                self.fs_call_1(p, OP_READ_BYTES_IF_EXISTS)?;
                 let bh = self.types.intern(SliceTy::Scalar(Scalar::Bytes));
                 self.fs_if_exists_wrap(bh, |em| {
                     let _ = em.fs_result_bytes()?;
@@ -252,7 +252,7 @@ impl Emitter<'_> {
             (f, [p, cb]) if almide_ir::mono_base_or_self(f).starts_with("__fallible_for_each_line") => {
                 self.lower_fs_fallible_for_each(p, cb)?
             }
-            _ => return Ok(None),
+            _ => return self.lower_fs_root_call(func, args),
         };
         Ok(Some(Some(Lowered::owned(out))))
     }
@@ -490,66 +490,6 @@ impl Emitter<'_> {
         self.release_i64();
         let oh = self.types.intern(SliceTy::Option(inner));
         Ok(SliceTy::Result(oh, self.types.intern(STR)))
-    }
-
-    /// The one decode of a host-staged byte block (`hraw`, `hlen` bytes)
-    /// into a fresh `List[Int]` in `hout`, one i64 slot per byte. The
-    /// staging block is the caller's own scratch: once decoded it goes
-    /// (#3629, #3677 — each copy of this loop had to remember it apart).
-    pub(crate) fn emit_decode_staged_bytes(&mut self, hraw: u32, hlen: u32, hout: u32, hk: u32) {
-        let mut i = self.f.instructions();
-        i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
-        i.i32_const(0).local_set(hk);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
-        i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
-        i.local_get(hraw).local_get(hk).i32_add();
-        i.i64_load8_u(crate::bytes::byte_k(0));
-        i.i64_store(slot_memarg(0));
-        i.local_get(hk).i32_const(1).i32_add().local_set(hk);
-        i.br(0).end().end();
-        i.local_get(hraw).call(F_DEC_FLAT);
-    }
-
-    /// ret on stack → Result[List[Int], String] (the read_bytes decode,
-    /// shared with the if-exists twin).
-    pub(crate) fn fs_decode_byte_list(&mut self) -> Result<(), EmitError> {
-        let hret = self.hold_i64()?;
-        let hraw = self.hold_i32()?;
-        let hlen = self.hold_i32()?;
-        let hout = self.hold_i32()?;
-        let hk = self.hold_i32()?;
-        {
-            let mut i = self.f.instructions();
-            i.local_set(hret);
-            i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i32_wrap_i64().local_set(hlen);
-            i.local_get(hlen).call(F_ALLOC).local_set(hraw);
-            i.local_get(hraw).i32_const(almide_layout::PAYLOAD as i32).i32_add().call(F_HOST_READ);
-            i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(1).i32_eq();
-            i.if_(BlockType::Result(ValType::I32));
-            i.i32_const(16)
-                .call(F_ALLOC)
-                .local_tee(hout)
-                .i32_const(1)
-                .i32_store(slot_memarg(almide_layout::SUM_TAG));
-            i.local_get(hout).local_get(hraw).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-            i.local_get(hout);
-            i.else_();
-            let _ = i;
-            self.emit_decode_staged_bytes(hraw, hlen, hout, hk);
-            let mut i = self.f.instructions();
-            let hs = self.tmp_i32_local;
-            i.i32_const(16).call(F_ALLOC).local_set(hs);
-            i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
-            i.local_get(hs).local_get(hout).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-            i.local_get(hs);
-            i.end();
-        }
-        for _ in 0..4 {
-            self.release_i32();
-        }
-        self.release_i64();
-        Ok(())
     }
 }
 

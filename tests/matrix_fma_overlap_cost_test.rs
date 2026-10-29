@@ -1,11 +1,13 @@
-//! #3644 — `matrix.fma` / `matrix.fma3` cost the OVERLAP of their operands,
-//! not the largest operand, on both legs.
+//! #3644 — the fused-multiply-add composed forms `matrix.scale(a, ka) +
+//! matrix.scale(b, kb)` (and the three-operand sum) cost the OVERLAP of their
+//! operands, not the largest operand, on both legs: the rewrite rules replace
+//! the composed form with the internal fused kernel (R-matrix-03).
 //!
 //! Native zips the operands (`a.iter().zip(b.iter())`, twice), so a call
 //! touches only the cells the result has. The wasm leg linked the composition
 //! `add(scale(a, ka), scale(b, kb))` (stdlib/matrix_fused.almd), and `scale`
 //! walks and allocates a whole copy of each operand before `add` truncates to
-//! the overlap: `fma(1×1, n×n)` cost O(n²) there. 200 calls took 0.08 s at
+//! the overlap: a 1×1 against n×n fma cost O(n²) there. 200 calls took 0.08 s at
 //! n = 1000 and 0.33 s at n = 2000 on wasm, against a flat ~0.02 s natively.
 //!
 //! The values are pinned by spec/wasm_cross/matrix_composition_family.almd
@@ -33,9 +35,9 @@ effect fn run(n: Int, d: Int) -> Unit = {
   let t0 = datetime.monotonic_ns()!
   var acc = 0.0
   for i in 0..<d {
-    let r = matrix.fma(one, 2.0, big, 3.0)
-    let r3 = matrix.fma3(big, 1.0, one, 1.0, big, 0.5)
-    acc = acc + matrix.get(r, 0, 0) + matrix.get(r3, 0, 0)
+    let r = matrix.scale(one, 2.0) + matrix.scale(big, 3.0)
+    let r3 = matrix.scale(big, 1.0) + matrix.scale(one, 1.0) + matrix.scale(big, 0.5)
+    acc = acc + (matrix.get(r, 0, 0) ?? 0.0) + (matrix.get(r3, 0, 0) ?? 0.0)
   }
   let t1 = datetime.monotonic_ns()!
   println("${acc} ${t1 - t0}")

@@ -334,6 +334,7 @@ fn push_escaped_char(out: &mut String, chars: &[char], i: usize, quote: char, us
         '\r' => out.push_str("\\r"),
         '\\' => out.push_str("\\\\"),
         c if c == quote => { out.push('\\'); out.push(c); }
+        c if crate::fmt::push_hidden_escape(out, c) => {}
         c => out.push(c),
     }
     1
@@ -661,23 +662,9 @@ fn fmt_expr_lambda(out: &mut String, expr: &Expr, depth: usize) {
     // bare ctor. A user-written lambda never carries the reserved
     // `__ctor_arg` spelling, and even if one did, the two forms are
     // semantically identical.
-    if let [p] = params.as_slice()
-        && p.name.as_str() == "__ctor_arg"
-        && p.ty.is_none()
-        && p.tuple_names.is_none()
-    {
-        let inner = match &body.kind {
-            ExprKind::Some { expr } => Some(("some", expr)),
-            ExprKind::Ok { expr } => Some(("ok", expr)),
-            ExprKind::Err { expr } => Some(("err", expr)),
-            _ => None,
-        };
-        if let Some((ctor, inner)) = inner
-            && matches!(&inner.kind, ExprKind::Ident { name } if name.as_str() == "__ctor_arg")
-        {
-            out.push_str(ctor);
-            return;
-        }
+    if let Some(ctor) = expr.bare_ctor_word() {
+        out.push_str(ctor);
+        return;
     }
     out.push('(');
     comma_sep(out, params, |out, p| {
@@ -801,6 +788,7 @@ fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
         match ch {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
             '\\' => out.push_str("\\\\"),
             // A literal `${` in a double-quoted string must not round-trip
             // into a live interpolation hole (#1076). Single quotes never
@@ -808,6 +796,7 @@ fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
             // the escape is double-quote-only.
             '$' if quote == '"' && it.peek() == Some(&'{') => out.push_str("\\$"),
             c if c == quote => { out.push('\\'); out.push(c); }
+            c if crate::fmt::push_hidden_escape(out, c) => {}
             c => out.push(c),
         }
     }

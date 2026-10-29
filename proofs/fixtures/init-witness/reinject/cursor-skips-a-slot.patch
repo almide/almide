@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/ranges.rs b/crates/almide-wasm/src/ranges.rs
+index 4d883fbf9..a0ae1c6d3 100644
+--- a/crates/almide-wasm/src/ranges.rs
++++ b/crates/almide-wasm/src/ranges.rs
+@@ -166,7 +166,8 @@ impl crate::emitter::Emitter<'_> {
+                 // countdown loop on `hd` stores one `SLOT`-byte slot per step
+                 // (witness_init.rs records both where they are emitted).
+                 const SLOT: u32 = 8;
+-                const STEP: i32 = 8;
++                // RE-INJECTED (#4013 drill): the cursor skips a slot per step.
++                const STEP: i32 = 16;
+                 let list_ty = match hty {
+                     SliceTy::List(h) => h.index() as u32,
+                     _ => u32::MAX,

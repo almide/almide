@@ -10,112 +10,6 @@ use crate::emitter::Emitter;
 use crate::*;
 
 impl Emitter<'_> {
-    /// `bytes.read_length_prefixed_strings_le(b, pos, count)` — up to
-    /// count [u32-LE length][bytes] entries decoded LOSSILY; a truncated
-    /// prefix or body STOPS the scan; negative pos reads nothing. Both
-    /// bounds SUBTRACTIVE (the additive forms wrap — the self-host's
-    /// own doctrine). Two passes: count, then fill 4-byte slots.
-    pub(crate) fn lower_bytes_lenprefix(
-        &mut self,
-        b: &IrExpr,
-        pos: &IrExpr,
-        count: &IrExpr,
-    ) -> ArmResult {
-        let lossy = self.work.helper(crate::work::Helper::Utf8Lossy);
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        let hb = self.hold_i32()?;
-        self.f.instructions().local_set(hb);
-        self.lower_arg(pos, Some(INT), ArgMode::Borrow)?;
-        let hp0 = self.hold_i64()?;
-        self.f.instructions().local_set(hp0);
-        self.lower_arg(count, Some(INT), ArgMode::Borrow)?;
-        let hrem = self.hold_i64()?;
-        let hp = self.hold_i64()?;
-        let hsl = self.hold_i64()?;
-        let hn = self.hold_i32()?;
-        let hout = self.hold_i32()?;
-        let hi = self.hold_i32()?;
-        let hs = self.hold_i32()?;
-        let mut i = self.f.instructions();
-        // rem = max(count, 0)
-        i.local_set(hrem);
-        i.i64_const(0).local_get(hrem).local_get(hrem).i64_const(0).i64_lt_s().select();
-        i.local_set(hrem);
-        // pass 1: count
-        i.i32_const(0).local_set(hn);
-        i.local_get(hp0).local_set(hp);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hrem).i64_eqz().br_if(1);
-        i.local_get(hp).i64_const(0).i64_lt_s().br_if(1);
-        i.local_get(hp);
-        i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u().i64_const(4).i64_sub();
-        i.i64_gt_s().br_if(1);
-        i.local_get(hb).local_get(hp).i32_wrap_i64().i32_add();
-        i.i32_load(wasm_encoder::MemArg {
-            offset: u64::from(almide_layout::PAYLOAD),
-            align: 0,
-            memory_index: 0,
-        });
-        i.i64_extend_i32_u().local_set(hsl);
-        i.local_get(hsl);
-        i.local_get(hb)
-            .i32_load(len_memarg())
-            .i64_extend_i32_u()
-            .i64_const(4)
-            .i64_sub()
-            .local_get(hp)
-            .i64_sub();
-        i.i64_gt_s().br_if(1);
-        i.local_get(hp).i64_const(4).i64_add().local_get(hsl).i64_add().local_set(hp);
-        i.local_get(hrem).i64_const(1).i64_sub().local_set(hrem);
-        i.local_get(hn).i32_const(1).i32_add().local_set(hn);
-        i.br(0).end().end();
-        // pass 2: fill
-        i.local_get(hn).i32_const(4).i32_mul().call(F_ALLOC).local_set(hout);
-        i.local_get(hp0).local_set(hp);
-        i.i32_const(0).local_set(hi);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hb).local_get(hp).i32_wrap_i64().i32_add();
-        i.i32_load(wasm_encoder::MemArg {
-            offset: u64::from(almide_layout::PAYLOAD),
-            align: 0,
-            memory_index: 0,
-        });
-        i.i64_extend_i32_u().local_set(hsl);
-        // slice = fresh block of sl bytes at p+4, then the lossy decode
-        i.local_get(hsl).i32_wrap_i64().call(F_ALLOC).local_set(hs);
-        i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-        i.local_get(hb)
-            .i32_const(almide_layout::PAYLOAD as i32)
-            .i32_add()
-            .local_get(hp)
-            .i32_wrap_i64()
-            .i32_add()
-            .i32_const(4)
-            .i32_add();
-        i.local_get(hsl).i32_wrap_i64();
-        i.memory_copy(0, 0);
-        i.local_get(hout).local_get(hi).i32_const(4).i32_mul().i32_add();
-        i.local_get(hs).call(lossy);
-        i.i32_store(slot_memarg(0));
-        // The decode answers a fresh string: the slice was scratch (#2977).
-        i.local_get(hs).call(F_DEC_FLAT);
-        i.local_get(hp).i64_const(4).i64_add().local_get(hsl).i64_add().local_set(hp);
-        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-        i.br(0).end().end();
-        i.local_get(hout);
-        let _ = i;
-        for _ in 0..4 {
-            self.release_i32();
-        }
-        for _ in 0..3 {
-            self.release_i64();
-        }
-        self.release_i64();
-        self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))))
-    }
 
     /// chunks: `b.chunks(size)` — size <= 0 yields the empty list; a
     /// size past the buffer is one whole chunk (the i64 clamp precedes
@@ -191,15 +85,19 @@ impl Emitter<'_> {
         self.lower_arg(index, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
+        // #4005: a Bytes index is never a fact candidate (a loose slot).
+        let site = crate::witness::bounds::site(None);
         self.bytes_room(bh, ih, 1);
         let msg = self.pool.intern("index out of bounds");
         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
+        crate::witness::bounds::check(site, self.f);
         self.emit_error_frame_abort();
         // #2755: out of bounds ABORTS — a recorded abort terminal on its arm.
         self.witness_abort_site();
         let mut i = self.f.instructions();
         i.end();
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add().i64_load8_u(byte_k(0));
+        crate::witness::bounds::access(site, false, self.f);
         self.release_i64();
         self.release_i32();
         Ok(INT)
@@ -377,13 +275,10 @@ impl Emitter<'_> {
             }
         };
         match (func, args) {
-            ("read_u8" | "read_bool", [b, i]) => {
+            ("read_bool", [b, i]) => {
                 self.lower_bytes_read_bits(b, i, 1, false, false)?;
-                if func == "read_bool" {
-                    self.f.instructions().i64_const(0).i64_ne();
-                    return Ok(Some(Some(Lowered::scalar(BOOL))));
-                }
-                Ok(Some(Some(Lowered::scalar(INT))))
+                self.f.instructions().i64_const(0).i64_ne();
+                Ok(Some(Some(Lowered::scalar(BOOL))))
             }
             ("read_u16_le" | "read_u16_be" | "read_i16_le" | "read_i16_be" | "read_u32_le"
             | "read_u32_be" | "read_i32_le" | "read_i32_be" | "read_i64_le" | "read_i64_be", [b, i]) => {
@@ -396,7 +291,7 @@ impl Emitter<'_> {
                 )?;
                 Ok(Some(Some(Lowered::scalar(INT))))
             }
-            ("set_at" | "set_u8", [b, i, v]) => {
+            ("set_u8", [b, i, v]) => {
                 self.lower_bytes_set(b, i, v, 1, false, false)?;
                 Ok(Some(None))
             }

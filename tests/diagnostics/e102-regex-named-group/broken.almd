@@ -1,0 +1,5 @@
+// E102 (#3942, R-regex-06): a named group is not supported; it used to be
+// read as an ordinary group of the characters `P<year>`.
+import regex
+
+fn main() -> Unit = println("${regex.find(regex.new("(?P<year>\\d{4})"), "in 2026")}")

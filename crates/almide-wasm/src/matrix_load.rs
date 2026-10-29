@@ -21,7 +21,7 @@ fn raw32() -> MemArg {
 }
 
 impl Emitter<'_> {
-    /// Four-arg loader/selector family, split by name.
+    /// Four-arg loader family, split by name.
     pub(crate) fn lower_matrix_loader(
         &mut self,
         func: &str,
@@ -33,32 +33,8 @@ impl Emitter<'_> {
         match func {
             "from_bytes_f32_le" => self.lower_matrix_from_bytes(4, a, b, c, d),
             "from_bytes_f16_le" => self.lower_matrix_from_bytes(2, a, b, c, d),
-            "from_bytes_f64_le" => self.lower_matrix_from_bytes(8, a, b, c, d),
-            _ => self.lower_matrix_select_f32(a, b, c, d),
+            _ => self.lower_matrix_from_bytes(8, a, b, c, d),
         }
-    }
-
-    /// Push an i32: does selected row `rid`'s byte window `off + rid·rb ..+ rb`
-    /// lie inside the Bytes at `hd`? All three i64 holds are already clamped
-    /// to >= 0. Divided, never multiplied: `off + rid·rb + rb <= len` wrapped
-    /// for an rid near i64::MAX to just below `off`, passed, and read the bytes
-    /// before the buffer while native panicked on the same wrap (#2676, fuzz
-    /// seed 579914833587 index 9386). A zero-width row (rb = 0) carries no
-    /// bytes, so its answer is immaterial; the divisor is max(rb, 1) so the
-    /// eager `i64.div_s` never traps.
-    ///   fits = rb <= len - off  &&  (rb == 0 || rid <= (len - off - rb) / max(rb, 1))
-    fn row_fits(&mut self, hd: u32, hoff: u32, hrid: u32, hrb: u32) {
-        let mut i = self.f.instructions();
-        i.local_get(hrb);
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u().local_get(hoff).i64_sub();
-        i.i64_le_s();
-        i.local_get(hrb).i64_eqz();
-        i.local_get(hrid);
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u().local_get(hoff).i64_sub();
-        i.local_get(hrb).i64_sub();
-        i.local_get(hrb).i64_const(1).local_get(hrb).i64_const(1).i64_gt_s().select();
-        i.i64_div_s().i64_le_s();
-        i.i32_or().i32_and();
     }
 
     /// Clamp an i64 hold to `max(v, 0)` in place.
@@ -125,7 +101,7 @@ impl Emitter<'_> {
         i.i32_wrap_i64().i32_store(slot_memarg(4));
         // The cells start ZERO by contract (the OOB→zeros edge of the byte
         // loaders fills nothing): `$alloc` hands back reused blocks
-        // unzeroed, so the constructor zeroes — the `bytes.new` lesson
+        // unzeroed, so the constructor zeroes — the `bytes.zeros` lesson
         // (#2004), met again the moment list spines were freed (#2010).
         i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
         i.i32_const(0);
@@ -136,9 +112,10 @@ impl Emitter<'_> {
     }
 
     /// from_bytes_f32_le / from_bytes_f16_le / from_bytes_f64_le (`width`
-    /// = the element's byte count): negative dims clamp to the empty
-    /// matrix; a negative offset or a short buffer is the all-zero matrix
-    /// (the family's OOB→zeros edge).
+    /// = the element's byte count) answer `Option[Matrix]` (C-341):
+    /// negative dims clamp to 0 and the C-161 ceiling aborts first; then a
+    /// negative offset, an offset past the end or a short buffer is `none`
+    /// (NULL_ADDR), anything else `some` of the decoded matrix.
     pub(crate) fn lower_matrix_from_bytes(
         &mut self,
         width: i64,
@@ -168,24 +145,29 @@ impl Emitter<'_> {
         // (`Error: matrix dimensions too large` — differential fuzz, seed
         // 544202078563 index 874). The division-form guard cannot wrap.
         self.q_dims_guard(hr, hc);
+        {
+            let mut i = self.f.instructions();
+            // fits? offset >= 0 && offset <= len && r*c*width <= len - offset
+            // — subtraction on the buffer side, never `offset + r*c*width`:
+            // an offset near i64::MAX wrapped that sum negative, passed the
+            // test and read a subnormal out of the wrong bytes (#1909). r and
+            // c are clamped >= 0 and `q_dims_guard` has already refused a
+            // count past the element ceiling, so `r*c*width` cannot wrap.
+            i.local_get(hoff).i64_const(0).i64_ge_s();
+            i.local_get(hoff);
+            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+            i.i64_le_s().i32_and();
+            i.local_get(hr).local_get(hc).i64_mul().i64_const(width).i64_mul();
+            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+            i.local_get(hoff).i64_sub();
+            i.i64_le_s().i32_and();
+            i.if_(BlockType::Result(ValType::I32));
+        }
         let ho = self.mat_alloc_out64(hr, hc)?;
         let hk = self.hold_i32()?;
         let hn = self.hold_i32()?;
+        let hbox = self.hold_i32()?;
         let mut i = self.f.instructions();
-        // in-bounds? offset >= 0 && offset <= len && r*c*width <= len - offset
-        // — subtraction on the buffer side, never `offset + r*c*width`:
-        // an offset near i64::MAX wrapped that sum negative, passed the
-        // test and read a subnormal out of the wrong bytes (#1909). r and
-        // c are clamped >= 0 and `mat_alloc_out64` has already refused a
-        // product past the element ceiling, so `r*c*width` cannot wrap.
-        i.local_get(hoff).i64_const(0).i64_ge_s();
-        i.local_get(hoff);
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_le_s().i32_and();
-        i.local_get(hr).local_get(hc).i64_mul().i64_const(width).i64_mul();
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.local_get(hoff).i64_sub();
-        i.i64_le_s().i32_and().if_(BlockType::Empty);
         i.i32_const(0).local_set(hk);
         i.local_get(hr).local_get(hc).i64_mul().i32_wrap_i64().local_set(hn);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -208,195 +190,26 @@ impl Emitter<'_> {
         i.f64_store(mat_elem());
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
         i.br(0).end().end();
-        i.end();
+        // `some(m)`: a one-slot box owning the fresh matrix.
+        i.i32_const(SliceTy::Matrix.slot_size() as i32).call(F_ALLOC).local_tee(hbox);
         i.local_get(ho);
         let _ = i;
-        for _ in 0..3 {
+        self.store_ty_slot(SliceTy::Matrix, almide_layout::OPTION_FIELD);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hbox);
+            i.else_();
+            i.i32_const(almide_layout::NULL_ADDR as i32);
+            i.end();
+        }
+        for _ in 0..4 {
             self.release_i32();
         }
         for _ in 0..3 {
             self.release_i64();
         }
         self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Matrix)))))
     }
 
-    /// select_rows_f32: rid clamps to 0; a row whose f32 window leaves
-    /// the buffer stays all-zero; offset/cols clamp (#1503).
-    pub(crate) fn lower_matrix_select_f32(
-        &mut self,
-        data: &IrExpr,
-        offset: &IrExpr,
-        cols: &IrExpr,
-        ids: &IrExpr,
-    ) -> ArmResult {
-        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
-        let hd = self.hold_i32()?;
-        self.f.instructions().local_set(hd);
-        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
-        let hoff = self.hold_i64()?;
-        self.f.instructions().local_set(hoff);
-        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
-        let hc = self.hold_i64()?;
-        self.f.instructions().local_set(hc);
-        match self.lower_arg(ids, None, ArgMode::Borrow)? {
-            SliceTy::List(h) if self.types.el(h) == INT => {}
-            other => return unsup(&format!("matrix-select-ids:{other:?}")),
-        }
-        let hids = self.hold_i32()?;
-        self.f.instructions().local_set(hids);
-        self.clamp0(hoff);
-        self.clamp0(hc);
-        let hn = self.hold_i64()?;
-        self.f
-            .instructions()
-            .local_get(hids)
-            .i32_load(len_memarg())
-            .i32_const(8)
-            .i32_div_u()
-            .i64_extend_i32_u()
-            .local_set(hn);
-        // The shared C-161 ceiling on (row count, cols) BEFORE the product
-        // `mat_alloc_out64` forms — native ceilings the same pair first. A
-        // huge `cols` wrapped `n*c*8` past the OOM bound into a tiny block.
-        self.q_dims_guard(hn, hc);
-        let ho = self.mat_alloc_out64(hn, hc)?;
-        let hi = self.hold_i32()?;
-        let hrid = self.hold_i64()?;
-        let hj = self.hold_i32()?;
-        let hrb = self.hold_i64()?; // row bytes = c*4
-        let mut i = self.f.instructions();
-        i.local_get(hc).i64_const(4).i64_mul().local_set(hrb);
-        i.i32_const(0).local_set(hi);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hi).local_get(hn).i32_wrap_i64().i32_ge_u().br_if(1);
-        // rid = max(ids[i], 0)
-        i.local_get(hids).local_get(hi).i32_const(8).i32_mul().i32_add();
-        i.i64_load(slot_memarg(0)).local_set(hrid);
-        let _ = i;
-        self.clamp0(hrid);
-        self.row_fits(hd, hoff, hrid, hrb);
-        let mut i = self.f.instructions();
-        i.if_(BlockType::Empty);
-        // base = off + rid*c*4 (in range: the window fits)
-        i.local_get(hoff).local_get(hrid).local_get(hrb).i64_mul().i64_add().local_set(hrid); // reuse: base
-        i.i32_const(0).local_set(hj);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);
-        i.local_get(ho);
-        i.local_get(hi)
-            .local_get(hc)
-            .i32_wrap_i64()
-            .i32_mul()
-            .local_get(hj)
-            .i32_add()
-            .i32_const(8)
-            .i32_mul();
-        i.i32_add();
-        i.local_get(hd)
-            .local_get(hrid)
-            .i32_wrap_i64()
-            .i32_add()
-            .local_get(hj)
-            .i32_const(4)
-            .i32_mul()
-            .i32_add();
-        i.i32_load(raw32()).f32_reinterpret_i32().f64_promote_f32();
-        i.f64_store(mat_elem());
-        i.local_get(hj).i32_const(1).i32_add().local_set(hj);
-        i.br(0).end().end();
-        i.end();
-        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-        i.br(0).end().end();
-        i.local_get(ho);
-        let _ = i;
-        self.release_i64();
-        self.release_i32();
-        self.release_i64();
-        self.release_i32();
-        self.release_i32();
-        self.release_i64();
-        self.release_i32();
-        self.release_i64();
-        self.release_i64();
-        self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
-    }
-
-    /// select_rows (plain): rid clamps to 0; rid < rows copies the row,
-    /// else the all-zero row.
-    pub(crate) fn lower_matrix_select_rows(
-        &mut self,
-        m: &IrExpr,
-        ids: &IrExpr,
-    ) -> ArmResult {
-        let (hm, hr, hc) = self.mat_open(m)?;
-        match self.lower_arg(ids, None, ArgMode::Borrow)? {
-            SliceTy::List(h) if self.types.el(h) == INT => {}
-            other => return unsup(&format!("matrix-select-ids:{other:?}")),
-        }
-        let hids = self.hold_i32()?;
-        let hn = self.hold_i64()?;
-        let hc64 = self.hold_i64()?;
-        {
-            let mut i = self.f.instructions();
-            i.local_set(hids);
-            i.local_get(hids)
-                .i32_load(len_memarg())
-                .i32_const(8)
-                .i32_div_u()
-                .i64_extend_i32_u()
-                .local_set(hn);
-            i.local_get(hc).i64_extend_i32_u().local_set(hc64);
-        }
-        let ho = self.mat_alloc_out64(hn, hc64)?;
-        let hi = self.hold_i32()?;
-        let hrid = self.hold_i64()?;
-        let mut i = self.f.instructions();
-        i.i32_const(0).local_set(hi);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hi).local_get(hn).i32_wrap_i64().i32_ge_u().br_if(1);
-        i.local_get(hids).local_get(hi).i32_const(8).i32_mul().i32_add();
-        i.i64_load(slot_memarg(0)).local_set(hrid);
-        let _ = i;
-        self.clamp0(hrid);
-        let mut i = self.f.instructions();
-        i.local_get(hrid).local_get(hr).i64_extend_i32_u().i64_lt_s().if_(BlockType::Empty);
-        i.local_get(ho)
-            .i32_const(almide_layout::PAYLOAD as i32 + 8)
-            .i32_add()
-            .local_get(hi)
-            .local_get(hc)
-            .i32_mul()
-            .i32_const(8)
-            .i32_mul()
-            .i32_add();
-        i.local_get(hm)
-            .i32_const(almide_layout::PAYLOAD as i32 + 8)
-            .i32_add()
-            .local_get(hrid)
-            .i32_wrap_i64()
-            .local_get(hc)
-            .i32_mul()
-            .i32_const(8)
-            .i32_mul()
-            .i32_add();
-        i.local_get(hc).i32_const(8).i32_mul();
-        i.memory_copy(0, 0);
-        i.end();
-        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-        i.br(0).end().end();
-        i.local_get(ho);
-        let _ = i;
-        self.release_i64();
-        self.release_i32();
-        self.release_i32();
-        self.release_i64();
-        self.release_i64();
-        self.release_i32();
-        for _ in 0..3 {
-            self.release_i32();
-        }
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
-    }
 }

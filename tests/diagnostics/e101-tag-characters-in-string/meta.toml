@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "U+E0049 TAG CHARACTER (invisible)"
+hint_substring = "u{E0049}` if the character is intended"
+expects_line_col = "4:19"

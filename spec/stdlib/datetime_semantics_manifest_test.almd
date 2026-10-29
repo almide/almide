@@ -23,32 +23,16 @@ test "datetime.day unit=civil-field" {
   assert_eq("${datetime.day(1705322096)}", "15")
 }
 
-test "datetime.diff_seconds unit=second" {
-  assert_eq("${datetime.diff_seconds(90, 30)}", "60")
-}
-
 test "datetime.format unit=second" {
   assert_eq("${datetime.format(1705322096, "%Y-%m-%dT%H:%M:%SZ")}", "2024-01-15T12:34:56Z")
 }
 
 test "datetime.from_parts unit=civil-field" {
-  assert_eq("${datetime.from_parts(2024, 1, 15, 12, 34, 56)}", "1705322096")
-}
-
-test "datetime.from_unix unit=second" {
-  assert_eq("${datetime.from_unix(1705322096)}", "1705322096")
+  assert_eq("${datetime.from_parts(2024, 1, 15, 12, 34, 56) ?? 0}", "1705322096")
 }
 
 test "datetime.hour unit=civil-field" {
   assert_eq("${datetime.hour(1705322096)}", "12")
-}
-
-test "datetime.is_after unit=second" {
-  assert_eq("${datetime.is_after(0, 1)}", "false")
-}
-
-test "datetime.is_before unit=second" {
-  assert_eq("${datetime.is_before(0, 1)}", "true")
 }
 
 test "datetime.minute unit=civil-field" {
@@ -72,6 +56,13 @@ test "datetime.now unit=second" {
   )
 }
 
+test "datetime.now_ms unit=millisecond" {
+  assert_eq(
+    "${if datetime.now_ms() > 1700000000000 and datetime.now_ms() < 100000000000000 then "millisecond" else "other"}",
+    "millisecond",
+  )
+}
+
 test "datetime.parse_iso unit=second" {
   assert_eq(
     "${match datetime.parse_iso("2024-01-15T12:34:56Z") {
@@ -88,10 +79,6 @@ test "datetime.second unit=civil-field" {
 
 test "datetime.to_iso unit=second" {
   assert_eq("${datetime.to_iso(1705322096)}", "2024-01-15T12:34:56Z")
-}
-
-test "datetime.to_unix unit=second" {
-  assert_eq("${datetime.to_unix(1705322096)}", "1705322096")
 }
 
 test "datetime.weekday unit=second" {

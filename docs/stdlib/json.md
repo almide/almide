@@ -3,14 +3,15 @@
 The JSON **format**: parsing and printing of `Value` trees. import json.
 
 The data model itself lives on `value.*` (auto-imported) — constructors
-(`value.null` / `value.int` / `value.str` / `value.object` / …) and
-accessors (`value.as_*` / `value.field` / `value.keys`) — see
+(`value.null` / `value.int` / `value.string` / `value.object` / …) and
+accessors (`value.as_*` / `value.get` / `value.as_object`) and paths
+(`value.root` / `value.key` / `value.get_path`) — see
 [value.md](./value.md). The old `json.*` spellings of those operations were retired aliases —
 dropped after their one-release E040 deprecation window; the migration map
 is in [Renamed operations](#renamed-operations) at the bottom.
 
-`JsonPath` (the opaque handle of `json.root()` / `json.field(...)`) resolves
-in user annotations whenever `json` is imported — bare or `json.JsonPath`.
+A path built with `value.root` / `value.key` / `value.index` has type `value.Path`;
+annotate helpers over paths with that type.
 
 ### `json.parse(text: String) -> Result[Value, String]`
 
@@ -31,11 +32,55 @@ fn main() -> Unit = {
 {"name":"Alice"}
 ```
 
+The grammar is RFC 8259 plus I-JSON (RFC 7493), read **strictly** (ALS-T3,
+C-400 / C-401): the whole text is one value between JSON whitespace (space,
+tab, LF, CR), and every other input is an `err` with one text per case, the
+same on every target. `N` is the character index where the problem starts.
+
+| Input | Error |
+|---|---|
+| `"ad\ud800min"` (a surrogate that is not a high+low pair) | `json: lone surrogate at pos N` |
+| `"ad\qmin"` (an escape other than `\" \\ \/ \b \f \n \r \t \u`) | `json: unknown escape at pos N` |
+| `"\u12"` (`\u` without four hex digits) | `json: invalid unicode escape at pos N` |
+| a raw U+0000–U+001F inside a string | `json: control character in string at pos N` |
+| U+FDD0–U+FDEF, U+xFFFE, U+xFFFF (escaped or raw) | `json: noncharacter at pos N` |
+| `"abc` | `json: unterminated string at pos N` |
+| `{"a":1,"a":2}` | `json: duplicate key at pos N` |
+| `[1,2] [3]`, `{} garbage` | `json: trailing data at pos N` |
+| `{x: 1}` | `json: unquoted key at pos N` |
+| `[1,]`, `{"a":1,}` | `json: trailing comma at pos N` |
+| `{"a" 1}` | `json: expected ':' at pos N` |
+| `[1 2]` / `{"a":1 "b":2}` | `json: expected ',' or ']' at pos N` / `json: expected ',' or '}' at pos N` |
+| `01`, `1.`, `-`, `1e` | `json: invalid number at pos N` |
+
+Nothing is dropped or guessed: a lone surrogate or an unknown escape is never
+deleted (`ad\ud800min` does not become `admin`), and a repeated key is never
+resolved first-wins or last-wins, so a parser in front of the program cannot
+read a different document from the same bytes.
+
+```almd run
+import json
+
+fn main() -> Unit = {
+  for text in ["{\"user\":\"ad\\ud800min\"}", "{\"user\":\"alice\",\"user\":\"admin\"}", "[1,2] [3]"] {
+    match json.parse(text) {
+      ok(j) => println(json.stringify(j)),
+      err(e) => println(e),
+    }
+  }
+}
+```
+```output
+json: lone surrogate at pos 11
+json: duplicate key at pos 16
+json: trailing data at pos 6
+```
+
 ### `json.stringify(v: Value) -> String`
 
 Convert a Value to a JSON string. A non-finite Float (NaN, +inf, -inf) has no
 JSON spelling and is written as `null`, so the output always parses back; the
-same rule holds for `json.stringify_pretty` and `value.stringify`.
+same rule holds for `json.stringify_pretty`.
 
 ```almd run
 import json
@@ -49,6 +94,38 @@ fn main() -> Unit = {
 ```
 ```output
 {"name":"Alice","age":30}
+```
+
+### Typed decode: `T.decode` and `T.decode_strict`
+
+A `: Codec` record type `T` derives `T.decode` and `T.decode_strict` (and
+`T.encode`). `T.decode` ignores keys it does not know; `T.decode_strict`
+refuses the first one with `unknown key '<k>'` before reading any field. A
+field marked `@skip_decode` is never read from input (it keeps its default)
+and is still encoded; `@skip` is neither read nor written. Untrusted input is
+best decoded into a type holding only what the client may set (CHEATSHEET,
+JSON Rule 5).
+
+```almd run
+import json
+
+type User: Codec = { name: String, @skip_decode is_admin: Bool = false }
+
+fn main() -> Unit = {
+  let body = json.parse("{\"name\": \"m\", \"is_admin\": true}") ?? value.null()
+  match User.decode(body) {
+    ok(u) => println("${u.name} admin=${u.is_admin}"),
+    err(e) => println(e),
+  }
+  match User.decode_strict(body) {
+    ok(u) => println("${u.name} admin=${u.is_admin}"),
+    err(e) => println(e),
+  }
+}
+```
+```output
+m admin=false
+unknown key 'is_admin'
 ```
 
 ### `json.stringify_pretty(j: Value) -> String`
@@ -74,300 +151,12 @@ fn main() -> Unit = {
 }
 ```
 
-### `json.get_string(j: Value, key: String) -> Option[String]`
-
-Get a string value by key. Returns none if key doesn't exist or value is not a string.
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
-  match json.get_string(j, "name") {
-    some(x) => println("some(${x})"),
-    none => println("none"),
-  }
-  match json.get_string(j, "age") {
-    some(x) => println("some(${x})"),
-    none => println("none"),
-  }
-}
-```
-```output
-some(Alice)
-none
-```
-
-### `json.get_int(j: Value, key: String) -> Option[Int]`
-
-Get an integer value by key. Returns none if key doesn't exist or value is not an integer.
-A Float value is `none` even when it is integral (`3.0`) — it is never truncated, the same
-rule as `value.as_int`. The widening runs one way only: `json.get_float` accepts an Int.
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
-  match json.get_int(j, "age") {
-    some(x) => println("some(${x})"),
-    none => println("none"),
-  }
-  match json.get_int(j, "name") {
-    some(x) => println("some(${x})"),
-    none => println("none"),
-  }
-}
-```
-```output
-some(30)
-none
-```
-
-### `json.get_float(j: Value, key: String) -> Option[Float]`
-
-Get a float value by key. Returns none if key doesn't exist or value is not a number.
-An Int value is widened to Float (`30` reads as `30.0`).
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
-  match json.get_float(j, "price") {
-    some(x) => println("some(${float.to_string(x)})"),
-    none => println("none"),
-  }
-  match json.get_float(j, "name") {
-    some(x) => println("some(${float.to_string(x)})"),
-    none => println("none"),
-  }
-}
-```
-```output
-some(9.5)
-none
-```
-
-### `json.get_bool(j: Value, key: String) -> Option[Bool]`
-
-Get a boolean value by key. Returns none if key doesn't exist or value is not a boolean.
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
-  match json.get_bool(j, "active") {
-    some(x) => println("some(${x})"),
-    none => println("none"),
-  }
-  match json.get_bool(j, "missing") {
-    some(x) => println("some(${x})"),
-    none => println("none"),
-  }
-}
-```
-```output
-some(true)
-none
-```
-
-### `json.get_array(j: Value, key: String) -> Option[List[Value]]`
-
-Get an array value by key. Returns none if key doesn't exist or value is not an array.
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
-  match json.get_array(j, "items") {
-    some(xs) => println(xs |> list.map((x) => json.stringify(x)) |> list.join(",")),
-    none => println("none"),
-  }
-  match json.get_array(j, "name") {
-    some(xs) => println(xs |> list.map((x) => json.stringify(x)) |> list.join(",")),
-    none => println("none"),
-  }
-}
-```
-```output
-1,2,3
-none
-```
-
-### `json.root() -> JsonPath`
-
-Create a root JSON path for traversal.
-
-```almd run
-import json
-
-fn show(o: Option[Value]) -> String = match o {
-  some(v) => json.stringify(v),
-  none => "none",
-}
-
-fn main() -> Unit = {
-  let j = json.parse("{\"user\": {\"name\": \"Alice\"}}") ?? value.null()
-  let path = json.root()
-  println(show(json.get_path(j, path)))
-}
-```
-```output
-{"user":{"name":"Alice"}}
-```
-
-### `json.field(path: JsonPath, name: String) -> JsonPath`
-
-Extend a JSON path with a field name.
-
-```almd run
-import json
-
-fn show(o: Option[Value]) -> String = match o {
-  some(v) => json.stringify(v),
-  none => "none",
-}
-
-fn main() -> Unit = {
-  let j = json.parse("{\"user\": {\"name\": \"Alice\"}}") ?? value.null()
-  let path = json.field(json.root(), "user")
-  println(show(json.get_path(j, path)))
-}
-```
-```output
-{"name":"Alice"}
-```
-
-### `json.index(path: JsonPath, i: Int) -> JsonPath`
-
-Extend a JSON path with an array index.
-
-```almd run
-import json
-
-fn show(o: Option[Value]) -> String = match o {
-  some(v) => json.stringify(v),
-  none => "none",
-}
-
-fn main() -> Unit = {
-  let j = json.parse("{\"items\": [10, 20, 30]}") ?? value.null()
-  let path = json.index(json.field(json.root(), "items"), 0)
-  println(show(json.get_path(j, path)))
-}
-```
-```output
-10
-```
-
-### `json.get_path(j: Value, path: JsonPath) -> Option[Value]`
-
-Get a value at a JSON path. Returns none if path doesn't exist.
-
-```almd run
-import json
-
-fn show(o: Option[Value]) -> String = match o {
-  some(v) => json.stringify(v),
-  none => "none",
-}
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\"}") ?? value.null()
-  println(show(json.get_path(j, json.field(json.root(), "name"))))
-  println(show(json.get_path(j, json.field(json.root(), "missing"))))
-}
-```
-```output
-"Alice"
-none
-```
-
-### `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]`
-
-Set a value at a JSON path. Infallible: a missing object key is created, an index past the end of an array leaves the document unchanged, and a field step through a non-object value replaces that value with an object holding the field.
-
-```almd run
-import json
-
-fn show(r: Result[Value, String]) -> String = match r { ok(v) => json.stringify(v), err(e) => "err " + e }
-
-effect fn main() -> Unit = {
-  let doc = json.parse("{\"a\": {\"b\": 1}, \"xs\": [1, 2]}")!
-  println(show(json.set_path(doc, json.root() |> json.field("a") |> json.field("c"), value.int(5))))
-  println(show(json.set_path(doc, json.root() |> json.field("xs") |> json.index(7), value.int(5))))
-  println(show(json.set_path(doc, json.root() |> json.field("a") |> json.field("b") |> json.field("z"), value.int(5))))
-}
-```
-```output
-{"a":{"b":1,"c":5},"xs":[1,2]}
-{"a":{"b":1},"xs":[1,2]}
-{"a":{"b":{"z":5}},"xs":[1,2]}
-```
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\"}") ?? value.null()
-  match json.set_path(j, json.field(json.root(), "name"), value.str("Bob")) {
-    ok(v) => println(json.stringify(v)),
-    err(e) => println("error: ${e}"),
-  }
-}
-```
-```output
-{"name":"Bob"}
-```
-
-### `json.remove_path(j: Value, path: JsonPath) -> Value`
-
-Remove a value at a JSON path. Returns the Json with the value removed.
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let j = json.parse("{\"name\": \"Alice\", \"temp\": 1}") ?? value.null()
-  println(json.stringify(json.remove_path(j, json.field(json.root(), "temp"))))
-}
-```
-```output
-{"name":"Alice"}
-```
-
-### `json.to_map(j: Value) -> Option[Map[String, String]]`
-
-Convert a JSON object to a Map[String, String]. Values are stringified. Returns none if not an object.
-
-```almd run
-import json
-
-fn main() -> Unit = {
-  let obj = json.parse("{\"name\": \"Alice\", \"age\": 30, \"tags\": [1, 2]}") ?? value.null()
-  let m = json.to_map(obj) ?? map.new()
-  println("${map.len(m)}")
-  println(map.get_or(m, "name", "?"))
-  println(map.get_or(m, "age", "?"))
-  println(map.get_or(m, "tags", "?"))
-}
-```
-```output
-3
-Alice
-30
-[1,2]
-```
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (15 functions)
+## Signature index (3 functions)
 
 ```
-// Value or err; lenient, trailing text ignored.
+// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 // @since 0.5.0 or earlier
 json.parse(text: String) -> Result[Value, String]
 
@@ -377,55 +166,7 @@ json.stringify(v: Value) -> String
 
 // JSON with 2-space indent; [] and {} inline, NaN/inf null.
 // @since 0.5.0 or earlier
-json.stringify_pretty(j: Value) -> String
-
-// String at key; none if absent or non-string.
-// @since 0.5.0 or earlier
-json.get_string(j: Value, key: String) -> Option[String]
-
-// Int at key; none if absent or not an Int (a Float is never truncated).
-// @since 0.5.0 or earlier
-json.get_int(j: Value, key: String) -> Option[Int]
-
-// Float at key (Int widens); none if absent.
-// @since 0.5.0 or earlier
-json.get_float(j: Value, key: String) -> Option[Float]
-
-// Bool at key; none if absent or non-Bool.
-// @since 0.5.0 or earlier
-json.get_bool(j: Value, key: String) -> Option[Bool]
-
-// Array at key; none if absent or non-array.
-// @since 0.5.0 or earlier
-json.get_array(j: Value, key: String) -> Option[List[Value]]
-
-// Empty path: the whole value.
-// @since 0.5.13 or earlier
-json.root() -> JsonPath
-
-// path extended by object key name.
-// @since 0.5.13 or earlier
-json.field(path: JsonPath, name: String) -> JsonPath
-
-// path plus index i; negative i counts from end.
-// @since 0.5.13 or earlier
-json.index(path: JsonPath, i: Int) -> JsonPath
-
-// Value at path, or none if a step misses.
-// @since 0.5.13 or earlier
-json.get_path(j: Value, path: JsonPath) -> Option[Value]
-
-// j with value at path; missing keys created.
-// @since 0.5.13 or earlier
-json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]
-
-// j minus the entry at path; unchanged if absent.
-// @since 0.5.13 or earlier
-json.remove_path(j: Value, path: JsonPath) -> Value
-
-// Object as key->string map (non-strings as JSON).
-// @since 0.12.3 or earlier
-json.to_map(j: Value) -> Option[Map[String, String]]
+json.stringify_pretty(v: Value) -> String
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
@@ -437,11 +178,10 @@ v0.53.4). A retired spelling is an ordinary E002 undefined-function error now.
 
 | retired | survivor |
 |---|---|
-| `json.null` / `json.object` / `json.array` / `json.keys` | `value.null` / `value.object` / `value.array` / `value.keys` |
-| `json.from_string` / `json.from_int` / `json.from_bool` / `json.from_float` | `value.str` / `value.int` / `value.bool` / `value.float` |
+| `json.null` / `json.object` / `json.array` | `value.null` / `value.object` / `value.array` |
+| `json.from_string` / `json.from_int` / `json.from_bool` / `json.from_float` | `value.string` / `value.int` / `value.bool` / `value.float` |
 | `json.as_string` … `json.as_array` (returned `Option`) | `value.as_string(v)?` … `value.as_array(v)?` — `?` converts the `Result` to the same `Option` |
-| `json.get(j, k)` (returned `Option`) | `value.field(j, k)?` |
-| `value.get(j, k)` | `value.field(j, k)` |
+| `json.get(j, k)` (returned `Option`) | `value.get(j, k)` |
 
 Note one behavioral tightening: the dropped `json.as_int` widened a Float
 value to Int; `value.as_int` does not (`err("expected Int")`) — the widening

@@ -1,6 +1,6 @@
 //! In-place container mutation, modeled by binding write-back.
 //!
-//! The stdlib's `mut`-receiver mutators (`list.push`, `map.insert`, …) mutate
+//! The stdlib's `mut`-receiver mutators (`list.push`, `bytes.put_u8`, …) mutate
 //! the CALLER's binding and mostly return `Unit`: the program reads the effect
 //! on the variable, never a returned container. The generic dispatch path
 //! evaluates every argument by value before the callee sees it, so by then the
@@ -37,10 +37,10 @@ use crate::value::Value;
 /// a container the interp models natively: append one element, remove one
 /// element, or empty the container. Every one has exact semantics with no
 /// bounds or endianness surface, and each mirrors a named runtime fn:
-/// `almide_rt_list_push` → `Vec::push`, `almide_rt_map_insert` →
-/// `AlmideMap::insert`, `almide_rt_string_push` → `String::push_str`, …
+/// `almide_rt_list_push` → `Vec::push`, `almide_rt_string_push` →
+/// `String::push_str`, …
 ///
-/// The `bytes` BYTE-LEVEL WRITER family (`set_*` / `append_*` / `write_*`, plus
+/// The `bytes` BYTE-LEVEL WRITER family (`set_*` / `append_*`, plus
 /// `fill` / `copy_from` / `copy_within`) joins them through [`bytes_write_op`],
 /// which derives each member's bounds rule and byte order from its NAME rather
 /// than from a hand-kept list (issue #1021). The name is the whole rule, so a
@@ -59,12 +59,11 @@ pub(crate) fn writes_back(module: &str, func: &str) -> bool {
         ("list", "push")
             | ("list", "pop")
             | ("list", "clear")
-            | ("map", "insert")
-            | ("map", "delete")
             | ("map", "clear")
             | ("string", "push")
             | ("string", "clear")
             | ("bytes", "push")
+            | ("bytes", "pop")
             | ("bytes", "clear")
     )
 }
@@ -87,42 +86,29 @@ pub(crate) struct Enc {
 /// buffer rather than by name.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum BytesWrite {
-    /// `append_*`, and the big-endian `write_*` serialization twins: encode the
-    /// scalar and EXTEND the buffer. No bounds rule — appends always fit.
+    /// `append_*`: encode the scalar and EXTEND the buffer. No bounds rule —
+    /// appends always fit.
     Append(Enc),
-    /// `set_*` (including `set_at`, a 1-byte store): encode and splice at `pos`.
+    /// `set_*`: encode and splice at `pos`.
     /// A window that does not fit is a SILENT no-op — every `almide_rt_bytes_set_*`
     /// guards with `if p + N <= b.len()` and returns, never aborts.
     Set(Enc),
-    /// `write_bool` — `b.push(if val { 1 } else { 0 })`.
+    /// `put_*` — the typed byte IO matrix's position write: [`Self::Set`]'s
+    /// encoding, but a window outside the buffer ABORTS (R-bytes-11) where
+    /// `set_*` skipped it; [`put_out_of_range`] answers the abort first.
+    Put(Enc),
+    /// `put_bool(b, pos, x)` — 1 or 0 at `pos`, aborting out of range.
+    PutBool,
+    /// `append_bytes(b, src)` — `src`'s octets onto the end.
+    AppendBytes,
+    /// `append_bool` — `b.push(if val { 1 } else { 0 })`.
     WriteBool,
-    /// `write_string_be` — a u32 BE length prefix, then the UTF-8 bytes.
-    WriteStringBe,
     /// `fill` — overwrite every existing byte; the length never changes.
     Fill,
     /// `copy_from(dst, src, dst_off, src_off, len)`.
     CopyFrom,
     /// `copy_within(b, src_start, src_end, dst)`.
     CopyWithin,
-    /// The sized-type surface (`write_uint16(b, v, .le)`), whose endianness is a
-    /// trailing `Endian` ARGUMENT instead of part of the name. Each `@inline_rust`
-    /// body dispatches to the same `almide_rt_bytes_append_*` pair, so the model
-    /// is [`Self::Append`] with the order read at runtime.
-    AppendSized { width: usize, float: bool },
-    /// `set_uint16(b, offset, v, .le)` and friends — [`Self::Set`] with a runtime order.
-    SetSized { width: usize, float: bool },
-}
-
-/// The width/kind of a sized-type writer suffix (`uint16`, `float32`, …). These
-/// spell the type, not the byte layout, so their endianness arrives separately.
-fn sized_suffix(name: &str) -> Option<(usize, bool)> {
-    Some(match name {
-        "uint16" => (2, false),
-        "uint32" => (4, false),
-        "int32" => (4, false),
-        "float32" => (4, true),
-        _ => return None,
-    })
 }
 
 /// Parse a name-encoded scalar suffix (`u8`, `i16_le`, `f64_be`) into its layout.
@@ -133,8 +119,9 @@ fn sized_suffix(name: &str) -> Option<(usize, bool)> {
 fn enc_of(suffix: &str) -> Option<Enc> {
     let (kind, big_endian) = split_order_suffix(suffix);
     let (float, width) = scalar_kind(kind)?;
-    // A float is only ever f32/f64, and a single byte has no order to pick.
-    if float && width < 4 {
+    // A float is f16 (the matrix's half rows), f32 or f64, and a single byte
+    // has no order to pick.
+    if float && width < 2 {
         return None;
     }
     match (width, big_endian) {
@@ -175,35 +162,21 @@ fn scalar_kind(kind: &str) -> Option<(bool, usize)> {
 
 /// Classify a `bytes` function as a byte-level writer, from its NAME alone.
 ///
-/// The mapping is total over `stdlib/bytes.almd`'s `set_` / `append_` / `write_`
+/// The mapping is total over `stdlib/bytes.almd`'s `set_` / `append_`
 /// prefixes plus the three named buffer ops, and
 /// `every_stdlib_bytes_writer_is_modeled` proves that against the stdlib source.
 pub(crate) fn bytes_write_op(func: &str) -> Option<BytesWrite> {
-    // The sized-type surface FIRST: `set_uint16` also starts with `set_`, and
-    // `uint16` is not a name-encoded suffix, so order matters only for clarity.
-    sized_write_op(func)
-        .or_else(|| named_write_op(func))
-        .or_else(|| encoded_write_op(func))
-}
-
-/// The `Endian`-parameterized sized surface: `write_uint16` / `set_float32`,
-/// whose byte order arrives as a runtime argument rather than in the name.
-fn sized_write_op(func: &str) -> Option<BytesWrite> {
-    if let Some((width, float)) = func.strip_prefix("write_").and_then(sized_suffix) {
-        return Some(BytesWrite::AppendSized { width, float });
-    }
-    let (width, float) = func.strip_prefix("set_").and_then(sized_suffix)?;
-    Some(BytesWrite::SetSized { width, float })
+    // `__set_*` is the width primitive under the checked `put_*` wrapper.
+    let func = func.strip_prefix("__").unwrap_or(func);
+    named_write_op(func).or_else(|| encoded_write_op(func))
 }
 
 /// The buffer ops named outright rather than by scalar encoding.
 fn named_write_op(func: &str) -> Option<BytesWrite> {
     let op = match func {
-        // `almide_rt_bytes_set_at`: `if (i as usize) < b.len() { b[i] = val as u8 }`
-        // — a 1-byte `Set`, bound-identical to `set_u8`'s `p + 1 <= b.len()`.
-        "set_at" => BytesWrite::Set(Enc { width: 1, big_endian: false, float: false }),
-        "write_bool" => BytesWrite::WriteBool,
-        "write_string_be" => BytesWrite::WriteStringBe,
+        "append_bool" => BytesWrite::WriteBool,
+        "put_bool" => BytesWrite::PutBool,
+        "append_bytes" => BytesWrite::AppendBytes,
         "fill" => BytesWrite::Fill,
         "copy_from" => BytesWrite::CopyFrom,
         "copy_within" => BytesWrite::CopyWithin,
@@ -213,15 +186,61 @@ fn named_write_op(func: &str) -> Option<BytesWrite> {
 }
 
 /// The name-encoded scalar surface: the order rides in the name (`append_u32_be`).
-///
-/// `write_u8` / `write_u32_be` / `write_i64_be` / `write_f64_be` are appends
-/// too — the serialization cursor's big-endian twins of `append_*`.
 fn encoded_write_op(func: &str) -> Option<BytesWrite> {
-    if let Some(s) = func.strip_prefix("append_").or_else(|| func.strip_prefix("write_")) {
+    if let Some(s) = func.strip_prefix("append_") {
         return enc_of(s).map(BytesWrite::Append);
+    }
+    if let Some(s) = func.strip_prefix("put_") {
+        return enc_of(s).map(BytesWrite::Put);
     }
     let s = func.strip_prefix("set_")?;
     enc_of(s).map(BytesWrite::Set)
+}
+
+/// The abort text of a `put_*` whose window leaves the buffer — the one the
+/// stdlib's Almide body panics with (`stdlib/bytes.almd` `put_out_of_range`).
+pub(crate) fn put_out_of_range(module: &str, func: &str, slot: &Value, rest: &[Value]) -> Option<String> {
+    if module != "bytes" {
+        return None;
+    }
+    let width = match bytes_write_op(func)? {
+        BytesWrite::Put(enc) => enc.width as i64,
+        BytesWrite::PutBool => 1,
+        _ => return None,
+    };
+    let Value::List(xs) = slot else { return None };
+    let Some(Value::Int(pos)) = rest.first() else { return None };
+    let len = xs.len() as i64;
+    (*pos < 0 || *pos > len - width)
+        .then(|| format!("bytes.{func}: {width}-byte write at {pos} is out of range for length {len}"))
+}
+
+/// IEEE half bits of `x`, rounded to nearest even straight from the f64 — the
+/// steps of `stdlib/bytes.almd`'s `__f16_bits` (and the native
+/// `almide_f64_to_f16_bits`): overflow is ±inf, a NaN the quiet 0x7E00.
+fn f16_bits(x: f64) -> u16 {
+    let bits = x.to_bits();
+    let sign = ((bits >> 63) as u16) << 15;
+    let exp = ((bits >> 52) & 0x7ff) as i64;
+    let mant = bits & ((1u64 << 52) - 1);
+    if exp == 0x7ff {
+        return if mant != 0 { 0x7E00 } else { sign | 0x7C00 };
+    }
+    if exp == 0 {
+        return sign;
+    }
+    let e = exp - 1023 + 15;
+    let m = (1u64 << 52) | mant;
+    let shift = if e >= 1 { 42 } else { 42 + (1 - e) };
+    if shift > 53 {
+        return sign;
+    }
+    let q = m >> shift;
+    let r = m & ((1u64 << shift) - 1);
+    let half = 1u64 << (shift - 1);
+    let q = if r > half || (r == half && (q & 1) == 1) { q + 1 } else { q };
+    let out = if e >= 1 { ((e as u64) << 10) + (q - (1 << 10)) } else { q };
+    if out >= 0x7C00 { sign | 0x7C00 } else { sign | out as u16 }
 }
 
 /// The scalar's bytes, in `enc`'s order. Mirrors the native `as`-cast +
@@ -246,6 +265,7 @@ fn encode(enc: Enc, v: &Value) -> Option<Vec<u8>> {
             // unseen. Found when #1226's block heap let
             // `nan_canonical_bytes_write` reach this arm instead of abstaining
             // at `prim.handle`.
+            2 => f16_bits(*f).to_le_bytes().to_vec(),
             4 if f.is_nan() => 0x7FC0_0000u32.to_le_bytes().to_vec(),
             8 if f.is_nan() => 0x7FF8_0000_0000_0000u64.to_le_bytes().to_vec(),
             4 => (*f as f32).to_le_bytes().to_vec(),
@@ -262,16 +282,6 @@ fn encode(enc: Enc, v: &Value) -> Option<Vec<u8>> {
         out.reverse();
     }
     Some(out)
-}
-
-/// Read an `Endian` argument (`.le` / `.be`) as "is big-endian".
-fn endian_is_big(v: &Value) -> Option<bool> {
-    let Value::Variant { ctor, .. } = v else { return None };
-    match ctor.as_str() {
-        "LittleEndian" => Some(false),
-        "BigEndian" => Some(true),
-        _ => None,
-    }
 }
 
 /// The receiver's `VarId`, when the receiver is a plain variable.
@@ -298,7 +308,7 @@ pub(crate) fn receiver_var(recv: &almide_ir::IrExpr) -> Option<VarId> {
 pub(crate) fn apply(module: &str, func: &str, slot: &mut Value, rest: Vec<Value>) -> Option<Value> {
     match module {
         "list" => apply_list(func, slot, rest),
-        "map" => apply_map(func, slot, rest),
+        "map" => apply_map(func, slot),
         "string" => apply_string(func, slot, rest),
         "bytes" => apply_bytes(func, slot, rest),
         _ => None,
@@ -325,28 +335,10 @@ fn apply_list(func: &str, slot: &mut Value, rest: Vec<Value>) -> Option<Value> {
     }
 }
 
-fn apply_map(func: &str, slot: &mut Value, rest: Vec<Value>) -> Option<Value> {
+fn apply_map(func: &str, slot: &mut Value) -> Option<Value> {
     let Value::Map(rc) = slot else { return None };
     let entries = Rc::make_mut(rc);
     match func {
-        // `almide_rt_map_insert` -> `AlmideMap::insert`: replace the value in
-        // place when the key is present (keeping its slot), else append. The
-        // shared helper is the same one `map.set` and `IrStmtKind::MapInsert`
-        // use, so the mutating and functional forms cannot diverge.
-        "insert" => {
-            let mut it = rest.into_iter();
-            crate::eval::map_insert(entries, it.next()?, it.next()?);
-            Some(Value::Unit)
-        }
-        // `AlmideMap::remove`: "Remove, keeping the order of the remaining
-        // entries" — so a positional remove, never a swap-remove.
-        "delete" => {
-            let key = rest.into_iter().next()?;
-            if let Some(i) = entries.iter().position(|(k, _)| k == &key) {
-                entries.remove(i);
-            }
-            Some(Value::Unit)
-        }
         "clear" => {
             entries.clear();
             Some(Value::Unit)
@@ -394,6 +386,7 @@ fn apply_bytes(func: &str, slot: &mut Value, rest: Vec<Value>) -> Option<Value> 
             xs.clear();
             Some(Value::Unit)
         }
+        "pop" => Some(Value::Option(xs.pop().map(Box::new))),
         // The byte-level writer family (#1021), modeled over the same
         // `List` of `Int` — every arm mirrors its `almide_rt_bytes_*` oracle,
         // bounds guard included.
@@ -427,8 +420,8 @@ fn splice(xs: &mut [Value], pos: i64, src: &[u8]) {
     }
 }
 
-/// The name-encoded and sized scalar writes: `(value)` appends, `(offset,
-/// value)` splices. The named buffer ops delegate to
+/// The name-encoded scalar writes: `(value)` appends, `(offset, value)`
+/// splices. The named buffer ops delegate to
 /// [`apply_named_bytes_write`].
 fn apply_bytes_write(op: BytesWrite, xs: &mut Vec<Value>, rest: Vec<Value>) -> Option<Value> {
     let mut it = rest.into_iter();
@@ -437,28 +430,22 @@ fn apply_bytes_write(op: BytesWrite, xs: &mut Vec<Value>, rest: Vec<Value>) -> O
             let src = encode(enc, &it.next()?)?;
             append_bytes(xs, &src);
         }
-        BytesWrite::Set(enc) => {
+        // `put_*`: in range by here (`put_out_of_range` aborted first).
+        BytesWrite::Set(enc) | BytesWrite::Put(enc) => {
             let Value::Int(pos) = it.next()? else { return None };
             let src = encode(enc, &it.next()?)?;
             splice(xs, pos, &src);
         }
-        // `write_uint16(b, value, endian)` — the order is the LAST argument.
-        BytesWrite::AppendSized { width, float } => {
-            let value = it.next()?;
-            let big_endian = endian_is_big(&it.next()?)?;
-            let src = encode(Enc { width, big_endian, float }, &value)?;
-            append_bytes(xs, &src);
-        }
-        // `set_uint16(b, offset, value, endian)`.
-        BytesWrite::SetSized { width, float } => {
+        BytesWrite::PutBool => {
             let Value::Int(pos) = it.next()? else { return None };
-            let value = it.next()?;
-            let big_endian = endian_is_big(&it.next()?)?;
-            let src = encode(Enc { width, big_endian, float }, &value)?;
-            splice(xs, pos, &src);
+            let Value::Bool(v) = it.next()? else { return None };
+            splice(xs, pos, &[u8::from(v)]);
+        }
+        BytesWrite::AppendBytes => {
+            let Value::List(src) = it.next()? else { return None };
+            xs.extend(src.iter().cloned());
         }
         named @ (BytesWrite::WriteBool
-        | BytesWrite::WriteStringBe
         | BytesWrite::Fill
         | BytesWrite::CopyFrom
         | BytesWrite::CopyWithin) => return apply_named_bytes_write(named, xs, &mut it),
@@ -482,14 +469,6 @@ fn apply_named_bytes_write(
         BytesWrite::WriteBool => {
             let Value::Bool(v) = it.next()? else { return None };
             xs.push(Value::Int(i64::from(v)));
-        }
-        // `almide_rt_bytes_write_string_be`: a u32 BE byte-LENGTH prefix, then
-        // the UTF-8 bytes (`s.as_bytes()`, so a multibyte char counts its bytes).
-        BytesWrite::WriteStringBe => {
-            let Value::Str(s) = it.next()? else { return None };
-            let sb = s.as_bytes();
-            append_bytes(xs, &(sb.len() as u32).to_be_bytes());
-            append_bytes(xs, sb);
         }
         // `almide_rt_bytes_fill`: overwrite every existing byte in place. An
         // EMPTY buffer stays empty — fill never grows it.
@@ -658,28 +637,6 @@ mod tests {
     }
 
     #[test]
-    fn map_insert_replaces_in_place_and_append_keeps_order() {
-        let mut slot = map_of(&[(1, 10), (2, 20)]);
-        apply("map", "insert", &mut slot, vec![Value::Int(1), Value::Int(99)]).unwrap();
-        apply("map", "insert", &mut slot, vec![Value::Int(3), Value::Int(30)]).unwrap();
-        assert_eq!(pairs(&slot), vec![(1, 99), (2, 20), (3, 30)]);
-    }
-
-    #[test]
-    fn map_delete_keeps_the_order_of_the_rest() {
-        let mut slot = map_of(&[(1, 10), (2, 20), (3, 30)]);
-        apply("map", "delete", &mut slot, vec![Value::Int(2)]).unwrap();
-        assert_eq!(pairs(&slot), vec![(1, 10), (3, 30)]);
-    }
-
-    #[test]
-    fn map_delete_of_a_missing_key_is_a_no_op() {
-        let mut slot = map_of(&[(1, 10)]);
-        apply("map", "delete", &mut slot, vec![Value::Int(9)]).unwrap();
-        assert_eq!(pairs(&slot), vec![(1, 10)]);
-    }
-
-    #[test]
     fn string_push_appends_a_suffix_not_a_char() {
         let mut slot = Value::str("ab");
         apply("string", "push", &mut slot, vec![Value::str("cd")]).unwrap();
@@ -731,8 +688,6 @@ mod tests {
             ("list", "push"),
             ("list", "pop"),
             ("list", "clear"),
-            ("map", "insert"),
-            ("map", "delete"),
             ("map", "clear"),
             ("string", "push"),
             ("string", "clear"),
@@ -773,13 +728,17 @@ mod tests {
                 continue;
             };
             let name = rest.split('(').next().unwrap_or("").trim();
+            // Only the intrinsic writers (`= _`) are modeled here: a writer with
+            // an Almide body (`put_*`, `append_f16_*`, `append_bytes`) evaluates
+            // that body, which reaches a modeled primitive (`__set_*`, `push`).
+            if !t.trim_end().ends_with("= _") {
+                continue;
+            }
+            let name = name.strip_prefix("__").unwrap_or(name);
             // The FUNCTIONAL siblings (`bytes.set(b, i, v) -> Bytes`) return a new
             // buffer and are excluded by the underscore, exactly as in
             // `is_inplace_mutating_op` — the two rules must agree.
-            if !(name.starts_with("set_")
-                || name.starts_with("append_")
-                || name.starts_with("write_"))
-            {
+            if !(name.starts_with("set_") || name.starts_with("append_")) {
                 continue;
             }
             seen += 1;
@@ -787,16 +746,16 @@ mod tests {
                 missing.push(name.to_string());
             }
         }
-        assert!(seen >= 40, "only {seen} prefix writers found — did the scrape break?");
+        assert!(seen >= 30, "only {seen} prefix writers found — did the scrape break?");
         assert!(missing.is_empty(), "unmodeled bytes writers: {missing:?}");
         // The three named buffer ops complete the family (they carry no prefix).
-        for f in ["fill", "copy_from", "copy_within", "set_at"] {
+        for f in ["fill", "copy_from", "copy_within"] {
             assert!(bytes_write_op(f).is_some(), "bytes.{f} unmodeled");
             assert!(writes_back("bytes", f), "bytes.{f} not in the tier table");
             assert!(crate::hofs::is_inplace_mutating_op("bytes", f), "bytes.{f} not intercepted");
         }
         // …and every modeled writer must actually be routed here, or it is dead code.
-        for f in ["append_u32_le", "set_f64_be", "write_string_be", "write_uint16", "set_int32"] {
+        for f in ["append_u32_le", "set_f64_be", "set_u8"] {
             assert!(writes_back("bytes", f), "bytes.{f} not in the tier table");
             assert!(crate::hofs::is_inplace_mutating_op("bytes", f), "bytes.{f} not intercepted");
         }
@@ -874,51 +833,39 @@ mod tests {
         assert_eq!(write("set_u32_le", &[1, 2, 3, 4], vec![Value::Int(-1), Value::Int(258)]), [
             1, 2, 3, 4
         ]);
-        // set_at / set_u8: one byte, masked, index-bound.
-        assert_eq!(write("set_at", &[1, 2, 3], vec![Value::Int(1), Value::Int(0x1FF)]), [1, 255, 3]);
-        assert_eq!(write("set_at", &[1, 2, 3], vec![Value::Int(3), Value::Int(7)]), [1, 2, 3]);
+        // set_u8: one byte, masked, index-bound.
+        assert_eq!(write("set_u8", &[1, 2, 3], vec![Value::Int(1), Value::Int(0x1FF)]), [1, 255, 3]);
+        assert_eq!(write("set_u8", &[1, 2, 3], vec![Value::Int(3), Value::Int(7)]), [1, 2, 3]);
         assert_eq!(write("set_u8", &[1, 2, 3], vec![Value::Int(2), Value::Int(7)]), [1, 2, 7]);
     }
 
-    /// The sized-type surface reads its order from a trailing `Endian` argument
-    /// instead of from the name, and lands on the same encoding.
-    #[test]
-    fn sized_writers_take_their_order_from_the_endian_argument() {
-        let le = || Value::Variant {
-            ty: None,
-            ctor: almide_lang::intern::sym("LittleEndian"),
-            payload: crate::value::VariantPayload::Unit,
-        };
-        let be = || Value::Variant {
-            ty: None,
-            ctor: almide_lang::intern::sym("BigEndian"),
-            payload: crate::value::VariantPayload::Unit,
-        };
-        assert_eq!(write("write_uint16", &[], vec![Value::Int(258), le()]), [2, 1]);
-        assert_eq!(write("write_uint16", &[], vec![Value::Int(258), be()]), [1, 2]);
-        assert_eq!(write("write_uint32", &[], vec![Value::Int(258), be()]), [0, 0, 1, 2]);
-        assert_eq!(write("write_float32", &[], vec![Value::Float(1.5), le()]), [0, 0, 0xC0, 0x3F]);
-        assert_eq!(
-            write("set_uint32", &[0, 0, 0, 0], vec![Value::Int(0), Value::Int(258), le()]),
-            [2, 1, 0, 0]
-        );
-        assert_eq!(
-            write("set_int32", &[0, 0, 0], vec![Value::Int(0), Value::Int(258), le()]),
-            [0, 0, 0]
-        );
-    }
-
-    /// `write_bool` / `write_string_be` — the two non-scalar cursor writers.
+    /// `append_bool` — the non-scalar cursor writer.
     #[test]
     fn cursor_writers_match_their_native_shape() {
-        assert_eq!(write("write_bool", &[], vec![Value::Bool(true)]), [1]);
-        assert_eq!(write("write_bool", &[9], vec![Value::Bool(false)]), [9, 0]);
-        // A u32 BE BYTE-length prefix, then the UTF-8 bytes — "hi" is 2 bytes.
-        assert_eq!(write("write_string_be", &[], vec![Value::str("hi")]), [
-            0, 0, 0, 2, 104, 105
-        ]);
-        // Multibyte counts BYTES, not chars: "é" is 2 bytes (C3 A9).
-        assert_eq!(write("write_string_be", &[], vec![Value::str("é")]), [0, 0, 0, 2, 0xC3, 0xA9]);
+        assert_eq!(write("append_bool", &[], vec![Value::Bool(true)]), [1]);
+        assert_eq!(write("append_bool", &[9], vec![Value::Bool(false)]), [9, 0]);
+    }
+
+    /// The typed byte IO matrix's writers with an Almide body in the stdlib
+    /// (`put_*`, `append_f16_*`, `append_bytes`, `pop`) run here by name: the
+    /// eager module path cannot copy a `mut` param back (#1022).
+    #[test]
+    fn the_matrix_writers_model_their_bodies() {
+        assert_eq!(write("put_u16_be", &[0, 0, 0], vec![Value::Int(1), Value::Int(258)]), [0, 1, 2]);
+        assert_eq!(write("put_i8", &[0], vec![Value::Int(0), Value::Int(-2)]), [254]);
+        assert_eq!(write("put_bool", &[0, 0], vec![Value::Int(1), Value::Bool(true)]), [0, 1]);
+        assert_eq!(write("put_f16_le", &[0, 0], vec![Value::Int(0), Value::Float(1.0)]), [0, 60]);
+        assert_eq!(write("append_f16_be", &[], vec![Value::Float(65520.0)]), [124, 0]);
+        assert_eq!(write("append_f16_le", &[], vec![Value::Float(f64::NAN)]), [0, 126]);
+        assert_eq!(write("append_bytes", &[1], vec![ints(&[2, 3])]), [1, 2, 3]);
+        let mut slot = ints(&[4, 5]);
+        assert_eq!(apply("bytes", "pop", &mut slot, vec![]), Some(Value::Option(Some(Box::new(Value::Int(5))))));
+        assert_eq!(as_ints(&slot), [4]);
+        let at = |pos: i64, len: usize| put_out_of_range("bytes", "put_u32_le", &ints(&vec![0; len]), &[Value::Int(pos)]);
+        assert!(at(0, 4).is_none());
+        assert_eq!(at(1, 4).as_deref(), Some("bytes.put_u32_le: 4-byte write at 1 is out of range for length 4"));
+        assert!(at(-1, 8).is_some());
+        assert!(put_out_of_range("bytes", "set_u32_le", &ints(&[0]), &[Value::Int(5)]).is_none());
     }
 
     /// `fill` overwrites every existing byte and NEVER changes the length —
@@ -1006,7 +953,7 @@ mod tests {
     /// guessed layout. This is what keeps `writes_back` honest for `bytes`.
     #[test]
     fn an_unrecognized_writer_name_is_not_modeled() {
-        for f in ["set_", "append_", "append_u7_le", "append_u32", "set_u16", "append_f16_le", "set_q32_le", "write_"] {
+        for f in ["set_", "append_", "append_u7_le", "append_u32", "set_u16", "append_f8_le", "put_u16", "set_q32_le", "write_"] {
             assert!(bytes_write_op(f).is_none(), "bytes.{f} should not be modeled");
             assert!(!writes_back("bytes", f), "bytes.{f} should not claim a write-back");
         }

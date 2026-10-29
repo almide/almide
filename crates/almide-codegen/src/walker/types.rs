@@ -190,7 +190,7 @@ fn render_type_applied(ctx: &RenderContext, id: &TypeConstructorId, args: &[Ty])
             let key_s = render_type(ctx, k);
             let value_s = render_type(ctx, v);
             ctx.templates.render_with("type_map", None, &[], &[("key", key_s.as_str()), ("value", value_s.as_str())])
-                .unwrap_or_else(|| format!("HashMap<{}, {}>", key_s, value_s))
+                .unwrap_or_else(|| format!("std::collections::HashMap<{}, {}>", key_s, value_s))
         }
         (TypeConstructorId::Set, [inner]) => {
             let inner_s = render_type(ctx, inner);

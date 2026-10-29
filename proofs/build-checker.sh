@@ -18,6 +18,11 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust CapabilityBound.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityReach.v >/dev/null
 "$COQC" -Q . AlmideTrust CallModes.v >/dev/null
+"$COQC" -Q . AlmideTrust MemorySafe.v >/dev/null
+"$COQC" -Q . AlmideTrust SpatialCert.v >/dev/null
+"$COQC" -Q . AlmideTrust BoundsCert.v >/dev/null
+"$COQC" -Q . AlmideTrust Certified.v >/dev/null
+"$COQC" -Q . AlmideTrust InitCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -102,6 +107,44 @@ runm() { # path expected_exit  (call-modes mode)
 runm $GATE_TMP/modes_ok.cert 0
 runm $GATE_TMP/modes_bad.cert 1
 runm $GATE_TMP/modes_unknown.cert 1
+
+# BOUNDS witness (#4005): `;`-separated straight-line stretches, each a bounds
+# program (c = check, a = read, w = write, s = the slot's index changed, L{..}
+# loop, B{..|..} branch). accept ⟹ every run is Spatial (check_bounds_cert_sound).
+printf 'c0 a0 c1 a1 w0 w1' > $GATE_TMP/bounds_flip.cert   # #3345 fannkuch flip: two checks decide four accesses → ACCEPT
+printf 'c0 s0 a0'          > $GATE_TMP/bounds_stale.cert  # index changed after the check, check elided → REJECT
+printf 'c0 ; a0'           > $GATE_TMP/bounds_cross.cert  # a fact carried across a stretch boundary → REJECT
+printf 'c0 a0 x'           > $GATE_TMP/bounds_junk.cert   # malformed tail → REJECT (never read as a prefix)
+runb() { # path expected_exit  (bounds mode)
+  set +e; ./checker bounds "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runb $GATE_TMP/bounds_flip.cert 0
+runb $GATE_TMP/bounds_stale.cert 1
+runb $GATE_TMP/bounds_cross.cert 1
+runb $GATE_TMP/bounds_junk.cert 1
+
+# INIT witness (#4013): `;`-separated construction sites, each `h H w W n N r R`
+# then the stored slots `s I`. accept ⟹ every site's window leaves its block
+# initialized over its whole extent (check_init_cert_sound).
+printf 'h12 w8 n3 r0 s0 s1 s2' > $GATE_TMP/init_literal.cert  # a three-element list literal, every slot stored → ACCEPT
+printf 'h12 w8 n3 r0 s0 s2'    > $GATE_TMP/init_missing.cert  # slot 1 never stored → REJECT
+printf 'h12 w8 n2 r0 s0 s1 s2' > $GATE_TMP/init_past.cert     # a store past the last slot → REJECT
+printf 'h12 w8 n1 r0 s0 x'     > $GATE_TMP/init_junk.cert     # malformed tail → REJECT
+runi() { # path expected_exit  (init mode)
+  set +e; ./checker init "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runi $GATE_TMP/init_literal.cert 0
+runi $GATE_TMP/init_missing.cert 1
+runi $GATE_TMP/init_past.cert 1
+runi $GATE_TMP/init_junk.cert 1
+printf 'h12 w8 v4 r0 f4 t8'  > $GATE_TMP/init_fill.cert      # a range's loop fill: counts down the count it was sized from, one slot per step → ACCEPT
+printf 'h12 w8 v4 r0 f4 t16' > $GATE_TMP/init_fill_skip.cert # the cursor skips a slot per step → REJECT
+runi $GATE_TMP/init_fill.cert 0
+runi $GATE_TMP/init_fill_skip.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

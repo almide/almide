@@ -1,8 +1,6 @@
-// Continuation of `impl Checker` — module-level type inference, declaration
-// checking, and test where-clause evaluation. Split out of mod.rs to keep it
-// under the 800-line codopsy max-lines threshold; pure text move, same
-// module scope via `include!` (no privacy boundary since these continuations
-// are spliced directly into check/mod.rs's module, not separate submodules).
+// Continuation of `impl Checker` (spliced into check/mod.rs by `include!`,
+// same module scope): module-level type inference, declaration checking and
+// test where-clause evaluation, split out of mod.rs for the 800-line budget.
 
 impl Checker {
     /// Every post-solve validation, in ONE list (#2373).
@@ -14,15 +12,18 @@ impl Checker {
     /// away. `almide check` reaches every file as an entry and rejected it;
     /// `almide build` reached it as a module and shipped the artifact.
     /// Whether a rule applied depended on which file the author happened to
-    /// put the function in, which is invisible from the source.
-    ///
-    /// A shared list cannot drift: adding a validation here adds it to both.
+    /// put the function in, which is invisible from the source. A shared list
+    /// cannot drift: adding a validation here adds it to both.
     fn validate_after_solve(&mut self, program: &ast::Program) {
         self.validate_map_key_types();
         self.validate_result_interpolations();
+        let new_generic_calls = self.generic_calls.len();
         self.validate_interp_instantiations();
+        self.validate_polymorphic_recursion(new_generic_calls);
         self.validate_ord_elem_types();
         self.validate_eq_operand_types();
+        self.validate_eq_instantiations();
+        self.validate_opaque_spreads();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
@@ -30,13 +31,17 @@ impl Checker {
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
         self.validate_type_param_inference();
+        self.validate_input_sinks();
+        self.validate_deferred_protocol_bounds();
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
         self.check_concurrent_var_reach(program);
         self.check_abort_sites(program);
+        self.check_regex_literals(program);
         self.check_scoped(program);
         self.check_pure_attrs(program);
+        self.record_outside_guarantee(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
@@ -172,6 +177,9 @@ impl Checker {
             self.deferred_eq_checks.len(),
             self.deferred_cascade_diags.len(),
             self.deferred_type_param_checks.len(),
+            self.deferred_input_sink_checks.len(),
+            self.deferred_protocol_bounds.len(),
+            self.deferred_opaque_spreads.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -230,6 +238,9 @@ impl Checker {
         self.deferred_eq_checks.truncate(saved_deferred_lens.13);
         self.deferred_cascade_diags.truncate(saved_deferred_lens.14);
         self.deferred_type_param_checks.truncate(saved_deferred_lens.15);
+        self.deferred_input_sink_checks.truncate(saved_deferred_lens.16);
+        self.deferred_protocol_bounds.truncate(saved_deferred_lens.17);
+        self.deferred_opaque_spreads.truncate(saved_deferred_lens.18);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
@@ -265,77 +276,6 @@ impl Checker {
     }
 
     // ── Declaration checking ──
-
-    /// Push generic type vars, structural bounds, and protocol bounds into the
-    /// environment. Returns the SHADOWED `env.types` bindings so
-    /// `exit_generics` can restore them — a generic letter shadows a
-    /// same-named type for one declaration, it must not destroy it (#1574).
-    fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) -> Vec<(Sym, Option<Ty>)> {
-        use crate::canonicalize::registration::SCALAR_TYPE_NAMES;
-        let mut shadowed: Vec<(Sym, Option<Ty>)> = Vec::new();
-        let gs = match generics { Some(gs) => gs, None => return shadowed };
-        for g in gs.iter() {
-            // A const param is a generic with a single scalar type bound. The
-            // bound is carried out of the same expression that tests for it —
-            // the previous form tested `bounds` here and re-read `bounds[0]`
-            // below, so the test and the read could drift.
-            let const_bound = g.bounds.as_ref().and_then(|bs| match bs.as_slice() {
-                [only] if SCALAR_TYPE_NAMES.contains(&only.as_str()) => Some(only.clone()),
-                _ => None,
-            });
-            let is_const = const_bound.is_some();
-            if let Some(bound) = const_bound {
-                let ty = self.resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&bound) });
-                let prev = self.env.types.insert(sym(&g.name), Ty::ConstParam { name: sym(&g.name), ty: Box::new(ty) });
-                shadowed.push((sym(&g.name), prev));
-            } else {
-                let prev = self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
-                shadowed.push((sym(&g.name), prev));
-            }
-            if let Some(bte) = &g.structural_bound {
-                let bt = self.resolve_type_expr(bte);
-                self.env.structural_bounds.insert(sym(&g.name), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
-            }
-            if let Some(bounds) = &g.bounds {
-                if !bounds.is_empty() && !is_const {
-                    self.env.generic_protocol_bounds.insert(sym(&g.name), bounds.iter().map(|b| sym(b)).collect());
-                }
-            }
-        }
-        // Applied bounds' type arguments (#1589), resolved once every letter
-        // of this declaration is in scope — `[R: Repository[K, V], K, V]`
-        // names letters declared after the bound.
-        for g in gs.iter() {
-            for (i, b) in g.bounds.iter().flatten().enumerate() {
-                let Some(r) = ast::protocol_ref_at(&g.bound_refs, i) else { continue };
-                if r.args.is_empty() { continue; }
-                let args: Vec<Ty> = r.args.iter().map(|a| self.resolve_type_expr(a)).collect();
-                self.env.generic_protocol_bound_args.insert((g.name, *b), args);
-            }
-        }
-        shadowed
-    }
-
-    /// Remove generic structural/protocol bounds and RESTORE the `env.types`
-    /// bindings the generic letters shadowed (#1574).
-    fn exit_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>, shadowed: Vec<(Sym, Option<Ty>)>) {
-        if let Some(gs) = generics {
-            for g in gs.iter() {
-                self.env.types.remove(&sym(&g.name));
-                self.env.structural_bounds.remove(&sym(&g.name));
-                self.env.generic_protocol_bounds.remove(&sym(&g.name));
-                for b in g.bounds.iter().flatten() {
-                    self.env.generic_protocol_bound_args.remove(&(g.name, *b));
-                }
-            }
-        }
-        for (gn, prev) in shadowed.into_iter().rev() {
-            match prev {
-                Some(t) => { self.env.types.insert(gn, t); }
-                None => { self.env.types.remove(&gn); }
-            }
-        }
-    }
 
     /// Constrain an effect fn body against its return type signature.
     /// Effect fns accept: unwrapped T, or full Result[T, E].
@@ -441,11 +381,46 @@ impl Checker {
                      explicit widening required (e.g. `int.from_{}(...)`)",
                     name, rr.display(), rb.display(), rb.display().to_lowercase()
                 ),
-                "Widen the value at the return: `int.from_uint8(x)` / `int.from_int32(x)` \
-                 (`float.from_float32(x)` for the float widths).",
+                "Widen the value at the return: `int.from(x)` \
+                 (`float.from(x)` for the float widths).",
                 format!("fn '{}'", name),
             ).with_code("E001"));
         }
+    }
+
+    /// `Never` is the bottom type (result-option-effect.md §Never): a `Never`
+    /// value fits every slot, but no other value fits a `Never` slot. The
+    /// solver's `compatible` lets `Never` match in BOTH directions (it is the
+    /// join's identity), so a fn declared `-> Never` whose body completes with
+    /// a value (`{ println("x") }` is `Unit`) passed `check` and failed the
+    /// native build: the lowering leaves a `Never` fn's tail un-Ok-wrapped
+    /// (#4226). The body of a `-> Never` fn must itself diverge — a `panic`,
+    /// `process.exit`, a call to another `-> Never` fn, or a branch whose arms
+    /// all do. An unresolved body type (a `_` hole, a still-open variable) is
+    /// not judged here.
+    fn check_never_return(&mut self, name: &str, ret_ty: &Ty, body_ty: &Ty, is_effect: bool) {
+        if resolve_ty(ret_ty, &self.uf) != Ty::Never {
+            return;
+        }
+        let mut rb = resolve_ty(body_ty, &self.uf);
+        if is_effect {
+            if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = rb.clone() {
+                if let Some(ok) = args.first() { rb = resolve_ty(ok, &self.uf); }
+            }
+        }
+        if rb == Ty::Never || rb.contains_unknown() || rb.contains_typevar() {
+            return;
+        }
+        self.emit(err(
+            format!(
+                "fn '{}' declares -> Never but its body can complete with a {} value",
+                name, rb.display()
+            ),
+            "A `-> Never` fn must not return: end its body in `panic(..)`, \
+             `process.exit(..)` or a call to another `-> Never` fn — or declare \
+             the type the body actually yields (e.g. `-> Unit`).",
+            format!("fn '{}'", name),
+        ).with_code("E001"));
     }
 
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
@@ -508,6 +483,7 @@ impl Checker {
         self.expect_lambda(body, &ret_ty);
         self.lambda_expect.clear();
         self.call_expect.clear();
+        self.qq_fallback_expect.clear();
         self.expect_expr(body, &ret_ty);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the
@@ -545,6 +521,7 @@ impl Checker {
         // wherever inference happened to end — the last arm's last leaf.
         let saved_span = self.current_span;
         self.current_span = arm_blame::tail_report_span(body).or(saved_span);
+        self.check_never_return(name, &ret_ty, &body_ity, is_effect);
         if effect.unwrap_or(false) || fallible_marker {
             self.constrain_effect_body(name, &ret_ty, body_ity, body);
         } else {
@@ -564,10 +541,11 @@ impl Checker {
     fn check_decl(&mut self, decl: &mut ast::Decl) {
         // E090: an `@extern(c)` signature must be one the C ABI table has
         // rows for — with a body (`= _`) or without.
-        if let ast::Decl::Fn { name, params, return_type, extern_attrs, span, .. } = &*decl
+        if let ast::Decl::Fn { name, params, return_type, extern_attrs, attrs, span, .. } = &*decl
             && !extern_attrs.is_empty()
         {
-            self.reject_extern_c_types(name.as_str(), params, return_type, extern_attrs, *span);
+            let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
+            self.reject_extern_c_types(sig, extern_attrs, attrs);
         }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the

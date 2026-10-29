@@ -42,6 +42,40 @@ fn the_allowlist_refuses_a_command_outside_it_by_name() {
     set_allowlist(None);
 }
 
+/// #4125: kill is bounded as the `kill` command — refused with the
+/// refused-spawn text, lifted by listing it.
+#[test]
+fn the_allowlist_bounds_signalling_as_the_kill_command() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let me = std::process::id().to_string();
+    set_allowlist(Some(vec!["echo".to_string()]));
+    assert_eq!(
+        call(87, &me, "0", &|| {}).unwrap_err(),
+        "process.kill(\"kill\"): `kill` is not in [permissions] proc"
+    );
+    set_allowlist(Some(vec!["echo".to_string(), "kill".to_string()]));
+    assert_eq!(call(87, &me, "0", &|| {}).unwrap(), "");
+    set_allowlist(None);
+    assert_eq!(
+        call(87, "-1", "0", &|| {}).unwrap_err(),
+        "process.kill(-1, 0): pid must be in 1..=2147483647"
+    );
+}
+
+/// C-418 (#4126): a refused command is named with its control characters
+/// escaped, so it cannot forge a line of the error text.
+#[test]
+fn a_refused_command_is_named_escaped() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    set_allowlist(Some(vec!["echo".to_string()]));
+    let refused = call(80, "x\ny\u{1b}", &frame(&[]), &|| {}).unwrap_err();
+    assert_eq!(
+        refused,
+        "process.exec(\"x\\ny\\u{1b}\"): `x\\ny\\u{1b}` is not in [permissions] proc"
+    );
+    set_allowlist(None);
+}
+
 #[test]
 fn the_fs_call_form_packs_status_and_length() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -153,7 +187,7 @@ fn the_wit_names_the_eleven_ops_in_host_op_order_and_the_call_shape() {
     let cases: Vec<&str> = e.cases.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(
         cases,
-        ["exec", "exec-in", "exec-with-stdin", "exec-status", "exec-status-timeout", "run", "spawn", "kill", "is-alive", "pid", "run-in"]
+        ["exec", "exec-in", "exec-with-stdin", "exec-status", "output", "run", "spawn", "kill", "is-alive", "pid", "run-with"]
     );
     assert_eq!(super::OP_LAST - super::OP_FIRST + 1, cases.len() as i32);
     let call = &resolve.interfaces[iface].functions["call"];

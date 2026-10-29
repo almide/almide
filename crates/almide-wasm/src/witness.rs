@@ -373,6 +373,23 @@ impl WitnessRecorder {
         true
     }
 
+    /// An `Assign` of a view (the [`Self::bind_view`] shape on the Assign
+    /// route): the old occupant was released (`released_old`), the route's
+    /// `rc_inc_top` is the share on the view, and the local is its owner
+    /// from here on.
+    pub fn assign_view(&mut self, local: u32, released_old: bool) -> bool {
+        if !self.rebind_site(local) {
+            return false;
+        }
+        if released_old {
+            self.held_ops(local, "d");
+        }
+        let o = self.view_obj();
+        self.ops(o, "a");
+        self.log(Ev::Bind { local, obj: o, owner: true });
+        true
+    }
+
     /// A `for` / `while` body opens / closes (#2757), and a `break` /
     /// `continue` ends an iteration.
     pub fn loop_open(&mut self) {
@@ -631,6 +648,9 @@ fn sink() -> &'static Sink {
 pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
     crate::witness::modes::start();
+    crate::witness::bounds::start();
+    crate::witness::init::start();
+    crate::witness::anchor::start();
     crate::witness::decls::start();
 }
 
@@ -641,6 +661,32 @@ pub use modes::take as take_modes;
 /// The call-mode witness sink (split for the file budget).
 #[path = "witness_modes.rs"]
 pub(crate) mod modes;
+
+/// The bounds witness of every emission pass (#4005, witness_bounds.rs):
+/// `(pass, stretches)`, for `almide-verify bounds`.
+pub use bounds::take as take_bounds;
+
+/// The bounds witness sink (split for the file budget).
+#[path = "witness_bounds.rs"]
+pub(crate) mod bounds;
+
+/// The init witness of every emission pass (#4013, witness_init.rs):
+/// `(pass, sites)`, for `almide-verify init`.
+pub use init::take as take_init;
+
+/// The init witness sink (split for the file budget).
+#[path = "witness_init.rs"]
+pub(crate) mod init;
+
+/// Where in the bytes each bounds / init event is (#4011 (d),
+/// witness_anchor.rs).
+#[path = "witness_anchor.rs"]
+pub mod anchor;
+
+/// The certificate bundle of one build's shipped pass (witness_bundle.rs):
+/// the one producer `almide verify` and the corpus sweep share.
+#[path = "witness_bundle.rs"]
+pub mod bundle;
 
 /// The per-pass declaration table the name and capability witnesses read
 /// (#2759, witness_decls.rs).

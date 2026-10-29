@@ -7,7 +7,7 @@ A room test written `pos + N <= len`, or a chunk count written `(total + n - 1) 
 defeated by its own arithmetic: the sum wraps, the comparison passes, the store or the
 allocation goes ahead. The shape has recurred in this repo five times, each fixed
 point-wise, returning at whichever END nobody measured (#1408 at the negative end, the
-SAME line at the positive end, `list.chunk`, `bytes.chunks`).
+SAME line at the positive end, `list.chunk`, `bytes.chunk`).
 
 The differential fuzzer cannot close it, and the reason is written down in its own source.
 `tools/xtarget-fuzz/src/generator/term.rs:363-365`:
@@ -20,8 +20,8 @@ The differential fuzzer cannot close it, and the reason is written down in its o
 That decision is CORRECT — feeding `u32::MAX` to `repeat` manufactures an out-of-memory
 "hang" that is noise, not a finding. But it draws the blind spot exactly over the
 parameters the room guards read. It predicts which siblings are reachable and which are
-not: `pos` is not in the name list, so `bytes.set_f32_le` was found; `size` is, so
-`bytes.chunks` never could be.
+not: `pos` is not in the name list, so `bytes.put_f32_le` was found; `size` is, so
+`bytes.chunk` never could be.
 
 So this is a SEPARATE instrument, not a fuzzer change. The fuzzer keeps its small-count
 rule. Here the extremes are fed deliberately, exhaustively, and the expectation is
@@ -108,7 +108,7 @@ def derived_edges(recv_len):
 # SKIPPED and NAMED — an honest hole, in the ledger, rather than a silent
 # absence. The naming is the part that was missing (#2402): the skip count was
 # printed and never read back, and for `json` it hid 12 of 13 Int slots,
-# including `json.index(path: JsonPath, i: Int)` — the signature that carried
+# including the path step `index(path, i: Int)` (now `value.index(p: Path, i: Int)`) — the signature that carried
 # #2396, a wasm-only i32 truncation of the path index. The skipped population
 # is now printed by name, written to the ledger, and a skip that APPEARS fails
 # the gate exactly as a divergence that appears does.
@@ -129,9 +129,9 @@ VALUES = {
     "List[Float]": "[1.0, 2.0, 3.0, 4.0, 5.0]",
     "List[Bool]": "[true, false, true, false, true]",
     "List[List[String]]": '[["a"], ["b"], ["c"], ["d"], ["e"]]',
-    # A JsonPath is opaque: the only value a program can hold is one built
-    # from `json.root()` by the path constructors, so the receiver is the root.
-    "JsonPath": "json.root()",
+    # A value Path is built from `value.root()` by the path constructors, so
+    # the receiver is the root.
+    "Path": "value.root()",
     "Value": JSON_DOC,
     "List[Value]": "[value.int(1), value.int(2), value.int(3), value.int(4), value.int(5)]",
 }
@@ -147,7 +147,7 @@ RECV_LENS = {
     "List[List[String]]": RECV_LEN,
     "List[Value]": RECV_LEN,
     "Value": 3,       # JSON_DOC has three elements
-    "JsonPath": 3,    # a path is applied to JSON_DOC, so its far edge is the same
+    "Path": 3,        # a path is applied to JSON_DOC, so its far edge is the same
 }
 
 # How to render a result of each return type as a printable digest. A return
@@ -170,12 +170,12 @@ RENDER = {
     "List[List[String]]": 'int.to_string(list.len({e}))',
     "List[Value]": 'int.to_string(list.len({e}))',
     "Value": 'json.stringify({e})',
-    # A JsonPath is opaque, so it is rendered by APPLYING it to the known
+    # A Path is rendered by APPLYING it to the known
     # document — removing at the path and printing what is left is the only
     # way an out-of-range step is observable at all. #2396 was exactly a step
     # that landed on a real element after wrapping; `[10,30]` where `[10,20,30]`
     # was owed is the digest that catches it.
-    "JsonPath": f'json.stringify(json.remove_path({JSON_DOC}, {{e}}))',
+    "Path": f'json.stringify(value.remove_path({JSON_DOC}, {{e}}))',
     "Unit": None,  # call for effect only
 }
 

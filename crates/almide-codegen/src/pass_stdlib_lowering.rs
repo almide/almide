@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::{HashSet, HashMap};
 use almide_base::intern::Sym;
 use almide_ir::*;
-use almide_lang::types::{Ty, TypeConstructorId};
+use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -464,7 +464,7 @@ fn rewrite_expr_call_module(module: Sym, func: Sym, args: Vec<IrExpr>, type_args
         // template owns reference semantics and the wrapper
         // would produce `&mut b.clone()` — mutation on a
         // temp, silently dropped. Elsewhere (by-value params
-        // like `value.field(v, key)` that take `Value` owned
+        // like `value.__field(v, key)` that take `Value` owned
         // and reuse `v` across several `?`-propagating calls
         // after the codec derive), keep the wrappers so the
         // clone-insertion pass's ownership plumbing works.

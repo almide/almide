@@ -1,0 +1,12 @@
+// A `: Codec` record is not a `Value`: `json.stringify` takes the dynamic
+// value, and the record's derived `encode` is what builds one (#4272 —
+// before, the checker let the record unify with `Value`, and the native
+// build then failed in rustc with E0308 on `&P` where `&Value` was expected).
+import json
+
+type P: Codec = { a: Int }
+
+effect fn main() -> Unit = {
+  let p = P { a: 1 }
+  println(json.stringify(p))
+}

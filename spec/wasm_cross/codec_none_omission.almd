@@ -82,7 +82,7 @@ fn main() -> Unit = {
     parent: none,
     meta: value.int(1),
     extra: some(value.null()),
-    items: [value.str("k")],
+    items: [value.string("k")],
     tags: some([]),
   }
   match Doc.decode(Doc.encode(x)) {

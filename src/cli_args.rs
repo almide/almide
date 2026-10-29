@@ -19,6 +19,39 @@ pub(crate) struct Cli {
     /// Show internal pipeline notes (e.g. which codegen path built the binary)
     #[arg(short = 'v', long = "verbose", global = true)]
     pub(crate) verbose: bool,
+    /// Treat every .almd source under DIR as the standard library's own (E085
+    /// authority) — for a harness that builds a modified copy of a stdlib
+    /// source. A flag only: a dependency cannot grant it
+    #[arg(long = "stdlib-authority", value_name = "DIR", global = true, hide = true)]
+    pub(crate) stdlib_authority: Vec<std::path::PathBuf>,
+    /// Honour this `ALMIDE_*` route / gate / ablation / trap switch from the
+    /// environment (repeatable). A release build ignores such a switch
+    /// without it, so an environment you do not control cannot change what
+    /// is compiled or skip a check (#4129). `--profile critical` refuses them
+    /// regardless.
+    #[arg(long = "allow-switch", value_name = "NAME", global = true)]
+    pub(crate) allow_switch: Vec<String>,
+    /// Lock the build-changing switches as a release build does, in any
+    /// build — the instrument the #4129 tests drive a dev binary with.
+    #[arg(long = "lock-switches", global = true, hide = true)]
+    pub(crate) lock_switches: bool,
+    /// `almide survive`'s hand-off to its child runs (#2147, #4129): every
+    /// compiler read of this `.almd` path returns the text of
+    /// `--survive-overlay-text` instead of the disk bytes. An argument, never
+    /// an environment variable, so only the parent that spawned the run can
+    /// arm it.
+    #[arg(long = "survive-overlay", value_name = "PATH", global = true, hide = true, requires = "survive_overlay_text")]
+    pub(crate) survive_overlay: Option<String>,
+    /// The file holding the proposed text for `--survive-overlay`.
+    #[arg(long = "survive-overlay-text", value_name = "FILE", global = true, hide = true, requires = "survive_overlay")]
+    pub(crate) survive_overlay_text: Option<String>,
+}
+
+/// Was this binary built by the release workflow? `build.rs` writes the kind
+/// into the version line (`<version> (release[, <sha>])`), from
+/// `ALMIDE_BUILD_PROVENANCE`, which only `.github/workflows/release.yml` sets.
+pub(crate) fn is_release_build() -> bool {
+    almide_base::env::lock_engaged_by_default(VERSION_LINE)
 }
 
 #[derive(Subcommand)]
@@ -33,6 +66,11 @@ pub(crate) enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093). For CI: a build never resolves
+        /// something new
+        #[arg(long)]
+        locked: bool,
         /// Build with optimisations (cargo --release). Required for any
         /// performance-sensitive comparison; without it the generated
         /// Rust runs in dev profile.
@@ -124,6 +162,11 @@ pub(crate) enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093). For CI: a build never resolves
+        /// something new
+        #[arg(long)]
+        locked: bool,
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
@@ -198,6 +241,11 @@ pub(crate) enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093). For CI: a build never resolves
+        /// something new
+        #[arg(long)]
+        locked: bool,
         /// Output test results as JSON (one per line)
         #[arg(long)]
         json: bool,
@@ -338,6 +386,22 @@ pub(crate) enum Commands {
         /// component
         #[arg(long)]
         subdir: Option<String>,
+        /// Trust the source's owner (`host/owner`, or `owner` for
+        /// github.com): it must be the owner the source resolves to, and it
+        /// is written into `[trust] owners` (#4093). Needed for any owner
+        /// other than github.com/almide that the project does not trust yet
+        #[arg(long)]
+        trust: Option<String>,
+        /// Print the resolved source, the trust verdict and whether the
+        /// repository exists; fetch and write nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Trust a source owner (`host/owner`, or `owner` for github.com):
+    /// add it to `[trust] owners` in almide.toml (#4093)
+    Trust {
+        /// The owner, e.g. `github.com/alice`
+        owner: String,
     },
     /// List dependencies
     Deps,
@@ -368,20 +432,45 @@ pub(crate) enum Commands {
         /// Build target (default: native)
         #[arg(long)]
         target: Option<String>,
+        /// Replace an existing file at the destination that `almide install`
+        /// did not put there (#4183). Without it such a file is refused, so
+        /// a package named `git` or `almide` cannot silently replace a tool.
+        #[arg(long)]
+        force: bool,
+        /// Trust the owner of a remote spec that is not trusted by default
+        /// (#4184): `host/owner`, or `owner` for github.com. Only
+        /// github.com/almide is trusted without it.
+        #[arg(long)]
+        trust: Option<String>,
+        /// Allow the installed package's own native code to be compiled
+        /// (#4184): its `native/` Rust files, its `[native-deps]` crates (their
+        /// build scripts run at build time) and its `@extern(rust|c)` fns.
+        /// Without it such a package is refused and its native code listed.
+        #[arg(long = "allow-native")]
+        allow_native: bool,
     },
     /// Update almide to the latest version
     #[command(name = "self-update")]
     SelfUpdate {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
+        /// Install without verifying the release's Sigstore attestation
+        /// (#4127). The checksum is still checked, but it comes from the same
+        /// place as the archive, so it proves integrity, not origin. By default
+        /// the update verifies the attestation with `gh attestation verify`
+        /// and refuses when `gh` is missing.
+        #[arg(long = "skip-attestation")]
+        skip_attestation: bool,
     },
-    /// Re-check a program's flight-grade certificates with the independent
-    /// `almide-verify` binary (found next to almide, else on PATH; there is no
-    /// built-in fallback). `almide verify app.almd [--emit out.bundle]`
-    /// produces the certificate bundle and hands it over; any other arguments
-    /// go to almide-verify verbatim (e.g. `almide verify ownership w.cert`).
+    /// Re-check the certificates of the wasm module `almide build --target
+    /// wasm` ships with the independent `almide-verify` binary (found next to
+    /// almide, else on PATH; there is no built-in fallback). `almide verify
+    /// app.almd [--artifact app.wasm] [--emit out.bundle]` builds the program,
+    /// writes its certificate bundle — pinned to the built file's SHA-256
+    /// when one is present — and hands it over; any other arguments go to
+    /// almide-verify verbatim (e.g. `almide verify ownership w.cert`).
     Verify {
-        /// `<file.almd> [--emit <bundle>]`, or arguments for almide-verify
+        /// `<file.almd> [--artifact <file.wasm>] [--emit <bundle>]`, or arguments for almide-verify
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -423,6 +512,11 @@ pub(crate) enum Commands {
         /// Per-run time limit in seconds for every child check / test / run
         #[arg(long, default_value_t = 600)]
         timeout: u64,
+        /// Let an edit that DELETES tests or `// @contract:` lines survive. By
+        /// default a test or contract present before the edit and absent after
+        /// it does not survive (#4267)
+        #[arg(long = "allow-removed")]
+        allow_removed: bool,
     },
     /// Verify-then-write: run `survive` on the edit and write it (atomically)
     /// only if nothing is newly broken. `--force` writes whatever the verdict.
@@ -449,6 +543,10 @@ pub(crate) enum Commands {
         /// Per-run time limit in seconds for every child check / test / run
         #[arg(long, default_value_t = 600)]
         timeout: u64,
+        /// Let an edit that DELETES tests or `// @contract:` lines survive
+        /// (reported in the verdict). Off by default (#4267)
+        #[arg(long = "allow-removed")]
+        allow_removed: bool,
     },
     /// Internal to `almide survive`: compile one file's test harness and run it
     /// captured, printing `{compiled, exit_code, output}` as one JSON line.

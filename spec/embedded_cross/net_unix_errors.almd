@@ -1,20 +1,34 @@
 // @contract: C-383
-// net's Unix-domain sockets and shared-memory files on their error paths
-// (#3620; the embedded lane's interim ops 104..=116). Every call answers an
-// `err`, never a crash, and the text is the same on native and the embedded
-// host: the argument checks are Almide's own, and an OS failure keeps the
-// platform's wording, which both legs read from the same machine. A
-// descriptor the program does not hold (never issued, a standard stream, or
-// already closed) is refused before any system call. The socket path, a
-// fresh name in the temp dir, is masked as `<path>`.
-import env
+// unix's Unix-domain sockets and shared-memory files on their error paths
+// (#3620, R-unix-01; the embedded lane's interim ops 104..=116). Every call
+// answers an `err`, never a crash, and the text is the same on native and the
+// embedded host: the argument checks are Almide's own, and an OS failure keeps
+// the platform's wording, which both legs read from the same machine. A
+// descriptor the program has closed is refused before any system call; one it
+// never held cannot be written at all, since `unix.Fd` is opaque. (A
+// shm_write out of the file's range aborts, so it is not staged here.) The
+// socket path, a fresh name in the temp dir, is masked as `<path>`.
+import unix
+import io
 import fs
-import net
 import random
 
 fn masked(e: String, path: String) -> String = string.replace(e, path, "<path>")
 
-fn show_int(r: Result[Int, String], path: String) -> String = match r {
+// `descriptor <n> ` → `descriptor <name> `: the number is the OS's.
+fn __mask_descriptor(line: String, name: String) -> String = match string.index_of(
+  line,
+  "descriptor ",
+) {
+  none => line,
+  some(i) => {
+    let rest = string.drop(line, i + 11)
+    let digits = string.to_list(rest) |> list.take_while((ch) => string.contains("0123456789", ch)) |> list.len
+    string.take(line, i + 11) + name + string.drop(rest, digits)
+  },
+}
+
+fn show_int[A](r: Result[A, String], path: String) -> String = match r {
   ok(_) => "ok",
   err(e) => "err ${masked(e, path)}",
 }
@@ -34,7 +48,7 @@ fn show_bool(r: Result[Bool, String]) -> String = match r {
   err(e) => "err ${e}",
 }
 
-fn show_list(r: Result[List[Int], String]) -> String = match r {
+fn show_list[A](r: Result[List[A], String]) -> String = match r {
   ok(v) => "ok ${list.len(v)}",
   err(e) => "err ${e}",
 }
@@ -42,64 +56,60 @@ fn show_list(r: Result[List[Int], String]) -> String = match r {
 effect fn main() -> Unit = {
   // A fresh socket path in the temp dir (a random name, so two runs at
   // once cannot meet), removed again before the closing line.
-  let path = "${env.temp_dir()}/almide-unix-${random.int(0, 999999999)}.sock"
+  let path = "${fs.temp_dir()}/almide-unix-${random.int(0, 999999999)}.sock"
   let x = bytes.from_string("x")
   // Paths.
-  println(show_int(net.unix_connect(path), path))
-  println(show_int(net.unix_connect(""), path))
-  let l = net.unix_listen(path)!
-  println(show_int(net.unix_listen(path), path))
-  let c = net.unix_connect(path)!
-  let s = net.unix_accept(l)!
-  // Descriptors the program does not hold: negative, a standard stream, and
-  // a closed one, whose number differs between the legs and prints as
-  // `closed`.
-  let f = net.shm_create(4)!
-  net.unix_close(f)!
-  for fd in [-1, 0, 2, f] {
-    let name = if fd == f then "closed" else int.to_string(fd)
+  println(show_int(unix.connect(path), path))
+  println(show_int(unix.connect(""), path))
+  let l = unix.listen(path)!
+  println(show_int(unix.listen(path), path))
+  let c = unix.connect(path)!
+  let s = unix.accept(l)!
+  // A descriptor the program closed; its number differs between the legs
+  // and prints as `closed`.
+  let f = unix.shm_create(4)!
+  io.close(f)!
+  for fd in [f] {
+    let name = "closed"
     let lines = [
-      show_int(net.unix_accept(fd), path),
-      show_unit(net.unix_send(fd, x, [])),
-      show_bytes(net.unix_recv(fd, 4)),
-      "take ${list.len(net.unix_take_fds(fd))}",
-      show_bool(net.unix_poll(fd, 0)),
-      show_list(net.unix_wait([s, fd], 0)),
-      show_unit(net.unix_close(fd)),
-      show_unit(net.shm_resize(fd, 8)),
-      show_unit(net.shm_write(fd, 0, x)),
-      show_bytes(net.shm_read(fd, 0, 1))
+      show_int(unix.accept(fd), path),
+      show_unit(unix.write_fds(fd, x, [])),
+      show_bytes(io.read(fd, 4)),
+      "take ${list.len(unix.take_fds(fd)!)}",
+      show_bool((unix.select([fd], 0) |> result.map((xs) => list.len(xs) > 0))),
+      show_list(unix.select([s, fd], 0)),
+      show_unit(io.close(fd)),
+      show_unit(unix.shm_resize(fd, 8)),
+      show_bytes(unix.shm_read(fd, 0, 1))
     ]
     println("fd ${name}")
     for line in lines {
-      println("  ${string.replace(line, "descriptor ${fd} ", "descriptor ${name} ")}")
+      println("  ${__mask_descriptor(line, name)}")
     }
   }
-  println(show_unit(net.unix_send(c, x, [s, 0])))
-  println(show_unit(net.unix_send(c, x, [s, -5])))
+  println(__mask_descriptor(show_unit(unix.write_fds(c, x, [s, f])), "closed"))
   // Argument domains.
-  let m = net.shm_create(16)!
-  println(show_int(net.shm_create(-1), path))
-  println(show_unit(net.shm_resize(m, -1)))
-  println(show_unit(net.shm_write(m, -1, x)))
-  println(show_bytes(net.shm_read(m, -1, 1)))
-  println(show_bytes(net.shm_read(m, 0, -1)))
+  let m = unix.shm_create(16)!
+  println(show_int(unix.shm_create(-1), path))
+  println(show_unit(unix.shm_resize(m, -1)))
+  println(show_bytes(unix.shm_read(m, -1, 1)))
+  println(show_bytes(unix.shm_read(m, 0, -1)))
   let many = list.repeat(m, 29)
-  println(show_unit(net.unix_send(c, x, many)))
+  println(show_unit(unix.write_fds(c, x, many)))
   // The right descriptor for the wrong call: the OS refuses it.
-  println(show_int(net.unix_accept(s), path))
-  println(show_bytes(net.unix_recv(m, 4)))
-  println(show_unit(net.unix_send(m, x, [])))
-  println(show_unit(net.shm_write(c, 0, x)))
-  println(show_bytes(net.shm_read(l, 0, 1)))
+  println(show_int(unix.accept(s), path))
+  println(show_bytes(io.read(m, 4)))
+  println(show_unit(unix.write_fds(m, x, [])))
+  println(show_unit(unix.shm_write(c, 0, x)))
+  println(show_bytes(unix.shm_read(l, 0, 1)))
   // Nothing was sent: no descriptors wait, and the socket is idle.
-  println("take ${list.len(net.unix_take_fds(s))}")
-  println(show_bool(net.unix_poll(s, 0)))
-  net.unix_close(m)!
-  net.unix_close(c)!
-  net.unix_close(s)!
-  net.unix_close(l)!
-  println(string.replace(show_unit(net.unix_close(l)), "descriptor ${l} ", "descriptor <listener> "))
+  println("take ${list.len(unix.take_fds(s)!)}")
+  println(show_bool((unix.select([s], 0) |> result.map((xs) => list.len(xs) > 0))))
+  io.close(m)!
+  io.close(c)!
+  io.close(s)!
+  io.close(l)!
+  println(__mask_descriptor(show_unit(io.close(l)), "<listener>"))
   fs.remove(path)!
   println("done")
 }

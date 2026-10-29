@@ -78,13 +78,85 @@ impl BuildDirLock {
 }
 
 /// The shared native build scratch dir of `almide run` / `almide build`:
-/// `ALMIDE_RUN_PROJECT_DIR` when set, else `<temp>/almide-run`. One
+/// `ALMIDE_RUN_PROJECT_DIR` when set, else `<cache base>/run`. One
 /// resolution, shared by the builder and by `almide clean` (#2500), so the
 /// dir `clean` empties is the dir the builds fill.
 pub(crate) fn shared_run_project_dir() -> std::path::PathBuf {
     almide_base::env::var("ALMIDE_RUN_PROJECT_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"))
+        .unwrap_or_else(|| cache_base().join("run"))
+}
+
+/// The private base every native build cache lives under (#4180):
+/// `<temp>/almide-<euid>` on unix, created exclusively with mode 0700.
+///
+/// The caches hold binaries that are executed (`almide run`, the `almide
+/// test` workers) and an rlib every program links. They used to sit at fixed
+/// names directly in the temp dir, created with `create_dir_all`, and a hit
+/// was "the file exists". On Linux the temp dir is the shared `/tmp`, so
+/// another local user could create the directory first, plant a binary under
+/// its predictable name, and have it run as you. A base that only its owner
+/// can enter closes that: an existing one is used only when it is a real
+/// directory, owned by the effective uid, and closed to group and others.
+/// Anything else is refused, never repaired, because what is inside it could
+/// have been written by someone else.
+pub(crate) fn cache_base() -> std::path::PathBuf {
+    static BASE: std::sync::OnceLock<Result<std::path::PathBuf, String>> = std::sync::OnceLock::new();
+    match BASE.get_or_init(|| private_base_in(&std::env::temp_dir())) {
+        Ok(dir) => dir.clone(),
+        Err(e) => {
+            crate::err(&format!("error: {e}"));
+            std::process::exit(1);
+        }
+    }
+}
+
+/// [`cache_base`] under `temp`.
+pub(crate) fn private_base_in(temp: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        let dir = temp.join(format!("almide-{uid}"));
+        ensure_private_dir(&dir, uid)?;
+        Ok(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        let dir = temp.join("almide");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        Ok(dir)
+    }
+}
+
+/// Create `dir` with mode 0700 unless it exists, then require that it is a
+/// real directory (not a symlink), owned by `uid`, with no group or other
+/// permission bits (#4180).
+#[cfg(unix)]
+pub(crate) fn ensure_private_dir(dir: &std::path::Path, uid: u32) -> Result<(), String> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(format!("cannot create the build cache {}: {e}", dir.display())),
+    }
+    let md = std::fs::symlink_metadata(dir).map_err(|e| format!("cannot read the build cache {}: {e}", dir.display()))?;
+    let refuse = |why: String| {
+        Err(format!(
+            "refusing the build cache {}: {why}. Another user may have created it to plant a binary that would run as you; remove it and run again",
+            dir.display()
+        ))
+    };
+    if !md.file_type().is_dir() {
+        return refuse("it is not a directory (a symlink or a file)".into());
+    }
+    if md.uid() != uid {
+        return refuse(format!("it is owned by uid {}, not by you (uid {uid})", md.uid()));
+    }
+    if md.mode() & 0o077 != 0 {
+        return refuse(format!("group or other users can reach it (mode {:o})", md.mode() & 0o777));
+    }
+    Ok(())
 }
 
 /// The lockfile name every build scratch dir is serialized on.
@@ -203,7 +275,7 @@ pub(crate) const RTLIB_DIR_PREFIX: &str = "almide-rtlib-";
 /// never wrong. A dir being built in right now holds its lock and is
 /// skipped.
 pub(crate) fn sweep_rtlib_cache(in_use: &std::path::Path) {
-    let temp = std::env::temp_dir();
+    let temp = cache_base();
     if !sweep_due(&temp) {
         return;
     }

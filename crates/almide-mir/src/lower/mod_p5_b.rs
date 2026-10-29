@@ -626,7 +626,7 @@ fn simultaneous_update_safe(
 /// READS from an enclosing scope. brick 2: a Value-CONTAINING tuple result
 /// must ALSO route to the accumulator — the dispatch recomputes a tuple base
 /// from the carried params, but a tuple whose base holds a
-/// `value.object(..)`/`value.str(..)` CALL alongside a sibling scalar carry
+/// `value.object(..)`/`value.string(..)` CALL alongside a sibling scalar carry
 /// reads the scalar STALE (pos=0 not the loop's final pos). A Value-FREE
 /// tuple (csv `pf`'s `(acc, pos)`) works via the dispatch and routing it
 /// regresses parse_rows_rec, so the gate is strictly a Value-containing tuple.

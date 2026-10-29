@@ -46,7 +46,7 @@
 - (b) 純粋な計算です。host の機能は要りません。
 - (c) 幅優先探索のようなアルゴリズム問題で、LLM は他言語の deque を前提に書きます。無いと、自前のキューを毎回書くことになり、書き間違いが増えます。
 - (d) 追加です（新しいモジュール）。
-- 関数（L0 の動詞に従う）: `deque.new`、`from_list`、`to_list`、`len`、`is_empty`、`push_back`、`push_front`、`pop_back`、`pop_front`、`first`、`last`。`push_*`・`pop_*` は `list.push`・`list.pop` と同じく、`mut` 引数を取るその場書き換えです（R-L0-04 の 3: 1 つの動詞は全モジュールで同じ様式）。詳細は [L2-deque](L2-deque.md)。
+- 関数（L0 の動詞に従う）: `deque.new`、`from_list`、`to_list`、`len`、`is_empty`、`push`、`push_front`、`pop`、`pop_front`、`first`、`last`。`push_*`・`pop_*` は `list.push`・`list.pop` と同じく、`mut` 引数を取るその場書き換えです（R-L0-04 の 3: 1 つの動詞は全モジュールで同じ様式）。詳細は [L2-deque](L2-deque.md)。
 - ゲート: list と同じ境界入力の行列テストを使います。native と wasm で結果が一致することを確かめる fixture を置きます。
 - issue: #3932
 
@@ -113,6 +113,13 @@
 - 根拠: L1 の追加基準（5 言語以上）。R-L0-25（文字列からの変換は先の型の `parse`）。
 - (a) Rust `"true".parse::<bool>()`、Go `strconv.ParseBool`、OCaml `bool_of_string_opt`、Kotlin `toBooleanStrictOrNull`、Swift `Bool("true")`。どれも不正な入力を拒みます。
 - issue: #3980
+
+### R-L1-31 秘密の値を包む `secret` — ○ 採用
+
+- いま: パスワードや API キーを持つレコードは、埋め込み・`assert_eq` の失敗表示・`almide test` の報告で全フィールドをそのまま出します（#4107）。フィールドに付けた `@redact` のような属性は読まれず、黙って何も守りません。
+- 案: `secret` モジュールを置き（自動 import しない。`import secret`）、型 `Secret[A]` と `secret.new`・`secret.reveal` を足します。どの表示経路も `Secret(***)` を出し、`==` は String / Bytes だけ定数時間で比べ、Codec は decode だけ導出します。中身は [L2-secret](L2-secret.md)。
+- 根拠: 専用の型を持つのは 2/8（Rust secrecy・pydantic）で、5 言語の基準には届きません。それでも採るのは、1 つの宣言から全表示経路を導く形が型だけだからです（フィールド属性は 1 つのレコードの 1 経路しか守れない）。オーナー裁定 2026-10-24。
+- issue: #4107
 
 ## 3. 足さないカテゴリ（× と理由）
 

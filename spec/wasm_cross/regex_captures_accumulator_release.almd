@@ -9,18 +9,18 @@
 // match and `none` as no match; the live-at-exit ledger pins the release.
 import regex
 
-fn show(o: List[String]?) -> String = match o {
-  some(xs) => "[" + string.join(xs, "|") + "]",
+fn show(o: List[String?]?) -> String = match o {
+  some(xs) => "[" + list.join(xs |> list.map((x) => x ?? ""), "|") + "]",
   none => "NONE",
 }
 
 fn main() -> Unit = {
-  println(show(regex.captures("(a*)*", "")))
-  println(show(regex.captures("(\\d+)-(\\d+)-(\\d+)", "on 2026-09-30 ok")))
-  println(show(regex.captures("(x)(y)?(z)", "xz")))
-  println(show(regex.captures("q+", "abc")))
+  println(show(regex.captures(regex.new("(a*)*"), "")))
+  println(show(regex.captures(regex.new("(\\d+)-(\\d+)-(\\d+)"), "on 2026-09-30 ok")))
+  println(show(regex.captures(regex.new("(x)(y)?(z)"), "xz")))
+  println(show(regex.captures(regex.new("q+"), "abc")))
   for _ in 0..<50 {
-    let _ = regex.captures("(a)(b)(c)(d)", "abcd")
+    let _ = regex.captures(regex.new("(a)(b)(c)(d)"), "abcd")
   }
-  println(show(regex.captures("(a)(b)(c)(d)", "zabcd")))
+  println(show(regex.captures(regex.new("(a)(b)(c)(d)"), "zabcd")))
 }

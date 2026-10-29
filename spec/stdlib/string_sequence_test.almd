@@ -1,0 +1,115 @@
+// The string additions of R-string-16/17 and R-L0-42: Text, Container and
+// Sequence requirements. An element is one codepoint as a one-character
+// String; a position counts codepoints.
+import testing
+
+test "compare, byte_len, new and from_list" {
+  assert_eq(string.compare("a", "b"), -1)
+  assert_eq(string.compare("b", "a"), 1)
+  assert_eq(string.compare("", ""), 0)
+  assert_eq(string.compare("ab", "abc"), -1)
+  assert_eq(string.byte_len("héllo"), 6)
+  assert_eq(string.byte_len(""), 0)
+  assert_eq(string.new(), "")
+  assert_eq(string.from_list(["a", "bc", "日"]), "abc日")
+  assert_eq(string.from_list([]), "")
+}
+
+test "to_utf16 and from_utf16" {
+  assert_eq(string.to_utf16("aé日"), [97, 233, 26085])
+  assert_eq(string.to_utf16("😀"), [55357, 56832])
+  assert_eq(string.from_utf16([55357, 56832, 97]), ok("😀a"))
+  assert_eq(string.from_utf16([]), ok(""))
+  assert_eq(string.from_utf16([55357]), err("string.from_utf16: unpaired surrogate at 0"))
+  assert_eq(string.from_utf16([97, 56832]), err("string.from_utf16: unpaired surrogate at 1"))
+  assert_eq(
+    string.from_utf16([70000]),
+    err("string.from_utf16: code unit out of range at 0: 70000"),
+  )
+}
+
+test "filter and fold" {
+  assert_eq(string.filter("a1b2c3", (c) => string.is_digit(c)), "123")
+  assert_eq(string.fold("abc", "", (acc, c) => c + acc), "cba")
+  assert_eq(string.fold("abc", 0, (n, _) => n + 1), 3)
+}
+
+test "insert and remove_at" {
+  assert_eq(string.insert("héllo", 1, "XY"), "hXYéllo")
+  assert_eq(string.insert("ab", 2, "c"), "abc")
+  assert_eq(string.insert("", 0, "x"), "x")
+  assert_eq(string.remove_at("héllo", 1), "hllo")
+  testing.assert_aborts("string.insert", () => string.insert("ab", 3, "c"))
+  testing.assert_aborts("string.insert", () => string.insert("ab", -1, "c"))
+  testing.assert_aborts("string.remove_at", () => string.remove_at("ab", 2))
+  testing.assert_aborts("string.remove_at", () => string.remove_at("", 0))
+}
+
+test "enumerate, zip, zip_with" {
+  assert_eq(string.enumerate("ab"), [(0, "a"), (1, "b")])
+  assert_eq(string.zip("abc", [1, 2]), [("a", 1), ("b", 2)])
+  assert_eq(string.zip_with("ab", ["x", "y"], (c, t) => c + t), ["ax", "by"])
+}
+
+test "filter_map, find_map, reduce, scan" {
+  assert_eq(string.filter_map("a1b2", (c) => int.parse(c)?), [1, 2])
+  assert_eq(string.find_map("ab3c4", (c) => int.parse(c)?), some(3))
+  assert_eq(string.find_map("abc", (c) => int.parse(c)?), none)
+  assert_eq(string.reduce("abc", (a, b) => b + a), some("cba"))
+  assert_eq(string.reduce("", (a, b) => a + b), none)
+  assert_eq(string.scan("abc", "", (acc, c) => acc + c), ["a", "ab", "abc"])
+}
+
+test "partition and group_by" {
+  let (digits, rest) = string.partition("a1b2", (c) => string.is_digit(c))
+  assert_eq(digits, ["1", "2"])
+  assert_eq(rest, ["a", "b"])
+  let g = string.group_by("aAbB", (c) => string.to_lower(c))
+  assert_eq(map.get(g, "a"), some(["a", "A"]))
+  assert_eq(map.get(g, "b"), some(["b", "B"]))
+}
+
+test "sort, sort_by, sort_with" {
+  assert_eq(string.sort("cab"), ["a", "b", "c"])
+  assert_eq(string.sort_by("bAa", (c) => string.to_lower(c)), ["A", "a", "b"])
+  assert_eq(string.sort_with("abc", (a, b) => string.compare(b, a)), ["c", "b", "a"])
+  assert_eq(string.sort_with("", (a, b) => string.compare(a, b)), [])
+}
+
+test "min, max and their _by and _with forms" {
+  assert_eq(string.min("cab"), some("a"))
+  assert_eq(string.max("cab"), some("c"))
+  assert_eq(string.min(""), none)
+  assert_eq(string.min_by("bAa", (c) => string.to_lower(c)), some("A"))
+  assert_eq(string.max_by("aBb", (c) => string.to_lower(c)), some("b"))
+  assert_eq(string.min_with("cab", (a, b) => string.compare(a, b)), some("a"))
+  assert_eq(string.max_with("cab", (a, b) => string.compare(a, b)), some("c"))
+  assert_eq(string.max_with("", (a, b) => string.compare(a, b)), none)
+}
+
+test "find_index, take_while, drop_while" {
+  assert_eq(string.find_index("ab1", (c) => string.is_digit(c)), some(2))
+  assert_eq(string.find_index("ab", (c) => string.is_digit(c)), none)
+  assert_eq(string.take_while("12ab3", (c) => string.is_digit(c)), "12")
+  assert_eq(string.drop_while("12ab3", (c) => string.is_digit(c)), "ab3")
+}
+
+test "chunk, window, split_at" {
+  assert_eq(string.chunk("abcde", 2), ["ab", "cd", "e"])
+  assert_eq(string.chunk("", 2), [])
+  assert_eq(string.window("abcd", 3), ["abc", "bcd"])
+  assert_eq(string.window("ab", 3), [])
+  assert_eq(string.split_at("héllo", 2), ("hé", "llo"))
+  assert_eq(string.split_at("ab", 9), ("ab", ""))
+  testing.assert_aborts("string.chunk", () => string.chunk("ab", 0))
+  testing.assert_aborts("string.window", () => string.window("ab", 0))
+  assert_eq(string.split_at("ab", -1), ("", "ab"))
+}
+
+test "dedup, intersperse, unique, unique_by" {
+  assert_eq(string.dedup("aabbbca"), "abca")
+  assert_eq(string.intersperse("abc", "-"), "a-b-c")
+  assert_eq(string.intersperse("", "-"), "")
+  assert_eq(string.unique("abacb"), "abc")
+  assert_eq(string.unique_by("aAbB", (c) => string.to_lower(c)), "ab")
+}

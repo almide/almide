@@ -16,8 +16,8 @@
 // so the TLS types are written fully qualified (no rustls/Arc imports to
 // collide or strand a cfg attribute), and the io/net imports here are the
 // COMPLEMENT of http.rs's (which keeps BufRead/BufReader/TcpListener).
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read as _;
+use std::io::Write as _;
 
 // URL, request head, proxies, dial limits and TLS trust: one include, so
 // this file stays under the 1000-line limit.
@@ -42,11 +42,16 @@ pub fn client_read_timeout(default_secs: u64) -> Option<std::time::Duration> {
 /// closes without TLS close_notify (#1592). A read error after a
 /// SYNTACTICALLY COMPLETE response keeps the data; before completeness it
 /// still propagates — a truncated body is never silently returned. More than
-/// `max` bytes is an error naming the cap (#2825). Errors are `url`'s
-/// classified texts.
-pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usize>) -> Result<Vec<u8>, String> {
+/// `max` bytes is an error naming the cap (#2825), and so is a response
+/// whose final head is not whole within `HTTP_MAX_HEAD_BYTES` (C-408, #4137 —
+/// the call-handle client's cap, now on this path too: the protocol class).
+/// Errors are `url`'s classified texts. Whether a response that ENDED is whole
+/// is the caller's question (`http_parse_response`), because it depends on
+/// the request method.
+pub fn read_response_tolerant(stream: &mut impl std::io::Read, url: &str, max: Option<usize>) -> Result<Vec<u8>, String> {
     let mut response = Vec::new();
     let mut buf = [0u8; 8192];
+    let mut head_whole = false;
     loop {
         match http_read_retrying(stream, &mut buf) {
             Ok(0) => break,
@@ -54,6 +59,20 @@ pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usi
                 response.extend_from_slice(&buf[..n]);
                 if let Some(max) = max.filter(|m| response.len() > *m) {
                     return Err(http_too_large_text(url, max));
+                }
+                if !head_whole {
+                    // The cap is on the head itself: one whose blank line
+                    // arrives in the read that crosses the cap is past it too.
+                    match http_final_head(&response) {
+                        Some((_, end)) if end > HTTP_MAX_HEAD_BYTES => {
+                            return Err(http_error_text(HttpErrorClass::Protocol, url));
+                        }
+                        Some(_) => head_whole = true,
+                        None if response.len() > HTTP_MAX_HEAD_BYTES => {
+                            return Err(http_error_text(HttpErrorClass::Protocol, url));
+                        }
+                        None => {}
+                    }
                 }
             }
             Err(e) => {
@@ -74,7 +93,7 @@ pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usi
 /// SA_RESTART or not (signal(7)) — the SIGCHLD of a process the program spawns
 /// while a call is in flight is one. Taken as the end of the exchange, it
 /// turned a whole response into `malformed or incomplete response`.
-pub fn http_read_retrying<R: Read + ?Sized>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
+pub fn http_read_retrying<R: std::io::Read + ?Sized>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
     loop {
         match r.read(buf) {
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -187,32 +206,36 @@ pub fn chunked_body_terminated(body: &[u8]) -> bool {
 /// Chunked transfer-decoding. It runs on BYTES, before any text decoding:
 /// chunk sizes count bytes, and a multibyte character may straddle two
 /// chunks (#2536), so lossily decoding the framed body first would change
-/// its length under the size walk. A malformed size line is an error.
+/// its length under the size walk. A malformed size line is an error, and
+/// so is a body that ends before its terminating 0-chunk — a size line cut
+/// short, a chunk shorter than its size, a chunk without its CRLF (C-408,
+/// #4137: these used to return what had arrived as a whole body).
 pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
+    let incomplete = || "incomplete chunked body".to_string();
     let mut result = Vec::new();
     let mut pos = 0usize;
-    while pos < body.len() {
+    loop {
         let line_end = match body[pos..].windows(2).position(|w| w == b"\r\n") {
             Some(i) => pos + i,
-            None => break,
+            None => return Err(incomplete()),
         };
         let size = http_chunk_size(&body[pos..line_end])?;
         if size == 0 {
-            break;
+            return Ok(result);
         }
         let data_start = line_end + 2;
-        match data_start.checked_add(size) {
-            Some(data_end) if data_end <= body.len() => {
+        // Both additions are checked: a size line near usize::MAX makes
+        // `data_end + 2` overflow, which used to panic (or wrap to an
+        // inverted slice) on a server-chosen chunk size instead of erring.
+        let data_end = data_start.checked_add(size);
+        match data_end.and_then(|e| Some((e, e.checked_add(2)?))) {
+            Some((data_end, crlf_end)) if crlf_end <= body.len() && &body[data_end..crlf_end] == b"\r\n" => {
                 result.extend_from_slice(&body[data_start..data_end]);
-                pos = data_end;
-                if pos + 2 <= body.len() && &body[pos..pos + 2] == b"\r\n" {
-                    pos += 2;
-                }
+                pos = crlf_end;
             }
-            _ => break,
+            _ => return Err(incomplete()),
         }
     }
-    Ok(result)
 }
 
 /// Start TLS on `stream` and finish the handshake here, so a certificate or
@@ -222,8 +245,8 @@ pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
 pub fn make_tls_stream(
     host: &str,
     url: &str,
-    mut stream: TcpStream,
-) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
+    mut stream: std::net::TcpStream,
+) -> Result<rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>, String> {
     let config = http_tls_config()?;
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|_| http_error_text(HttpErrorClass::Tls, url))?;
@@ -242,33 +265,49 @@ pub fn make_tls_stream(
 /// A parsed text response: `(status_code, headers, body)`. The header list
 /// is EVERY field line in wire order — names keep their wire spelling, and a
 /// repeated field (`Set-Cookie`) keeps every occurrence (#1791); the
-/// accessors do the case-insensitive matching. A missing / unparseable
-/// status line yields code 0 and an empty header list (the whole text is
-/// then the body — the same tolerance the body-only client always had).
+/// accessors do the case-insensitive matching.
 pub type HttpTextResponse = (i64, Vec<(String, String)>, String);
 
 /// A parsed response with its body still bytes: `(status_code, headers,
 /// transfer-decoded body)`.
 pub type HttpRawResponse = (i64, Vec<(String, String)>, Vec<u8>);
 
-/// Split a whole response into status, fields and the transfer-decoded body
-/// bytes, past any 1xx interim heads. The framing is removed on BYTES; only
-/// a text caller then decodes the body (#2536). The head is ASCII by
-/// protocol, so reading it lossily is harmless.
-pub fn http_parse_response(response: &[u8]) -> Result<HttpRawResponse, String> {
+/// Split a response that ended into status, fields and the transfer-decoded
+/// body bytes, past any 1xx interim heads, or refuse it as incomplete (C-408,
+/// #4137): no whole head (the head-only reply used to come back as its own
+/// body with status 0), a chunked body without its 0-chunk, or fewer body
+/// bytes than Content-Length. A body past Content-Length is cut at it. A HEAD
+/// request and a 204 or 304 answer have no body, whatever their framing says;
+/// with neither framing field the body runs to the close. The framing is
+/// removed on BYTES; only a text caller then decodes the body (#2536). The
+/// head is ASCII by protocol, so reading it lossily is harmless.
+pub fn http_parse_response(response: &[u8], head_request: bool) -> Result<HttpRawResponse, String> {
     let Some((start, idx)) = http_final_head(response) else {
-        return Ok((0, Vec::new(), response.to_vec()));
+        return Err("incomplete response head".to_string());
     };
     let head = String::from_utf8_lossy(&response[start..idx]);
     let code = http_status_of(&response[start..idx]);
     let fields = http_head_fields(&head);
     let body = &response[idx + 4..];
-    let body = if http_fields_chunked(&fields) { decode_chunked_bytes(body)? } else { body.to_vec() };
+    if head_request || code == 204 || code == 304 {
+        return Ok((code, fields, Vec::new()));
+    }
+    let body = if http_fields_chunked(&fields) {
+        decode_chunked_bytes(body)?
+    } else if let Some(cl) = fields.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).map(|(_, v)| v.trim()) {
+        let cl = cl.parse::<usize>().map_err(|_| "malformed Content-Length".to_string())?;
+        if body.len() < cl {
+            return Err("incomplete response body".to_string());
+        }
+        body[..cl].to_vec()
+    } else {
+        body.to_vec()
+    };
     Ok((code, fields, body))
 }
 
 /// Write the prepared request and read the whole response.
-pub fn http_exchange_raw(stream: &mut (impl Read + Write), url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
+pub fn http_exchange_raw(stream: &mut (impl std::io::Read + std::io::Write), url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
     stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
     read_response_tolerant(stream, url, client_max_response_bytes())
 }
@@ -300,8 +339,9 @@ fn http_request_raw(
         let mut stream = stream;
         http_exchange_raw(&mut stream, url, &request)?
     };
-    // A framing the decoder cannot walk is the protocol class.
-    http_parse_response(&response).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))
+    // A framing the decoder cannot walk, or a response that ended before its
+    // framing did, is the protocol class — the call-handle client's text.
+    http_parse_response(&response, method.eq_ignore_ascii_case("HEAD")).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))
 }
 
 /// The full-response client (#1791): `(status_code, headers, body)` for ANY
@@ -359,17 +399,6 @@ pub fn request_status(
     headers: &[(String, String)],
 ) -> Result<(i64, String), String> {
     request_response(method, url, body, headers).map(|(c, _, b)| (c, b))
-}
-
-/// The binary client: the raw response body as `Vec<u8>` — binary payloads
-/// are never run through `from_utf8_lossy`.
-pub fn request_bytes(
-    method: &str,
-    url: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<Vec<u8>, String> {
-    http_request_raw(method, url, body, headers).map(|(_, _, b)| b)
 }
 
 // The call-handle core (#2631 / #2633) rides the same include chain: inlined

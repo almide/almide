@@ -37,7 +37,7 @@ fn words(n: Int) -> List[String] = ["a", "b"]
 
 fn maybe(n: Int) -> Int? = if n >= 0 then some(n) else none
 
-fn scratch_tail(n: Int) -> String = float.to_string(int.to_float(n) + 0.5)
+fn scratch_tail(n: Int) -> String = float.to_string(float.from(n) + 0.5)
 
 effect fn main() -> Unit = {{
   var total = 0
@@ -86,7 +86,7 @@ fn a_list_of_strings_releases_its_elements() {
 /// #2010 stage 2b: a spine COPIED from another spine (slice / take /
 /// filter / concat / reverse …) holds its own element credits — the copy
 /// and the source each release exactly what they hold, flat and without
-/// a double free (the double-free trap is armed on the corpus sweep).
+/// a double free (the double-free trap is in every wasm build since #4023).
 #[test]
 fn a_copied_spine_holds_its_own_element_credits() {
     flat(
@@ -117,8 +117,8 @@ fn a_shape_block_releases_its_handle_payload() {
 #[test]
 fn a_map_releases_its_entries() {
     flat(
-        "let m = map.from_list([(str, [str])]); map.insert(m, k, v); let m2 = m",
-        "    var m = map.from_list([(int.to_string(i % 7), [int.to_string(i % 7)]), (\"b\", [\"y\"])])\n    map.insert(m, \"c\" + int.to_string(i % 7), [\"z\"])\n    map.insert(m, \"b\", [int.to_string(i % 7)])\n    let m2 = m\n    let m3 = map.set(m2, \"b\", [\"q\"])\n    let m4 = map.remove(m3, \"c\" + int.to_string(i % 7))\n    total = total + map.len(m) + map.len(m2) + map.len(m3) + map.len(m4)",
+        "let m = map.from_list([(str, [str])]); m[k] = v; let m2 = m",
+        "    var m = map.from_list([(int.to_string(i % 7), [int.to_string(i % 7)]), (\"b\", [\"y\"])])\n    m[\"c\" + int.to_string(i % 7)] = [\"z\"]\n    m[\"b\"] = [int.to_string(i % 7)]\n    let m2 = m\n    let m3 = map.set(m2, \"b\", [\"q\"])\n    let m4 = map.remove(m3, \"c\" + int.to_string(i % 7))\n    total = total + map.len(m) + map.len(m2) + map.len(m3) + map.len(m4)",
         "11000",
         "88000",
     );
@@ -312,13 +312,13 @@ fn an_error_exit_releases_the_frame_like_the_ok_exit() {
 fn an_effect_call_releases_its_heap_argument_credit() {
     fn mut_param(n: u32, body: &str) -> String {
         format!(
-            r#"effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.set_at(b, 0, v)
+            r#"effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.put_u8(b, 0, v)
 
 effect fn width(b: Bytes) -> Int = ok(bytes.len(b))
 
 effect fn main() -> Unit = {{
   var total = 0
-  var held = bytes.new(64)
+  var held = bytes.zeros(64)
   var i = 0
   while i < {n} {{
 {body}
@@ -333,7 +333,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "poke(fresh buffer)!",
-        "    var b = bytes.new(64)\n    poke(b, 7)!\n    total = total + bytes.get_or(b, 0, 0)",
+        "    var b = bytes.zeros(64)\n    poke(b, 7)!\n    total = total + bytes.get(b, 0) ?? 0",
         "7000",
         "56000",
     );
@@ -341,7 +341,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "poke(held buffer)!",
-        "    poke(held, 7)!\n    total = total + bytes.get_or(held, 0, 0)",
+        "    poke(held, 7)!\n    total = total + bytes.get(held, 0) ?? 0",
         "7000",
         "56000",
     );
@@ -350,7 +350,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "width(fresh buffer)!",
-        "    let t = bytes.new(64)\n    total = total + width(t)!",
+        "    let t = bytes.zeros(64)\n    total = total + width(t)!",
         "64000",
         "512000",
     );
@@ -403,7 +403,7 @@ effect fn main() -> Unit = {{
 fn append_heap(n: u32) -> (u64, String) {
     let src = format!(
         r#"effect fn main() -> Unit = {{
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   for i in 0..<{n} {{
     bytes.append_u16_le(b, i)
   }}
@@ -592,7 +592,7 @@ fn a_generic_constructor_hands_back_one_credit() {
     );
 }
 
-/// `value.keys(v)` copies the object's key HANDLES into a fresh list, and
+/// The key list of `value.as_object(v)` copies the object's key HANDLES into a fresh list, and
 /// the list's typed drop releases every element — so the list has to take
 /// its own credit per key, as `map.keys` does (#2010 stage 2b). Without the
 /// inc, each dropped key list spent one of the Value's credits: two calls
@@ -606,7 +606,7 @@ fn a_value_keys_list_holds_its_own_key_credits() {
     let src = r#"import json
 
 fn count(b: Value) -> Int = {
-  let ks = value.keys(b)
+  let ks = list.map(value.as_object(b) ?? [], (kv) => kv.0)
   list.len(ks)
 }
 
@@ -614,7 +614,7 @@ fn main() -> Unit = {
   let b = json.parse("{\"beta\":20,\"alpha\":10,\"gamma\":30}") ?? value.null()
   let n = count(b) + count(b) + count(b)
   let junk = list.map([1, 2, 3, 4, 5, 6], (x) => "zzzzzzzzzzzzzzzzzzz" + int.to_string(x))
-  println("${n} ${json.stringify(b)} ${json.get_int(b, "alpha") ?? -1}")
+  println("${n} ${json.stringify(b)} ${value.get_int(b, "alpha") ?? -1}")
   println(list.join(junk, ","))
 }
 "#;
@@ -643,17 +643,17 @@ fn growth_in(program: fn(u32, &str) -> String, name: &str, body: &str, expect_10
 /// borrowed views of its fields, exactly as they are under a written-out name.
 fn destructure_program(n: u32, body: &str) -> String {
     format!(
-        r#"fn mkt(v: Int) -> (Bytes, Int) = (bytes.new(64), v)
+        r#"fn mkt(v: Int) -> (Bytes, Int) = (bytes.zeros(64), v)
 
 fn mks(v: Int) -> (String, List[Int]) = (int.to_string(v % 10) + "s", [v, v])
 
 fn stamp(mut b: Bytes, v: Int) -> Int = {{
-  bytes.set_at(b, 0, v)
+  bytes.put_u8(b, 0, v)
   v
 }}
 
 effect fn estamp(mut b: Bytes, v: Int) -> Int = {{
-  bytes.set_at(b, 0, v)
+  bytes.put_u8(b, 0, v)
   ok(v)
 }}
 
@@ -686,13 +686,13 @@ fn an_owned_tuple_destructure_releases_the_tuple_and_its_contents() {
         ("let (b, _) = mkt(i) in a tail", "    let b = first(i)\n    total = total + bytes.len(b)", "64000", "512000"),
         (
             "stamp(fresh buffer) — the mut-param value return",
-            "    var b = bytes.new(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "    var b = bytes.zeros(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get(b, 0) ?? 0",
             "14000",
             "112000",
         ),
         (
             "estamp(fresh buffer)! — the mut-param effect value return",
-            "    var b = bytes.new(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "    var b = bytes.zeros(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get(b, 0) ?? 0",
             "14000",
             "112000",
         ),
@@ -723,9 +723,9 @@ fn a_borrowed_tuple_destructure_keeps_its_subject() {
 /// left the cell at rc 1 forever (144 B per call).
 fn to_option_program(n: u32, body: &str) -> String {
     format!(
-        r#"effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+        r#"effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.zeros(64))
 
-fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.zeros(64))
 
 fn width(o: Bytes?) -> Int = match o {{
   some(b) => bytes.len(b),

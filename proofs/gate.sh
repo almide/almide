@@ -69,6 +69,8 @@ kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
     caps)            fn="check_caps_cert" ;;
     caps-transitive) fn="check_prog_cert" ;;
     call-modes)      fn="check_modes_cert" ;;
+    bounds)          fn="check_bounds_cert" ;;
+    init)            fn="check_init_cert" ;;
     *) echo "kernel_verify: unknown checker mode $mode" >&2; return 2 ;;
   esac
   if [ "$expect" -eq 0 ]; then want=true; else want=false; fi
@@ -77,7 +79,7 @@ kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
 import sys
 w = open(sys.argv[1]).read()
 lit = '"' + w.replace('"', '""') + '"'
-print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes.")
+print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.")
 print("From Stdlib Require Import String.")
 print("Open Scope string_scope.")
 print("Goal %s %s = %s." % (sys.argv[2], lit, sys.argv[3]))
@@ -442,16 +444,18 @@ tamper_structural greet '3s/^ibd$/ib/' "#2755 concat operand"
 # more as per-site `{a|b}` / `{a x|b}` items. `pick` hands its list to
 # `take` on one arm only (`{ibm|id}`: the arm's tail call takes the dying
 # list, `m` = the move-in; `b` = the read, #3259); `label` keeps a string alive across
-# a match, returning its share on one arm (`{|am}`). Drills: drop the
-# release on the arm that took the share, and the move-out on the arm that
-# returned it (on `pick`, drop the move-in, so the arm keeps a credit it
-# never releases) — each arm is checked on its own, so each leak is seen.
+# a match: the `some` arm shares it into an in-place append and releases its
+# own credit (`ibamd`, #4261), the `none` arm moves the dying param out
+# (`im`) — one line `{ibamd|im}`. Drills: drop the move-in on `pick`'s
+# arm, and the move-out on the arm of `label` that returned the string —
+# each arm then keeps a credit it never releases, and each arm is checked
+# on its own, so each leak is seen.
 echo
 echo "== structural leg, branch frames  ⊳  proven checker (#2756) =="
 run_structural spec/wasm_cross/witness_straightline.almd pick 0
 run_structural spec/wasm_cross/witness_straightline.almd label 0
 tamper_structural pick 's/^{ibm|id}$/{ib|id}/' "#2756 if arm"
-tamper_structural label 's/^{|am}$/{|a}/' "#2756 match arm"
+tamper_structural label 's/^{ibamd|im}$/{ibamd|i}/' "#2756 match arm"
 
 # ── #2757: a SELF TAIL CALL (loop-converted by tco.rs) certified as the next
 # activation of the frame: `count_down` shares its list into the next
@@ -634,15 +638,15 @@ tamper_structural fan_bang '6s/^{|im}$/{|i}/' "#2755 fan payload"
 # `{|am}`); out of bounds ABORTS the process with nothing released — the
 # abort terminal discharges it, and an aborting path a returning path extends
 # needs no arm of its own (`check_line_prefix_safe`: `tagged_at`'s `t` aborts
-# holding its block after `ib`, a prefix of its returning `ibd`; `b` = the
-# index's read of it, #3259). Drills: the
-# view never shared; `t` never released on the returning path.
+# holding its block after `i`, a prefix of its returning `im` — the dying `t`
+# moves into the in-place append, #4261). Drills: the
+# view never shared; `t` never handed off on the returning path.
 echo
 echo "== structural leg, list index + abort exit  ⊳  proven checker (#2755) =="
 run_structural spec/wasm_cross/witness_straightline.almd elem_at 0
 run_structural spec/wasm_cross/witness_straightline.almd tagged_at 0
 tamper_structural elem_at '2s/^{|am}$/{|m}/' "#2755 index view"
-tamper_structural tagged_at '2s/^{|ibd}$/{|ib}/' "#2755 abort-path release"
+tamper_structural tagged_at '2s/^{|im}$/{|i}/' "#2755 abort-path release"
 
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
@@ -742,15 +746,17 @@ tamper_fixture "$GI" main '16s/^ibabdd$/ibabd/' "#2755 bound if"
 
 # ── #2755: `list.group_by`'s inlined key callback. One activation per
 # element: an owned key is born, released when its group is present and
-# moved into the new entry when absent (`{id|im}`, line 93 of the fixture's
-# `main`); the absent arm's first group list is born into the entry
+# moved into the new entry when absent (`{id|im}`, the only such line of the
+# fixture's `main`); the absent arm's first group list is born into the entry
 # (`{|im}`), and a handle element is shared into its group on both arms.
-# Drill: the present arm's key never released.
+# Drill: the present arm's key never released. Keyed on the line's text, not
+# its number, which moves whenever an earlier statement's witness grows (93
+# -> 96 at #4182); the drill fails if the line is gone (nothing changes).
 echo
 echo "== structural leg, group_by key  ⊳  proven checker (#2755) =="
 GB=spec/wasm_cross/map_insertion_order.almd
 run_structural "$GB" main 0
-tamper_fixture "$GB" main '93s/^{id|im}$/{i|im}/' "#2755 group_by key"
+tamper_fixture "$GB" main 's/^{id|im}$/{i|im}/' "#2755 group_by key"
 
 # ── #2755: an instance-parallel `fan.map` chunk (`fan.__par_K`, fan_par.rs) is
 # a branch site on the host's answer: the served arm copies the answer room

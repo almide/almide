@@ -19,7 +19,11 @@
 //!    (`survive_delta` holds the identity rule and the bucket table).
 //!
 //! The edit **survives** iff no ERROR diagnostic, no test and no contract is
-//! `newly_broken`. A newly broken WARNING is reported but does not decide the
+//! `newly_broken`, and no test or contract is `removed` (#4267: deleting the
+//! test that guards the code is not surviving it; `--allow-removed` says a
+//! removal is deliberate, and the MCP tool never sets it). A test that keeps
+//! its name but loses every assertion that reads a value — `assert(true)`, an
+//! empty body — is reported `newly_broken` with `after: "hollowed"`. A newly broken WARNING is reported but does not decide the
 //! verdict, for the reason `almide check` itself exits 0 on one — and because
 //! the unused-variable lint only runs on an error-free file, so fixing a
 //! file's last error surfaces warnings that were there all along; gating on
@@ -49,6 +53,9 @@ pub struct SurviveArgs {
     pub as_kind: String,
     pub json: bool,
     pub timeout_secs: u64,
+    /// `--allow-removed` (#4267): an edit that deletes tests or contracts may
+    /// survive. Never set by the MCP tool.
+    pub allow_removed: bool,
 }
 
 /// The file and both texts, once the edit has been read and applied.
@@ -57,6 +64,7 @@ struct Prepared {
     before: String,
     after: String,
     kind: EditKind,
+    allow_removed: bool,
 }
 
 fn prepare(a: &SurviveArgs) -> Result<Prepared, String> {
@@ -68,7 +76,7 @@ fn prepare(a: &SurviveArgs) -> Result<Prepared, String> {
     let content = read_with(&a.with)?;
     let kind = EditKind::parse_flag(&a.as_kind)?.unwrap_or_else(|| detect(&content));
     let after = after_text(&before, &content, kind)?;
-    Ok(Prepared { file: a.file.clone(), before, after, kind })
+    Ok(Prepared { file: a.file.clone(), before, after, kind, allow_removed: a.allow_removed })
 }
 
 /// The after-text, parked OUTSIDE the tree for the child processes to read;
@@ -125,18 +133,27 @@ fn test_delta(files: &[String], edited: &Path, p: &Prepared, ov: &OverlayEnv, ti
         let mut names: Vec<&String> = before.keys().chain(after.keys()).collect();
         names.sort();
         names.dedup();
+        let (asserts_before, asserts_after) = (assertion_counts(&bt), assertion_counts(&at));
         for name in names {
             let (b, a) = (before.get(name), after.get(name));
+            // #4267: a test that kept its name but lost every assertion that
+            // read a value (`assert(true)`, an empty body) passes without
+            // guarding anything — the cheap way out of a failing test. It
+            // counts as newly broken whatever its two statuses are.
+            let hollowed = a.is_some()
+                && assertions_of(&asserts_before, name) > 0
+                && assertions_of(&asserts_after, name) == 0;
             let mut entry = json!({
                 "file": f,
                 "name": name,
                 "before": b.map(|o| o.status),
-                "after": a.map(|o| o.status),
+                "after": if hollowed { Some("hollowed") } else { a.map(|o| o.status) },
             });
             if let Some(fail) = a.and_then(|o| o.failure.clone()) {
                 entry["failure"] = fail;
             }
-            d.push(bucket(b.map(|o| o.status), a.map(|o| o.status), legs::test_good), entry);
+            let kind = if hollowed { "newly_broken" } else { bucket(b.map(|o| o.status), a.map(|o| o.status), legs::test_good) };
+            d.push(kind, entry);
         }
     }
     Ok(d)
@@ -197,7 +214,15 @@ fn evaluate(p: &Prepared, timeout: Duration) -> Result<Value, String> {
     let contracts = contract_delta(&with_contracts, &edited, p, &ov, timeout)?;
 
     let broken_errors = check.newly_broken.iter().filter(|e| e["after"]["level"] == "error").count();
-    let survives = broken_errors == 0 && tests.newly_broken.is_empty() && contracts.newly_broken.is_empty();
+    // #4267: a test or contract present before the edit and absent after it
+    // is a guard the edit took away — deleting the failing test is the
+    // easiest way to make nothing newly broken. It does not survive unless
+    // the caller says the removal is deliberate (`--allow-removed`).
+    let removed_guard = !tests.removed.is_empty() || !contracts.removed.is_empty();
+    let survives = broken_errors == 0
+        && tests.newly_broken.is_empty()
+        && contracts.newly_broken.is_empty()
+        && (p.allow_removed || !removed_guard);
     let mut check_json = check.to_json();
     if !unstructured.is_empty() {
         check_json["unstructured"] = json!(unstructured);
@@ -229,6 +254,49 @@ fn evaluate(p: &Prepared, timeout: Duration) -> Result<Value, String> {
     }))
 }
 
+/// Per `test` block of `text` (keyed by its declared name), how many of its
+/// assertion calls read a value — `assert` / `assert_eq` / `assert_ne` /
+/// `testing.assert_*` with at least one argument that is not a literal. A
+/// text that does not parse yields nothing, so no test is judged hollow.
+fn assertion_counts(text: &str) -> std::collections::HashMap<String, usize> {
+    use almide::ast::{Decl, Expr, ExprKind};
+    let tokens = almide::lexer::Lexer::tokenize(text);
+    let Ok(program) = almide::parser::Parser::new(tokens).parse() else { return Default::default() };
+    let is_assert = |callee: &Expr| match &callee.kind {
+        ExprKind::Ident { name } => matches!(name.as_str(), "assert" | "assert_eq" | "assert_ne"),
+        ExprKind::Member { object, field } => {
+            matches!(&object.kind, ExprKind::Ident { name } if name.as_str() == "testing") && field.as_str().starts_with("assert")
+        }
+        _ => false,
+    };
+    let literal = |e: &Expr| matches!(e.kind, ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } | ExprKind::Bool { .. });
+    let mut counts = std::collections::HashMap::new();
+    for decl in &program.decls {
+        let Decl::Test { name, body, .. } = decl else { continue };
+        let mut n = 0usize;
+        almide::ast::visit_expr(body, &mut |e: &Expr| {
+            if let ExprKind::Call { callee, args, .. } = &e.kind
+                && is_assert(callee)
+                && args.iter().any(|a| !literal(a))
+            {
+                n += 1;
+            }
+        });
+        counts.insert(name.clone(), n);
+    }
+    counts
+}
+
+/// The count for a reported test name: its own block, or — for a `where`
+/// case, reported as `<test> / <case>` — the block the case expands.
+fn assertions_of(counts: &std::collections::HashMap<String, usize>, reported: &str) -> usize {
+    counts
+        .get(reported)
+        .or_else(|| reported.rsplit_once(" / ").and_then(|(test, _)| counts.get(test)))
+        .copied()
+        .unwrap_or(0)
+}
+
 /// Exit 2 with the reason — as a JSON object on stdout under `--json`, so a
 /// harness never has to parse prose to learn the call itself failed.
 fn fail(json_mode: bool, msg: &str) -> ! {
@@ -256,9 +324,17 @@ fn describe(e: &Value, leg: &str) -> String {
     }
 }
 
-fn render_human(r: &Value) {
+fn render_human(r: &Value, allow_removed: bool) {
     let verdict = if r["survives"].as_bool().unwrap_or(false) { "survives" } else { "does NOT survive" };
     err(&format!("{}: the edit {}", r["file"].as_str().unwrap_or(""), verdict));
+    let removed = ["tests", "contracts"].iter().any(|leg| r["summary"][leg]["removed"].as_u64().unwrap_or(0) > 0);
+    if removed {
+        err(if allow_removed {
+            "  removed tests / contracts are allowed (--allow-removed)"
+        } else {
+            "  a test or contract the edit removes counts against it — pass --allow-removed if the removal is deliberate"
+        });
+    }
     for leg in ["check", "tests", "contracts"] {
         let s = &r["summary"][leg];
         err(&format!(
@@ -267,7 +343,7 @@ fn render_human(r: &Value) {
             s["newly_broken"], s["newly_fixed"], s["unchanged"], s["removed"]
         ));
     }
-    for (bucket, label) in [("newly_broken", "newly broken"), ("newly_fixed", "newly fixed")] {
+    for (bucket, label) in [("newly_broken", "newly broken"), ("newly_fixed", "newly fixed"), ("removed", "removed")] {
         for leg in ["check", "tests", "contracts"] {
             for e in r[leg][bucket].as_array().into_iter().flatten() {
                 err(&format!("  {} [{}] {}", label, leg, describe(e, leg)));
@@ -285,7 +361,7 @@ pub fn cmd_survive(a: SurviveArgs) {
     if a.json {
         out(&report.to_string());
     } else {
-        render_human(&report);
+        render_human(&report, a.allow_removed);
     }
     std::process::exit(if report["survives"].as_bool().unwrap_or(false) { 0 } else { 1 });
 }
@@ -358,7 +434,7 @@ pub fn cmd_apply(a: SurviveArgs, if_survives: Option<String>, force: bool) {
     if a.json {
         out(&report.to_string());
     } else {
-        render_human(&report);
+        render_human(&report, a.allow_removed);
         err(&if write {
             format!("  wrote {}{}", p.file, if force && !survives { " (--force)" } else { "" })
         } else {

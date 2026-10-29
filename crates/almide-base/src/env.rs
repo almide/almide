@@ -44,6 +44,10 @@ pub enum Scope {
     Ablation,
     /// Arms a runtime trap the shipped artifact leaves off.
     Trap,
+    /// Adds instrumentation to the emitted artifact — allocation counters, a
+    /// fixed or poisoning allocator — that a harness reads back. The program
+    /// computes the same values, but the artifact is not the shipped one.
+    Instrument,
     /// Adds stderr output only (a trace channel, a dump, a profile).
     Debug,
     /// A CLI / tooling knob that changes where things go or how much is kept,
@@ -74,13 +78,13 @@ const fn sw(name: &'static str, kind: Kind, scope: Scope, doc: &'static str) -> 
 
 use Kind::{Flag, Value};
 // `Debug` as a bare name would shadow the derive macro; the rows say `Dbg`.
-use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Route, Runtime, Tool, Trap};
+use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Instrument, Route, Runtime, Tool, Trap};
 
 /// Every `ALMIDE_*` switch the tree reads. Sorted by name; the gate proves the
 /// order and the completeness.
 pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_ABORT_SITE", Value, Runtime, "the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand"),
-    sw("ALMIDE_ALLOC_COUNT", Flag, Harness, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
+    sw("ALMIDE_ALLOC_COUNT", Flag, Instrument, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
     sw("ALMIDE_BENCH_MAIN_NS", Value, Harness, "the file `almide bench` points a benched native binary at: the spliced `main` timer writes its elapsed nanoseconds there (#2980, the main-only boundary)"),
@@ -92,9 +96,16 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_CACHE_MAX_BYTES", Value, Tool, "the size bound of each native build cache — the `almide test` worker cache (`<temp>/almide-test/native`, least recently used worker dirs emptied first) and a build scratch dir's per-program binaries and objects (`<temp>/almide-run`): `4G` (default), `512M`, a byte count, or `0`/`off` for no bound (#2608)"),
     sw("ALMIDE_CAPTURE_MOVE_OFF", Flag, Ablation, "make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives"),
     sw("ALMIDE_CERTIFY_OWNERSHIP", Value, Dbg, "run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build"),
+    sw("ALMIDE_CI_BASE", Value, Harness, "the commit a sliced CI run diffs HEAD against to find the change's own files (a PR's base sha, a merge group's base_sha): every fixture the change touches joins the `ALMIDE_CI_SLICE` slice; scripts/ci-slice-prepare.sh resolves it into `ALMIDE_CI_TOUCHED`"),
+    sw("ALMIDE_CI_SEED", Value, Harness, "the commit sha whose first 7 hex digits rotate the `ALMIDE_CI_SLICE` residue class, so consecutive commits judge different slices (CI passes `github.sha`); unset = offset 0"),
+    sw("ALMIDE_CI_SLICE", Value, Harness, "`k` > 1 makes every corpus-iterating test and script judge a commit-rotated 1-in-k slice of its fixtures plus the ones the change touches, skip its whole-corpus staleness / completeness checks and never rewrite a ledger (crates/almide-corpus/src/ci_slice.rs, scripts/lib/ci-slice.sh); CI sets it on PRs and merge groups whose base is not main; unset or 1 = the full run, unchanged"),
+    sw("ALMIDE_CI_TOUCHED", Value, Harness, "a file listing the repo-relative paths the change touches, one per line (written by scripts/ci-slice-prepare.sh); read instead of running `git diff` against `ALMIDE_CI_BASE`"),
     sw("ALMIDE_COMPILER_STACK", Value, Tool, "stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject"),
     sw("ALMIDE_COMPONENT_ADAPTER", Flag, Route, "route `--component` through the preview1 adapter instead of the direct component emission"),
     sw("ALMIDE_COMPONENT_P3", Flag, Route, "emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; runs on a stock wasmtime 46+ with no feature flag (`wasmtime run app.wasm`, `-S http` for an http client — ADR-0023 step 1)"),
+    sw("ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT", Flag, Ablation, "make an `@input_sink` parameter (`http.decode_json[T]`) admit a type that is also `Encode` (a `Codec` type) instead of E110: the negative control of the row-22 input-type gate (tests/input_sink_test.rs), whose over-post cell must flip from E110 to `is_admin=true`; never set otherwise"),
+    sw("ALMIDE_CONTROL_BIN", Value, Harness, "an `almide` binary the security route tests (`tests/effect_value_laundering_test.rs`, `proc_category_test.rs`, `permissions_routes_test.rs`) run INSTEAD of the one under test — the negative control: a build without the check fails their assertions (#4151, #4155)"),
+    sw("ALMIDE_CONTROL_IGNORE_SKIP_DECODE", Flag, Ablation, "make the Codec derive read a `@skip_decode` field from input again: the negative control of the #4108 field-skip matrix gate (tests/codec_field_skip_test.rs), which must flip its `admin=false` cell; never set otherwise"),
     sw("ALMIDE_CORPUS_FILTER", Value, Harness, "substring filter over the fixture paths the 3-way oracle test evaluates"),
     sw("ALMIDE_CORPUS_SHARD", Value, Harness, "`k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate"),
     sw("ALMIDE_CORPUS_SHARD_DIR", Value, Harness, "directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing"),
@@ -124,6 +135,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DEBUG_EFFECTS", Flag, Dbg, "print the effect inference pass's per-function results (native codegen)"),
     sw("ALMIDE_DEBUG_MIR_OPS", Flag, Harness, "print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument)"),
     sw("ALMIDE_DEFAULTS_DEBUG", Flag, Dbg, "print the record-default resolution when no default keys were found (native codegen)"),
+    sw("ALMIDE_DEPS_CACHE_ONLY", Flag, Tool, "resolve dependencies only from what is already on disk: a dependency not in the cache is an error, nothing is cloned and `almide.lock` is never written. Set by `almide mcp` on every tool child (#4179)"),
     sw("ALMIDE_DISABLE_OPT", Flag, Ablation, "run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run)"),
     sw("ALMIDE_DUMP_IR", Value, Dbg, "dump the IR after the named passes (comma-separated, or `all`) on the native pipeline, and the post-chain body of every fn whose name contains the value on the v1 pipeline"),
     sw("ALMIDE_DUMP_MIR", Flag, Dbg, "print every lowered fn's op stream before the native render runs"),
@@ -132,6 +144,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DWARF_FIXTURES", Value, Harness, "the DWARF line-table span-resolution measurement (`crates/almide-wasm/tests/dwarf_lines.rs`, ignored test): the `.almd` files to measure, comma-separated (#1315)"),
     sw("ALMIDE_EXPECT_TOOLS", Flag, Harness, "make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it"),
     sw("ALMIDE_F32_SWEEP_N", Value, Harness, "how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs)"),
+    sw("ALMIDE_FAKE_RUSTC_VERSION", Value, Harness, "the version a fake `rustc` reports in tests/rustc_floor_test.rs, which forwards every other invocation to `ALMIDE_REAL_RUSTC` (the rustc-floor refusal's probe)"),
     sw("ALMIDE_FALLBACK_NAMES", Flag, Tool, "make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed"),
     sw("ALMIDE_FAN_COST_OFF", Flag, Ablation, "go parallel on every `fan` offer the cost model (#3341) would keep sequential — the pre-#3341 behaviour, on both legs (native threads and the embedded wasm host's instances); the ablation the crossover measurement and the parallel-path tests use"),
     sw("ALMIDE_FAN_PAR_OFF", Flag, Ablation, "keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance"),
@@ -147,13 +160,14 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_FUZZ_BASE", Value, Harness, "the first seed of the differential fuzz's fixed seed range (default 0)"),
     sw("ALMIDE_FUZZ_HOST_ORACLE", Flag, Harness, "run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode)"),
     sw("ALMIDE_FUZZ_ITERS", Value, Harness, "how many seeds the differential fuzz's fixed range covers (default 200)"),
+    sw("ALMIDE_GPU_REQUIRED", Flag, Harness, "fail the GPU leg's parity tests when no wgpu adapter is found instead of printing SKIP (#4236; the `gpu-parity` CI job sets it over lavapipe; crates/almide-gpu-run/tests/int_map_parity.rs)"),
     sw("ALMIDE_HEAP_TRACE", Flag, Dbg, "print the interpreter's heap-block allocations and frees"),
     sw("ALMIDE_HTTP_MAX_RESPONSE_BYTES", Value, Runtime, "the http client's cap on a buffered response in bytes, read by the compiled program (default 1 GiB; 0 = no cap, #2825)"),
     sw("ALMIDE_HTTP_TIMEOUT_SECS", Value, Runtime, "the http client's connect and read timeout in seconds, read by the compiled program (default 30; 0 = none)"),
     sw("ALMIDE_INLINE_OFF", Flag, Ablation, "turn the structural leg's small scalar-fn inliner off (#2980): every call kept, for an A/B"),
     sw("ALMIDE_INSTALL", Value, Tool, "the directory `almide install` installs binaries into (overrides the default `~/.local/bin`)"),
     sw("ALMIDE_INTERP_SWEEP_THREADS", Value, Harness, "interp sweep thread count; 1 = serial (#2381)"),
-    sw("ALMIDE_IR_FAULT", Value, Harness, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary"),
+    sw("ALMIDE_IR_FAULT", Value, Route, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129)"),
     sw("ALMIDE_KEEP_SCRATCH", Flag, Tool, "keep the `almide test` scratch build directory instead of deleting it"),
     sw("ALMIDE_LSP_TRACE", Flag, Dbg, "print every LSP request and response the language server handles"),
     sw("ALMIDE_MANIFEST_TREE_CHECK", Value, Ci, "the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override"),
@@ -180,7 +194,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_PROBE_OUT", Value, Harness, "the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr"),
     sw("ALMIDE_PROBE_SRC", Value, Harness, "the source file the heap probe compiles (unset = the probe is skipped)"),
     sw("ALMIDE_PROFILE", Flag, Dbg, "print per-pass and per-phase timings of the native pipeline"),
-    sw("ALMIDE_RC_TRAP_DOUBLE_FREE", Flag, Trap, "arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping"),
+    sw("ALMIDE_REAL_RUSTC", Value, Harness, "the real `rustc` the fake one in tests/rustc_floor_test.rs runs for anything but `--version`"),
     sw("ALMIDE_REGION_DEBUG", Flag, Dbg, "print the region-window pass's decisions (native and structural leg)"),
     sw("ALMIDE_REGION_OFF", Flag, Ablation, "turn the region-window allocation pass off (native and structural leg)"),
     sw("ALMIDE_REGION_TRAP_STALE", Flag, Trap, "arm the native region prelude's stale-reference trap (#2200)"),
@@ -194,11 +208,12 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_SKIP_PASS", Value, Ablation, "skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change"),
     sw("ALMIDE_SKIP_VERSION_CHECK", Flag, Gate, "skip the project's `almide` version requirement check"),
     sw("ALMIDE_STREAM_FUSION_OFF", Flag, Ablation, "turn the stream-fusion pass off"),
-    sw("ALMIDE_SURVIVE_OVERLAY", Value, Route, "set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written"),
-    sw("ALMIDE_SURVIVE_OVERLAY_TEXT", Value, Route, "the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file"),
+    sw("ALMIDE_SURVIVE_OVERLAY", Value, Harness, "RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change"),
+    sw("ALMIDE_SURVIVE_OVERLAY_TEXT", Value, Harness, "RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read"),
     sw("ALMIDE_TCO_DEBUG", Flag, Dbg, "print the native tail-call loop rewrite decisions"),
     sw("ALMIDE_TEST_ABORT_PROBE", Flag, Runtime, "marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand"),
     sw("ALMIDE_TEST_LAX_WASM", Flag, Gate, "let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run"),
+    sw("ALMIDE_TEST_LEDGER", Value, Runtime, "the completion-ledger file a native `almide test` binary appends each finished test's name to (#4255): set by the runner, never by hand"),
     sw("ALMIDE_TEST_SIGNALLED_CALL_URL", Value, Harness, "the loopback URL that turns the almide-rt-core http test's re-run of itself into the signalled-call child (#3857): it spawns a missing command while a call waits on that URL; set by the parent test, never by hand"),
     sw("ALMIDE_TEST_VERBOSE", Flag, Tool, "show the full cargo / rustc output of the `almide test` harness build"),
     sw("ALMIDE_TEST_WASM_RUNNER", Value, Tool, "`wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host"),
@@ -213,6 +228,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_INTERP_LEDGER", Flag, Harness, "regenerate the interpreter abstain and bridge-fallback ledgers"),
     sw("ALMIDE_UPDATE_NAME_SITES", Flag, Harness, "remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`)"),
     sw("ALMIDE_UPDATE_NATIVE_OWN", Flag, Harness, "regenerate the native result-ownership ledger"),
+    sw("ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR", Flag, Harness, "regenerate proofs/native-verified-floor.txt, the spec/wasm_cross fixtures the verified native renderer covers (#4006, tests/native_verified_floor_test.rs)"),
     sw("ALMIDE_UPDATE_SIZES", Flag, Harness, "regenerate the structural leg's size baselines"),
     sw("ALMIDE_UPDATE_SIZE_LADDER", Flag, Harness, "regenerate the stdlib-linking size ladder ledger (#2141)"),
     sw("ALMIDE_UPDATE_SNAPSHOTS", Flag, Tool, "same as `almide test --update-snapshots`"),
@@ -222,8 +238,9 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_VERIFIED_DEBUG", Flag, Dbg, "name the wasm leg that rendered, and why the other declined (the route oracle)"),
     sw("ALMIDE_VERSION_LINE", Value, Ci, "NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384)"),
     sw("ALMIDE_WALL_REASON", Flag, Dbg, "make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall`"),
-    sw("ALMIDE_WASM_ALLOC_COUNT", Flag, Harness, "emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt)"),
-    sw("ALMIDE_WASM_CANONICAL_ALLOC", Flag, Harness, "emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs)"),
+    sw("ALMIDE_WASM_ALLOC_COUNT", Flag, Instrument, "emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt)"),
+    sw("ALMIDE_WASM_CANONICAL_ALLOC", Flag, Instrument, "emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs)"),
+    sw("ALMIDE_WASM_CHECKED_ALLOC", Flag, Instrument, "emit the structural wasm leg's `$free` poisoning a freed size-class block with 0xA5 and `$alloc` checking that poison before reusing the block, trapping on a write that landed while it was free (#4009: the wasm leg's use-after-free and stray-write detector; scripts/wasm-checked-alloc.sh runs the corpus under it); off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/checked_alloc.rs)"),
     sw("ALMIDE_WASM_FREES", Flag, Ci, "the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's"),
     sw("ALMIDE_WASM_SKIP_STOCK_AUDIT", Flag, Route, "skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe the parity, diff-fuzz and availability gates build under); named ALMIDE_WASM_STRUCTURAL until #2934"),
     sw("ALMIDE_WASM_WATCHDOG_SECS", Value, Harness, "the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615)"),
@@ -253,6 +270,9 @@ pub fn is_on(value: &std::ffi::OsStr) -> bool {
 pub fn flag(name: &str) -> bool {
     let sw = registered(name);
     let on = std::env::var_os(name).is_some_and(|v| is_on(&v));
+    if on && !honoured(sw) {
+        return false;
+    }
     if on {
         announce(sw);
     }
@@ -264,8 +284,116 @@ pub fn flag(name: &str) -> bool {
 pub fn var(name: &str) -> Option<String> {
     let sw = registered(name);
     let v = std::env::var(name).ok().filter(|v| !v.trim().is_empty())?;
+    if !honoured(sw) {
+        return None;
+    }
     announce(sw);
     Some(v)
+}
+
+/// The switch lock (#4129). An environment the developer does not control (a
+/// CI job's env, a repository's `.envrc`, a devcontainer, an editor task) must
+/// not make a shipped compiler build something other than the reviewed source
+/// or skip a check. So once [`lock`] runs — the release binary does it first
+/// thing, and `--lock-switches` does it in any build — an INHERITED switch
+/// whose scope [`Scope::changes_the_build`] is read as unset, unless the
+/// command line names it with `--allow-switch NAME`. A switch the tool arms on
+/// itself ([`arm`]) is its own decision and stays honoured.
+static LOCK: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Switches the tool armed on itself (see [`arm`]).
+static ARMED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+
+/// Lock the build-changing switches; `allowed` are the names the command line
+/// opted into. An allowed name that is not a build-changing switch is an error
+/// the caller reports (see [`check_allowed`]).
+pub fn lock(allowed: Vec<String>) {
+    let _ = LOCK.set(allowed);
+}
+
+/// Is the switch lock on?
+pub fn locked() -> bool {
+    LOCK.get().is_some()
+}
+
+/// Does a binary whose `--version` line is `version_line` lock the switches
+/// with no `--lock-switches` on the command line? Only the release workflow's
+/// build says `(release` there (#2384), and that build locks by default
+/// (#4129). The CLI decides with this and nothing else, so the unit test below
+/// is the release-default engagement's check in every CI run; the release
+/// workflow runs `scripts/check-release-switch-lock.sh` on the artifact itself.
+pub fn lock_engaged_by_default(version_line: &str) -> bool {
+    version_line.contains("(release")
+}
+
+/// Why `name` cannot be passed to `--allow-switch`, if it cannot.
+pub fn check_allowed(name: &str) -> Result<(), String> {
+    match switch(name) {
+        None => Err(format!("`{name}` is not a registered switch (`almide switches` lists them)")),
+        Some(sw) if !sw.scope.changes_the_build() => {
+            Err(format!("`{name}` is a {} switch, which is honoured without `--allow-switch`", sw.scope.label()))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// Set a switch on this process (and the children it spawns) as the TOOL's
+/// own decision — `almide test` arming `ALMIDE_NO_RTLIB` for its harness
+/// build, `--time-report` arming `ALMIDE_FUEL_PROBE`. Honoured under the lock.
+///
+/// # Safety
+/// The caller upholds [`std::env::set_var`]'s contract: no other thread reads
+/// or writes the environment concurrently.
+pub unsafe fn arm(name: &'static str, value: &str) {
+    registered(name);
+    unsafe { std::env::set_var(name, value) };
+    ARMED.lock().unwrap_or_else(|e| e.into_inner()).push(name);
+}
+
+/// The inherited build-changing switches that are on, whether or not the lock
+/// would honour them — what `--profile critical` refuses outright.
+pub fn inherited_build_switches() -> Vec<&'static str> {
+    SWITCHES
+        .iter()
+        .filter(|sw| sw.scope.changes_the_build())
+        .filter(|sw| was_inherited(sw.name) && !was_armed(sw.name))
+        .filter(|sw| match sw.kind {
+            Kind::Flag => std::env::var_os(sw.name).is_some_and(|v| is_on(&v)),
+            Kind::Value => std::env::var_os(sw.name).is_some_and(|v| !v.to_string_lossy().trim().is_empty()),
+        })
+        .map(|sw| sw.name)
+        .collect()
+}
+
+fn was_inherited(name: &str) -> bool {
+    INHERITED.get().map_or(true, |names| names.iter().any(|n| n == name))
+}
+
+fn was_armed(name: &str) -> bool {
+    ARMED.lock().unwrap_or_else(|e| e.into_inner()).contains(&name)
+}
+
+/// Does the lock let `sw` through? Says so once on stderr when it does not.
+fn honoured(sw: &'static Switch) -> bool {
+    let Some(allowed) = LOCK.get() else { return true };
+    if !sw.scope.changes_the_build() || !was_inherited(sw.name) || was_armed(sw.name) {
+        return true;
+    }
+    if allowed.iter().any(|a| a == sw.name) {
+        return true;
+    }
+    static SAID: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    if !said.contains(&sw.name) {
+        said.push(sw.name);
+        eprintln!(
+            "[almide] {} is set but IGNORED: this compiler honours a {} switch from the environment only with `--allow-switch {}` (#4129)",
+            sw.name,
+            sw.scope.label(),
+            sw.name
+        );
+    }
+    false
 }
 
 fn registered(name: &str) -> &'static Switch {
@@ -312,6 +440,12 @@ fn announce(sw: &'static Switch) {
 }
 
 impl Scope {
+    /// Does a switch of this scope change what the compiler emits or which
+    /// check runs? Those are the ones the switch lock (#4129) holds back.
+    pub fn changes_the_build(self) -> bool {
+        matches!(self, Scope::Route | Scope::Gate | Scope::Ablation | Scope::Trap | Scope::Instrument)
+    }
+
     /// The scope's name in the tables.
     pub fn label(self) -> &'static str {
         match self {
@@ -319,6 +453,7 @@ impl Scope {
             Scope::Gate => "gate",
             Scope::Ablation => "ablation",
             Scope::Trap => "trap",
+            Scope::Instrument => "instrument",
             Scope::Debug => "debug",
             Scope::Tool => "tool",
             Scope::Runtime => "runtime",
@@ -378,6 +513,27 @@ mod tests {
         for s in SWITCHES {
             assert!(s.name.starts_with("ALMIDE_"), "{}", s.name);
             assert!(!s.doc.is_empty(), "{} has no doc", s.name);
+        }
+    }
+
+    #[test]
+    fn a_release_version_line_engages_the_lock_and_a_dev_one_does_not() {
+        assert!(lock_engaged_by_default("0.70.0 (release, 1a2b3c4d5)"));
+        assert!(lock_engaged_by_default("0.70.0 (release)"));
+        assert!(!lock_engaged_by_default("0.70.0 (dev, 1a2b3c4d5)"));
+        assert!(!lock_engaged_by_default("0.70.0 (dev)"));
+        assert!(!lock_engaged_by_default("0.70.0"));
+    }
+
+    #[test]
+    fn every_scope_that_changes_the_artifact_is_one_the_lock_holds() {
+        // The lock's set is derived from the scope, so a scope whose doc says
+        // it changes what is emitted or checked must answer yes here.
+        for s in [Scope::Route, Scope::Gate, Scope::Ablation, Scope::Trap, Scope::Instrument] {
+            assert!(s.changes_the_build(), "{} must be held by the lock", s.label());
+        }
+        for s in [Scope::Debug, Scope::Tool, Scope::Runtime, Scope::Harness, Scope::Ci] {
+            assert!(!s.changes_the_build(), "{} is declared not to change the build", s.label());
         }
     }
 

@@ -44,7 +44,7 @@ pub fn has_tests(ir: &IrProgram) -> bool {
 /// run printed — a program can print the runner's `ok` itself.
 pub fn runs_test(f: &almide_ir::IrFunction, run_filter: Option<&str>) -> bool {
     f.is_test
-        && run_filter.is_none_or(|pattern| almide_lang::almide_base::names::test_name_matches_filter(f.name.as_str(), pattern))
+        && run_filter.is_none_or(|pattern| almide_lang::almide_base::names::test_name_matches_filter(f.display_name(), pattern))
 }
 
 /// Promote a test file's `test` fns to ordinary effect fns and synthesize the
@@ -397,18 +397,38 @@ fn assert_abort(
         _ => operands[0].clone(),
     };
     let at = span.map(|s| format!("\n  at: line {}", s.line)).unwrap_or_default();
+    // An operand as the frontend's `assert_shown` shows it (#4262): its
+    // rendering through C-418's escaper, so the program's control and bidi
+    // characters never reach the block raw. (The frontend already lowers an
+    // in-test `assert_eq` / `assert_ne` to the harness `assert(cond, msg)`;
+    // this arm is for IR that did not come through it.)
+    let shown = |e: &IrExpr| {
+        let text = if matches!(e.ty, Ty::String) {
+            e.clone()
+        } else {
+            mk(IrExprKind::StringInterp { parts: vec![IrStringPart::Expr { expr: e.clone() }] }, Ty::String)
+        };
+        mk(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym("string"), func: sym("__err_text"), def_id: None },
+                args: vec![text],
+                type_args: vec![],
+            },
+            Ty::String,
+        )
+    };
     let parts: Vec<IrStringPart> = match name {
         "assert_eq" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
-            IrStringPart::Expr { expr: operands[1].clone() },
+            IrStringPart::Expr { expr: shown(&operands[1]) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: operands[0].clone() },
+            IrStringPart::Expr { expr: shown(&operands[0]) },
         ],
         "assert_ne" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: != ") },
-            IrStringPart::Expr { expr: operands[0].clone() },
+            IrStringPart::Expr { expr: shown(&operands[0]) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: operands[0].clone() },
+            IrStringPart::Expr { expr: shown(&operands[0]) },
         ],
         _ if operands.len() >= 2 => {
             let mut p = vec![

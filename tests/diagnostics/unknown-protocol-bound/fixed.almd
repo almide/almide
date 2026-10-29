@@ -1,0 +1,4 @@
+// #4097: a bound naming no protocol is reported at the bound.
+fn widen[S: Numeric](x: S) -> Float = float.from(x)
+
+effect fn main() -> Unit = println("${widen(3)}")

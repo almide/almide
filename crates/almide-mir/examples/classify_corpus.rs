@@ -415,7 +415,7 @@ fn operator_credit(
         n += 1;
     }
     // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
-    // `math.fpow` (the bit-exact libm pow) for Float, `math.pow` (int squaring) for Int.
+    // `math.__fpow` (the bit-exact libm pow) for Float, `math.__pow` (int squaring) for Int.
     // Count the operator NODE as one ir_call so that synthetic call has a matching ir_call
     // and `mir_calls <= ir_calls` holds BY CONSTRUCTION (a `**` not yet lowered in some
     // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
@@ -518,12 +518,12 @@ fn count_ir_calls(
             // MIR input today). Without this, a FnRef over-count could cancel a Computed/
             // Method elision under-count, hiding a taint and falsely caps-verifying a fn.
             if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. } | FnRef { .. } | ClosureCreate { .. })
-                // A sized-int WIDENING conversion (`int8.to_int64(x)`) lowers to the
+                // A sized-int WIDENING conversion (`int.__to_int64(x)`) lowers to the
                 // IDENTITY (no call op) — skip it by the SAME predicate the lowering
                 // uses, so `mir == ir` holds by construction (its operand's own calls
                 // are counted by the descent as usual).
                 && almide_mir::lower::identity_int_widening_call(e).is_none()
-                // `float.from_int` lowers to ONE F64FromInt prim (no call) — skip by
+                // `float.__from_int` lowers to ONE F64FromInt prim (no call) — skip by
                 // the SAME predicate the lowering uses (#806 step 2).
                 && almide_mir::lower::float_from_int_prim_call(e).is_none()
             {

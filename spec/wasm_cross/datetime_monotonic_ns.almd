@@ -6,10 +6,10 @@
 // every wasm host from its own origin, so only the relation between reads is
 // a promise.
 // The pause is timed on the clock under test, never on a second clock (#2874:
-// a wall-clock step or slew once made 21 env.millis ticks shorter than 20 ms
+// a wall-clock step or slew once made 21 datetime.now_ms ticks shorter than 20 ms
 // of monotonic time on a macOS runner). The spin runs until the monotonic
 // clock has advanced 20_000_000 — 20 ms in nanoseconds — and every read in it
-// must be >= the one before (never backwards). The wall clock (env.millis)
+// must be >= the one before (never backwards). The wall clock (datetime.now_ms)
 // only bounds the spin: after 5 s it gives up, so a stopped clock still
 // terminates and prints a false line. That escape is also what pins the unit
 // without comparing the two clocks' readings: 20_000_000 microseconds is 20 s
@@ -17,11 +17,9 @@
 // reach the mark after the 5 s escape has fired.
 // The spin reads clocks rather than calling env.sleep_ms, so the incumbent
 // leg renders the fixture too (it walls env.sleep_ms).
-import env
-
 effect fn main() -> Unit = {
   let a = datetime.monotonic_ns()
-  let escape = env.millis() + 5000
+  let escape = datetime.now_ms() + 5000
   var prev = a
   var ordered = true
   var reached = false
@@ -31,7 +29,7 @@ effect fn main() -> Unit = {
     ordered = ordered and now >= prev
     prev = now
     reached = now - a >= 20000000
-    gave_up = env.millis() >= escape
+    gave_up = datetime.now_ms() >= escape
   }
   let b = datetime.monotonic_ns()
   println("never backwards: ${ordered and b >= prev}")

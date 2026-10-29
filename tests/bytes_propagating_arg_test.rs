@@ -1,5 +1,5 @@
 //! A Bytes argument spelled as an `if` / `match` passed to a function compiled
-//! from Almide (a user fn, or a self-hosted stdlib fn such as `zlib.crc32`)
+//! from Almide (a user fn, or a self-hosted stdlib fn such as `hash.crc32`)
 //! failed rustc E0308 natively after `almide check` accepted it. Native
 //! `BorrowLowering` wrote `&*(if …)` for every propagating Bytes rvalue: that
 //! deref is right at a runtime intrinsic's `&Vec<u8>` slot, but an
@@ -8,7 +8,7 @@
 //! Found by the counted stdlib inspection's parity campaign (8 functions:
 //! `hex.decode`, `regex.*`, `url.decode_component`, `zlib.*`). The expected
 //! outputs are the wasm leg's, which was right; the crc32 value is
-//! `zlib.crc32(bytes([1]))` in Python.
+//! `zlib.crc32(bytes([1]))` in Python's zlib module.
 use std::process::Command;
 
 const USER_FN: &str = r#"fn total(b: Bytes) -> Int = bytes.len(b)
@@ -17,16 +17,16 @@ fn main() -> Unit = {
   let c = list.len([1, 2]) > 1
   println(int.to_string(total(if c then bytes.from_list([1]) else bytes.from_list([2, 3]))))
   println(int.to_string(bytes.len(if c then bytes.from_list([1]) else bytes.from_list([2, 3]))))
-  let m = match c { true => bytes.from_list([4]), false => bytes.new(0) }
-  println(int.to_string(total(match c { true => bytes.from_list([4]), false => bytes.new(0) }) + bytes.len(m)))
+  let m = match c { true => bytes.from_list([4]), false => bytes.zeros(0) }
+  println(int.to_string(total(match c { true => bytes.from_list([4]), false => bytes.zeros(0) }) + bytes.len(m)))
 }
 "#;
 
-const SELF_HOSTED: &str = r#"import zlib
+const SELF_HOSTED: &str = r#"import hash
 
 fn main() -> Unit = {
   let c = list.len([1, 2]) > 1
-  println(int.to_string(zlib.crc32(if c then bytes.from_list([1]) else bytes.from_list([2]))))
+  println(int.to_string(hash.crc32(if c then bytes.from_list([1]) else bytes.from_list([2]))))
 }
 "#;
 

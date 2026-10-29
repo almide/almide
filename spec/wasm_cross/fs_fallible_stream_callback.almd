@@ -31,7 +31,7 @@
 import fs
 
 effect fn step(log: String, acc: Map[String, Int], line: String) -> Map[String, Int] = {
-  fs.append(log, line + ";")!
+  fs.append_text(log, line + ";")!
   if line == "bad" then err("boom at ${line}")
   else ok(map.set(acc, line, string.len(line)))
 }
@@ -41,14 +41,14 @@ effect fn main() -> Unit = {
   let p = dir + "/data.txt"
   let log = dir + "/log.txt"
   // ── the ok path: every line folds, the callback never errs ──
-  let _w1 = fs.write(p, "a\nbb\nccc\n")!
-  let _l1 = fs.write(log, "")!
+  let _w1 = fs.write_text(p, "a\nbb\nccc\n")!
+  let _l1 = fs.write_text(log, "")!
   let m0: Map[String, Int] = map.new()
   let all = fs.fold_lines(p, m0, (acc, line) => step(log, acc, line)!)!
   println("ok_n=${map.len(all)} ok_trace=${fs.read_text(log)!}")
   // ── the err path: the callback errs on line 3 of 5 ──
-  let _w2 = fs.write(p, "a\nbb\nbad\nccc\ndddd\n")!
-  let _l2 = fs.write(log, "")!
+  let _w2 = fs.write_text(p, "a\nbb\nbad\nccc\ndddd\n")!
+  let _l2 = fs.write_text(log, "")!
   let m1: Map[String, Int] = map.new()
   let r = fs.fold_lines(p, m1, (acc, line) => step(log, acc, line)!)
   match r {
@@ -59,13 +59,13 @@ effect fn main() -> Unit = {
   // and NOT for `ccc` / `dddd`.
   println("err_trace=${fs.read_text(log)!}")
   // ── the empty file: zero invocations, init returned ──
-  let _w3 = fs.write(p, "")!
-  let _l3 = fs.write(log, "")!
+  let _w3 = fs.write_text(p, "")!
+  let _l3 = fs.write_text(log, "")!
   let m2: Map[String, Int] = map.new()
   let empty = fs.fold_lines(p, m2, (acc, line) => step(log, acc, line)!)!
   println("empty_n=${map.len(empty)} empty_trace='${fs.read_text(log)!}'")
   // ── a missing file: the reader's own err, before any invocation ──
-  let _l4 = fs.write(log, "")!
+  let _l4 = fs.write_text(log, "")!
   let m3: Map[String, Int] = map.new()
   let missing = fs.fold_lines(dir + "/absent.txt", m3, (acc, line) => step(log, acc, line)!)
   match missing {
@@ -74,8 +74,8 @@ effect fn main() -> Unit = {
   }
   println("missing_trace='${fs.read_text(log)!}'")
   // ── the err is the CALLBACK's message, not a wrapper's ──
-  let _w5 = fs.write(p, "bad\n")!
-  let _l5 = fs.write(log, "")!
+  let _w5 = fs.write_text(p, "bad\n")!
+  let _l5 = fs.write_text(log, "")!
   let m4: Map[String, Int] = map.new()
   let first = fs.fold_lines(p, m4, (acc, line) => step(log, acc, line)!)
   match first {

@@ -67,6 +67,12 @@ equal to the set of codes the compiler emits.
 | [E097](E097.md) | `pub` before a `type`, `protocol` or `test` — those are public by default (or have no visibility); delete `pub` (machine-applicable fix-it + `almide fix`) |
 | [E098](E098.md) | The closure passed to `testing.assert_aborts` captures a local of the test, or is a fn value rather than a lambda written in the call: it runs in a child process or instance, where the test's locals do not exist |
 | [E099](E099.md) | `testing.assert_aborts` called outside a test block, used as a value, or called inside another `assert_aborts` closure |
+| [E100](E100.md) | Outside the memory-safety guarantee: a `@memory_unsafe` call (`ffi.*`, a deprecated `bytes` raw-pointer call) in a file without `import ffi` (#4043); under `--profile critical`, any of those or an `@extern` fn (#4008) |
+| [E101](E101.md) | Source that reads differently from what compiles: a raw hidden character (a bidi control, U+2028/U+2029, a zero-width or other Cf character, a tag character, a raw control) anywhere in the file — write `\u{202E}` in a literal (#4092, #4266) — or a homoglyph identifier: mixed scripts beyond UTS #39 Moderately Restrictive, or a UTS #39 confusable of another name (#4266) |
+| [E104](E104.md) | A record field marked `@skip` or `@skip_decode` has no default, so `T.decode` has no value for it (#4108) |
+| [E109](E109.md) | A pure fn runs an `effect fn` it reached through a function value — a record field, a list element, a callback handed down through pure helpers (#4151) |
+| [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22) |
+| [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

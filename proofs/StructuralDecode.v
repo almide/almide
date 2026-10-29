@@ -18,7 +18,7 @@
    by `runtime_trees_match_the_proof_transcription` — the hash pin now
    guards THESE lists' provenance rather than the transcription itself).
    Their constants are single-byte LEB128 (positive immediates < 64
-   verbatim, 124 = SLEB(-4)) except the large-list split threshold
+   verbatim, 124 = SLEB(-4), 127 = SLEB(-1)) except the large-list split threshold
    65536 = [128;128;4]; `48` is FREELIST_BASE (= ITOA_END, the layout
    constant), `3` is G_LINE_END's global index, `33` is `$free`'s fixed
    function index. Since #3348 `$free`'s above-ceiling arm and `$alloc`'s
@@ -230,6 +230,13 @@ Fixpoint decode_go (fuel : nat) (nm : naming) (bs : list Z)
           | a :: stk' => decode_go f nm r (EEqz a :: stk') acc
           | [] => None
           end
+      | 70 :: r => (* i32.eq — $dec_flat's double-free sentinel (#4023) *)
+          match stk with
+          | b :: a :: stk' => decode_go f nm r (EEq a b :: stk') acc
+          | _ => None
+          end
+      | 0 :: r => (* unreachable — the double-free trap (#4023) *)
+          decode_go f nm r stk (STrap :: acc)
       | 73 :: r => (* i32.lt_u *)
           match stk with
           | b :: a :: stk' => decode_go f nm r (ELtU a b :: stk') acc
@@ -327,6 +334,7 @@ Definition inc_bytes : list Z :=
 Definition dec_bytes : list Z :=
   [32;0;35;3;73;4;64;15;11;
    32;0;40;2;0;65;1;107;33;1;
+   32;1;65;127;70;4;64;0;11;
    32;0;32;1;54;2;0;
    32;1;69;4;64;32;0;16;33;11;
    11].

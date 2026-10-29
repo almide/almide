@@ -7,7 +7,7 @@
 //! leg (wasmtime's stack is far smaller than native's 8 MB), which makes it a
 //! cross-target divergence as well as a crash:
 //!
-//! - #2291 `string.index_of` / `string.count(s, "")`: `__cp_count` was
+//! - #2291 `string.index_of` / `string.count_matches(s, "")`: `__cp_count` was
 //!   `step + __cp_count(..)`, one frame per byte of the prefix — wasm trapped
 //!   past ~16 KB while native answered.
 //! - #2306 `list.iterate` and the fallible carriers behind
@@ -53,9 +53,18 @@ const DIR_DEPTH: &str = "one frame per directory level / path segment, not per d
 /// the engine's own nesting is the arena's growth:
 const ARENA_DOUBLING: &str =
     "one frame per doubling of the backtracking arena: log2 of its final size, not the input's length";
+/// The Pike VM's compiler (#4019) and its can-match-empty test walk the
+/// pattern text: alternatives, sequences and copies of a counted group are tail
+/// loops, and the only frames kept are the ones a group's body nests inside.
+const PATTERN_NESTING: &str =
+    "a few frames per level of group nesting in the PATTERN text, not per input character, piece or repetition count; regex.new refuses nesting past 250 (C-395)";
+
+/// A merge sort: one frame per halving of the list, so log2 of its length.
+const HALVING: &str = "one frame per halving of the list (n / 2 per level): log2 of its length, at most 63";
 
 const BOUNDED: &[(&str, &str, &str, &str)] = &[
     // (file, function, non-tail callee, why its depth does not follow the input's length)
+    ("bytes.almd", "merge_sort_with", "merge_sort_with", HALVING),
     ("datetime_format.almd", "__iso_digits", "__iso_digits", DIGITS),
     ("float_to_string.almd", "__sf_pow10_small", "__sf_pow10_small",
         "called only with j < 9 (`__sf_pow10_loop` takes 10^9 steps above that): at most 8 frames"),
@@ -67,6 +76,9 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
         "one frame per 64 MiB chunk of the requested length"),
     ("json_parse.almd", "__jp_array", "__jp_value", JSON_NESTING),
     ("json_parse.almd", "__jp_object", "__jp_value", JSON_NESTING),
+    // #4209: set_path's nesting probe stops at its budget (at most
+    // JSON_MAX_DEPTH = 1000 levels), whatever the Value holds.
+    ("json_path.almd", "__jnp_items", "__json_nests_past", VALUE_NESTING),
     ("json_path.almd", "__jps_items", "json_path_set_go", PATH_SEGMENTS),
     ("json_path.almd", "__jps_pairs", "json_path_set_go", PATH_SEGMENTS),
     ("json_path.almd", "json_path_set_field", "__jps_pairs", PATH_SEGMENTS),
@@ -76,6 +88,8 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("json_path.almd", "__jpr_pairs", "json_path_rm_go", PATH_SEGMENTS),
     ("json_path.almd", "json_path_rm_field", "__jpr_pairs", PATH_SEGMENTS),
     ("json_path.almd", "json_path_rm_index", "__jpr_items", PATH_SEGMENTS),
+    ("list.almd", "__fallible_sort_with", "__fallible_sort_with", HALVING),
+    ("list.almd", "sort_with", "sort_with", HALVING),
     ("list_to_string.almd", "__lts_fill_digits", "__lts_fill_digits", DIGITS),
     ("list_to_string.almd", "__lts_fill_neg", "__lts_fill_neg", DIGITS),
     ("map_to_string.almd", "__mts_fill_digits", "__mts_fill_digits", DIGITS),
@@ -89,11 +103,30 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("regex_engine.almd", "__rx_ngroups", "__rx_ngroups",
         "one frame per capture group written in the pattern text, not per input character"),
     ("regex_engine.almd", "__rx_grow", "__rx_drive", ARENA_DOUBLING),
+    ("regex_engine.almd", "__rx_c_alts", "__rx_c_seq", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_c_copy", "__rx_c_alts", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_c_seq", "__rx_c_piece", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_c_counted", "__rx_c_alts", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_ck_arms", "__rx_ck_seq", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_ck_piece", "__rx_ck_arms", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_ck_seq", "__rx_ck_piece", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_regrow", "__rx_pike_run",
+        "one frame per quadrupling of a Pike VM buffer (stack, thread table, visited set): log4 of its final size, not the input's length"),
+    ("regex_engine.almd", "__rx_null_alts", "__rx_null_seq", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_null_seq", "__rx_null_piece", PATTERN_NESTING),
     ("result_to_string.almd", "__rts_fill_digits", "__rts_fill_digits", DIGITS),
     ("result_to_string.almd", "__rts_fill_neg", "__rts_fill_neg", DIGITS),
     ("set_to_string.almd", "__sts_fill_digits", "__sts_fill_digits", DIGITS),
     ("set_to_string.almd", "__sts_fill_neg", "__sts_fill_neg", DIGITS),
+    ("string.almd", "merge_sort_with", "merge_sort_with", HALVING),
     ("value_core.almd", "__varr_eq", "value_eq", VALUE_NESTING),
+    // value.remove_path and set_path's pure walk (stdlib/value.almd, #4220):
+    // one frame per step of the Path, the JSON path walk's bound.
+    ("value.almd", "__set_steps", "__set_steps", PATH_SEGMENTS),
+    ("value.almd", "__remove_steps", "__remove_steps", PATH_SEGMENTS),
+    // set_path's pure nesting probe stops at its budget (at most 1000
+    // levels, the JSON depth cap), whatever the Value holds.
+    ("value.almd", "__nests_past", "__nests_past", VALUE_NESTING),
     ("value_core.almd", "__vobj_eq", "value_eq", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_arr", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_obj", VALUE_NESTING),

@@ -129,7 +129,7 @@ fn churn_corpus_runs_identically_under_the_cap() {
 /// 2n-slot block — (n−1) value blocks leaked per literal, output-invisible;
 /// this harness caught it on its first live run. Under the ceiling, a
 /// regression is a deterministic OOM, not a green run.
-// The `map.get_or(m, "k1", some(0)) ?? 0` term this probe carried on the
+// The `(map.get(m, "k1") ?? some(0)) ?? 0` term this probe carried on the
 // incumbent leg leaks one block per call on the wasm leg (#2932); it is left
 // out until that lands, so the cap here judges the literal intermediates only.
 const MAP_LITERAL_CHURN: &str = r#"effect fn main() -> Unit = {
@@ -167,16 +167,19 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 
 /// #1857: a `let`-bound range read ONLY as a `for-in` head allocates nothing
 /// on native even when the program falls off the v1 trust-spine onto the v3
-/// codegen. The top-level `let` keeps the program off the v1 render (rung 1
-/// has no top-level lets) — it used to be the `list.len` / index reads of
-/// `idx`, until `list.range` and `list.len` joined the native floor (#1869)
-/// — so `main` renders through v3 — where,
+/// codegen. The top-level `let` whose initializer is a CALL keeps the program
+/// off the v1 render (rung 1 admits a top-level let only when materializing
+/// it at its uses is faithful, and a call runs eagerly before main) — it used
+/// to be the `list.len` / index reads of `idx`, until `list.range` and
+/// `list.len` joined the native floor (#1869), and then a constant top-level
+/// let, until rung 1 admitted those (#4006) — so `main` renders through v3 —
+/// where,
 /// before the fix, `big` was materialized as a 1 GiB `Vec<i64>` (the nightly
 /// fuzzer's seed 539646620663 index 1415 carried 16 GiB: 33.6 s native vs
 /// 0.7 s wasm, byte-identical). Under a 4 MiB ceiling that materialization is
 /// the deterministic OOM; the head-only deferral (`RangeCountingVarsPass`)
 /// is what makes this a green run.
-const WALLED_RANGE_PROBE: &str = r#"let bump = 0
+const WALLED_RANGE_PROBE: &str = r#"let bump = int.abs(0)
 
 effect fn main() -> Unit = {
   let idx = 0..<5
@@ -215,9 +218,10 @@ fn walled_head_only_range_allocates_nothing_natively() {
     );
     let build_note = String::from_utf8_lossy(&build.stderr);
     // The probe is only a witness while it actually walls v1: if rung 1 ever
-    // admits top-level lets, this program stops exercising the v3 fallback
-    // and the gate must move to a shape that still does (it moved once
-    // already, when `list.range` / `list.len` joined the floor — #1869).
+    // admits a top-level let initialized by a call, this program stops
+    // exercising the v3 fallback and the gate must move to a shape that still
+    // does (it moved twice already: when `list.range` / `list.len` joined the
+    // floor — #1869 — and when constant top-level lets did — #4006).
     assert!(
         build_note.contains("verified native render walled"),
         "the walled-range probe no longer walls the v1 native render — pick a shape that does: {build_note}"

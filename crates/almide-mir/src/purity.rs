@@ -58,39 +58,34 @@
 pub const PURE_MODULES: &[&str] = &[
     "base64",
     "base64_encode",
+    "bigint",
     "bool",
     "bytes",
     "bytes_append_multi",
     "bytes_array",
     "bytes_core",
+    "bytes_ct",
     "bytes_cursor",
     "bytes_f16",
-    "bytes_lenprefix",
     "bytes_mutate",
-    "bytes_rawptr",
-    "bytes_skip",
     "bytes_split",
     "bytes_string",
-    "bytes_typed",
     "codec_decode",
     "codec_encode",
     "datetime_arith",
     "datetime_calendar",
     "datetime_format",
     "datetime_parse_iso",
+    "deque",
     "env_os",
-    "error",
-    "error_chain",
-    "error_message",
     "fan_any",
     "fan_map",
+    "ffi_bridge",
     "float",
     "float32",
-    "float32_convert",
     "float64",
     "float64_convert",
     "float_bits",
-    "float_checked",
     "float_convert",
     "float_core",
     "float_extra",
@@ -101,12 +96,12 @@ pub const PURE_MODULES: &[&str] = &[
     "float_to_string",
     "hash",
     "hash_impl",
+    "heap",
     "hex",
     "hex_encode",
     "html",
     "http_request",
     "http_response",
-    "http_url_decode",
     "int",
     "int16",
     "int16_convert",
@@ -153,8 +148,6 @@ pub const PURE_MODULES: &[&str] = &[
     "list_fold_ols",
     "list_foldf",
     "list_get",
-    "list_get_or",
-    "list_get_or_str",
     "list_get_str",
     "list_heapelem",
     "list_hshare",
@@ -252,6 +245,7 @@ pub const PURE_MODULES: &[&str] = &[
     "result_core",
     "result_map",
     "result_to_string",
+    "secret",
     "set",
     "set_core",
     "set_str",
@@ -266,8 +260,8 @@ pub const PURE_MODULES: &[&str] = &[
     "string_codepoint",
     "string_concat",
     "string_eq",
+    "string_err_text",
     "string_first_last",
-    "string_from_bytes_self",
     "string_from_codepoint",
     "string_is_digit",
     "string_is_empty",
@@ -278,16 +272,11 @@ pub const PURE_MODULES: &[&str] = &[
     "string_pad",
     "string_quote",
     "string_repeat",
-    "string_replace",
     "string_reverse",
-    "string_rle",
     "string_search",
     "string_slice",
     "string_slice2",
-    "string_split",
-    "string_split_once",
     "string_take_drop",
-    "string_to_bytes",
     "string_to_int",
     "string_to_lower",
     "string_to_upper",
@@ -305,6 +294,7 @@ pub const PURE_MODULES: &[&str] = &[
     "value",
     "value_core",
     "value_utils",
+    "zlib_inflate",
 ];
 
 /// Is `module` a provably-pure stdlib data module (reaches no host capability)?
@@ -312,7 +302,25 @@ pub const PURE_MODULES: &[&str] = &[
 /// admission is module-granular because the impure-plain modules are walled in
 /// full (see the module doc).
 pub fn is_pure(module: &str, func: &str) -> bool {
-    PURE_MODULES.contains(&module) || is_pure_fn_in_impure_module(module, func)
+    PURE_MODULES.contains(&module)
+        || is_pure_fn_in_impure_module(module, func)
+        // A runtime-backed type's declared repr (#4204), derived from its row.
+        || almide_lang::stdlib_info::is_runtime_backed_repr(module, func)
+}
+
+/// Whether bundled `module` declares a public (non-`local`) fn named `func`,
+/// read from its `.almd` source — the declaration is the one place the
+/// module's surface is written down.
+fn declares_public_fn(module: &str, func: &str) -> bool {
+    let Some(src) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    src.lines().any(|line| {
+        let decl = line.strip_prefix("effect ").unwrap_or(line);
+        decl.strip_prefix("fn ").is_some_and(|rest| {
+            rest.strip_prefix(func).is_some_and(|tail| tail.starts_with(['(', '[']))
+        })
+    })
 }
 
 /// A genuinely-PURE function living inside an otherwise impure-plain module. `datetime` is walled
@@ -329,14 +337,9 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "add_hours"
                 | "add_minutes"
                 | "add_seconds"
-                | "diff_seconds"
-                | "from_unix"
-                | "to_unix"
                 | "hour"
                 | "minute"
                 | "second"
-                | "is_before"
-                | "is_after"
                 | "year"
                 | "month"
                 | "day"
@@ -375,64 +378,71 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // The whole zlib surface is a DETERMINISTIC data transform of its
         // input bytes (#1700): the self-host bodies (stdlib/zlib_inflate.almd
         // / zlib_deflate.almd) reach no host capability, and the `effect fn`
-        // spelling is the Result carrier, not an effect. Same admission class
-        // as http's pure codecs below — enumerated, so a future zlib fn with
-        // a real capability does not ride in silently.
-        "zlib" => matches!(
-            func,
-            "compress"
-                | "compress_level"
-                | "decompress"
-                | "deflate"
-                | "deflate_level"
-                | "inflate"
-                | "gzip"
-                | "gunzip"
-                | "crc32"
-                | "adler32"
-        ),
-        // Pure data codecs on the blanket-impure http module (the network fns stay
-        // walled): url_decode is a percent-decoder (stdlib/http_url_decode.almd).
-        //
-        // #2588: the request rep (stdlib/http_request.almd — List[String]
-        // data, like the response rep) and the router layer over it
-        // (stdlib/http.almd). The router's construction and dispatch are
-        // pure; a HANDLER's own capabilities are counted transitively through
-        // the closure it holds, exactly like a list.map callback. `serve`
-        // (the listener) stays walled.
-        "http" => matches!(
-            func,
-            "new_request"
-                | "req_method"
-                | "req_path"
-                | "req_body"
-                | "req_header"
-                | "query_params"
-                | "param"
-                | "query"
-                | "queries"
-                | "route"
-                | "router"
-                | "mount"
-                | "wrap"
-                | "recover"
-                | "logger"
-                | "__with_params"
-                | "__with_path"
-                | "__set_body"
-                | "url_decode"
-                | "response"
-                | "json"
-                | "redirect"
-                | "with_headers"
-                | "status"
-                | "body"
-                | "set_header"
-                | "get_header"
-                | "status_code"
-                | "headers"
-                | "header_values"
-        ),
+        // spelling is the Result carrier, not an effect. The bounded decoders
+        // (`inflate_max` / `decompress_max` / `gunzip_max`, #4020) are the same
+        // transforms with a caller-chosen output bound. Admission is read from
+        // the module's own declarations (stdlib/zlib.almd) rather than from a
+        // list of its names here — a list is a second copy of the surface, and
+        // the bounded decoders were missing from it. A name zlib does not
+        // declare stays walled, and a future zlib fn that reaches a real
+        // capability is a host op, which `host_ops::classify` answers before
+        // it asks purity.
+        "zlib" => declares_public_fn("zlib", func),
+        // `ffi` (R-ffi-01, ADR-0031): `region` / `alloc` build a Region, and
+        // `read` / `write` copy through one after its bounds check, inside the
+        // program's own memory (stdlib/ffi_bridge.almd: prim loads and
+        // stores, no host op). The `effect fn` spelling marks memory outside
+        // Almide's values (R-ffi-02), not a host capability; `--profile
+        // critical` refuses the module wholesale (#4008).
+        "ffi" => true,
+        // Pure data on the blanket-impure http module (the network fns stay
+        // walled): the response and request reps (stdlib/http_response.almd,
+        // stdlib/http_request.almd — List[String] data), the HttpMessage
+        // accessors over them and their per-type requirements (R-http-12),
+        // and the router layer (stdlib/http.almd, #2588). The router's
+        // construction and dispatch are pure; a HANDLER's own capabilities
+        // are counted transitively through the closure it holds, exactly
+        // like a list.map callback. `serve` (the listener) stays walled.
+        "http" => {
+            func.starts_with("__http_request_")
+                || func.starts_with("__http_response_")
+                || matches!(
+                    func,
+                    "new_request"
+                        | "__new_request"
+                        | "method"
+                        | "path"
+                        | "query_params"
+                        | "param"
+                        | "query"
+                        | "queries"
+                        | "route"
+                        | "router"
+                        | "mount"
+                        | "wrap"
+                        | "recover"
+                        | "logger"
+                        | "__with_params"
+                        | "__with_path"
+                        | "__flat"
+                        | "__pairs"
+                        | "response"
+                        | "json"
+                        | "redirect"
+                        | "with_headers"
+                        | "__with_headers"
+                        | "set_status"
+                        | "status"
+                        | "header"
+                        | "header_values"
+                        | "headers"
+                        | "body"
+                        | "body_bytes"
+                        | "set_header"
+                        | "set_body"
+                        | "set_body_bytes"
+                )
+        }
         _ => false,
     }
 }
@@ -447,6 +457,11 @@ mod tests {
         assert!(is_pure("list", "len"));
         assert!(is_pure("json", "parse"));
         assert!(is_pure("path", "join"));
+        // zlib is admitted by its own declarations: every declared fn, the
+        // bounded decoders included, and no undeclared name.
+        assert!(is_pure("zlib", "inflate"));
+        assert!(is_pure("zlib", "gunzip_max"));
+        assert!(!is_pure("zlib", "inflat"));
     }
 
     #[test]

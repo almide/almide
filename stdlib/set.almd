@@ -13,20 +13,20 @@ fn new[A]() -> Set[A] = _
 @intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
-/// Copy with value appended; unchanged if present.
+/// Copy with x appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
 @reuse(s)
-fn insert[A](s: Set[A], value: A) -> Set[A] = _
+fn insert[A](s: Set[A], x: A) -> Set[A] = _
 
-/// Copy without value; unchanged if absent.
+/// Copy without x; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
 @reuse(s)
-fn remove[A](s: Set[A], value: A) -> Set[A] = _
+fn remove[A](s: Set[A], x: A) -> Set[A] = _
 
-/// true when value is a member.
+/// true when x is a member.
 @intrinsic("almide_rt_set_contains")
-@borrow_ref(value)
-fn contains[A](s: Set[A], value: A) -> Bool = _
+@borrow_ref(x)
+fn contains[A](s: Set[A], x: A) -> Bool = _
 
 /// Member count; 0 for an empty set.
 @intrinsic("almide_rt_set_len")
@@ -85,6 +85,80 @@ fn any[A](s: Set[A], f: (A) -> Bool) -> Bool = _
 /// true if f holds for every member; true if empty.
 @intrinsic("almide_rt_set_all")
 fn all[A](s: Set[A], f: (A) -> Bool) -> Bool = _
+
+// ── the Container cells and the sequence algorithms (R-L0-37, R-L0-42) ──
+// Written once over `set.to_list`: each walks the members in insertion order
+// and gives what the same-named `list` fn gives on that list. The ones that
+// cut a run out of the sequence (take_while, chunk, …) are `Ordered` cells a
+// set does not have.
+/// Number of members where f holds.
+fn count[A](s: Set[A], f: (A) -> Bool) -> Int = list.count(set.to_list(s), f)
+
+/// First member, in insertion order, where f holds, or none.
+fn find[A](s: Set[A], f: (A) -> Bool) -> A? = list.find(set.to_list(s), f)
+
+/// Removes every member of s in place.
+fn clear[A](mut s: Set[A]) -> Unit = {
+  s = set.new()
+}
+
+/// (index, member) pairs in insertion order, index from 0.
+fn enumerate[A](s: Set[A]) -> List[(Int, A)] = list.enumerate(set.to_list(s))
+
+/// Members paired with ys by position; stops at the shorter.
+fn zip[A, B](s: Set[A], ys: List[B]) -> List[(A, B)] = list.zip(set.to_list(s), ys)
+
+/// f over (member, ys element) pairs; stops at the shorter.
+fn zip_with[A, B, C](s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip_with(
+  set.to_list(s),
+  ys,
+  f,
+)
+
+/// The somes f gives, in insertion order.
+fn filter_map[A, B](s: Set[A], f: (A) -> B?) -> List[B] = list.filter_map(set.to_list(s), f)
+
+/// The first some f gives, or none; f is not called after the hit.
+fn find_map[A, B](s: Set[A], f: (A) -> B?) -> B? = list.find_map(set.to_list(s), f)
+
+/// Left fold seeded by the first member; none when empty.
+fn reduce[A](s: Set[A], f: (A, A) -> A) -> A? = list.reduce(set.to_list(s), f)
+
+/// Running fold values in insertion order, init excluded.
+fn scan[A, B](s: Set[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(set.to_list(s), init, f)
+
+/// (members where f holds, the rest), insertion order kept.
+fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(set.to_list(s), f)
+
+/// Key f(x) -> members; keys in first-seen order.
+fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
+
+/// Members in ascending order; Floats in IEEE totalOrder.
+fn sort[A](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
+
+/// Members sorted by key f(x), stable; f runs once per member.
+fn sort_by[A, B](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
+
+/// Members sorted by cmp, stable: negative puts a first.
+fn sort_with[A](s: Set[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(set.to_list(s), cmp)
+
+/// Least member, or none when empty.
+fn min[A](s: Set[A]) -> A? = list.min(set.to_list(s))
+
+/// Greatest member, or none when empty.
+fn max[A](s: Set[A]) -> A? = list.max(set.to_list(s))
+
+/// Member with the least key f(x); the first on ties.
+fn min_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
+
+/// Member with the greatest key f(x); the first on ties.
+fn max_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
+
+/// Least member by cmp; the first on ties.
+fn min_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.min_with(set.to_list(s), cmp)
+
+/// Greatest member by cmp; the first on ties.
+fn max_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.max_with(set.to_list(s), cmp)
 
 // ── the fallible carriers (ADR-0006, #3163) ──
 //
@@ -200,3 +274,90 @@ fn __fallible_all[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Bool, E]
     none => ok(held),
   }
 }
+
+// The sequence cells' carriers: each hands the members, in insertion order, to
+// the same-named list fn with the callback's `!` — the list fn's own carrier,
+// so the first err stops the walk exactly as it does over the list.
+fn __fallible_count[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Int, E] = list.count(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_find[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[A?, E] = list.find(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_zip_with[A, B, C, E](s: Set[A], ys: List[B], f: (A, B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
+  set.to_list(s),
+  ys,
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_filter_map[A, B, E](s: Set[A], f: (A) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_find_map[A, B, E](s: Set[A], f: (A) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_reduce[A, E](s: Set[A], f: (A, A) -> Result[A, E]) -> Result[A?, E] = list.reduce(
+  set.to_list(s),
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_scan[A, B, E](s: Set[A], init: B, f: (B, A) -> Result[B, E]) -> Result[List[B], E] = list.scan(
+  set.to_list(s),
+  init,
+  (acc, x) => f(acc, x)!,
+)
+
+fn __fallible_partition[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E] = list.partition(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_sort_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_sort_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = list.sort_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_min_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_max_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_min_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = list.min_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_max_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = list.max_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+// ── Numeric folds (R-L0-42): the element type's own sum and product ──
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](s: Set[A]) -> A = A.__sum(set.to_list(s))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](s: Set[A]) -> A = A.__product(set.to_list(s))

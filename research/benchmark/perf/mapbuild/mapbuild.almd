@@ -27,16 +27,16 @@ effect fn main() -> Unit = {
   }
   var acc = 0
   for i in 0..<n {
-    acc = acc + map.get_or(by_int, i * 7, -1)
+    acc = acc + map.get(by_int, i * 7) ?? -1
   }
   var by_str: Map[String, Int] = map.new()
   for i in 0..<n {
     let k = "k" + int.to_string(i)
-    by_str[k] = map.get_or(by_str, k, 0) + i
+    by_str[k] = map.get(by_str, k) ?? 0 + i
   }
   var acc2 = 0
   for i in 0..<n {
-    acc2 = acc2 + map.get_or(by_str, "k" + int.to_string(i), -1)
+    acc2 = acc2 + map.get(by_str, "k" + int.to_string(i)) ?? -1
   }
   println("int: ${int.to_string(map.len(by_int))} ${int.to_string(acc)} str: ${int.to_string(map.len(by_str))} ${int.to_string(acc2)}")
 }

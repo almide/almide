@@ -179,7 +179,7 @@ fn consumes(u: &Use) -> bool {
         Site::Arg(SlotMode::Borrow | SlotMode::Mut) | Site::Callee
         | Site::Iterable { consumed: false } | Site::Borrow { .. } | Site::Clone
         | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Deref | Site::Operand | Site::Compare
-        | Site::Assigned | Site::Reassign | Site::InPlace => false,
+        | Site::StrView | Site::Assigned | Site::Reassign | Site::InPlace => false,
     }
 }
 
@@ -225,17 +225,8 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
 /// payload out, so any binding keeps the conservative verdict.
 fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    use crate::use_kind::pattern_binds_nothing as binds_nothing;
     struct Scan { var: VarId, ok: bool }
-    fn binds_nothing(p: &IrPattern) -> bool {
-        match p {
-            IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
-            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binds_nothing(inner),
-            IrPattern::Constructor { args, .. } => args.iter().all(binds_nothing),
-            IrPattern::Tuple { elements } => elements.iter().all(binds_nothing),
-            IrPattern::List { elements, rest } => elements.iter().all(binds_nothing) && rest.as_deref().map_or(true, binds_nothing),
-            IrPattern::Bind { .. } | IrPattern::RecordPattern { .. } | IrPattern::As { .. } => false,
-        }
-    }
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Match { subject, arms } = &e.kind
@@ -271,8 +262,18 @@ pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
 /// after the verdict): the certifier's final IR spells a binder's capture as
 /// `let __cap = b` outside the closure, and that bind IS the capture (#3174).
 /// The verdict runs before the binds exist and passes an empty set.
+///
+/// #4292: a binder consumed where a later occurrence of it can still run
+/// (`Node(l, _, _) => keep(l, depth(l))`) is CLONED there whichever way the
+/// subject is matched — the clone pass keeps the binder live for the later
+/// read — so that consumption earns the subject's ownership nothing; it is a
+/// read, the same `cloned_anyway` rule `param_borrow` applies to a param.
+/// Admitted only at a [`part_clone_site`], the positions the borrow lowering
+/// already clones a by-reference binder at.
 pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites, captures: &HashSet<VarId>) -> bool {
-    subject_binders(body, var, uses, captures, &|_| false).is_some()
+    let cloned_anyway = |u: &Use| part_clone_site(u)
+        && uses.of(u.var).any(|w| !std::ptr::eq(w, u) && after(u, w) && uses.keeps_live(u, w));
+    subject_binders(body, var, uses, captures, &cloned_anyway).is_some()
 }
 
 /// The binders every `match` on `var` introduces (transitively, through a
@@ -423,6 +424,8 @@ pub(crate) fn subject_root(s: &IrExpr) -> Option<VarId> {
     match &s.kind {
         IrExprKind::Var { id } => Some(*id),
         IrExprKind::Clone { expr } | IrExprKind::Borrow { expr, .. } | IrExprKind::Deref { expr } => subject_root(expr),
+        // BoxTakeLowering's move of a boxed binder out of its box.
+        IrExprKind::InlineRust { template, args } if template.starts_with("almide_box_take(") && args.len() == 1 => subject_root(&args[0].1),
         _ => None,
     }
 }
@@ -496,7 +499,7 @@ fn param_borrow(slot: usize, param: &IrParam, uses: &UseSites, scope: &Scope, bo
         return ParamBorrow::Own;
     }
     // Implicit mut for bundled bodies: when the body forwards this param into
-    // a callee slot that expects `RefMut` (`bytes.set_u16_le` et al), the
+    // a callee slot that expects `RefMut` (`bytes.put_u16_le` et al), the
     // caller's own param must also be `RefMut` — else the generated code
     // writes `&mut b` against a `b: &Vec<u8>` sig, which fails to borrow-check.
     if uses.of(param.var).any(|u| u.site == Site::Arg(SlotMode::Mut)) {
@@ -687,7 +690,7 @@ pub(crate) fn is_borrow_eligible(ty: &Ty, records: &HashSet<String>) -> bool {
         | Ty::Applied(TypeConstructorId::List, _)
         // Map/Set are heap collections too — without them a `mut Map`/`mut Set`
         // parameter is forced to `Own` here (never reaching the borrow analysis),
-        // so an in-place `map.insert(m, …)` emits `&mut m` against a non-`mut`
+        // so an in-place `m[k] = v` emits `&mut m` against a non-`mut`
         // owned binding and fails to borrow-check (#436, E0596). With them the
         // param is inferred Ref/RefMut/Own like a List.
         | Ty::Applied(TypeConstructorId::Map, _)

@@ -1,43 +1,23 @@
 // int_rotate — SELF-HOSTED `int.rotate_left` / `int.rotate_right` over the bitwise prim
-// floor. v0 rotates within a `bits`-wide field: mask = (1<<bits)-1 (or all-ones for
-// bits>=64); v = a & mask; n = the count reduced into [0, bits); left/right shift the masked
-// value as a u64 (logical shr via prim.bshr_u), OR them, re-mask. Byte-exact with v0, the
-// bits<=0 abort included (C-047). Pure scalar — cert untouched.
+// floor. The register is the 64 bits of `a` (R-int-12): the count is reduced into
+// [0, 64), the value is shifted left and right as a u64 (logical shr via prim.bshr_u)
+// and the halves are ORed. Byte-exact with native `u64::rotate_left`. Pure scalar —
+// cert untouched.
 //
-// The count is reduced EUCLIDEAN-ly into [0, bits), like v0's `n.rem_euclid(bits)`, so a
+// The count is reduced EUCLIDEAN-ly into [0, 64), like native `n.rem_euclid(64)`, so a
 // negative count rotates the other way (#2492: `n % bits` kept the sign, and a negative
 // shift amount made every negative count return 0).
-fn __rotate_count(n: Int, bits: Int) -> Int = {
-  let r = n % bits
-  if r < 0 then r + bits else r
+fn __rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
 }
 
-fn __rotate_mask(bits: Int) -> Int = if bits >= 64 then 0 - 1
-else {
-  let p = prim.bshl(1, bits)
-  p - 1
+fn int_rotate_left(a: Int, n: Int) -> Int = {
+  let nn = __rotate_count(n)
+  if nn == 0 then a else prim.bor(prim.bshl(a, nn), prim.bshr_u(a, 64 - nn))
 }
 
-fn int_rotate_left(a: Int, n: Int, bits: Int) -> Int = {
-  // §13 termination convention: a nonpositive width has no rotation — abort
-  // with the native-identical stderr line + exit 1.
-  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
-  let mask = __rotate_mask(bits)
-  let v = prim.band(a, mask)
-  let nn = __rotate_count(n, bits)
-  let left = prim.bshl(v, nn)
-  let right = prim.bshr_u(v, bits - nn)
-  let combined = prim.bor(left, right)
-  prim.band(combined, mask)
-}
-
-fn int_rotate_right(a: Int, n: Int, bits: Int) -> Int = {
-  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
-  let mask = __rotate_mask(bits)
-  let v = prim.band(a, mask)
-  let nn = __rotate_count(n, bits)
-  let right = prim.bshr_u(v, nn)
-  let left = prim.bshl(v, bits - nn)
-  let combined = prim.bor(left, right)
-  prim.band(combined, mask)
+fn int_rotate_right(a: Int, n: Int) -> Int = {
+  let nn = __rotate_count(n)
+  if nn == 0 then a else prim.bor(prim.bshr_u(a, nn), prim.bshl(a, 64 - nn))
 }

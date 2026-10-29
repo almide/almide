@@ -26,7 +26,7 @@
 # ---------------------------------------------------------
 # A slot the matrix cannot build is coverage the matrix does not have, and the
 # count of those was printed for a month and never read back — it held
-# `json.index(path: JsonPath, i: Int)`, the signature that carried #2396. So a
+# `json.index(path: JsonPath, i: Int)` (now `value.index`), the signature that carried #2396. So a
 # skip is now a ledger row with a name and a reason, and the diff runs on it:
 #
 #   skipped-but-undeclared   -> coverage LOST (a type left the tables, a probe
@@ -45,7 +45,7 @@
 #
 # That decision is right and stays. It also draws the blind spot exactly over the
 # parameters the room guards read — `pos` is not in the name list, so
-# `bytes.set_f32_le` was found by fuzzing; `size` is, so `bytes.chunks` never
+# `bytes.put_f32_le` was found by fuzzing; `size` is, so `bytes.chunk` never
 # could be. This gate covers what the lottery structurally cannot.
 #
 # Usage:

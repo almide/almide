@@ -24,8 +24,8 @@ fn section_of_heading(line: String) -> String = {
   if not string.starts_with(line, "## ALS-") then ""
   else {
     let rest = string.slice(line, 3)
-    let head = list.get_or(string.split(rest, " "), 0, "")
-    if head |> string.chars |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-", c)) then head else ""
+    let head = list.get(string.split(rest, " "), 0) ?? ""
+    if head |> string.to_list |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-", c)) then head else ""
   }
 }
 

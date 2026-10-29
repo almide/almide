@@ -1,6 +1,6 @@
 // http_request — SELF-HOSTED HttpRequest rep for the wasm legs (#2588). v0's
 // AlmideHttpRequest { method, path, body, headers, params } is opaque nominal;
-// here it is a List[String] (the http_response / JsonPath precedent):
+// here it is a List[String] (the http_response precedent):
 //
 //   [method, target, body, <header count>, k1, v1, …, kn, vn, p1, v1, …]
 //
@@ -22,8 +22,8 @@ else if __hq_fold(list.get(a, i) ?? "") != __hq_fold(list.get(b, i) ?? "") then 
 else __hq_ci_at(a, b, i + 1)
 
 fn __hq_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hq_ci_at(a, b, 0)
 }
@@ -33,9 +33,11 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 // First slot past the header pairs — where the bound params start.
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
-fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
-  [method, target, body, int.to_string(map.len(headers))] + pairs
+// The headers arrive flat, [k1, v1, …] in list order (R-http-09); an odd
+// trailing name is dropped, as native's pairing does.
+fn http_new_request(method: String, target: String, body: String, flat: List[String]) -> List[String] = {
+  let n = list.len(flat) / 2
+  [method, target, body, int.to_string(n)] + list.take(flat, 2 * n)
 }
 
 fn http_req_method(req: List[String]) -> String = list.get(req, 0) ?? ""
@@ -55,6 +57,53 @@ fn http_req_header(req: List[String], key: String) -> String? = __hq_find(
   key,
 )
 
+fn __hq_all(req: List[String], i: Int, end: Int, key: String, acc: List[String]) -> List[String] =
+  if i >= end then acc
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then __hq_all(
+    req,
+    i + 2,
+    end,
+    key,
+    acc + [
+      list.get(req, i + 1) ?? ""
+    ],
+  )
+  else __hq_all(req, i + 2, end, key, acc)
+
+fn http_req_header_values(req: List[String], key: String) -> List[String] = __hq_all(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  [],
+)
+
+fn http_req_headers_flat(req: List[String]) -> List[String] = list.take(
+  list.drop(req, 4),
+  2 * __hq_nh(req),
+)
+
+// Upsert, the response's rule: the first match's value replaced in place,
+// else the pair appended after the last header and the count raised.
+fn __hq_set(req: List[String], i: Int, end: Int, key: String, value: String) -> List[String] =
+  if i >= end then list.set(
+    list.take(req, end) + [key, value] + list.drop(req, end),
+    3,
+    int.to_string(__hq_nh(req) + 1),
+  )
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then list.set(req, i + 1, value)
+  else __hq_set(req, i + 2, end, key, value)
+
+fn http_req_set_header(req: List[String], key: String, value: String) -> List[String] = __hq_set(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  value,
+)
+
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
+
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)
 else __hq_param(req, i + 2, name)
@@ -72,3 +121,37 @@ fn http_req_with_params(req: List[String], flat: List[String]) -> List[String] =
 }
 
 fn http_req_with_path(req: List[String], target: String) -> List[String] = list.set(req, 1, target)
+
+// ── The declared reprs of the http value types (#4204) ──
+// `${req}` / `${resp}`, bare or nested in a record, list, option, …, shows
+// native's `AlmideRepr` (#2647): the headers are COUNTED, never listed, so a
+// logged request does not carry its Authorization / Cookie values. The wasm
+// display engine calls them as the types' declared `http.__*_repr` (derived
+// from the runtime-backed row: `stdlib_info::runtime_backed_repr_surface`),
+// never the generic list display of this file's rep.
+fn __hq_quote_char(c: String) -> String = match c {
+  "\\" => "\\\\",
+  "\"" => "\\\"",
+  "\n" => "\\n",
+  "\r" => "\\r",
+  "\t" => "\\t",
+  _ => c,
+}
+
+// A String in a nested position: native's `almide_repr_str` (five escapes).
+fn __hq_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
+
+@implements("http.__http_request_repr")
+fn http_req_repr(req: List[String]) -> String = {
+  let method = __hq_quote(list.get(req, 0) ?? "")
+  let path = __hq_quote(list.get(req, 1) ?? "")
+  let body = __hq_quote(list.get(req, 2) ?? "")
+  "HttpRequest { method: ${method}, path: ${path}, body: ${body}, headers: ${__hq_nh(req)} }"
+}
+
+@implements("http.__http_response_repr")
+fn http_resp_repr(resp: List[String]) -> String = {
+  let status = list.get(resp, 0) ?? "0"
+  let body = __hq_quote(list.get(resp, 1) ?? "")
+  "HttpResponse { status: ${status}, body: ${body}, headers: ${(list.len(resp) - 2) / 2} }"
+}

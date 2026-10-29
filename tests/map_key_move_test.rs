@@ -1,12 +1,12 @@
 //! The native Map's read side borrows its key and the word-count write moves it (#2157).
 //!
-//! `counts[w] = map.get_or(counts, w, 0) + 1` — the keyed-aggregation loop —
-//! used to emit `counts.insert(w.clone(), almide_rt_map_get_or(&counts, w, 0) + 1)`:
-//! `get_or` took the key BY VALUE, so `w` was consumed there and the insert
+//! `counts[w] = (map.get(counts, w) ?? 0) + 1` — the keyed-aggregation loop —
+//! used to emit `counts.insert(w.clone(), <map read>(&counts, w, 0) + 1)`:
+//! the read took the key BY VALUE, so `w` was consumed there and the insert
 //! had to clone it. Two mechanisms now remove the clone, and each one is
 //! pinned here by the emitted Rust:
 //!
-//! 1. `map.get` / `map.get_or` / `map.contains` / `set.contains` are
+//! 1. `map.get` / `map.contains` / `set.contains` are
 //!    `@borrow_ref(key)` and the runtime takes `&Q` (`K: Borrow<Q>`), so the
 //!    lookup renders `&w` (or the bare `&str` for a borrow-inferred String
 //!    param) and never owns a key it only compares.
@@ -74,7 +74,7 @@ fn emitted_fn(source: &str, name: &str, tag: &str) -> String {
 const COUNT_LOOP: &str = "fn count(words: List[String]) -> Map[String, Int] = {\n\
   var counts: Map[String, Int] = [:]\n\
   for w in words {\n\
-    counts[w] = map.get_or(counts, w, 0) + 1\n\
+    counts[w] = (map.get(counts, w) ?? 0) + 1\n\
   }\n\
   counts\n\
 }\n\
@@ -114,7 +114,7 @@ fn key_still_used_after_the_insert_keeps_its_clone() {
            var counts: Map[String, Int] = [:]\n\
            var total = 0\n\
            for w in words {\n\
-             counts[w] = map.get_or(counts, w, 0) + 1\n\
+             counts[w] = (map.get(counts, w) ?? 0) + 1\n\
              total = total + string.len(w)\n\
            }\n\
            total\n\

@@ -1,0 +1,191 @@
+// heap — a min-first priority queue (R-heap-01, R-L1-02), in pure Almide.
+//
+// A binary heap in a list: slot 0 is the root, slot i's children are 2i + 1
+// and 2i + 2. Each slot holds an element and the number it was pushed with,
+// and the heap orders slots by `cmp` first and that number second, so equal
+// elements come out in the order they went in (R-heap-01: one order on both
+// targets). `cmp` follows R-L0-16 (negative puts a first); `new` orders by
+// the natural order `list.sort` uses, `new_by` by a key, `new_with` by a
+// comparator — only the empty constructors take an order (L2-heap).
+//
+// Adding and taking are in-place `mut` verbs like `list.push` / `list.pop`
+// (R-L0-04). The fns that read every element (`contains`, `any`, `all`,
+// `count`) answer the same whatever the slots' order, so the order of the
+// list inside is never observable (R-heap-02); `to_list` is the pop order.
+// `Heap` is opaque (`mod type`, #4256): outside this module its fields cannot
+// be read and its record literal cannot be written (E033), so no caller sees
+// the slot order or builds a heap that breaks the heap invariant.
+/// A priority queue; the least element by its order comes out first.
+mod type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
+
+// The natural order of two values, as `list.sort_by` orders them (a generic
+// `<` lowers only for scalars on wasm, so the order is asked of `sort_by`).
+fn __natural[A](a: A, b: A) -> Int =
+  if a == b then 0
+  else match list.first(list.sort_by([1, 0], (i) => if i == 0 then a else b)) {
+    some(0) => -1,
+    _ => 1,
+  }
+
+// ── construction (R-heap-01) ──
+/// An empty heap; the least element comes out first.
+fn new[A]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
+
+/// An empty heap ordered by key f(x); the least key comes out first.
+fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
+  slots: [],
+  next: 0,
+  cmp: (a, b) => __natural(f(a), f(b)),
+}
+
+/// An empty heap ordered by cmp; negative puts a first.
+fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
+
+/// A heap of xs in the natural order; equal elements leave in list order.
+fn from_list[A](xs: List[A]) -> Heap[A] = {
+  var h: Heap[A] = new()
+  for x in xs {
+    push(h, x)
+  }
+  h
+}
+
+// Does slot a leave before slot b: cmp first, push order on a tie.
+fn __before[A](h: Heap[A], a: (A, Int), b: (A, Int)) -> Bool = {
+  let c = (h.cmp)(a.0, b.0)
+  c < 0 or (c == 0 and a.1 < b.1)
+}
+
+// Swap slots i and j of a list.
+fn __swap[A](xs: List[(A, Int)], i: Int, j: Int) -> List[(A, Int)] = list.swap(xs, i, j)
+
+// ── the in-place add and take ──
+/// Adds x in place.
+fn push[A](mut h: Heap[A], x: A) -> Unit = {
+  var slots = h.slots
+  list.push(slots, (x, h.next))
+  var i = list.len(slots) - 1
+  var moving = true
+  while moving and i > 0 {
+    let parent = (i - 1) / 2
+    match (list.get(slots, i), list.get(slots, parent)) {
+      (some(child), some(up)) => if __before(h, child, up) then {
+        slots = __swap(slots, i, parent)
+        i = parent
+      } else {
+        moving = false
+      },
+      _ => {
+        moving = false
+      },
+    }
+  }
+  h = { slots: slots, next: h.next + 1, cmp: h.cmp }
+}
+
+/// Removes and yields the first element out; none when empty.
+fn pop[A](mut h: Heap[A]) -> A? = {
+  let n = list.len(h.slots)
+  if n == 0 then none
+  else {
+    let top = list.get(h.slots, 0)
+    var slots = __swap(h.slots, 0, n - 1)
+    let _ = list.pop(slots)
+    let size = n - 1
+    var i = 0
+    var moving = true
+    while moving {
+      let l = 2 * i + 1
+      let r = l + 1
+      var best = i
+      match (list.get(slots, l), list.get(slots, best)) {
+        (some(a), some(b)) => if l < size and __before(h, a, b) then {
+          best = l
+        } else (),
+        _ => (),
+      }
+      match (list.get(slots, r), list.get(slots, best)) {
+        (some(a), some(b)) => if r < size and __before(h, a, b) then {
+          best = r
+        } else (),
+        _ => (),
+      }
+      if best == i then {
+        moving = false
+      } else {
+        slots = __swap(slots, i, best)
+        i = best
+      }
+    }
+    h = { slots: slots, next: h.next, cmp: h.cmp }
+    match top {
+      some((x, _)) => some(x),
+      none => none,
+    }
+  }
+}
+
+/// Removes every element of h in place; the order is kept.
+fn clear[A](mut h: Heap[A]) -> Unit = {
+  h = { slots: [], next: 0, cmp: h.cmp }
+}
+
+// ── the reads ──
+/// The element pop would yield next, or none when empty.
+fn peek[A](h: Heap[A]) -> A? = match list.first(h.slots) {
+  some((x, _)) => some(x),
+  none => none,
+}
+
+/// Element count; 0 for an empty heap.
+fn len[A](h: Heap[A]) -> Int = list.len(h.slots)
+
+/// true iff h has no elements.
+fn is_empty[A](h: Heap[A]) -> Bool = list.is_empty(h.slots)
+
+/// The elements in pop order.
+fn to_list[A](h: Heap[A]) -> List[A] = {
+  var q = h
+  var out: List[A] = []
+  for _ in 0..<list.len(h.slots) {
+    match pop(q) {
+      some(x) => list.push(out, x),
+      none => (),
+    }
+  }
+  out
+}
+
+// ── the order-free cells (R-heap-02) ──
+// Their answers do not depend on any order; a callback is still asked in pop
+// order, so which elements it sees (and when `any` / `all` stop) never
+// depends on how the slots happen to lie.
+/// true if some element == x.
+fn contains[A](h: Heap[A], x: A) -> Bool = {
+  var hit = false
+  for (y, _) in h.slots {
+    if y == x then {
+      hit = true
+    } else ()
+  }
+  hit
+}
+
+/// true if f holds for some element; false when empty.
+fn any[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.any(to_list(h), f)
+
+/// true if f holds for every element; true when empty.
+fn all[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.all(to_list(h), f)
+
+/// Number of elements where f holds.
+fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
+
+/// The elements where f holds, in a heap of the same order; equal elements
+/// keep the order they went in.
+fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
+  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
+  for x in to_list(h) {
+    if f(x) then push(out, x) else ()
+  }
+  out
+}

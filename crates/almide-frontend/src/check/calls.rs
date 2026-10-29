@@ -8,6 +8,25 @@ use crate::types::Ty;
 use super::types::resolve_ty;
 use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
+/// A call whose protocol-bounded type parameters were still open inference
+/// vars when the call was checked — judged post-solve (#4235).
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredBoundSite {
+    /// The callee as written at the call.
+    pub callee: String,
+    pub sig: crate::types::FnSig,
+    /// The call's generic bindings (inference vars intact).
+    pub bindings: HashMap<Sym, Ty>,
+    /// The bounded parameters that were open at the call.
+    pub tvs: Vec<Sym>,
+    pub span: Option<ast::Span>,
+}
+
+/// An unbound `?` inference var (not a rigid type parameter, not `Unknown`).
+fn is_open_infer_var(t: &Ty) -> bool {
+    matches!(t, Ty::TypeVar(n) if n.as_str().starts_with('?'))
+}
+
 /// Substitute named TypeVars in a type with replacement types.
 pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     match ty {
@@ -122,11 +141,12 @@ impl Checker {
         // call site, before any argument inference can bury it under a
         // cascade of type errors.
         self.warn_if_deprecated(callee);
+        self.reject_unopted_memory_unsafe_callee(callee);
         if let [argument] = args {
             self.reject_exit_literal(callee, argument);
         }
         let call_sig = self.lookup_call_sig(callee);
-        let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
+        let mut arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
@@ -162,6 +182,8 @@ impl Checker {
                         return ret;
                     }
                 }
+                // #4283: a fallible call in a builtin's argument is E041.
+                self.strip_builtin_effect_args(name.as_str(), args, &mut arg_tys);
                 let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
                 let arg_refs: Vec<&ast::Expr> = args.iter().collect();
                 self.validate_mut_args(&name, &arg_refs);
@@ -222,6 +244,9 @@ impl Checker {
         let seeds = self.bindings_from_expected_ret(call_sig.as_ref());
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
+            if let Some(sig) = call_sig.as_ref() {
+                self.regroup_tuple_lambda_arg(a, sig, i, &bindings);
+            }
             let pinned = if is_lambda_arg(a) {
                 call_sig.as_ref().and_then(|sig| self.lambda_pin_for_arg(sig, i, &bindings))
             } else { None };
@@ -283,12 +308,77 @@ impl Checker {
             // Accumulate generic bindings from this arg so later lambda params can be pinned. Lambdas contribute nothing new here.
             if let Some(sig) = call_sig {
                 if let Some((_, pty)) = sig.params.get(i) {
-                    crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
+                    let apart = self.caller_letters_apart_from(sig);
+                    Self::unify_apart(pty, &resolve_ty(&aty, &self.uf), &apart, &mut bindings);
                 }
             }
             tys.push(aty);
         }
         tys
+    }
+
+    /// R-map-09: a lambda whose parameters spell a tuple slot's ELEMENTS one by
+    /// one is regrouped into the tuple-pattern form before it is inferred.
+    ///
+    /// - A slot taking ONE tuple (`f: ((K, V)) -> Bool`, or `(A) -> B` once an
+    ///   earlier argument bound `A` to a tuple) accepts a lambda with one
+    ///   parameter per element: `map.filter(m, (k, v) => v > 0)` reads as
+    ///   `((k, v)) => v > 0`, Swift's rule for a closure over a tuple element.
+    /// - A slot taking a tuple BESIDE other parameters (`map.fold`'s
+    ///   `(A, (K, V)) -> A`) does not: the flat `(acc, k, v) =>` is the spelling
+    ///   epoch 15 removed, so it is E004 with the grouped rewrite. The lambda is
+    ///   regrouped anyway so the body checks once, without a cascade.
+    ///
+    /// Read from the slot's type alone: any callback slot, no list of names. A
+    /// parameter with an annotation or a pattern of its own is left as written.
+    fn regroup_tuple_lambda_arg(&mut self, a: &mut ast::Expr, sig: &crate::types::FnSig, i: usize, bindings: &HashMap<Sym, Ty>) {
+        let Some((_, pty)) = sig.params.get(i) else { return };
+        let Ty::Fn { params: slot, .. } = crate::types::substitute(pty, bindings) else { return };
+        let arities: Vec<usize> = slot.iter().map(|t| match resolve_ty(t, &self.uf) {
+            Ty::Tuple(es) if es.len() >= 2 => es.len(),
+            _ => 1,
+        }).collect();
+        let span = a.span;
+        let Some(params) = lambda_params_mut(a) else { return };
+        if params.len() <= slot.len()
+            || arities.iter().sum::<usize>() != params.len()
+            || params.iter().any(|p| p.tuple_names.is_some() || p.ty.is_some())
+        {
+            return;
+        }
+        let mut flat = std::mem::take(params).into_iter();
+        let mut grouped: Vec<ast::LambdaParam> = Vec::with_capacity(arities.len());
+        for &n in &arities {
+            if n == 1 {
+                grouped.extend(flat.next());
+            } else {
+                let names: Vec<Sym> = flat.by_ref().take(n).map(|p| p.name).collect();
+                grouped.push(ast::LambdaParam { name: names[0], tuple_names: Some(names), ty: None });
+            }
+        }
+        let spelled = grouped.iter().map(|p| match &p.tuple_names {
+            Some(ns) => format!("({})", ns.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ")),
+            None => p.name.as_str().to_string(),
+        }).collect::<Vec<_>>().join(", ");
+        *params = grouped;
+        if slot.len() == 1 {
+            return;
+        }
+        let saved = self.current_span;
+        if span.is_some() {
+            self.current_span = span;
+        }
+        self.emit(super::err(
+            format!(
+                "this callback takes {} parameter(s), and the lambda spells a tuple parameter's elements as separate parameters",
+                slot.len()
+            ),
+            format!(
+                "a tuple parameter is one parenthesized pattern: rewrite as `({spelled}) => …` (the flat `(acc, k, v)` callback of `map.fold` was removed at dialect epoch 15)"
+            ),
+            "lambda argument".to_string(),
+        ).with_code("E004"));
+        self.current_span = saved;
     }
 
     /// #3469: the fn type of call slot `i` when arg `a` is a bare fn reference
@@ -528,10 +618,13 @@ impl Checker {
                 caller: self.current_fn.as_ref()
                     .filter(|(_, gs)| !gs.is_empty())
                     .map(|(k, _)| *k),
+                call_span: self.call_span_hint.or(self.current_span),
             });
         }
 
         self.check_protocol_bounds(name, &sig, &bindings);
+        // Row 22 (C-436): an `@input_sink`'s input types are judged post-solve.
+        self.defer_input_sink_checks(name, qualified_via_direct.as_deref(), &bindings);
         self.propagate_call_arg_types(name, &sig, CheckedArgs {
             arg_tys, aligned_raw: &aligned_raw, e005_fired: &e005_fired,
         }, &bindings);
@@ -554,7 +647,9 @@ impl Checker {
             let Some(binding) = bindings.get(g) else { continue };
             match bound.cap {
                 Cap::Eq if !Self::sig_keys_on(sig, *g) => {
-                    self.deferred_eq_checks.push((binding.clone(), span, format!("{qualified}()")));
+                    // #4239: the stdlib fn's body compares its parameter structurally.
+                    let in_fn = self.generic_fn_key();
+                    self.deferred_eq_checks.push(super::EqSite { ty: binding.clone(), span, what: format!("{qualified}()"), in_fn, generic_compare: true });
                 }
                 Cap::Eq => {}
                 Cap::Ord => self.deferred_ord_elem_checks.push((binding.clone(), span, qualified.to_string())),
@@ -575,6 +670,14 @@ impl Checker {
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     pub(crate) fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
+            self.report_effect_isolation(name, None);
+        }
+    }
+
+    /// E006 for an `effect` protocol method reached through a protocol bound
+    /// (`x.save()` with `x: T, T: Saver`, #4158). `name` is `Protocol.method`.
+    pub(crate) fn check_effect_isolation_via_bound(&mut self, name: &str) {
+        if !self.env.can_call_effect {
             self.report_effect_isolation(name, None);
         }
     }
@@ -614,7 +717,7 @@ impl Checker {
             None => (msg, format!("call to {}()", name)),
         };
         let mut diag = super::err(msg, hint, context).with_code("E006");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(name), self.current_module_prefix.as_deref()) {
             diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
         }
         self.emit(diag);
@@ -704,6 +807,7 @@ impl Checker {
         &mut self, name: &str, sig: &crate::types::FnSig, concrete_args: &[Ty], bindings: &mut HashMap<Sym, Ty>,
     ) -> Vec<bool> {
         let mut e005_fired: Vec<bool> = Vec::new();
+        let apart = self.caller_letters_apart_from(sig);
         for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
             // Point caret at the exact argument expression for E005
             let saved_span = self.current_span;
@@ -711,20 +815,78 @@ impl Checker {
                 self.current_span = Some(sp);
             }
             let site = ArgSite { fn_name: name, param_name: pname };
-            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, bindings);
+            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, &apart, bindings);
             if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
         self.arg_spans.clear();
         e005_fired
     }
-    /// Verify protocol bounds on generic type parameters. Verbatim text move out of [`Self::check_named_call_with_type_args`].
+    /// Verify protocol bounds on generic type parameters. A parameter whose
+    /// binding is still an open inference var here (`let r: String =
+    /// list.product(list.with_capacity(0))` — `A` is pinned only later, by
+    /// the annotation) is deferred whole: [`Self::validate_deferred_protocol_bounds`]
+    /// judges it post-solve with the same diagnostics. Skipping it outright
+    /// let a non-conforming type pass check and reach ResolveCalls as an
+    /// unresolvable `A.__product` dispatch (#4235).
     fn check_protocol_bounds(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
-        for (tv_name, proto_names) in &sig.protocol_bounds {
-            if let Some(concrete_ty) = bindings.get(tv_name) {
-                let type_name = self.resolve_type_name_for_protocol(concrete_ty);
+        let open: Vec<Sym> = sig.protocol_bounds.keys()
+            .filter(|tv| bindings.get(*tv).is_some_and(|b| is_open_infer_var(&resolve_ty(b, &self.uf))))
+            .copied()
+            .collect();
+        if !open.is_empty() {
+            self.deferred_protocol_bounds.push(DeferredBoundSite {
+                callee: name.to_string(),
+                sig: sig.clone(),
+                bindings: bindings.clone(),
+                tvs: open.clone(),
+                span: self.current_span,
+            });
+        }
+        self.check_protocol_bounds_on(name, sig, bindings, &|tv| !open.contains(&tv));
+    }
+
+    /// Post-solve half of [`Self::check_protocol_bounds`]: each deferred
+    /// parameter, now resolved, gets the call-time check verbatim. One still
+    /// open after the solve is left to inference defaulting, as before.
+    pub(crate) fn validate_deferred_protocol_bounds(&mut self) {
+        let sites = std::mem::take(&mut self.deferred_protocol_bounds);
+        for site in sites {
+            let resolved: HashMap<Sym, Ty> = site.bindings.iter()
+                .map(|(k, v)| (*k, resolve_ty(v, &self.uf)))
+                .collect();
+            let closed: Vec<Sym> = site.tvs.iter()
+                .filter(|tv| resolved.get(*tv).is_some_and(|t| !is_open_infer_var(t)))
+                .copied()
+                .collect();
+            if closed.is_empty() {
+                continue;
+            }
+            let saved_span = std::mem::replace(&mut self.current_span, site.span);
+            self.check_protocol_bounds_on(&site.callee, &site.sig, &resolved, &|tv| closed.contains(&tv));
+            self.current_span = saved_span;
+        }
+    }
+
+    /// The bound checks of [`Self::check_protocol_bounds`], restricted to the
+    /// type parameters `judge` selects.
+    fn check_protocol_bounds_on(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, judge: &dyn Fn(Sym) -> bool) {
+        let mut bounds: Vec<(&Sym, &Vec<Sym>)> = sig.protocol_bounds.iter().collect();
+        bounds.sort_by_key(|(tv, _)| tv.as_str());
+        for (tv_name, proto_names) in bounds {
+            if !judge(*tv_name) {
+                continue;
+            }
+            if let Some(bound_ty) = bindings.get(tv_name) {
+                let concrete_ty = resolve_ty(bound_ty, &self.uf);
+                let type_name = self.resolve_type_name_for_protocol(&concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
+                        // An unknown protocol is reported once, at the bound
+                        // (`enter_generics`), not again at every call.
+                        if !self.env.protocols.contains_key(proto) {
+                            continue;
+                        }
                         let has_proto = self.env.type_protocols
                             .get(&type_name)
                             .map_or(false, |ps| ps.contains(proto));
@@ -736,10 +898,38 @@ impl Checker {
                                 format!("call to {}()", name)));
                         }
                     }
+                } else {
+                    self.check_structural_protocol_bound(name, sig, *tv_name, proto_names, &concrete_ty, bindings);
                 }
             }
         }
-        self.check_protocol_bound_args(name, sig, bindings);
+        self.check_protocol_bound_args(name, sig, bindings, judge);
+    }
+
+    /// A container, tuple or function type has no conformance-table name, but
+    /// it is still concrete: it never conforms to a non-derivable built-in
+    /// protocol (`Numeric`, `Integer`, `Text`), whose conformers are listed
+    /// primitives only. Without this, `list.join(xs: List[Option[Int]], ..)`
+    /// or `list.product([[1.0]])` passed the checker and reached codegen
+    /// with an unresolvable `T.__join` / `A.__product` dispatch.
+    fn check_structural_protocol_bound(&mut self, name: &str, sig: &crate::types::FnSig, tv_name: Sym, proto_names: &[Sym], concrete_ty: &Ty, bindings: &HashMap<Sym, Ty>) {
+        let concrete = resolve_ty(concrete_ty, &self.uf);
+        if !matches!(concrete, Ty::Applied(..) | Ty::Tuple(_) | Ty::Fn { .. }) {
+            return;
+        }
+        for proto in proto_names {
+            let non_derivable_builtin = crate::canonicalize::protocols::builtin_protocol(proto.as_str())
+                .is_some_and(|p| !p.derivable);
+            if !non_derivable_builtin || !self.env.protocols.contains_key(proto) {
+                continue;
+            }
+            let applied = self.display_applied_bound(sig, tv_name, *proto, bindings);
+            let shown = concrete.display();
+            self.emit(super::err(
+                format!("type '{}' does not implement protocol '{}'", shown, applied),
+                format!("'{}' is satisfied only by the types that declare it; pass a value of such a type (for example by mapping each element first)", applied),
+                format!("call to {}()", name)));
+        }
     }
     /// `Repository[User]` for the bound `(tv, proto)` of `sig`, with the
     /// call's bindings substituted — the bare name when the bound is not
@@ -758,10 +948,11 @@ impl Checker {
     /// unifying them also pins a letter only the bound mentions (`K` from
     /// `type UserRepo: Repository[UserId, User]`). No other implementation
     /// is searched for: a conformance with different arguments is a mismatch.
-    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
+    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, judge: &dyn Fn(Sym) -> bool) {
         let mut applied: Vec<(&(Sym, Sym), &Vec<Ty>)> = sig.protocol_bound_args.iter().collect();
         applied.sort_by_key(|((tv, p), _)| (tv.as_str(), p.as_str()));
         for ((tv, proto), want) in applied {
+            if !judge(*tv) { continue; }
             let Some(bound_ty) = bindings.get(tv) else { continue };
             let concrete = resolve_ty(bound_ty, &self.uf);
             let Some(type_name) = self.resolve_type_name_for_protocol(&concrete) else { continue };
@@ -836,13 +1027,22 @@ impl Checker {
                 almide_lang::stdlib_info::is_bundled_module(m) && !user_import
             })
             .unwrap_or(false);
+        // A bare call inside a bundled module's own body names its sibling:
+        // `fs.is_dir` written in fs.almd resolves to `is_dir` (#4022). A
+        // template-dispatched sibling returns its raw `T` there too, as it
+        // does from any other caller.
+        let bundled_sibling = !name.contains('.')
+            && self.in_bundled_module
+            && self.current_module_prefix.as_deref().is_some_and(|m| crate::bundled_sigs::bundled_effect_fn_is_template(m, name));
         // Single-condition decisions (MC/DC ledger): the && chain as its
         // short-circuit-order nested ifs, verbatim.
         if sig.is_effect {
             if !ret.is_result() {
                 if self.env.functions.contains_key(&sym(name)) {
                     if !is_bundled_stdlib_call {
-                        return Ty::result(ret, Ty::String);
+                        if !bundled_sibling {
+                            return Ty::result(ret, Ty::String);
+                        }
                     }
                     // Only a TEMPLATE-dispatched bundled effect fn
                     // (`@intrinsic`, `@inline_rust`, `@wasm_intrinsic`,
@@ -1055,8 +1255,9 @@ impl Checker {
     // rather than a rename.
     fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
         // A spelling a dialect epoch removed: say where it went (or that the
-        // call is deleted), as the ledger records it. No fix-it — the new
-        // spelling needs a dependency and an import, not a rename.
+        // call is deleted), as the ledger records it. The fix-it, when the
+        // rewrite is a pure rename, is attached by the caller
+        // (`removed_spellings::same_shape_rename`).
         if let Some(removal) = crate::removed_spellings::lookup(name) {
             return (crate::removed_spellings::hint(removal), None, None);
         }
@@ -1149,7 +1350,13 @@ impl Checker {
             }
         }
         // `try_replace` (Phase 3): when the hint is a clean rename and the callee's source span is available, emit both a concise `try` and the exact replacement range so `Diagnostic::apply_try_to` can rewrite the source. Rich multi-line snippets (conversion wrappers, operator suggestions) stay display-only via `with_try`.
-        if let Some(rich) = rich_snippet {
+        // A dialect-epoch removal whose ledger rewrite keeps the argument list
+        // (`ffi.address(b)` → `ffi.region(b)`, ADR-0031): the callee rename IS
+        // the edit, so `almide fix` applies it unattended.
+        let removal_rename = crate::removed_spellings::same_shape_rename(name);
+        if let (Some(to), Some(span)) = (&removal_rename, self.callee_span_hint) {
+            diag = diag.with_machine_fix(span.line, span.col, span.end_col, to.clone());
+        } else if let Some(rich) = rich_snippet {
             diag = diag.with_try(rich.to_string());
         } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
             // Almide `Span::end_col` is the column one past the last char (same convention as lexer emit — `end_col = col + token_len`). `apply_try_to` wants the exclusive upper bound, so use `end_col` directly.
@@ -1340,7 +1547,7 @@ impl Checker {
         }
     }
 }
-/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.chars + list.all"`).
+/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.to_list + list.all"`).
 fn is_clean_fn_name(s: &str) -> bool {
     // Single-condition decisions (MC/DC ledger, #566): each guard is its
     // own early return, same short-circuit order.
@@ -1379,6 +1586,16 @@ include!("calls_arg.rs");
 /// then inferred against fresh vars, an ill-typed `+` unified as concat instead
 /// of colliding, and the first complaint arrived at IR verify — past the point
 /// where an E-diagnostic promises that a check-green program builds (#1018).
+/// The parameter list of a lambda argument, through redundant parentheses
+/// (the [`is_lambda_arg`] reading).
+fn lambda_params_mut(a: &mut ast::Expr) -> Option<&mut Vec<ast::LambdaParam>> {
+    match &mut a.kind {
+        ExprKind::Lambda { params, .. } => Some(params),
+        ExprKind::Paren { expr } => lambda_params_mut(expr),
+        _ => None,
+    }
+}
+
 fn is_lambda_arg(a: &ast::Expr) -> bool {
     match &a.kind {
         ExprKind::Lambda { .. } => true,
@@ -1422,12 +1639,11 @@ fn bundled_call_is_lifted(name: &str) -> bool {
 fn argv_reader_hint(name: &str) -> Option<String> {
     let reads_argv = matches!(
         name.split_once('.'),
-        Some(("env" | "process", "args"))
-            | Some(("args", "raw" | "flag" | "option" | "option_or" | "positional" | "positional_at"))
+        Some(("env", "args")) | Some(("args", "has_flag" | "option" | "positional"))
     );
     // The `args` readers have Almide bodies, so their call is a Result
-    // propagated with `!`; `env.args` / `process.args` are runtime templates
-    // that return the list itself.
+    // propagated with `!`; `env.args` is a runtime template that returns the
+    // list itself.
     let call = if name.starts_with("args.") { format!("{name}(..)!") } else { format!("{name}()") };
     reads_argv.then(|| {
         format!(

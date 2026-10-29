@@ -14,7 +14,8 @@
 // quotient rounded to 1.0.
 //
 // So this test compiles the SHIPPED source text itself. `runtime/rs/src/random.rs`
-// is self-contained (`std::cell::Cell` and nothing else), which is what makes
+// is self-contained (`std::cell::Cell`, libc's entropy call, and the prelude's
+// `almide_abort`, stubbed below), which is what makes
 // the include legal here and not a general answer: most of runtime/rs resolves
 // only under the embedder's flat concatenation plus a synthesised prelude, so
 // including another module would not compile. Do not read this file as a
@@ -35,12 +36,28 @@ mod runtime_random {
         "/runtime/rs/src/random.rs"
     ));
 
+    // The emitted prelude's abort, which random.bytes calls on a negative n.
+    fn almide_abort(msg: impl std::fmt::Display) -> ! {
+        panic!("{msg}")
+    }
+
+    // ... and its out-of-memory abort, which random.bytes calls when the
+    // buffer cannot be reserved.
+    fn almide_abort_oom() -> ! {
+        panic!("out of memory")
+    }
+
     // `almide_float_from_u64` is private in the shipped source and stays that
     // way — the emitted crate is one flat module, so a visibility change there
     // is a change to what ships. Inside this module the private item is in
     // scope, so the accessor lives here instead.
     pub fn float_from_u64(r: u64) -> f64 {
         almide_float_from_u64(r)
+    }
+
+    // The per-OS entropy arm, private for the same reason.
+    pub fn os_entropy(chunk: &mut [u8]) -> bool {
+        almide_os_entropy(chunk)
     }
 }
 
@@ -88,11 +105,50 @@ fn the_ends_of_the_u64_range_are_exact() {
 }
 
 /// The public draw stays in range over a large sample. The generator is seeded
-/// from the clock, so this asserts the invariant, not a sequence.
+/// from OS entropy (#4122), so this asserts the invariant, not a sequence.
 #[test]
 fn the_public_draw_stays_in_range() {
     for _ in 0..100_000 {
         let f = runtime_random::almide_rt_random_float();
         assert!((0.0..1.0).contains(&f), "random.float() returned {f}");
     }
+}
+
+/// `random.bytes` (C-394) reads the OS source in 256-byte chunks (getentropy's
+/// limit): the length is exact on both sides of a chunk boundary, the bytes
+/// past the first chunk are drawn too, and two draws differ.
+#[test]
+fn random_bytes_fills_every_chunk() {
+    for n in [0usize, 1, 255, 256, 257, 300, 1024] {
+        assert_eq!(runtime_random::almide_rt_random_bytes(n as i64).len(), n);
+    }
+    let a = runtime_random::almide_rt_random_bytes(600);
+    assert!(a[256..512].iter().any(|&b| b != 0), "second chunk never drawn");
+    assert!(a[512..].iter().any(|&b| b != 0), "third chunk never drawn");
+    assert_ne!(
+        runtime_random::almide_rt_random_bytes(32),
+        runtime_random::almide_rt_random_bytes(32)
+    );
+}
+
+#[test]
+#[should_panic(expected = "random.bytes: negative length -1")]
+fn random_bytes_refuses_a_negative_length() {
+    runtime_random::almide_rt_random_bytes(-1);
+}
+
+/// The OS source itself answers on the host this test runs on. Each OS has its
+/// own `almide_os_entropy` arm (getrandom(2), getentropy(3), BCryptGenRandom),
+/// and a host without one gets the arm that always fails — which is how every
+/// Windows `random.bytes` aborted until it had an arm. CI runs this file on
+/// Linux, macOS and Windows (the `build` job's platform-sensitive set), so an
+/// arm that is missing, mis-linked or answers zeros is a red test on its OS.
+#[test]
+fn the_os_random_source_answers_on_this_host() {
+    let mut a = [0u8; 256];
+    let mut b = [0u8; 256];
+    assert!(runtime_random::os_entropy(&mut a), "the OS random source failed on this host");
+    assert!(runtime_random::os_entropy(&mut b), "the OS random source failed on this host");
+    assert!(a.iter().any(|&x| x != 0), "the OS random source left the buffer zeroed");
+    assert_ne!(a, b, "two 256-byte OS draws were equal");
 }

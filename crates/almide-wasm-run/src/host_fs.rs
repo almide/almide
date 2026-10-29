@@ -31,15 +31,21 @@ impl FsErrSuffix for &str {
         (*self).to_string()
     }
 }
-/// Source-shaped quoting — the twin of `fs.rs`'s `q`. Deliberately not `{:?}`;
-/// see that file for why the escape table is not reproduced.
+/// Source-shaped quoting — the twin of `fs.rs`'s `fs_q`: quotes plus C-418's
+/// control/bidi escapes, the ONE function every leg runs (almide-base's
+/// err_text.rs, #4126). Deliberately not `{:?}`; see fs.rs for why.
 fn q(s: &str) -> String {
-    format!("\"{s}\"")
+    almide_base::err_text::almide_rt_errtext_quote(s)
 }
 /// The Almide call an fs op came from — ONE table with the p1 fs service
 /// (`almide_wasi::fs_op_name`), so the stock-runtime artifact and this host
 /// cannot spell a call two ways (#2090, #2742).
 use crate::wasi::fs_op_name;
+/// Every fs call below goes through `std::fs`'s names in the shared facade:
+/// the plain `std::fs` call without `[permissions] fs`, and beneath the
+/// granted root's held descriptor under it (host_fs_scope.rs, #4084) — the
+/// same core the native runtime's scoped calls run.
+use almide_rt_core::fs_beneath_core::almide_sfs as sfs;
 
 /// Length-prefixed string frames (u32 LE + bytes) — the list-of-strings
 /// result encoding the guest decoder walks.
@@ -97,33 +103,33 @@ fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         Err(m) => err_s(m),
     };
     match op {
-        2 | 15 => unit(std::fs::write(a, b).map_err(|e| io_err(fs_op_name(op), &q(a), e))),
+        2 | 15 => unit(sfs::write(a, b).map_err(|e| io_err(fs_op_name(op), &q(a), e))),
         // write_bytes: b is the guest List[Int] payload — i64 LE slots,
         // low byte each (native `x as u8`).
         3 => {
             let (slots, _) = b.as_chunks::<8>();
             let data: Vec<u8> = slots.iter().map(|c| i64::from_le_bytes(*c) as u8).collect();
-            unit(std::fs::write(a, &data).map_err(|e| io_err(fs_op_name(op), &q(a), e)))
+            unit(sfs::write(a, &data).map_err(|e| io_err(fs_op_name(op), &q(a), e)))
         }
-        7 => unit(std::fs::create_dir_all(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))),
+        7 => unit(sfs::create_dir_all(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))),
         8 => {
             let p = Path::new(a);
-            unit(if p.is_dir() {
-                std::fs::remove_dir(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
+            unit(if sfs::is_dir(p) {
+                sfs::remove_dir(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             } else {
-                std::fs::remove_file(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
+                sfs::remove_file(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             })
         }
         9 => {
             let p = Path::new(a);
-            unit(if p.is_dir() {
-                std::fs::remove_dir_all(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
+            unit(if sfs::is_dir(p) {
+                sfs::remove_dir_all(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             } else {
-                std::fs::remove_file(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
+                sfs::remove_file(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             })
         }
         _ => unit(
-            std::fs::OpenOptions::new()
+            sfs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(a)
@@ -161,27 +167,16 @@ fn stream_line_frames(op: i32, a: &str, bytes: Vec<u8>) -> (i64, Vec<u8>) {
 }
 
 fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
-    use std::path::Path;
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        10 => {
-            let dir = std::env::temp_dir();
-            let name = format!(
-                "{}{}",
-                a,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            );
-            let path = dir.join(&name);
-            match std::fs::create_dir_all(&path).map_err(|e| io_err(fs_op_name(op), &q(&path.to_string_lossy()), e)) {
-                Ok(()) => ok_text(path.to_string_lossy().replace('\\', "/")),
-                Err(m) => err_s(m),
-            }
-        }
-        11 => match std::fs::read_dir(a) {
+        // A new private temp dir under an OS-entropy name, created
+        // exclusively (#4113): native's fs_temp_create.
+        10 => match almide_rt_core::fs_beneath_core::fs_temp_create(a, true) {
+            Ok(p) => ok_text(p),
+            Err((p, e)) => err_s(io_err(fs_op_name(op), &q(&p), e)),
+        },
+        11 => match sfs::read_dir(a) {
             Ok(entries) => {
                 let mut names = Vec::new();
                 for entry in entries {
@@ -201,7 +196,7 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // raw-BYTES reader, and routing them there fed the guest bytes where it
         // decodes length-prefixed frames — `fs.fold_lines` then summed an empty
         // walk and answered 0 instead of 6, silently.
-        12 => match std::fs::read_to_string(a) {
+        12 => match sfs::read_to_string_bounded(a) {
             Ok(t) => {
                 let lines: Vec<String> = t.lines().map(str::to_string).collect();
                 let buf = frames(&lines);
@@ -209,49 +204,45 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
             }
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        51 | 52 => match std::fs::read(a) {
+        51 | 52 => match sfs::read(a) {
             Ok(bytes) => stream_line_frames(op, a, bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        13 => {
-            if Path::new(a).exists() {
-                match std::fs::read_to_string(a) {
-                    Ok(t) => ok_text(t),
-                    Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
-                }
-            } else {
-                (pack(2, 0), Vec::new())
-            }
-        }
-        _ => match std::fs::read(a) {
+        // Absence is the READ's own NotFound, as native classifies it
+        // (C-215): an `exists` pre-check read a symlink loop (ELOOP) or a
+        // file parent (ENOTDIR) as absent where native errs (#4154).
+        13 => match sfs::read_to_string_bounded(a) {
+            Ok(t) => ok_text(t),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        _ => match sfs::read_bounded(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
     }
 }
 
-/// The metadata / host-environment ops (17+) — split for the
+/// The metadata / host-environment ops (19+) — split for the
 /// complexity budget. Bodies verbatim from the native runtime.
 fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
-    use std::path::Path;
     match op {
-        // 62 is fold_lines_chunked's size probe: op 17's body under the
-        // chunked call's name (#2744), native's `metadata` before the workers.
-        17 | 62 => match std::fs::metadata(a) {
+        // 62 is fold_lines_chunked's size probe (#2744), native's `metadata`
+        // before the workers.
+        62 => match sfs::metadata(a) {
             Ok(m) => fs_ok_i64(m.len() as i64),
             Err(e) => fs_err(io_err(fs_op_name(op), &q(a), e)),
         },
-        18 => fs_mtime(op, a),
         19 | 20 => fs_copy_or_rename(op, a, b),
         21 => fs_temp_file(a),
-        22 => (pack(0, usize::from(Path::new(a).is_symlink())), Vec::new()),
+        22 => (pack(0, usize::from(sfs::is_symlink(a))), Vec::new()),
         23 => fs_walk_sorted(a),
         38 => fs_stat(op, a),
         39 => fs_glob(a),
         24 => fs_read_lines(a),
         // 64 is `read_bytes_raw_if_exists`: op 25's body under its own name
         // (#2890).
-        25 | 64 => match std::fs::read(a) {
+        25 | 64 => match sfs::read_bounded(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
             Err(e) => fs_err(io_err(fs_op_name(op), &q(a), e)),
@@ -270,19 +261,8 @@ fn fs_ok_i64(v: i64) -> (i64, Vec<u8>) {
     (pack(0, 8), v.to_le_bytes().to_vec())
 }
 
-/// op 18: the modification time in Unix seconds.
-fn fs_mtime(op: i32, a: &str) -> (i64, Vec<u8>) {
-    match std::fs::metadata(a)
-        .map_err(|e| io_err(fs_op_name(op), &q(a), e))
-        .and_then(|m| m.modified().map_err(|e| io_err(fs_op_name(op), &q(a), e)))
-    {
-        Ok(t) => fs_ok_i64(t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64),
-        Err(m) => fs_err(m),
-    }
-}
-
 fn same_file(a: &str, b: &str) -> bool {
-    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    matches!((sfs::canonicalize(a), sfs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 /// ops 19 / 20: copy / rename `a` to the path in `b`.
@@ -291,15 +271,15 @@ fn fs_copy_or_rename(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     // fs.copy of a directory fails as reading it does (EISDIR, C-215): the
     // twin of runtime/rs/src/fs.rs `almide_rt_fs_copy`.
     let r = if op == 19 {
-        match std::path::Path::new(a).is_dir().then(|| std::fs::read(a)) {
+        match sfs::is_dir(a).then(|| sfs::read(a)) {
             Some(Err(e)) => Err(e),
             // Onto the same file the copy is already done (truncating it
             // first would empty it): the twin of native's `fs_same_file`.
             _ if same_file(a, &to) => Ok(()),
-            _ => std::fs::copy(a, to.as_ref()).map(|_| ()),
+            _ => sfs::copy(a, to.as_ref()).map(|_| ()),
         }
     } else {
-        std::fs::rename(a, to.as_ref())
+        sfs::rename(a, to.as_ref())
     };
     match r {
         Ok(()) => (pack(0, 0), Vec::new()),
@@ -311,7 +291,7 @@ fn fs_copy_or_rename(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
 /// almide_rt_fs_stat field for field (modified = Unix seconds, 0 when the
 /// host cannot say).
 fn fs_stat(op: i32, a: &str) -> (i64, Vec<u8>) {
-    match std::fs::metadata(a) {
+    match sfs::metadata(a) {
         Ok(m) => {
             let modified = m
                 .modified()
@@ -331,7 +311,7 @@ fn fs_stat(op: i32, a: &str) -> (i64, Vec<u8>) {
 
 /// op 24: read a text file as framed lines (none-class on NotFound).
 fn fs_read_lines(path: &str) -> (i64, Vec<u8>) {
-    match std::fs::read_to_string(path) {
+    match sfs::read_to_string_bounded(path) {
         Ok(t) => {
             let lines: Vec<String> = t.lines().map(str::to_string).collect();
             let buf = frames(&lines);
@@ -345,25 +325,15 @@ fn fs_read_lines(path: &str) -> (i64, Vec<u8>) {
     }
 }
 
-/// op 21: create an empty uniquely-named temp file, return its path.
+/// op 21: a new, empty, private temp file under an OS-entropy name,
+/// created exclusively (#4113): native's fs_temp_create.
 fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
-    let name = format!(
-        "{}{}",
-        prefix,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    let path = std::env::temp_dir().join(&name);
-    match std::fs::write(&path, "")
-        .map_err(|e| io_err("fs.create_temp_file", &q(&path.to_string_lossy()), e))
-    {
-        Ok(()) => {
-            let t = path.to_string_lossy().replace('\\', "/");
-            (pack(0, t.len()), t.into_bytes())
+    match almide_rt_core::fs_beneath_core::fs_temp_create(prefix, false) {
+        Ok(t) => (pack(0, t.len()), t.into_bytes()),
+        Err((p, e)) => {
+            let m = io_err("fs.create_temp_file", &q(&p), e);
+            (pack(1, m.len()), m.into_bytes())
         }
-        Err(m) => (pack(1, m.len()), m.into_bytes()),
     }
 }
 
@@ -374,20 +344,13 @@ fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
 /// same list, in the same order, with the same walk errors as native.
 fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
+    // A symlinked directory is an entry, never descended (#4143): the
+    // shared descriptor walk native's glob runs.
     fn walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
-        for entry in
-            std::fs::read_dir(dir).map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?
-        {
-            let entry = entry.map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let rel = if rel_prefix.is_empty() { name } else { format!("{rel_prefix}/{name}") };
-            let path = entry.path();
-            let descend = depth != Some(1) && path.is_dir();
-            out.push(rel.clone());
-            if descend {
-                walk(&path, &rel, depth.map(|d| d - 1), out)?;
-            }
-        }
+        use almide_rt_core::fs_beneath_core::{fs_walk_join, fs_walk_nofollow};
+        let d = dir.to_string_lossy();
+        let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &q(&fs_walk_join(&d, &rel)), e))?;
+        out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{rel_prefix}/{r}") }));
         Ok(())
     }
     fn segs_match(pats: &[&str], segs: &[&str]) -> bool {
@@ -431,10 +394,10 @@ fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
     let pats = &segs[k..];
     let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
     if pats.is_empty() {
-        let hit = !base.is_empty() && Path::new(&base).exists();
+        let hit = !base.is_empty() && sfs::exists(&base);
         return ok_list(if hit { vec![base] } else { Vec::new() });
     }
-    if !base.is_empty() && !Path::new(&base).is_dir() {
+    if !base.is_empty() && !sfs::is_dir(&base) {
         return ok_list(Vec::new());
     }
     let root = if base.is_empty() { "." } else { base.as_str() };
@@ -460,18 +423,13 @@ fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
 
 fn fs_walk_sorted(root: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
+    // A symlink is an entry, never a level (#4143): the shared descriptor
+    // walk native's fs.walk runs.
     fn walk(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
-        for entry in
-            std::fs::read_dir(dir).map_err(|e| io_err("fs.walk", &q(&dir.to_string_lossy()), e))?
-        {
-            let entry =
-                entry.map_err(|e| io_err("fs.walk", &q(&dir.to_string_lossy()), e))?;
-            let path = entry.path();
-            out.push(path.to_string_lossy().replace('\\', "/"));
-            if path.is_dir() {
-                walk(&path, out)?;
-            }
-        }
+        use almide_rt_core::fs_beneath_core::{fs_walk_join, fs_walk_nofollow};
+        let d = dir.to_string_lossy();
+        let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &q(&fs_walk_join(&d, &rel)), e))?;
+        out.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
         Ok(())
     }
     let mut results = Vec::new();
@@ -507,34 +465,34 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         // Decomposed by op family (codopsy cc 38 -> per-family fns): the
         // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
-        43..=50 => fs_dispatch_http(op, a, b),
-        26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
+        // Op 50 (framed raw-bytes http) is retired: no guest emits it.
+        43..=49 => fs_dispatch_http(op, a, b),
+        26 | 27 | 28 | 29 | 33 | 37 | 77 => fs_dispatch_env(op, a, b),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
-        32 => {
-            let n = b.len();
-            let mut seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64
-                | 1;
-            let mut out = Vec::with_capacity(n);
-            for _ in 0..n {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                out.push(seed as u8);
-            }
-            (pack(0, out.len()), out)
-        }
+        32 => fs_entropy(b.len()),
         _ => err_s(format!("unknown fs op {op}")),
     }
 }
 
-/// The http op family (43..=50) of `fs_dispatch_host`, verbatim.
+/// op 32 (`prim.random_get`, #4122): `n` bytes from the OS CSPRNG
+/// (getrandom(2) on Linux, getentropy(3) on macOS), the source the stock
+/// wasm leg's WASI `random_get` and native `random.*` draw from. A clock-seeded
+/// generator reseeded per call answered the SAME bytes to every call inside
+/// one clock tick. An OS entropy failure is a host fault, not a guest value:
+/// it aborts the run instead of handing out predictable bytes.
+fn fs_entropy(n: usize) -> (i64, Vec<u8>) {
+    let mut out = vec![0u8; n];
+    if let Err(e) = getrandom::fill(&mut out) {
+        panic!("random: the OS entropy source failed: {e}");
+    }
+    (pack(0, out.len()), out)
+}
+
+/// The http op family (43..=49) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_http(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
-        48..=50 => fs_http_framed(op, a, b),
+        48 | 49 => fs_http_framed(op, a, b),
         43..=47 => fs_http_plain(op, a, b),
         // env.set (#1423 bucket C ruling): key in a, value in b.
         _ => fs_err(format!("unknown fs op {op}")),
@@ -565,11 +523,11 @@ fn fs_http_plain(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     fs_text_or_err(almide_rt_core::http_client_core::request(method, a, &body, &[]))
 }
 
-/// The framed request family (#1710 increment 3, ops 48..=50): url in a, the
+/// The framed request family (#1710 increment 3, ops 48..=49): url in a, the
 /// decimal CHAR-length frame in b — method cell, body cell, then header
 /// key/value cells, `<len>\n<payload>` each, exactly as
 /// stdlib/http_framed.almd builds it. 48 answers the body text, 49 answers
-/// `<status>\n<body>`, 50 raw bytes.
+/// `<status>\n<body>`. Op 50 (raw bytes) is retired.
 fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use almide_rt_core::http_client_core as client;
     let frame = String::from_utf8_lossy(b).to_string();
@@ -579,15 +537,11 @@ fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     };
     match op {
         48 => fs_text_or_err(client::request(&method, a, &body, &headers)),
-        49 => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
-        _ => match client::request_bytes(&method, a, &body, &headers) {
-            Ok(bytes) => (pack(0, bytes.len()), bytes),
-            Err(m) => fs_err(m),
-        },
+        _ => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
     }
 }
 
-/// The env op family (26/27/28/29/33/37) of `fs_dispatch_host`, verbatim.
+/// The env op family (26/27/28/29/33/37/77) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
@@ -596,7 +550,10 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // process-level setenv makes a later get observe the set, and the
         // overlay reproduces that observable without std::env::set_var
         // (unsafe under threads — the wasmtime host runs multi-threaded).
+        // `env.remove`'s mark (#3908) is an overlay entry with the value
+        // NUL — the one value `env.set` refuses — and reads as unset.
         26 => match with_env_overlay(|o| o.get(a).cloned()) {
+            Some(v) if v == "\0" => (pack(2, 0), Vec::new()),
             Some(v) => ok_text(v),
             None => match std::env::var(a) {
                 Ok(v) => ok_text(v),
@@ -608,16 +565,30 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // (http_client.rs), so error texts and framing match native
         // byte-for-byte. Stock artifacts never reach here (the build-path
         // op audit refuses unserved ops); the embedded lane serves them.
-        // The framed request family (#1710 increment 3, ops 48..=50):
+        // The framed request family (#1710 increment 3, ops 48..=49):
         // url in a, the decimal CHAR-length frame in b — method cell,
         // body cell, then header key/value cells, `<len>\n<payload>`
         // each, exactly as stdlib/http_framed.almd builds it. 48 answers
-        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
+        // the body text, 49 answers `<status>\n<body>`; 50 is retired.
         // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();
             with_env_overlay(|o| o.insert(a.to_string(), v));
             (pack(0, 0), Vec::new())
+        }
+        // env.vars' leaf (#3908): `name=value` frames, the process
+        // environment first and the overlay's entries (sets and remove
+        // marks) after, by name so the answer is the same run to run. The
+        // guest's Almide body lets the later entry win, as on the stock legs.
+        77 => {
+            let mut entries: Vec<String> = std::env::vars_os()
+                .filter_map(|(k, v)| Some(format!("{}={}", k.into_string().ok()?, v.into_string().ok()?)))
+                .collect();
+            let mut overlay: Vec<String> = with_env_overlay(|o| o.iter().map(|(k, v)| format!("{k}={v}")).collect());
+            overlay.sort();
+            entries.extend(overlay);
+            let buf = frames(&entries);
+            (pack(0, buf.len()), buf)
         }
         27 => ok_text(std::env::consts::OS.to_string()),
         28 => ok_text(std::env::temp_dir().to_string_lossy().replace('\\', "/")),
@@ -643,8 +614,35 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     }
 }
 
+/// The rooted family's descriptor ops 120..=125 (#4084): `a` is
+/// `<root>\0<segments>`; the shared core (`almide_rt_core::fs_beneath_core`,
+/// which native includes) walks from the root without following a symlink.
+/// An io error names the plain call and `<root>/<segments>`, as native's.
+fn fs_dispatch_root(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    use almide_rt_core::fs_beneath_core as fb;
+    let (dir, rel) = a.split_once('\0').unwrap_or((a, ""));
+    let fail = |e: fb::FsBeneathError| match e {
+        fb::FsBeneathError::Escape => fs_err(fb::FS_BENEATH_ESCAPE.to_string()),
+        fb::FsBeneathError::Io(e) => fs_err(io_err(fs_op_name(op), &q(&fb::fs_beneath_joined(dir, rel)), e)),
+    };
+    let unit = |r: Result<(), fb::FsBeneathError>| r.map_or_else(fail, |()| (pack(0, 0), Vec::new()));
+    match op {
+        120 => fb::fs_beneath_read_text(dir, rel).map_or_else(fail, |t| (pack(0, t.len()), t.into_bytes())),
+        121 => fb::fs_beneath_read(dir, rel).map_or_else(fail, |v| (pack(0, v.len()), v)),
+        122 => fb::fs_beneath_list(dir, rel).map_or_else(fail, |names| {
+            let buf = frames(&names);
+            (pack(0, buf.len()), buf)
+        }),
+        123 => fb::fs_beneath_exists(dir, rel).map_or_else(fail, |e| (pack(0, usize::from(e)), if e { vec![1] } else { Vec::new() })),
+        124 => unit(fb::fs_beneath_write(dir, rel, b)),
+        _ => unit(fb::fs_beneath_remove(dir, rel)),
+    }
+}
+
 fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
-    use std::path::Path;
+    if (120..=125).contains(&op) {
+        return fs_dispatch_root(op, a, b);
+    }
     // The fan prefetch pair (#1628 increment 2b). The guest re-sends the
     // path at await, so the sequential host needs NO slot state: start is
     // a no-op and await IS the read — byte-identical to sequential fan.
@@ -673,7 +671,7 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        1 => match std::fs::read_to_string(a) {
+        1 => match sfs::read_to_string_bounded(a) {
             Ok(t) => ok_text(t),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
@@ -682,13 +680,13 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // the byte ranges and validates UTF-8 only in what it reads, as
         // native's per-line `read_line` does (#3758) — a whole-file decode
         // here failed ranges whose own lines are valid.
-        61 => match std::fs::read(a) {
+        61 => match sfs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),
-        5 => (pack(0, usize::from(Path::new(a).is_dir())), Vec::new()),
-        6 => (pack(0, usize::from(Path::new(a).is_file())), Vec::new()),
+        4 => (pack(0, usize::from(sfs::exists(a))), Vec::new()),
+        5 => (pack(0, usize::from(sfs::is_dir(a))), Vec::new()),
+        6 => (pack(0, usize::from(sfs::is_file(a))), Vec::new()),
         _ => err_s(format!("unknown fs op {op}")),
     }
 }

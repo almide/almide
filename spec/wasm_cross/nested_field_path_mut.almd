@@ -1,8 +1,8 @@
 // @contract: C-226, C-033
 // #2933: the mut stdlib forms through a record field path TWO or more levels
 // deep — `list.push(doc.root.trace, t)`, `list.pop(h.mid.inner.xs)`,
-// `list.clear`, `string.push` / `string.clear`, `map.insert` /
-// `map.delete` — on a record var and on a `mut` record parameter. Each op
+// `list.clear`, `string.push` / `string.clear`, `map.set` /
+// `map.remove` rebinds — on a record var and on a `mut` record parameter. Each op
 // is the copy-on-write field write at every level (#2411 / #2908's one-level
 // route): a copy of any level bound before the op keeps its old contents
 // (C-033), and the loop is long enough that a leaked record or temporary
@@ -35,9 +35,9 @@ fn drain(mut doc: Doc) -> Int = {
 fn step(mut doc: Doc, i: Int) -> Unit = {
   list.push(doc.root.inner.xs, i)
   list.push(doc.root.inner.ss, "s" + int.to_string(i))
-  list.push(doc.root.inner.fs, int.to_float(i) / 2.0)
+  list.push(doc.root.inner.fs, float.from(i) / 2.0)
   list.push(doc.root.inner.ps, { name: "p" + int.to_string(i), w: 1.5 })
-  map.insert(doc.root.inner.m, "k" + int.to_string(i % 7), i)
+  doc.root.inner.m = map.set(doc.root.inner.m, "k" + int.to_string(i % 7), i)
   string.push(doc.root.inner.s, int.to_string(i % 10))
   ()
 }
@@ -79,7 +79,7 @@ effect fn main() -> Unit = {
       string.clear(doc.root.inner.s)
     } else ()
     if i % 250 == 0 then {
-      map.delete(doc.root.inner.m, "k3")
+      doc.root.inner.m = map.remove(doc.root.inner.m, "k3")
       snaps = snaps + [before]
     } else ()
   }

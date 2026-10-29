@@ -46,6 +46,32 @@ writes the response head. A stock artifact from `almide build --target wasm`
 has no listening socket, so `build` and `check --target wasm` still refuse
 `http.serve` (E081); #2659 tracks that.
 
+## What the embedded host grants (it is not a sandbox)
+
+`almide run --target wasm` runs a program with the authority of the user who
+runs it, as the native binary does. Wasm bounds the guest's own memory
+accesses; it does not, on this host, bound what the guest may ask the host to
+do. Do not run untrusted code with it expecting isolation.
+
+| Lane | When | Files | Environment | Other host access | Memory |
+|---|---|---|---|---|---|
+| core module (`almide.*` imports, `crates/almide-wasm-run/src/host.rs`) | most programs | the whole host filesystem with the user's permissions: the fs ops run the native file calls on the path the guest passes, with no preopen scoping | the process environment (read; `env.set` writes a per-run overlay, not the process) | process spawn, tcp / unix sockets, shared memory, http client and server, stdin, the clocks, all as native | ONE budget per run across the run's instance, its `fan` worker instances and a `testing.assert_aborts` child (#4135): the test harness's cap when it names one, otherwise the least of 4 GiB (the wasm32 address space), the host's cgroup memory limit and its physical memory, read from the environment (C-197) |
+| p3 component (`crates/almide-wasm-run/src/component_host.rs`) | programs whose host ops the core lane serves only through WASI 0.3 (the http client family, ADR-0023 step 7) | `/` preopened **read-write**: the whole host filesystem | inherited in full, plus `ALMIDE_CWD` | stdio inherited; wasi:http through native's client; wasi:sockets as wasmtime-wasi provides | no store limit beyond wasm32's 4 GiB per memory |
+
+Both lanes match native's authority on purpose: a program behaves the same on
+either target (the contract ledger), and native has no sandbox either. The
+stock artifact is different: `almide build --target wasm` writes a module that
+gets only what its runtime grants, for example `wasmtime run --dir=<dir>`.
+Scoping the embedded host's file access to granted directories, and no longer
+preopening `/`, is #4022. Until that lands, this table is the isolation level.
+
+On the core-module lane, a guest pointer or length that falls outside the
+guest's memory is a trap of that guest (`Error: wasm trap: out of bounds memory
+access`, exit 1). It is never a host panic, and the host never allocates a
+buffer sized by the forged length (#4135). On the component lane the canonical
+ABI in wasmtime checks the same spans. Host output is written as the guest's bytes, never re-encoded
+(C-399).
+
 The authoritative references are:
 
 - **Architecture** — [docs/ARCHITECTURE.md](../ARCHITECTURE.md) (compiler pipeline,

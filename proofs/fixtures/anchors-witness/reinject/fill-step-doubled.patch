@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/ranges.rs b/crates/almide-wasm/src/ranges.rs
+index 286af1c94..27a28cab7 100644
+--- a/crates/almide-wasm/src/ranges.rs
++++ b/crates/almide-wasm/src/ranges.rs
+@@ -197,7 +197,7 @@ impl crate::emitter::Emitter<'_> {
+                         memory_index: 0,
+                     });
+                     i.local_get(hs).i64_const(1).i64_add().local_set(hs);
+-                    i.local_get(hc).i32_const(STEP).i32_add().local_set(hc);
++                    i.local_get(hc).i32_const(STEP * 2).i32_add().local_set(hc);
+                     i.local_get(hd).i64_const(1).i64_sub().local_set(hd);
+                     i.br(0);
+                     i.end();

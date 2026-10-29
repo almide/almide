@@ -58,7 +58,7 @@ fn run_client(port: u16) -> (i32, String) {
         r#"import http
 
 effect fn main() -> Unit = {{
-  match http.request("GET", "http://127.0.0.1:{port}/", "", map.new()) {{
+  match http.request("GET", "http://127.0.0.1:{port}/", "", []) {{
     ok(resp) => println("OK ${{int.to_string(string.len(resp))}}"),
     err(e) => println("ERR ${{e}}"),
   }}

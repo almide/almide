@@ -108,7 +108,7 @@ fn inert(e: &IrExpr) -> bool {
 /// A match whose subject reads the var is not seen through: its bindings
 /// are views into that block, which an in-place write would change under
 /// them.
-fn tail_consumed_reads<'e>(e: &'e IrExpr, subjects: &mut Vec<&'e IrExpr>, out: &mut Vec<&'e IrExpr>) {
+pub(crate) fn tail_consumed_reads<'e>(e: &'e IrExpr, subjects: &mut Vec<&'e IrExpr>, out: &mut Vec<&'e IrExpr>) {
     match &e.kind {
         // A temp-bound concat (#3530) is judged as a whole, before its tail.
         IrExprKind::Block { expr: Some(t), .. } => match crate::concat_dying::concat_read(e) {
@@ -227,6 +227,15 @@ fn member_reads(fields: &[(almide_base::intern::Sym, IrExpr)], b: VarId, f: almi
     impl IrVisitor for Find {
         fn visit_expr(&mut self, e: &IrExpr) {
             let owning = self.owning.contains(&key(e));
+            // #4261: an append in an owning position consumes its moved
+            // left operand (concat_dying.rs `try_concat_taken`), so the
+            // `b.f` of `b.f + s` / `b.f + [x]` is an owning read too.
+            if owning
+                && let Some(left) = crate::concat_dying::taken_append_left(e, self.b)
+                && matches!(&left.kind, IrExprKind::Member { field, .. } if *field == self.f)
+            {
+                self.owning.insert(key(left));
+            }
             match &e.kind {
                 IrExprKind::Member { object, field }
                     if *field == self.f && matches!(&object.kind, IrExprKind::Var { id } if *id == self.b) =>

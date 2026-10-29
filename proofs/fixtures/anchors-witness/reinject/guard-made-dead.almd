@@ -1,0 +1,9 @@
+// #4011 (d) drill: the read's bounds compare is replaced by a constant
+// false while its recording call stays — the bounds witness still reads
+// `c0 a0` and the proven checker accepts it; only the bytes show the guard
+// can never fire.
+fn pick(xs: List[Int], i: Int) -> Int = xs[i]
+
+effect fn main() -> Unit = {
+  println("${pick([1, 2, 3], 1)}")
+}

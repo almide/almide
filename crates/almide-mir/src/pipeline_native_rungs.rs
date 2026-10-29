@@ -319,6 +319,15 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
 include!("pipeline_native_concurrency.rs");
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    try_render_rust_source_certified(source).map(|(rust, _)| rust)
+}
+
+/// [`try_render_rust_source`] with the ownership certificate of EVERY
+/// function it rendered (#4006): the certificates are taken from the exact
+/// MIR handed to the renderer — after the probe charges, the result-window
+/// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
+/// the functions the Rust source was rendered from, not a sibling lowering.
+pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
     if almide_base::env::flag("ALMIDE_DUMP_MIR") {
@@ -341,12 +350,31 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             "native: multi-module program — outside rung 1".into(),
         ));
     }
-    if !ir.top_lets.is_empty() {
+    // #4006: an immutable top-level `let` lowers the way the witness path
+    // threads it — each reference materializes the CONST initializer
+    // (`value_or_global`), and a computed one walls in the lowering. A
+    // mutable `var` lives in a storage slot the native render has no
+    // address for, so it walls here.
+    if ir.top_lets.iter().any(|tl| tl.mutable) {
         return Err(LowerError::Unsupported(
-            "native: top-level lets — outside rung 1".into(),
+            "native: a mutable top-level var — outside the native rungs".into(),
         ));
     }
-    let globals = std::collections::HashMap::new();
+    // Top-level lets are evaluated EAGERLY, at program start, before `main`
+    // (top_let_div_eager: an unused `let X = 1 / 0` aborts). Materializing at
+    // each use is lazy, so it is only faithful for an initializer that can
+    // neither fail nor be observed: literals, other top-level lets, and
+    // operators that cannot abort (no integer `/`, `%` or `^`, no call).
+    let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
+    if let Some(tl) = ir.top_lets.iter().find(|tl| !total_const_init(&tl.value, &top_vars)) {
+        return Err(LowerError::at(
+            tl.value.span,
+            "native: a top-level let whose initializer can fail or calls — it must run eagerly, before main",
+        ));
+    }
+    let globals: std::collections::HashMap<_, _> = ir.top_lets.iter().map(|tl| (tl.var, tl.ty.clone())).collect();
+    let global_inits: std::collections::HashMap<_, _> =
+        ir.top_lets.iter().map(|tl| (tl.var, tl.value.clone())).collect();
     let mut functions = Vec::new();
     for func in &ir.functions {
         if func.is_test {
@@ -358,7 +386,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         let all = crate::lower::lower_function_all_with_globals(
             func,
             &globals,
-            &std::collections::HashMap::new(),
+            &global_inits,
             &record_layouts,
             &variant_layouts,
         )
@@ -398,7 +426,8 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
-    crate::render_native::try_render_native_program(
+    let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
+    let rust = crate::render_native::try_render_native_program(
         &MirProgram {
             functions,
             exports: Vec::new(),
@@ -406,7 +435,8 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             mutable_global_count: 0,
         },
         &sigs,
-    )
+    )?;
+    Ok((rust, certs))
 }
 
 
@@ -464,4 +494,22 @@ pub fn lowered_functions(source: &str) -> Result<Vec<crate::MirFunction>, LowerE
         out.extend(all);
     }
     Ok(out)
+}
+
+/// An initializer whose value does not depend on WHEN it is evaluated: no
+/// call, and no operator that can abort (#4006, the top-level-let rule).
+fn total_const_init(e: &almide_ir::IrExpr, top_vars: &std::collections::HashSet<almide_ir::VarId>) -> bool {
+    use almide_ir::{BinOp, IrExprKind};
+    match &e.kind {
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } => true,
+        IrExprKind::Var { id } => top_vars.contains(id),
+        IrExprKind::UnOp { operand, .. } => total_const_init(operand, top_vars),
+        IrExprKind::BinOp { op, left, right } => {
+            !matches!(op, BinOp::DivInt | BinOp::ModInt | BinOp::PowInt)
+                && total_const_init(left, top_vars)
+                && total_const_init(right, top_vars)
+        }
+        IrExprKind::List { elements } => elements.iter().all(|x| total_const_init(x, top_vars)),
+        _ => false,
+    }
 }

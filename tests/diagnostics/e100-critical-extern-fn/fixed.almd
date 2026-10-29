@@ -1,0 +1,4 @@
+// The same function in Almide.
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn main() -> Unit = println(int.to_string(imax(1, 2)))

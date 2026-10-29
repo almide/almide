@@ -56,7 +56,7 @@ SHAPES = {
     "map_int": dict(
         decl="", ann="Map[String, Int]",
         val='map.from_list([("a", 1), ("b", 2)])', val2='map.from_list([("a", 1)])',
-        show='int.to_string(map.get_or({v}, "a", 0 - 1) * 10 + map.len({v}))',
+        show='int.to_string((map.get({v}, "a") ?? (0 - 1)) * 10 + map.len({v}))',
     ),
     "tuple2": dict(
         decl="", ann="(Int, String)",

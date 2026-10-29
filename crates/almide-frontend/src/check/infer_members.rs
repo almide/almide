@@ -29,11 +29,247 @@ impl Checker {
         }
         let obj_ty = self.infer_expr(object);
         let concrete = resolve_ty(&obj_ty, &self.uf);
+        self.reject_foreign_opaque_record(&concrete, &format!("read field '{}' of", field));
         let field_ty = self.resolve_field_type(&concrete, field);
         if matches!(field_ty, Ty::Unknown) {
             self.report_unknown_member(object, field, &concrete, member_span);
         }
         field_ty
+    }
+
+    /// E033 (#4107): `ty` is a bundled module's `mod type` record and this
+    /// code is outside that module — the type is opaque here, so `doing` (a
+    /// field read, a literal) is refused and the module's own fns named.
+    pub(crate) fn reject_foreign_opaque_record(&mut self, ty: &Ty, doing: &str) {
+        let Some((bare, owner)) = self.foreign_opaque_record(ty) else { return };
+        let msg = format!("cannot {} opaque type '{}' outside its module '{}'", doing, bare, owner);
+        self.emit_opaque_e033(msg, &bare, owner);
+    }
+
+    /// `(bare name, owning module)` when `ty` is a bundled module's `mod
+    /// type` record and this code is outside that module (#4107) — read
+    /// through every alias link, never off the spelling.
+    pub(crate) fn foreign_opaque_record(&self, ty: &Ty) -> Option<(String, Sym)> {
+        let Ty::Named(n, _) = ty else { return None };
+        // The type it NAMES, not its spelling: `type Mine = Secret[Int]` (an
+        // alias at any depth, any instantiation, in any module) is the
+        // opaque type itself, so the boundary reads through every alias link.
+        let n = &self.opaque_check_target(*n);
+        let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str()).to_string();
+        if let Some(found) = self.foreign_user_opaque_record(*n, &bare) {
+            return found;
+        }
+        let owner = self.env.opaque_records.get(&sym(&bare)).copied()?;
+        // Only the bundled module's own type: its bare key or `owner.T`. A user
+        // type of the same name (`m.Secret`, an in-package or dependency module
+        // named after the stdlib one) is that module's own record (#2843).
+        if n.as_str() != bare && n.as_str() != format!("{owner}.{bare}") {
+            return None;
+        }
+        if self.current_module_prefix.as_deref() == Some(owner.as_str()) {
+            return None;
+        }
+        Some((bare, owner))
+    }
+
+    /// A user module's `mod type` / `local type` record (#4241): `Some(None)`
+    /// when `n` is one and this code is inside its visibility, `Some(Some(..))`
+    /// when it is foreign here, `None` when `n` is no user opaque record. A
+    /// `mod type` is visible to its whole PROJECT (the same package rule as
+    /// `mod fn`, `check_fn_visibility`), a `local type` to its file.
+    fn foreign_user_opaque_record(&self, n: Sym, bare: &str) -> Option<Option<(String, Sym)>> {
+        let (owner, vis) = match self.env.opaque_user_records.get(&n) {
+            Some(found) => *found,
+            // A bare spelling of a module's type (dual-registered for
+            // unqualified access): the one user opaque record of that name.
+            None if !n.as_str().contains('.') && self.env.prefixed_bare_aliases.contains(&n) => {
+                // Inside a module that declares its own type of this name the
+                // bare spelling names that one (the bundled `heap` reading its
+                // `Heap` beside a user module's `Heap`), never the user record.
+                if let Some(c) = self.current_module_prefix.as_deref()
+                    && (self.env.opaque_records.get(&n).is_some_and(|o| o.as_str() == c)
+                        || self.env.types.contains_key(&sym(&format!("{c}.{bare}"))))
+                    && !self.env.opaque_user_records.contains_key(&sym(&format!("{c}.{bare}")))
+                {
+                    return None;
+                }
+                let mut hits = self.env.opaque_user_records.iter()
+                    .filter(|(k, _)| k.as_str().rsplit('.').next() == Some(bare));
+                let first = hits.next()?;
+                if hits.next().is_some() {
+                    return None;
+                }
+                *first.1
+            }
+            None => return None,
+        };
+        let caller = self.current_module_prefix.clone();
+        let pkg_of = |m: Option<&str>| -> String {
+            let Some(m) = m else { return String::new() };
+            if let Some((root, _)) = m.split_once('.') {
+                return root.to_string();
+            }
+            if self.env.dep_root_modules.contains(&sym(m)) { m.to_string() } else { String::new() }
+        };
+        let inside = match vis {
+            crate::ast::Visibility::Public => true,
+            crate::ast::Visibility::Local => caller.as_deref() == Some(owner.as_str()),
+            crate::ast::Visibility::Mod => pkg_of(caller.as_deref()) == pkg_of(Some(owner.as_str())),
+        };
+        Some(if inside { None } else { Some((bare.to_string(), owner)) })
+    }
+
+    /// Where a value of `actual` fills an `expected` slot, the foreign
+    /// opaque record that would cross its boundary STRUCTURALLY, at any
+    /// depth: an opaque record against a structural record, an open row or
+    /// another nominal type. `Some((opaque type, reading))` — `reading` when
+    /// the opaque value flows OUT into the other shape (its fields become
+    /// readable), else a foreign shape flows IN as the opaque type (a forge).
+    /// The same opaque type (through any alias), a type variable and
+    /// `Unknown` never cross.
+    pub(crate) fn opaque_crossing(&self, expected: &Ty, actual: &Ty) -> Option<(Ty, bool)> {
+        self.opaque_crossing_at(expected, actual, 0)
+    }
+
+    fn opaque_crossing_at(&self, expected: &Ty, actual: &Ty, depth: usize) -> Option<(Ty, bool)> {
+        if depth > 32 {
+            return None;
+        }
+        let e = resolve_ty(expected, &self.uf);
+        let a = resolve_ty(actual, &self.uf);
+        let open = |t: &Ty| matches!(t, Ty::TypeVar(_) | Ty::Unknown);
+        let fo_e = self.foreign_opaque_record(&e);
+        let fo_a = self.foreign_opaque_record(&a);
+        if fo_e.is_some() || fo_a.is_some() {
+            if open(&e) || open(&a) {
+                return None;
+            }
+            let same = matches!((&e, &a), (Ty::Named(ne, _), Ty::Named(na, _))
+                if self.opaque_check_target(*ne) == self.opaque_check_target(*na)
+                    || fo_e.as_ref().zip(fo_a.as_ref()).is_some_and(|(x, y)| x == y));
+            // Only a record shape on the other side crosses: an `Int` slot
+            // is an ordinary mismatch, reported as one.
+            let other = if fo_a.is_some() { &e } else { &a };
+            let record_shaped = |t: &Ty| matches!(t, Ty::Record { .. } | Ty::OpenRecord { .. });
+            let other_is_record = record_shaped(other)
+                || (matches!(other, Ty::Named(..)) && record_shaped(&self.env.resolve_named(other)));
+            if !same && other_is_record {
+                return Some(if fo_a.is_some() { (a.clone(), true) } else { (e.clone(), false) });
+            }
+        }
+        let next = depth + 1;
+        match (&e, &a) {
+            (Ty::Named(ne, ea), Ty::Named(na, aa)) if ne == na && ea.len() == aa.len() => {
+                ea.iter().zip(aa.iter()).find_map(|(x, y)| self.opaque_crossing_at(x, y, next))
+            }
+            (Ty::Applied(ei, ea), Ty::Applied(ai, aa)) if ei == ai && ea.len() == aa.len() => {
+                ea.iter().zip(aa.iter()).find_map(|(x, y)| self.opaque_crossing_at(x, y, next))
+            }
+            (Ty::Tuple(ea), Ty::Tuple(aa))
+                if ea.len() == aa.len() =>
+            {
+                ea.iter().zip(aa.iter()).find_map(|(x, y)| self.opaque_crossing_at(x, y, next))
+            }
+            (Ty::Fn { params: ep, ret: er, .. }, Ty::Fn { params: ap, ret: ar, .. }) if ep.len() == ap.len() => {
+                // A fn slot's parameters flow the other way: the slot's
+                // caller hands its values to the value's parameters.
+                ep.iter().zip(ap.iter()).find_map(|(x, y)| self.opaque_crossing_at(y, x, next))
+                    .or_else(|| self.opaque_crossing_at(er, ar, next))
+            }
+            (Ty::Record { fields: ef } | Ty::OpenRecord { fields: ef }, Ty::Record { fields: af } | Ty::OpenRecord { fields: af }) => {
+                ef.iter().find_map(|(n, et)| af.iter().find(|(m, _)| m == n).and_then(|(_, at)| self.opaque_crossing_at(et, at, next)))
+            }
+            _ => None,
+        }
+    }
+
+    /// The E033 for an [`Self::opaque_crossing`].
+    pub(crate) fn reject_opaque_crossing(&mut self, opaque: &Ty, reading: bool) {
+        let Some((bare, owner)) = self.foreign_opaque_record(opaque) else { return };
+        let msg = if reading {
+            format!("cannot use opaque type '{}' as another record type outside its module '{}'", bare, owner)
+        } else {
+            format!("cannot use another record type as opaque type '{}' outside its module '{}'", bare, owner)
+        };
+        self.emit_opaque_e033(msg, &bare, owner);
+    }
+
+    fn emit_opaque_e033(&mut self, msg: String, bare: &str, owner: Sym) {
+        let line = self.current_span.map(|s| s.line);
+        if self.diagnostics.iter().any(|d| d.message == msg && d.line == line) {
+            return;
+        }
+        let named = self.opaque_entry_fns(owner.as_str(), bare);
+        let hint = if named.is_empty() {
+            format!("'{}' is opaque outside `{}`: build and read it through that module's public API", bare, owner)
+        } else {
+            let list: Vec<String> = named.iter().map(|f| format!("`{owner}.{f}`")).collect();
+            format!("'{}' is opaque: build and read it with the `{}` module's fns ({})", bare, owner, list.join(", "))
+        };
+        self.emit(super::err(msg, hint, format!("opaque type {}", bare)).with_code("E033"));
+    }
+
+    /// The fns an E033 hint names, read off the owner module's signatures
+    /// rather than spelled per type (#4256): the builder with the fewest
+    /// parameters, then a one-parameter reader that answers the type's
+    /// content (a list of its type argument, else the argument) when exactly
+    /// one fn does — `secret.new` / `secret.reveal`, `heap.new` /
+    /// `heap.to_list`. Builder ties go to the name.
+    fn opaque_entry_fns(&self, owner: &str, bare: &str) -> Vec<String> {
+        let qualified = format!("{owner}.{bare}");
+        let is_it = |t: &Ty| matches!(t, Ty::Named(n, _) if n.as_str() == bare || n.as_str() == qualified);
+        let prefix = format!("{owner}.");
+        let mut fns: Vec<(&str, &almide_lang::types::FnSig)> = self
+            .env
+            .functions
+            .iter()
+            .filter_map(|(k, sig)| {
+                let name = k.as_str().strip_prefix(prefix.as_str())?;
+                (!name.contains('.') && !name.starts_with("__")).then_some((name, sig))
+            })
+            .collect();
+        fns.sort_by(|a, b| a.0.cmp(b.0));
+        let builder = fns
+            .iter()
+            .filter(|(_, sig)| is_it(&sig.ret) && !sig.params.iter().any(|(_, t)| is_it(t)))
+            .min_by_key(|(name, sig)| (sig.params.len(), *name));
+        // 0 = answers a list of the content (the whole of it), 1 = the
+        // content itself; a list reader is preferred.
+        let reads = |sig: &almide_lang::types::FnSig| -> Option<u8> {
+            let [(_, p @ Ty::Named(_, args))] = sig.params.as_slice() else { return None };
+            let a = args.first().filter(|_| is_it(p))?;
+            match &sig.ret {
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e) if e.first() == Some(a) => Some(0),
+                r if r == a => Some(1),
+                _ => None,
+            }
+        };
+        // The best rank's reader, named only when it is the one fn of that
+        // rank: two list readers (`deque.to_list` / `deque.sort`) leave the
+        // signatures no way to tell which reads the content as it is.
+        let ranked: Vec<(u8, &(&str, &almide_lang::types::FnSig))> =
+            fns.iter().filter_map(|f| reads(f.1).map(|rank| (rank, f))).collect();
+        let best = ranked.iter().map(|(rank, _)| *rank).min();
+        let top: Vec<_> = ranked.iter().filter(|(rank, _)| Some(*rank) == best).collect();
+        let reader = match top.as_slice() {
+            [(_, f)] => Some(*f),
+            _ => None,
+        };
+        builder.into_iter().chain(reader).map(|(name, _)| name.to_string()).collect()
+    }
+
+    /// The declaration a type name finally denotes: follows transparent alias
+    /// links (`type A = B[..]`) whatever their generic arguments, stopping at
+    /// a self-named newtype identity or a non-alias declaration.
+    fn opaque_check_target(&self, n: Sym) -> Sym {
+        let mut cur = n;
+        for _ in 0..16 {
+            match self.env.types.get(&cur) {
+                Some(Ty::Named(next, _)) if *next != cur => cur = *next,
+                _ => break,
+            }
+        }
+        cur
     }
 
     /// Resolve `mod.name` where `mod` names a module rather than a value.
@@ -50,6 +286,7 @@ impl Checker {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span, None);
             self.reject_user_prim(mod_name, field, object.span);
+            self.reject_unopted_memory_unsafe_member(mod_name, field, object.span);
             // Every resolved branch below marks the import used (#3241): a
             // member taken as a VALUE (`let f = process.pid`, an argument, a
             // pipe RHS) is as much a use as a call, which marks on its own path.

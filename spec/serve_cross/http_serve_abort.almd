@@ -1,0 +1,55 @@
+// @contract: C-434
+// A SERVER fixture for a runtime abort inside an `http.serve` handler
+// (almide/almide#4203): no generic runner executes it. The driver
+// (tests/http_serve_cross_test.rs in almide/almide) starts it natively and
+// on the embedded lane, waits for the "ready" line on stderr, and sends
+// POST bodies. A 1-byte body is served (`val=20`); a 5-byte body indexes the
+// 3-element list out of bounds (an `Error: index out of bounds` abort); `P`
+// reaches `panic`. Each abort must fail only its request (the fixed C-409
+// 500, one `handler aborted` stderr line, the abort text never in the
+// response), and the next request is served. `L` opens a tcp listener on
+// the second argument's port and then aborts: the abort must close it, so
+// every later `L` can listen on that port again. `B` builds a large list
+// and then aborts: a long run of them must not grow the server's memory.
+// `E` prints `Error: x` itself and calls `process.exit(1)`: that is the
+// program's own exit, not an abort, and ends the server with exit 1.
+// Each leg must answer the same.
+// Usage: almide run http_serve_abort.almd [--target wasm] -- <port> [<port2>]
+import env
+import http
+import net
+import process
+
+// The program's own exit, after a line shaped like an abort's.
+effect fn quit() -> Unit = {
+  eprintln("Error: x")
+  process.exit(1)
+}
+
+effect fn handle(req: HttpRequest) -> HttpResponse = {
+  let body = http.body(req)
+  let port2 = int.parse(env.args() |> list.get(1) ?? "0") ?? 0
+  let xs = [10, 20, 30]
+  match body {
+    "P" => panic("boom \"quoted\""),
+    "E" => {
+      quit()!
+      http.response(200, "after the exit")
+    },
+    "L" => {
+      let l = net.tcp_listen("127.0.0.1", port2)!
+      http.response(200, "listener ${l} ${xs[9]}")
+    },
+    "B" => {
+      let big = list.range(0, 50000) |> list.map((i) => "${i}")
+      http.response(200, "big ${list.len(big)} ${xs[9]}")
+    },
+    _ => http.response(200, "val=" + int.to_string(xs[string.len(body)])),
+  }
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  eprintln("ready")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
+}

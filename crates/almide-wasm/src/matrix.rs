@@ -13,7 +13,7 @@
 //! is asked for anything.
 
 use almide_ir::IrExpr;
-use wasm_encoder::BlockType;
+use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -102,7 +102,7 @@ impl Emitter<'_> {
                 // after a released matrix printed the dead block's cells
                 // (#1423 stage 4, found the day the structural leg took the
                 // matrix ops that free their temporaries). The mat_alloc_out64
-                // / bytes.new lesson, met a third time.
+                // / bytes.zeros lesson, met a third time.
                 let mut i = self.f.instructions();
                 i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
                 i.i32_const(0);
@@ -197,38 +197,41 @@ impl Emitter<'_> {
             self.lower_arg(c, Some(INT), ArgMode::Borrow)?;
             let hc = self.hold_i64()?;
             self.f.instructions().local_set(hc);
-            // The index-domain rule (C-282): an accessor with no
-            // identity value ABORTS out of range, in the same unified
-            // form as `xs[i]`. Compared as i64 BEFORE any cast, so a
-            // negative can never wrap past the test.
-            let msg = self.pool.intern("matrix index out of bounds");
-            for (idx, ext_off) in [(hr, 0), (hc, 4)] {
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(idx).i64_const(0).i64_lt_s();
-                    i.local_get(idx);
-                    i.local_get(hm).i32_load(slot_memarg(ext_off)).i64_extend_i32_u();
-                    i.i64_ge_s();
-                    i.i32_or();
-                    i.if_(BlockType::Empty);
-                    i.i32_const(msg as i32);
-                }
-                self.emit_error_frame_abort();
-                self.f.instructions().end();
-            }
+            // The index-domain rule (C-282): `some(value)` in range, `none`
+            // (NULL_ADDR) out of range, NEGATIVE included. Compared as i64
+            // BEFORE any cast, so a negative can never wrap past the test.
+            // The flat layout's rows are uniform, so the header's cols IS
+            // the selected row's width.
+            let hres = self.hold_i32()?;
             {
                 let mut i = self.f.instructions();
+                i.local_get(hr).i64_const(0).i64_lt_s();
+                i.local_get(hr);
+                i.local_get(hm).i32_load(slot_memarg(0)).i64_extend_i32_u();
+                i.i64_ge_s().i32_or();
+                i.local_get(hc).i64_const(0).i64_lt_s().i32_or();
+                i.local_get(hc);
+                i.local_get(hm).i32_load(slot_memarg(4)).i64_extend_i32_u();
+                i.i64_ge_s().i32_or();
+                i.if_(BlockType::Result(ValType::I32));
+                i.i32_const(almide_layout::NULL_ADDR as i32);
+                i.else_();
+                i.i32_const(FLOAT.slot_size() as i32).call(F_ALLOC).local_tee(hres);
                 i.local_get(hm);
                 i.local_get(hr);
                 i.local_get(hm).i32_load(slot_memarg(4)).i64_extend_i32_u();
                 i.i64_mul().local_get(hc).i64_add().i32_wrap_i64();
                 i.i32_const(3).i32_shl().i32_add();
                 i.f64_load(slot_memarg(8));
+                i.f64_store(slot_memarg(almide_layout::OPTION_FIELD));
+                i.local_get(hres);
+                i.end();
             }
+            self.release_i32();
             self.release_i64();
             self.release_i64();
             self.release_i32();
-            Some(Lowered::scalar(FLOAT))
+            Some(Lowered::owned(SliceTy::Option(self.types.intern(FLOAT))))
         })
     }
 
@@ -579,12 +582,8 @@ impl Emitter<'_> {
             ("transpose", [m]) => self.lower_matrix_transpose(m)?,
             ("row_dot" | "dot_row", [m, r, v]) => self.lower_matrix_row_dot(m, r, v)?,
             // Kernel families, shape-grouped (name split in the subs).
-            ("pow", [m, e]) => return self.lower_matrix_elementwise_pow(m, e).map(Some),
-            ("select_rows", [m, ids]) => {
-                return self.lower_matrix_select_rows(m, ids).map(Some)
-            }
             (
-                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le" | "select_rows_f32",
+                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le",
                 [a, b, c, d],
             ) => return self.lower_matrix_loader(func, a, b, c, d).map(Some),
             _ => return self.lower_matrix_call_b(func, args),

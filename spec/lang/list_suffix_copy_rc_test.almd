@@ -7,38 +7,37 @@
 test "take_end co-owns String elements" {
   let src = ["a", "b", "c"]
   let s = list.take_end(src, 2)
-  assert_eq(list.get_or(s, 0, "D"), "b")
-  assert_eq(list.get_or(s, 1, "D"), "c")
-  assert_eq(list.get_or(src, 0, "D"), "a")
+  assert_eq(list.get(s, 0) ?? "D", "b")
+  assert_eq(list.get(s, 1) ?? "D", "c")
+  assert_eq(list.get(src, 0) ?? "D", "a")
 }
 
 test "tail co-owns String elements" {
   let src = ["x", "y", "z"]
-  let s = list.tail(src)
-  assert_eq(list.get_or(s, 0, "D"), "y")
+  let s = list.drop(src, 1)
+  assert_eq(list.get(s, 0) ?? "D", "y")
   assert_eq(list.len(src), 3)
 }
 
 test "drop_end co-owns Value elements" {
   let src = [value.int(7), value.int(8)]
   let s = list.drop_end(src, 1)
-  assert_eq(value.as_int(list.get_or(s, 0, value.null())) ?? -1, 7)
+  assert_eq(value.as_int(list.get(s, 0) ?? value.null()) ?? -1, 7)
 }
 
 test "take_end and tail co-own Value elements" {
   let src = [value.int(1), value.int(2), value.int(3)]
   let a = list.take_end(src, 2)
-  let b = list.tail(src)
-  assert_eq(value.as_int(list.get_or(a, 0, value.null())) ?? -1, 2)
-  assert_eq(value.as_int(list.get_or(b, 1, value.null())) ?? -1, 3)
+  let b = list.drop(src, 1)
+  assert_eq(value.as_int(list.get(a, 0) ?? value.null()) ?? -1, 2)
+  assert_eq(value.as_int(list.get(b, 1) ?? value.null()) ?? -1, 3)
 }
 
 test "the fuzz chain shape survives end to end" {
-  let r = list.get_or(
+  let r = list.get(
     list.drop_while(list.flat_map(list.take_end(["hello"], 3), ((x) => [x])), ((s) => false)),
     0,
-    "  spaced  ",
-  )
+  ) ?? "  spaced  "
   assert_eq(r, "hello")
 }
 
@@ -67,7 +66,7 @@ test "tuple elements: suffix copies co-own" {
   let src: List[(Float, Bool)] = [(1.0, true), (2.0, false), (3.0, true)]
   let te = list.take_end(src, 2)
   let de = list.drop_end(src, 1)
-  let tl = list.tail(src)
+  let tl = list.drop(src, 1)
   assert_eq(list.join(list.map(te, pair_cell), ","), "2.0F,3.0T")
   assert_eq(list.join(list.map(de, pair_cell), ","), "1.0T,2.0F")
   assert_eq(list.join(list.map(tl, pair_cell), ","), "2.0F,3.0T")

@@ -314,3 +314,15 @@
 # now almide-mir host-op rows: the child run counts Process (id 10, the wasm
 # projection's private process capability, ADR-0025), the site selector CliArgs.
 # The 19 rows are pruned (19 -> 0). The set is EMPTY again. ANY row is a regression.
+
+# (2026-10-25, #4182) 14 test fns the integration batch added wall on the MIR rung
+# (regex captures, http router guards, bigint, radix parse, a global Bytes callee).
+# Listed so the batch could land; #4189 owns burning them back down to EMPTY.
+spec/stdlib/bigint_operators_test.almd :: b  # #4189
+spec/stdlib/bigint_test.almd :: b  # #4189
+spec/stdlib/http_router_test.almd :: __test_almd_0017_a path the guard reads differently from the router is a 400 (C-406)  # #4189
+spec/stdlib/http_router_test.almd :: __test_almd_0018_a parameter that decodes to a traversal, a slash or NUL is a 400 (C-406)  # #4189
+spec/stdlib/int_radix_floor_test.almd :: ok_int  # #4189
+# C-432: v1 refuses a user variant carrying a runtime-backed payload; the structural leg renders it.
+# Found under #4230 (closed by the integration merge); #4189 owns the MIR rung walls that batch added.
+spec/wasm_cross/runtime_backed_variant_repr.almd :: main  # #4189

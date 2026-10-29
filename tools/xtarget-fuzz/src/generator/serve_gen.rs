@@ -28,13 +28,13 @@ pub const CONSTANT_APP: &str = "fn app(req: HttpRequest) -> Result[HttpResponse,
 /// The app of the alloc and diamond probes: every reader, a header set
 /// from a request header, a status outside the reason table, and an err.
 pub const PROBE_APP: &str = r#"fn app(req: HttpRequest) -> Result[HttpResponse, String] = {
-  let path = http.req_path(req)
-  let q = http.query_params(req)
-  let keys = map.keys(q) |> list.sort |> list.join(",")
+  let path = http.path(req)
+  let q = http.query_params(req) ?? []
+  let keys = q |> list.map(((k, _)) => k) |> list.join(",")
   match path {
     "/missing" => err("no route ${path}"),
-    "/a/b" => ok(http.response(200, http.req_body(req)) |> http.status(418) |> http.set_header("x-kind", "teapot")),
-    _ => ok(http.with_headers(200, "${http.req_method(req)} ${path} [${keys}] ${http.req_body(req)}", ["x-token": http.req_header(req, "x-token") ?? "none", "Content-Type": "text/plain; charset=utf-8"])),
+    "/a/b" => ok(http.response(200, http.body(req)) |> http.set_status(418) |> http.set_header("x-kind", "teapot")),
+    _ => ok(http.with_headers(200, "${http.method(req)} ${path} [${keys}] ${http.body(req)}", [("x-token", http.header(req, "x-token") ?? "none"), ("Content-Type", "text/plain; charset=utf-8")])),
   }
 }
 "#;
@@ -90,12 +90,12 @@ pub fn diamond_projects(header: &str, app: &str) -> Vec<super::Project> {
 /// The request readers a generated handler starts from: each is bound
 /// with probability 1/2, so a handler reads a different subset.
 const READERS: &[(&str, &str, fn() -> GenType)] = &[
-    ("method", "http.req_method(req)", || GenType::String),
-    ("path", "http.req_path(req)", || GenType::String),
-    ("body", "http.req_body(req)", || GenType::String),
-    ("token", "http.req_header(req, \"x-token\") ?? \"none\"", || GenType::String),
-    ("ctype", "http.req_header(req, \"Content-Type\") ?? \"\"", || GenType::String),
-    ("query", "http.query_params(req)", || GenType::Map(Box::new(GenType::String))),
+    ("method", "http.method(req)", || GenType::String),
+    ("path", "http.path(req)", || GenType::String),
+    ("body", "http.body(req)", || GenType::String),
+    ("token", "http.header(req, \"x-token\") ?? \"none\"", || GenType::String),
+    ("ctype", "http.header(req, \"Content-Type\") ?? \"\"", || GenType::String),
+    ("query", "http.query_params(req) ?? []", || GenType::List(Box::new(GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::String))))),
 ];
 
 /// Goal types of the extra bindings a handler computes before its answer.
@@ -137,7 +137,7 @@ const HEADER_NAMES: &[&str] = &["x-a", "X-Token", "content-type", "Cache-Control
 /// The response: a catalogue-directed term (a third of the time), or
 /// `http.response` / `http.with_headers` over a status and terms of the
 /// handler's scope (the request readers), then up to two `set_header` /
-/// `status` steps.
+/// `set_status` steps.
 fn gen_response(b: &mut Builder) -> String {
     let status = |b: &mut Builder| -> String {
         if b.rng.chance(1, 4) {
@@ -163,14 +163,14 @@ fn gen_response(b: &mut Builder) -> String {
             b.fuel = START_FUEL;
             let body = gen_expr(b, &GenType::String);
             b.fuel = START_FUEL;
-            let headers = gen_expr(b, &GenType::Map(Box::new(GenType::String)));
+            let headers = gen_expr(b, &GenType::List(Box::new(GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::String)))));
             format!("http.with_headers({s}, {body}, {headers})")
         }
     };
     for _ in 0..b.rng.below(3) {
         if b.rng.chance(1, 4) {
             let s = status(b);
-            resp = format!("http.status({resp}, {s})");
+            resp = format!("http.set_status({resp}, {s})");
             continue;
         }
         let name = if b.rng.chance(3, 4) {
@@ -278,6 +278,6 @@ mod tests {
         }
         assert!(many.iter().all(|h| h.starts_with("fn app(req: HttpRequest) -> Result[HttpResponse, String] = {\n") && h.contains("  let resp: HttpResponse = ")));
         assert!(many.iter().any(|h| h.contains(" then err(")), "some handlers take the err path");
-        assert!(many.iter().any(|h| h.contains("http.req_body(req)")), "handlers read the request");
+        assert!(many.iter().any(|h| h.contains("http.body(req)")), "handlers read the request");
     }
 }

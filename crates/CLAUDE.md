@@ -30,7 +30,8 @@ almide-frontend       Type checker, constraint solver, AST→IR lowering
 almide-optimize       Monomorphization, DCE, constant propagation
 almide-codegen        Nanopass pipeline, TOML templates, walker（WGSL は on-hold — attribute パースのみ）
 almide-mir            v1 Middle IR: ownership/layout SoT, MIR lowering + native renderers +
-                      certificate witnesses (`almide verify --emit`); no WASM/WAT
+                      certificate witnesses (proofs/gate.sh; `almide verify` judges the
+                      structural leg's since #4011); no WASM/WAT
                       renderer since #2761
 almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
 almide-tools          Formatter, module interface (.almdi). NOT the LSP — that
@@ -50,6 +51,11 @@ almide-wasi           The `to_wasi` transform that makes build artifacts
                       re-exported as `almide_wasm_run::wasi`
 almide-wasm-run       The embedded almide.* host (wasmtime) + the p2/p3
                       component transforms
+almide-anchor-check   The byte-level translation check of #4011 (d): decodes a
+                      shipped module itself (wasmparser only, no compiler
+                      code) and holds every located bounds / init witness
+                      event to the instruction it names; run per artifact by
+                      proofs/structural-wall.sh
 almide-wasm-vm        The qualification-scoped wasm interpreter (#865): runs a
                       shipped `to_wasi` artifact with an instruction set pinned
                       to the emitter's, fixed buffers and fuel; std only.

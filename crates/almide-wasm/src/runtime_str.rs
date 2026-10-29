@@ -45,13 +45,15 @@ pub(crate) fn emit_str_cmp() -> Function {
 /// `replace_first` with an empty `from` is `to ++ s` (find("") = 0).
 pub(crate) fn emit_str_replace() -> Function {
     // params: 0=s, 1=from, 2=to, 3=first
-    // locals: 4=slen, 5=flen, 6=tlen, 7=count, 8=p, 9=w, 10=out, 11=q, 12=eq
+    // locals: 4=slen, 5=flen, 6=tlen, 7=count, 8=p, 9=w, 10=out, 11=q,
+    // 12=eq (a match start), 13=tbl, 14=k, 15=c (the KMP registers)
     let (s, from, to, first) = (0u32, 1u32, 2u32, 3u32);
     let (slen, flen, tlen, count, p, w, out, q, eq) =
         (4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32);
+    let (tbl, k, c) = (13u32, 14u32, 15u32);
     let payload = almide_layout::PAYLOAD as i32;
     let byte = |off: u32| MemArg { offset: u64::from(off), align: 0, memory_index: 0 };
-    let mut f = Function::new([(9, ValType::I32)]);
+    let mut f = Function::new([(12, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(s).i32_load(len_memarg()).local_set(slen);
     i.local_get(from).i32_load(len_memarg()).local_set(flen);
@@ -107,33 +109,19 @@ pub(crate) fn emit_str_replace() -> Function {
         i.local_get(out).return_();
     }
     i.end();
-    // non-empty pattern: count pass, then fill pass
+    // non-empty pattern: count pass, then fill pass, each a forward walk of
+    // KMP searches resuming past the last match (crate::kmp, #4206)
+    let kmp = crate::kmp::Kmp { hay: s, n: slen, pat: from, m: flen, tbl, k, c, q };
+    kmp.emit_table(&mut i);
     i.i32_const(0).local_set(count);
     i.i32_const(0).local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(flen).i32_add().local_get(slen).i32_gt_u().br_if(1);
-    // eq = memeq(s+p, from, flen)
-    i.i32_const(1).local_set(eq);
-    i.i32_const(0).local_set(q);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(q).local_get(flen).i32_ge_u().br_if(1);
-    i.local_get(s).i32_const(payload).i32_add().local_get(p).i32_add().local_get(q).i32_add();
-    i.i32_load8_u(byte(0));
-    i.local_get(from).i32_const(payload).i32_add().local_get(q).i32_add();
-    i.i32_load8_u(byte(0));
-    i.i32_ne().if_(BlockType::Empty);
-    i.i32_const(0).local_set(eq);
-    i.br(2);
-    i.end();
-    i.local_get(q).i32_const(1).i32_add().local_set(q);
-    i.br(0).end().end();
-    i.local_get(eq).if_(BlockType::Empty);
+    i.local_get(p).local_set(q);
+    kmp.emit_find(&mut i, eq);
+    i.local_get(eq).i32_const(0).i32_lt_s().br_if(1);
     i.local_get(count).i32_const(1).i32_add().local_set(count);
-    i.local_get(p).local_get(flen).i32_add().local_set(p);
-    i.local_get(first).br_if(2);
-    i.else_();
-    i.local_get(p).i32_const(1).i32_add().local_set(p);
-    i.end();
+    i.local_get(eq).local_get(flen).i32_add().local_set(p);
+    i.local_get(first).br_if(1);
     i.br(0).end().end();
     // out_len = slen + count*(tlen - flen)
     i.local_get(slen);
@@ -142,41 +130,25 @@ pub(crate) fn emit_str_replace() -> Function {
     i.local_get(out).i32_const(payload).i32_add().local_set(w);
     i.i32_const(0).local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(slen).i32_ge_u().br_if(1);
-    // try a match here while replacements remain
-    i.i32_const(0).local_set(eq);
-    i.local_get(count).i32_const(0).i32_gt_s();
-    i.local_get(p).local_get(flen).i32_add().local_get(slen).i32_le_u();
-    i.i32_and().if_(BlockType::Empty);
-    i.i32_const(1).local_set(eq);
-    i.i32_const(0).local_set(q);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(q).local_get(flen).i32_ge_u().br_if(1);
-    i.local_get(s).i32_const(payload).i32_add().local_get(p).i32_add().local_get(q).i32_add();
-    i.i32_load8_u(byte(0));
-    i.local_get(from).i32_const(payload).i32_add().local_get(q).i32_add();
-    i.i32_load8_u(byte(0));
-    i.i32_ne().if_(BlockType::Empty);
-    i.i32_const(0).local_set(eq);
-    i.br(2);
-    i.end();
-    i.local_get(q).i32_const(1).i32_add().local_set(q);
-    i.br(0).end().end();
-    i.end();
-    i.local_get(eq).if_(BlockType::Empty);
+    i.local_get(count).i32_eqz().br_if(1);
+    i.local_get(p).local_set(q);
+    kmp.emit_find(&mut i, eq);
+    // s[p .. match), then `to`
+    i.local_get(w).local_get(s).i32_const(payload).i32_add().local_get(p).i32_add();
+    i.local_get(eq).local_get(p).i32_sub();
+    i.memory_copy(0, 0);
+    i.local_get(w).local_get(eq).local_get(p).i32_sub().i32_add().local_set(w);
     i.local_get(w).local_get(to).i32_const(payload).i32_add().local_get(tlen);
     i.memory_copy(0, 0);
     i.local_get(w).local_get(tlen).i32_add().local_set(w);
-    i.local_get(p).local_get(flen).i32_add().local_set(p);
+    i.local_get(eq).local_get(flen).i32_add().local_set(p);
     i.local_get(count).i32_const(1).i32_sub().local_set(count);
-    i.else_();
-    i.local_get(w);
-    i.local_get(s).i32_const(payload).i32_add().local_get(p).i32_add();
-    i.i32_load8_u(byte(0)).i32_store8(byte(0));
-    i.local_get(w).i32_const(1).i32_add().local_set(w);
-    i.local_get(p).i32_const(1).i32_add().local_set(p);
-    i.end();
     i.br(0).end().end();
+    // the tail after the last replaced match
+    i.local_get(w).local_get(s).i32_const(payload).i32_add().local_get(p).i32_add();
+    i.local_get(slen).local_get(p).i32_sub();
+    i.memory_copy(0, 0);
+    kmp.emit_free(&mut i);
     i.local_get(out);
     i.end();
     f

@@ -79,7 +79,8 @@ and serves as the cross-target oracle / executable spec.
   - the **incumbent WAT trust-spine** (`almide-mir` rendering WAT) is gone:
     #2752 removed its last route and #2761 deleted the renderer. `almide-mir`
     keeps MIR lowering (the native leg), the native renderers, and the
-    certificate witness producer (`almide verify --emit`).
+    MIR certificate witness producer (proofs/gate.sh, corpus-wall.sh;
+    `almide verify` judges the structural leg's bundle since #4011).
   Every `ALMIDE_*` switch the tree reads — the gate
   bypasses, the ablations, the trace channels — is one registry,
   `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
@@ -135,7 +136,7 @@ almide/                    Workspace root
 │   ├── almide-mir/        v1 Middle IR — single source of truth for ownership
 │   │                      and layout (Perceus). #![forbid(unsafe_code)].
 │   │                      MIR lowering + the native trust-spine renderer
-│   │                      + certificate witnesses (`almide verify --emit`).
+│   │                      + MIR certificate witnesses (proofs/gate.sh).
 │   │                      No wasm/WAT renderer since #2761.
 │   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
 │   │                      stream fusion
@@ -330,6 +331,8 @@ The Wgsl arm is the four rows marked W. Class:
 | 34 | `SliceBinders` | `pass_slice_binders.rs` | Rust | optimizer | a `match` over `split_once` / `strip_prefix` / `strip_suffix` whose payload binders are only read as `&str` or consumed binds them as slices of the subject (the runtime's `_ref` twins); a consumed binder is copied where it is consumed, any other use keeps the owned twin | n/a (the wasm leg has no references) |
 | 35 | `StrMapKey` | `pass_str_map_key.rs` | Rust | optimizer | a String-keyed `map.set` / `map.upsert` whose key is `k.to_string()` takes `&k` through the runtime's `_str` twin, which copies the key only when it inserts it | n/a |
 | 36 | `ThreadShareMarks` | `pass_thread_share.rs` | Rust | Rust by design | ADR-0013: every variable a spawned fan arm or a call to a thread-crossing runtime helper (`crosses_threads`, as a `RuntimeCall` or a `Call { Module }` such as `fan.map_par`) reaches is marked `(v).almide_share();` before the threads start, as an `InlineRust` block — the walker renders it and runs no `free_vars` walk of its own (#2186) | n/a |
+| 37 | `BoxTakeLowering` | `pass_box_take.rs` | Rust | Rust by design | #4251: a field that closes a cycle of a recursive type is an `AlmideBox` (bounded-stack drop / clone / `==`), which cannot be moved out of through `*b`; every read of one (a box-pattern binder, a recursive record's boxed field) is spelled as a place `(*x)` when its parent only looks at it, and as `almide_box_take(x)` when it consumes it |
+| 38 | `StrViewRebind` | `pass_str_view_rebind.rs` | Rust | Rust by design | #4296: a binding arm of a match over a `&str` view of its `String` subject (`match &*x { "a" => .., other => .. }`) whose binder is wanted as a value — or whose arm touches the subject's variable — opens with its own owned copy; publishes `str_view_owned_binders` from the final IR for the walker to spell | n/a |
 
 Rows 14, 16 and 17 read their ownership facts from ONE walk, `use_kind.rs`
 (#2186): every occurrence of every local, tagged with the position its parent

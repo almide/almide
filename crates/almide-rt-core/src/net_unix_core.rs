@@ -14,7 +14,8 @@
 // Descriptors are the RAW OS numbers, on both legs: a descriptor is what
 // crosses to the peer, and one received from it is a number the program
 // passes on. The table holds every descriptor the program was given (opened
-// here or received), each as an `OwnedFd`, and a call naming any other
+// here or received — at most MAX_FDS untaken per socket, the rest closed on
+// receipt, #4124), each as an `OwnedFd`, and a call naming any other
 // number — never issued, a standard stream, closed — is refused before any
 // system call. That is what keeps a guest on the embedded host from reaching
 // the host's own descriptors, and native answers the same by construction.
@@ -53,6 +54,36 @@ fn almide_unix_retry<T>(mut f: impl FnMut() -> std::io::Result<T>) -> std::io::R
     }
 }
 
+// The descriptors this thread came to hold while an `http.serve` handler
+// runs on it (#4203) — per thread, as for tcp (net_core.rs).
+thread_local! {
+    static ALMIDE_UNIX_REQUEST: std::cell::RefCell<Option<Vec<i64>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+fn almide_unix_note(fd: i64) {
+    ALMIDE_UNIX_REQUEST.with(|r| {
+        if let Some(log) = r.borrow_mut().as_mut() {
+            log.push(fd);
+        }
+    });
+}
+
+/// Start recording this thread's descriptors (a handler call begins).
+pub fn almide_unix_request_begin() {
+    ALMIDE_UNIX_REQUEST.with(|r| *r.borrow_mut() = Some(Vec::new()));
+}
+
+/// Whether this thread is recording.
+pub fn almide_unix_request_active() -> bool {
+    ALMIDE_UNIX_REQUEST.with(|r| r.borrow().is_some())
+}
+
+/// Stop recording; answers what this thread came to hold since the begin.
+pub fn almide_unix_request_end() -> Vec<i64> {
+    ALMIDE_UNIX_REQUEST.with(|r| r.borrow_mut().take().unwrap_or_default())
+}
+
 #[cfg(unix)]
 impl AlmideUnixTables {
     /// How many descriptors the table holds.
@@ -63,11 +94,25 @@ impl AlmideUnixTables {
     fn hold(&mut self, fd: std::os::fd::OwnedFd) -> i64 {
         let n = i64::from(std::os::fd::AsRawFd::as_raw_fd(&fd));
         self.held.insert(n, fd);
+        almide_unix_note(n);
+        n
+    }
+
+    /// Close each descriptor in `fds` the table still holds (#4203: what an
+    /// aborted handler came to hold and left open). Answers how many.
+    pub fn close_held(&mut self, fds: &[i64]) -> usize {
+        let mut n = 0;
+        for fd in fds {
+            if self.held.contains_key(fd) {
+                let _ = self.unix_close(*fd);
+                n += 1;
+            }
+        }
         n
     }
 
     /// `fd` itself when the table holds it; else the err naming `call`.
-    fn check(&self, call: &str, fd: i64) -> Result<i64, String> {
+    fn check(&self, call: &'static str, fd: i64) -> Result<i64, String> {
         if fd < 0 || fd > i64::from(i32::MAX) {
             return Err(format!("{call}: not a file descriptor: {fd}"));
         }
@@ -83,7 +128,7 @@ impl AlmideUnixTables {
 
     /// Run `f` on the held descriptor `fd` viewed as a `T` (a listener, a
     /// file), then hold it again.
-    fn with_as<T, R>(&mut self, call: &str, fd: i64, f: impl FnOnce(&T) -> R) -> Result<R, String>
+    fn with_as<T, R>(&mut self, call: &'static str, fd: i64, f: impl FnOnce(&T) -> R) -> Result<R, String>
     where
         T: From<std::os::fd::OwnedFd>,
         std::os::fd::OwnedFd: From<T>,
@@ -98,13 +143,13 @@ impl AlmideUnixTables {
 
     /// Connect a stream socket to the listener at `path`; its descriptor.
     pub fn unix_connect(&mut self, path: &str) -> Result<i64, String> {
-        let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix_connect({path}): {e}"))?;
+        let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix_connect({}): {e}", almide_rt_errtext_escape(path)))?;
         Ok(self.hold(std::os::fd::OwnedFd::from(s)))
     }
 
     /// Listen for stream connections at `path` (which must not exist yet).
     pub fn unix_listen(&mut self, path: &str) -> Result<i64, String> {
-        let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix_listen({path}): {e}"))?;
+        let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix_listen({}): {e}", almide_rt_errtext_escape(path)))?;
         Ok(self.hold(std::os::fd::OwnedFd::from(l)))
     }
 
@@ -136,14 +181,21 @@ impl AlmideUnixTables {
         Ok(())
     }
 
-    /// Up to `max` bytes (blocking until some arrive); empty once the peer
-    /// closed. Descriptors that came with them wait for `unix_take_fds`.
+    /// Up to `max` bytes — at most 64 KiB per call, the buffer is never `max`
+    /// itself (#4123) — blocking until some arrive; empty once the peer
+    /// closed. Descriptors that came with them wait for `unix_take_fds`, at
+    /// most `MAX_FDS` per socket (#4124): one that arrives while that many
+    /// wait untaken is closed on receipt and never held, so a peer cannot
+    /// fill the program's descriptor table through a socket it only reads.
     pub fn unix_recv(&mut self, sock: i64, max: i64) -> Result<Vec<u8>, String> {
         let sock = self.check("unix_recv", sock)?;
-        let mut buf = vec![0u8; max.max(0) as usize];
+        let mut buf = vec![0u8; (max.max(0) as usize).min(ALMIDE_UNIX_RECV_CHUNK)];
         let s = self.borrow(sock);
         let (n, fds) = almide_unix_retry(|| almide_unix_sys::recv(&s, &mut buf)).map_err(|e| format!("unix_recv: {e}"))?;
-        let got: Vec<i64> = fds.into_iter().map(|f| self.hold(f)).collect();
+        let waiting = self.received.get(&sock).map_or(0, |q| q.len());
+        let room = almide_unix_sys::MAX_FDS.saturating_sub(waiting);
+        // `fds` beyond the room drop here: their OwnedFd closes them.
+        let got: Vec<i64> = fds.into_iter().take(room).map(|f| self.hold(f)).collect();
         if !got.is_empty() {
             self.received.entry(sock).or_default().extend(got);
         }
@@ -155,6 +207,24 @@ impl AlmideUnixTables {
     /// first; they stay held, now the program's to use and close.
     pub fn unix_take_fds(&mut self, sock: i64) -> Vec<i64> {
         self.received.remove(&sock).map(Vec::from).unwrap_or_default()
+    }
+
+    /// Queue on `sock` the descriptors another table received for it, under
+    /// the same bound `unix_recv` keeps (#4124): at most `MAX_FDS` wait
+    /// untaken, and each one past that is closed here (its held entry is
+    /// dropped), never queued. A host that runs a call on a scratch table and
+    /// merges the result back (#4199) merges through this, so the scratch
+    /// table's empty backlog cannot lift the bound.
+    pub fn absorb_received(&mut self, sock: i64, fds: impl IntoIterator<Item = i64>) {
+        let waiting = self.received.get(&sock).map_or(0, |q| q.len());
+        let mut fds = fds.into_iter();
+        let keep: Vec<i64> = fds.by_ref().take(almide_unix_sys::MAX_FDS.saturating_sub(waiting)).collect();
+        for n in fds {
+            self.held.remove(&n);
+        }
+        if !keep.is_empty() {
+            self.received.entry(sock).or_default().extend(keep);
+        }
     }
 
     /// Whether `fd` has something to read (data, a connection, or the peer's
@@ -215,14 +285,31 @@ impl AlmideUnixTables {
             .map_err(|e| format!("shm_resize: {e}"))
     }
 
-    /// Write `data` into the shared-memory file `fd` at byte `offset`.
+    /// Write `data` into the shared-memory file `fd` at byte `offset`, inside
+    /// its current size. A negative offset or a write past the end is the
+    /// `unix.shm_write:` refusal, which `unix.shm_write` turns into an abort
+    /// (an out-of-range write is a program error, R-unix-01); growing the file
+    /// is `shm_resize`'s job.
     pub fn shm_write(&mut self, fd: i64, offset: i64, data: &[u8]) -> Result<(), String> {
         self.check("shm_write", fd)?;
         if offset < 0 {
-            return Err(format!("shm_write: negative offset {offset}"));
+            return Err(format!("unix.shm_write: negative offset {offset}"));
         }
-        self.with_as("shm_write", fd, |f: &std::fs::File| std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64))?
-            .map_err(|e| format!("shm_write: {e}"))
+        self.with_as("shm_write", fd, |f: &std::fs::File| {
+            // The bound is a shared-memory FILE's size; any other descriptor
+            // (a socket) is left to the OS, which refuses the write.
+            let meta = f.metadata()?;
+            let size = meta.len();
+            let end = (offset as u64).checked_add(data.len() as u64);
+            if meta.is_file() && end.is_none_or(|e| e > size) {
+                return Ok(Err(format!(
+                    "unix.shm_write: {} bytes at offset {offset} run past the end of the {size}-byte file",
+                    data.len()
+                )));
+            }
+            std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64).map(Ok)
+        })?
+            .map_err(|e| format!("shm_write: {e}"))?
     }
 
     /// Up to `len` bytes of the file `fd` from byte `offset` (fewer at its end).
@@ -259,27 +346,35 @@ fn almide_shm_open() -> std::io::Result<std::fs::File> {
     Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free name"))
 }
 
+/// The most one `unix_recv` or one `shm_read` step takes into memory (#4123).
+#[cfg(unix)]
+const ALMIDE_UNIX_RECV_CHUNK: usize = 64 * 1024;
+
+/// Up to `len` bytes from `offset`, the answer growing with the bytes the file
+/// has (#4123): allocating the program's `len` up front aborted the process
+/// on a huge one.
 #[cfg(unix)]
 fn almide_shm_read_at(f: &std::fs::File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    let mut got = 0usize;
-    while got < buf.len() {
-        match almide_unix_retry(|| std::os::unix::fs::FileExt::read_at(f, &mut buf[got..], offset + got as u64))? {
+    let mut chunk = vec![0u8; len.min(ALMIDE_UNIX_RECV_CHUNK)];
+    let mut buf = Vec::new();
+    while buf.len() < len {
+        let want = (len - buf.len()).min(chunk.len());
+        match almide_unix_retry(|| std::os::unix::fs::FileExt::read_at(f, &mut chunk[..want], offset + buf.len() as u64))? {
             0 => break,
-            n => got += n,
+            n => buf.extend_from_slice(&chunk[..n]),
         }
     }
-    buf.truncate(got);
     Ok(buf)
 }
 
 /// Off Unix there is nothing to hold: every call is the platform err.
 #[cfg(not(unix))]
 impl AlmideUnixTables {
-    fn unsupported<T>(call: &str) -> Result<T, String> {
+    fn unsupported<T>(call: &'static str) -> Result<T, String> {
         Err(format!("{call}: Unix-domain sockets and shared-memory files need a Unix platform"))
     }
     pub fn held(&self) -> usize { 0 }
+    pub fn close_held(&mut self, _: &[i64]) -> usize { 0 }
     pub fn unix_connect(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_connect") }
     pub fn unix_listen(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_listen") }
     pub fn unix_accept(&mut self, _: i64) -> Result<i64, String> { Self::unsupported("unix_accept") }

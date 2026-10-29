@@ -19,14 +19,14 @@ use super::{value_subset, Why};
 /// Were an arm to inline it after all, the callback node would carry no
 /// hook and the module-call audit would decline the frame.
 ///
-/// Two surfaces take a Fn VALUE outright: `bytes.map_each` has no native arm
+/// Two surfaces take a Fn VALUE outright: `bytes.map` has no native arm
 /// (the linked self-host body calls the closure), and `list.push` stores the
 /// closure it is handed as an element (`lower_arg`, Retain).
 pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
     let base = almide_ir::mono_base_or_self(func);
     (matches!(module, "list" | "map" | "set" | "option") && base.starts_with("__fallible_"))
         || (base != func && !base.starts_with("__"))
-        || matches!((module, func), ("bytes", "map_each") | ("list", "push"))
+        || matches!((module, func), ("bytes", "map") | ("list", "push"))
 }
 
 /// #2755 / #2758: a module call that INLINES a literal callback. Admitted

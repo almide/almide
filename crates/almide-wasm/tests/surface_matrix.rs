@@ -29,8 +29,32 @@ fn head(dbg: String) -> String {
     dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
 }
 
+/// `head(format!("{v:?}"))` without formatting the whole value: the writer
+/// refuses everything after the variant name, so `Debug` stops there. A full
+/// `{:?}` of every node printed each subtree once per ancestor (#4289).
+fn head_of(v: &impl std::fmt::Debug) -> String {
+    struct Head(String);
+    impl std::fmt::Write for Head {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            match s.find(&[' ', '(', '{'][..]) {
+                Some(i) => {
+                    self.0.push_str(&s[..i]);
+                    Err(std::fmt::Error)
+                }
+                None => {
+                    self.0.push_str(s);
+                    Ok(())
+                }
+            }
+        }
+    }
+    let mut h = Head(String::new());
+    let _ = std::fmt::write(&mut h, format_args!("{v:?}"));
+    head(h.0)
+}
+
 fn record_pattern(p: &IrPattern, out: &mut BTreeSet<String>) {
-    out.insert(format!("pattern:{}", head(format!("{p:?}"))));
+    out.insert(format!("pattern:{}", head_of(p)));
     match p {
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             record_pattern(inner, out)
@@ -45,7 +69,15 @@ fn record_pattern(p: &IrPattern, out: &mut BTreeSet<String>) {
 }
 
 fn walk(e: &IrExpr, out: &mut BTreeSet<String>) {
-    out.insert(format!("expr:{}", head(format!("{:?}", e.kind))));
+    walk_node(e, out);
+    // Child recursion via the IR's own traversal (covers statement-held
+    // expressions too), identity-mapped over ONE owned copy: cloning at
+    // every level copied each subtree once per ancestor (#4289).
+    let _ = e.clone().map_children(&mut |c| walk_owned(c, out));
+}
+
+fn walk_node(e: &IrExpr, out: &mut BTreeSet<String>) {
+    out.insert(format!("expr:{}", head_of(&e.kind)));
     match &e.kind {
         IrExprKind::BinOp { op, .. } => {
             out.insert(format!("binop:{op:?}"));
@@ -76,22 +108,21 @@ fn walk(e: &IrExpr, out: &mut BTreeSet<String>) {
         }
         IrExprKind::Block { stmts, .. } => {
             for s in stmts {
-                out.insert(format!("stmt:{}", head(format!("{:?}", s.kind))));
+                out.insert(format!("stmt:{}", head_of(&s.kind)));
             }
         }
         IrExprKind::While { body, .. } | IrExprKind::ForIn { body, .. } => {
             for s in body {
-                out.insert(format!("stmt:{}", head(format!("{:?}", s.kind))));
+                out.insert(format!("stmt:{}", head_of(&s.kind)));
             }
         }
         _ => {}
     }
-    // Child recursion via the IR's own traversal (covers statement-held
-    // expressions too), identity-mapped.
-    e.clone().map_children(&mut |c| {
-        walk(&c, out);
-        c
-    });
+}
+
+fn walk_owned(e: IrExpr, out: &mut BTreeSet<String>) -> IrExpr {
+    walk_node(&e, out);
+    e.map_children(&mut |c| walk_owned(c, out))
 }
 
 fn measure(ir: &IrProgram, out: &mut BTreeSet<String>) {
@@ -114,8 +145,8 @@ fn exercised_surface_matches_golden() {
     .expect("run manifest");
 
     let mut surface: BTreeSet<String> = BTreeSet::new();
-    for line in almide_corpus::manifest_rows(&manifest) {
-        let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
+    let rows: Vec<&str> = almide_corpus::manifest_rows(&manifest).map(|line| line.splitn(3, '\t').nth(2).expect("manifest row")).collect();
+    for rel in almide_corpus::select(rows, "surface_matrix", |rel| rel.to_string()) {
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
         if almide_wasm::emit_program(&ir).is_ok() {
@@ -127,6 +158,7 @@ fn exercised_surface_matches_golden() {
 
     let golden_path = root.join("crates/almide-wasm/tests/golden/wasm-exercised-surface.txt");
     if std::env::var("ALMIDE_UPDATE_SURFACE").is_ok() {
+        almide_corpus::refuse_regen("surface_matrix");
         std::fs::create_dir_all(golden_path.parent().expect("dir")).expect("mkdir");
         std::fs::write(&golden_path, &measured).expect("write golden");
         println!("surface golden regenerated: {} constructs", surface.len());
@@ -137,7 +169,16 @@ fn exercised_surface_matches_golden() {
     let golden_set: BTreeSet<&str> = golden.lines().filter(|l| !l.is_empty()).collect();
     let measured_set: BTreeSet<&str> = measured.lines().filter(|l| !l.is_empty()).collect();
 
-    let lost: Vec<&&str> = golden_set.difference(&measured_set).collect();
+    // Under the CI slice the measured surface is a 1-in-k corpus's: a
+    // construct it did not meet is not "lost" (the full run judges that), but
+    // a construct outside the golden is new whatever fixture showed it.
+    assert!(!measured_set.is_empty(), "no construct measured — the sweep went blind");
+    let lost: Vec<&&str> = if almide_corpus::full_run() {
+        golden_set.difference(&measured_set).collect()
+    } else {
+        println!("surface_matrix: CI slice — {} construct(s) measured; disappearance is judged on the full run", measured_set.len());
+        Vec::new()
+    };
     let gained: Vec<&&str> = measured_set.difference(&golden_set).collect();
     assert!(
         lost.is_empty(),

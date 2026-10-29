@@ -16,15 +16,15 @@
 // The zero-iteration case pins the share discipline itself: the result aliases
 // the seed and both are dropped independently.
 fn go(xs: List[Int], i: Int, acc: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(xs) then acc
-else go(xs, i + 1, map.set(acc, list.get_or(xs, i, 0), 1))
+else go(xs, i + 1, map.set(acc, list.get(xs, i) ?? 0, 1))
 
 fn gs(xs: List[String], i: Int, acc: Set[String]) -> Set[String] = if i >= list.len(xs) then acc
-else gs(xs, i + 1, set.insert(acc, list.get_or(xs, i, "")))
+else gs(xs, i + 1, set.insert(acc, list.get(xs, i) ?? ""))
 
 fn gm(xs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
   if i >= list.len(xs) then acc
   else {
-    let k = list.get_or(xs, i, "")
+    let k = list.get(xs, i) ?? ""
     gm(xs, i + 1, map.set(acc, k, k + "!"))
   }
 
@@ -32,7 +32,7 @@ fn main() -> Unit = {
   // The original counterexample: the seed entry must survive the loop.
   let seed = map.from_list([(99, 7)])
   let m = go([1, 2], 0, seed)
-  println("len=${int.to_string(map.len(m))} seed99=${int.to_string(map.get_or(m, 99, -1))} orig=${int.to_string(map.len(seed))}")
+  println("len=${int.to_string(map.len(m))} seed99=${int.to_string(map.get(m, 99) ?? -1)} orig=${int.to_string(map.len(seed))}")
   // Zero iterations: the result SHARES the seed's block (rc=2); both handles
   // are then dropped independently — the share must not double-free or leak.
   let seed0 = map.from_list([(5, 50)])

@@ -14,6 +14,8 @@
 //! | `caps`            | `CapabilityBound.check_caps_cert`          | used capabilities ⊆ declared |
 //! | `caps-transitive` | `CapabilityReach.check_prog_cert`          | every function's transitive reach ⊆ its declaration |
 //! | `call-modes`      | `CallModes.check_modes_cert`               | every call site's modes equal its callee's signature |
+//! | `bounds`          | `BoundsCert.check_bounds_cert`             | every list access is preceded, on every path, by a check of its slot with no change since |
+//! | `init`            | `InitCert.check_init_cert`                 | every construction site stores every slot of its block, and none past it |
 //!
 //! WHAT IS PROVEN AND WHAT IS NOT. The Coq functions carry the soundness
 //! theorems; this crate does not — it is a second implementation of the same
@@ -24,6 +26,8 @@
 //! `proofs/corpus-wall.sh` runs it over the whole corpus witness set.
 
 pub mod bundle;
+mod bounds;
+mod init;
 mod modes;
 mod nat;
 mod ownership;
@@ -35,7 +39,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The witness formats this version reads.
 pub const FORMATS: &str =
-    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bundle v1 and v2 (artifact sha256)";
+    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, bundle v1 and v2 (artifact sha256)";
 
 /// A flight-grade property a witness certifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,15 +49,19 @@ pub enum Property {
     Caps,
     CapsTransitive,
     CallModes,
+    Bounds,
+    Init,
 }
 
 impl Property {
-    pub const ALL: [Property; 5] = [
+    pub const ALL: [Property; 7] = [
         Property::Ownership,
         Property::Names,
         Property::Caps,
         Property::CapsTransitive,
         Property::CallModes,
+        Property::Bounds,
+        Property::Init,
     ];
 
     /// The name used on the command line and in bundles — the same mode names
@@ -65,6 +73,8 @@ impl Property {
             Property::Caps => "caps",
             Property::CapsTransitive => "caps-transitive",
             Property::CallModes => "call-modes",
+            Property::Bounds => "bounds",
+            Property::Init => "init",
         }
     }
 
@@ -80,5 +90,7 @@ pub fn check(property: Property, witness: &[u8]) -> bool {
         Property::Names | Property::Caps => nat::subset_cert(witness),
         Property::CapsTransitive => reach::check_prog_cert(witness),
         Property::CallModes => modes::check_modes_cert(witness),
+        Property::Bounds => bounds::check_bounds_cert(witness),
+        Property::Init => init::check_init_cert(witness),
     }
 }

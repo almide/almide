@@ -7,7 +7,7 @@ blocked, verified statically where the structure allows.
 > **Dialect epoch 14 (2026-10-17):** the Q1_0, GELU, SiLU and softmax kernels
 > (`q1_0`, `q1_0_packed`, `gelu`, `silu`, `softmax`) left this crate together
 > with the `matrix` functions they served, which moved to package
-> [almide/nnlib](https://github.com/almide/nnlib). The crate now holds `matmul`,
+> [almide-graphics/nn](https://github.com/almide-graphics/nn) (module `nn.kernels`). The crate now holds `matmul`,
 > `scale`, `transpose`, `transpose_f64` and `bridge`. The q1_0 measurements and
 > proofs below are the record of that work; the code is in git history.
 

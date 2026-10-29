@@ -1,0 +1,576 @@
+// bigint — arbitrary-precision integers (R-L1-03, R-bigint-01), in pure Almide.
+//
+// A BigInt is a sign and a magnitude. The magnitude is a little-endian list of
+// 30-bit limbs (each 0..2^30-1), with no zero limb on top, so zero is the empty
+// list and is never negative: one value has one representation, and `==` on two
+// BigInts compares values. A limb product is below 2^60, which leaves Int room
+// for the carry, so every step is exact Int arithmetic on both targets.
+//
+// The spellings are int's (R-bigint-01 rule 1). BigInt is Numeric and Integer:
+// `+ - * / %` and unary `-` desugar to the module's internal add/sub/mul/div/rem/neg
+// and `< <= > >=` to compare (R-bigint-04), `bigint.from` takes any number
+// (R-L0-40), and `list.sum` adds BigInts. Bitwise functions treat a negative
+// value as two's complement with an endless run of 1 bits above it (R-bigint-07),
+// as Python's int does.
+/// An arbitrary-precision integer.
+type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
+
+// ── text (R-bigint-01) ──
+/// BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
+fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
+
+/// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+/// err on junk, and on more than 4300 digits in a radix that is not a power of two;
+/// radix outside 2..36 aborts.
+fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
+  check_radix(radix)
+  let codes = bytes.to_list(bytes.from_string(string.trim(s)))
+  match codes {
+    [] => err("cannot parse integer from empty string"),
+    [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
+    [43, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, false),
+    _ => read_digits(strip_radix_prefix(codes, radix), radix, false),
+  }
+}
+
+/// Decimal digits, with - when negative; more than 4300 digits aborts.
+fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
+/// a radix that is not a power of two when the text would pass 4300 digits.
+fn to_string_radix(x: BigInt, radix: Int) -> String = {
+  check_radix(radix)
+  let k = chunk_width(radix, 1, radix)
+  let text = if is_pow2(radix) then chunk_text(
+    pow2_chunks(x.limbs, k * radix_bits(radix)),
+    radix,
+    k,
+  )
+  else {
+    // A magnitude of at least 2^(limit * bit_length(radix)) has more than `limit` digits, so
+    // it is refused before any division; below that the text is at most 1.3 * limit digits
+    // long, and its exact length decides.
+    if bit_length(x) > text_digit_limit() * int.bit_length(radix) then panic(text_limit_error())
+    else ()
+    let t = chunk_text(radix_chunks(x.limbs, int.pow(radix, k), []), radix, k)
+    if string.len(t) > text_digit_limit() then panic(text_limit_error()) else t
+  }
+  if x.neg then "-" + text else text
+}
+
+// The chunks of k digits each, most significant first, as one text.
+local fn chunk_text(chunks: List[Int], radix: Int, k: Int) -> String = match chunks {
+  [] => "0",
+  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> list.join("")),
+}
+
+// ── the conversion limits (#4196) ──
+// Decimal (any radix that is not a power of two) text costs time quadratic in its length
+// on both sides, so it is limited to 4300 digits, Python's default limit
+// (CVE-2020-10735). A power-of-two radix converts in linear time and has no limit.
+local fn text_digit_limit() -> Int = 4300
+
+local fn text_limit_error() -> String = "integer string conversion exceeds the limit of 4300 digits"
+
+// 30 * 2^28: 2^28 limbs, the list ceiling `bshl` meets in `list.repeat` (2^31 bytes).
+local fn pow_bit_ceiling() -> Int = 8053063680
+
+// ── Integer: order, sign, division, power (R-bigint-01, R-bigint-05) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: BigInt, b: BigInt) -> Int = match (a.neg, b.neg) {
+  (false, true) => 1,
+  (true, false) => -1,
+  (false, false) => compare_mag(a.limbs, b.limbs),
+  _ => compare_mag(b.limbs, a.limbs),
+}
+
+/// Lesser of a and b.
+fn min(a: BigInt, b: BigInt) -> BigInt = if compare(a, b) <= 0 then a else b
+
+/// Greater of a and b.
+fn max(a: BigInt, b: BigInt) -> BigInt = if compare(a, b) >= 0 then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt =
+  if compare(lo, hi) > 0 then panic("clamp requires min <= max")
+  else max(lo, min(x, hi))
+
+/// Magnitude of x.
+fn abs(x: BigInt) -> BigInt = { neg: false, limbs: x.limbs }
+
+/// -1, 0 or 1 by the sign of x; 0 for 0.
+fn sign(x: BigInt) -> Int = if x.neg then -1
+else if list.is_empty(x.limbs) then 0 else 1
+
+/// True when x is a multiple of 2.
+fn is_even(x: BigInt) -> Bool = limb(x.limbs, 0) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: BigInt) -> Bool = limb(x.limbs, 0) % 2 != 0
+
+/// Quotient rounded toward -inf; b == 0 aborts.
+fn floor_div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, r) = divide(a, b)
+  if list.is_empty(r.limbs) or a.neg == b.neg then q else add(q, small(-1))
+}
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  if list.is_empty(r.limbs) or a.neg == b.neg then r else add(r, b)
+}
+
+/// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
+fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
+else if pow_too_large(bit_length(base) - 1, exp) then panic("pow result too large")
+else power(base, exp, small(1))
+
+// |base| >= 2^k makes base^exp at least 2^(k * exp): refused once k * exp reaches the
+// ceiling, computed without the product that overflows. 0, 1 and -1 (k <= 0) never are.
+local fn pow_too_large(k: Int, exp: Int) -> Bool = k > 0 and exp > (pow_bit_ceiling() - 1) / k
+
+/// Bits needed to hold the magnitude of x; 0 for 0.
+fn bit_length(x: BigInt) -> Int = match list.len(x.limbs) {
+  0 => 0,
+  n => 30 * (n - 1) + int.bit_length(limb(x.limbs, n - 1)),
+}
+
+// ── Integer: bitwise, two's complement (R-bigint-07) ──
+/// Bitwise AND.
+fn band(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg and b.neg, (x, y) => int.band(x, y))
+
+/// Bitwise OR.
+fn bor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg or b.neg, (x, y) => int.bor(x, y))
+
+/// Bitwise XOR.
+fn bxor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg != b.neg, (x, y) => int.bxor(x, y))
+
+/// Bitwise complement; equals -x - 1.
+fn bnot(x: BigInt) -> BigInt = add(negate(x), small(-1))
+
+/// a shifted left by n bits (a * 2^n); n < 0 aborts.
+fn bshl(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
+else make(a.neg, list.repeat(0, n / 30) + shift_left_bits(a.limbs, n % 30, 0, 0, []))
+
+/// a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+fn bshr(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
+else if a.neg then bnot(shr_magnitude(bnot(a), n))
+else shr_magnitude(a, n)
+
+// a non-negative a shifted right by n >= 0 bits: drop whole limbs, then shift the rest.
+local fn shr_magnitude(a: BigInt, n: Int) -> BigInt = make(
+  false,
+  shift_right_bits(list.drop(a.limbs, n / 30), n % 30),
+)
+
+// ── the internal arithmetic the operators desugar to (R-bigint-04): Numeric's
+//    operator requirements, module functions that are not public ──
+local fn sub(a: BigInt, b: BigInt) -> BigInt = add(a, negate(b))
+
+local fn mul(a: BigInt, b: BigInt) -> BigInt = multiply(a, b)
+
+local fn div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, _) = divide(a, b)
+  q
+}
+
+local fn rem(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  r
+}
+
+local fn neg(a: BigInt) -> BigInt = negate(a)
+
+local fn add(a: BigInt, b: BigInt) -> BigInt =
+  if a.neg == b.neg then make(a.neg, add_mag(a.limbs, b.limbs))
+  else if compare_mag(a.limbs, b.limbs) >= 0 then make(a.neg, sub_mag(a.limbs, b.limbs))
+  else make(b.neg, sub_mag(b.limbs, a.limbs))
+
+local fn negate(x: BigInt) -> BigInt = make(not x.neg, x.limbs)
+
+local fn multiply(a: BigInt, b: BigInt) -> BigInt = make(a.neg != b.neg, mul_mag(a.limbs, b.limbs))
+
+// Quotient toward 0 and the remainder with the sign of a; b == 0 aborts.
+local fn divide(a: BigInt, b: BigInt) -> (BigInt, BigInt) =
+  if list.is_empty(b.limbs) then panic("division by zero")
+  else {
+    let (q, r) = divmod_mag(a.limbs, b.limbs)
+    (make(a.neg != b.neg, q), make(a.neg, r))
+  }
+
+local fn power(base: BigInt, exp: Int, acc: BigInt) -> BigInt = if exp == 0 then acc
+else if exp == 1 then multiply(acc, base)
+else if exp % 2 == 1 then power(multiply(base, base), exp / 2, multiply(acc, base))
+else power(multiply(base, base), exp / 2, acc)
+
+// ── representation ──
+local fn limb_base() -> Int = 1073741824
+
+local fn limb_mask() -> Int = 1073741823
+
+local fn limb(l: List[Int], i: Int) -> Int = list.get(l, i) ?? 0
+
+// The canonical value: high zero limbs dropped, and zero never negative.
+local fn make(neg: Bool, limbs: List[Int]) -> BigInt = {
+  let l = list.take(limbs, top_nonzero(limbs, list.len(limbs)))
+  { neg: neg and not list.is_empty(l), limbs: l }
+}
+
+local fn top_nonzero(l: List[Int], n: Int) -> Int =
+  if n > 0 and limb(l, n - 1) == 0 then top_nonzero(l, n - 1) else n
+
+local fn small(n: Int) -> BigInt = make(n < 0, int_limbs(if n < 0 then n else 0 - n, []))
+
+// The limbs of -n for n <= 0, so min_value has no overflowing negation.
+local fn int_limbs(n: Int, acc: List[Int]) -> List[Int] = if n == 0 then acc
+else int_limbs(n / limb_base(), acc + [0 - n % limb_base()])
+
+// ── magnitudes: little-endian limb lists without high zero limbs ──
+local fn compare_mag(a: List[Int], b: List[Int]) -> Int = {
+  let n = list.len(a)
+  let m = list.len(b)
+  if n != m then int.compare(n, m)
+  else compare_from_top(a, b, n - 1)
+}
+
+local fn compare_from_top(a: List[Int], b: List[Int], i: Int) -> Int = if i < 0 then 0
+else if limb(a, i) != limb(b, i) then int.compare(limb(a, i), limb(b, i))
+else compare_from_top(a, b, i - 1)
+
+local fn add_mag(a: List[Int], b: List[Int]) -> List[Int] = add_from(
+  a,
+  b,
+  0,
+  0,
+  int.max(list.len(a), list.len(b)),
+  [],
+)
+
+local fn add_from(a: List[Int], b: List[Int], i: Int, carry: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let s = limb(a, i) + limb(b, i) + carry
+    add_from(a, b, i + 1, s / limb_base(), n, acc + [int.band(s, limb_mask())])
+  }
+
+// a - b for a >= b; the result may carry high zero limbs (make drops them).
+local fn sub_mag(a: List[Int], b: List[Int]) -> List[Int] = sub_from(a, b, 0, 0, list.len(a), [])
+
+local fn sub_from(a: List[Int], b: List[Int], i: Int, borrow: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc
+  else {
+    let d = limb(a, i) - limb(b, i) - borrow
+    if d < 0 then sub_from(a, b, i + 1, 1, n, acc + [d + limb_base()])
+    else sub_from(a, b, i + 1, 0, n, acc + [d])
+  }
+
+local fn mul_mag(a: List[Int], b: List[Int]) -> List[Int] = list.enumerate(b) |> list.fold(
+  [],
+  (acc, (i, d)) => add_mag(acc, list.repeat(0, i) + mul_small(a, d)),
+)
+
+// a * m for 0 <= m <= 2^30; empty for m == 0.
+local fn mul_small(a: List[Int], m: Int) -> List[Int] = if m == 0 then []
+else mul_small_from(a, m, 0, 0, [])
+
+local fn mul_small_from(a: List[Int], m: Int, i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(a) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let p = limb(a, i) * m + carry
+    mul_small_from(a, m, i + 1, p / limb_base(), acc + [int.band(p, limb_mask())])
+  }
+
+// (a / d, a % d) for 1 <= d <= 2^30, walking from the top limb down.
+local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_from(
+  a,
+  d,
+  list.len(a) - 1,
+  0,
+  [],
+)
+
+local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
+  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
+  else {
+    let cur = rem * limb_base() + limb(a, i)
+    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+  }
+
+// Schoolbook long division, one limb of quotient per step: each quotient limb is
+// searched between two bounds read from the top limbs of the running remainder.
+local fn divmod_mag(a: List[Int], b: List[Int]) -> (List[Int], List[Int]) =
+  if compare_mag(a, b) < 0 then ([], a)
+  else if list.len(b) == 1 then {
+    let (q, r) = divmod_small(a, limb(b, 0))
+    (q, if r == 0 then []
+    else [r])
+  } else long_divide(a, b, list.len(a) - 1, [], [])
+
+local fn long_divide(a: List[Int], b: List[Int], i: Int, rem: List[Int], acc: List[Int]) -> (List[Int], List[Int]) =
+  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
+  else {
+    let shifted = trim([limb(a, i)] + rem)
+    let q = quotient_limb(shifted, b)
+    long_divide(a, b, i - 1, trim(sub_mag(shifted, mul_small(b, q))), [q] + acc)
+  }
+
+local fn trim(l: List[Int]) -> List[Int] = list.take(l, top_nonzero(l, list.len(l)))
+
+// The largest q in 0..2^30-1 with b * q <= rem, for rem < b * 2^30.
+local fn quotient_limb(rem: List[Int], b: List[Int]) -> Int = {
+  let m = list.len(b)
+  let top = limb(b, m - 1)
+  let t = if list.len(rem) > m then limb(rem, m) * limb_base() + limb(rem, m - 1) else limb(
+    rem,
+    m - 1,
+  )
+  search_quotient(rem, b, t / (top + 1), int.min(limb_mask(), (t + 1) / top))
+}
+
+local fn search_quotient(rem: List[Int], b: List[Int], lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi + 1) / 2
+    if compare_mag(trim(mul_small(b, mid)), rem) <= 0 then search_quotient(rem, b, mid, hi)
+    else search_quotient(rem, b, lo, mid - 1)
+  }
+
+// ── bits ──
+local fn shift_left_bits(a: List[Int], r: Int, i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(a) then acc + [carry]
+  else {
+    let v = int.bshl(limb(a, i), r) + carry
+    shift_left_bits(a, r, i + 1, int.bshr(v, 30), acc + [int.band(v, limb_mask())])
+  }
+
+local fn shift_right_bits(a: List[Int], r: Int) -> List[Int] = list.range(0, list.len(a)) |> list.map((i) => int.band(int.bor(int.bshr(limb(a, i), r), int.bshl(limb(a, i + 1), 30 - r)), limb_mask()))
+
+// Each operand as n limbs of two's complement (n above both widths, so the top limb
+// carries the sign), combined limb by limb, read back with the result's sign.
+local fn bitwise(a: BigInt, b: BigInt, neg: Bool, f: (Int, Int) -> Int) -> BigInt = {
+  let n = int.max(list.len(a.limbs), list.len(b.limbs)) + 1
+  let r = list.zip_with(twos(a, n), twos(b, n), f)
+  if neg then make(true, add_mag(complement(r), [1]))
+  else make(false, r)
+}
+
+local fn twos(x: BigInt, n: Int) -> List[Int] =
+  if x.neg then complement(pad(sub_mag(x.limbs, [1]), n))
+  else pad(x.limbs, n)
+
+local fn pad(l: List[Int], n: Int) -> List[Int] = l + list.repeat(0, n - list.len(l))
+
+local fn complement(l: List[Int]) -> List[Int] = l |> list.map((d) => limb_mask() - d)
+
+// ── radix text ──
+local fn check_radix(radix: Int) -> Unit =
+  if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
+
+// The most digits k with radix^k <= 2^30: one chunk of k digits fits one division step.
+local fn chunk_width(radix: Int, k: Int, p: Int) -> Int = if p * radix > limb_base() then k
+else chunk_width(radix, k + 1, p * radix)
+
+// The magnitude in chunks of d = radix^k, most significant first.
+local fn radix_chunks(l: List[Int], d: Int, acc: List[Int]) -> List[Int] =
+  if list.is_empty(l) then acc
+  else {
+    let (q, r) = divmod_small(l, d)
+    radix_chunks(q, d, [r] + acc)
+  }
+
+// The digits after an optional 0x / 0o / 0b, the prefix only matching its own radix.
+local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+  [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
+  else bytes,
+  _ => bytes,
+}
+
+local fn prefix_radix(b: Int) -> Int = match b {
+  120 | 88 => 16,
+  111 | 79 => 8,
+  98 | 66 => 2,
+  _ => 0,
+}
+
+// The value of an ASCII digit or letter, any case; 99 for any other byte.
+local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 122 then b - 87
+else if b >= 65 and b <= 90 then b - 55
+else 99
+
+local fn read_digits(digits: List[Int], radix: Int, neg: Bool) -> Result[BigInt, String] =
+  if list.is_empty(digits) then err("invalid digit found in string")
+  else if list.any(digits, (b) => digit_value(b) >= radix) then err("invalid digit found in string")
+  else if is_pow2(radix) then ok(make(
+    neg,
+    pow2_limbs(digits, radix_bits(radix), list.len(digits) - 1, 0, 0, []),
+  ))
+  else if list.len(digits) > text_digit_limit() then err(text_limit_error())
+  else {
+    let k = chunk_width(radix, 1, radix)
+    ok(make(
+      neg,
+      list.chunk(digits, k) |> list.fold(
+        [],
+        (acc, chunk) => add_mag(
+          mul_small(acc, int.pow(radix, list.len(chunk))),
+          chunk_value(chunk, radix),
+        ),
+      ),
+    ))
+  }
+
+local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
+  let v = chunk |> list.fold(0, (acc, b) => acc * radix + digit_value(b))
+  if v == 0 then []
+  else [v]
+}
+
+// ── power-of-two radix text: bits moved straight between digits and limbs, linear time ──
+local fn is_pow2(radix: Int) -> Bool = int.band(radix, radix - 1) == 0
+
+// Bits per digit of a power-of-two radix.
+local fn radix_bits(radix: Int) -> Int = int.bit_length(radix) - 1
+
+// The limbs of the digits, read from the last (least significant) digit at index i
+// upward; cur holds the nbits < 30 bits not yet in a limb.
+local fn pow2_limbs(digits: List[Int], s: Int, i: Int, cur: Int, nbits: Int, acc: List[Int]) -> List[Int] =
+  if i < 0 then acc + [cur]
+  else {
+    let v = int.bor(cur, int.bshl(digit_value(limb(digits, i)), nbits))
+    if nbits + s >= 30 then pow2_limbs(
+      digits,
+      s,
+      i - 1,
+      int.bshr(v, 30),
+      nbits + s - 30,
+      acc + [int.band(v, limb_mask())],
+    )
+    else pow2_limbs(digits, s, i - 1, v, nbits + s, acc)
+  }
+
+// The magnitude in chunks of w <= 30 bits, most significant first.
+local fn pow2_chunks(l: List[Int], w: Int) -> List[Int] = {
+  let n = (30 * list.len(l) + w - 1) / w
+  list.range(0, n) |> list.map((j) => bit_field(l, (n - 1 - j) * w, w)) |> list.drop_while((c) => c == 0)
+}
+
+// The w <= 30 bits of the magnitude starting at bit p.
+local fn bit_field(l: List[Int], p: Int, w: Int) -> Int = int.band(
+  int.bor(int.bshr(limb(l, p / 30), p % 30), int.bshl(limb(l, p / 30 + 1), 30 - p % 30)),
+  int.bshl(1, w) - 1,
+)
+
+// ── The `from` family (R-L0-40): BigInt from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as BigInt, toward zero; NaN or an infinity aborts.
+fn from[S: Numeric](x: S) -> BigInt = match from_checked(x.__trunc()) {
+  some(b) => b,
+  none => panic("bigint.from: the value is not a finite number"),
+}
+
+/// some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
+fn from_checked[S: Numeric](x: S) -> BigInt? = match x.__int_exact() {
+  some(n) => some(small(n)),
+  none => match x.__decimal_exact() {
+    some(digits) => match parse(digits) {
+      ok(b) => some(b),
+      err(_) => none,
+    },
+    none => none,
+  },
+}
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: BigInt) -> Int? =
+  if compare(x, small(int.min_value())) >= 0 and compare(x, small(int.max_value())) <= 0 then some(int_value(x))
+  else none
+
+fn __uint64_exact(x: BigInt) -> UInt64? = if x.neg or bit_length(x) > 64 then none
+else {
+  // x = hi * 2^60 + lo, hi < 16
+  let lo = int_value(make(false, list.take(x.limbs, 2)))
+  let hi = int_value(make(false, list.drop(x.limbs, 2)))
+  some(int.__to_uint64(lo) + int.__to_uint64(hi) * int.__to_uint64(1152921504606846976))
+}
+
+fn __trunc(x: BigInt) -> BigInt = x
+
+fn __int_sat(x: BigInt) -> Int = match __int_exact(x) {
+  some(n) => n,
+  none => if x.neg then int.min_value() else int.max_value(),
+}
+
+fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.__to_uint64(0)
+else match __uint64_exact(x) {
+  some(u) => u,
+  none => uint64.max_value(),
+}
+
+fn __to_float(x: BigInt) -> Float = match __int_exact(x) {
+  some(n) => int.__raw_to_float(n),
+  none => {
+    // the top 61 bits with a sticky bit below them round like the whole value
+    let (top, e) = top_bits(x, 61)
+    pow2(e) * int.__raw_to_float(top)
+  },
+}
+
+fn __to_float_exact(x: BigInt) -> Float? = {
+  let f = __to_float(x)
+  if float.__decimal_exact(f) == some(to_string(x)) then some(f) else none
+}
+
+fn __to_float32(x: BigInt) -> Float32 = match __int_exact(x) {
+  some(n) => int.__raw_to_float32(n),
+  none => {
+    let (top, e) = top_bits(x, 61)
+    if e > 200 then float.__raw_to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
+    else float.__raw_to_float32(pow2(e) * float.__from_float32(int.__raw_to_float32(top)))
+  },
+}
+
+fn __to_float32_exact(x: BigInt) -> Float32? = {
+  let f = __to_float32(x)
+  if float.__decimal_exact(float.__from_float32(f)) == some(to_string(x)) then some(f) else none
+}
+
+fn __decimal_exact(x: BigInt) -> String? = some(to_string(x))
+
+fn __bits64(x: BigInt) -> Int = {
+  let low = band(x, add(bshl(small(1), 64), small(-1)))
+  if bit_length(low) <= 63 then int_value(low)
+  else int_value(sub(low, bshl(small(1), 64)))
+}
+
+fn __sum(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(0), (a, b) => add(a, b))
+
+fn __product(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(1), (a, b) => multiply(a, b))
+
+// The Int value of an x that fits, accumulated from the top limb toward the
+// sign so Int's minimum never overflows.
+local fn int_value(x: BigInt) -> Int = list.reverse(x.limbs) |> list.fold(
+  0,
+  (acc, l) => if x.neg then acc * 1073741824 - l else acc * 1073741824 + l,
+)
+
+// The top n bits of |x| as a signed Int with a sticky low bit (set when any bit
+// below them is), and the power of two that scales them back: x is about
+// top * 2^e, and rounding top rounds x the same way.
+local fn top_bits(x: BigInt, n: Int) -> (Int, Int) = {
+  let mag = abs(x)
+  let shift = bit_length(mag) - n
+  let top = shr_magnitude(mag, shift)
+  let sticky = if compare(bshl(top, shift), mag) == 0 then 0 else 1
+  let t = int_value(top) * 2 + sticky
+  (if x.neg then 0 - t else t, shift - 1)
+}
+
+// 2^e as a Float, exactly; above Float's range, infinity.
+local fn pow2(e: Int) -> Float = if e > 1023 then float.infinity() else float.from_bits(int.bshl(e + 1023, 52))

@@ -1,0 +1,8 @@
+// The caller of the transparent HOF is an `effect fn`, so the call may read.
+import fs
+
+fn apply(f: (String) -> Result[String, String], p: String) -> Result[String, String] = f(p)
+
+effect fn reads(p: String) -> Result[String, String] = apply(fs.read_text, p)
+
+effect fn main() -> Unit = println(reads("s.txt") ?? "none")

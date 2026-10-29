@@ -1,28 +1,52 @@
 // @contract: C-282
-// The DEFINED side of the matrix index domain (the abort is pinned by
-// spec/wasm_fail/matrix_index_oob_aborts.almd — one fixture cannot assert both
-// an abort and a clean exit, the C-198 split).
+// The whole matrix index domain, both sides, on both targets.
 //
 // FAMILY COMPLETENESS. Three public accessors take an index:
-//   matrix.get      — returns THE ELEMENT. No identity value exists for "the
-//                     value at (r, c)", so out of range ABORTS, exactly as the
-//                     `xs[i]` list index does. Cells below: every in-range
-//                     corner, on both legs.
+//   matrix.get      — returns THE ELEMENT as `Option[Float]`: `some(value)`
+//                     in range, `none` out of range, NEGATIVE included. It
+//                     never aborts and never invents a value. (Before stdlib
+//                     redesign R-matrix-08 it aborted with `Error: matrix
+//                     index out of bounds`, pinned by the retired
+//                     spec/wasm_fail/matrix_index_oob_aborts.almd.)
 //   matrix.dot_row  — a REDUCTION over a row. Its empty-sum identity IS 0.0, so
-//                     an out-of-range (or negative) row answers 0.0 and does
-//                     NOT abort. Measured convergent before this change and
-//                     pinned here so the guard work never silently converts
-//                     them into aborts.
-// The distinction is the ruling: an accessor with no identity aborts; a
-// reduction with one answers it.
+//                     an out-of-range (or negative) row answers 0.0 — a bare
+//                     Float, no Option. Pinned here so the accessor's change
+//                     never leaks into the reductions.
+//
+// The negative cells are the ones that matter most: before any guard, the
+// wasm leg wrapped `col as usize` and printed whatever bytes lay outside the
+// row block with exit 0, while native panicked (first scheduled both-arch
+// fuzz night, run 31861833115, seeds 509789329848/509789329844, mutations of
+// spec/wasm_cross/rope_at_family.almd). `none` is now the one answer.
+fn cell(m: Matrix, r: Int, c: Int) -> String = match matrix.get(m, r, c) {
+  some(x) => float.to_string(x),
+  none => "none",
+}
+
 fn main() -> Unit = {
   let m = matrix.from_lists([
     [1.0, 2.0, 3.0, 4.0],
     [5.0, 6.0, 7.0, 8.0]
   ])
   // Every corner of the in-range domain, plus the interior.
-  println("corners=${float.to_string(matrix.get(m, 0, 0))},${float.to_string(matrix.get(m, 0, 3))},${float.to_string(matrix.get(m, 1, 0))},${float.to_string(matrix.get(m, 1, 3))}")
-  println("interior=${float.to_string(matrix.get(m, 1, 2))}")
+  println("corners=${cell(m, 0, 0)},${cell(m, 0, 3)},${cell(m, 1, 0)},${cell(m, 1, 3)}")
+  println("interior=${cell(m, 1, 2)}")
+  // Out of range is `none` — one past each edge, far past, and negative.
+  println("row_past=${cell(m, 2, 0)}")
+  println("col_past=${cell(m, 0, 4)}")
+  println("both_past=${cell(m, 2, 4)}")
+  println("row_huge=${cell(m, 9223372036854775807, 0)}")
+  println("col_huge=${cell(m, 0, 9223372036854775807)}")
+  println("row_neg=${cell(m, 0 - 1, 0)}")
+  println("col_neg=${cell(m, 0, 0 - 1)}")
+  println("both_neg=${cell(m, 0 - 1, 0 - 1)}")
+  println("row_min=${cell(m, -9223372036854775808, 0)}")
+  println("col_min=${cell(m, 1, -9223372036854775808)}")
+  // An empty matrix has no in-range index at all.
+  println("empty=${cell(matrix.zeros(0, 0), 0, 0)}")
+  println("rows_no_cols=${cell(matrix.zeros(3, 0), 0, 0)}")
+  // The fallback form a caller writes.
+  println("fallback=${float.to_string(matrix.get(m, 5, 5) ?? -1.0)}")
   // The reductions keep answering their identity out of range — no abort.
   println("row_dot_oob=${float.to_string(matrix.dot_row(m, 1000000, [1.0, 1.0, 1.0, 1.0]))}")
   println("row_dot_neg=${float.to_string(matrix.dot_row(m, 0 - 1, [1.0, 1.0, 1.0, 1.0]))}")

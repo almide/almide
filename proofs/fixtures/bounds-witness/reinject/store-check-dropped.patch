@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/stmts_index.rs b/crates/almide-wasm/src/stmts_index.rs
+index 918f31680..637777a0a 100644
+--- a/crates/almide-wasm/src/stmts_index.rs
++++ b/crates/almide-wasm/src/stmts_index.rs
+@@ -125,7 +125,8 @@ impl Emitter<'_> {
+                 // #4005: a cell or a global is never a fact candidate — a
+                 // fresh loose slot, decided by its own check alone.
+                 let site = self.bounds_site((is_local && !in_cell).then_some(*target), index);
+-                if !known {
++                // RE-INJECTED (#4005 drill): the store route emits no bounds check.
++                if false && !known {
+                     self.f.instructions().local_get(hi);
+                     match hoisted {
+                         Some(count) => {

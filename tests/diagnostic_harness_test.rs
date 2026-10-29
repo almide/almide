@@ -31,6 +31,10 @@
 //! in `meta.toml`: both halves are then checked with `almide check
 //! --target wasm` (#1922), the route E082 is reported on (#3285).
 //!
+//! A case whose diagnostic belongs to a PROFILE sets `check_profile =
+//! "critical"`: every check of the case (both halves, `--json` included) then
+//! runs `almide check --profile critical` (E100, #4008).
+//!
 //! Running: `cargo test --test diagnostic_harness_test`.
 
 use std::collections::HashMap;
@@ -51,6 +55,8 @@ struct Meta {
     expects_line_col: Option<String>,
     /// `--target` for `almide check` (only `wasm`): the E082 families.
     check_target: Option<String>,
+    /// `--profile` for `almide check` (only `critical`): the E100 families.
+    check_profile: Option<String>,
 }
 
 fn parse_meta(path: &Path) -> Meta {
@@ -69,6 +75,7 @@ fn parse_meta(path: &Path) -> Meta {
                 "hint_substring" => "hint_substring",
                 "expects_line_col" => "expects_line_col",
                 "check_target" => "check_target",
+                "check_profile" => "check_profile",
                 _ => continue,
             },
             value,
@@ -80,6 +87,7 @@ fn parse_meta(path: &Path) -> Meta {
         hint_substring: fields.remove("hint_substring"),
         expects_line_col: fields.remove("expects_line_col"),
         check_target: fields.remove("check_target"),
+        check_profile: fields.remove("check_profile"),
     }
 }
 
@@ -94,7 +102,7 @@ fn collect_cases() -> Vec<PathBuf> {
         for entry in entries.flatten() {
             // `silent/` is not a case: it holds the programs that must
             // check with NO diagnostic (#2149, `diagnostic_silent_test.rs`).
-            if entry.file_type().map_or(false, |t| t.is_dir()) && entry.file_name() != "silent" {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) && entry.file_name() != "silent" {
                 cases.push(entry.path());
             }
         }
@@ -103,15 +111,37 @@ fn collect_cases() -> Vec<PathBuf> {
     cases
 }
 
+/// The cases a heavy test judges on this run: every case on a full run, the
+/// CI slice (`ALMIDE_CI_SLICE`, crates/almide-corpus/src/ci_slice.rs) plus the
+/// cases the change touches otherwise. The floors over the WHOLE population
+/// (`MACHINE_APPLICABLE_FIXTURE_FLOOR`, `REPAIR_GREP_FLOOR`, the non-vacuous
+/// E002 count) are whole-corpus counts, judged only on a full run.
+fn judged_cases(gate: &str) -> Vec<PathBuf> {
+    let cases = collect_cases();
+    assert!(!cases.is_empty(), "no fixtures found under tests/diagnostics/");
+    almide_corpus::select(cases, gate, |c| {
+        format!("tests/diagnostics/{}", c.file_name().unwrap_or_default().to_string_lossy())
+    })
+}
+
 fn run_check(file: &Path) -> (bool, String, String) {
     run_check_target(file, None)
 }
 
+/// The `--profile` a fixture file's case declares (`check_profile` in the
+/// `meta.toml` beside it), as extra `almide check` arguments.
+fn profile_args(file: &Path) -> Vec<String> {
+    let meta = file.parent().map(|d| parse_meta(&d.join("meta.toml"))).unwrap_or_default();
+    meta.check_profile.map(|p| vec!["--profile".to_string(), p]).unwrap_or_default()
+}
+
 fn run_check_target(file: &Path, target: Option<&str>) -> (bool, String, String) {
+    let profile = profile_args(file);
     let mut args = vec!["check", file.to_str().unwrap()];
     if let Some(t) = target {
         args.extend(["--target", t]);
     }
+    args.extend(profile.iter().map(String::as_str));
     let out = Command::new(almide())
         .args(&args)
         .output()
@@ -170,7 +200,7 @@ fn every_case_has_broken_and_fixed_pair() {
 
 #[test]
 fn broken_files_produce_expected_diagnostics() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::broken_files_produce_expected_diagnostics");
     for case in &cases {
         let broken = case.join("broken.almd");
         let meta = parse_meta(&case.join("meta.toml"));
@@ -232,7 +262,7 @@ fn broken_files_produce_expected_diagnostics() {
 /// every diagnostic a broken file produces must carry a non-empty hint.
 #[test]
 fn every_diagnostic_carries_a_hint() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::every_diagnostic_carries_a_hint");
     let mut offenders = Vec::new();
     for case in &cases {
         let diags = run_check_json(&case.join("broken.almd"));
@@ -256,7 +286,7 @@ fn every_diagnostic_carries_a_hint() {
 
 #[test]
 fn fixed_files_compile_cleanly() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::fixed_files_compile_cleanly");
     for case in &cases {
         let (success, stdout, stderr) = check_case(case, "fixed");
         assert!(
@@ -270,10 +300,11 @@ fn fixed_files_compile_cleanly() {
 fn run_check_json(file: &Path) -> Vec<DiagJson> {
     let out = Command::new(almide())
         .args(["check", "--json", file.to_str().unwrap()])
+        .args(profile_args(file))
         .output()
         .expect("almide check --json");
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    stdout.lines().filter_map(|l| DiagJson::parse(l)).collect()
+    stdout.lines().filter_map(DiagJson::parse).collect()
 }
 
 /// Minimal subset of the `almide check --json` payload the harness
@@ -423,11 +454,12 @@ fn try_snippets_with_replace_span_apply_cleanly() {
     // source compile. Until per-diagnostic migrations in Phase 3 land,
     // this loop may be a no-op — that's fine; it's the regression
     // gate for when migrations do arrive.
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::try_snippets_with_replace_span_apply_cleanly");
     for case in &cases {
         let broken = case.join("broken.almd");
         let fixed = case.join("fixed.almd");
         let diagnostics = run_check_json(&broken);
+        let meta = parse_meta(&case.join("meta.toml"));
         // A case with SEVERAL span-anchored fixes (e.g. two unused imports)
         // reaches fixed.almd only after `almide fix`'s multi-round application;
         // a single application cannot equal it. Each application must still
@@ -463,7 +495,11 @@ fn try_snippets_with_replace_span_apply_cleanly() {
                 "applied try: did not compile in {}:\nrewritten:\n{}\nstdout: {}\nstderr: {}",
                 case.display(), rewritten, stdout, stderr
             );
-            if span_fix_count == 1 {
+            // A fix for a NEIGHBOUR of the case's subject (the E052 rename
+            // beside an E032 case, #4043) repairs a different defect, so it
+            // cannot be expected to produce fixed.almd; it must still compile.
+            let fixes_the_subject = meta.expects_code.as_deref().is_none_or(|c| d.code.as_deref() == Some(c));
+            if span_fix_count == 1 && fixes_the_subject {
                 let fixed_src = std::fs::read_to_string(&fixed).unwrap();
                 let norm = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
                 assert_eq!(
@@ -488,7 +524,7 @@ fn try_snippets_with_replace_span_apply_cleanly() {
 #[test]
 fn e002_underlines_the_span_it_offers_to_replace() {
     let mut checked = 0usize;
-    for case in &collect_cases() {
+    for case in &judged_cases("diagnostic_harness::e002_underlines_the_span_it_offers_to_replace") {
         let broken = case.join("broken.almd");
         for d in run_check_json(&broken) {
             if d.code.as_deref() != Some("E002") { continue; }
@@ -501,7 +537,7 @@ fn e002_underlines_the_span_it_offers_to_replace() {
             checked += 1;
         }
     }
-    assert!(checked > 0, "no E002 fixture carried a replacement span — this test went vacuous");
+    assert!(checked > 0 || !almide_corpus::full_run(), "no E002 fixture carried a replacement span — this test went vacuous");
 }
 
 /// #1312 ratchet. `almide fix` applies `machine-applicable` fix-its and
@@ -515,7 +551,7 @@ const MACHINE_APPLICABLE_FIXTURE_FLOOR: usize = 27;
 
 #[test]
 fn machine_applicable_fixits_stay_populated() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::machine_applicable_fixits_stay_populated");
     let mut machine: Vec<String> = Vec::new();
     for case in &cases {
         for d in run_check_json(&case.join("broken.almd")) {
@@ -547,7 +583,7 @@ fn machine_applicable_fixits_stay_populated() {
         unpromised
     );
     assert!(
-        machine.len() >= MACHINE_APPLICABLE_FIXTURE_FLOOR,
+        !almide_corpus::full_run() || machine.len() >= MACHINE_APPLICABLE_FIXTURE_FLOOR,
         "machine-applicable fix-its dropped to {} (floor {}): {:?}",
         machine.len(), MACHINE_APPLICABLE_FIXTURE_FLOOR, machine
     );
@@ -570,12 +606,13 @@ const REPAIR_GREP_FLOOR: usize = 10;
 fn repair_grep_needles_appear_in_the_diagnostic() {
     let mut checked = 0usize;
     let mut misses: Vec<String> = Vec::new();
-    for case in &collect_cases() {
+    for case in &judged_cases("diagnostic_harness::repair_grep_needles_appear_in_the_diagnostic") {
         let Ok(grep) = std::fs::read_to_string(case.join("repair.grep")) else { continue };
         checked += 1;
         let meta = parse_meta(&case.join("meta.toml"));
         let out = Command::new(almide())
             .args(["check", "--json", case.join("broken.almd").to_str().unwrap()])
+            .args(profile_args(&case.join("broken.almd")))
             .output()
             .expect("almide check --json");
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -604,7 +641,7 @@ fn repair_grep_needles_appear_in_the_diagnostic() {
     }
     assert!(misses.is_empty(), "repair.grep needles missing:\n{}", misses.join("\n"));
     assert!(
-        checked >= REPAIR_GREP_FLOOR,
+        !almide_corpus::full_run() || checked >= REPAIR_GREP_FLOOR,
         "only {} case(s) carry repair.grep (floor {})",
         checked, REPAIR_GREP_FLOOR
     );

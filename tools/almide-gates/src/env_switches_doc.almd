@@ -32,7 +32,7 @@ fn embedded_block(doc: String) -> List[String]? = {
 fn first_diff(a: List[String], b: List[String], i: Int) -> Int? =
   if i >= list.len(a) and i >= list.len(b) then none
   else if i >= list.len(a) or i >= list.len(b) then some(i)
-  else if list.get_or(a, i, "") != list.get_or(b, i, "") then some(i)
+  else if (list.get(a, i) ?? "") != list.get(b, i) ?? "" then some(i)
   else first_diff(a, b, i + 1)
 
 effect fn run(root: String, almide_bin: String) -> Verdict = {
@@ -55,8 +55,8 @@ effect fn run(root: String, almide_bin: String) -> Verdict = {
       some(i) => Verdict {
         lines: [
           "::error::" + doc_path + " switch table differs from `almide switches --md` at row " + int.to_string(i + 1),
-          "  doc:      " + list.get_or(got, i, "<end>"),
-          "  registry: " + list.get_or(want, i, "<end>"),
+          "  doc:      " + list.get(got, i) ?? "<end>",
+          "  registry: " + list.get(want, i) ?? "<end>",
           "  regenerate: replace the block between the markers with the output of `almide switches --md`"
         ],
         ok: false,

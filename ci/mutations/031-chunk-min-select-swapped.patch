@@ -1,15 +1,15 @@
 diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
-index 47ecc8167..eabd46c9e 100644
+index 8ae92437a..7c702ac63 100644
 --- a/crates/almide-wasm/src/list_order.rs
 +++ b/crates/almide-wasm/src/list_order.rs
-@@ -358,9 +358,9 @@ impl Emitter<'_> {
-                         i.local_get(hn).local_set(hcs);
-                     } else {
-                         // cs = n > remaining ? remaining : n
-+                        i.local_get(hn); // [MUTANT: select operands swapped]
-                         i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
-                         i.local_get(hn);
--                        i.local_get(hn);
-                         i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
-                         i.i64_gt_s().select().local_set(hcs);
-                     }
+@@ -376,9 +376,9 @@ impl Emitter<'_> {
+                     i.local_get(hk).local_get(hnum).i32_ge_u().br_if(1);
+                     // row size: min(n, total - k*n)
+                     // cs = n > remaining ? remaining : n
++                    i.local_get(hn); // [MUTANT: select operands swapped]
+                     i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                     i.local_get(hn);
+-                    i.local_get(hn);
+                     i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                     i.i64_gt_s().select().local_set(hcs);
+                     i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul().call(F_ALLOC).local_set(hrow);

@@ -1,0 +1,136 @@
+// The bitwise Integer requirements and the FixedWidthInteger bit counts on the eight
+// fixed-width integer types (R-sized-10). Every answer is in the type's own width:
+// counts run over its bits, a shift count is taken mod the width, and `bshr` fills
+// with the sign on a signed type and with zeros on an unsigned one (the UInt64 upper
+// half included, which a signed Int pivot would sign-fill).
+fn i8(n: Int) -> Int8 = int8.from_wrapping(n)
+
+fn i16(n: Int) -> Int16 = int16.from_wrapping(n)
+
+fn i32(n: Int) -> Int32 = int32.from_wrapping(n)
+
+fn i64(n: Int) -> Int64 = int64.from(n)
+
+fn u8(n: Int) -> UInt8 = uint8.from_wrapping(n)
+
+fn u16(n: Int) -> UInt16 = uint16.from_wrapping(n)
+
+fn u32(n: Int) -> UInt32 = uint32.from_wrapping(n)
+
+fn u64(n: Int) -> UInt64 = uint64.from_wrapping(n)
+
+// ── band / bor / bxor / bnot ──
+test "and, or, xor and not over the type's bits" {
+  assert_eq(int8.band(i8(-100), i8(12)), i8(12))
+  assert_eq(int8.bor(i8(-100), i8(3)), i8(-97))
+  assert_eq(int8.bxor(i8(-1), i8(15)), i8(-16))
+  assert_eq(int8.bnot(i8(0)), i8(-1))
+  assert_eq(int8.bnot(int8.min_value()), int8.max_value())
+  assert_eq(int16.band(i16(-1), i16(4660)), i16(4660))
+  assert_eq(int16.bnot(i16(4660)), i16(-4661))
+  assert_eq(int32.bor(i32(65536), i32(1)), i32(65537))
+  assert_eq(int32.bxor(i32(-1), i32(0)), i32(-1))
+  assert_eq(int64.band(int64.min_value(), i64(-1)), int64.min_value())
+  assert_eq(int64.bnot(int64.max_value()), int64.min_value())
+  assert_eq(uint8.bnot(u8(0)), u8(255))
+  assert_eq(uint8.bxor(u8(255), u8(15)), u8(240))
+  assert_eq(uint16.bnot(u16(0)), u16(65535))
+  assert_eq(uint16.band(u16(65280), u16(4660)), u16(4608))
+  assert_eq(uint32.bnot(u32(0)), u32(4294967295))
+  assert_eq(uint32.bor(u32(2147483648), u32(1)), u32(2147483649))
+  assert_eq(uint64.bnot(u64(0)), uint64.max_value())
+  assert_eq(uint64.band(uint64.max_value(), u64(255)), u64(255))
+  assert_eq(uint64.to_string(uint64.bor(uint64.pow(u64(2), 63), u64(1))), "9223372036854775809")
+  assert_eq(uint64.to_string(uint64.bxor(uint64.max_value(), u64(1))), "18446744073709551614")
+}
+
+// ── bshl / bshr ──
+test "shift counts are taken mod the width" {
+  assert_eq(int8.bshl(i8(1), 7), i8(-128))
+  assert_eq(int8.bshl(i8(1), 8), i8(1))
+  assert_eq(int8.bshl(i8(1), -1), i8(-128))
+  assert_eq(int8.bshl(i8(3), 7), i8(-128))
+  assert_eq(int8.bshr(i8(64), 9), i8(32))
+  assert_eq(int16.bshl(i16(1), 15), i16(-32768))
+  assert_eq(int16.bshl(i16(1), 16), i16(1))
+  assert_eq(int32.bshl(i32(1), 31), i32(-2147483648))
+  assert_eq(int32.bshl(i32(1), 33), i32(2))
+  assert_eq(int64.bshl(i64(1), 63), int64.min_value())
+  assert_eq(int64.bshl(i64(1), 64), i64(1))
+  assert_eq(uint8.bshl(u8(255), 4), u8(240))
+  assert_eq(uint16.bshl(u16(1), 17), u16(2))
+  assert_eq(uint32.bshl(u32(1), 31), u32(2147483648))
+  assert_eq(uint64.to_string(uint64.bshl(uint64.max_value(), 63)), "9223372036854775808")
+}
+
+test "bshr fills with the sign on signed types" {
+  assert_eq(int8.bshr(int8.min_value(), 1), i8(-64))
+  assert_eq(int8.bshr(int8.min_value(), 7), i8(-1))
+  assert_eq(int16.bshr(int16.min_value(), 15), i16(-1))
+  assert_eq(int32.bshr(i32(-8), 2), i32(-2))
+  assert_eq(int64.bshr(int64.min_value(), 63), i64(-1))
+}
+
+test "bshr fills with zeros on unsigned types" {
+  assert_eq(uint8.bshr(u8(255), 4), u8(15))
+  assert_eq(uint16.bshr(u16(65535), 15), u16(1))
+  assert_eq(uint32.bshr(u32(2147483648), 31), u32(1))
+  assert_eq(uint64.bshr(uint64.max_value(), 63), u64(1))
+  assert_eq(uint64.to_string(uint64.bshr(uint64.max_value(), 1)), "9223372036854775807")
+  assert_eq(uint64.bshr(uint64.max_value(), 64), uint64.max_value())
+  assert_eq(uint64.bshr(uint64.max_value(), -1), u64(1))
+}
+
+// ── count_leading_zeros / count_trailing_zeros / count_ones ──
+test "bit counts run over the type's width" {
+  assert_eq(int8.count_leading_zeros(i8(1)), 7)
+  assert_eq(int8.count_leading_zeros(i8(0)), 8)
+  assert_eq(int8.count_leading_zeros(i8(-1)), 0)
+  assert_eq(int8.count_trailing_zeros(i8(0)), 8)
+  assert_eq(int8.count_trailing_zeros(int8.min_value()), 7)
+  assert_eq(int8.count_trailing_zeros(i8(12)), 2)
+  assert_eq(int8.count_ones(i8(-1)), 8)
+  assert_eq(int8.count_ones(i8(0)), 0)
+  assert_eq(int8.count_ones(int8.min_value()), 1)
+  assert_eq(int16.count_leading_zeros(i16(1)), 15)
+  assert_eq(int16.count_trailing_zeros(i16(0)), 16)
+  assert_eq(int16.count_ones(i16(-1)), 16)
+  assert_eq(int32.count_leading_zeros(i32(1)), 31)
+  assert_eq(int32.count_trailing_zeros(i32(0)), 32)
+  assert_eq(int32.count_ones(i32(-1)), 32)
+  assert_eq(int64.count_leading_zeros(i64(1)), 63)
+  assert_eq(int64.count_leading_zeros(int64.min_value()), 0)
+  assert_eq(int64.count_trailing_zeros(i64(0)), 64)
+  assert_eq(int64.count_trailing_zeros(int64.min_value()), 63)
+  assert_eq(int64.count_ones(i64(-1)), 64)
+  assert_eq(uint8.count_leading_zeros(u8(1)), 7)
+  assert_eq(uint8.count_trailing_zeros(u8(128)), 7)
+  assert_eq(uint8.count_ones(u8(255)), 8)
+  assert_eq(uint16.count_leading_zeros(u16(255)), 8)
+  assert_eq(uint16.count_trailing_zeros(u16(0)), 16)
+  assert_eq(uint16.count_ones(u16(65535)), 16)
+  assert_eq(uint32.count_leading_zeros(u32(1)), 31)
+  assert_eq(uint32.count_trailing_zeros(u32(0)), 32)
+  assert_eq(uint32.count_ones(u32(4294967295)), 32)
+  assert_eq(uint64.count_leading_zeros(uint64.max_value()), 0)
+  assert_eq(uint64.count_leading_zeros(u64(1)), 63)
+  assert_eq(uint64.count_leading_zeros(u64(0)), 64)
+  assert_eq(uint64.count_trailing_zeros(u64(0)), 64)
+  assert_eq(uint64.count_ones(uint64.max_value()), 64)
+}
+
+// ── byte_swap ──
+test "byte_swap reverses the type's bytes" {
+  assert_eq(int8.byte_swap(i8(-5)), i8(-5))
+  assert_eq(uint8.byte_swap(u8(200)), u8(200))
+  assert_eq(int16.byte_swap(i16(4660)), i16(13330))
+  assert_eq(int16.byte_swap(i16(255)), i16(-256))
+  assert_eq(int32.byte_swap(i32(305419896)), i32(2018915346))
+  assert_eq(int32.byte_swap(i32(255)), i32(-16777216))
+  assert_eq(int64.byte_swap(i64(72623859790382856)), i64(578437695752307201))
+  assert_eq(uint16.byte_swap(u16(4660)), u16(13330))
+  assert_eq(uint16.byte_swap(u16(65280)), u16(255))
+  assert_eq(uint32.byte_swap(u32(305419896)), u32(2018915346))
+  assert_eq(uint32.byte_swap(u32(4278190080)), u32(255))
+  assert_eq(uint64.to_string(uint64.byte_swap(u64(255))), "18374686479671623680")
+}

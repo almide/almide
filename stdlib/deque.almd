@@ -1,0 +1,245 @@
+// deque — a double-ended queue (R-deque-01, R-L1-01), in pure Almide.
+//
+// Two lists: `front` holds the front part REVERSED (its last element is the
+// deque's first) and `back` holds the back part in order (its last element is
+// the deque's last), so all four end operations are a `list.push` / `list.pop`
+// on one of them. A pop from an end whose list is empty first splits the
+// other list in half (amortized O(1): a split of n elements is paid for by
+// the n pushes that built it). The deque, front to back, is
+// `list.reverse(front) + back`; every whole-sequence fn reads that order.
+//
+// Adding and taking at the ends are in-place `mut` verbs like `list.push` /
+// `list.pop` (R-L0-04, R-deque-03); everything else is a copy. Positional and
+// range fns take the same arguments and give the same answers as the list fn
+// of the same name (R-deque-04), and the sequence algorithms are the list
+// ones over the front-to-back order (R-L0-42). `Deque` is opaque (`mod
+// type`, #4256): outside this module neither half can be read or written
+// (E033), so how the elements are split between them is never observable.
+/// A double-ended queue, front to back.
+mod type Deque[A] = { front: List[A], back: List[A] }
+
+// ── construction and size (R-deque-01) ──
+/// An empty deque.
+fn new[A]() -> Deque[A] = { front: [], back: [] }
+
+/// A deque of xs, front to back.
+fn from_list[A](xs: List[A]) -> Deque[A] = { front: [], back: xs }
+
+/// The elements, front to back.
+fn to_list[A](d: Deque[A]) -> List[A] = list.reverse(d.front) + d.back
+
+/// Element count; 0 for an empty deque.
+fn len[A](d: Deque[A]) -> Int = list.len(d.front) + list.len(d.back)
+
+/// true iff d has no elements.
+fn is_empty[A](d: Deque[A]) -> Bool = list.is_empty(d.front) and list.is_empty(d.back)
+
+// ── the ends: in-place add / take, and the reads ──
+/// Appends x at the back in place.
+fn push[A](mut d: Deque[A], x: A) -> Unit = list.push(d.back, x)
+
+/// Adds x at the front in place.
+fn push_front[A](mut d: Deque[A], x: A) -> Unit = list.push(d.front, x)
+
+/// Removes and yields the last element; none when empty.
+fn pop[A](mut d: Deque[A]) -> A? = {
+  if list.is_empty(d.back) then {
+    let xs = list.reverse(d.front)
+    let keep = list.len(xs) / 2
+    d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else ()
+  list.pop(d.back)
+}
+
+/// Removes and yields the first element; none when empty.
+fn pop_front[A](mut d: Deque[A]) -> A? = {
+  if list.is_empty(d.front) then {
+    let keep = (list.len(d.back) + 1) / 2
+    d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
+  } else ()
+  list.pop(d.front)
+}
+
+/// The first element, or none when empty.
+fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
+  some(x) => some(x),
+  none => list.first(d.back),
+}
+
+/// The last element, or none when empty.
+fn last[A](d: Deque[A]) -> A? = match list.last(d.back) {
+  some(x) => some(x),
+  none => list.first(d.front),
+}
+
+/// Element at index i from the front, or none when out of range.
+fn get[A](d: Deque[A], i: Int) -> A? = {
+  let nf = list.len(d.front)
+  if i < 0 then none
+  else if i < nf then list.get(d.front, nf - 1 - i)
+  else list.get(d.back, i - nf)
+}
+
+/// true if some element == x.
+fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+
+/// Removes every element of d in place.
+fn clear[A](mut d: Deque[A]) -> Unit = {
+  d = { front: [], back: [] }
+}
+
+// ── the Container combinators (R-deque-02), front to back ──
+/// Deque of f(x), front to back; f runs front to back.
+fn map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B] = from_list(list.map(to_list(d), f))
+
+/// Elements where f holds, order kept.
+fn filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.filter(to_list(d), f))
+
+/// Folds f(acc, x) front to back.
+fn fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B = list.fold(to_list(d), init, f)
+
+/// true if f holds for some element; false when empty.
+fn any[A](d: Deque[A], f: (A) -> Bool) -> Bool = list.any(to_list(d), f)
+
+/// true if f holds for every element; true when empty.
+fn all[A](d: Deque[A], f: (A) -> Bool) -> Bool = list.all(to_list(d), f)
+
+/// Number of elements where f holds.
+fn count[A](d: Deque[A], f: (A) -> Bool) -> Int = list.count(to_list(d), f)
+
+/// The element nearest the front where f holds, or none.
+fn find[A](d: Deque[A], f: (A) -> Bool) -> A? = list.find(to_list(d), f)
+
+// ── position and range (R-deque-04): the list fn's arguments and answers ──
+/// Elements back to front.
+fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
+
+/// First n elements, as list.take.
+fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
+
+/// All but the first n, as list.drop.
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop(to_list(d), n))
+
+/// Last n elements, as list.take_end.
+fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
+
+/// All but the last n, as list.drop_end.
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop_end(to_list(d), n))
+
+/// Indices start..<end, as list.slice.
+fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
+
+/// Copy with slot i = x, as list.set.
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.set(to_list(d), i, x))
+
+/// Copy with x at i, as list.insert.
+fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
+
+/// Copy without slot i, as list.remove_at.
+fn remove_at[A](d: Deque[A], i: Int) -> Deque[A] = from_list(list.remove_at(to_list(d), i))
+
+// ── the sequence algorithms (R-L0-42), front to back ──
+/// (index, element) pairs, index from 0 at the front.
+fn enumerate[A](d: Deque[A]) -> List[(Int, A)] = list.enumerate(to_list(d))
+
+/// Elements paired with ys by position; stops at the shorter.
+fn zip[A, B](d: Deque[A], ys: List[B]) -> List[(A, B)] = list.zip(to_list(d), ys)
+
+/// f over (element, ys element) pairs; stops at the shorter.
+fn zip_with[A, B, C](d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip_with(
+  to_list(d),
+  ys,
+  f,
+)
+
+/// The somes f gives, front to back.
+fn filter_map[A, B](d: Deque[A], f: (A) -> B?) -> List[B] = list.filter_map(to_list(d), f)
+
+/// The first some f gives, or none; f is not called after the hit.
+fn find_map[A, B](d: Deque[A], f: (A) -> B?) -> B? = list.find_map(to_list(d), f)
+
+/// Left fold seeded by the first element; none when empty.
+fn reduce[A](d: Deque[A], f: (A, A) -> A) -> A? = list.reduce(to_list(d), f)
+
+/// Running fold values front to back, init excluded.
+fn scan[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(
+  to_list(d),
+  init,
+  f,
+)
+
+/// (elements where f holds, the rest), order kept.
+fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(
+  to_list(d),
+  f,
+)
+
+/// Key f(x) -> elements; keys in first-seen order.
+fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
+
+/// Elements in ascending order; Floats in IEEE totalOrder.
+fn sort[A](d: Deque[A]) -> List[A] = list.sort(to_list(d))
+
+/// Elements sorted by key f(x), stable; f runs once per element.
+fn sort_by[A, B](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
+
+/// Elements sorted by cmp, stable: negative puts a first.
+fn sort_with[A](d: Deque[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(to_list(d), cmp)
+
+/// Least element, or none when empty.
+fn min[A](d: Deque[A]) -> A? = list.min(to_list(d))
+
+/// Greatest element, or none when empty.
+fn max[A](d: Deque[A]) -> A? = list.max(to_list(d))
+
+/// Element with the least key f(x); the nearest the front on ties.
+fn min_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
+
+/// Element with the greatest key f(x); the nearest the front on ties.
+fn max_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
+
+/// Least element by cmp; the nearest the front on ties.
+fn min_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.min_with(to_list(d), cmp)
+
+/// Greatest element by cmp; the nearest the front on ties.
+fn max_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.max_with(to_list(d), cmp)
+
+/// Index from the front of the first x where f holds, or none.
+fn find_index[A](d: Deque[A], f: (A) -> Bool) -> Int? = list.find_index(to_list(d), f)
+
+/// Longest front run where f holds.
+fn take_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.take_while(to_list(d), f))
+
+/// The rest after the longest front run where f holds.
+fn drop_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.drop_while(to_list(d), f))
+
+/// Runs of n from the front, as list.chunk.
+fn chunk[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.chunk(to_list(d), n) |> list.map((xs) => from_list(xs))
+
+/// All n-long runs, as list.window.
+fn window[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.window(to_list(d), n) |> list.map((xs) => from_list(xs))
+
+/// (first n, the rest), as list.split_at.
+fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
+  let xs = to_list(d)
+  (from_list(list.take(xs, n)), from_list(list.drop(xs, n)))
+}
+
+/// Adjacent equal runs collapsed, as list.dedup.
+fn dedup[A](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
+
+/// sep between adjacent elements.
+fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = from_list(list.intersperse(to_list(d), sep))
+
+/// Duplicates removed; the occurrence nearest the front kept.
+fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
+
+/// The first element per distinct key f(x).
+fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+
+// ── Numeric folds (R-L0-42): the element type's own sum and product ──
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](d: Deque[A]) -> A = A.__sum(to_list(d))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](d: Deque[A]) -> A = A.__product(to_list(d))

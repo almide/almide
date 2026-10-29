@@ -403,6 +403,14 @@ pub type VariantTags = std::collections::HashMap<(Sym, Sym), u32>;
 ///
 /// `None` means genuinely incomparable (the caller aborts or abstains — never
 /// guesses).
+/// The signed key whose `i64` order is the list-ordering total order, with every
+/// NaN collapsed to the canonical +qNaN `0x7FF8000000000000` (R-float-09).
+fn float_order_key(x: f64) -> i64 {
+    let b = x.to_bits();
+    let b = (if (b & 0x7FFF_FFFF_FFFF_FFFF) > 0x7FF0_0000_0000_0000 { 0x7FF8_0000_0000_0000u64 } else { b }) as i64;
+    b ^ (((b >> 63) as u64) >> 1) as i64
+}
+
 pub struct TotalOrder<'a> {
     tags: &'a VariantTags,
 }
@@ -415,7 +423,9 @@ impl<'a> TotalOrder<'a> {
     pub fn cmp(&self, a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
         use Value::*;
         match (a, b) {
-            (Float(x), Float(y)) => Some(x.total_cmp(y)),
+            // ONE NaN (R-float-09, #4258): every NaN orders as the canonical
+            // +qNaN, after +inf, whatever its sign — the native/wasm key too.
+            (Float(x), Float(y)) => Some(float_order_key(*x).cmp(&float_order_key(*y))),
             (List(x), List(y)) => self.cmp_seq(x, y),
             (Tuple(x), Tuple(y)) => self.cmp_seq(x, y),
             // Option payloads stay on the TOTAL order (a Float inside a some
@@ -443,8 +453,7 @@ impl<'a> TotalOrder<'a> {
     }
 
     /// The case's declaration index, or `None` when this value's type is not in
-    /// the program's decls — the bundled `bytes.Endian`, whose decl never
-    /// reaches `IrProgram`. Abstaining there is right: guessing an order for a
+    /// the program's decls. Abstaining there is right: guessing an order for a
     /// case whose declaration we cannot read is guessing.
     fn tag(&self, ty: Option<Sym>, ctor: Sym) -> Option<u32> {
         self.tags.get(&(ty?, ctor)).copied()

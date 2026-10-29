@@ -1,0 +1,14 @@
+// @contract: C-129
+// A NEGATIVE chunk size is read as 0 (the negative-count rule, #4147), so
+// `list.chunk(xs, -1)` is the same domain error as `list.chunk(xs, 0)`: it
+// aborts with "Error: chunk size must be positive" + exit 1 on every leg.
+// Before, a negative size kept the `as usize` wrap and answered the whole list
+// as one chunk. `neg(7)` shields the size; the leading print locks
+// stdout/stderr order and the trailing print must never appear.
+fn neg(x: Int) -> Int = 0 - x
+
+fn main() -> Unit = {
+  println("before")
+  let cs = list.chunk([1, 2, 3], neg(7))
+  println(int.to_string(list.len(cs)))
+}

@@ -11,9 +11,9 @@ test "a tuple parameter binds every name (#1060)" {
   assert_eq(pairs |> list.map(((n, s)) => "${n}${s}"), ["1a", "2b"])
 }
 
-test "map.entries pairs destructure directly (#1060)" {
+test "map.to_list pairs destructure directly (#1060)" {
   let m: Map[String, Int] = ["a": 1, "b": 2]
-  assert_eq(map.entries(m) |> list.map(((k, v)) => "${k}=${v}"), ["a=1", "b=2"])
+  assert_eq(map.to_list(m) |> list.map(((k, v)) => "${k}=${v}"), ["a=1", "b=2"])
 }
 
 test "list.enumerate pairs destructure directly (#1060)" {

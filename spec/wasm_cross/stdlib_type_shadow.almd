@@ -1,8 +1,8 @@
 // @contract: C-076
 // A user type named after a STDLIB-OWNED type — the builtin `Value`, a
-// runtime-backed nominal (`HttpRequest`, `JsonPath`), a bundled twin
-// (`Endian`, here under the auto-import with no `import bytes`), a bundled
-// record (`Url`) — keeps its own identity while the stdlib's stays exactly
+// runtime-backed nominal (`HttpRequest`), an auto-imported bundled record
+// (`Deque`, with no import), an auto-imported newtype (`value.Path`), a
+// bundled record (`Url`) — keeps its own identity while the stdlib's stays exactly
 // what every stdlib signature carries (#1828). The checker keys the user's
 // declaration under the #433 module-qualified name (`self.Value` in the entry
 // program), never under the bare key the stdlib's `Ty::Named("Value")` is;
@@ -17,10 +17,11 @@
 // SOURCE spelling `Value { … }`, not the identity key) beside the stdlib value
 // flowing through `json.parse` / `json.stringify` / `value.int`; a user
 // VARIANT under a runtime-backed name beside the runtime's `HttpResponse`;
-// a user record under the twin's name beside the twin's own constructors
-// (`LittleEndian` / `BigEndian`) reaching `bytes.write_uint16`; a user record
-// under `JsonPath` beside `json.field(json.root(), ..)`; a user record under
-// `Url` beside `url.parse`'s own record.
+// a user record under `Deque` beside the auto-imported `deque.from_list` /
+// `deque.len` and `bytes.append_u16_le`; a user record under `Path` beside
+// `value.key(value.root(), ..)`; a user record under `Url` beside
+// `url.parse`'s own record. (The stdlib `bytes.Endian` twin and `json.JsonPath`
+// this fixture first pinned left in dialect epoch 15.)
 import json
 import http
 import url
@@ -29,9 +30,9 @@ type Value = { n: Int }
 
 type HttpRequest = | Small(Int) | Big
 
-type Endian = { n: Int }
+type Deque = { n: Int }
 
-type JsonPath = { n: Int }
+type Path = { n: Int }
 
 type Url = { n: Int }
 
@@ -48,7 +49,7 @@ fn show(r: HttpRequest) -> String = match r {
   Big => "big",
 }
 
-fn pick(big: Bool) -> Endian = if big then Endian { n: 1 } else Endian { n: 0 }
+fn pick(big: Bool) -> Deque = if big then Deque { n: 1 } else Deque { n: 0 }
 
 effect fn main() -> Unit = {
   let mine = Value { n: 7 }
@@ -57,13 +58,14 @@ effect fn main() -> Unit = {
   println("${json.stringify(doc)} ${json.stringify(value.int(3))}")
   let r = http.response(200, "body")
   println("${show(Small(3))} ${show(Big)} ${http.body(r)}")
-  var t = bytes.new(0)
-  bytes.write_uint16(t, 258, LittleEndian)
-  let e: Endian = pick(true)
-  println("${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 0, BigEndian))} ${e.n}")
-  let path = json.field(json.root(), "a")
-  let jp = JsonPath { n: 5 }
-  println("${jp.n} ${json.stringify(json.get_path(doc, path) ?? value.null())}")
+  var t = bytes.zeros(0)
+  bytes.append_u16_le(t, 258)
+  let e: Deque = pick(true)
+  let q = deque.from_list([1, 2, 3])
+  println("${bytes.get_u16_le(t, 0) ?? 0} ${bytes.get_u16_be(t, 0) ?? 0} ${e.n} ${deque.len(q)} ${deque.to_list(q)}")
+  let path = value.key(value.root(), "a")
+  let jp = Path { n: 5 }
+  println("${jp.n} ${json.stringify(value.get_path(doc, path) ?? value.null())}")
   let u = url.parse("http://example.com/p")!
   let mu = Url { n: 9 }
   println("${mu.n} ${u.host}")

@@ -1,5 +1,3 @@
-import math
-
 // protocol_edge_test — Edge cases inspired by common protocol/interface problems in other languages
 // ── Diamond problem: two protocols require same method name ──
 protocol HasLabel {
@@ -34,8 +32,8 @@ fn Range.split(r: Range) -> (Range, Range) = {
 }
 
 fn Range.merge(a: Range, b: Range) -> Range = Range {
-  lo: math.min(a.lo, b.lo),
-  hi: math.max(a.hi, b.hi),
+  lo: int.min(a.lo, b.lo),
+  hi: int.max(a.hi, b.hi),
 }
 
 test "recursive Self in split and merge" {

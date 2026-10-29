@@ -9,17 +9,17 @@
 // allocation ledger's watermark for this fixture is what a reintroduced leak
 // moves. The borrowed cell beside them destructures a var twice and reads it
 // again: an over-release there would read freed memory.
-fn mk(v: Int) -> (Bytes, Int) = (bytes.new(64), v)
+fn mk(v: Int) -> (Bytes, Int) = (bytes.zeros(64), v)
 
 fn named(v: Int) -> (String, List[Int]) = ("n" + int.to_string(v % 10), [v, v + 1])
 
 fn stamp(mut b: Bytes, v: Int) -> Int = {
-  bytes.set_at(b, 0, v % 200)
+  bytes.put_u8(b, 0, v % 200)
   v % 7
 }
 
 effect fn estamp(mut b: Bytes, v: Int) -> Int = {
-  bytes.set_at(b, 1, v % 200)
+  bytes.put_u8(b, 1, v % 200)
   ok(v % 5)
 }
 
@@ -38,10 +38,10 @@ effect fn main() -> Unit = {
     owned = owned + bytes.len(b) + k - i + string.len(s) + list.len(xs)
     let tail = first(i)
     owned = owned + bytes.len(tail)
-    var buf = bytes.new(64)
+    var buf = bytes.zeros(64)
     let r = stamp(buf, i)
     let e = estamp(buf, i)!
-    mutp = mutp + r + e + bytes.get_or(buf, 0, 0) + bytes.get_or(buf, 1, 0)
+    mutp = mutp + r + e + bytes.get(buf, 0) ?? 0 + bytes.get(buf, 1) ?? 0
     let t = mk(i)
     let (c, n) = t
     let (d, _) = t

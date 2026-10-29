@@ -1,22 +1,22 @@
 // bytes high-level operations: reverse / fill / map_each / insert / remove_at /
 // chunks / split / lines.
 test "reverse" {
-  var b = bytes.new(0)
+  var b = bytes.new()
   bytes.append_u8(b, 1)
   bytes.append_u8(b, 2)
   bytes.append_u8(b, 3)
   let r = bytes.reverse(b)
   assert_eq(bytes.len(r), 3)
-  assert_eq(bytes.read_u8(r, 0), 3)
-  assert_eq(bytes.read_u8(r, 1), 2)
-  assert_eq(bytes.read_u8(r, 2), 1)
+  assert_eq(bytes.get(r, 0) ?? 0, 3)
+  assert_eq(bytes.get(r, 1) ?? 0, 2)
+  assert_eq(bytes.get(r, 2) ?? 0, 1)
 }
 
 test "fill in-place" {
-  var b = bytes.new(4)
+  var b = bytes.zeros(4)
   bytes.fill(b, 0xAB)
-  assert_eq(bytes.read_u8(b, 0), 0xAB)
-  assert_eq(bytes.read_u8(b, 3), 0xAB)
+  assert_eq(bytes.get(b, 0) ?? 0, 0xAB)
+  assert_eq(bytes.get(b, 3) ?? 0, 0xAB)
 }
 
 test "insert in middle" {
@@ -24,24 +24,24 @@ test "insert in middle" {
   let r = bytes.insert(b, 1, 0x62)
   // 'b'
   assert_eq(bytes.len(r), 3)
-  assert_eq(bytes.read_u8(r, 0), 0x61)
-  assert_eq(bytes.read_u8(r, 1), 0x62)
-  assert_eq(bytes.read_u8(r, 2), 0x63)
+  assert_eq(bytes.get(r, 0) ?? 0, 0x61)
+  assert_eq(bytes.get(r, 1) ?? 0, 0x62)
+  assert_eq(bytes.get(r, 2) ?? 0, 0x63)
 }
 
 test "insert at end clamps" {
   let b = bytes.from_string("ab")
   let r = bytes.insert(b, 100, 0x63)
   assert_eq(bytes.len(r), 3)
-  assert_eq(bytes.read_u8(r, 2), 0x63)
+  assert_eq(bytes.get(r, 2) ?? 0, 0x63)
 }
 
 test "remove_at" {
   let b = bytes.from_string("abc")
   let r = bytes.remove_at(b, 1)
   assert_eq(bytes.len(r), 2)
-  assert_eq(bytes.read_u8(r, 0), 0x61)
-  assert_eq(bytes.read_u8(r, 1), 0x63)
+  assert_eq(bytes.get(r, 0) ?? 0, 0x61)
+  assert_eq(bytes.get(r, 1) ?? 0, 0x63)
 }
 
 test "remove_at out of range no-op" {
@@ -52,25 +52,25 @@ test "remove_at out of range no-op" {
 
 test "chunks" {
   let b = bytes.from_string("abcdefg")
-  let cs = bytes.chunks(b, 3)
+  let cs = bytes.chunk(b, 3)
   assert_eq(list.len(cs), 3)
-  let c0 = list.get(cs, 0) |> option.unwrap_or(bytes.new(0))
-  let c1 = list.get(cs, 1) |> option.unwrap_or(bytes.new(0))
-  let c2 = list.get(cs, 2) |> option.unwrap_or(bytes.new(0))
+  let c0 = list.get(cs, 0) |> option.unwrap_or(bytes.new())
+  let c1 = list.get(cs, 1) |> option.unwrap_or(bytes.new())
+  let c2 = list.get(cs, 2) |> option.unwrap_or(bytes.new())
   assert_eq(bytes.len(c0), 3)
   assert_eq(bytes.len(c1), 3)
   assert_eq(bytes.len(c2), 1)
-  assert_eq(bytes.read_u8(c0, 0), 0x61)
-  assert_eq(bytes.read_u8(c2, 0), 0x67)
+  assert_eq(bytes.get(c0, 0) ?? 0, 0x61)
+  assert_eq(bytes.get(c2, 0) ?? 0, 0x67)
 }
 
 test "split on comma" {
   let b = bytes.from_string("a,bb,ccc")
   let parts = bytes.split(b, bytes.from_string(","))
   assert_eq(list.len(parts), 3)
-  let p0 = list.get(parts, 0) |> option.unwrap_or(bytes.new(0))
-  let p1 = list.get(parts, 1) |> option.unwrap_or(bytes.new(0))
-  let p2 = list.get(parts, 2) |> option.unwrap_or(bytes.new(0))
+  let p0 = list.get(parts, 0) |> option.unwrap_or(bytes.new())
+  let p1 = list.get(parts, 1) |> option.unwrap_or(bytes.new())
+  let p2 = list.get(parts, 2) |> option.unwrap_or(bytes.new())
   assert_eq(bytes.len(p0), 1)
   assert_eq(bytes.len(p1), 2)
   assert_eq(bytes.len(p2), 3)
@@ -78,24 +78,8 @@ test "split on comma" {
 
 test "split with empty separator returns whole" {
   let b = bytes.from_string("abc")
-  let parts = bytes.split(b, bytes.new(0))
+  let parts = bytes.split(b, bytes.new())
   assert_eq(list.len(parts), 1)
-}
-
-test "lines" {
-  let b = bytes.from_string("hello\nworld\n!")
-  let ls = bytes.lines(b)
-  assert_eq(list.len(ls), 3)
-  let l0 = list.get(ls, 0) |> option.unwrap_or(bytes.new(0))
-  let l2 = list.get(ls, 2) |> option.unwrap_or(bytes.new(0))
-  assert_eq(bytes.len(l0), 5)
-  assert_eq(bytes.len(l2), 1)
-}
-
-test "lines trailing newline ignored" {
-  let b = bytes.from_string("a\nb\n")
-  let ls = bytes.lines(b)
-  assert_eq(list.len(ls), 2)
 }
 
 // Wave 4 P1: an out-of-range read must be +0.0 on BOTH targets even when the
@@ -114,12 +98,12 @@ test "bytes reads are +0.0 at an overflowing offset" {
     7,
     8
   ])
-  assert_eq(bytes.read_f32_le(b, 9223372036854775807), 0.0)
-  assert_eq(bytes.read_f64_le(b, 9223372036854775807), 0.0)
-  assert_eq(bytes.read_u32_le(b, 9223372036854775807), 0)
-  assert_eq(bytes.read_u16_le(b, 9223372036854775807), 0)
-  assert_eq(bytes.read_i32_le(b, 9223372036854775807), 0)
+  assert_eq(bytes.get_f32_le(b, 9223372036854775807) ?? 0.0, 0.0)
+  assert_eq(bytes.get_f64_le(b, 9223372036854775807) ?? 0.0, 0.0)
+  assert_eq(bytes.get_u32_le(b, 9223372036854775807) ?? 0, 0)
+  assert_eq(bytes.get_u16_le(b, 9223372036854775807) ?? 0, 0)
+  assert_eq(bytes.get_i32_le(b, 9223372036854775807) ?? 0, 0)
   // The ordinary out-of-range and in-range answers are unchanged.
-  assert_eq(bytes.read_f32_le(b, 100), 0.0)
-  assert_eq(bytes.read_u16_le(b, 0), 513)
+  assert_eq(bytes.get_f32_le(b, 100) ?? 0.0, 0.0)
+  assert_eq(bytes.get_u16_le(b, 0) ?? 0, 513)
 }

@@ -82,7 +82,12 @@ fn to_list[A](o: A?) -> List[A] = _
 // input, so it is reserved once (the growth ruling, 2026-10-15). A
 // `filter_map` grew it by doubling, about twice its size allocated and copied.
 /// some(values) if no element is none, else none.
-fn collect[T](xs: List[T?]) -> List[T]? =
+fn collect[A](xs: List[A?]) -> List[A]? = __collect(xs)
+
+// The body names its type variable T: inside a generic body whose variable is
+// spelled A, the `list.map` instantiation (its own A := A?, B := A) is
+// substituted into the wrong variable, and the mono pass loses the element type.
+local fn __collect[T](xs: List[T?]) -> List[T]? =
   if list.any(xs, (o) => option.is_none(o)) then none
   else some(list.map(
     xs,
@@ -93,7 +98,7 @@ fn collect[T](xs: List[T?]) -> List[T]? =
   ))
 
 /// some of all f(x), or none; f runs on every x.
-fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
+fn collect_map[A, B](xs: List[A], f: (A) -> B?) -> List[B]? = option.collect(list.map(xs, f))
 
 // ── the fallible carriers (ADR-0006, #3163) ──
 //

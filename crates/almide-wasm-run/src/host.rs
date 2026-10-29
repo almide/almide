@@ -13,6 +13,9 @@ use std::sync::{Arc, Mutex};
 #[path = "host_fan.rs"]
 mod fan;
 
+#[path = "host_budget.rs"]
+mod budget;
+
 /// One wasm run's cross-target observables: stdout, stderr, exit code.
 /// A trap WITHOUT a recorded `almide.exit` code is a runtime abort
 /// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract,
@@ -21,9 +24,21 @@ mod fan;
 /// manifest hashes stdout only).
 #[allow(dead_code)]
 pub struct RunResult {
+    /// The captured stdout as text — [`RunResult::stdout_bytes`] decoded
+    /// lossily, for the harness gates that compare text.
     pub stdout: String,
     pub stderr: String,
+    /// The captured stdout EXACTLY as the guest wrote it (C-399): a byte
+    /// writer's non-UTF-8 bytes are kept here, never replaced.
+    pub stdout_bytes: Vec<u8>,
+    pub stderr_bytes: Vec<u8>,
     pub exit: i32,
+    /// `main` RETURNED (#4255) — as opposed to the run ending through
+    /// `almide.exit` (`process.exit`, an abort) or a trap. Exit status 0 does
+    /// not imply it: `process.exit(0)` ends the run with 0 before `main` is
+    /// done, so a harness that needs `main` to have run to its end (the test
+    /// runner: every test reported) reads this, never the status.
+    pub main_returned: bool,
     /// The bump-heap watermark (exported `__heap` global) after the run:
     /// total bytes the module ever allocated plus the fixed base — the
     /// allocation-ledger observable (#1586). None if the module predates
@@ -84,8 +99,9 @@ impl std::fmt::Display for AllocCount {
 }
 
 struct Host {
-    out: Arc<Mutex<String>>,
-    err: Arc<Mutex<String>>,
+    /// The captured streams (C-399): raw bytes, as the guest wrote them.
+    out: Arc<Mutex<Vec<u8>>>,
+    err: Arc<Mutex<Vec<u8>>>,
     exit: Arc<Mutex<Option<i32>>>,
     /// The fs result parking buffer (host_read copies it to the guest).
     fs_buf: Arc<Mutex<Vec<u8>>>,
@@ -95,8 +111,10 @@ struct Host {
     /// Program args for op 29 (#1716): framed as [argv0, args...] — the
     /// guest's args arm skips the first frame, matching native argv[1..].
     args: Vec<String>,
-    /// Linear-memory budget (heap-budget gates); unlimited by default.
-    limits: wasmtime::StoreLimits,
+    /// This store's share of the run's ONE linear-memory budget (#4135):
+    /// every store of a run — its own, its fan workers', an abort-site
+    /// child's — meters against the same cap (`host_budget.rs`).
+    meter: budget::Meter,
     /// The run's live http calls (#2633) — cancelled when the run ends.
     calls: Arc<Mutex<crate::http_call_host::HttpCalls>>,
     /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
@@ -119,6 +137,92 @@ struct Host {
     /// The `testing.assert_aborts` site this instance was started to run
     /// (op 118, ADR-0029), or -1: the run's own instance runs its tests.
     abort_site: i64,
+    /// The `fs_call` ops this module was built with (#4102): the constant op
+    /// of every call site. The in-process module imports the whole gateway
+    /// whatever its effects; an op outside this set traps, so a miscompile
+    /// cannot steer the gateway into a capability the program never had. A
+    /// site whose op is not a visible constant adds nothing: the list fails
+    /// closed there (row 19), so such a site reaches only an op another site
+    /// names. There is no module without a list.
+    allowed_ops: AllowedOps,
+    /// The contained serve loop's stderr hold (#4203, op 75).
+    contain: Arc<Mutex<Contain>>,
+}
+
+/// While op 75 runs the guest's serve loop, an abort's own stderr write —
+/// the die line `Error: <msg>` (or `PANIC: <msg>`) before its `unreachable`,
+/// or `panic`'s raw `PANIC: <msg>` before its exit 1 — must not reach stderr
+/// when the abort is contained: native prints only the `handler aborted`
+/// line then. So a write that could be such a line is HELD, and released by
+/// the next host call or the loop's return; it is consumed only when the
+/// trap that follows it is that abort.
+#[derive(Default)]
+struct Contain {
+    active: bool,
+    /// The held write and whether it was a line (eprintln) or raw (op 73).
+    held: Option<(Vec<u8>, bool)>,
+    /// `process.exit` sent its mark (op 76): the call ends by a deliberate
+    /// exit, which is never contained.
+    exit_marked: bool,
+    /// A linear-memory growth of this store was refused while the call ran
+    /// (the store limiter below): the call is running out of memory, which
+    /// is never contained (row 1 of the security table, C-434). The guest's
+    /// allocator answers the refused `memory.grow` with C-197's abort, so the
+    /// kind is read from the refusal itself, never from the abort's text.
+    oom: bool,
+}
+
+/// `process.exit`'s mark (crates/almide-wasm fs_meta.rs `OP_EXIT_MARK`).
+const OP_EXIT_MARK: i32 = 76;
+
+enum Handles {
+    Begin,
+    End,
+    Abort,
+}
+
+/// The handles an `http.serve` handler opens (#4203): recorded from the
+/// request's hand-out to its reply, and closed if its handler aborts — the
+/// tcp and unix tables and the http calls.
+fn request_handles(host: &Host, h: Handles) -> usize {
+    let mut net = host.net.lock().expect("net");
+    let mut calls = host.calls.lock().expect("calls");
+    match h {
+        Handles::Begin => {
+            net.request_begin();
+            calls.request_begin();
+            0
+        }
+        Handles::End => {
+            net.request_end();
+            calls.request_end();
+            0
+        }
+        Handles::Abort => net.request_abort() + calls.request_abort(),
+    }
+}
+
+/// See [`Host::allowed_ops`].
+pub(crate) type AllowedOps = Arc<std::collections::BTreeSet<i32>>;
+
+/// The `fs_call` op set of `bytes` (#4102), shared by every instance of it:
+/// the visible constants only, so a computed op fails closed (row 19).
+fn allowed_ops_of(bytes: &[u8]) -> anyhow::Result<AllowedOps> {
+    let ops = almide_wasm::cert_project::fs_call_ops_visible(bytes).map_err(anyhow::Error::msg)?;
+    Ok(Arc::new(ops))
+}
+
+/// Refuse an `fs_call` op the module was not built with (#4102).
+fn op_allowed(host: &Host, op: i32) -> wasmtime::Result<()> {
+    if host.allowed_ops.contains(&op) {
+        return Ok(());
+    }
+    Err(wasmtime::Error::msg(format!("almide.fs_call: op {op} is not one this module was built with")))
+}
+
+/// Record that a growth of `host`'s memory was refused (see [`Contain::oom`]).
+fn mark_oom(host: &Host) {
+    host.contain.lock().expect("contain").oom = true;
 }
 
 /// Is the process's stdout a terminal (native flushes per write there).
@@ -127,43 +231,134 @@ fn stdout_is_terminal() -> bool {
     std::io::stdout().is_terminal()
 }
 
+/// The store limiter of every store of a run: linear-memory growth is
+/// metered against the run's shared budget (#4135); tables, instance and
+/// memory counts keep wasmtime's defaults, as `StoreLimits` did.
+impl wasmtime::ResourceLimiter for Host {
+    fn memory_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
+        if maximum.is_some_and(|m| desired > m) {
+            mark_oom(self);
+            return Ok(false);
+        }
+        let delta = desired.saturating_sub(current);
+        if self.meter.reserve(delta) {
+            return Ok(true);
+        }
+        // The run's own instance takes back what its idle pooled fan
+        // workers hold before it is refused: alone, it reaches the whole cap.
+        let granted = match &self.par {
+            Some(par) => {
+                par.release_pool();
+                self.meter.reserve(delta)
+            }
+            None => false,
+        };
+        if !granted {
+            mark_oom(self);
+        }
+        Ok(granted)
+    }
+
+    fn memory_grow_failed(&mut self, _error: wasmtime::Error) -> wasmtime::Result<()> {
+        self.meter.undo_last();
+        mark_oom(self);
+        Ok(())
+    }
+
+    fn table_growing(&mut self, _current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
+        Ok(maximum.is_none_or(|m| desired <= m))
+    }
+}
+
+
 /// Append program output: into the capture buffer, or — live — to the
-/// real stream with native's buffering rule.
-fn emit_out(host: &Host, text: &str) {
+/// real stream with native's buffering rule. The bytes go through exactly
+/// as the guest wrote them (C-399, #4138): `io.write` / `io.write_bytes`
+/// are byte writers, and a `String`'s bytes are written as native writes
+/// them — no UTF-8 decoding, so no U+FFFD substitution, on any path.
+fn emit_out(host: &Host, bytes: &[u8]) {
     match &host.live_out {
         Some(w) => {
             use std::io::Write as _;
             let mut w = w.lock().expect("live stdout");
-            let _ = w.write_all(text.as_bytes());
+            let _ = w.write_all(bytes);
             // Line-buffered, native's rule (#3417): a line end flushes on any
             // stdout, every write on a terminal.
-            if text.contains('\n') || stdout_is_terminal() {
+            if bytes.contains(&b'\n') || stdout_is_terminal() {
                 let _ = w.flush();
             }
         }
-        None => host.out.lock().expect("test harness invariant").push_str(text),
+        None => host.out.lock().expect("test harness invariant").extend_from_slice(bytes),
     }
 }
 
-fn emit_err_line(host: &Host, line: &str) {
-    *host.err_last.lock().expect("err last") = line.to_string();
+/// Write to the real stderr unbuffered, as native's `eprint!` does — but
+/// the bytes, not a decoded text.
+fn stderr_write(parts: &[&[u8]]) {
+    use std::io::Write as _;
+    let mut e = std::io::stderr().lock();
+    for p in parts {
+        let _ = e.write_all(p);
+    }
+}
+
+fn emit_err_line(host: &Host, line: &[u8]) {
+    if hold_err(host, line, true) {
+        return;
+    }
+    emit_err_line_now(host, line);
+}
+
+/// Hold `bytes` when the contained loop runs and they could be an abort's
+/// line (#4203); otherwise release any held write first. True = held.
+fn hold_err(host: &Host, bytes: &[u8], line: bool) -> bool {
+    release_held(host);
+    let mut c = host.contain.lock().expect("contain");
+    let abort_shaped = bytes.starts_with(b"PANIC: ") || (line && bytes.starts_with(b"Error: "));
+    if c.active && abort_shaped {
+        *host.err_last.lock().expect("err last") = String::from_utf8_lossy(bytes).into_owned();
+        c.held = Some((bytes.to_vec(), line));
+        return true;
+    }
+    false
+}
+
+/// Write a held stderr write out: what followed it was not its abort.
+fn release_held(host: &Host) {
+    let held = host.contain.lock().expect("contain").held.take();
+    match held {
+        Some((b, true)) => emit_err_line_now(host, &b),
+        Some((b, false)) => emit_err_raw_now(host, &b),
+        None => {}
+    }
+}
+
+fn emit_err_line_now(host: &Host, line: &[u8]) {
+    *host.err_last.lock().expect("err last") = String::from_utf8_lossy(line).into_owned();
     if host.live_out.is_some() {
-        eprintln!("{line}");
+        stderr_write(&[line, b"\n"]);
     } else {
         let mut o = host.err.lock().expect("test harness invariant");
-        o.push_str(line);
-        o.push('\n');
+        o.extend_from_slice(line);
+        o.push(b'\n');
     }
 }
 
 /// Append to stderr verbatim — op 73, the newline-free twin of
 /// [`emit_err_line`].
-fn emit_err_raw(host: &Host, text: &str) {
-    *host.err_last.lock().expect("err last") = text.to_string();
+fn emit_err_raw(host: &Host, bytes: &[u8]) {
+    if hold_err(host, bytes, false) {
+        return;
+    }
+    emit_err_raw_now(host, bytes);
+}
+
+fn emit_err_raw_now(host: &Host, bytes: &[u8]) {
+    *host.err_last.lock().expect("err last") = String::from_utf8_lossy(bytes).into_owned();
     if host.live_out.is_some() {
-        eprint!("{text}");
+        stderr_write(&[bytes]);
     } else {
-        host.err.lock().expect("test harness invariant").push_str(text);
+        host.err.lock().expect("test harness invariant").extend_from_slice(bytes);
     }
 }
 
@@ -191,15 +386,28 @@ impl StdinSource {
                 b.drain(..k).collect()
             }
             StdinSource::RealOnce => {
+                // Read in bounded chunks, so what the host holds grows with
+                // the bytes that ARRIVE, never with the guest's word (#4135:
+                // a forged count must not reserve up to 2 GiB). A chunk that
+                // comes back short is all the stream has ready (a terminal
+                // line, EOF), so the read stops there; a full one may have
+                // more behind it, so it reads on until the request is filled
+                // (native's io.read_n_bytes answers min(n, what stdin has)).
                 use std::io::Read;
-                let mut buf = vec![0u8; n];
-                match std::io::stdin().read(&mut buf) {
-                    Ok(got) => {
-                        buf.truncate(got);
-                        buf
+                const CHUNK: usize = 64 * 1024;
+                let mut out = Vec::new();
+                let mut stdin = std::io::stdin().lock();
+                while out.len() < n {
+                    let want = (n - out.len()).min(CHUNK);
+                    let start = out.len();
+                    out.resize(start + want, 0);
+                    let got = stdin.read(&mut out[start..]).unwrap_or(0);
+                    out.truncate(start + got);
+                    if got < want {
+                        break;
                     }
-                    Err(_) => Vec::new(),
                 }
+                out
             }
         }
     }
@@ -207,26 +415,49 @@ impl StdinSource {
 
 include!("host_fs.rs");
 
-fn append_line(
-    caller: &mut wasmtime::Caller<'_, Host>,
-    sink: fn(&Host) -> &Arc<Mutex<String>>,
-    ptr: i32,
-    len: i32,
-) {
-    let mem = caller
+/// The guest's exported memory — an error (a trap of the call), never a
+/// panic, for a module that exports none (#4135).
+pub(crate) fn guest_memory<T>(caller: &mut wasmtime::Caller<'_, T>) -> wasmtime::Result<wasmtime::Memory> {
+    caller
         .get_export("memory")
         .and_then(|e| e.into_memory())
-        .expect("exported memory");
-    let mut buf = vec![0u8; len as u32 as usize];
-    if let Err(e) = mem.read(&caller, ptr as u32 as usize, &mut buf) {
-        panic!("in-bounds read: {e:?} ptr={ptr} len={len} memsize={}", mem.data_size(&caller));
+        .ok_or_else(|| wasmtime::Error::msg("the module exports no memory"))
+}
+
+/// Copy the guest span `[ptr, ptr + len)` out of `mem` (both i32s read
+/// unsigned, the wasm32 address rule). The span is checked against the
+/// memory's CURRENT size BEFORE anything is allocated (#4135): a forged
+/// length can neither make the host reserve up to 4 GiB nor panic it — it is
+/// the guest's own out-of-bounds trap, `Error: wasm trap: out of bounds
+/// memory access`, exit 1, exactly what a guest load past the end gives.
+pub(crate) fn read_guest<T>(caller: &wasmtime::Caller<'_, T>, mem: wasmtime::Memory, ptr: i32, len: i32) -> wasmtime::Result<Vec<u8>> {
+    let data = mem.data(caller);
+    let start = ptr as u32 as usize;
+    match start.checked_add(len as u32 as usize) {
+        Some(end) if end <= data.len() => Ok(data[start..end].to_vec()),
+        _ => Err(wasmtime::Trap::MemoryOutOfBounds.into()),
     }
-    let text = String::from_utf8_lossy(&buf);
-    if std::ptr::eq(sink(caller.data()), &caller.data().err) {
-        emit_err_line(caller.data(), &text);
+}
+
+/// Is the guest span `[ptr, ptr + len)` inside `mem` (the answer room a host
+/// op writes back into)?
+pub(crate) fn guest_span_fits<T>(caller: &wasmtime::Caller<'_, T>, mem: wasmtime::Memory, ptr: i32, len: usize) -> bool {
+    (ptr as u32 as usize).checked_add(len).is_some_and(|end| end <= mem.data_size(caller))
+}
+
+/// `println` / `eprintln`: the guest's bytes plus a line end, written as
+/// they are (a `String` is already UTF-8; nothing is decoded).
+fn append_line(caller: &mut wasmtime::Caller<'_, Host>, to_err: bool, ptr: i32, len: i32) -> wasmtime::Result<()> {
+    let mem = guest_memory(caller)?;
+    let mut line = read_guest(caller, mem, ptr, len)?;
+    if to_err {
+        emit_err_line(caller.data(), &line);
     } else {
-        emit_out(caller.data(), &format!("{text}\n"));
+        release_held(caller.data());
+        line.push(b'\n');
+        emit_out(caller.data(), &line);
     }
+    Ok(())
 }
 
 pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
@@ -382,34 +613,36 @@ fn run_wasm_src_here(
     cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
-    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1 })
+    let allowed_ops = allowed_ops_of(bytes)?;
+    let budget = budget::Budget::new(max_memory_bytes);
+    run_compiled(&engine, &module, Launch { stdin, budget, args, watchdog, live, abort_site: -1, allowed_ops })
 }
 
 /// How one instance of a compiled module is started: the run's own, or an
 /// abort-site child of it (`testing.assert_aborts`, ADR-0029).
 struct Launch<'a> {
     stdin: StdinSource,
-    max_memory_bytes: Option<usize>,
+    /// The run's linear-memory budget — an abort-site child shares its
+    /// parent's (#4135).
+    budget: Arc<budget::Budget>,
     args: &'a [String],
     watchdog: Option<std::time::Duration>,
     live: bool,
     /// The abort site this instance runs (op 118), or -1 for the tests.
     abort_site: i64,
+    /// The module's `fs_call` op set (#4102).
+    allowed_ops: AllowedOps,
 }
 
 /// Instantiate `module` once and run its `main` to completion.
 fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: Launch<'_>) -> anyhow::Result<RunResult> {
-    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site } = launch;
+    let Launch { stdin, budget, args, watchdog, live, abort_site, allowed_ops } = launch;
     let (engine, module) = (engine.clone(), module.clone());
-    let out = Arc::new(Mutex::new(String::new()));
-    let err = Arc::new(Mutex::new(String::new()));
+    let out = Arc::new(Mutex::new(Vec::new()));
+    let err = Arc::new(Mutex::new(Vec::new()));
     let exit = Arc::new(Mutex::new(None));
     let fs_buf = Arc::new(Mutex::new(Vec::new()));
     let stdin_buf = Arc::new(Mutex::new(stdin));
-    let limits = match max_memory_bytes {
-        Some(cap) => wasmtime::StoreLimitsBuilder::new().memory_size(cap).build(),
-        None => wasmtime::StoreLimits::default(),
-    };
     let mut store = wasmtime::Store::new(
         &engine,
         Host {
@@ -419,7 +652,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             fs_buf: fs_buf.clone(),
             stdin: stdin_buf.clone(),
             args: args.to_vec(),
-            limits,
+            meter: budget::Meter::new(budget.clone()),
             calls: Arc::default(),
             serve: Arc::new(Mutex::new(crate::host_serve::ServeState::default())),
             net: Arc::default(),
@@ -427,18 +660,21 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             err_last: Arc::new(Mutex::new(String::new())),
             par: None,
             abort_site,
+            allowed_ops: allowed_ops.clone(),
+            contain: Arc::default(),
         },
     );
-    store.limiter(|h| &mut h.limits);
+    store.limiter(|h| h as &mut dyn wasmtime::ResourceLimiter);
     let linker = host_linker(&engine)?;
     // #3003 (ADR-0011 §D2a): the instance-parallel fan offer (op 74) runs a
     // chunk on fresh instances of THIS module, through THIS import set.
     let ticked = watchdog.map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)));
     store.data_mut().par = Some(Arc::new(fan::ParCtx::new(
         (engine.clone(), module.clone(), linker.clone()),
-        max_memory_bytes,
+        budget,
         ticked.clone(),
         args.to_vec(),
+        allowed_ops,
     )));
     let ticker = watchdog.map(|after| {
         store.set_epoch_deadline(1);
@@ -458,6 +694,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
     let call = main.call(&mut store, ());
     let main_secs = main_started.elapsed().as_secs_f64();
     let recorded = exit.lock().expect("test harness invariant").take();
+    let main_returned = call.is_ok() && recorded.is_none();
     let exit_code = match (&call, recorded) {
         (Ok(()), None) => 0,
         (Err(_), Some(code)) => code,
@@ -480,7 +717,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             let named_die = is_unreachable_trap(e)
                 && store.data().err_last.lock().expect("err last").starts_with("Error: ");
             if !named_die {
-                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n'));
+                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n').as_bytes());
             }
             1
         }
@@ -521,10 +758,15 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
         }
         _ => None,
     };
+    let stdout_bytes = out.lock().expect("test harness invariant").clone();
+    let stderr_bytes = err.lock().expect("test harness invariant").clone();
     Ok(RunResult {
-        stdout: out.lock().expect("test harness invariant").clone(),
-        stderr: err.lock().expect("test harness invariant").clone(),
+        stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        stdout_bytes,
+        stderr_bytes,
         exit: exit_code,
+        main_returned,
         heap_end,
         alloc_count,
         main_secs,
@@ -538,15 +780,15 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
     linker.func_wrap(
         "almide",
         "println",
-        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
-            append_line(&mut caller, |h| &h.out, ptr, len);
+        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| -> wasmtime::Result<()> {
+            append_line(&mut caller, false, ptr, len)
         },
     )?;
     linker.func_wrap(
         "almide",
         "eprintln",
-        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
-            append_line(&mut caller, |h| &h.err, ptr, len);
+        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| -> wasmtime::Result<()> {
+            append_line(&mut caller, true, ptr, len)
         },
     )?;
     // A fn item (not a closure): a return-type-annotated closure is not
@@ -572,6 +814,19 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
          b_ptr: i32,
          b_len: i32|
          -> wasmtime::Result<i64> {
+            op_allowed(caller.data(), op)?;
+            release_held(caller.data());
+            // op 75 = the contained serve loop (#4203): the loop closure's
+            // env rides a_len (scalar, null a_ptr).
+            if op == crate::host_serve::OP_SERVE_RUN {
+                return serve_contained(&mut caller, a_len);
+            }
+            // op 76 = `process.exit`'s mark (#4203): the exit that follows is
+            // the program's own, never a contained abort.
+            if op == OP_EXIT_MARK {
+                caller.data().contain.lock().expect("contain").exit_marked = true;
+                return Ok(0);
+            }
             // op 74 = the instance-parallel fan offer (#3003): the request
             // and the answer room are raw i64 slots, never text.
             if op == fan::OP_FAN_PAR {
@@ -583,6 +838,12 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             // buffer would read a_len bytes of guest memory (the 4 GiB
             // trap the op-31 comment in the emitter records).
             if op == 35 {
+                // The answer is min(a_len, what stdin has) — NOT capped at the
+                // guest's current memory size: the guest allocates the answer
+                // AFTER this op (growing its memory), then host_read copies it
+                // in, so a cap at the size before the read truncated a 1 MB
+                // request to the 512 KiB the memory then had. What bounds the
+                // host's reservation is `take` reading in chunks (#4135).
                 let n = i64::from(a_len).max(0) as usize;
                 let got = caller.data().stdin.lock().expect("stdin").take(n);
                 let len = got.len();
@@ -627,14 +888,9 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             if op == 117 || op == 118 {
                 return Ok(abort_site_op(&caller, op, a_len));
             }
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .expect("exported memory");
-            let mut a = vec![0u8; a_len as u32 as usize];
-            mem.read(&caller, a_ptr as u32 as usize, &mut a)?;
-            let mut b = vec![0u8; b_len as u32 as usize];
-            mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
+            let mem = guest_memory(&mut caller)?;
+            let a = read_guest(&caller, mem, a_ptr, a_len)?;
+            let b = read_guest(&caller, mem, b_ptr, b_len)?;
             let a = String::from_utf8_lossy(&a).to_string();
             // op 30 = raw stdout append (io.write / io.write_bytes):
             // PROGRAM order with println is the C-contract, so it goes
@@ -648,18 +904,25 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 return Ok(now);
             }
             if op == 30 {
-                emit_out(caller.data(), &String::from_utf8_lossy(&b));
+                emit_out(caller.data(), &b);
                 return Ok(0);
             }
             // op 73 = raw stderr append (`panic`'s line, #2769): no newline.
             if op == 73 {
-                emit_err_raw(caller.data(), &String::from_utf8_lossy(&b));
+                emit_err_raw(caller.data(), &b);
                 return Ok(0);
             }
             // http.serve (#2650): the listener and the held connection
             // live in the run's own state — one per run, like native's.
             if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
                 let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, caller.data().live_out.as_ref(), op, &a, frames, parse_http_frame);
+                // #4203: a request handed out starts its handler's handle
+                // record; its reply ends it.
+                if op == crate::host_serve::OP_SERVE_NEXT && !buf.is_empty() {
+                    request_handles(caller.data(), Handles::Begin);
+                } else if op == crate::host_serve::OP_SERVE_REPLY {
+                    request_handles(caller.data(), Handles::End);
+                }
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
@@ -690,7 +953,12 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             let (ret, buf) = if op == 53 {
                 crate::http_call_host::open(&caller.data().calls.clone(), &a, &b)
             } else {
-                fs_dispatch(op, &a, &b)
+                // `[permissions] fs` (#4022): a path outside the granted roots is
+                // refused before the host touches it, with native's bytes.
+                // The op itself runs beneath the granted root (#4084); a
+                // symlink it meets there answers the same refusal.
+                crate::host_fs_scope::refuse(op, &a, &b)
+                    .unwrap_or_else(|| crate::host_fs_scope::refused_by_call(op, &a, &b, fs_dispatch(op, &a, &b)))
             };
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)
@@ -700,10 +968,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
         "almide",
         "host_read",
         |mut caller: wasmtime::Caller<'_, Host>, dst: i32| -> wasmtime::Result<()> {
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .expect("exported memory");
+            let mem = guest_memory(&mut caller)?;
             let buf = caller.data().fs_buf.lock().expect("fs buf").clone();
             mem.write(&mut caller, dst as u32 as usize, &buf)?;
             Ok(())
@@ -728,11 +993,23 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
     let par = if caller.data().abort_site >= 0 { None } else { caller.data().par.clone() };
     let child = match par {
         Some(par) => {
-            let (engine, module, max_memory_bytes, args) = par.compiled();
+            // the child meters against the run's own budget (#4135); the
+            // parent's idle fan workers give their memory back first, as the
+            // parent's own growth would make them
+            par.release_pool();
+            let (engine, module, budget, args, allowed_ops) = par.compiled();
             std::thread::scope(|s| {
                 spawn_guest_thread(s, || {
                     let launch =
-                        Launch { stdin: StdinSource::Buf(Vec::new()), max_memory_bytes, args, watchdog: None, live: false, abort_site: i64::from(a_len) };
+                        Launch {
+                        stdin: StdinSource::Buf(Vec::new()),
+                        budget,
+                        args,
+                        watchdog: None,
+                        live: false,
+                        abort_site: i64::from(a_len),
+                        allowed_ops: allowed_ops.clone(),
+                    };
                     run_compiled(engine, module, launch)
                 })
                 .join()
@@ -749,6 +1026,121 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
     let len = buf.len();
     *caller.data().fs_buf.lock().expect("fs buf") = buf;
     (len as i64) & 0xFFFF_FFFF
+}
+
+/// op 75 (#4203): run the guest's serve loop — the closure whose env block
+/// is `env` — so that a runtime abort inside a handler fails only its
+/// request: the request gets native's C-409 500, stderr gets native's one
+/// `handler aborted` line, and the loop is called again. Answers 0 when the
+/// loop returned (a shutdown), or `1 << 32` (err, "not served") for a module
+/// without the exports, and the guest then runs the loop itself.
+///
+/// State soundness. Before the first call the host copies the instance's
+/// whole linear memory and every mutable global (a module naming op 75
+/// exports its globals and table, assembly.rs). An abort unwinds only the
+/// call made here: wasmtime hands the trap back to this host function, and
+/// the guest frames below it (`http.serve`'s, `main`'s) are untouched, since
+/// a trap ends only the frames the trapping call pushed. The host then writes
+/// the copy back, so memory and globals are bit for bit what they were when
+/// `http.serve` called op 75: whatever the handler left half done (an
+/// allocator mid-update, a region window still open, refcounts raised and
+/// never lowered, a partly built line-buffer string) is gone rather than
+/// carried into the next request. Memory grown since is zeroed, as fresh
+/// pages are. The frames below hold only values that existed at the copy
+/// (the loop closure and the app), so they stay valid. That point is the
+/// state a fresh instance of the app would start serving from, and C-367's
+/// app is instance-closed (how many instances evaluate it is not
+/// observable), so a later request sees nothing of the aborted one but its
+/// effects on the world: output already written, files, sockets.
+///
+/// Only the two defined aborts are contained, the ones native's serve loop
+/// catches (`almide_abort`, `almide_panic_abort`): the line `Error: <m>`
+/// (or `PANIC: <m>`, or `panic`'s raw `PANIC: <m>`) written just before the
+/// call ends on its `unreachable` (the die convention) or its exit 1. A
+/// `process.exit` sends its own mark (op 76) before its exit import, so a
+/// program that prints `Error: x` and then calls `process.exit(1)` is told
+/// apart exactly: it ends the run, as on native. Any other end of the call
+/// (another exit code, stack exhaustion, another trap, an abort outside a
+/// request) stays the run's too. A contained abort also closes the tcp
+/// sockets, unix descriptors and http calls the aborted handler opened and
+/// left open (`request_handles`) — native's unwinding drops what owned
+/// them; the guest's own drop paths were rolled back with its state.
+fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtime::Result<i64> {
+    const NOT_SERVED: i64 = 1 << 32;
+    let mem = guest_memory(caller)?;
+    let Some(table) = caller.get_export("__almide_table").and_then(|e| e.into_table()) else {
+        return Ok(NOT_SERVED);
+    };
+    let mut globals = Vec::new();
+    for g in 0.. {
+        let Some(gl) = caller.get_export(&format!("__almide_g{g}")).and_then(|e| e.into_global()) else {
+            break;
+        };
+        if gl.ty(&*caller).mutability() == wasmtime::Mutability::Var {
+            let v = gl.get(&mut *caller);
+            globals.push((gl, v));
+        }
+    }
+    let mut slot = [0u8; 4];
+    mem.read(&*caller, (env as u32 as usize).saturating_add(almide_layout::PAYLOAD as usize), &mut slot)?;
+    let Some(func) = table.get(&mut *caller, u64::from(u32::from_le_bytes(slot))).and_then(|r| r.as_func().flatten().copied()) else {
+        return Ok(NOT_SERVED);
+    };
+    let snapshot = mem.data(&*caller).to_vec();
+    let serve = caller.data().serve.clone();
+    let mut results = vec![wasmtime::Val::I32(0); func.ty(&*caller).results().len()];
+    loop {
+        {
+            let mut c = caller.data().contain.lock().expect("contain");
+            c.active = true;
+            c.exit_marked = false;
+            c.oom = false;
+        }
+        let ran = func.call(&mut *caller, &[wasmtime::Val::I32(env)], &mut results);
+        let (held, exit_marked, oom) = {
+            let mut c = caller.data().contain.lock().expect("contain");
+            c.active = false;
+            (c.held.take(), c.exit_marked, c.oom)
+        };
+        let put_back = |host: &Host, held: Option<(Vec<u8>, bool)>| match held {
+            Some((b, true)) => emit_err_line_now(host, &b),
+            Some((b, false)) => emit_err_raw_now(host, &b),
+            None => {}
+        };
+        let e = match ran {
+            Ok(()) => {
+                put_back(caller.data(), held);
+                return Ok(0);
+            }
+            Err(e) => e,
+        };
+        let exit = *caller.data().exit.lock().expect("exit");
+        // The abort's own end: its `unreachable` (the die convention) or
+        // its exit 1 (the emitter's guards and `panic`).
+        // An out-of-memory end is never contained: its growth was refused.
+        let ended = !exit_marked && !oom && (matches!(exit, Some(1)) || (exit.is_none() && is_unreachable_trap(&e)));
+        let text = match &held {
+            Some((h, line)) if ended => match h.strip_prefix(b"Error: ").filter(|_| *line) {
+                Some(m) => Some(m.to_vec()),
+                None => h.starts_with(b"PANIC: ").then(|| h.clone()),
+            },
+            _ => None,
+        };
+        let line = text.and_then(|t| crate::host_serve::abort_pending(&serve, &String::from_utf8_lossy(&t)));
+        let Some(line) = line else {
+            put_back(caller.data(), held);
+            return Err(e);
+        };
+        *caller.data().exit.lock().expect("exit") = None;
+        request_handles(caller.data(), Handles::Abort);
+        emit_err_line_now(caller.data(), line.as_bytes());
+        let data = mem.data_mut(&mut *caller);
+        data[..snapshot.len()].copy_from_slice(&snapshot);
+        data[snapshot.len()..].fill(0);
+        for (g, v) in &globals {
+            g.set(&mut *caller, *v)?;
+        }
+    }
 }
 
 fn is_unreachable_trap(e: &wasmtime::Error) -> bool {
@@ -875,5 +1267,154 @@ mod tests {
         let r = run_wasm(&module(&[Instruction::Nop])).expect("engine runs the module");
         assert_eq!(r.exit, 0);
         assert_eq!(r.stderr, "");
+    }
+
+    /// A hand-made module that imports `almide.<name>` — `(i32, i32) -> ()`
+    /// for println/eprintln, `(i32 × 5) -> i64` for fs_call — with `data`
+    /// at address 16 of a one-page memory (exported only when `export_memory`),
+    /// and a `main` running `body`. The shapes compiler output never makes:
+    /// forged pointers and lengths.
+    fn calling(name: &str, data: &[u8], export_memory: bool, body: &[Instruction<'_>]) -> Vec<u8> {
+        use wasm_encoder::{ConstExpr, DataSection, EntityType, ImportSection, ValType};
+        let mut types = TypeSection::new();
+        types.ty().function([], []);
+        if name == "fs_call" {
+            types.ty().function([ValType::I32; 5], [ValType::I64]);
+        } else {
+            types.ty().function([ValType::I32; 2], []);
+        }
+        let mut imports = ImportSection::new();
+        imports.import("almide", name, EntityType::Function(1));
+        let mut funcs = FunctionSection::new();
+        funcs.function(0);
+        let mut mems = MemorySection::new();
+        mems.memory(MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
+        let mut exports = ExportSection::new();
+        if export_memory {
+            exports.export("memory", ExportKind::Memory, 0);
+        }
+        exports.export("main", ExportKind::Func, 1);
+        let mut code = CodeSection::new();
+        let mut f = Function::new([]);
+        for op in body {
+            f.instruction(op);
+        }
+        f.instruction(&Instruction::End);
+        code.function(&f);
+        let mut datas = DataSection::new();
+        datas.active(0, &ConstExpr::i32_const(16), data.iter().copied());
+        let mut m = Module::new();
+        m.section(&types).section(&imports).section(&funcs).section(&mems).section(&exports).section(&code).section(&datas);
+        m.finish()
+    }
+
+    /// `[i32.const a ...]` then `call 0` (the import), dropping an fs_call's i64.
+    fn call0(args: &[i32], drop_result: bool) -> Vec<Instruction<'static>> {
+        let mut body: Vec<Instruction<'static>> = args.iter().map(|&a| Instruction::I32Const(a)).collect();
+        body.push(Instruction::Call(0));
+        if drop_result {
+            body.push(Instruction::Drop);
+        }
+        body
+    }
+
+    /// C-399 (#4138): op 30 — `io.write` / `io.write_bytes` — writes the
+    /// guest's bytes as they are. Not UTF-8 here: a lone 0xFF, a NUL, 0x80,
+    /// a PNG signature's 0x89 'P' 'N' 'G'; the lossy decode this replaced
+    /// wrote EF BF BD for each invalid byte.
+    #[test]
+    fn a_byte_write_reaches_stdout_byte_for_byte() {
+        let bytes = [0xFF, 0x00, 0x80, 0x89, b'P', b'N', b'G', 0xFF, 0xFE, b'\n'];
+        let body = call0(&[30, 0, 0, 16, bytes.len() as i32], true);
+        let r = run_wasm(&calling("fs_call", &bytes, true, &body)).expect("engine runs the module");
+        assert_eq!(r.exit, 0, "stderr: {}", r.stderr);
+        assert_eq!(r.stdout_bytes, bytes);
+        // the stderr twin (op 73) is the same rule
+        let body = call0(&[73, 0, 0, 16, bytes.len() as i32], true);
+        let r = run_wasm(&calling("fs_call", &bytes, true, &body)).expect("engine runs the module");
+        assert_eq!(r.stderr_bytes, bytes);
+    }
+
+    /// #4135: a guest pointer or length past the end of memory is the
+    /// guest's own out-of-bounds trap — `Error: wasm trap: out of bounds
+    /// memory access`, exit 1, as a guest load past the end gives — never a
+    /// host panic, and never a host allocation sized by the forged length.
+    /// Negative control (2026-10-26): with `read_guest`'s bounds check
+    /// removed (the span sliced unchecked) the guest thread panicked at the
+    /// slice ("panicked at crates/almide-wasm-run/src/host.rs:417:12") and
+    /// this test failed.
+    #[test]
+    fn a_forged_span_traps_instead_of_panicking_the_host() {
+        let oob = "Error: wasm trap: out of bounds memory access\n";
+        let page = 65536;
+        let cases: [(&str, Vec<Instruction<'static>>); 6] = [
+            // println / eprintln: a span crossing the end, a 4 GiB length, a
+            // pointer past the end
+            ("println", call0(&[page - 2, 100], false)),
+            ("println", call0(&[0, -1], false)),
+            ("eprintln", call0(&[-16, 4], false)),
+            // fs_call: the a-span and the b-span, each forged
+            ("fs_call", call0(&[30, -1, 8, 0, 0], true)),
+            ("fs_call", call0(&[30, 0, 0, 16, -1], true)),
+            ("fs_call", call0(&[1, 0, i32::MAX, 0, 0], true)),
+        ];
+        for (name, body) in cases {
+            let r = run_wasm(&calling(name, b"x", true, &body)).expect("engine runs the module");
+            assert_eq!((r.exit, r.stderr.as_str()), (1, oob), "{name} {body:?}");
+        }
+    }
+
+    /// `[i32.const 29, i32.const 1, i32.add]` then `b`'s span: an op-30 call
+    /// (`io.write` of `len` bytes at 16) whose op the operand stack does not
+    /// show as a constant.
+    fn computed_op_30(len: i32) -> Vec<Instruction<'static>> {
+        vec![
+            Instruction::I32Const(29),
+            Instruction::I32Const(1),
+            Instruction::I32Add,
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(16),
+            Instruction::I32Const(len),
+            Instruction::Call(0),
+            Instruction::Drop,
+        ]
+    }
+
+    /// Row 19 (#4102): the host serves only the `fs_call` ops the module was
+    /// built with. This module's one constant op is 73 (a stderr write); its
+    /// second site computes op 30, a stdout write the set does not hold, and
+    /// the call traps before anything reaches stdout. Negative control: with
+    /// `op_allowed` answering `Ok(())` the write lands and the run exits 0.
+    #[test]
+    fn an_op_outside_the_modules_set_traps() {
+        let mut body = call0(&[73, 0, 0, 16, 1], true);
+        body.extend(computed_op_30(1));
+        let r = run_wasm(&calling("fs_call", b"x", true, &body)).expect("engine runs the module");
+        assert_eq!(r.exit, 1, "stdout: {:?} stderr: {:?}", r.stdout, r.stderr);
+        assert_eq!(r.stdout, "", "the refused op wrote");
+        assert!(r.stderr.starts_with('x'), "the allowed op 73 ran first: {:?}", r.stderr);
+        assert!(r.stderr.contains("almide.fs_call: op 30 is not one this module was built with"), "{:?}", r.stderr);
+    }
+
+    /// Row 19: a module whose only `fs_call` op is not a visible constant
+    /// gets the empty list, never no list — it fails closed. Negative
+    /// control: with `allowed_ops_of` back on `fs_call_ops`' `None` (no list),
+    /// op 30 is served and the run exits 0 with `x` on stdout.
+    #[test]
+    fn a_module_whose_op_is_not_a_constant_fails_closed() {
+        let r = run_wasm(&calling("fs_call", b"x", true, &computed_op_30(1))).expect("engine runs the module");
+        assert_eq!(r.exit, 1, "stdout: {:?} stderr: {:?}", r.stdout, r.stderr);
+        assert_eq!(r.stdout, "", "a computed op was served");
+        assert!(r.stderr.contains("almide.fs_call: op 30 is not one this module was built with"), "{:?}", r.stderr);
+    }
+
+    /// A module that exports no memory and calls a host op that reads it is
+    /// an error of the run, not a host panic.
+    #[test]
+    fn a_host_op_without_an_exported_memory_is_an_error_not_a_panic() {
+        let r = run_wasm(&calling("println", b"x", false, &call0(&[16, 1], false))).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stderr, "Error: wasm trap: the module exports no memory\n");
     }
 }

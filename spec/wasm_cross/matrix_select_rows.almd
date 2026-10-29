@@ -1,20 +1,32 @@
 // @contract: C-228
-// The matrix.select_rows_f32 selector decodes identically on both targets (the
-// shared f32 LE decoder the full-matrix loader uses, on a row-subset schedule).
-// Its Q1_0 / Q8_0 siblings left the stdlib at dialect epoch 14 (package almide/nnlib).
+// The f32 row selector decodes identically on both targets (the shared f32 LE
+// decoder the full-matrix loader uses, then `matrix.gather_rows` on a
+// row-subset schedule).
+// Its Q1_0 / Q8_0 siblings left the stdlib at dialect epoch 14 (module nn.kernels of package almide-graphics/nn).
 import matrix
 import bytes
 
+// The f32 row selector (it left the stdlib for module nn.kernels of package almide-graphics/nn in
+// dialect epoch 15), composed from the loader and the gather: decode the whole
+// aligned rows after the offset (a negative offset reads from 0), then gather
+// them (an out-of-range id is the all-zero row, a negative id is row 0).
+fn select_rows_f32(b: Bytes, offset: Int, cols: Int, ids: List[Int]) -> Matrix = {
+  let off = int.max(offset, 0)
+  let rows = int.max(bytes.len(b) - off, 0) / (4 * cols)
+  let m = matrix.from_bytes_f32_le(b, off, rows, cols) ?? matrix.zeros(0, cols)
+  matrix.gather_rows(m, ids |> list.map((i) => int.max(i, 0)))
+}
+
 effect fn main() -> Unit = {
-  var f32d = bytes.new(32)
-  bytes.set_f32_le(f32d, 0, 1.5)
-  bytes.set_f32_le(f32d, 4, 2.5)
-  bytes.set_f32_le(f32d, 8, 0.0 - 3.0)
-  bytes.set_f32_le(f32d, 12, 4.0)
-  bytes.set_f32_le(f32d, 16, 5.0)
-  bytes.set_f32_le(f32d, 20, 6.5)
-  bytes.set_f32_le(f32d, 24, 7.0)
-  bytes.set_f32_le(f32d, 28, 8.0)
-  let mf = matrix.select_rows_f32(f32d, 0, 2, [3, 0, 1])
+  var f32d = bytes.zeros(32)
+  bytes.put_f32_le(f32d, 0, 1.5)
+  bytes.put_f32_le(f32d, 4, 2.5)
+  bytes.put_f32_le(f32d, 8, 0.0 - 3.0)
+  bytes.put_f32_le(f32d, 12, 4.0)
+  bytes.put_f32_le(f32d, 16, 5.0)
+  bytes.put_f32_le(f32d, 20, 6.5)
+  bytes.put_f32_le(f32d, 24, 7.0)
+  bytes.put_f32_le(f32d, 28, 8.0)
+  let mf = select_rows_f32(f32d, 0, 2, [3, 0, 1])
   println("f32=${matrix.to_lists(mf)}")
 }

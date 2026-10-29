@@ -334,6 +334,13 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 let lit = almide_base::rust_lit::escape_rust_str(s);
                 line!("let mut {}: AlmideString = AlmideString::from(\"{lit}\");", var(*dst));
             }
+            // #4006: a constant int list (a literal the lowering folded, an
+            // empty `[]`, a top-level list `let`) — the same Vec a ListLit renders.
+            Init::IntList(vs) => {
+                tys.insert(*dst, NTy::Vec);
+                let items = vs.iter().map(|v| format!("{v}i64")).collect::<Vec<_>>().join(", ");
+                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+            }
             other => {
                 return Err(wall(format!(
                     "native: Alloc {other:?} — outside the rung subset"
@@ -396,7 +403,7 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_bin(op, d, args, tys, out, indent)?,
-        // `float.from_int` — int (i64) to f64, carried per the float floor.
+        // `float.__from_int` — int (i64) to f64, carried per the float floor.
         Op::Prim {
             kind: crate::PrimKind::F64FromInt,
             dst: Some(d),

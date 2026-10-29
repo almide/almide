@@ -60,7 +60,10 @@ fn emit_sexp(pat: &Pat, out: &mut String) {
         Pat::Call { func, children } => {
             out.push('(');
             out.push_str("matrix_");
-            out.push_str(func);
+            // Internal stdlib names (`matrix.__mul`) keep the stable egg op
+            // name (`matrix_mul`): the dunder is a visibility marker, not
+            // part of the operator's identity.
+            out.push_str(func.trim_start_matches("__"));
             for c in children {
                 out.push(' ');
                 emit_sexp(c, out);

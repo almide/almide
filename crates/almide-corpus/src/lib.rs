@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 mod limit;
 pub use limit::{run_limited, Stop, FIXTURE_LIMIT};
+pub mod ci_slice;
+pub use ci_slice::{ci_slice, full_run, refuse_regen, scaled_count, select};
 
 /// The submodule mount point of almide/als, relative to the workspace root.
 pub const JUDGE_MOUNT: &str = "als";

@@ -252,24 +252,21 @@ fn the_manifest_reader_refuses_every_duplicate_it_reads() {
         almide::project::parse_toml(&path)
     };
 
-    let e = parse("[package]\nname = \"a\"\nname = \"b\"\n").err().expect("duplicate name");
+    let e = parse("[package]\nname = \"a\"\nname = \"b\"\n").expect_err("duplicate name");
     assert!(e.contains(":3: key `name` is declared twice in [package] (first at line 2)"), "{e}");
 
     let e = parse("[package]\nname = \"a\"\n\n[permissions]\nallow = [\"IO\"]\nallow = [\"Net\"]\n")
-        .err()
-        .expect("duplicate allow");
+        .expect_err("duplicate allow");
     assert!(e.contains("key `allow` is declared twice in [permissions]"), "{e}");
 
     let e = parse("[package]\nname = \"a\"\n\n[native-deps]\nfoo = \"1\"\n\"foo\" = \"2\"\n")
-        .err()
-        .expect("duplicate native dep, bare and quoted");
+        .expect_err("duplicate native dep, bare and quoted");
     assert!(e.contains("key `foo` is declared twice in [native-deps]"), "{e}");
 
     let e = parse(
         "[package]\nname = \"a\"\n\n[dependencies]\nx = { path = \"../x\" }\n\n[dependencies]\ny = { path = \"../y\" }\n",
     )
-    .err()
-    .expect("duplicate header");
+    .expect_err("duplicate header");
     assert!(e.contains(":7: table [dependencies] is declared twice (first at line 4)"), "{e}");
 
     // The same key in two DIFFERENT tables is fine, as is a multi-line array
@@ -279,12 +276,12 @@ fn the_manifest_reader_refuses_every_duplicate_it_reads() {
          [permissions]\nallow = [\n  \"IO\",\n  \"a=b\",\n  \"a=b\",\n]\n",
     );
     assert!(ok.is_ok(), "{:?}", ok.err());
-    assert_eq!(ok.unwrap().permissions, ["IO", "a=b", "a=b"], "the multi-line array reads whole (#3253)");
+    assert_eq!(ok.unwrap().permissions.unwrap(), ["IO", "a=b", "a=b"], "the multi-line array reads whole (#3253)");
 
     // A table the reader never reads is still TOML: since the manifest is read
     // by the `toml` crate (#3253), a key repeated there is refused on its line
     // too, by the parser rather than by this scan.
-    let e = parse("[package]\nname = \"a\"\n\n[tool]\nx = 1\nx = 2\n").err().expect("duplicate in [tool]");
+    let e = parse("[package]\nname = \"a\"\n\n[tool]\nx = 1\nx = 2\n").expect_err("duplicate in [tool]");
     assert!(e.contains("almide.toml:6:"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }

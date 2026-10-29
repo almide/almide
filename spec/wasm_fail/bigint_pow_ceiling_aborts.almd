@@ -1,0 +1,11 @@
+// @expect-fail: pow result too large
+// @contract: C-419
+// bigint.pow refuses before computing a result sure to pass 30 * 2^28 bits (#4196):
+// 2^8053063680 is the first power of two at the ceiling; before the bound it ran until
+// the CPU limit on both legs.
+import bigint
+
+fn main() -> Unit = {
+  println("start")
+  println(int.to_string(bigint.bit_length(bigint.pow(bigint.from(2), 8053063680))))
+}

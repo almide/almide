@@ -1,6 +1,6 @@
 // io extern — Rust native implementations
 
-use std::io::Write;
+use std::io::Write as _;
 
 // The stdout buffer, `almide_stdout_flush`, `almide_stdout_write_fmt` and
 // `almide_stdout_write_bytes` live in the runtime PRELUDE (#2245: every
@@ -16,23 +16,12 @@ pub fn almide_rt_io_print(s: &str) {
     almide_stdout_flush();
 }
 
-pub fn almide_rt_io_read_line() -> AlmideString {
-    let __almide_out: String = {
-        almide_stdout_flush();
-        let mut buf = String::new();
-        std::io::stdin().read_line(&mut buf).unwrap_or(0);
-        buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
-    };
-    __almide_out.into()
-}
-
-// `read_line` answers "" both for an empty line and at end of input, so a loop
-// that skips empty lines never sees the end (#2539). This twin says which: `None`
-// when stdin had nothing left, `Some("")` for a line that was only a newline.
-// The line is decoded lossily (as io.read_all's twin does), so a stray invalid
-// byte costs one U+FFFD instead of the whole line — the wasm self-host
-// (stdlib/io_read_line_opt.almd) decodes the same way.
-pub fn almide_rt_io_read_line_opt() -> Option<AlmideString> {
+// One line, read as BYTES and decoded lossily (#4142): each invalid sequence becomes one
+// U+FFFD (`String::from_utf8_lossy`), as the wasm self-host (stdlib/io_read_line_opt.almd)
+// decodes it. `None` when stdin had nothing left, `Some("")` for a line that was only a
+// newline (#2539, R-io-01): a loop that skips empty lines still sees the end. An I/O error
+// ends the input, as it does on the wasm legs (an errno ends their fd_read loop).
+pub fn almide_rt_io_read_line() -> Option<AlmideString> {
     let __almide_v: Option<String> = {
         use std::io::BufRead;
         almide_stdout_flush();
@@ -52,24 +41,19 @@ pub fn almide_rt_io_read_all() -> AlmideString {
     let __almide_out: String = {
         almide_stdout_flush();
         use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
-        buf
+        // Bytes first, decoded lossily once (#4142): `read_to_string` refused the whole
+        // stream on one invalid byte and `unwrap_or(0)` answered "", where the wasm
+        // self-host (stdlib/io_read_all.almd) decodes the same bytes with U+FFFD. The
+        // bytes read before an I/O error are kept — the wasm fd_read loop stops there too.
+        let mut buf: Vec<u8> = Vec::new();
+        let _ = std::io::stdin().lock().read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
     };
     __almide_out.into()
 }
 
-pub fn almide_rt_io_read_byte() -> i64 {
-    almide_stdout_flush();
-    use std::io::Read;
-    let mut buf = [0u8; 1];
-    match std::io::stdin().read(&mut buf) {
-        Ok(1) => buf[0] as i64,
-        _ => -1,
-    }
-}
-
-// `read_n_bytes(n)` reads UP TO n bytes and answers what it got. The count is a LIMIT,
+// `io.read(io.stdin(), n)` (the leaf `__read_stdin_bytes`) reads UP TO n bytes and answers
+// what it got. The count is a LIMIT,
 // not a size to reserve — so nothing here is allocated from it.
 //
 // The old body did `vec![0u8; n as usize]` first: a negative n became ~1.8e19 and the
@@ -80,11 +64,11 @@ pub fn almide_rt_io_read_byte() -> i64 {
 // empty stdin is honestly the empty list, not an error.
 /// The chunk this leg's SELF-HOST twin reads in. Native has no reason to chunk — it
 /// hands `n` straight to `take` — but the constant is rostered so the two halves of
-/// `read_n_bytes` cannot drift apart in the ONE way that matters: the answer's length.
+/// the stdin read cannot drift apart in the ONE way that matters: the answer's length.
 /// Keep equal to the literal in stdlib/io_read_n_bytes.almd.
 pub const ALMIDE_IO_READ_CHUNK_BYTES: i64 = 1 << 26;
 
-// `read_n_bytes(n)` answers min(n, what stdin has). No ceiling, no clamp.
+// The stdin read answers min(n, what stdin has). No ceiling, no clamp.
 //
 // A clamp shipped here briefly and it was WRONG: it capped the answer at 2^26, so
 // `read_n_bytes(100 MiB)` on 100 MiB of stdin returned 64 MiB and no error, on BOTH
@@ -97,7 +81,7 @@ pub const ALMIDE_IO_READ_CHUNK_BYTES: i64 = 1 << 26;
 // real defect was only ever `n` too large to REPRESENT at the i32 host boundary
 // (i64::MAX truncated to -1 and read nothing), and the self-host twin now solves that
 // by looping over 2^26 chunks instead of asking the floor for the whole span at once.
-pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
+pub fn almide_rt_io___read_stdin_bytes(n: i64) -> Vec<u8> {
     use std::io::Read;
     almide_stdout_flush();
     if n <= 0 { return Vec::new(); }
@@ -114,7 +98,7 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
     }
     CHUNK.with(|chunk| {
         let mut chunk = chunk.borrow_mut();
-        let mut out: Vec<i64> = Vec::with_capacity((n as u64).min(SLICE as u64) as usize);
+        let mut out: Vec<u8> = Vec::with_capacity((n as u64).min(SLICE as u64) as usize);
         let mut left = n as u64;
         let mut input = std::io::stdin().lock();
         while left > 0 {
@@ -122,7 +106,7 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
             match input.read(&mut chunk[..want]) {
                 Ok(0) => break,
                 Ok(got) => {
-                    out.extend(chunk[..got].iter().map(|&b| b as i64));
+                    out.extend_from_slice(&chunk[..got]);
                     left -= got as u64;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
@@ -136,11 +120,18 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
 // Byte writes share the buffer with `println` (#2245), so they interleave in
 // PROGRAM order without a flush per call (the C-162 fixture pins the order on
 // both legs); a terminal still sees each write as it happens.
-pub fn almide_rt_io_write_bytes(data: &[i64]) {
-    let bytes: Vec<u8> = data.iter().map(|&b| b as u8).collect();
-    almide_stdout_write_bytes(&bytes);
+pub fn almide_rt_io___write_stdout(data: &Vec<u8>) {
+    almide_stdout_write_bytes(data);
 }
 
-pub fn almide_rt_io_write(data: &Vec<u8>) {
-    almide_stdout_write_bytes(data);
+// stderr is unbuffered: stdout is flushed first so the two streams keep
+// program order on a terminal, as `eprintln` does.
+pub fn almide_rt_io___write_stderr(data: &Vec<u8>) {
+    almide_stdout_flush();
+    let _ = std::io::stderr().write_all(data);
+}
+
+pub fn almide_rt_io_eprint(s: &str) {
+    almide_stdout_flush();
+    let _ = std::io::stderr().write_all(s.as_bytes());
 }

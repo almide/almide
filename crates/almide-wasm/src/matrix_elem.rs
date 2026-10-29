@@ -223,7 +223,7 @@ impl Emitter<'_> {
                 self.elem_at(hm, hi, hc, hj);
                 let mut i = self.f.instructions();
                 i.f64_load(mat_elem());
-                if func == "neg" {
+                if func == "__neg" {
                     // native `-x`: the sign flip, so neg(0.0) is -0.0
                     i.f64_neg();
                 } else {

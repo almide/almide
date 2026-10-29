@@ -353,13 +353,13 @@ fn fix_leaves_real_2arg_calls_alone() {
     // a known comparison-fn / module pair. A 2-arg list fn should be
     // untouched.
     let src = r#"
-fn head_or_default(xs: List[Int], d: Int) -> Int = list.get_or(xs, 0, d)
+fn head_or_default(xs: List[Int], d: Int) -> Int = list.get(xs, 0) ?? d
 "#;
     let path = write_tmp("fix_no_rewrite.almd", src);
     let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
     assert!(out.status.success());
     let after = std::fs::read_to_string(&path).unwrap();
-    assert!(after.contains("list.get_or"), "unrelated fn clipped:\n{}", after);
+    assert!(after.contains("list.get(xs, 0) ?? d"), "unrelated fn clipped:\n{}", after);
 }
 
 #[test]
@@ -479,7 +479,8 @@ fn main() -> Unit = {
     assert!(!after.contains("unwrap_or("), "eager call left behind:\n{after}");
     assert!(after.contains("let a = f(1) ?? 0"), "{after}");
     assert!(after.contains("let b = f(2) ?? 9"), "{after}");
-    assert!(after.contains("[1, 2] |> list.get(0) ?? 7"), "{after}");
+    // The pipe binds looser than `??`'s left operand (#4319).
+    assert!(after.contains("([1, 2] |> list.get(0)) ?? 7"), "{after}");
     assert!(after.contains("${r ?? 0}"), "{after}");
     let run = Command::new(almide()).args(["run", &path]).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1 2 1 3");
@@ -508,6 +509,77 @@ fn main() -> Unit = {
     let run = Command::new(almide()).args(["run", &path]).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "a\nd");
+}
+
+/// #4319: a call argument lands next to an operator, and the call itself
+/// may sit where only a tighter form re-parses. An operand that binds looser
+/// than its slot is grouped — on either side of `??`, on either side of a
+/// comparison, and under a prefix `not` — and the rewritten program computes
+/// what the original did. Before the fix `option.unwrap_or(i, 0 - 1)` became
+/// `i ?? 0 - 1`, i.e. `(i ?? 0) - 1`: every found index off by one.
+#[test]
+fn fix_groups_an_operand_that_binds_looser_than_its_operator() {
+    let src = r#"
+fn close_of(raw: String) -> Int = option.unwrap_or(string.index_of(raw, "]"), 0 - 1)
+fn pick(flag: Bool, a: Int?, b: Int?) -> Int = option.unwrap_or(if flag then a else b, 2 + 3)
+fn first_or(xs: List[Int], d: Int) -> Int = option.unwrap_or(xs |> list.get(0), d * 2 - 1)
+
+fn main() -> Unit = {
+  let c1 = close_of("abc")
+  let c2 = close_of("a]")
+  let c3 = close_of("ab]")
+  let p1 = pick(true, none, some(1))
+  let p2 = pick(false, none, some(1))
+  let p3 = pick(true, some(4), none)
+  let f1 = first_or([], 3)
+  let f2 = first_or([9], 3)
+  println("${c1} ${c2} ${c3} ${p1} ${p2} ${p3} ${f1} ${f2}")
+}
+"#;
+    let expected = "-1 1 2 5 1 4 5 9";
+    let path = write_tmp("fix_4319_unwrap_or_grouping.almd", src);
+    let (mut cmd, _td) = run_cmd();
+    let before = cmd.args(["run", &path]).output().unwrap();
+    assert!(before.status.success(), "{}", String::from_utf8_lossy(&before.stderr));
+    assert_eq!(String::from_utf8_lossy(&before.stdout).trim(), expected);
+
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(!after.contains("unwrap_or("), "eager call left behind:\n{after}");
+    assert!(after.contains(r#"string.index_of(raw, "]") ?? (0 - 1)"#), "{after}");
+    assert!(after.contains("?? (2 + 3)") && after.contains("(if flag"), "{after}");
+    assert!(after.contains("(xs |> list.get(0)) ?? (d * 2 - 1)"), "{after}");
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
+    assert!(run.status.success(), "{after}\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), expected, "the rewrite changed a value:\n{after}");
+}
+
+/// #4319, the sibling rewrite: `bool.eq(a or b, c)` is `(a or b) == c`, not
+/// `a or b == c` (= `a or (b == c)`), and `not int.gt(x, y)` is `not (x > y)`.
+#[test]
+fn fix_groups_comparison_operands_and_the_comparison_itself() {
+    let src = r#"
+fn either_matches(a: Bool, b: Bool, c: Bool) -> Bool = bool.eq(a or b, c)
+fn matches_either(a: Bool, b: Bool, c: Bool) -> Bool = bool.eq(c, a or b)
+fn not_greater(x: Int, y: Int) -> Bool = not int.gt(x, y)
+
+fn main() -> Unit = {
+  println("${either_matches(true, false, false)} ${matches_either(false, true, false)} ${not_greater(1, 2)} ${not_greater(3, 2)}")
+}
+"#;
+    let path = write_tmp("fix_4319_comparison_grouping.almd", src);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("(a or b) == c"), "{after}");
+    assert!(after.contains("c == (a or b)"), "{after}");
+    assert!(after.contains("not (x > y)"), "{after}");
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
+    assert!(run.status.success(), "{after}\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "false false true false", "{after}");
 }
 
 /// #3063: E041 on `x = f()`, `s.f = f()` and `xs[i] = f()` each carries the
@@ -546,7 +618,7 @@ effect fn main() -> Unit = {
     let mut lines: Vec<String> = src.lines().map(str::to_string).collect();
     for a in &sugg {
         let (line, col) = (a["line"].as_u64().unwrap() as usize, a["col"].as_u64().unwrap() as usize);
-        lines[line - 1].insert_str(col - 1, "!");
+        lines[line - 1].insert(col - 1, '!');
     }
     let fixed = lines.join("\n") + "\n";
     for line in ["x = get()!", "acc.total = get()!", "xs[0] = get()!"] {
@@ -593,4 +665,155 @@ fn fix_rewrites_every_deprecated_stdlib_synonym_in_every_call_form() {
     let check = Command::new(almide()).args(["check", &path]).output().unwrap();
     let stderr = String::from_utf8_lossy(&check.stderr);
     assert!(check.status.success() && !stderr.contains("E052"), "still warns after fix:\n{stderr}");
+}
+
+/// A project `app` depending by path on a package `deplib` whose
+/// `src/common.almd` is `common_src`. Returns the app dir.
+fn dep_project(name: &str, common_src: &str, main: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("almide-fix-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let (dep, app) = (root.join("dep"), root.join("app"));
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(dep.join("almide.toml"), "[package]\nname = \"deplib\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(dep.join("src").join("common.almd"), common_src).unwrap();
+    std::fs::write(
+        app.join("almide.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndeplib = { path = \"../dep\" }\n",
+    )
+    .unwrap();
+    std::fs::write(app.join("main.almd"), main).unwrap();
+    app
+}
+
+/// #4318: a selective import of a package submodule whose names are called
+/// bare is USED. E060 must not fire on it, and `almide fix` must not delete
+/// it — before the fix both lines went, and every bare call became E002.
+/// The plain `import deplib.common` beside it is unused and may go; the
+/// selective one alone must keep the program checking and running.
+#[test]
+fn fix_keeps_a_selective_import_whose_names_are_called() {
+    let common = "fn items() -> Int = 1\nfn sep() -> Int = 2\n";
+    for (label, main) in [
+        (
+            "pair",
+            "import deplib.common\nimport deplib.common.{ items, sep }\n\neffect fn main() -> Unit = println(\"${items() + sep()}\")\n",
+        ),
+        (
+            "selective-only",
+            "import deplib.common.{ items, sep }\n\neffect fn main() -> Unit = println(\"${items() + sep()}\")\n",
+        ),
+    ] {
+        let app = dep_project(&format!("4318-{label}"), common, main);
+        let check = Command::new(almide()).args(["check", "main.almd"]).current_dir(&app).output().unwrap();
+        let check_text = format!("{}{}", String::from_utf8_lossy(&check.stdout), String::from_utf8_lossy(&check.stderr));
+        assert!(check.status.success(), "{label}: before fix:\n{check_text}");
+        // With the selective import alone, nothing is unused.
+        if label != "pair" {
+            assert!(!check_text.contains("E060"), "{label}: E060 on a used selective import:\n{check_text}");
+        }
+
+        let fix = Command::new(almide()).args(["fix", "main.almd"]).current_dir(&app).output().unwrap();
+        let after = std::fs::read_to_string(app.join("main.almd")).unwrap();
+        assert!(fix.status.success(), "{label}: fix failed:\n{}\n{after}", String::from_utf8_lossy(&fix.stderr));
+        assert!(after.contains("import deplib.common.{"), "{label}: the used selective import was deleted:\n{after}");
+        let recheck = Command::new(almide()).args(["check", "main.almd"]).current_dir(&app).output().unwrap();
+        let recheck_text = String::from_utf8_lossy(&recheck.stderr);
+        assert!(recheck.status.success() && !recheck_text.contains("E002"), "{label}: fixed file does not check:\n{recheck_text}\n{after}");
+        assert!(!recheck_text.contains("E060"), "{label}: an import is still reported unused after fix:\n{recheck_text}\n{after}");
+        let run = Command::new(almide())
+            .args(["run", "main.almd"])
+            .current_dir(&app)
+            .env("ALMIDE_RUN_PROJECT_DIR", app.join("run"))
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "3", "{label}:\n{}\n{after}", String::from_utf8_lossy(&run.stderr));
+    }
+}
+
+/// Every character E101 refuses raw, spelled as an escape, in plain and
+/// interpolated literals — the payload the #4320 property below carries
+/// through each fix shape.
+const HIDDEN_ESCAPES: &str = r#"\x1b[2m|\u{7f}|\u{85}|\u{200b}|\u{202e}|\u{2028}|\u{e0041}|\r|\t|\\|\${x}|\x1b[0m"#;
+
+/// Every string literal's decoded value, sorted, via the compiler's own
+/// lexer + parser. A recovered parse (the E031 shape before its fix) still
+/// decodes every literal; whether the text parses CLEANLY is asserted by
+/// the caller on the fixed side.
+fn literal_values(src: &str) -> Vec<String> {
+    use almide::ast::{ExprKind, StringPart};
+    let mut parser = almide::parser::Parser::new(almide::lexer::Lexer::tokenize(src));
+    let mut program = parser.parse().expect("parses");
+    let mut out = Vec::new();
+    almide::ast::visit_exprs_mut(&mut program, &mut |e: &mut almide::ast::Expr| match &e.kind {
+        ExprKind::String { value, .. } => out.push(value.clone()),
+        ExprKind::InterpolatedString { parts, .. } => {
+            for p in parts {
+                if let StringPart::Lit { value } = p {
+                    out.push(value.clone());
+                }
+            }
+        }
+        _ => {}
+    });
+    out.sort();
+    out
+}
+
+/// #4320, as a property over the fix shapes: whichever fix `almide fix`
+/// applies — an engine fix-it (E060 import removal, E031 range migration) or
+/// an AST re-render (`option.unwrap_or` → `??`, `int.gt` → `>`) — the
+/// output (1) holds no raw character E101 refuses, (2) re-checks clean, and
+/// (3) decodes every string literal to the bytes it decoded to before. The
+/// re-render case is the one that wrote a raw ESC: it dropped every
+/// literal's spelling and printed the decoded value back verbatim.
+#[test]
+fn fix_output_rechecks_clean_and_preserves_string_literal_bytes() {
+    let payload = HIDDEN_ESCAPES;
+    let shapes: &[(&str, &str)] = &[
+        ("unused-import", "import json\n\neffect fn main() -> Unit = {\n  let x = 1\n  println(\"PAY\")\n  println(\"PAY ${x} PAY\")\n}\n"),
+        ("range", "effect fn main() -> Unit = {\n  var s = 0\n  for i in 0 .. 3 { s = s + i }\n  let x = s\n  println(\"PAY\")\n  println(\"PAY ${x} PAY\")\n}\n"),
+        ("unwrap-or", "effect fn main() -> Unit = {\n  let x = option.unwrap_or(some(1), 2)\n  println(\"PAY\")\n  println(\"PAY ${option.unwrap_or(some(x), 3)} PAY\")\n}\n"),
+        ("comparison", "effect fn main() -> Unit = {\n  let x = if int.gt(2, 1) then 1 else 0\n  println(\"PAY\")\n  println(\"PAY ${x} PAY\")\n}\n"),
+    ];
+    for (label, shape) in shapes {
+        let src = shape.replace("PAY", payload);
+        let path = write_tmp(&format!("fix_4320_{label}.almd"), &src);
+        let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(out.status.success(), "{label}: {}\n{after}", String::from_utf8_lossy(&out.stderr));
+        assert_ne!(after, src, "{label}: the shape no longer triggers a fix — the property is not exercised");
+        assert!(
+            !after.chars().any(almide::lexer::is_hidden_source_char),
+            "{label}: a raw hidden character was written:\n{}",
+            after.escape_debug()
+        );
+        let check = Command::new(almide()).args(["check", &path]).output().unwrap();
+        let check_err = String::from_utf8_lossy(&check.stderr);
+        assert!(check.status.success() && !check_err.contains("error["), "{label}: fixed file does not re-check:\n{check_err}\n{after}");
+        assert_eq!(literal_values(&src), literal_values(&after), "{label}: a literal changed bytes:\n{after}");
+    }
+}
+
+/// #4320, the reported shape end to end: the rewritten file runs and prints
+/// the same bytes as the original, and a plain literal keeps its spelling.
+#[test]
+fn fix_keeps_escaped_control_characters_escaped() {
+    let src = "import json\n\neffect fn main() -> Unit = {\n  let d = \"x\"\n  println(\"\\x1b[1mbold\\x1b[0m\")\n  println(\"\\x1b[2m  sub: ${option.unwrap_or(some(d), \"y\")}\\x1b[0m\")\n}\n";
+    let path = write_tmp("fix_4320_escape_spelling.almd", src);
+    let (mut cmd, _td) = run_cmd();
+    let before = cmd.args(["run", &path]).output().unwrap();
+    assert!(before.status.success(), "{}", String::from_utf8_lossy(&before.stderr));
+
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(out.status.success(), "{}\n{after}", String::from_utf8_lossy(&out.stderr));
+    assert!(!after.contains("unwrap_or(") && !after.contains("import json"), "fixes not applied:\n{after}");
+    assert!(after.contains(r#"println("\x1b[1mbold\x1b[0m")"#), "plain literal lost its spelling:\n{after}");
+    assert!(!after.contains('\u{1b}'), "raw ESC written:\n{}", after.escape_debug());
+
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
+    assert!(run.status.success(), "{}\n{after}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(run.stdout, before.stdout, "the fixed program prints different bytes:\n{after}");
 }

@@ -78,6 +78,14 @@
 - 完全性の規則: つながるストリームは {connect, listen, accept, read, write, close} が TCP と Unix で同じ形です。
 - issue: #3974
 
+### R-unix-04 読み書きと閉じるを `io` の総称関数にし、記述子つきの書き込みを `write_fds` にする — ○ 採用
+
+- 内容: `unix.Fd` を `Read`・`Write`・`Close` に準拠させ（R-L0-44）、`unix.read`・`unix.close` は置かずに `io.read`・`io.close` を使います。記述子を一緒に渡す書き込みは `effect fn unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` にします（`io.write(sock, data)` は記述子なし）。受け取りは `io.read` と `unix.take_fds` の組のままです。
+- 根拠の L0 規則: R-L0-44、R-L0-01。R-unix-03 の「TCP と Unix で同じ形」は、`io` の 1 組で TCP と完全に同じ呼び方になります。
+- (a) Rust `UnixStream` は `Read`・`Write` を実装し、記述子つきは別の関数（`send_vectored_with_ancillary`）です。Python は `send_fds`、Go は `WriteMsgUnix` で、どれも記述子なしの読み書きと名前を分けています。
+- (d) `unix` は新しいモジュールなので費用は 0 です。
+- issue: #4015
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(案) | 他言語の主な綴り | 判定 | 案 |
@@ -85,11 +93,9 @@
 | `unix.connect` | `effect fn connect(path: String) -> Fd` | Rust `UnixStream::connect` / Go `DialUnix` | 追加（`net.unix_connect` から移動） | R-unix-01 |
 | `unix.listen` | `effect fn listen(path: String) -> Fd` | Rust `UnixListener::bind` / Go `ListenUnix` | 追加（移動） | R-unix-01 |
 | `unix.accept` | `effect fn accept(listener: Fd) -> Fd` | Rust・Python `accept` / Go `AcceptUnix` | 追加（移動） | R-unix-01 |
-| `unix.write` | `effect fn write(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | Python `send_fds` / Go `WriteMsgUnix` | 追加（移動） | R-unix-01、R-unix-03 |
-| `unix.read` | `effect fn read(sock: Fd, max: Int) -> Bytes` | Python `recv_fds` / Go `ReadMsgUnix` | 追加（移動） | R-unix-01、R-unix-03 |
+| `unix.write_fds` | `effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | Python `send_fds` / Go `WriteMsgUnix` | 追加（移動） | R-unix-01、R-unix-04 |
 | `unix.take_fds` | `effect fn take_fds(sock: Fd) -> List[Fd]` | — | 追加（移動） | R-unix-01 |
 | `unix.select` | `effect fn select(fds: List[Fd], timeout_ms: Int) -> List[Fd]` | Python `select.select` / OCaml `Unix.select` | 追加（移動。`unix_poll` を吸収） | R-unix-01、R-unix-02 |
-| `unix.close` | `effect fn close(fd: Fd) -> Unit` | Python `os.close` / OCaml `Unix.close` | 追加（移動） | R-unix-01 |
 | `unix.shm_create` | `effect fn shm_create(size: Int) -> Fd` | Python `SharedMemory(create=True, size=)` | 追加（移動） | R-unix-01 |
 | `unix.shm_resize` | `effect fn shm_resize(fd: Fd, size: Int) -> Unit` | POSIX `ftruncate` | 追加（移動） | R-unix-01 |
 | `unix.shm_write` | `effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit` | POSIX `pwrite` | 追加（移動） | R-unix-01 |

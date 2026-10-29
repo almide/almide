@@ -43,13 +43,52 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_string_ends_with(s: &str, p: &str) -> i64 { s.ends_with(p) as i64 }"),
     ("string.to_upper", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_upper(s: &str) -> AlmideString { AlmideString::from(s.to_uppercase()) }"),
+            "fn rt_string_to_upper(s: &str) -> AlmideString {\n    // C-412: a non-ASCII scalar whose mapping holds ASCII stays unchanged.\n    let mut out = String::with_capacity(s.len());\n    for c in s.chars() { let m = c.to_uppercase(); if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(c) } else { out.extend(m) } }\n    AlmideString::from(out)\n}"),
     ("string.to_lower", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_lower(s: &str) -> AlmideString { AlmideString::from(s.to_lowercase()) }"),
+            "fn rt_string_to_lower(s: &str) -> AlmideString {\n    // C-412: walk str::to_lowercase (Final_Sigma context) in step with each scalar's span.\n    let full = s.to_lowercase();\n    let mut lowered = full.chars();\n    let mut out = String::with_capacity(full.len());\n    for c in s.chars() { let span: String = lowered.by_ref().take(c.to_lowercase().count()).collect(); if !c.is_ascii() && span.chars().any(|x| x.is_ascii()) { out.push(c) } else { out.push_str(&span) } }\n    AlmideString::from(out)\n}"),
     ("string.trim", &[NTy::Str],
             Some(NTy::Str),
             "fn rt_string_trim(s: &str) -> AlmideString { AlmideString::from(s.trim()) }"),
+    // #4006: four floor rows the corpus walls on most, each the v0 oracle's
+    // body (runtime/rs/src/string.rs, math.rs; stdlib/bool.almd).
+    ("bool.to_string", &[NTy::I64],
+            Some(NTy::Str),
+            "fn rt_bool_to_string(b: i64) -> AlmideString { AlmideString::from(if b != 0 { \"true\" } else { \"false\" }) }"),
+    ("string.replace", &[NTy::Str, NTy::Str, NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { AlmideString::from(s.replace(from, to)) }"),
+    // CODEPOINT indices clamped to [0, char_count] (almide_rt_string_slice).
+    ("string.slice", &[NTy::Str, NTy::I64, NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {\n    let s_idx = start.max(0) as usize;\n    let e_idx = end.max(0) as usize;\n    if s_idx >= e_idx { AlmideString::new() } else { AlmideString::from(s.chars().skip(s_idx).take(e_idx - s_idx).collect::<String>()) }\n}"),
+    ("string.is_empty", &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_is_empty(s: &str) -> i64 { s.is_empty() as i64 }"),
+    ("string.is_alpha", &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_is_alpha(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphabetic())) as i64 }"),
+    ("string.is_alphanumeric", &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_is_alphanumeric(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphanumeric())) as i64 }"),
+    ("string.capitalize", &[NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_capitalize(s: &str) -> AlmideString {\n    // C-412: the first scalar upper-cases under the to_upper rule.\n    let mut c = s.chars();\n    let mut out = String::with_capacity(s.len());\n    if let Some(f) = c.next() { let m = f.to_uppercase(); if !f.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(f) } else { out.extend(m) } out.push_str(c.as_str()); }\n    AlmideString::from(out)\n}"),
+    ("string.take", &[NTy::Str, NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n.max(0) as usize).collect::<String>()) }"),
+    // A NaN maps to the one canonical quiet-NaN pattern (almide_rt_float_to_bits).
+    ("float.to_bits", &[NTy::F64],
+            Some(NTy::I64),
+            "fn rt_float_to_bits(f: f64) -> i64 { if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 } }"),
+    // Square-and-multiply with wrapping steps; a negative exponent is the
+    // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
+    // `int.pow` is the public name (`math.pow` left the surface, R-math-01),
+    // and the `^` operator on Int lowers to a call of it too (calls_p4.rs),
+    // so this one row serves both, as `math.pow`'s did.
+    ("int.pow", &[NTy::I64, NTy::I64],
+            Some(NTy::I64),
+            "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     // #1869: `list.range` joins the floor as a closed shim. The lowering
     // materializes a `let`-bound range that is indexed or measured as
     // `CallFn list.range(s, e)`; without a floor entry the whole program
@@ -108,9 +147,16 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}"),
 ];
 
+/// C-418's escaper (#4126, #4262), the one shim whose source is not a
+/// literal here: the assert desugar shows its operands through it, and its
+/// Rust body is almide-base's err_text.rs, so the range table stays one copy.
+const ERR_TEXT_SHIM: (&str, &[NTy], Option<NTy>, &str) =
+    ("string.__err_text", &[NTy::Str], Some(NTy::Str), almide_base::ERR_TEXT_NATIVE_SHIM);
+
 pub(crate) fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
     SHIMS
         .iter()
+        .chain(std::iter::once(&ERR_TEXT_SHIM))
         .find(|(n, ..)| *n == name)
         .map(|(_, p, r, src)| (*p, *r, *src))
 }

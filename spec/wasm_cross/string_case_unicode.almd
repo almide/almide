@@ -1,4 +1,4 @@
-// @contract: C-020
+// @contract: C-020, C-412
 // Regression: WASM string.to_upper / to_lower / capitalize must produce the SAME
 // bytes as native (Rust str::to_uppercase / str::to_lowercase / first-char
 // char::to_uppercase). Previously the WASM runtime folded ONLY ASCII a-z<->A-Z
@@ -8,6 +8,9 @@
 // Unicode case tables in SELF-HOSTED Almide (stdlib/string_to_upper.almd,
 // stdlib/string_to_lower.almd, stdlib/string_capitalize.almd) and
 // resolves Final_Sigma at runtime — byte-identical to native for ALL scalars.
+// C-412 (#4121): a non-ASCII scalar whose mapping would contain ASCII (ß, ﬁ,
+// ŉ, İ, ...) is held back unchanged; the rows below pin those as kept, and the
+// length-changing maps that stay non-ASCII (ΐ, և) still lengthen.
 effect fn main() -> Unit = {
   // ── ASCII (the old fast path; still correct) ──
   println(string.to_upper("hello, world!"))
@@ -23,11 +26,13 @@ effect fn main() -> Unit = {
   // ÀÉÎÕÜ
   // ── Length-changing maps (output longer than input) ──
   println(string.to_upper("straße"))
-  // STRASSE  (ß -> SS)
+  // STRAßE   (ß held back: SS would fold it into ASCII, C-412)
   println(string.to_upper("ﬁle ﬄ"))
-  // FILE FFL (ligatures)
+  // ﬁLE ﬄ    (ligatures held back, C-412)
   println(string.to_upper("ŉ"))
-  // ʼN       (U+0149 -> 2 scalars)
+  // ŉ        (U+0149 -> ʼN holds ASCII N: held back, C-412)
+  println(string.to_upper("ΐ և"))
+  // Ϊ́ ԵՒ    (U+0390 -> 3 scalars, U+0587 -> 2 — no ASCII, still lengthen)
   // ── Cyrillic ──
   println(string.to_upper("привет, мир"))
   // ПРИВЕТ, МИР
@@ -48,14 +53,14 @@ effect fn main() -> Unit = {
   // σς   (first medial, second final)
   println(string.to_upper("σοφία τέλος"))
   // ΣΟΦΊΑ ΤΈΛΟΣ
-  // ── İ / dotted-I (U+0130 -> i + combining dot above) ──
+  // ── İ / dotted-I (U+0130 -> i + combining dot above holds ASCII i: held back, C-412) ──
   println(string.to_lower("İ"))
-  // i̇
+  // İ
   // ── capitalize: first scalar uppercased, REST VERBATIM (no recase, no Σ rule) ──
   println(string.capitalize("über"))
   // Über
   println(string.capitalize("ßeta"))
-  // SSeta  (ß -> SS as head)
+  // ßeta   (ß head held back, C-412)
   println(string.capitalize("σοσ"))
   // Σοσ    (tail σ kept, NOT lowered to ς)
   println(string.capitalize("ΣΟΣ"))
@@ -66,9 +71,9 @@ effect fn main() -> Unit = {
   // 123abc (non-cased head unchanged)
   println(string.capitalize(""))
   // (empty)
-  // ── Astral plane (Deseret, has case mappings) via from_codepoint ──
-  println(string.to_lower(string.from_codepoint(66560)))
+  // ── Astral plane (Deseret, has case mappings) ──
+  println(string.to_lower("𐐀"))
   // 𐐀 U+10400 -> 𐐨 U+10428
   // 𐐨 U+10428 -> 𐐀 U+10400
-  println(string.to_upper(string.from_codepoint(66600)))
+  println(string.to_upper("𐐨"))
 }

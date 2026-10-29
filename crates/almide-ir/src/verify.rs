@@ -601,13 +601,14 @@ fn ty_matches(actual: &Ty, expected: &Ty) -> bool {
     if expected == &Ty::Int
         && matches!(
             actual,
-            Ty::Int8 | Ty::Int16 | Ty::Int32
+            Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
         )
     {
         return true;
     }
-    if expected == &Ty::Float && matches!(actual, Ty::Float32) {
+    // `Int64` / `Float64` are `Int` / `Float` at runtime (#4055).
+    if expected == &Ty::Float && matches!(actual, Ty::Float32 | Ty::Float64) {
         return true;
     }
     std::mem::discriminant(actual) == std::mem::discriminant(expected)

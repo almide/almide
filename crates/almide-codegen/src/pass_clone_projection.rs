@@ -79,6 +79,16 @@ pub(super) fn match_binders(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Has
     Some(all)
 }
 
+/// The by-reference head read [`borrowed_subject`] makes of `list.get` /
+/// `list.first`: `Option<&T>`, so the arms bind `&T`.
+pub(super) const BORROWED_HEAD: &str = "almide_list_get_ref!";
+
+/// Is `subject` a head read [`borrowed_subject`] borrowed, whose arms bind
+/// their payloads by reference?
+pub(super) fn is_borrowed_head(subject: &IrExpr) -> bool {
+    matches!(&subject.kind, IrExprKind::RuntimeCall { symbol, .. } if symbol.as_str() == BORROWED_HEAD)
+}
+
 /// The borrowed form of a subject `match_binders` accepted: a head read
 /// becomes `almide_list_get_ref!(xs, i)` (`list.first` reads index 0), a
 /// place projection `&place`.
@@ -89,7 +99,7 @@ pub(super) fn borrowed_subject(subject: IrExpr) -> IrExpr {
             if args.len() == 1 {
                 args.push(IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: almide_lang::types::Ty::Int, span, def_id: None });
             }
-            IrExpr { kind: IrExprKind::RuntimeCall { symbol: almide_base::intern::sym("almide_list_get_ref!"), args }, ty, span, def_id: None }
+            IrExpr { kind: IrExprKind::RuntimeCall { symbol: almide_base::intern::sym(BORROWED_HEAD), args }, ty, span, def_id: None }
         }
         kind => {
             let place = IrExpr { kind, ty: ty.clone(), span, def_id: None };

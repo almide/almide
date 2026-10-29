@@ -87,54 +87,9 @@ impl Peephole {
     /// Apply the single-expression peephole rewrites to `expr` after its children
     /// have already been rewritten (post-order). Sets `self.changed` on a hit.
     fn local_rewrite(&mut self, expr: &mut IrExpr) {
-        // ── Fusion: unwrap_or(map.get(m, k), default) → map.get_or(m, k, default) ──
-        if self.try_fuse_map_get_or(expr) { return; }
         if self.try_fuse_group_count(expr) { return; }
         // Detect: for i in 0..n { xs[i] = ys[i] } → ListCopySlice
         self.try_rewrite_copy_loop(expr);
-    }
-
-    /// `UnwrapOr` fusion check of `local_rewrite` (cog>30 decomposition,
-    /// pattern 1 — independent "try this rewrite, return whether it fired"
-    /// checks with no state shared between them other than `self.changed`,
-    /// which only the firing check writes). Eliminates heap allocation for
-    /// Option return in the common `??` pattern. Returns `true` iff `expr`
-    /// was rewritten (both the `Call` and post-`IntrinsicLowering`
-    /// `RuntimeCall` forms of `map.get`).
-    ///
-    /// The fused call evaluates the fallback EAGERLY, as one more argument,
-    /// while `??` evaluates it only on `none` (language.md: fallback は遅延評価)
-    /// and only after the lookup has returned. So the fusion fires only when
-    /// [`fallback_fuses_into`] says those two orders are indistinguishable.
-    fn try_fuse_map_get_or(&mut self, expr: &mut IrExpr) -> bool {
-        let IrExprKind::UnwrapOr { expr: inner, fallback } = &expr.kind else { return false };
-        let args = match &inner.kind {
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                if module.as_str() == "map" && func.as_str() == "get" && args.len() == 2 => args,
-            IrExprKind::RuntimeCall { symbol, args }
-                if (symbol.as_str() == "almide_rt_map_get" || symbol.as_str().contains("map_get"))
-                    && !symbol.as_str().contains("get_or") && args.len() == 2 => args,
-            _ => return false,
-        };
-        if !fallback_fuses_into(fallback, args) { return false; }
-        let mut new_args = args.clone();
-        new_args.push(*fallback.clone());
-        *expr = IrExpr {
-            kind: IrExprKind::Call {
-                target: CallTarget::Module {
-                    module: almide_base::intern::sym("map"),
-                    func: almide_base::intern::sym("get_or"),
-                    def_id: None,
-                },
-                args: new_args,
-                type_args: vec![],
-            },
-            ty: expr.ty.clone(),
-            span: expr.span,
-            def_id: None,
-        };
-        self.changed = true;
-        true
     }
 
     /// `map.map(list.group_by(xs, f), (g) => list.len(g))` →
@@ -542,40 +497,5 @@ fn read_var_through_wrappers(e: &IrExpr) -> Option<VarId> {
         IrExprKind::Var { id } => Some(*id),
         IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } => read_var_through_wrappers(expr),
         _ => None,
-    }
-}
-
-/// May `fallback` — the lazy right side of `call ?? fallback` — become an
-/// eagerly evaluated sibling argument of `call`'s `args` (#3409)?
-///
-/// Moving an expression from AFTER a call into the call's own argument list
-/// changes two things this pass runs too late to repair (it is after
-/// CloneInsertion, whose E0505 guard never saw the merged call):
-///
-/// - **evaluation**: the fallback now runs on the `some` path too. Only an
-///   expression with no effect, no trap and no cost may do that, so only a
-///   literal or a plain variable read qualifies — a call, an arithmetic op
-///   (`1 / 0` traps), a clone (allocates) all stay lazy.
-/// - **ownership**: a sibling argument may BORROW a variable for the whole
-///   call, so a fallback that MOVES that same variable is rustc E0505
-///   (`get_or(m, &key, key)`). Unfused, the lookup's borrow has ended before
-///   the fallback moves. A variable the arguments mention qualifies only if
-///   its type is a `Copy` scalar, whose "move" is a copy.
-fn fallback_fuses_into(fallback: &IrExpr, args: &[IrExpr]) -> bool {
-    match &fallback.kind {
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit => true,
-        IrExprKind::Var { id } => {
-            use almide_lang::types::Ty;
-            let copy_scalar = matches!(fallback.ty,
-                Ty::Int | Ty::Float | Ty::Bool
-                | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                | Ty::Float32 | Ty::Float64);
-            copy_scalar || !args.iter().any(|a| {
-                almide_ir::free_vars::free_vars(a, &std::collections::HashSet::new()).contains(id)
-            })
-        }
-        _ => false,
     }
 }

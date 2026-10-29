@@ -15,8 +15,8 @@ fn main() -> Unit = {
   let p2 = int.parse("9223372036854775808") ?? (0 - 1)
   let p3 = int.parse("-42") ?? 0
   println("${int.to_string(p1)} ${int.to_string(p2)} ${int.to_string(p3)}")
-  println(int.to_string(int.from_hex("ff") ?? 0))
-  println(int.to_string(int.from_hex("FFFFFFFFFFFFFFFF") ?? (0 - 1)))
+  println(int.to_string(int.parse_radix("ff", 16) ?? 0))
+  println(int.to_string(int.parse_radix("FFFFFFFFFFFFFFFF", 16) ?? (0 - 1)))
   let bs = bytes.from_list([
     0,
     1,

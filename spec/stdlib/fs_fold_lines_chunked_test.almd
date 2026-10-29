@@ -28,7 +28,7 @@ effect fn par_counts(path: String, workers: Int) -> Map[String, Int] = {
 }
 
 // NOT map.merge: counts must ADD on key collision, merge overwrites.
-fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.entries(b) |> list.fold(
+fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.to_list(b) |> list.fold(
   a,
   (acc, e) => {
     let (k, v) = e
@@ -39,14 +39,14 @@ fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.e
 test "every worker count folds every line exactly once" {
   let d = tmp()!
   let p = d + "/data.txt"
-  fs.write(p, "x\ny\nx\nz\nx\ny\nw\n")!
+  fs.write_text(p, "x\ny\nx\nz\nx\ny\nw\n")!
   let seq = seq_counts(p)!
   for w in [1, 2, 3, 5, 16] {
     let par = par_counts(p, w)!
-    assert_eq(map.get_or(par, "x", 0), map.get_or(seq, "x", 0))
-    assert_eq(map.get_or(par, "y", 0), map.get_or(seq, "y", 0))
-    assert_eq(map.get_or(par, "z", 0), map.get_or(seq, "z", 0))
-    assert_eq(map.get_or(par, "w", 0), map.get_or(seq, "w", 0))
+    assert_eq(map.get(par, "x") ?? 0, map.get(seq, "x") ?? 0)
+    assert_eq(map.get(par, "y") ?? 0, map.get(seq, "y") ?? 0)
+    assert_eq(map.get(par, "z") ?? 0, map.get(seq, "z") ?? 0)
+    assert_eq(map.get(par, "w") ?? 0, map.get(seq, "w") ?? 0)
     assert_eq(map.len(par), map.len(seq))
   }
 }
@@ -54,7 +54,7 @@ test "every worker count folds every line exactly once" {
 test "workers below one clamp to one" {
   let d = tmp()!
   let p = d + "/one.txt"
-  fs.write(p, "a\nb\n")!
+  fs.write_text(p, "a\nb\n")!
   let partials = fs.fold_lines_chunked(p, 0, [], (acc, line) => acc + [line])!
   assert_eq(list.len(partials), 1)
   assert_eq(partials[0], ["a", "b"])
@@ -63,7 +63,7 @@ test "workers below one clamp to one" {
 test "empty file yields no partials" {
   let d = tmp()!
   let p = d + "/empty.txt"
-  fs.write(p, "")!
+  fs.write_text(p, "")!
   let partials = fs.fold_lines_chunked(p, 4, 0, (acc, line) => acc + 1)!
   assert_eq(partials, [])
 }
@@ -73,7 +73,7 @@ test "partials arrive in chunk order" {
   let p = d + "/ord.txt"
   // 8 bytes, 2 workers → chunk width 8/2+1 = 5, cut at byte 5: the line
   // starting at byte 4 ("c") is owned by the first chunk (start 4 < 5).
-  fs.write(p, "a\nb\nc\nd\n")!
+  fs.write_text(p, "a\nb\nc\nd\n")!
   let partials = fs.fold_lines_chunked(p, 2, [], (acc, line) => acc + [line])!
   assert_eq(list.len(partials), 2)
   assert_eq(partials[0], ["a", "b", "c"])

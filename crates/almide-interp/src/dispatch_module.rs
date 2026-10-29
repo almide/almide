@@ -50,6 +50,19 @@ impl<'a> Interpreter<'a> {
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
+        // The generic `<T>.from` family (`float.from`, `int8.from_checked`, …):
+        // its body reads the source through the `Numeric` pivots, chosen by
+        // the argument's STATIC type — read here, where the type still is.
+        if let Some(flow) = self.eval_numeric_carrier(module, func, args, &evaled) {
+            return flow;
+        }
+        // `value.__set_path_steps` is the native runtime's in-place walk; its
+        // registry body (stdlib/json_path.almd) only forwards to the bundled
+        // pure walk `value.__set_path_pure`, which the pool does not lower —
+        // so the oracle runs that walk directly, as the wasm leg does.
+        if module.as_str() == "value" && func.as_str() == "__set_path_steps" {
+            return self.dispatch_module_resolved(module, almide_base::intern::sym("__set_path_pure"), evaled);
+        }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
         // `handle_arg_ty`). Stashed, not threaded: the hint is consumed by
@@ -131,19 +144,31 @@ impl<'a> Interpreter<'a> {
         for a in &args[1..] {
             rest.push(val!(self.eval_expr(a, scope)));
         }
+        if let Some(Some(msg)) = scope.with_slot(recv, |slot| crate::inplace::put_out_of_range(m, f, slot, &rest)) {
+            return self.put_abort(msg);
+        }
         // The mutation runs against the binding's own storage — `with_slot`
         // rather than get/assign, so `Rc::make_mut` inside can keep a push loop
         // linear. Every argument is already a value by here, so nothing under
         // this closure re-enters the scope.
-        match scope.with_slot(recv, |slot| crate::inplace::apply(m, f, slot, rest)) {
+        match scope.with_slot(recv, |slot| {
+            crate::inplace::apply(m, f, slot, rest).map(|out| moved_back(m, f, out, slot))
+        }) {
             Some(Some(out)) => Flow::val(out),
             Some(None) => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
             None => Flow::Abort(format!("internal: `{m}.{f}` on an unbound receiver")),
         }
     }
 
+    /// A `bytes.put_*` window outside the buffer: the stdlib body's `panic`,
+    /// so the same `PANIC:` termination.
+    fn put_abort(&self, msg: String) -> Flow {
+        self.panicked.set(true);
+        Flow::Abort(msg)
+    }
+
     /// [`Self::eval_inplace_mutation`] for a receiver that is not a variable.
-    /// A TEMPORARY — a call result (`bytes.append_u8(bytes.new(2), 7)`,
+    /// A TEMPORARY — a call result (`bytes.append_u8(bytes.zeros(2), 7)`,
     /// #1849) — has no binding to write back to, and none is needed: both
     /// backends evaluate the arguments in order, mutate the temporary and
     /// drop it, so the statement observes nothing but its own argument
@@ -177,15 +202,24 @@ impl<'a> Interpreter<'a> {
             for a in &args[1..] {
                 rest.push(val!(self.eval_expr(a, scope)));
             }
-            return match scope.with_slot(id, |slot| {
+            let mut oob = None;
+            let applied = scope.with_slot(id, |slot| {
                 let mut cur = slot;
                 for field in &path {
                     let Value::Record { fields, .. } = cur else { return None };
                     let fields = std::rc::Rc::make_mut(fields);
                     cur = &mut fields.iter_mut().find(|(k, _)| k == field)?.1;
                 }
-                crate::inplace::apply(m, f, cur, rest)
-            }) {
+                oob = crate::inplace::put_out_of_range(m, f, cur, &rest);
+                if oob.is_some() {
+                    return Some(Value::Unit);
+                }
+                crate::inplace::apply(m, f, cur, rest).map(|out| moved_back(m, f, out, cur))
+            });
+            if let Some(msg) = oob {
+                return self.put_abort(msg);
+            }
+            return match applied {
                 Some(Some(out)) => Flow::val(out),
                 Some(None) => Flow::Abort(format!(
                     "internal: `{m}.{f}` through a record field the binding does not hold"
@@ -211,8 +245,11 @@ impl<'a> Interpreter<'a> {
         for a in &args[1..] {
             rest.push(val!(self.eval_expr(a, scope)));
         }
+        if let Some(msg) = crate::inplace::put_out_of_range(m, f, &temp, &rest) {
+            return self.put_abort(msg);
+        }
         match crate::inplace::apply(m, f, &mut temp, rest) {
-            Some(out) => Flow::val(out),
+            Some(out) => Flow::val(moved_back(m, f, out, &temp)),
             None => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
         }
     }
@@ -319,9 +356,7 @@ impl<'a> Interpreter<'a> {
         // STATELESS bridge cannot serve — they read the run's argv, which is
         // interpreter state (`with_args`, empty by default = exactly how the
         // oracle harness runs every fixture on all three legs).
-        // `args_get_list` answers argv[1..]; `args_get_list_full` prepends an
-        // argv[0] whose only cross-target observable is NONEMPTINESS (the
-        // fixtures assert it, never print it — C-181's argv0 normalization).
+        // `args_get_list` answers argv[1..].
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
@@ -365,7 +400,18 @@ impl<'a> Interpreter<'a> {
         // the body cannot take this call, and the reason says so.
         let (func, func_def, gate_mut) = match self.resolve_body_for_arity(module, func, args.len()) {
             Ok(found) => found,
-            Err(why) => return self.abstain_or_bridge(floor_first, module, func, &args, why),
+            Err(why) => {
+                // A public fn written in its BUNDLED module (`int.pow`,
+                // `bytes.get_u16_le`), which the registry pool does not lower:
+                // its bundled definition, from `surface.rs`.
+                if let Some(flow) = self.eval_bundled_surface(module, func, &args) {
+                    return flow;
+                }
+                if floor_first {
+                    return Flow::Unsupported(why);
+                }
+                return self.no_body_fallback(module, func, args, why);
+            }
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
@@ -439,11 +485,6 @@ impl<'a> Interpreter<'a> {
                     self.args.iter().map(|s| Value::str(s.clone())).collect();
                 Some(Flow::val(Value::list(items)))
             }
-            "args_get_list_full" => {
-                let mut items = vec![Value::str("interp")];
-                items.extend(self.args.iter().map(|s| Value::str(s.clone())));
-                Some(Flow::val(Value::list(items)))
-            }
             // The env floor (same tier as argv, C-133): `prim.env_get`
             // reads the LIVE process environment — exactly what the other
             // two legs observe (native getenv; wasm WASI environ with
@@ -459,8 +500,9 @@ impl<'a> Interpreter<'a> {
                 };
                 // A variable the program set itself wins (`env.set`, held in
                 // the interp's overlay, #3808).
+                // A name it removed (`env.remove`, #3908) reads as unset.
                 let value = crate::bridge::env_overlay_get(name.as_str())
-                    .or_else(|| std::env::var(name.as_str()).ok());
+                    .unwrap_or_else(|| std::env::var(name.as_str()).ok());
                 Some(Flow::val(Value::Option(value.map(|v| Box::new(Value::str(v))))))
             }
             _ => self.vfs_prim(func, args),
@@ -562,5 +604,20 @@ fn member_path(recv: &IrExpr) -> Option<(almide_ir::VarId, Vec<almide_base::inte
             }
             _ => return None,
         }
+    }
+}
+
+/// What an intercepted writer's call evaluates to. A stdlib writer with an
+/// Almide body over `mut b` (`bytes.put_u16_le`, `bytes.pop`) arrives move-mode
+/// rewritten (almide-ir `mut_param`): its call answers the written buffer — and
+/// `(result, buffer)` when it returned a value of its own — which the rewritten
+/// site stores back. An intrinsic writer's call answers its own result.
+fn moved_back(m: &str, f: &str, out: Value, buf: &Value) -> Value {
+    if !almide_ir::mut_args::stdlib_fn_has_almide_body(m, f) {
+        return out;
+    }
+    match out {
+        Value::Unit => buf.clone(),
+        out => Value::tuple(vec![out, buf.clone()]),
     }
 }

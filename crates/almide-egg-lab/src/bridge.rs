@@ -89,6 +89,28 @@ impl Bridge {
     }
 
     fn lift_node(&mut self, expr: &IrExpr, rec: &mut RecExpr<AlmideExpr>) -> Id {
+        // The matrix operators (R-matrix-14): `a * b`, `a + b` and a scale by a
+        // Float lift as the `__mul` / `__add` / `scale` calls they mean, so the
+        // `@rewrite` rules see `a * matrix.scale(b, s)` as they see the calls.
+        if let IrExprKind::BinOp { op, left, right } = &expr.kind {
+            match op {
+                BinOp::MulMatrix | BinOp::AddMatrix => {
+                    let a = self.lift_node(left, rec);
+                    let b = self.lift_node(right, rec);
+                    let node = if *op == BinOp::MulMatrix { AlmideExpr::MatrixMul([a, b]) } else { AlmideExpr::MatrixAdd([a, b]) };
+                    return rec.add(node);
+                }
+                BinOp::ScaleMatrix => {
+                    let (m, s) = if is_matrix_ty(&left.ty) { (left, right) } else { (right, left) };
+                    if s.ty == Ty::Float {
+                        let m = self.lift_node(m, rec);
+                        let s = self.lift_node(s, rec);
+                        return rec.add(AlmideExpr::MatrixScale([m, s]));
+                    }
+                }
+                _ => {}
+            }
+        }
         if let IrExprKind::Call { target, args, .. } = &expr.kind {
             if let CallTarget::Module { module, func, .. } = target {
                 let m = module.as_str();
@@ -150,12 +172,12 @@ impl Bridge {
         rec: &mut RecExpr<AlmideExpr>,
     ) -> Option<Id> {
         match (func, args.len()) {
-            ("mul", 2) => {
+            ("__mul", 2) => {
                 let a = self.lift_node(&args[0], rec);
                 let b = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixMul([a, b])))
             }
-            ("add", 2) => {
+            ("__add", 2) => {
                 let a = self.lift_node(&args[0], rec);
                 let b = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixAdd([a, b])))
@@ -165,16 +187,10 @@ impl Bridge {
                 let s = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixScale([m, s])))
             }
-            ("linear_row", 3) => {
-                let x = self.lift_node(&args[0], rec);
-                let w = self.lift_node(&args[1], rec);
-                let b = self.lift_node(&args[2], rec);
-                Some(rec.add(AlmideExpr::MatrixLinearRow([x, w, b])))
-            }
             // Fused form — normally produced only by the rewrites, but
             // also accepted as input (the user called the intrinsic
             // directly) so that lift is idempotent.
-            ("mul_scaled", 3) => {
+            ("__mul_scaled", 3) => {
                 let a = self.lift_node(&args[0], rec);
                 let s = self.lift_node(&args[1], rec);
                 let b = self.lift_node(&args[2], rec);

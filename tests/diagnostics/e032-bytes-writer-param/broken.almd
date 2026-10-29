@@ -3,10 +3,10 @@
 // carries it back to the caller. Before #2466 this compiled, and the targets
 // disagreed about whether the caller's buffer changed: native wrote through,
 // wasm did not.
-fn zero(b: Bytes) -> Unit = bytes.set_u8(b, 0, 0)
+fn zero(b: Bytes) -> Unit = bytes.put_u8(b, 0, 0)
 
 fn main() -> Unit = {
   var b = bytes.from_list([1, 2])
   zero(b)
-  println(int.to_string(bytes.get_or(b, 0, 9)))
+  println(int.to_string(bytes.get(b, 0) ?? 9))
 }

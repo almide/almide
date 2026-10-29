@@ -3,7 +3,7 @@
 //! to every run as `XF_TCP_PORT` / `XF_SINK_PORT` / `XF_SOURCE_PORT` / `XF_HTTP`
 //! (the same on every leg), and a Unix-domain sink (`XF_UNIX_SINK`, #3620): a
 //! listener at a short absolute path (`sun_path` holds at most 104 bytes on
-//! macOS) that accepts every connection and drains it, so a `net.unix_send`
+//! macOS) that accepts every connection and drains it, so a `unix.write_fds`
 //! of any size never backs up. No run reaches any other host.
 //!
 //! HTTP routes (every answer has a Content-Length unless chunked):

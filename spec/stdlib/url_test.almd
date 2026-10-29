@@ -64,9 +64,9 @@ test "parse rejects non-urls and out-of-range ports with reasons" {
 }
 
 test "query_pairs and build_query are a family pair" {
-  assert_eq(url.build_query(url.query_pairs("a=1&b=two")), "a=1&b=two")
-  assert_eq(url.query_pairs(""), [])
-  assert_eq(url.query_pairs("flag&x=1"), [("flag", ""), ("x", "1")])
+  assert_eq(url.build_query(url.parse_query("a=1&b=two") ?? []), "a=1&b=two")
+  assert_eq(url.parse_query("") ?? [], [])
+  assert_eq(url.parse_query("flag&x=1") ?? [], [("flag", ""), ("x", "1")])
   assert_eq(url.build_query([("q", "a b"), ("lang", "ja")]), "q=a%20b&lang=ja")
   assert_eq(url.build_query([]), "")
 }
@@ -100,9 +100,12 @@ test "parse refuses the documented out-of-scope authorities by name" {
   assert_eq(parse_err("http://u:p@host/p"), "url.parse: userinfo is not supported: u:p@host")
   assert_eq(parse_err("http://[::1]:8080/"), "url.parse: IPv6 hosts are not supported: [::1]:8080")
   assert_eq(parse_err("http://a b/"), "url.parse: invalid host: a b")
-  // RFC 3986 reg-name: unreserved, sub-delims and pct-encoded all pass
+  // RFC 3986 reg-name: unreserved and sub-delims pass; a `%` does not (C-402:
+  // WHATWG decodes it before checking, so `evil.com%2fgood.com` would be read
+  // as two different things)
   assert_eq(
-    parse_err("http://ex-am.ple_~!$&'()*+,;=%41:80/p"),
-    "ok host='ex-am.ple_~!$&'()*+,;=%41' port=some(80)",
+    parse_err("http://ex-am.ple_~!$&'()*+,;=:80/p"),
+    "ok host='ex-am.ple_~!$&'()*+,;=' port=some(80)",
   )
+  assert_eq(parse_err("http://ex%41mple:80/p"), "url.parse: invalid host: ex%41mple")
 }

@@ -1,0 +1,23 @@
+// The bool module (R-bool-01..03): parse, compare, to_string — auto-imported.
+test "to_string and parse are inverses" {
+  assert_eq(bool.to_string(true), "true")
+  assert_eq(bool.to_string(false), "false")
+  assert_eq(bool.parse(bool.to_string(true)), ok(true))
+  assert_eq(bool.parse(bool.to_string(false)), ok(false))
+  assert_eq(bool.to_string(true), "${true}")
+}
+
+test "parse accepts only the exact spellings" {
+  assert_eq(bool.parse("True"), err("provided string was not `true` or `false`"))
+  assert_eq(bool.parse(" true"), err("provided string was not `true` or `false`"))
+  assert_eq(bool.parse(""), err("provided string was not `true` or `false`"))
+  assert_eq(bool.parse("1"), err("provided string was not `true` or `false`"))
+}
+
+test "compare orders false before true" {
+  assert_eq(bool.compare(false, true) < 0, true)
+  assert_eq(bool.compare(true, false) > 0, true)
+  assert_eq(bool.compare(true, true), 0)
+  assert_eq(bool.compare(false, false), 0)
+  assert_eq(bool.compare(false, true), 0 - bool.compare(true, false))
+}

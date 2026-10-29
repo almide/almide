@@ -12,9 +12,9 @@
 // consumed), and a create+sort+drop loop that TRAPS on wasm within a page if the
 // co-own is unbalanced in either direction (a leak grows past 64KB; a missing
 // acquire double-frees).
-fn key_of(row: List[String]) -> String = list.get_or(row, 0, "")
+fn key_of(row: List[String]) -> String = list.get(row, 0) ?? ""
 
-fn tag_of(row: List[String]) -> String = list.get_or(row, 1, "")
+fn tag_of(row: List[String]) -> String = list.get(row, 1) ?? ""
 
 fn render(rows: List[List[String]]) -> String = rows |> list.map((r) => "${key_of(r)}:${tag_of(r)}") |> list.join(",")
 

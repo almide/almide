@@ -78,7 +78,7 @@ let record_marker = "fuzz-night: "
 // `gh api ... 2>/dev/null || true` — a request that fails (an expired per-job log, a 404)
 // reads as EMPTY on the bash side, never as an error, and the scorer decides what empty means.
 effect fn gh_api(path: String) -> String = {
-  let st = process.exec_status("gh", ["api", path]) ?? process.ProcessStatus {
+  let st = process.output(process.ProcessCommand { cmd: "gh", args: ["api", path] }) ?? process.ProcessStatus {
     code: 1,
     stdout: "",
     stderr: "",
@@ -90,27 +90,26 @@ effect fn gh_api(path: String) -> String = {
 // `(.conclusion // .status)` — a run still executing has no conclusion, and the bash's `//`
 // falls back to its status so the row can be printed as unscored rather than dropped.
 fn run_state(run: json.Value) -> String = {
-  let c = json.get_string(run, "conclusion") ?? ""
+  let c = value.get_string(run, "conclusion") ?? ""
   if c != "" then c
-  else json.get_string(run, "status") ?? ""
+  else value.get_string(run, "status") ?? ""
 }
 
 // `created_at` is an ISO timestamp; the report shows the date only.
-fn date_of(run: json.Value) -> String = list.get_or(
-  string.split(json.get_string(run, "created_at") ?? "", "T"),
+fn date_of(run: json.Value) -> String = list.get(
+  string.split(value.get_string(run, "created_at") ?? "", "T"),
   0,
-  "",
-)
+) ?? ""
 
-fn jobs_of(jobs_json: json.Value) -> List[json.Value] = json.get_array(jobs_json, "jobs") ?? []
+fn jobs_of(jobs_json: json.Value) -> List[json.Value] = value.get_array(jobs_json, "jobs") ?? []
 
-fn job_named(jobs_json: json.Value, name: String) -> json.Value? = jobs_of(jobs_json) |> list.find((j) => (json.get_string(j, "name") ?? "") == name)
+fn job_named(jobs_json: json.Value, name: String) -> json.Value? = jobs_of(jobs_json) |> list.find((j) => (value.get_string(j, "name") ?? "") == name)
 
 // `[.jobs[] | select(.name == "Night verdict") | .conclusion][0] // "absent"` — a night with
 // no verdict job at all is a LEGACY night, and so is one whose verdict job has no conclusion
 // yet (jq's `//` treats `null` the same as a missing element).
 fn verdict_job(jobs_json: json.Value) -> String = match job_named(jobs_json, verdict_job_name) {
-  some(j) => json.get_string(j, "conclusion") ?? "absent",
+  some(j) => value.get_string(j, "conclusion") ?? "absent",
   none => "absent",
 }
 
@@ -118,7 +117,7 @@ fn verdict_job(jobs_json: json.Value) -> String = match job_named(jobs_json, ver
 // word `null` when the job carries none. The bash then asks for `jobs/null/logs`, which fails,
 // which is an empty log; the twin asks for the same path so the shim refuses both alike.
 fn verdict_job_id(jobs_json: json.Value) -> String = match job_named(jobs_json, verdict_job_name) {
-  some(j) => match json.get_int(j, "id") {
+  some(j) => match value.get_int(j, "id") {
     some(id) => int.to_string(id),
     none => "null",
   },
@@ -134,10 +133,10 @@ fn campaign_step(jobs_json: json.Value, job_name: String, step_name: String) -> 
   job_name,
 ) {
   some(j) => {
-    let steps = json.get_array(j, "steps") ?? []
-    let st = steps |> list.find((s) => (json.get_string(s, "name") ?? "") == step_name)
+    let steps = value.get_array(j, "steps") ?? []
+    let st = steps |> list.find((s) => (value.get_string(s, "name") ?? "") == step_name)
     match st {
-      some(s) => json.get_string(s, "conclusion") ?? "absent",
+      some(s) => value.get_string(s, "conclusion") ?? "absent",
       none => "absent",
     }
   },
@@ -177,7 +176,7 @@ fn delivered_pct(line: String) -> String = {
   if planned == "" or delivered == "" or planned == "0" then ""
   else {
     let p = awk_num(planned)
-    if p == 0.0 then "" else int.to_string(float.to_int((100.0 * awk_num(delivered)) / p))
+    if p == 0.0 then "" else int.to_string(int.from_saturating((100.0 * awk_num(delivered)) / p))
   }
 }
 
@@ -328,7 +327,7 @@ else if s.full then "FINDINGS" else "TRUNCATED"
 
 effect fn night_of(repo: String, run: json.Value, bar: Int) -> Night = {
   let state = run_state(run)
-  let id = int.to_string(json.get_int(run, "id") ?? 0)
+  let id = int.to_string(value.get_int(run, "id") ?? 0)
   if in_flight(state) then Night {
     date: date_of(run),
     id: id,
@@ -382,7 +381,7 @@ effect fn report(n: Int) -> List[String] = {
   let repo = repo_of()!
   let bar = budget_bar()!
   let url = "repos/" + repo + "/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=" + int.to_string(n)
-  let runs = json.get_array(json.parse(gh_api(url)!) ?? value.null(), "workflow_runs") ?? []
+  let runs = value.get_array(json.parse(gh_api(url)!) ?? value.null(), "workflow_runs") ?? []
   var nights: List[Night] = []
   for r in runs {
     nights = nights + [

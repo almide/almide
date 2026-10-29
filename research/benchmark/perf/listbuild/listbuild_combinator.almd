@@ -22,10 +22,10 @@ effect fn main() -> Unit = {
     }
   } else 20
 
-  let n = math.pow(2, size)
+  let n = int.pow(2, size)
 
   let data = list.range(0, n) |> list.flat_map((i) => {
-    let theta = float.from_int(i) / float.from_int(n) * math.pi()
+    let theta = float.from(i) / float.from(n) * math.pi()
     let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
     let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
     [float.round(re * 100.0) / 100.0, float.round(im * 100.0) / 100.0]

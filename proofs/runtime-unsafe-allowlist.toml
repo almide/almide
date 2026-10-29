@@ -1,0 +1,116 @@
+# Every `unsafe` the native runtime carries, per file (#4007). The language's memory
+# safety ends at these lines: the native leg trusts Rust's safe code, so each line here
+# is outside the guarantee. scripts/check-runtime-unsafe.sh counts the non-comment lines
+# holding the word `unsafe` and refuses any file whose count differs from its row — a new
+# `unsafe` needs a row and a reason, a removed one lowers the row in the same change.
+#
+# class: fan-sync (Almide values cross threads; checked by Miri and loom, below), ffi-surface
+# (the raw-pointer stdlib surface, closed to ffi.read/ffi.write by R-L0-45),
+# c-call (a C / OS function; safe when its arguments are), emitted-prelude (Rust text the
+# compiler pastes into every generated program that needs it — crates/almide-codegen/src/
+# prelude_*.rs, counted since #4023: the line is in the user's binary, not in runtime/rs; and,
+# since #4007, the other emitted code — walker/mod.rs's main SIGPIPE prelude, the @extern(c)
+# glue, the C-196 stack guard and the inlined matrix kernels).
+#
+# #4007: within the runtime, every c-call sits in ONE module per crate behind safe wrappers —
+# runtime/rs/src/sys.rs (os calls, plus cblas_dgemm) and crates/almide-rt-core/src/
+# net_unix_sys.rs. Checks: scripts/miri-generated.sh and scripts/asan-generated.sh over the
+# generated crates (.github/workflows/miri-nightly.yml), scripts/miri-fan-gate.sh and
+# scripts/loom-fan-gate.sh (the gate protocol's interleavings enumerated) for fan-sync,
+# scripts/lib/sys-ffi-asan.almd for sys.rs's process paths.
+
+[[file]]
+path = "runtime/rs/src/list.rs"
+count = 6
+class = "fan-sync"
+reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers, the take-cell read and the slot reads (almide_fan_deal .. almide_fan_steal). kept: std::thread::scope in its place (no unsafe) measured 1.13-1.32x the pool's wall time on offers of fine and medium elements and 0.95-1.00x on coarse ones (mandelbrot, binarytrees, fanblock), Apple M-series 14 cores, 2026-10-24 (#4007). Checked under Miri with four CPUs and helpers on by scripts/miri-fan-gate.sh (miri-nightly.yml miri-fan), whose control drops the caller's wait and must come back UB"
+
+[[file]]
+path = "runtime/rs/src/ffi.rs"
+count = 2
+class = "ffi-surface"
+reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ffi-01, #4042, ADR-0031): the one place a program reads or writes a raw address, reached only after the Almide-side bounds check against the Region's own length (and, for a write, its permission); @memory_unsafe, refused under --profile critical (E100)"
+
+[[file]]
+path = "runtime/rs/src/sys.rs"
+count = 9
+class = "c-call"
+reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), kill (process.kill / is_alive, #4125: the syscall, never a `kill` on PATH), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe. Checked: thread_cpu_ns under Miri (the fan corpus, scripts/miri-fan-gate.sh) and ASan; set_signal and wait_exited_or_stopped under ASan (scripts/lib/sys-ffi-asan.almd in the asan job); send_signal only by spec/embedded_cross/process_kill_syscall.almd (functional, no sanitizer; it touches no memory); thread_self / thread_kill / exit_now only by tests/http_serve_cross_test.rs (functional, no sanitizer); dgemm by nothing (no build sets have_blas); the Windows handler by nothing"
+
+[[file]]
+path = "crates/almide-rt-core/src/net_unix_sys.rs"
+count = 5
+class = "c-call"
+reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for the unix module"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_box_body.rs"
+count = 25
+class = "emitted-prelude"
+reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its new / into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_region.rs"
+count = 9
+class = "emitted-prelude"
+reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per trap variant), the trapped header read, and the three TLS-cell borrows of alloc / save / restore per variant. Sound only while every handle dies inside its window, i.e. while pass_region_window.rs's region-pure verdict is right; ALMIDE_REGION_TRAP_STALE=1 arms a generation check that turns a wrong verdict into a panic (#4023: off by default — measured +30% on binarytrees and +52% on treealloc — and CI runs spec/ and the differential fuzz with it armed)"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_rem_body.rs"
+count = 1
+class = "emitted-prelude"
+reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri"
+
+[[file]]
+path = "crates/almide-codegen/src/walker/mod.rs"
+count = 1
+class = "emitted-prelude"
+reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every native main (#1950), cfg(not(miri))"
+
+[[file]]
+path = "crates/almide-codegen/src/walker/extern_c.rs"
+count = 2
+class = "emitted-prelude"
+reason = "the call glue of a program's own @extern(c) fn: the program declares the foreign signature; and the release call a foreign Region's guard makes on its last drop, to the C function its `@region(release = …)` names (ADR-0031 D6)"
+
+[[file]]
+path = "crates/almide-base/src/native_stack_guard.rs"
+count = 12
+class = "emitted-prelude"
+reason = "the C-196 stack guard both native renders emit (module almide_stack_guard): sigaction, the faulting thread's stack bounds (pthread_get_stackaddr_np / pthread_get_stacksize_np on macOS), write(2) and _exit from the handler, the siginfo fault-address read and the chain to the previous handler"
+
+[[file]]
+path = "crates/almide-kernel/src/matmul.rs"
+count = 3
+class = "emitted-prelude"
+reason = "the AVX / register-tiled matmul kernels and their call behind is_x86_feature_detected"
+
+[[file]]
+path = "crates/almide-kernel/src/scale.rs"
+count = 2
+class = "emitted-prelude"
+reason = "scale_avx and its #[cfg(test)] bitwise check (the test block is stripped before emission)"
+
+[[file]]
+path = "crates/almide-kernel/src/transpose.rs"
+count = 7
+class = "emitted-prelude"
+reason = "the AVX 8x8 f32 transpose and its five passes"
+
+[[file]]
+path = "crates/almide-kernel/src/transpose_f64.rs"
+count = 3
+class = "emitted-prelude"
+reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection"
+
+[[file]]
+path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
+count = 14
+class = "c-call"
+reason = "the rooted fs family and every fs call under [permissions] fs by descriptor (#4084): openat / readlinkat / unlinkat / mkdirat / renameat / fdopendir / readdir / closedir, Linux openat2 via syscall, errno reset for readdir, and owning a descriptor a successful open returned"
+
+[[file]]
+path = "runtime/rs/src/random.rs"
+count = 6
+class = "c-call"
+reason = "random.bytes (#3938): the getrandom(2), getentropy(3) and Windows BCryptGenRandom (system-preferred RNG, null algorithm handle) declarations and calls that fill a caller-owned buffer from the OS CSPRNG; each call's pointer and length come from one live &mut [u8]"

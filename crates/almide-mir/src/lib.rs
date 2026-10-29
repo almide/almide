@@ -28,6 +28,7 @@
 /// The compiler's debug-trace channels.
 pub(crate) mod trace;
 
+pub mod affine_shape;
 pub mod alias_safety;
 pub(crate) mod borrow_join;
 pub mod certificate;
@@ -291,7 +292,7 @@ pub enum Op {
     /// routine (empty cert, leak-loop verified). The TUPLE-element counterpart of `DropListValue`.
     DropListStrValue { v: ValueId },
     /// `drop_list_str_str v` — release a `List[(String, String)]` whose element slots hold owned
-    /// (String, String) TUPLE blocks (the `map.entries` / svg render_attrs shape). The render calls
+    /// (String, String) TUPLE blocks (the `map.to_list` / svg render_attrs shape). The render calls
     /// `$__drop_list_str_str`: at the list's last ref each tuple is freed at its own last ref (BOTH
     /// String slots rc_dec'd flat — vs `DropListStrValue`'s recursive `$__drop_value` 2nd slot), then
     /// the tuple, then the list block. Same single cert `d` as [`Op::Drop`]; the (String,String)

@@ -13,21 +13,21 @@ impl Checker {
             (Ty::Bool, Ty::String) => Some(("Bool to String", "to_string({})")),
             (Ty::String, Ty::Int) => Some(("String to Int", "int.parse({})")),
             (Ty::String, Ty::Float) => Some(("String to Float", "float.parse({})")),
-            (Ty::Float, Ty::Int) => Some(("Float to Int", "float.to_int({})")),
-            (Ty::Int, Ty::Float) => Some(("Int to Float", "int.to_float({})")),
+            (Ty::Float, Ty::Int) => Some(("Float to Int", "int.from_saturating({})")),
+            (Ty::Int, Ty::Float) => Some(("Int to Float", "float.from({})")),
             _ => None,
         }
     }
 
-    /// Int-only `math.*` builtins whose generic Float→Int hint (`float.to_int`)
+    /// Int-only builtins whose generic Float→Int hint (`int.from_saturating`)
     /// would silently truncate. When one of these gets a Float argument, the
     /// caller points at the Float-preserving sibling instead (#740).
     pub(crate) fn math_float_sibling(fn_name: &str) -> Option<&'static str> {
         match fn_name {
-            "math.abs" => Some("float.abs"),
-            "math.pow" => Some("math.fpow"),
-            "math.max" => Some("math.fmax"),
-            "math.min" => Some("math.fmin"),
+            "int.abs" => Some("float.abs"),
+            "int.pow" => Some("float.pow"),
+            "int.max" => Some("float.max"),
+            "int.min" => Some("float.min"),
             _ => None,
         }
     }
@@ -45,11 +45,11 @@ impl Checker {
             (Ty::Int8 | Ty::Int16 | Ty::Int32
                     | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64,
              Ty::Int | Ty::Int64) => Some(
-                "use `x.to_int64()` to widen it — Almide has no implicit numeric widening".to_string()),
+                "use `int.from(x)` to widen it — Almide has no implicit numeric widening".to_string()),
             (Ty::Float32, Ty::Float | Ty::Float64) => Some(
-                "use `x.to_float64()` to widen it — Almide has no implicit numeric widening".to_string()),
-            (Ty::Float, Ty::Int) => Some("use `float.to_int(x)` to convert Float to Int (truncates)".to_string()),
-            (Ty::Int, Ty::Float) => Some("use `int.to_float(x)` to convert Int to Float".to_string()),
+                "use `float.from(x)` to widen it — Almide has no implicit numeric widening".to_string()),
+            (Ty::Float, Ty::Int) => Some("use `int.from_saturating(x)` to convert Float to Int (truncates)".to_string()),
+            (Ty::Int, Ty::Float) => Some("use `float.from(x)` to convert Int to Float".to_string()),
             // Unit where a List was expected: three common causes.
             // - `list.push/pop/clear` mutate and return Unit
             // - `for x in xs { ... }` is a side-effect loop returning Unit

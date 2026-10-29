@@ -1,7 +1,7 @@
 import fs
 effect fn main() -> Unit = {
   let a = fan.bounded(compute.ms(1)) {
-    fs.write("fan-audit-x.txt", "hi")
+    fs.write_text("fan-audit-x.txt", "hi")
     1
   } ?? -1
   println(int.to_string(a))

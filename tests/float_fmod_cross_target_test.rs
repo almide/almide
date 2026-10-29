@@ -86,7 +86,7 @@ fn fixed_pairs() -> Vec<(u64, u64)> {
 
 fn build_program(n: u64) -> String {
     let mut s = String::from(
-        "fn show(a: Int, b: Int) -> Unit = {\n  let x = int.bits_to_float(a)\n  let y = int.bits_to_float(b)\n  println(int.to_string(float.to_bits(x % y)))\n  let p: Float32 = float.to_float32(x)\n  let q: Float32 = float.to_float32(y)\n  println(int.to_string(float.to_bits(float32.to_float64(p % q))))\n}\n\nfn main() -> Unit = {\n",
+        "fn show(a: Int, b: Int) -> Unit = {\n  let x = float.from_bits(a)\n  let y = float.from_bits(b)\n  println(int.to_string(float.to_bits(x % y)))\n  let p: Float32 = float32.from(x)\n  let q: Float32 = float32.from(y)\n  println(int.to_string(float.to_bits(float64.from(p % q))))\n}\n\nfn main() -> Unit = {\n",
     );
     for (a, b) in fixed_pairs() {
         s.push_str(&format!("  show({}, {})\n", a as i64, b as i64));

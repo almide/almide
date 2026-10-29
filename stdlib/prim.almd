@@ -193,13 +193,6 @@ fn random_get(buf: Int, len: Int) -> Int = _
 @intrinsic("almide_rt_prim_args_get_list")
 fn args_get_list() -> List[String] = _
 
-// The argv[0]-INCLUSIVE twin of args_get_list — `process.args()` = native
-// std::env::args() (program path + program args). The SAME args_sizes_get/args_get
-// WASI bridge with skip=0; the SAME Capability::CliArgs accounting. Reached only by
-// the self-hosted `process.args` (process_args.almd). No native runtime impl.
-@intrinsic("almide_rt_prim_args_get_list_full")
-fn args_get_list_full() -> List[String] = _
-
 // The environ_sizes_get + environ_get WASI lookup, packaged as ONE high-level HEAP-RESULT
 // prim — the Env profile's sandbox exit (reaches Capability::CliArgs, the same
 // process-initial-state class as argv). Scans the `KEY=VALUE` environ entries for `name`
@@ -224,7 +217,7 @@ fn read_text_file(path: String) -> Result[String, String] = _
 
 // Raw-bytes twin of read_text_file — the SAME WASI path_open/fd_read floor and the
 // same cap-as-tag Result block; only the Ok payload TYPE differs (Bytes, no UTF-8
-// claim). Backs the self-hosted `fs.read_bytes_raw`. Capability::FsRead.
+// claim). Backs the self-hosted `fs.read_bytes`. Capability::FsRead.
 @intrinsic("almide_rt_prim_read_bytes_file")
 fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
@@ -269,13 +262,13 @@ fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
 // truncating) the file at `path` (preopen-relative, leading '/' stripped — the same
 // resolution read_text_file uses) and writes `content`'s bytes, returning a fresh OWNED
 // `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a path_open error. Reached
-// only by the self-hosted `fs.write` (fs_write.almd) in the v1 trust-spine wasm backend; the
+// only by the self-hosted `fs.write_text` (fs_write.almd) in the v1 trust-spine wasm backend; the
 // render emits the WASI path_open/fd_write + Result-build sequence. No native runtime impl —
-// the native target uses fs.write's own @intrinsic.
+// the native target uses fs.write_text's own @intrinsic.
 @intrinsic("almide_rt_prim_write_text_file")
 fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 
-// The write floor's call-head twins (#2206): `fs.append`, `fs.write_bytes`,
+// The write floor's call-head twins (#2206): `fs.append_text`, `fs.write_bytes`,
 // `fs.create_temp_file` and fs.copy's write half all reach `write_text_file`, and
 // native names each of them. See `read_text_file_as`.
 @intrinsic("almide_rt_prim_write_text_file_as")
@@ -332,14 +325,16 @@ fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_path_exists")
 fn path_exists(path: String) -> Bool = _
 
-// RawPtr ⇄ Int reinterpret casts — the SAME i64 scalar at the value level (a raw
+// Handle ⇄ Int reinterpret casts — the SAME i64 scalar at the value level (a raw
 // linear-memory address); the v1 lowering emits NO op (identity), the type system
-// just changes hats. The bytes_rawptr bridge's address arithmetic runs on Int.
+// just changes hats. The ffi bridge's address arithmetic (stdlib/ffi_bridge.almd)
+// runs on Int. No user file can name them (E085): a user-reachable Int → pointer
+// path would bypass every Region bounds check (ADR-0031 D4).
 @intrinsic("almide_rt_prim_ptr_to_int")
-fn ptr_to_int(p: RawPtr) -> Int = _
+fn ptr_to_int(p: Handle) -> Int = _
 
 @intrinsic("almide_rt_prim_int_to_ptr")
-fn int_to_ptr(a: Int) -> RawPtr = _
+fn int_to_ptr(a: Int) -> Handle = _
 
 // The path_filestat_get WASI FULL-stat query, packaged as ONE high-level SCALAR prim — a
 // FS-READ sandbox exit (Capability::FsRead, same accounting as path_exists). Writes the raw
@@ -391,10 +386,10 @@ fn read_n_bytes(n: Int) -> List[Int] = _
 // a DISTINCT capability: a clock read is neither a filesystem nor an entropy effect). Writes
 // the current clock value (nanoseconds) as an i64 at `time_ptr`, returning the i32 errno
 // (zero-extended). `id` selects the clock (0 = CLOCK_REALTIME), `precision` is the requested
-// resolution (ns). Reached only by the self-hosted `env.unix_timestamp`
-// (env_unix_timestamp.almd) in the v1 trust-spine wasm backend; the render emits the WASI
+// resolution (ns). Reached by the self-hosted `datetime.now` / `datetime.monotonic_ns`
+// (clock_now.almd) in the v1 trust-spine wasm backend; the render emits the WASI
 // clock_time_get host call. No native runtime impl — the native target uses
-// env.unix_timestamp's own @intrinsic.
+// their own @intrinsic.
 @intrinsic("almide_rt_prim_clock_time_get")
 fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 
@@ -496,7 +491,7 @@ fn i2f32(x: Int) -> Float32 = _
 fn f32bits(x: Float32) -> Int = _
 
 // Abort: write the message bytes at String-block address `s` to STDERR and
-// exit(1) — the self-host arm of the §13 termination convention (math.pow
+// exit(1) — the self-host arm of the §13 termination convention (math.__pow
 // negative exponent, int.rotate nonpositive width). Never returns.
 @intrinsic("almide_rt_prim_die")
 fn die(s: Int) -> Unit = _

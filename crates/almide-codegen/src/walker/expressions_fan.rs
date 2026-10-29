@@ -21,12 +21,16 @@ fn render_fan(ctx: &RenderContext, span: Option<almide_base::span::Span>, exprs:
     let exprs_s = rendered.join(", ");
     let count_s = format!("{}", exprs.len());
     let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__almide_fan_h{}", i)).collect();
+    // #4141: `almide_fan_spawn` starts the arm on a thread of its own, or runs
+    // it inline when the live-arm bound is reached or the OS refuses the thread
+    // (EAGAIN under a process limit) — the sequential evaluation every fan
+    // reproduces (ADR-0024 D1), never `Scope::spawn`'s panic.
     let spawns: Vec<String> = rendered.iter().enumerate()
-        .map(|(i, body)| format!("let {} = __almide_s.spawn(move || {{ let __almide_fan_e = almide_fan_enter(__almide_fan_g, {}); {} }});", handles[i], i, body))
+        .map(|(i, body)| format!("let {} = almide_fan_spawn(__almide_s, move || {{ let __almide_fan_e = almide_fan_enter(__almide_fan_g, {}); {} }});", handles[i], i, body))
         .collect();
     let any_result = exprs.iter().any(|e| e.ty.is_result());
     let joins: Vec<String> = exprs.iter().enumerate()
-        .map(|(i, e)| fan_join_tail(ctx, e, format!("almide_fan_join({})", handles[i])))
+        .map(|(i, e)| fan_join_tail(ctx, e, format!("almide_fan_take({})", handles[i])))
         .collect();
     let join_expr = if joins.len() == 1 { joins[0].clone() }
         else { format!("({})", joins.join(", ")) };

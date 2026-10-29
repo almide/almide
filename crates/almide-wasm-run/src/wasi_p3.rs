@@ -10,7 +10,7 @@
 //! service itself (`fs_service.wat`, the code the stock-p1 artifact runs)
 //! over a preview-1 adapter on wasi:filesystem@0.3.0 (`p3_fs_adapter.wat`,
 //! `wasi_p3_fs_service.rs`) — path resolution against the full preopen
-//! table and the cwd, every fs op, env.os / env.temp_dir / env.cwd, and
+//! table and the cwd, every fs op, env.os / fs.temp_dir / env.cwd, and
 //! native's `fs.<call>("<path>")` error heads. The fan prefetch triple
 //! (ops 40..=42) stays in this shim: its opens are async-lowered subtasks
 //! (increment 2b), on the descriptor the service resolves. `env.get`, the
@@ -379,6 +379,7 @@ include!("wasi_p3_http_resp.rs");
 
 // Its error classes, texts and helper functions (ADR-0023 step 2).
 include!("wasi_p3_http_err.rs");
+include!("wasi_p3_http_auth.rs");
 
 /// Canonical-ABI facts the http shim stores through (#1710 PR B) — DERIVED
 /// from the vendored WIT at emit time, never hand-counted (the fs_abi

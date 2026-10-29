@@ -59,6 +59,7 @@ impl Parser {
         // #1311 front-end phase accounting (no-op unless `--timings`).
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Parse);
         self.report_invalid_escapes();
+        self.report_hidden_chars();
         let mut program = Program {
             dialect: None,
             module: None,
@@ -201,6 +202,9 @@ impl Parser {
             pending = p;
             gap_blanks = b;
         }
+
+        // #4266: judged after the whole file (holes included) is parsed.
+        self.report_confusable_idents();
 
         if !pending.is_empty() {
             program.comment_map.push(pending);

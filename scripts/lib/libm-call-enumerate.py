@@ -4,7 +4,7 @@
 Almide vendors musl-libm (`runtime/rs/src/libm.rs`, the StrictMath/fdlibm
 decision) so a transcendental is bit-identical native <-> wasm AND across host
 platforms. A call to Rust's own `f64::exp`/`powf`/... escapes that contract:
-its last ULP is the host libm's. #1197 was exactly that — `matrix.pow` printed
+its last ULP is the host libm's. #1197 was exactly that — `matrix.pow` (since removed) printed
 `…82` on native and `…84` on wasm, live on released 0.56.0, and a HAND grep for
 it missed two more sites (`mha_core`, `silu_mul`). Hence: one machine-run
 enumeration, feeding both the audit ledger and its gate

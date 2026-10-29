@@ -144,7 +144,7 @@ impl Emitter<'_> {
     }
 
     /// The map twin (#1219 stage 1): the rebind `m = map.set(m, k, v)`
-    /// — what `m[k] = v` and `map.insert(m, k, v)` are on the incumbent
+    /// — what `m[k] = v` is on the incumbent
     /// leg and what a persistent-style program writes by hand — routes
     /// through the in-place window when `m` owns its block. Any other
     /// receiver (`b = map.set(a, k, v)`) keeps the functional copy, so

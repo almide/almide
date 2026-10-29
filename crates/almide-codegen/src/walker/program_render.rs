@@ -83,18 +83,9 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
     ann
 }
 
-/// Register every variant constructor → enum name: the runtime-owned ctors
-/// first (`LittleEndian` → `AlmideEndian`, #1821 — present whether or not the
-/// bundled decl reached the program), then top-level type decls, then
-/// imported-module type decls, so a user decl overrides a runtime ctor name.
+/// Register every variant constructor → enum name: top-level type decls,
+/// then imported-module type decls.
 fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
-    {
-        let ann = std::rc::Rc::make_mut(&mut ctx.ann);
-        for (ctor, enum_name) in runtime_owned::variant_ctors() {
-            ann.ctor_to_enum.insert(ctor.to_string(), enum_name.to_string());
-            ann.enum_cases.entry(enum_name.to_string()).or_default().insert(ctor.to_string());
-        }
-    }
     for td in &program.type_decls {
         register_type_decl_ctors(ctx, td);
     }
@@ -112,7 +103,6 @@ fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
 /// `program.modules`).
 fn register_type_decl_ctors(ctx: &mut RenderContext, td: &IrTypeDecl) {
     if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-        // A bundled twin's ctors belong to the runtime's reserved enum.
         let enum_name = runtime_owned::decl_rust_name(td);
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
         for c in cases {
@@ -133,7 +123,7 @@ fn render_program_type_decls(ctx: &RenderContext, program: &IrProgram, parts: &m
     // Track emitted names to deduplicate across modules
     let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
-        // A bundled twin (`Endian` / `FileStat` / `ProcessStatus`) is
+        // A bundled twin (`FileStat` / `ProcessStatus`) is
         // RUNTIME-OWNED (#1098, #1821): the native runtime defines the type
         // under its reserved spelling, repr impl included, so emitting the
         // bundled decl — it reaches the program whenever the import is
@@ -250,12 +240,19 @@ fn render_tls_struct(fields: &[String]) -> String {
 
 /// The `static` handle of a `var`'s per-thread cell: `NAME.with(|c| …)` reaches
 /// field `NAME` of the program's TLS struct, filling it on first access.
+/// The handle hands out the view `OnceCell::get` gives, never the one the
+/// initialising `get_or_init` returns. That first reference is derived from
+/// std's internal `&mut` to the slot, so once a nested access (`g.n = g.n + 1`
+/// reads the global inside the closure that writes it) touches the cell
+/// through `get`, the first reference is invalid under both Stacked and Tree
+/// Borrows: Miri reported UB in `spec/wasm_cross/mutable_global_field_mut_arg`
+/// (#4009). Every reference from `get` shares one parent, so they coexist.
 fn render_tls_cell_handle(name: &str, cell_ty: &str, init: &str) -> String {
     format!(
         "#[allow(non_camel_case_types)]\nstruct __AlmideTls_{name};\n\
          impl __AlmideTls_{name} {{\n    \
          fn with<R>(&self, f: impl FnOnce(&{cell_ty}) -> R) -> R {{\n        \
-         __ALMIDE_TLS.with(|g| f(g.{name}.get_or_init(|| {init})))\n    }}\n}}\n\
+         __ALMIDE_TLS.with(|g| {{ let _ = g.{name}.get_or_init(|| {init}); match g.{name}.get() {{ Some(c) => f(c), None => unreachable!() }} }})\n    }}\n}}\n\
          #[allow(non_upper_case_globals)]\nstatic {name}: __AlmideTls_{name} = __AlmideTls_{name};"
     )
 }

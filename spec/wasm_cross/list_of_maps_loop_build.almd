@@ -17,5 +17,5 @@ fn main() -> Unit = {
     list.push(lm, e)
     i = i + 1
   }
-  println(int.to_string(list.fold(lm, 0, (a, e) => a + map.get_or(e, "id", 0))))
+  println(int.to_string(list.fold(lm, 0, (a, e) => a + map.get(e, "id") ?? 0)))
 }

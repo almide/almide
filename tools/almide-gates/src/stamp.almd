@@ -88,7 +88,7 @@ effect fn toolchain(root: String) -> Stamp = {
       lines: head_lines + [
         "  rustc:    " + or_na(run("rustc", ["--version"])!),
         "  wasmtime: " + or_na(run("wasmtime", ["--version"])!),
-        "  coqc:     " + or_na(list.get_or(string.split(coq, "\n"), 0, "")),
+        "  coqc:     " + or_na(list.get(string.split(coq, "\n"), 0) ?? ""),
         "  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)",
         "─────────────────────"
       ],

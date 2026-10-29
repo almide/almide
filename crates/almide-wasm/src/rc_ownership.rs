@@ -179,8 +179,22 @@ impl Emitter<'_> {
         }
         self.work.drop_bodies.borrow_mut().push((h.clone(), None));
         let (slots, tagged) = self.shape_slots(ty);
-        let body = match h {
-            crate::work::Helper::IncShape { .. } => crate::runtime_alloc::emit_inc_shape(&slots, tagged),
+        let body = match (h.clone(), ty) {
+            (crate::work::Helper::IncShape { .. }, _) => crate::runtime_alloc::emit_inc_shape(&slots, tagged),
+            // #4252: a type on a cycle drops a deep value without one frame
+            // per level — past the limit its releases are queued by table slot.
+            (_, SliceTy::Named(ti)) if self.types.named_on_cycle(ti) => {
+                let slot_of = |dec: u32| if dec == F_DEC_FLAT { 0 } else { self.work.slot(TableEntry::Direct(dec)) };
+                let deep = |s: &[(u32, u32)]| s.iter().map(|&(off, dec)| (off, dec, slot_of(dec))).collect::<Vec<_>>();
+                let slots = deep(&slots);
+                let tagged = tagged.map(|(off, cases)| (off, cases.into_iter().map(|(tag, cs)| (tag, deep(&cs))).collect()));
+                let globals = (
+                    crate::deep_walk::global(self.work, crate::deep_walk::DROP_Q),
+                    crate::deep_walk::global(self.work, crate::deep_walk::DROP_DEPTH),
+                );
+                let drop_ty = self.work.itype(vec![ValType::I32], None);
+                crate::deep_walk::emit_drop_shape_deep(&slots, tagged, globals, drop_ty)
+            }
             _ => crate::runtime_alloc::emit_drop_shape(&slots, tagged),
         };
         let mut bodies = self.work.drop_bodies.borrow_mut();
@@ -660,7 +674,7 @@ impl Emitter<'_> {
             // result is `Owned` (two `View` arms exist). Predicting owned is
             // safe either way: the join then asks each arm what it actually
             // was and gives a borrowed one its +1. Predicting borrowed left
-            // `if c then name else string.join(xs, ".")` (path.stem) with a
+            // `if c then name else list.join(xs, ".")` (path.stem) with a
             // borrowed join over an owned arm — its block leaked (#2977).
             IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. }
             | IrExprKind::Try { .. }

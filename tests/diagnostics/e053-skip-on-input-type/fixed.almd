@@ -1,0 +1,10 @@
+// The server-owned field lives on the type the program builds, not on the input.
+type UserInput: Decode = { name: String }
+
+type User = { name: String, is_admin: Bool }
+
+effect fn main() -> Unit = {
+  let i = UserInput { name: "m" }
+  let u = User { name: i.name, is_admin: false }
+  println(u.name)
+}

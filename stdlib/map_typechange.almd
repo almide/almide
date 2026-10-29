@@ -1,10 +1,10 @@
 // map_typechange — SELF-HOSTED type-CHANGING `map.map` flavors + the missing
-// `map.entries` flavors (the C-039 class: the closure's return type differs from
+// `map.to_list` flavors (the C-039 class: the closure's return type differs from
 // the subject's value type, so the RESULT map is a DIFFERENT physical flavor).
 // Where the result flavor has a registered generic `map.set`, the twin COMPOSES
 // through it (the map_if from_list discipline — set handles dedup/copy/ownership);
 // the tuple-valued result (no set twin) builds the skv-split block raw.
-// ── map.entries over the CORE (scalar/scalar, interleaved 16-byte pairs) flavor ──
+// ── map.to_list over the CORE (scalar/scalar, interleaved 16-byte pairs) flavor ──
 // List[(Int, Int)] in insertion order; each pair a fresh flat 2-slot block.
 fn __mtc_entries_core_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -24,7 +24,7 @@ fn map_entries_core(m: Map[Int, Int]) -> List[(Int, Int)] = {
   out
 }
 
-// ── map.entries over the hval-TUPLE flavor (Map[String, (scalar, scalar)]) ──
+// ── map.to_list over the hval-TUPLE flavor (Map[String, (scalar, scalar)]) ──
 // skv-split layout (keys 0..n-1, values n..2n-1). Each pair CO-OWNS its key and
 // its tuple value (rc_inc — DropListStrStr at the call site releases both; a
 // scalar tuple is a flat block, so its rc_dec is a full free).

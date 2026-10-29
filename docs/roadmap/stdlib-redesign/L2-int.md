@@ -86,13 +86,13 @@
 - ゲート案: #3854 の案どおり、`stdlib_synonym_gate_test.rs` の隣に「wrap 族の 4 セルがそろい、シグネチャが同じで、`self_host_registry.rs` に行がある」ことを検査するテストを置きます。`bits = 0`・`-1`・`64`・`65` の端を `spec/wasm_cross` の fixture で両 target 一致にします（新しい契約 C 番号を als に先に置く）。
 - issue: #3854（1 節）、#3851 E
 
-### R-int-03 床方向の割り算と剰余 `int.floor_div` / `int.mod` を足す — ○ 採用
+### R-int-03 床方向の割り算と剰余 `int.floor_div` / `int.modulo` を足す — ○ 採用
 
-- 内容: `int.floor_div(a: Int, b: Int) -> Int`（−∞ 方向へ丸める商）、`int.mod(a: Int, b: Int) -> Int`（結果の符号は `b` と同じ。`a == floor_div(a, b) * b + mod(a, b)`）。`b == 0` は `/` と同じく abort（契約違反、R-L0-06 の 3）。`floor_div(min_value, -1)` は `Int` の演算と同じく折り返します。
-- 根拠の L0 規則: R-L0-02（主語が `Int` なので `int`）、L1 の追加基準（6/9 が持つ）。綴りは R-L0-00 の範囲で選びます: 剰余は `mod`（Elixir、Kotlin、Python の演算子名）、商は `floor_div`（Elixir、OCaml `fdiv` の意味、Kotlin `floorDiv`）。
+- 内容: `int.floor_div(a: Int, b: Int) -> Int`（−∞ 方向へ丸める商）、`int.modulo(a: Int, b: Int) -> Int`（結果の符号は `b` と同じ。`a == floor_div(a, b) * b + modulo(a, b)`）。`b == 0` は `/` と同じく abort（契約違反、R-L0-06 の 3）。`floor_div(min_value, -1)` は `/` と同じく abort します（"integer overflow"）。
+- 根拠の L0 規則: R-L0-02（主語が `Int` なので `int`）、L1 の追加基準（6/9 が持つ）。綴りは R-L0-00 の範囲で選びます: 剰余は `modulo`（Gleam。Elixir・Kotlin の `mod` は、Almide では可視性のキーワード `mod` と同じ綴りで関数名にできないため）、商は `floor_div`（Elixir、OCaml `fdiv` の意味、Kotlin `floorDiv`）。
 - (a) 6/9 が持っています（Python、Gleam、Elixir、OCaml、Kotlin、Rust の euclid 版）。Go、JS、Swift だけがありません。
 - (b) 純粋な計算です。`/` と `%` から Almide で書けます。
-- (c) いまの `%` は 0 方向の剰余なので、`(i - 1) % n` で配列を回すと負の添字になります。他言語で `%` が床方向の Python から来た LLM が、ここで静かに外れます。名前で引ける関数があれば、規則（「床方向は `int.mod`」）を CHEATSHEET に 1 行で書けます。
+- (c) いまの `%` は 0 方向の剰余なので、`(i - 1) % n` で配列を回すと負の添字になります。他言語で `%` が床方向の Python から来た LLM が、ここで静かに外れます。名前で引ける関数があれば、規則（「床方向は `int.modulo`」）を CHEATSHEET に 1 行で書けます。
 - (d) 追加。使用数 0。
 - ゲート案: `spec/stdlib/int_floor_div_test.almd` で符号の 4 象限と `b = 0` の abort を固定し、wasm_cross fixture を 1 本置きます。
 - issue: #3918
@@ -111,7 +111,7 @@
 - ゲート案: `to_string_radix` → `parse_radix` の往復を radix 2〜36、`min_value`・`max_value`・`0`・`-1` で検査する spec と、`from_hex` の既存 spec を `parse_radix(s, 16)` で通す差分テスト（撤去までの窓のあいだ）。
 - issue: #3920
 
-### R-int-05 `band`/`bor`/`bxor` などを多数派の綴りに改名する — × 不採用
+### R-int-05 `band`/`bor`/`bxor` などを多数派の綴りに改名する — × 不採用（改名しない。R-int-10 で確かめた）
 
 - 内容: 改名しません。
 - 根拠の L0 規則: R-L0-00。関数名でビット演算を書く 4 言語の綴りは割れています（Gleam `bitwise_and`、Elixir `band`、OCaml `logand`、Kotlin `and`、すべて (F)）。残りの 5 言語は演算子だけです。多数派がないので、いまの綴り（Elixir と同じ `b` 接頭辞）を据え置きます。
@@ -138,6 +138,55 @@
 - (d) 改名。`@deprecated(since=15, use="int.count_ones")`、`removal_epoch = 16`、`almide fix` で書き換えます。
 - issue: #3985
 
+### R-int-08 `int.to_hex` を `to_string_radix(x, 16)` にまとめる — × 不採用
+
+- 理由: 2 つは負の数で結果が違い、同義語ではありません。`int.to_hex(-1)` は 64 bit の並びの 16 進（`"ffffffffffffffff"`）、`int.to_string_radix(-1, 16)` は符号つき（`"-1"`）です。ハッシュ値やビットの並びを表示する用途と、数を別の基数で書く用途に分かれます。
+- issue: なし
+
+### R-int-09 `int.sign` と `float.signum` の綴りを 1 つにする — × 不採用
+
+- 理由: 0 の扱いが違うので、同じ名前にすると R-float-05 で避けた誤りが戻ります。`int.sign(0)`・`bigint.sign(0)` は 0、`float.signum(0.0)` は 1.0（Rust の `signum` と同じ）です。`sign` という名前は「0 は 0」の関数だけに使います（R-float-05 の完全性の規則）。
+- issue: なし
+
+### R-int-10 ビット演算の綴りを計測で決める — ○ 採用（関数のまま。十二巡目に演算子の案を取り消し）
+
+- いま: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical`（Elixir と同じ `b` 接頭辞）。R-sized-10・R-bigint-07 で `Integer` の要件になり、整数 10 型の 61 関数に広がりました。
+- R-int-05（×）の理由「関数名で書く 4 言語の綴りは割れていて、多数派がない」は今も成り立ちます。改名を、型エラーの理由だけで決めることもしません（R-L0-36）。
+- 測る候補:
+  1. いまの `int.band(a, b)`（Elixir）
+  2. 語の形 `int.bit_and(a, b)`・`bit_or`・`bit_xor`・`bit_not`・`shift_left`・`shift_right`（Gleam の `bitwise_and`、Roc の `bitwiseAnd` に近い）
+  3. 演算子 `a & b`・`a | b`・`a ^ b`・`~a`（R-L0-39 で `^` を空けたあと。Rust・Go・Python・JS・Swift の 5 言語と同じ）。シフトは `>>` が関数の合成なので、関数のまま（`shift_left`・`shift_right`）。
+- 決定（十二巡目）: 1 のいまの関数のままにし、`Integer` の要件にします。九巡目に演算子（3）に決めましたが、`^` は累乗、`>>` は関数の合成として使われてきた記号で、別の意味に使い直すことになるため取り消しました（R-L0-43）。`&`・`|` だけを演算子にすると XOR とシフトだけが関数になり、半端な形になります。関数の綴りは 4 言語で割れていて多数派がないので（R-int-05）、いまの綴りを据え置きます。
+- issue: almide-dojo#65
+
+### R-int-11 `bit_width` を `bit_length` に改名する — ○ 採用
+
+- いま: `int.bit_width(n)` は、値を表すのに要るビットの数を返します（Go `bits.Len64`、Python `bit_length`）。Swift の `bitWidth` は型の幅（`Int` なら常に 64）で、同じ名前で違う値です。Swift から類推して `int.bit_width(n)` を型の幅のつもりで書くと、黙って違う値になります。
+- 案: `bit_length` に改名し、`Integer` の要件にします（サイズつきの 8 型と `bigint` にも置く。`bigint` は Python の `int.bit_length`、Go の `big.Int.BitLen` と同じ）。
+- (d) 改名と追加です。epoch 15 で `@deprecated`、epoch 16 で撤去します。
+- issue: #4004
+
+### R-int-12 N bit の演算を、型の幅の演算に置き換える — ○ 採用
+
+- いま: `int.wrap_add(a, b, bits)`・`wrap_sub`・`wrap_mul`・`rotate_left(a, n, bits)`・`rotate_right` は、`Int` を N bit の数として扱います。固定幅の型では幅が型で決まるので、`FixedWidthInteger` の要件にすると形が食い違っていました。
+- 案: 5 つを `FixedWidthInteger` の要件にし、`bits` を外して型の幅で動かします（`int` は 64 bit、`int32.wrap_add(a, b)` は 32 bit。Swift の `&+`・`&-`・`&*`、Rust の `wrapping_add`・`rotate_left` と同じ）。N bit で切りたいときは `int.wrap(n, bits)` と組みます（`int.wrap(int.wrap_add(a, b), 12)`）。`int.wrap` は `int` だけの関数に残します。
+- (d) 意味変更です。`almide fix` が `int.wrap_add(a, b, bits)` を `int.wrap(int.wrap_add(a, b), bits)` に書き換えます。8・16・32・64 以外の幅の `rotate_*` は書き換えられないので、ヒントで知らせます。
+- issue: #4004
+
+### R-int-13 床方向の剰余の名前は `modulo`、`floor_div(min_value, -1)` は abort — ○ 採用（R-int-03 を直す）
+
+- 見つかったこと（wave 1B、#4045〜#4048 の実装中）:
+  - `mod` は可視性のキーワードです（`mod fn f() = …`、`TokenType::Mod`）。`fn mod(` は構文として読めず、`int.mod` も `int8.mod` も書けません。
+  - R-int-03 は「`floor_div(min_value, -1)` は `Int` の演算と同じく折り返す」と書いていましたが、`Int` の `/` は native でも wasm でもそこで "integer overflow" の abort です（2026-10-23 に実測）。
+- 案:
+  - 床方向の剰余は `modulo` にします（`int`、整数 8 型、`bigint`）。`mod` をキーワードから外して関数名に使えるようにする案は、宣言の先頭の `mod fn` と式の中の `x.mod(…)` を文脈で分ける必要があり、構文の変更になるので採りません。
+  - `floor_div(min_value, -1)` は、`/` と同じく abort にします（整数 9 型すべて）。整数の溢れを黙って折り返さないことは、[安全の表](../active/security-by-construction.md)の「整数の溢れ」の行の前提です。折り返しが欲しいときは `wrap_*` を使います。
+- 根拠の L0 規則: R-L0-00（綴りは比べた言語の範囲から）、R-L0-14（同じ名前で別の意味にしない: `/` と `floor_div` の端をそろえる）。
+- (a) 剰余の関数名: Gleam `int.modulo`、Elixir `Integer.mod`、Kotlin `mod`、Rust `rem_euclid`。`modulo` は Gleam と同じ綴りです。`MIN / -1`: Rust の `div_euclid` は debug で panic、Python は多倍長で溢れない、Kotlin `floorDiv` は折り返す。
+- (c) LLM は `int.mod` を書きがちです。`int.mod` の呼び出しには「`int.modulo` を使う」の診断（E002 の hint）を出します。
+- (d) 名前の変更（まだ出荷していない関数なので、利用者のコードへの影響はありません）と、端の意味の決め直し 1 つ。
+- issue: #4045
+
 ## L3: 関数表
 
 `int` の現行 72 関数と、追加する 13 関数です（`compare` と、[L2-bigint](L2-bigint.md) の `to_bigint` を含む）。
@@ -147,7 +196,7 @@
 | `to_hex` | `int.to_hex(n: Int) -> String` | Rust `format!("{:x}")` / Go `strconv.FormatInt(n,16)` / Python `hex` / JS `toString(16)` / Kotlin `toHexString` (F) / Gleam `to_base16` (F) | 据え置き | R-int-04（64 bit の並びの 16 進。符号付きの基数変換は `to_string_radix`） |
 | `parse` | `int.parse(s: String) -> Result[Int, String]` | Rust `parse` / Go `strconv.Atoi` / Gleam `parse` (F) / Elixir `parse` (F) / OCaml `of_string_opt` / Kotlin `toIntOrNull` / Swift `Int(s)` | 据え置き | — |
 | `from_hex` | `int.from_hex(s: String) -> Result[Int, String]` | Rust `from_str_radix(s,16)` / Go `ParseInt(s,16,64)` / Python `int(s,16)` / Gleam `base_parse(s,16)` (F) / Elixir `parse(s,16)` (F) | 撤去 | R-int-04（`int.parse_radix(s, 16)` に一本化） |
-| `to_float` | `int.to_float(n: Int) -> Float` | Rust `as f64` / Gleam `to_float` (F) / OCaml `to_float` (F) / Kotlin `toDouble` (F) | 据え置き | — |
+| `to_float` | `int.to_float(n: Int) -> Float` | Rust `as f64` / Gleam `to_float` (F) / OCaml `to_float` (F) / Kotlin `toDouble` (F) | 撤去（→ `float.from`） | R-L0-40 |
 | `bits_to_float` | `int.bits_to_float(bits: Int) -> Float` | Rust `f64::from_bits` (F) / Go `math.Float64frombits` / Kotlin `Double.fromBits` / Swift `Double(bitPattern:)` | 撤去 | R-float-02（`float.from_bits`） |
 | `bits_to_f32` | `int.bits_to_f32(bits: Int) -> Float` | Rust `f32::from_bits` / Go `math.Float32frombits` / Kotlin `Float.fromBits` | 撤去 | R-float-02（`float32.from_bits` → `float32.to_float`） |
 | `abs` | `int.abs(n: Int) -> Int` | Rust `abs` / Go — / Python `abs` / JS `Math.abs` / Gleam `absolute_value` (F) / Elixir `abs` / OCaml `abs` (F) / Kotlin `absoluteValue` (F) / Swift `abs` | 据え置き | R-math-01（`math.abs` の残る側） |
@@ -167,27 +216,27 @@
 | `pop_count` | `int.pop_count(n: Int) -> Int` | Rust `count_ones` / Go `bits.OnesCount64` / Python `bit_count` / OCaml `popcount` (F) / Elixir `popcount` (F) / Kotlin `countOneBits` (F) / Swift `nonzeroBitCount` | 改名 → `count_ones` | R-int-07 |
 | `bit_reverse` | `int.bit_reverse(n: Int) -> Int` | Rust `reverse_bits` / Go `bits.Reverse64` / 他 — | 据え置き | — |
 | `byte_swap` | `int.byte_swap(n: Int) -> Int` | Rust `swap_bytes` / Go `bits.ReverseBytes64` / Swift `byteSwapped` | 据え置き | — |
-| `bit_width` | `int.bit_width(n: Int) -> Int` | Go `bits.Len64` / Python `bit_length` / OCaml `unsigned_bitsize` (F) / Swift `bitWidth`（意味違い） | 据え置き | — |
+| `bit_width` | `int.bit_width(n: Int) -> Int` | Go `bits.Len64` / Python `bit_length` / OCaml `unsigned_bitsize` (F) / Swift `bitWidth`（意味違い） | 改名 → `bit_length` | R-int-11 |
 | `log2_floor` | `int.log2_floor(n: Int) -> Int` | Rust `ilog2` / 他 — | 据え置き | — |
 | `log2_ceil` | `int.log2_ceil(n: Int) -> Int` | 他 —（Rust は `next_power_of_two` から） | 据え置き | — |
 | `next_power_of_two` | `int.next_power_of_two(n: Int) -> Int` | Rust `next_power_of_two` / 他 — | 据え置き | — |
 | `prev_power_of_two` | `int.prev_power_of_two(n: Int) -> Int` | Kotlin `takeHighestOneBit` (F) / 他 — | 据え置き | — |
-| `wrap_add` | `int.wrap_add(a: Int, b: Int, bits: Int) -> Int` | Rust `wrapping_add` / Swift `&+` / JS `BigInt.asUintN` / 他 — | 意味変更 | R-int-02（`bits <= 0` を abort にそろえる。値は変えない） |
-| `wrap_mul` | `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int` | Rust `wrapping_mul` / Swift `&*` / 他 — | 意味変更 | R-int-02（同上） |
-| `rotate_right` | `int.rotate_right(a: Int, n: Int, bits: Int) -> Int` | Rust `rotate_right` / Go `bits.RotateLeft64(x,-k)` / Kotlin `rotateRight` (F) | 据え置き | — |
-| `rotate_left` | `int.rotate_left(a: Int, n: Int, bits: Int) -> Int` | Rust `rotate_left` / Go `bits.RotateLeft64` / Kotlin `rotateLeft` (F) | 据え置き | — |
+| `wrap_add` | `int.wrap_add(a: Int, b: Int) -> Int` | Rust `wrapping_add` / Swift `&+` / JS `BigInt.asUintN` / 他 — | 意味変更（`bits` を外し 64 bit で折り返す。N bit は `int.wrap` と組む） | R-int-12 |
+| `wrap_mul` | `int.wrap_mul(a: Int, b: Int) -> Int` | Rust `wrapping_mul` / Swift `&*` / 他 — | 意味変更（`bits` を外し 64 bit で折り返す。N bit は `int.wrap` と組む） | R-int-12 |
+| `rotate_right` | `int.rotate_right(a: Int, n: Int) -> Int` | Rust `rotate_right` / Go `bits.RotateLeft64(x,-k)` / Kotlin `rotateRight` (F) | 意味変更（`bits` を外し 64 bit で回す） | R-int-12 |
+| `rotate_left` | `int.rotate_left(a: Int, n: Int) -> Int` | Rust `rotate_left` / Go `bits.RotateLeft64` / Kotlin `rotateLeft` (F) | 意味変更（`bits` を外し 64 bit で回す） | R-int-12 |
 | `to_u32` | `int.to_u32(a: Int) -> Int` | JS `x >>> 0` / Rust `as u32 as i64` / 他 — | 撤去 | R-int-02（`int.wrap(x, 32)`。#3851 E） |
 | `to_u8` | `int.to_u8(a: Int) -> Int` | Rust `as u8` / 他 — | 撤去 | R-int-02（`int.wrap(x, 8)`。#3851 E） |
-| `to_int8` | `int.to_int8(n: Int) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_int16` | `int.to_int16(n: Int) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_int32` | `int.to_int32(n: Int) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint8` | `int.to_uint8(n: Int) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint16` | `int.to_uint16(n: Int) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint32` | `int.to_uint32(n: Int) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint64` | `int.to_uint64(n: Int) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_float32` | `int.to_float32(n: Int) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
-| `to_float64` | `int.to_float64(n: Int) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
-| `to_int64` | `int.to_int64(n: Int) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `int.to_int8(n: Int) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `int8.from`） | R-L0-40 |
+| `to_int16` | `int.to_int16(n: Int) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `int16.from`） | R-L0-40 |
+| `to_int32` | `int.to_int32(n: Int) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `int32.from`） | R-L0-40 |
+| `to_uint8` | `int.to_uint8(n: Int) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `uint8.from`） | R-L0-40 |
+| `to_uint16` | `int.to_uint16(n: Int) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `uint16.from`） | R-L0-40 |
+| `to_uint32` | `int.to_uint32(n: Int) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `uint32.from`） | R-L0-40 |
+| `to_uint64` | `int.to_uint64(n: Int) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去（→ `uint64.from`） | R-L0-40 |
+| `to_float32` | `int.to_float32(n: Int) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 撤去（→ `float32.from`） | R-L0-40 |
+| `to_float64` | `int.to_float64(n: Int) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 撤去（→ `float64.from`） | R-L0-40 |
+| `to_int64` | `int.to_int64(n: Int) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 撤去（→ `int64.from`） | R-L0-40 |
 | `from_int8` | `int.from_int8(n: Int8) -> Int` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 撤去 | R-sized-01（`int8.to_int` に移す。R-L0-07） |
 | `from_int16` | `int.from_int16(n: Int16) -> Int` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 撤去 | R-sized-01（`int16.to_int` に移す。R-L0-07） |
 | `from_int32` | `int.from_int32(n: Int32) -> Int` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 撤去 | R-sized-01（`int32.to_int` に移す。R-L0-07） |
@@ -196,35 +245,36 @@
 | `from_uint16` | `int.from_uint16(n: UInt16) -> Int` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 撤去 | R-sized-01（`uint16.to_int` に移す。R-L0-07） |
 | `from_uint32` | `int.from_uint32(n: UInt32) -> Int` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 撤去 | R-sized-01（`uint32.to_int` に移す。R-L0-07） |
 | `from_uint64` | `int.from_uint64(n: UInt64) -> Int` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 撤去 | R-sized-01（`uint64.to_int` に移す。R-L0-07） |
-| `to_int8_checked` | `int.to_int8_checked(n: Int) -> Option[Int8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int16_checked` | `int.to_int16_checked(n: Int) -> Option[Int16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int32_checked` | `int.to_int32_checked(n: Int) -> Option[Int32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8_checked` | `int.to_uint8_checked(n: Int) -> Option[UInt8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16_checked` | `int.to_uint16_checked(n: Int) -> Option[UInt16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32_checked` | `int.to_uint32_checked(n: Int) -> Option[UInt32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64_checked` | `int.to_uint64_checked(n: Int) -> Option[UInt64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_float32_checked` | `int.to_float32_checked(n: Int) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int8_saturating` | `int.to_int8_saturating(n: Int) -> Int8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int16_saturating` | `int.to_int16_saturating(n: Int) -> Int16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int32_saturating` | `int.to_int32_saturating(n: Int) -> Int32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8_saturating` | `int.to_uint8_saturating(n: Int) -> UInt8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16_saturating` | `int.to_uint16_saturating(n: Int) -> UInt16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32_saturating` | `int.to_uint32_saturating(n: Int) -> UInt32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64_saturating` | `int.to_uint64_saturating(n: Int) -> UInt64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_int8_checked` | `int.to_int8_checked(n: Int) -> Option[Int8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int8.from_checked`） | R-L0-40 |
+| `to_int16_checked` | `int.to_int16_checked(n: Int) -> Option[Int16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int16.from_checked`） | R-L0-40 |
+| `to_int32_checked` | `int.to_int32_checked(n: Int) -> Option[Int32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int32.from_checked`） | R-L0-40 |
+| `to_uint8_checked` | `int.to_uint8_checked(n: Int) -> Option[UInt8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint8.from_checked`） | R-L0-40 |
+| `to_uint16_checked` | `int.to_uint16_checked(n: Int) -> Option[UInt16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint16.from_checked`） | R-L0-40 |
+| `to_uint32_checked` | `int.to_uint32_checked(n: Int) -> Option[UInt32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint32.from_checked`） | R-L0-40 |
+| `to_uint64_checked` | `int.to_uint64_checked(n: Int) -> Option[UInt64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint64.from_checked`） | R-L0-40 |
+| `to_float32_checked` | `int.to_float32_checked(n: Int) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `float32.from_checked`） | R-L0-40 |
+| `to_int8_saturating` | `int.to_int8_saturating(n: Int) -> Int8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int8.from_saturating`） | R-L0-40 |
+| `to_int16_saturating` | `int.to_int16_saturating(n: Int) -> Int16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int16.from_saturating`） | R-L0-40 |
+| `to_int32_saturating` | `int.to_int32_saturating(n: Int) -> Int32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int32.from_saturating`） | R-L0-40 |
+| `to_uint8_saturating` | `int.to_uint8_saturating(n: Int) -> UInt8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint8.from_saturating`） | R-L0-40 |
+| `to_uint16_saturating` | `int.to_uint16_saturating(n: Int) -> UInt16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint16.from_saturating`） | R-L0-40 |
+| `to_uint32_saturating` | `int.to_uint32_saturating(n: Int) -> UInt32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint32.from_saturating`） | R-L0-40 |
+| `to_uint64_saturating` | `int.to_uint64_saturating(n: Int) -> UInt64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint64.from_saturating`） | R-L0-40 |
 | `from_uint64_checked` | `int.from_uint64_checked(n: UInt64) -> Option[Int]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去 | R-sized-01（`uint64.to_int_checked`） |
 | `from_uint64_saturating` | `int.from_uint64_saturating(n: UInt64) -> Int` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去 | R-sized-01（`uint64.to_int_saturating`） |
 | `min_value` | `int.min_value() -> Int` | Rust `i64::MIN` / Go `math.MinInt64` / OCaml `min_int` (F) / Kotlin `MIN_VALUE` (F) / Swift `.min` | 据え置き | — |
 | `max_value` | `int.max_value() -> Int` | Rust `i64::MAX` / Go `math.MaxInt64` / OCaml `max_int` (F) / Kotlin `MAX_VALUE` (F) / Swift `.max` | 据え置き | — |
-| `to_float_checked` | （追加）`int.to_float_checked(x: Int) -> Option[Float]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
-| `to_float64_checked` | （追加）`int.to_float64_checked(x: Int) -> Option[Float64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
 | `wrap` | （追加）`int.wrap(n: Int, bits: Int) -> Int` | Rust `as uN`系 / JS `BigInt.asUintN(bits, n)` / 他 — | 追加 | R-int-02 |
-| `wrap_sub` | （追加）`int.wrap_sub(a: Int, b: Int, bits: Int) -> Int` | Rust `wrapping_sub` / Swift `&-` / 他 — | 追加 | R-int-02 |
+| `wrap_sub` | （追加）`int.wrap_sub(a: Int, b: Int) -> Int` | Rust `wrapping_sub` / Swift `&-` / 他 — | 追加 | R-int-02、R-int-12 |
 | `pow` | （追加）`int.pow(base: Int, exp: Int) -> Int` | Rust `pow` / Gleam `power`（Float）(F) / Elixir `Integer.pow` (F) / Python `**` | 追加 | R-math-01 |
 | `sign` | （追加）`int.sign(n: Int) -> Int` | Rust `signum` / Kotlin `sign` (F) / JS `Math.sign` / Swift `signum()` | 追加 | R-math-01 |
-| `mod` | （追加）`int.mod(a: Int, b: Int) -> Int` | Python `%` / Gleam `modulo` (F) / Elixir `Integer.mod` (F) / Kotlin `mod` (F) / Rust `rem_euclid` | 追加 | R-int-03 |
+| `modulo` | （追加）`int.modulo(a: Int, b: Int) -> Int` | Python `%` / Gleam `modulo` (F) / Elixir `Integer.mod` (F) / Kotlin `mod` (F) / Rust `rem_euclid` | 追加 | R-int-03 |
 | `floor_div` | （追加）`int.floor_div(a: Int, b: Int) -> Int` | Python `//` / Gleam `floor_divide` (F) / Elixir `Integer.floor_div` (F) / Kotlin `floorDiv` (F) / OCaml `fdiv` (F) | 追加 | R-int-03 |
-| `bshr_logical` | （追加）`int.bshr_logical(a: Int, n: Int) -> Int` | OCaml `shift_right_logical` (F) / Kotlin `ushr` (F) / JS `>>>` / Rust・Go・Swift 符号なし型の `>>` | 追加 | R-int-06 |
 | `to_string_radix` | （追加）`int.to_string_radix(n: Int, radix: Int) -> String` | Go `FormatInt(n, base)` / JS `toString(radix)` / Gleam `to_base_string` (F) / Elixir `to_string(n, base)` (F) / Kotlin `toString(radix)` / Swift `String(n, radix:)` | 追加 | R-int-04 |
 | `parse_radix` | （追加）`int.parse_radix(s: String, radix: Int) -> Result[Int, String]` | Rust `from_str_radix` / Go `ParseInt(s, base, 64)` / Python `int(s, base)` / Gleam `base_parse` (F) / Elixir `parse(s, base)` (F) / Kotlin `toIntOrNull(radix)` / Swift `Int(s, radix:)` | 追加 | R-int-04 |
 | `compare` | （追加）`int.compare(a: Int, b: Int) -> Int` | Rust `cmp` / Go `cmp.Compare` / Gleam `compare`（Order）(F) / OCaml `compare` (F) / Kotlin `compareTo` (F) / Swift `<` | 追加 | R-sized-02 |
-| `to_bigint` | （追加）`int.to_bigint(n: Int) -> BigInt` | Go `big.NewInt` / JS `BigInt(n)` / Kotlin `BigInteger.valueOf` | 追加 | [R-bigint-01](L2-bigint.md) |
+| `from` | （追加）`int.from[S: Numeric](x: S) -> Int` | Rust `From`・`as` / Swift `init(_:)` / Python `int(x)` | 追加 | R-L0-40 |
+| `from_checked` | （追加）`int.from_checked[S: Numeric](x: S) -> Int?` | Rust `TryFrom` / Swift `init(exactly:)` | 追加 | R-L0-40 |
+| `from_saturating` | （追加）`int.from_saturating[S: Numeric](x: S) -> Int` | Swift `init(clamping:)` / Rust `as`（浮動小数点から） | 追加 | R-L0-40 |
+| `from_wrapping` | （追加）`int.from_wrapping[S: Integer](x: S) -> Int` | Swift `init(truncatingIfNeeded:)` / Rust `as` | 追加 | R-L0-40 |
+| `bshr_logical` | （追加）`int.bshr_logical(a: Int, n: Int) -> Int` | OCaml `shift_right_logical` (F) / Kotlin `ushr` (F) / JS `>>>` | 追加 | R-int-06 |

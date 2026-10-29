@@ -56,15 +56,15 @@ effect fn main() -> Unit = {
 
   var seed = 42
 
-  let alu_bytes = string.to_bytes(ALU)
+  let alu_bytes = bytes.to_list(bytes.from_string(ALU))
   let alu_len = list.len(alu_bytes)
   let newline = 10
 
   // Reusable buffer
-  var buf = bytes.new(64)
+  var buf = bytes.zeros(64)
 
   // ONE: repeat ALU
-  io.write(bytes.from_string(">ONE Homo sapiens alu\n"))
+  io.write(io.stdout()!, bytes.from_string(">ONE Homo sapiens alu\n"))!
   var pos = 0
   var remaining = n * 2
   while remaining > 0 {
@@ -77,12 +77,12 @@ effect fn main() -> Unit = {
       i = i + 1
     }
     bytes.push(buf, newline)
-    io.write(buf)
+    io.write(io.stdout()!, buf)!
     remaining = remaining - line_len
   }
 
   // TWO: IUB ambiguity codes
-  io.write(bytes.from_string(">TWO IUB ambiguity codes\n"))
+  io.write(io.stdout()!, bytes.from_string(">TWO IUB ambiguity codes\n"))!
   remaining = n * 3
   while remaining > 0 {
     let line_len = if remaining < 60 then remaining else 60
@@ -90,17 +90,17 @@ effect fn main() -> Unit = {
     var i = 0
     while i < line_len {
       seed = (seed * IA + IC) % IM
-      let r = float.from_int(seed) / im_float()
+      let r = float.from(seed) / im_float()
       bytes.push(buf, iub_select(r))
       i = i + 1
     }
     bytes.push(buf, newline)
-    io.write(buf)
+    io.write(io.stdout()!, buf)!
     remaining = remaining - line_len
   }
 
   // THREE: Homo sapiens frequency
-  io.write(bytes.from_string(">THREE Homo sapiens frequency\n"))
+  io.write(io.stdout()!, bytes.from_string(">THREE Homo sapiens frequency\n"))!
   remaining = n * 5
   while remaining > 0 {
     let line_len = if remaining < 60 then remaining else 60
@@ -108,12 +108,12 @@ effect fn main() -> Unit = {
     var i = 0
     while i < line_len {
       seed = (seed * IA + IC) % IM
-      let r = float.from_int(seed) / im_float()
+      let r = float.from(seed) / im_float()
       bytes.push(buf, hs_select(r))
       i = i + 1
     }
     bytes.push(buf, newline)
-    io.write(buf)
+    io.write(io.stdout()!, buf)!
     remaining = remaining - line_len
   }
 }

@@ -1,0 +1,17 @@
+// The generic fn that dispatches an `effect` method is an `effect fn`.
+import fs
+
+protocol Saver {
+  effect fn save(a: Self) -> Unit
+}
+
+type Src: Saver = { path: String }
+
+effect fn Src.save(a: Src) -> Unit = fs.write_text(a.path, "written")!
+
+effect fn use_it[T: Saver](x: T) -> Int = {
+  x.save()!
+  1
+}
+
+effect fn main() -> Unit = println("${use_it(Src { path: "out.txt" })!}")

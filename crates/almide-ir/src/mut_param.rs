@@ -525,7 +525,7 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
                         };
                         matches!(&inner.kind,
                             IrExprKind::Call { target, args, .. }
-                                if call_spelling(target).is_some_and(|name| mut_fns.contains_key(&name) || mut_fns.contains_key(&scope_key(scope, &name)))
+                                if mut_call_spelling(target).is_some_and(|name| mut_fns.contains_key(&name) || mut_fns.contains_key(&scope_key(scope, &name)))
                                     && args.iter().any(|a| matches!(&a.kind, IrExprKind::Var { id } if *id == p)))
                     }
                     _ => false,
@@ -610,6 +610,26 @@ pub(crate) fn call_spelling(target: &CallTarget) -> Option<String> {
         }
         CallTarget::Module { module, func, .. } => Some(format!("{module}.{func}")),
         CallTarget::Method { .. } | CallTarget::Computed { .. } => None,
+    }
+}
+
+/// The spelling the MOVE-MODE call-site rewrite keys a call by: what
+/// [`call_spelling`] gives, plus a stdlib module call whose callee is written
+/// in Almide (declared without `@intrinsic`, a mono instance by its generic).
+/// Such a callee's body takes the rewrite like a user module fn's (its `mut`
+/// param comes back as the returned buffer), so its call sites must take the
+/// write-back too — without it `set.clear(s)` on wasm cleared the callee's copy
+/// and left the caller's set as it was, while native's `&mut` cleared it. An
+/// intrinsic stdlib mutator stays out: the emitters lower it in place.
+pub(crate) fn mut_call_spelling(target: &CallTarget) -> Option<String> {
+    match target {
+        CallTarget::Module { module, func, .. }
+            if almide_lang::stdlib_info::is_any_stdlib(module.as_str())
+                && crate::mut_args::stdlib_fn_has_almide_body(module.as_str(), func.as_str()) =>
+        {
+            Some(format!("{module}.{func}"))
+        }
+        _ => call_spelling(target),
     }
 }
 
@@ -743,12 +763,29 @@ fn value_payload_ty(func: &IrFunction) -> Option<Ty> {
     }
 }
 
-/// `Some((T, E))` when `func` is an effect fn declared `-> Result[T, E]`.
+/// `Some((T, E))` when `func` is an effect fn declared `-> Result[T, E]`,
+/// or a fn whose declared `Result[T, String]` is its err channel
+/// ([`err_channel`]).
 fn single_layer_ok_ty(func: &IrFunction) -> Option<(Ty, Ty)> {
-    if !func.is_effect {
+    if !err_channel(func) {
         return None;
     }
     Some((func.ret_ty.result_ok_ty()?, func.ret_ty.result_err_ty()?))
+}
+
+/// Does `func` raise through the single-layer effect channel — the one the
+/// move-mode carrier pairs its buffer with (#2917)? An effect fn does. So
+/// does a PURE fn declared `-> T!` / `-> Result[T, String]` whose raises can
+/// all be paired: its `x!` propagates through that Result exactly as an
+/// effect fn's does (#4274). Treated as a plain value instead, its body was
+/// wrapped in the `(Result, Buf)` tuple, a `!` inside had no Result to
+/// return through, and the wasm leg aborted at the first err (`unreachable`)
+/// where native propagated it. Read off the ORIGINAL signature and body:
+/// call it before a rewrite replaces either.
+pub(crate) fn err_channel(func: &IrFunction) -> bool {
+    func.is_effect
+        || (func.ret_ty.result_err_ty().is_some_and(|e| matches!(e, Ty::String))
+            && crate::mut_param_err_carry::pairable(&func.body))
 }
 
 /// Phase 1: rewrite function bodies. Unit-returning fns return the
@@ -805,6 +842,7 @@ fn rewrite_one_signature(func: &mut IrFunction, scope: &str, vt: &mut VarTable, 
 /// otherwise — the single-param forms below with every buffer in the tuple.
 /// Its guard exits are paired with the same buffers.
 fn rewrite_multi_body(func: &mut IrFunction, vt: &mut VarTable, bufs: &[(VarId, Ty)], was_unit: bool) {
+    let channel = err_channel(func);
     let single_layer = single_layer_ok_ty(func).map(|(ok_ty, _)| ok_ty);
     let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
     let mut elems: Vec<Ty> = if was_unit { vec![] } else { vec![orig_ty.clone()] };
@@ -817,7 +855,7 @@ fn rewrite_multi_body(func: &mut IrFunction, vt: &mut VarTable, bufs: &[(VarId, 
         strip_ok_layer(&mut old_body, ok_ty);
     }
     let ty = tuple_ty.clone();
-    pair_guard_exits(&mut old_body, func.is_effect, &tuple_ty, &mut |e| {
+    pair_guard_exits(&mut old_body, channel, &tuple_ty, &mut |e| {
         let span = e.span;
         let mut elements = if was_unit { vec![] } else { vec![e.clone()] };
         elements.extend(reads());
@@ -859,10 +897,11 @@ fn rewrite_multi_body(func: &mut IrFunction, vt: &mut VarTable, bufs: &[(VarId, 
 /// Unit-returning callee: `{ <old body>; mut_param }` — wrap the existing body
 /// in a block whose tail reads the mutated param.
 fn rewrite_unit_body(func: &mut IrFunction, mut_var: VarId, mut_ty: Ty) {
+    let channel = err_channel(func);
     func.ret_ty = mut_ty.clone();
     let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
     let new_ret = func.ret_ty.clone();
-    pair_guard_exits(&mut old_body, func.is_effect, &new_ret, &mut |e| IrExpr {
+    pair_guard_exits(&mut old_body, channel, &new_ret, &mut |e| IrExpr {
         ty: mut_ty.clone(),
         span: e.span,
         def_id: None,
@@ -886,6 +925,7 @@ fn rewrite_unit_body(func: &mut IrFunction, mut_var: VarId, mut_ty: Ty) {
 /// — the body runs first (its mutations land in the param local), then the
 /// tuple pairs the original result with the final buffer.
 fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, mut_ty: Ty) {
+    let channel = err_channel(func);
     let single_layer = single_layer_ok_ty(func).map(|(ok_ty, _)| ok_ty);
     let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
     let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()]);
@@ -895,7 +935,7 @@ fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, 
     if let Some(ok_ty) = &single_layer {
         strip_ok_layer(&mut old_body, ok_ty);
     }
-    pair_guard_exits(&mut old_body, func.is_effect, &tuple_ty.clone(), &mut |e| IrExpr {
+    pair_guard_exits(&mut old_body, channel, &tuple_ty.clone(), &mut |e| IrExpr {
         ty: tuple_ty.clone(),
         span: e.span,
         def_id: None,
@@ -1169,7 +1209,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let IrExprKind::Call { target, args, .. } = &expr.kind else {
             return;
         };
-        let Some(name) = call_spelling(target) else { return };
+        let Some(name) = mut_call_spelling(target) else { return };
         let Some((idx, mut_ty, was_unit, callee_ret, extra)) = self.lookup_mut_fn(&name).cloned() else {
             return;
         };

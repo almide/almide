@@ -17,7 +17,14 @@ use crate::*;
 /// the counter switch is armed — every call bumps `__alloc_count` and adds
 /// `len` to `__alloc_bytes`, a free-list pop bumps `__alloc_reused`. `None`
 /// (the shipped module) emits none of it. `canonical`: see canonical_alloc.rs.
-pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -> Function {
+/// `oom_probe` (row 1 of the security table, C-434): only in a module that
+/// runs the contained serve loop (op 75), the wrapped-frontier die first
+/// asks `memory.grow` for every page there is and drops the answer. The
+/// request cannot succeed, so the embedded host's store limiter refuses it
+/// and marks the call out of memory, which it never contains: the wrap is
+/// as much a failed allocation as a refused growth. Every other module,
+/// and the tree proofs/StructuralRuntime.v transcribes, has `false`.
+pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, oom_probe: bool) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32 (class scratch
     // before the bump path claims it), 3=want i32, 4=head i32, 5..=9 the
     // large-list walk (pp, p, q, z, r — runtime_large.rs)
@@ -33,6 +40,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
             .i64_add()
             .global_set(c + crate::alloc_count::BYTES);
     }
+    crate::checked_alloc::emit_canary_reserve(&mut i, len); // #4009, only when armed
     // want = max(16, (PAYLOAD + len + 3) & !3); class = ceil_log2(want) - 4
     i.local_get(len)
         .i32_const(almide_layout::PAYLOAD as i32 + 3)
@@ -51,7 +59,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_const(FREELIST_BASE as i32)
         .i32_add()
         .local_set(next); // next = the class slot ADDRESS now
-    crate::canonical_alloc::emit_class_head(&mut i, canonical, next).local_tee(head).if_(BlockType::Empty);
+    crate::canonical_alloc::emit_class_head(&mut i, canonical, next, (head, 5, 6)).local_tee(head).if_(BlockType::Empty);
     // pop: slot = head.payload[0]; headers rc=1/len/cap=len; done.
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::REUSED);
@@ -74,6 +82,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_const(almide_layout::PAYLOAD as i32)
         .i32_sub()
         .i32_store(word(almide_layout::CAP.offset));
+    crate::checked_alloc::emit_canary_set(&mut i, head, len);
     i.local_get(head).return_();
     i.end();
     // Freelist miss: round the bump request UP to the class size —
@@ -114,6 +123,9 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
     // frontier is an allocation the machine cannot satisfy: die in the
     // defined form before the grow guard can misjudge it.
     i.local_get(next).local_get(base).i32_lt_u().if_(BlockType::Empty);
+    if oom_probe {
+        i.i32_const(-1).memory_grow(0).drop();
+    }
     i.i32_const(oom_msg as i32).call(F_EPRINTLN_BLOCK);
     i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
     i.end();
@@ -168,6 +180,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_sub()
         .i32_store(word(almide_layout::CAP.offset));
     i.local_get(next).global_set(G_HEAP);
+    crate::checked_alloc::emit_canary_set(&mut i, base, len);
     i.local_get(base);
     i.end();
     f
@@ -178,8 +191,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
 /// taken by ceil at alloc, so reuse never under-serves. Blocks too
 /// small for a next pointer are abandoned; blocks above the ceiling join
 /// the exact-size large list (runtime_large.rs, #3348).
-/// The caller must OWN the block outright — there is no rc check yet;
-/// the only callers are the sort machinery's private scratch buffers.
+/// The caller must OWN the block outright (`$dec_flat` at rc 0, scratch buffers).
 ///
 /// `counters` (#2407): when armed, every call bumps `__free_count` on
 /// entry — filed or abandoned alike, so the number is "blocks released".
@@ -192,6 +204,7 @@ pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::FREES);
     }
+    crate::checked_alloc::emit_canary_check(&mut i, block); // #4009, only when armed
     // total = (len + PAYLOAD + 3) & !3; too small to hold the next ptr → abandon
     i.local_get(block)
         .i32_load(word(almide_layout::CAP.offset))
@@ -222,6 +235,7 @@ pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     i.local_get(class).i32_load(word(0));
     i.i32_store(word(almide_layout::PAYLOAD));
     i.local_get(class).local_get(block).i32_store(word(0));
+    crate::checked_alloc::emit_poison(&mut i, block, total); // #4009, only when armed
     i.end();
     f
 }
@@ -264,16 +278,17 @@ pub(crate) fn emit_dec_flat() -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    // Diagnostic knob (`ALMIDE_RC_TRAP_DOUBLE_FREE=1`, emit time): a dec
-    // of a block already at rc 0 — a freed block — traps instead of
+    // The double-free trap (#4023, on in every build): a dec of a block
+    // already at rc 0 — a freed block — hits `unreachable` instead of
     // wrapping to 0xFFFF_FFFF and silently keeping a dangling block
-    // alive. Off by default: the proof-transcribed runtime tree (the
-    // hash below) is the shipped one.
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    // alive. Measured at +0.0% instructions / +0.3% cycles (median over
+    // the perf suite's wasm rows) and +0.8% bytes over spec/wasm_cross.
+    // proofs/StructuralRuntime.v transcribes this tree with the trap
+    // (`dec_body`'s `SIf (EEq ETmp (EC (-1))) STrap`), so the shipped
+    // tree is the proven one.
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).call(F_FREE);
@@ -283,7 +298,7 @@ pub(crate) fn emit_dec_flat() -> Function {
 }
 
 /// `$drop_list(block)` — `$dec_flat` for a List of heap HANDLES (#2010
-/// stage 2b): the same heap-floor guard and trap knob; at rc 0 every
+/// stage 2b): the same heap-floor guard and double-free trap; at rc 0 every
 /// element handle (a 4-byte slot) is released through `elem_dec` before
 /// the spine is freed.
 pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
@@ -296,11 +311,9 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
@@ -318,7 +331,7 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
 
 /// `$drop_<shape>(block)` — the typed drop of a block with handle slots
 /// at fixed payload offsets (#2010 stage 2c): `$dec_flat`'s guard and
-/// trap knob; at rc 0 every `(offset, dec_fn)` slot is released, then
+/// double-free trap; at rc 0 every `(offset, dec_fn)` slot is released, then
 /// the block freed. `tagged` names a tag word and per-tag slot tables
 /// (a Result: tag 0 = Ok payload, 1 = Err payload, both at SUM_FIELD).
 pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
@@ -331,11 +344,9 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     for &(off, dec) in slots {
@@ -357,7 +368,7 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     f
 }
 
-/// `$drop_http_call(block)` (#2633): `$dec_flat`'s guard and trap knob; at
+/// `$drop_http_call(block)` (#2633): `$dec_flat`'s guard and double-free trap; at
 /// rc 0 the call id (the block's one i64 slot) goes to the host as op 59 —
 /// cancel and forget, the native handle's `Drop` — before the block is
 /// freed. The op's i64 answer carries nothing and is dropped.
@@ -371,11 +382,9 @@ pub(crate) fn emit_drop_http_call() -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.i32_const(crate::fs_meta::OP_HTTP_CALL_DROP);
@@ -402,11 +411,9 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.global_get(G_MAPIDX).if_(BlockType::Empty);
@@ -420,7 +427,7 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
 
 /// `$drop_entries(block)` — the typed drop of a Map / Set with handle
 /// slots in its entries (#2010, Map stage b): `$dec_flat`'s guard and
-/// trap knob; at rc 0 every entry's `(offset, dec_fn)` slots are
+/// double-free trap; at rc 0 every entry's `(offset, dec_fn)` slots are
 /// released in insertion order, the index side-table entry cleared, and
 /// the entries array freed.
 pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], side_clear: u32) -> Function {
@@ -433,11 +440,9 @@ pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], sid
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
@@ -656,75 +661,10 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
     })
 }
 
-/// `$map_reserve(block, esz) -> block`: room for ONE more `esz`-byte
-/// map entry — `$list_push`'s growth discipline with the store left to
-/// the caller (the entry layout varies per key/value class, the growth
-/// does not). Class slack covers the entry → the same block; else the
-/// doubled block (min four entries) with the live entries copied and
-/// the outgrown block freed iff uniquely held. `len` stays at the OLD
-/// length: the caller writes the pair at `payload + len` and bumps it.
-/// (#1219 stage 1 — the in-place `map.set` window.)
-pub(crate) fn emit_map_reserve() -> Function {
-    // params: 0=block i32, 1=esz i32; locals: 2=la i32, 3=cap i32, 4=base i32
-    let (block, esz, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let mut f = Function::new([(3, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(block).i32_load(len_memarg()).local_set(la);
-    i.local_get(block).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
-    // fast path: the class slack holds one more entry → same block
-    i.local_get(cap).local_get(la).i32_sub().local_get(esz).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(block).return_();
-    i.end();
-    // grow: newcap = max(cap * 2, 4 * esz)
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
-    i.local_get(cap).local_get(esz).i32_const(2).i32_shl().i32_lt_u().if_(BlockType::Empty);
-    i.local_get(esz).i32_const(2).i32_shl().local_set(cap);
-    i.end();
-    i.local_get(cap).call(F_ALLOC).local_set(base);
-    i.local_get(base).i32_const(payload).i32_add();
-    i.local_get(block).i32_const(payload).i32_add();
-    i.local_get(la);
-    i.call(F_COPY);
-    // live len = the old len (the caller appends and bumps)
-    i.local_get(base).local_get(la).i32_store(word(almide_layout::LEN.offset));
-    // the outgrown block is garbage iff this map is uniquely held —
-    // the window only reserves at rc == 1, so the chain never leaks.
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
-    i.local_get(block).call(F_FREE);
-    i.end();
-    i.local_get(base);
-    i.end();
-    f
-}
-
-/// `$cow(block) -> block`: the copy-on-write judge at every in-place
-/// mutation entry (RC-5). A uniquely-held block passes through; a
-/// SHARED one (rc > 1 — binds now share instead of copying) is copied,
-/// the original releases one ref, and the mutation proceeds on the
-/// unique copy — value semantics moved from bind time to mutation
-/// time, unobservably.
-pub(crate) fn emit_cow() -> Function {
-    // params: 0=block; locals: 1=copy
-    let (block, copy) = (0u32, 1u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let mut f = Function::new([(1, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
-    i.local_get(block).return_();
-    i.end();
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_le_u().if_(BlockType::Empty);
-    i.local_get(block).return_();
-    i.end();
-    i.local_get(block).call(F_BLOCK_COPY).local_set(copy);
-    i.local_get(block);
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub();
-    i.i32_store(word(almide_layout::RC.offset));
-    i.local_get(copy);
-    i.end();
-    f
-}
+// `$map_reserve` and `$cow` live in runtime_alloc_cow.rs (the file budget).
+#[path = "runtime_alloc_cow.rs"]
+mod cow;
+pub(crate) use cow::{emit_cow, emit_map_reserve};
 
 #[cfg(test)]
 mod tests {
@@ -759,13 +699,15 @@ mod tests {
         // $alloc with a FIXED probe immediate for its one per-program
         // parameter (the OOM message address): the tree shape is pinned;
         // the immediate's value is not part of the transcription.
-        body_bytes(&super::emit_alloc(0, None, false)).hash(&mut h);
+        body_bytes(&super::emit_alloc(0, None, false, false)).hash(&mut h);
         let got = h.finish();
-        // Recorded at the StructuralRuntime.v landing. A mismatch means
-        // the emitted trees moved: update proofs/StructuralRuntime.v to
-        // the new trees (re-proving what changed), then this constant.
+        // Recorded at the StructuralRuntime.v landing; moved by #4023
+        // ($dec_flat's double-free sentinel, dec_body's
+        // `SIf (EEq ETmp (EC (-1))) STrap`). A mismatch means the emitted
+        // trees moved: update proofs/StructuralRuntime.v to the new trees
+        // (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0xe367ec7ac138a3d8,
+            got, 0xc6a7af758f38cfcd,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }
@@ -788,7 +730,7 @@ mod byte_dump {
             ("free", super::emit_free(None, false)),
             // 0 stands in for the per-program OOM message address; the
             // .v side carries that immediate as a parameter.
-            ("alloc", super::emit_alloc(0, None, false)),
+            ("alloc", super::emit_alloc(0, None, false, false)),
         ] {
             let mut cs = CodeSection::new();
             cs.function(&f);

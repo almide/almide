@@ -1,0 +1,6 @@
+// The real fix is `almide add almide-graphics/nn@v0.2.0 --trust github.com/almide-graphics`, `import nn.kernels` and
+// `kernels.rope_rotate(x, 2, 2, 10000.0)`; this case checks without dependencies.
+fn main() -> Unit = {
+  let x = matrix.ones(2, 4)
+  println(int.to_string(matrix.cols(x)))
+}

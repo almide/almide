@@ -7,6 +7,16 @@ test "value.as_int unit=value" {
   assert_eq("${value.as_int(value.int(7)) ?? (0 - 1)}", "7")
 }
 
+test "value.get_int unit=value" {
+  assert_eq("${value.get_int(value.object([("n", value.int(7))]), "n") ?? (0 - 1)}", "7")
+}
+
 test "value.int unit=value" {
   assert_eq("${value.as_int(value.int(9)) ?? 0}", "9")
+}
+
+test "value.index unit=element-index" {
+  let v = value.array([value.int(10), value.int(20), value.int(30)])
+  let p = value.index(value.root(), 1)
+  assert_eq("${value.as_int(value.get_path(v, p) ?? value.int(0 - 1)) ?? (0 - 1)}", "20")
 }

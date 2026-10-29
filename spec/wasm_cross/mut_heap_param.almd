@@ -81,7 +81,7 @@ fn main() -> Unit = {
   var s = "ab"
   let sl = addc(s, 30)
   println("sl=" + int.to_string(sl) + " s_len=" + int.to_string(string.len(s)))
-  var by = bytes.new(0)
+  var by = bytes.zeros(0)
   addb(by, 20)
   println("by=" + int.to_string(bytes.len(by)))
 }

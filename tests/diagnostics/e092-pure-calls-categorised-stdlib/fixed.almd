@@ -1,6 +1,6 @@
 import io
 
 @pure
-fn greeting() -> Bytes = bytes.from_string("hi")
+fn greeting() -> String = "hi"
 
-fn main() -> Unit = io.write(greeting())
+effect fn main() -> Unit = io.print(greeting())

@@ -58,19 +58,23 @@ fn run_leg(path: &Path, env: &[(&str, &str)], wasm: bool) -> (bool, String, Stri
     )
 }
 
-/// The issue's four rows, verbatim shapes, plus the typed read with a BOUND
-/// `Endian` value (the shape that walled on the structural leg even with an
-/// explicit `import bytes`).
+/// The issue's rows (bind + equality, match, param, `${e}`), first pinned on
+/// `bytes.Endian`; that type left the stdlib and no auto-imported stdlib
+/// VARIANT remains, so the rows spell the auto-imported generic record
+/// `deque.Deque`, with no import. `Deque` is opaque since #4256, so no
+/// auto-imported stdlib record can be built by its literal any more: a row
+/// reaches its value through the module's constructor and keeps the type
+/// spelled in the bind and param positions. The spelling
+/// with no module call at all is gate 2's matrix.
 const ROWS: &[(&str, &str, &str)] = &[
-    ("eq", "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e == LittleEndian}\")\n}\n", "false\n"),
-    ("match", "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  let s = match e { LittleEndian => \"le\", BigEndian => \"be\" }\n  println(s)\n}\n", "be\n"),
-    ("param", "fn name(e: Endian) -> String = match e { LittleEndian => \"le\", BigEndian => \"be\" }\neffect fn main() -> Unit = {\n  println(name(BigEndian))\n}\n", "be\n"),
-    ("repr", "effect fn main() -> Unit = {\n  let e = BigEndian\n  println(\"${e}\")\n}\n", "BigEndian\n"),
-    ("bound_read", "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  let b = bytes.from_list([1, 2, 3, 4])\n  println(\"${int.from_uint16(bytes.read_uint16(b, 0, e))}\")\n}\n", "258\n"),
+    ("eq", "effect fn main() -> Unit = {\n  let d: Deque[Int] = deque.from_list([1])\n  println(\"${d == deque.from_list([2])}\")\n}\n", "false\n"),
+    ("match", "effect fn main() -> Unit = {\n  let d: Deque[Int] = deque.from_list([1, 2, 3])\n  let n = match deque.first(d) { some(x) => x + deque.len(d), none => 0 }\n  println(\"${n}\")\n}\n", "4\n"),
+    ("param", "fn size(d: Deque[Int]) -> Int = deque.len(d)\neffect fn main() -> Unit = {\n  println(\"${size(deque.from_list([4, 5]))}\")\n}\n", "2\n"),
+    ("repr", "effect fn main() -> Unit = {\n  let d: Deque[Int] = deque.from_list([1, 2])\n  println(\"${d}\")\n}\n", "Deque { front: [], back: [1, 2] }\n"),
 ];
 
 #[test]
-fn auto_import_endian_rows_build_on_the_wasm_leg() {
+fn auto_import_owned_type_rows_build_on_the_wasm_leg() {
     if !wasmtime_available() {
         eprintln!("skipping: wasmtime not on PATH");
         return;
@@ -87,30 +91,33 @@ fn auto_import_endian_rows_build_on_the_wasm_leg() {
             failures.push(format!("{tag}: structural: ok={ok_s} out={out_s:?} err={err_s}"));
         }
     }
-    assert!(failures.is_empty(), "auto-import Endian rows:\n{}", failures.join("\n"));
+    assert!(failures.is_empty(), "auto-import owned-type rows:\n{}", failures.join("\n"));
 }
 
-/// A program spelling only the type: a fn taking and returning it.
-fn spelling_program(ty: &str) -> String {
+/// A program spelling only the type: a fn taking and returning it. A generic
+/// type is spelled with `Int` for each parameter (`Deque[Int]`); a bare
+/// `Deque` is an arity error the checker does not report yet (#4085).
+fn spelling_program(ty: &str, arity: usize) -> String {
+    let ty = if arity == 0 { ty.to_string() } else { format!("{ty}[{}]", vec!["Int"; arity].join(", ")) };
     format!("fn keep(x: {ty}) -> {ty} = x\nfn main() -> Unit = println(\"ok\")\n")
 }
 
 #[test]
 fn every_bundled_type_decl_is_pulled_when_spelled() {
     let owners = almide_frontend::bundled_sigs::bundled_type_owners();
-    assert!(owners.contains_key("Endian"), "bytes.Endian is the auto-import row of the matrix");
+    assert!(owners.contains_key("Deque"), "deque.Deque is the auto-import row of the matrix");
     let nominal = nominal_bundled_types();
-    assert!(nominal.contains("Endian") && nominal.contains("FileStat"), "the nominal set enumerates");
+    assert!(nominal.contains_key("Deque") && nominal.contains_key("FileStat"), "the nominal set enumerates");
     let mut names: Vec<&String> = owners.keys().collect();
     names.sort();
     let mut failures = Vec::new();
     for name in names {
         let module = owners[name];
-        if !nominal.contains(name.as_str()) {
+        let Some(&arity) = nominal.get(name.as_str()) else {
             eprintln!("{module}.{name}: transparent alias — resolves away at check time, no cell");
             continue;
-        }
-        let src = spelling_program(name);
+        };
+        let src = spelling_program(name, arity);
         let path = scratch(&format!("pull_{name}"), &src);
         let ir = match almide::wasm_leg::lower_to_ir(path.to_str().unwrap(), &src) {
             Ok(ir) => ir,
@@ -122,7 +129,11 @@ fn every_bundled_type_decl_is_pulled_when_spelled() {
                 continue;
             }
         };
-        let declared = ir.type_decls.iter().any(|td| td.name.as_str() == name);
+        // The decl is pulled to the top level, or the owner was lowered as a
+        // module (an auto-imported module whose fns are linked, `deque` and
+        // `heap`) and carries it there — the pull skips a name already declared.
+        let declared = ir.type_decls.iter().any(|td| td.name.as_str() == name)
+            || ir.modules.iter().any(|m| m.name.as_str() == module && m.type_decls.iter().any(|td| td.name.as_str() == name));
         let owner_used = ir.used_stdlib_modules.contains(module);
         if !declared || !owner_used {
             failures.push(format!("{module}.{name}: declared={declared} owner_used={owner_used}"));
@@ -132,17 +143,18 @@ fn every_bundled_type_decl_is_pulled_when_spelled() {
 }
 
 /// The bare names of every RECORD or VARIANT `type` a bundled module
-/// declares — the nominal cells of the matrix.
-fn nominal_bundled_types() -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
+/// declares, with the number of its type parameters — the nominal cells of
+/// the matrix.
+fn nominal_bundled_types() -> std::collections::HashMap<String, usize> {
+    let mut out = std::collections::HashMap::new();
     for module in almide::stdlib_info::BUNDLED_MODULES.iter().copied() {
         let Some(source) = almide::stdlib_info::bundled_source(module) else { continue };
         let program = almide_lang::parse_cached(source).expect("bundled source parses");
         for decl in &program.decls {
-            if let almide::ast::Decl::Type { name, ty, .. } = decl
+            if let almide::ast::Decl::Type { name, ty, generics, .. } = decl
                 && matches!(ty, almide::ast::TypeExpr::Record { .. } | almide::ast::TypeExpr::Variant { .. })
             {
-                out.insert(name.as_str().to_string());
+                out.insert(name.as_str().to_string(), generics.as_ref().map_or(0, |g| g.len()));
             }
         }
     }

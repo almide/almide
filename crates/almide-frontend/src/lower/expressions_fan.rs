@@ -752,13 +752,21 @@ fn lower_fan_race_map_fold(
 }
 
 /// L4 (#1108 Phase 2b): inside a FALLIBLE lambda body, rewrite every
-/// Option-operand `Unwrap` into `option.to_result(e, "none")!` so the
-/// closure's propagation stays a plain Result unwrap on every backend
-/// (the fn-body ok_or template has no closure equivalent).
-fn convert_option_unwraps_to_result(body: &mut IrExpr) {
+/// Option-operand `Unwrap` into `(match e { some(v) => ok(v), none =>
+/// err("none") })!` so the closure's propagation stays a plain Result unwrap
+/// on every backend (the fn-body ok_or template has no closure equivalent).
+///
+/// The conversion is spelled out in IR rather than as a call to
+/// `option.to_result`: a bundled module is loaded only when the program
+/// reaches it (#4071), and a call the LOWERING introduces is not something
+/// the program spells — the call linked nothing on either leg when `option`
+/// was not otherwise reached.
+pub(crate) fn convert_option_unwraps_to_result(ctx: &mut LowerCtx, body: &mut IrExpr) {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
-    struct Rw;
-    impl IrMutVisitor for Rw {
+    struct Rw<'c, 'a> {
+        ctx: &'c mut LowerCtx<'a>,
+    }
+    impl IrMutVisitor for Rw<'_, '_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::Unwrap { expr: inner } = &mut e.kind else { return };
@@ -767,31 +775,46 @@ fn convert_option_unwraps_to_result(body: &mut IrExpr) {
             }
             let inner_ty = inner.ty.clone();
             let payload_ty = inner_ty.option_inner().unwrap_or(Ty::Unknown);
+            let result_ty = Ty::result(payload_ty.clone(), Ty::String);
             let span = inner.span.clone();
             let opt = std::mem::replace(
                 &mut **inner,
                 IrExpr { kind: IrExprKind::OptionNone, ty: inner_ty, span: span.clone(), def_id: None },
             );
-            **inner = IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Module {
-                        module: sym("option"),
-                        func: sym("to_result"),
-                        def_id: None,
+            let v = self.ctx.var_table.alloc(sym("__opt_v"), payload_ty.clone(), Mutability::Let, span);
+            let some_arm = IrMatchArm {
+                pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v, ty: payload_ty.clone() }) },
+                guard: None,
+                body: IrExpr {
+                    kind: IrExprKind::ResultOk {
+                        expr: Box::new(IrExpr { kind: IrExprKind::Var { id: v }, ty: payload_ty, span, def_id: None }),
                     },
-                    args: vec![
-                        opt,
-                        IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span: span.clone(), def_id: None },
-                    ],
-                    type_args: Vec::new(),
+                    ty: result_ty.clone(),
+                    span,
+                    def_id: None,
                 },
-                ty: Ty::result(payload_ty, Ty::String),
+            };
+            let none_arm = IrMatchArm {
+                pattern: IrPattern::None,
+                guard: None,
+                body: IrExpr {
+                    kind: IrExprKind::ResultErr {
+                        expr: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span, def_id: None }),
+                    },
+                    ty: result_ty.clone(),
+                    span,
+                    def_id: None,
+                },
+            };
+            **inner = IrExpr {
+                kind: IrExprKind::Match { subject: Box::new(opt), arms: vec![some_arm, none_arm] },
+                ty: result_ty,
                 span,
                 def_id: None,
             };
         }
     }
-    Rw.visit_expr_mut(body);
+    Rw { ctx }.visit_expr_mut(body);
 }
 
 /// The dead placeholder of a race winner type with a CHEAP zero — the scalars

@@ -6,7 +6,7 @@ effect fn reader() -> Result[String, String] = {
 }
 
 effect fn writer() -> Result[String, String] = {
-  env.set("FAN_AUDIT_KEY", "written")
+  env.set("FAN_AUDIT_KEY", "written")!
   ok("w")
 }
 

@@ -8,11 +8,11 @@ else err("no")
 
 fn main() -> Unit = {
   match pick(true) {
-    ok(xs) => println(string.join(xs, "+")),
+    ok(xs) => println(list.join(xs, "+")),
     err(e) => println(e),
   }
   match pick(false) {
-    ok(xs) => println(string.join(xs, "+")),
+    ok(xs) => println(list.join(xs, "+")),
     err(e) => println(e),
   }
 }

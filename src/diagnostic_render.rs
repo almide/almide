@@ -16,6 +16,35 @@ pub fn init_color() {
     }
 }
 
+/// #4092 / #4266: a raw character E101 refuses (`is_hidden_source_char`: a
+/// bidi control, U+2028 / U+2029, a zero-width or Tags-block character, a raw
+/// control) echoed into the terminal reorders, breaks or hides the rendered
+/// line — and hands invisible text to the agent reading the diagnostic. Every
+/// echoed source line shows it as its escape `\u{202E}` instead, as rustc does
+/// for the bidi controls.
+fn escape_bidi(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.chars().any(almide_lang::lexer::is_hidden_source_char) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 16);
+    for c in text.chars() {
+        if almide_lang::lexer::is_hidden_source_char(c) {
+            out.push_str(&format!("\\u{{{:04X}}}", c as u32));
+        } else {
+            out.push(c);
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// The rendered width of `line`'s first `n` characters once `escape_bidi` has
+/// run, so padding and carets stay under the characters they point at.
+fn escaped_width(line: &str, n: usize) -> usize {
+    line.chars().take(n).map(|c| {
+        if almide_lang::lexer::is_hidden_source_char(c) { format!("\\u{{{:04X}}}", c as u32).len() } else { 1 }
+    }).sum()
+}
+
 fn use_color() -> bool {
     COLOR_ENABLED.load(Ordering::Relaxed)
 }
@@ -86,6 +115,7 @@ fn append_context_line(out: &mut String, d: &Diagnostic, color: bool) {
 fn append_here_line(out: &mut String, d: &Diagnostic, color: bool) {
     if let Some(here) = &d.here_snippet {
         if !here.is_empty() {
+            let here = escape_bidi(here);
             let line = if color { format!("{}here:{} {}", CYAN, RESET, here) } else { format!("here: {}", here) };
             out.push_str(&format!("\n  {}", line));
         }
@@ -242,6 +272,16 @@ fn json_escape(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            // #4266: JSON leaves Cf / Zl / Zp / Tags raw, so a hidden
+            // character quoted into a message or `here` would reach the agent
+            // reading `--json` invisibly. Write it as `\uXXXX` (a surrogate
+            // pair above the BMP), which every JSON reader decodes back.
+            c if almide_lang::lexer::is_hidden_source_char(c) => {
+                let mut units = [0u16; 2];
+                for u in c.encode_utf16(&mut units).iter() {
+                    out.push_str(&format!("\\u{:04x}", u));
+                }
+            }
             c => out.push(c),
         }
     }
@@ -270,8 +310,9 @@ fn enrich_here_snippet(d: &mut Diagnostic, source_lines: &[&str]) {
 fn render_secondary_spans(out: &mut String, d: &Diagnostic, source_lines: &[&str], color: bool) {
     for sec in &d.secondary {
         let Some(src_line) = source_lines.get(sec.line.saturating_sub(1)) else { continue; };
-        let trimmed = src_line.trim_end();
-        if trimmed.is_empty() { continue; }
+        let raw_line = src_line.trim_end();
+        if raw_line.is_empty() { continue; }
+        let trimmed = escape_bidi(raw_line);
         let max_line = d.line.unwrap_or(sec.line).max(sec.line);
         let width = format!("{}", max_line).len();
         let gutter_pad = " ".repeat(width);
@@ -285,7 +326,7 @@ fn render_secondary_spans(out: &mut String, d: &Diagnostic, source_lines: &[&str
         }
         // Dash underline with label for secondary
         let Some(col) = sec.col else { continue; };
-        let col0 = col.saturating_sub(1);
+        let col0 = escaped_width(raw_line, col.saturating_sub(1));
         let dash_len = if !sec.label.is_empty() { sec.label.len().max(1) } else { 1 };
         let pad = " ".repeat(col0);
         let dashes = "-".repeat(dash_len);
@@ -353,8 +394,9 @@ fn render_span_source_line(out: &mut String, line_num: usize, trimmed: &str, wid
 /// of a 37-column line for "this expression with an unconstrained type". A
 /// span the checker could not measure is a span of unknown width, and the
 /// honest rendering of unknown width is to point at where it starts.
-fn render_span_carets(out: &mut String, d: &Diagnostic, col: usize, width: usize, line_len: usize, color: bool) {
+fn render_span_carets(out: &mut String, d: &Diagnostic, col: usize, width: usize, line: &str, color: bool) {
     let gutter_pad = " ".repeat(width);
+    let line_len = line.chars().count();
     let col0 = col.saturating_sub(1);
     let caret_len = match d.end_col {
         Some(end_col) => { let end0 = end_col.saturating_sub(1); if end0 > col0 { end0 - col0 } else { 1 } }
@@ -363,6 +405,11 @@ fn render_span_carets(out: &mut String, d: &Diagnostic, col: usize, width: usize
     // Never underline past the end of the line: an end_col from a re-based
     // sub-parse (string interpolation) can overshoot the text it names.
     let caret_len = caret_len.min(line_len.saturating_sub(col0)).max(1);
+    // Measured in source characters above; drawn in rendered columns, where an
+    // escaped bidi control is eight wide (#4092).
+    let start = escaped_width(line, col0);
+    let caret_len = if col0 < line_len { (escaped_width(line, col0 + caret_len) - start).max(1) } else { caret_len };
+    let col0 = start;
     let pad = " ".repeat(col0);
     let carets = "^".repeat(caret_len);
     let (caret_color, caret_reset) = if color {
@@ -391,11 +438,11 @@ fn render_primary_span(out: &mut String, d: &Diagnostic, source_lines: &[&str], 
     let width = format!("{}", line_num).len();
 
     render_span_separator(out, d, line_num, width, color);
-    render_span_source_line(out, line_num, trimmed, width, color);
+    render_span_source_line(out, line_num, &escape_bidi(trimmed), width, color);
 
     // Caret underline
     let Some(col) = d.col else { return; };
-    render_span_carets(out, d, col, width, trimmed.chars().count(), color);
+    render_span_carets(out, d, col, width, trimmed, color);
 }
 
 pub fn display_with_source(d: &Diagnostic, source: &str) -> String {
@@ -469,6 +516,45 @@ mod caret_tests {
         d.col = Some(11);
         d.end_col = Some(20);
         assert_eq!(caret(&display_with_source(&d, src)), (11, 9));
+    }
+
+    /// #4092: a raw bidi control in an echoed source line would reorder the
+    /// terminal's rendering of it; the line shows the escape instead, and the
+    /// caret still lands under the character the diagnostic names.
+    #[test]
+    fn a_bidi_control_is_echoed_as_its_escape() {
+        let src = "  // a\u{202E} } \u{2066}if x then\u{2069} {";
+        let mut d = Diagnostic::error("m", "h", "c");
+        d.line = Some(1);
+        d.col = Some(11);
+        d.end_col = Some(12);
+        let out = display_with_source(&d, src);
+        assert!(
+            !out.chars().any(|c| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')),
+            "raw bidi control reached the rendered diagnostic:\n{out}"
+        );
+        assert!(out.contains("1 |   // a\\u{202E} } \\u{2066}if x then\\u{2069} {"), "{out}");
+        assert!(out.contains("here: // a\\u{202E} }"), "{out}");
+        // col 11 is U+2066: after `  // a` (6), the 8-wide escape of U+202E,
+        // ` } ` (3) — so the caret starts at rendered column 18, 8 wide.
+        assert_eq!(caret(&out), (6 + 8 + 3 + 1, 8));
+    }
+
+    /// #4266: tag characters, U+2028 and zero-width characters are echoed as
+    /// escapes too — a diagnostic must not carry hidden text to its reader.
+    #[test]
+    fn hidden_characters_are_echoed_as_escapes() {
+        let src = "  let s = \"ok\u{E0049}\u{E0047}\u{200B}\u{2028}x\"";
+        let mut d = Diagnostic::error("m", "h", "c");
+        d.line = Some(1);
+        d.col = Some(3);
+        d.end_col = Some(6);
+        let out = display_with_source(&d, src);
+        assert!(
+            !out.chars().any(almide_lang::lexer::is_hidden_source_char),
+            "raw hidden character reached the rendered diagnostic:\n{out}"
+        );
+        assert!(out.contains("ok\\u{E0049}\\u{E0047}\\u{200B}\\u{2028}x"), "{out}");
     }
 
     /// Every string field is valid JSON whatever it holds. A Windows path in

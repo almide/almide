@@ -2,7 +2,7 @@
 //! every witness its build produced, in the format `almide-verify bundle`
 //! reads (crates/almide-verify/src/bundle.rs).
 //!
-//! Usage: emit_structural_bundle <program.almd> [--artifact <file.wasm>]
+//! Usage: emit_structural_bundle <program.almd> [--artifact <file.wasm> [--anchors <file>]]
 //!        emit_structural_bundle <program.almd> --only <property> <function>
 //!
 //! The program goes through the PRODUCT route (`almide::wasm_route`, the
@@ -12,6 +12,9 @@
 //! - `ownership`, one per frame (witness.rs), and an `uncertified` record
 //!   for every declined frame;
 //! - `call-modes`, the program's call-mode witness (witness_modes.rs);
+//! - `bounds`, the program's bounds witness (witness_bounds.rs, #4005): every
+//!   `xs[i]` / `b[i]` read and store with the check before it, so the checks
+//!   #3345 elided are re-derived from the checks that were emitted;
 //! - `names`, over the stock-WASI bytes the build writes (`to_wasi` of the
 //!   module): `(module:<space>)` per shared index space, `locals:<fn>` per
 //!   function (cert_project.rs);
@@ -25,6 +28,12 @@
 //! record carries the file's SHA-256 (the `sha2` crate; almide-verify
 //! recomputes it with its own implementation and rejects a mismatch).
 //!
+//! `--anchors <file>` (#4011 (d)) also writes where in the shipped bytes
+//! each bounds and init event is (witness_bundle.rs `records_with_anchors`),
+//! the input `almide-anchor-check` judges against the artifact. Without
+//! `--artifact`, the stock-WASI bytes the route produced are written beside
+//! it as `<file>.wasm` (the anchor drill, scripts/witness-reinject.sh).
+//!
 //! `--only` prints one witness's bytes instead (the gate.sh feeder). Exit 2
 //! when the program does not build or the witness is absent.
 
@@ -35,29 +44,29 @@ fn fail(msg: &str) -> ! {
     std::process::exit(2);
 }
 
-struct Record {
-    property: &'static str,
-    function: String,
-    bytes: String,
-}
+use almide_wasm::witness::bundle::Record;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (rel, only, artifact) = match args.as_slice() {
-        [rel] => (rel.clone(), None, None),
-        [rel, flag, p, f] if flag == "--only" => (rel.clone(), Some((p.clone(), f.clone())), None),
-        [rel, flag, a] if flag == "--artifact" => {
-            // Absolute before the chdir below, so the bundle names the file
-            // the caller meant.
-            let a = std::path::absolute(a).unwrap_or_else(|e| fail(&format!("{a}: {e}")));
-            (rel.clone(), None, Some(a))
+    // Absolute before the chdir below, so the paths name the files the
+    // caller meant.
+    let abs = |a: &String| std::path::absolute(a).unwrap_or_else(|e| fail(&format!("{a}: {e}")));
+    let (rel, only, artifact, anchors) = match args.as_slice() {
+        [rel] => (rel.clone(), None, None, None),
+        [rel, flag, p, f] if flag == "--only" => (rel.clone(), Some((p.clone(), f.clone())), None, None),
+        [rel, flag, a] if flag == "--artifact" => (rel.clone(), None, Some(abs(a)), None),
+        [rel, flag, n] if flag == "--anchors" => (rel.clone(), None, None, Some(abs(n))),
+        [rel, flag, a, flag2, n] if flag == "--artifact" && flag2 == "--anchors" => {
+            (rel.clone(), None, Some(abs(a)), Some(abs(n)))
         }
-        _ => fail("usage: emit_structural_bundle <program.almd> [--artifact <file.wasm> | --only <property> <function>]"),
+        _ => fail(
+            "usage: emit_structural_bundle <program.almd> [--artifact <file.wasm> [--anchors <file>] | --only <property> <function>]",
+        ),
     };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap_or_else(|e| fail(&format!("cd {}: {e}", root.display())));
     let text = std::fs::read_to_string(&rel).unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
-    let (records, uncertified, shipped) = produce(&rel, &text);
+    let (records, uncertified, shipped, anchor_file) = produce(&rel, &text);
     if let Some((p, f)) = only {
         match records.iter().find(|r| r.property == p && r.function == f) {
             Some(r) => {
@@ -67,78 +76,61 @@ fn main() {
         }
         return;
     }
-    let mut out = match &artifact {
-        None => format!("almide-certificate-bundle 1\nproducer almide-wasm emit_structural_bundle\nsource {rel}\n"),
-        Some(path) => {
-            let file = std::fs::read(path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
-            if file != shipped {
-                fail(&format!(
-                    "{} ({} bytes) is not the stock-WASI module the route produced for {rel} ({} bytes) — the witnesses would describe other bytes",
-                    path.display(),
-                    file.len(),
-                    shipped.len()
-                ));
-            }
-            use sha2::Digest;
-            let hex: String = sha2::Sha256::digest(&file).iter().map(|b| format!("{b:02x}")).collect();
-            format!(
-                "almide-certificate-bundle 2\nproducer almide-wasm emit_structural_bundle\nsource {rel}\nartifact sha256 {hex} {}\n",
-                path.display()
-            )
+    let pinned = artifact.is_some();
+    let pin = artifact.map(|path| {
+        let file = std::fs::read(&path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
+        if file != shipped {
+            fail(&format!(
+                "{} ({} bytes) is not the stock-WASI module the route produced for {rel} ({} bytes) — the witnesses would describe other bytes",
+                path.display(),
+                file.len(),
+                shipped.len()
+            ));
         }
-    };
-    for r in &records {
-        out.push_str(&format!("witness {} {} {}\n{}\n", r.property, r.bytes.len(), r.function, r.bytes));
+        use sha2::Digest;
+        let hex: String = sha2::Sha256::digest(&file).iter().map(|b| format!("{b:02x}")).collect();
+        (hex, path.display().to_string())
+    });
+    // Written only once the artifact is known to be these bytes.
+    if let Some(path) = &anchors {
+        std::fs::write(path, &anchor_file).unwrap_or_else(|e| fail(&format!("write {}: {e}", path.display())));
+        if !pinned {
+            let w = path.with_extension("anchors.wasm");
+            std::fs::write(&w, &shipped).unwrap_or_else(|e| fail(&format!("write {}: {e}", w.display())));
+        }
     }
-    for (f, reason) in &uncertified {
-        out.push_str(&format!("uncertified {f} {reason}\n"));
-    }
+    let out = almide_wasm::witness::bundle::render(
+        "almide-wasm emit_structural_bundle",
+        &rel,
+        pin.as_ref().map(|(h, p)| (h.as_str(), p.as_str())),
+        &records,
+        &uncertified,
+    );
     let _ = std::io::stdout().write_all(out.as_bytes());
 }
 
+/// What [`produce`] hands back: the witness records, the uncertified
+/// rows, the shipped stock-WASI bytes and the anchor file.
+type Produced = (Vec<Record>, Vec<(String, String)>, Vec<u8>, String);
+
 /// Build `rel` through the product route and collect every witness, with
-/// the stock-WASI bytes the witnesses describe.
-fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>, Vec<u8>) {
+/// the stock-WASI bytes the witnesses describe (witness_bundle.rs).
+fn produce(rel: &str, text: &str) -> Produced {
     use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteOptions};
     almide_wasm::witness::start_collecting();
     let opts = RouteOptions { library: true, ..RouteOptions::default() };
     let routed = render_wasm_routed(rel, text, ModuleSource::Disk { dep_paths: &[] }, opts)
         .unwrap_or_else(|e| fail(&format!("{rel} does not build on the structural leg: {e:?}")));
-    let (pass, frames) = almide_wasm::witness::take_shipped().unwrap_or_else(|| fail("no shipped pass recorded"));
-    let modes = almide_wasm::witness::take_modes();
-    let decls = almide_wasm::witness::decls::take_for(&routed.bytes).unwrap_or_else(|| fail("no declaration table for the shipped module"));
     let shipped = routed.stock_wasi().unwrap_or_else(|e| fail(&format!("to_wasi: {e}")));
-
-    let mut records = Vec::new();
-    let mut uncertified = Vec::new();
-    for (name, cert) in frames {
-        match cert.strip_prefix(almide_wasm::witness::DECLINE_PREFIX) {
-            Some(reason) => uncertified.push((name, reason.trim().to_string())),
-            None if cert.starts_with('!') => uncertified.push((name, cert.trim().to_string())),
-            None => records.push(Record { property: "ownership", function: name, bytes: cert }),
-        }
+    // The same transform with its function map: where each emitted body
+    // ships (the anchors' locator).
+    let (again, fmap) = almide_wasm_run::wasi::to_wasi_mapped(&routed.bytes, &routed.host_ops)
+        .unwrap_or_else(|e| fail(&format!("to_wasi_mapped: {e}")));
+    if again != shipped {
+        fail("to_wasi_mapped and to_wasi disagree on the shipped bytes");
     }
-    if let Some((_, w)) = modes.into_iter().find(|(p, _)| *p == pass) {
-        records.push(Record { property: "call-modes", function: "(program)".into(), bytes: w });
-    }
-    // `to_wasi` keeps every defined function's order and moves it by the
-    // change in the import count — up for the imports it adds, down for the
-    // uncalled ones it prunes (#3114) — so a declared function keeps its
-    // name in the stock-WASI bytes; any other function is named by index.
-    let named = almide_wasm::cert_project::decl_names(&decls).unwrap_or_else(|e| fail(&format!("decls: {e}")));
-    let imports = |b: &[u8]| almide_wasm::cert_project::function_imports(b).unwrap_or_else(|e| fail(&format!("imports: {e}")));
-    let (shipped_imports, emitted_imports) = (imports(&shipped), imports(&routed.bytes));
-    let label = |i: u32| match i.checked_sub(shipped_imports).and_then(|d| named.get(&(d + emitted_imports))) {
-        Some(n) => format!("locals:{n}"),
-        _ => format!("locals:func[{i}]"),
-    };
-    for (function, bytes) in almide_wasm::cert_project::names(&shipped, &label).unwrap_or_else(|e| fail(&format!("names: {e}"))) {
-        records.push(Record { property: "names", function, bytes });
-    }
-    let (flat, graph) = almide_wasm::cert_project::caps(&decls).unwrap_or_else(|e| fail(&format!("caps: {e}")));
-    for (function, bytes) in flat {
-        records.push(Record { property: "caps", function, bytes });
-    }
-    records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
-    (records, uncertified, shipped)
+    let ((records, uncertified), anchor_file) =
+        almide_wasm::witness::bundle::records_with_anchors(&routed.bytes, &shipped, None, &fmap)
+            .unwrap_or_else(|e| fail(&e));
+    (records, uncertified, shipped, anchor_file)
 }

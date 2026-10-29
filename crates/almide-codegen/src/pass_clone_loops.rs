@@ -148,7 +148,7 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     let fresh = loop_fresh_vars(Some(var), var_tuple.as_deref(), &body);
     ctx.loops.binders.insert(var);
     ctx.loops.binders.extend(var_tuple.iter().flatten().copied());
-    let mut loop_ctx = CloneCtx { ref_lets: ctx.ref_lets, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
+    let mut loop_ctx = CloneCtx { ref_lets: ctx.ref_lets, bumped: ctx.bumped, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     // With the body's clones and moves placed, a binder every use of which
     // sits under a shared borrow / field read / clone never needs an owned
@@ -169,15 +169,18 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
 /// Is every occurrence of `v` in `body` one the Rust walker renders the same
 /// for a `&T` binder as for a `T` one: `&v` (a shared `Borrow`, which coerces
 /// from `&&T`), `v.field` (auto-deref), or `v.clone()` (resolves to
-/// `T::clone` through the reference)? A bare occurrence (a move), a `&mut`,
-/// a match subject, an interpolation, or any use inside a closure / fused
-/// iterator chain (whose captures must own) says no.
+/// `T::clone` through the reference), or the subject of a literal `match`
+/// (`Site::StrView`: `MatchSubject` spells it `&*x`, and
+/// `BorrowLowering` `x.as_str()` for a borrowed binder, #4294)? A bare
+/// occurrence (a move), a `&mut`, a non-literal match subject, an
+/// interpolation, or any use inside a closure / fused iterator chain (whose
+/// captures must own) says no.
 fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
     // A fused chain's lambda runs inside the iteration and never outlives it
     // (`scope_lambda`: depth stays 0), so a read there is a borrow like any
     // other (#3216); a chain that keeps the binder uses it at an owning site.
     UseSites::of_stmts(body, &ExplicitBorrows).of(v).all(|u| {
-        u.depth == 0 && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone)
+        u.depth == 0 && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone | Site::StrView)
     })
 }
 
@@ -185,7 +188,7 @@ fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
 /// both in the loop.
 pub(crate) fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
     let fresh = loop_fresh_vars(None, None, &body);
-    let mut loop_ctx = CloneCtx { ref_lets: ctx.ref_lets, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
+    let mut loop_ctx = CloneCtx { ref_lets: ctx.ref_lets, bumped: ctx.bumped, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
     let new_cond = insert_clones_live(cond, &mut loop_ctx);
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     IrExprKind::While { cond: Box::new(new_cond), body: new_body }
@@ -279,9 +282,11 @@ impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
         // some(v) => v }` moves out of nothing the next iteration reads. A
         // match on anything else (a captured or outer value) binds into
         // a value that outlives the iteration, and stays cloned.
+        // A match over a `&str` view of its subject (#4296) binds a copy its
+        // own arm makes (`StrViewRebind`'s copy), whatever it views.
         if let IrExprKind::Match { subject, arms } = &expr.kind
-            && let IrExprKind::Var { id } = &subject.kind
-            && self.fresh.contains(id)
+            && (matches!(&subject.kind, IrExprKind::Var { id } if self.fresh.contains(id))
+                || crate::pass_match_subject::matches_through_str_view(&subject.ty, arms))
         {
             for arm in arms {
                 almide_ir::free_vars::collect_pattern_bindings(&arm.pattern, self.fresh);

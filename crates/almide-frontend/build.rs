@@ -4,7 +4,9 @@
 //! which is outside this package. The ledger is copied to the committed
 //! `src/generated/dialect-epochs.toml` here, and only inside an almide
 //! checkout; a vendored or packaged almide-frontend compiles the committed copy
-//! (#3361).
+//! (#3361). The native regex runtime, `runtime/rs/src/regex.rs`, which the
+//! checker compiles in for E102, is copied to `src/generated/regex_rt.rs` the
+//! same way.
 
 #[path = "buildscript/in_checkout.rs"]
 mod in_checkout;
@@ -16,12 +18,16 @@ fn main() {
         println!("cargo:rerun-if-changed=build.rs");
         return;
     };
-    let src = root.join("proofs/dialect-epochs.toml");
+    copy_in(&root.join("proofs/dialect-epochs.toml"), &manifest_dir.join("src/generated/dialect-epochs.toml"));
+    copy_in(&root.join("runtime/rs/src/regex.rs"), &manifest_dir.join("src/generated/regex_rt.rs"));
+}
+
+/// Copy a checkout input into the committed generated file, writing only on a
+/// change so an unchanged input leaves the tree clean.
+fn copy_in(src: &std::path::Path, out: &std::path::Path) {
     println!("cargo:rerun-if-changed={}", src.display());
-    let ledger = std::fs::read_to_string(&src).expect("proofs/dialect-epochs.toml is readable in a checkout");
-    let out = manifest_dir.join("src/generated/dialect-epochs.toml");
-    // Write only on a change, so an unchanged ledger leaves the tree clean.
-    if std::fs::read_to_string(&out).ok().as_deref() != Some(ledger.as_str()) {
-        std::fs::write(&out, ledger).expect("src/generated/dialect-epochs.toml is writable");
+    let text = std::fs::read_to_string(src).unwrap_or_else(|e| panic!("{} is readable in a checkout: {e}", src.display()));
+    if std::fs::read_to_string(out).ok().as_deref() != Some(text.as_str()) {
+        std::fs::write(out, text).unwrap_or_else(|e| panic!("{} is writable: {e}", out.display()));
     }
 }

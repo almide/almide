@@ -199,9 +199,13 @@ impl Emitter<'_> {
             _ => None,
         };
         let local = acc.and_then(|v| self.locals.get(&v).map(|&(idx, _)| (v, idx)));
-        let Some((acc, idx)) = local.filter(|&(v, idx)| {
-            !self.metered && !self.cells.contains(&v) && idx >= self.rc_param_ceiling && self.elem_is_handle(want)
-        }) else {
+        let owner = local.filter(|&(v, idx)| {
+            !self.cells.contains(&v) && idx >= self.rc_param_ceiling && self.elem_is_handle(want)
+        });
+        if self.metered {
+            return self.lower_metered_fold_body(owner.map(|(_, idx)| idx), body, want);
+        }
+        let Some((acc, idx)) = owner else {
             self.lower(body, Some(want))?;
             return Ok(());
         };
@@ -215,6 +219,24 @@ impl Emitter<'_> {
             self.rc_owned.remove(&idx);
         }
         self.moves.move_in = outer;
+        got.map(|_| ())
+    }
+
+    /// A metered fold body (no move-in: the dynamic charge measures the
+    /// body's own blocks). The accumulator still holds the fold's one credit
+    /// for the body's duration, so a budget cut inside the body (fuel.rs
+    /// `emit_cut_return`) must release it with the frame's other credits:
+    /// it is registered as an exit-plan credit (arm_rests.rs) — not
+    /// `rc_owned`, so every read of it in the body stays a share — and
+    /// unregistered before the fold's own release of the replaced value.
+    fn lower_metered_fold_body(&mut self, acc: Option<u32>, body: &IrExpr, want: crate::SliceTy) -> Result<(), crate::EmitError> {
+        let held = acc.filter(|_| self.rc_droppable(want));
+        let mark = self.arm_rests.mark();
+        if let Some(idx) = held {
+            self.arm_rests.hold_local(idx, want);
+        }
+        let got = self.lower(body, Some(want));
+        self.arm_rests.truncate(mark);
         got.map(|_| ())
     }
 
@@ -419,7 +441,12 @@ impl Emitter<'_> {
         let g = (self.var_space, id);
         let Some(&(gidx, _)) = self.globals.get(&g) else { return Ok(None) };
         let reaches = !matches!(self.work.global_reach.borrow().get(i), Some(Some(set)) if !set.contains(&g));
+        // A frame-tail leaf frees a LOCAL (the frame ends); a global outlives
+        // it, so moving one there emptied the global (`fn show(p) =
+        // f(arena, p)` left `arena` empty for the next reader).
+        let frame_tail = self.moves.move_in.as_ref().is_some_and(|m| m.is_frame_tail(args));
         if reaches
+            || frame_tail
             || !matches!(move_in, MoveSet::Vars(v) if v.contains(&place))
             || args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, id))
         {

@@ -16,14 +16,58 @@
 #     1.113  1.126  1.130  1.132  1.137  1.142  1.154  1.159   median 1.132
 #   a 4.1% total spread, while p95 on the same ladder moved 6x over the same
 #   swing. The highest reading sits 12% under the +15% ceiling. Budget +15%.
-slope 1.132
+# slope moved 1.132 -> 0.781 (2026-10-24, #4071): the floor rung no longer
+#   checks the auto-imported stdlib (an auto-imported bundled module now loads
+#   only when the program reaches it), while every corpus rung still does, so
+#   marginal time at each rung now carries the stdlib's constant check cost
+#   (~12ms of the floor's check phase moved into the marginals) and the log-log
+#   fit flattens. No rung got slower. Same-machine A/B (M4 Pro, load 4.5-6.8),
+#   five interleaved pairs of the full ladder, 10 runs per rung, wave1-sim
+#   dc354e049 (develop + #4082) vs this change:
+#     before  1.130 1.135 1.136 1.142 1.154   median 1.136
+#     after   0.780 0.783 0.784 0.785 0.789   median 0.784   factor 0.690
+#   Left alone it reads under the 0.85x floor (0.962). Anchor x 0.690 = 0.781.
+slope 0.781
 # ratio — min(10,151-line rung) / min(4-line floor rung): what a 10k-line project
 #   costs in units of what an empty one costs. Catches a uniform slowdown of the
 #   per-line work, which `slope` by construction cannot see. Median of the same
 #   eight runs:
 #     4.298 4.351 4.362 4.403 4.424 4.435 4.454 4.690 (the 4.690 is load 42.4)
 #   an 8.9% total spread. Budget +25%.
-ratio 4.403
+#   Re-anchored 2026-10-23 (#4078) to 3.500. The floor rung is a 4-line entry,
+#   but every program reads and checks the auto-imported stdlib modules, so the
+#   floor grows with them while the 10k rung stays 10k lines; the stdlib
+#   redesign adds functions to `list`, `map`, `set` and `string` (#4062,
+#   #4078), and the ratio fell with no slower per-line work (`slope` and
+#   `slope_check` stayed in band). CI readings: develop 4.178, 3.847, 3.605 as
+#   #4042 and #4062 landed; #4078 3.035 (a one-line check 24 ms against
+#   develop's 19 ms, about 2 ms of it `deque` and `heap`, which stay
+#   auto-imported). Loading a bundled module only when a program uses it
+#   (#4071) gives the floor back and should re-anchor this up again.
+# ratio moved 3.500 -> 7.090 (2026-10-24, #4071): an auto-imported bundled
+#   module is now loaded only when the program reaches it, so the 4-line floor
+#   rung (`println` alone) no longer checks the auto-imported stdlib while every
+#   corpus rung still does. The floor halved (min 29.7ms -> 15.0ms; its check
+#   phase 12.6ms -> 0.5ms); the 10k rung did not move (79.5ms -> 81.1ms). The
+#   same five interleaved pairs as `slope` above:
+#     before  2.650 2.652 2.669 2.685 2.689   median 2.669
+#     after   5.385 5.387 5.408 5.413 5.434   median 5.408   factor 2.026
+#   Anchored on the anchor wave 1 set from CI, not on this box (which reads
+#   under it): 3.500 x 2.026 = 7.090. The #4078 CI reading it was set from,
+#   3.035 x 2.026 = 6.149, sits inside the band. Re-anchor from CI readings if
+#   the first develop jobs after this land sit past half the band.
+# ratio moved 7.090 -> 18.81 (2026-10-25, integration #4182): NOT a ladder
+#   artifact — the 10k rung's check got 3.4x slower. The effect-values batch
+#   (#4151: E109 through fn values, `check` judging user modules and running
+#   whole-program lowering) put lowering into every `almide check`: on the
+#   10,621-line rung the `other` phase went 18.7ms -> 146.2ms and `check`
+#   44.3ms -> 104.4ms, and the rung now front-ends 359 sources (226 before).
+#   Same M4 Pro, back to back, 20 interleaved runs each, load 5.8-8.1:
+#     batch-sec-ffi 7e4b7fdb2 (pre-#4151)  floor 15.9ms  10k 85.1ms   ratio 5.356
+#     batch-all-1025 (this integration)    floor 20.2ms  10k 287.1ms  ratio 14.211
+#   factor 2.653; anchor 7.090 x 2.653 = 18.81. Accepted to land the
+#   integration, recorded as a cost to win back (ADR-0030), not excused.
+ratio 18.81
 #
 # ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
 # The same ladder, checked with `almide check --timings`, splits the front end
@@ -88,13 +132,31 @@ ratio 4.403
 #     develop 0e53ddba6 job 113947299701 0.1340 0.1436 0.7224 (OVER 0.1333)
 # Three readings, not the 45-job window above: re-anchor again from a wider
 # window if the band proves tight.
-share_lex 0.1290
+# 2026-10-25 (integration #4182): share_lex/parse/check moved 0.1290/0.1386/
+# 0.7324 -> 0.1118/0.1150/0.7692 — the check-phase cost `ratio` above records
+# (#4151) shifts the zero-sum split toward check. Same A/B as `ratio`:
+#   batch-sec-ffi 0.1085/0.1377/0.7538 -> batch-all-1025 0.0940/0.1143/0.7917
+#   (factors 0.867/0.830/1.050 applied to the CI anchors).
+# 2026-10-29: share_lex moved 0.1118 -> 0.0942, re-anchored on CI readings. The
+# 0.1118 above was the M4 Pro factor applied to the old anchor, never a CI
+# reading: develop's Perf ratchet read 0.1240-0.1425 through 2026-10-24
+# (95abf53fe 0.1267) and has read 0.0886-0.1070 on every job since the #4182
+# integration landed (926542089, 2026-10-25) — a durable step of ~0.73x, not
+# the 0.867x the A/B predicted. The 13 develop push/PR-event jobs from
+# 926542089 to bfde4b0fb (2026-10-29T08:26):
+#     0.0886 0.0898 0.0927 0.0931 0.0936 0.0941 0.0942 0.0946 0.0948 0.0966
+#     0.0971 0.0972 0.1070   median 0.0942
+# The old floor 0.0894 sat 5% under that median, so it fired on develop itself
+# (ab7c28b74 0.0886) and on #4327 (0.0894) with no front-end change.
+# share_parse (0.1023-0.1307, two runner populations) and share_check
+# (0.7767-0.8025) stay inside their bands and keep their anchors.
+share_lex 0.0942
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
-share_parse 0.1386
+share_parse 0.1150
 #     share_check  0.7268 0.7269 0.7280 0.7290 0.7349 0.7351 0.7352 0.7352
 #                  median 0.7320, 1.2% spread (2026-08-14, M4 Pro)
-share_check 0.7324
+share_check 0.7692
 # slope_check — `slope` localized to the phase that owns it. The aggregate reads
 #   1.15; the split shows lex 1.00 and parse 1.03 flat and the checker carrying
 #   all of the superlinearity. Anchoring it separately means a checker going
@@ -103,7 +165,15 @@ share_check 0.7324
 #   uniform per-phase speed factor cancels out of it.
 #     1.1349 1.1359 1.1363 1.1412 1.1465 1.1472 1.1497 1.1572
 #     median 1.1439, 1.9% spread. Budget +15%, floor 0.85x.
-slope_check 1.144
+# slope_check moved 1.144 -> 0.731 (2026-10-24, #4071), for the reason `slope`
+#   moved: the stdlib's check cost left the floor rung and entered every
+#   marginal. The same five pairs:
+#     before  1.122 1.124 1.136 1.140 1.147   median 1.136
+#     after   0.724 0.726 0.726 0.728 0.731   median 0.726   factor 0.639
+#   Left alone it reads under the 0.85x floor (0.972). Anchor x 0.639 = 0.731.
+#   The top-rung shares did not move (lex 0.111, parse 0.138-0.140, check 0.750
+#   on both sides), so share_* keep their anchors.
+slope_check 0.731
 # NOT anchored, on purpose: slope_lex (median 1.005) and slope_parse (median
 # 1.030). Over the same swing they read a 10.3% / 10.4% spread — lex and parse are
 # ~12ms against check's 66ms, so subtracting the floor rung leaves a small

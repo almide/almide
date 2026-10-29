@@ -5,9 +5,9 @@
 /// Recursion is confined to `Call` nodes — a heap-branch that is NOT a call argument (e.g. a bare
 /// `let s = if..`, or an `if`-arm interior) is left for the tail-duplication / per-arm machinery.
 fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
-    // A TUPLE element may itself wrap a call-arg branch (`(value.str(if c then a else b), end)` — the
+    // A TUPLE element may itself wrap a call-arg branch (`(value.string(if c then a else b), end)` — the
     // block_scalar/block_line return shape). Recurse into each element so the inner `if` is ANF-lifted
-    // out (`let t = if c then a else b; (value.str(t), end)`), which `desugar_let_bound_heap_branch`
+    // out (`let t = if c then a else b; (value.string(t), end)`), which `desugar_let_bound_heap_branch`
     // then tail-duplicates into a heap-result `if` with Tuple arms — both of which already lower.
     if let IrExprKind::Tuple { elements } = &e.kind {
         for (idx, el) in elements.iter().enumerate() {

@@ -19,14 +19,14 @@ const SOURCE: &str = r#"fn tail_b(b: Bytes, n: Int) -> Bytes =
   if n == 0 then b else tail_b(bytes.set(b, n % 4, n), n - 1)
 
 effect fn growth() -> Unit = {
-  var g = bytes.new(100000)
+  var g = bytes.zeros(100000)
   var i = 0
   while i < 2000 {
     g = bytes.set(g, i % 9, i)
     i = i + 1
   }
-  let t = tail_b(bytes.new(100000), 2000)
-  let f = list.fold(list.range(0, 2000), bytes.new(100000), (acc, k) => bytes.set(acc, k % 5, k))
+  let t = tail_b(bytes.zeros(100000), 2000)
+  let f = list.fold(list.range(0, 2000), bytes.zeros(100000), (acc, k) => bytes.set(acc, k % 5, k))
   println("${bytes.len(g)} ${bytes.get(g, 2) ?? -1} ${bytes.len(t)} ${bytes.get(t, 1) ?? -1} ${bytes.get(f, 4) ?? -1}")
 }
 
@@ -59,13 +59,13 @@ effect fn main() -> Unit = {
   println("${bytes.to_list(o)}")
   // 6. a list of Bytes edited through list.set keeps each element whole
   var l = [bytes.from_list([1]), bytes.from_list([2])]
-  let e = bytes.set(list.get(l, 0) ?? bytes.new(0), 0, 3)
+  let e = bytes.set(list.get(l, 0) ?? bytes.zeros(0), 0, 3)
   l = list.set(l, 1, e)
   println("${list.map(l, (b) => bytes.to_list(b))}")
   // 7. a temporary source: a call's result goes to the owned twin as is
   println("${bytes.to_list(bytes.set(bytes.from_list([2, 2, 100]), 0, -1))}")
   let tb = bytes.from_list([1, 2])
-  println("${bytes.to_list(bytes.set(bytes.concat(tb, tb), 3, 7))} ${bytes.to_list(tb)}")
+  println("${bytes.to_list(bytes.set(tb + tb, 3, 7))} ${bytes.to_list(tb)}")
 }
 "#;
 

@@ -23,6 +23,8 @@ use crate::{err, out};
 
 #[path = "docs_gen_counts.rs"]
 mod counts;
+#[path = "docs_gen_bytes_matrix.rs"]
+mod bytes_matrix;
 
 const LLMS_TXT: &str = "llms.txt";
 const DIAGNOSTICS_DIR: &str = "docs/diagnostics";
@@ -50,9 +52,12 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_diagnostic_registry_bijection());
     drifts.extend(check_stdlib_fn_count());
     drifts.extend(check_numeric_conversion_matrix());
+    drifts.extend(check_numeric_protocol_matrix());
+    drifts.extend(check_builtin_conformance_matrix());
+    drifts.extend(check_bytes_io_matrix());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix, built-in conformance matrix, bytes IO matrix)"));
         return;
     }
 
@@ -322,77 +327,164 @@ fn check_stdlib_fn_count() -> Vec<String> {
     drifts
 }
 
-/// The integer-conversion MATRIX gate (#956). The conversion family is defined
-/// by a rule, not by enumeration-by-hand: over the carriers {Int, Int8..Int64,
-/// UInt8..UInt64}, every ordered pair has the plain (truncating) form, and a
-/// pair whose source range does not fit the destination — a LOSSY pair — must
-/// also have `_checked` (Option on overflow) and `_saturating` (clamp), while a
-/// lossless pair must NOT (an always-`Some` checked variant is noise). Every
-/// carrier module also carries `min_value`/`max_value`. This computes the
-/// expected surface from the range table and diffs it against the compiler's
-/// own module interfaces in both directions, so the family can never again be
-/// extended point-wise: a new carrier or a forgotten cell is a drift here.
-fn check_numeric_conversion_matrix() -> Vec<String> {
-    // (module, min, max) — i128 so u64::MAX fits.
-    const CARRIERS: &[(&str, i128, i128)] = &[
-        ("int8", i8::MIN as i128, i8::MAX as i128),
-        ("int16", i16::MIN as i128, i16::MAX as i128),
-        ("int32", i32::MIN as i128, i32::MAX as i128),
-        ("int64", i64::MIN as i128, i64::MAX as i128),
-        ("uint8", 0, u8::MAX as i128),
-        ("uint16", 0, u16::MAX as i128),
-        ("uint32", 0, u32::MAX as i128),
-        ("uint64", 0, u64::MAX as i128),
+/// The public function names of one bundled stdlib module, read from the
+/// compiler's own module interface (the same view `almide compile <m>` prints).
+fn module_function_names(m: &str) -> std::collections::HashSet<String> {
+    let (file, bundled_module) = super::compile::resolve_module_to_file(m);
+    let (program, source_text, checker) =
+        super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let iface = almide::interface::extract(&ir, m, Some(&source_text));
+    iface.functions.iter().map(|f| f.name.clone()).collect()
+}
+
+/// The typed byte IO matrix (`docs_gen_bytes_matrix.rs`), checked against
+/// `bytes`' interface as the compiler extracts it.
+fn check_bytes_io_matrix() -> Vec<String> {
+    let (file, bundled_module) = super::compile::resolve_module_to_file("bytes");
+    let (program, source_text, checker) =
+        super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let iface = almide::interface::extract(&ir, "bytes", Some(&source_text));
+    bytes_matrix::check(&iface.functions)
+}
+
+/// The built-in conformances, as a matrix read from the protocol declaration
+/// (`almide::canonicalize::protocols::BUILTIN_PROTOCOLS`): every built-in type
+/// a non-derivable protocol lists (`Int8: Numeric`, `String: Text`) must
+/// define each of the protocol's requirements in its stdlib module, the
+/// internal `__` pivots included — a generic body reaches them through a type
+/// variable, and monomorphization calls `<module>.<requirement>` with nothing
+/// else to check that it exists. Operator requirements (`add`, `neg`) are the
+/// operators on a primitive and are not functions.
+fn check_builtin_conformance_matrix() -> Vec<String> {
+    let mut seen: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let mut drifts = Vec::new();
+    for r in almide::canonicalize::protocols::builtin_conformance_requirements() {
+        let names = seen.entry(r.module).or_insert_with(|| module_function_names(r.module));
+        if !names.contains(&r.function) {
+            drifts.push(format!(
+                "built-in conformance: `{}` conforms to {} but does not define `{}.{}`",
+                r.module, r.protocol, r.module, r.function
+            ));
+        }
+    }
+    drifts
+}
+
+/// The fixed-width numeric PROTOCOL matrix gate (R-sized-02/03/08/10/11, R-int-11/12).
+/// The protocol pyramid (docs/roadmap/stdlib-redesign/protocol-view.md) is an assumed
+/// design: the language cannot yet say `Int8: Integer`, so every type carries each
+/// requirement as a concrete function. That makes the requirements a matrix — every
+/// carrier × every requirement of each protocol it conforms to — and this gate checks
+/// every cell exists, so the family can only be extended a whole row or column at a
+/// time. `mod` is absent from the integer rows on purpose: it is a reserved word, so
+/// `fn mod(...)` cannot be declared today. `float32.parse` is absent on purpose: a
+/// binary64 parse narrowed to binary32 rounds twice, so it needs a direct binary32
+/// reader first.
+fn check_numeric_protocol_matrix() -> Vec<String> {
+    // (module, signed, fixed width): `int` and the eight sized types are fixed width,
+    // `bigint` has no width (R-bigint-07: no bit counts, wrapping or rotation).
+    const INTEGERS: &[(&str, bool, bool)] = &[
+        ("int", true, true),
+        ("int8", true, true), ("int16", true, true), ("int32", true, true), ("int64", true, true),
+        ("uint8", false, true), ("uint16", false, true), ("uint32", false, true), ("uint64", false, true),
+        ("bigint", true, false),
     ];
-    const INT: (&str, i128, i128) = ("int", i64::MIN as i128, i64::MAX as i128);
-    let lossy = |s: &(&str, i128, i128), d: &(&str, i128, i128)| !(d.1 <= s.1 && s.2 <= d.2);
+    // Integer (R-sized-02/06/08/10, R-int-03/04/11, R-bigint-01/05/07).
+    const INTEGER: &[&str] = &[
+        "compare", "min", "max", "clamp", "to_string", "parse", "parse_radix", "to_string_radix",
+        "floor_div", "modulo", "pow", "is_even", "is_odd", "bit_length",
+        "band", "bor", "bxor", "bnot", "bshl", "bshr",
+    ];
+    // FixedWidthInteger (R-sized-10, R-int-12).
+    const FIXED_WIDTH: &[&str] = &[
+        "min_value", "max_value",
+        "count_leading_zeros", "count_trailing_zeros", "count_ones", "byte_swap",
+        "wrap_add", "wrap_sub", "wrap_mul", "rotate_left", "rotate_right",
+    ];
+    // SignedInteger (R-sized-10).
+    const SIGNED: &[&str] = &["abs", "sign"];
+    // FloatingPoint (R-sized-02/03/08/11, R-float-02/03/04/05).
+    const FLOATS: &[&str] = &["float", "float32", "float64"];
+    const FLOATING: &[&str] = &[
+        "compare", "min", "max", "clamp", "to_string", "parse",
+        "is_nan", "is_infinite", "is_finite",
+        "abs", "floor", "ceil", "round", "trunc", "signum",
+        "to_bits", "from_bits", "infinity", "nan", "epsilon", "max_value", "min_value",
+    ];
+
+    let mut drifts = Vec::new();
+    let mut require = |m: &str, names: &[&str]| {
+        let surface = module_function_names(m);
+        for f in names {
+            if !surface.contains(*f) {
+                drifts.push(format!("numeric protocol matrix: `{m}.{f}` is a requirement of a protocol `{m}` conforms to, but missing"));
+            }
+        }
+    };
+    for (m, signed, fixed) in INTEGERS {
+        let mut names: Vec<&str> = INTEGER.to_vec();
+        if *signed { names.extend_from_slice(SIGNED); }
+        if *fixed { names.extend_from_slice(FIXED_WIDTH); }
+        require(m, &names);
+    }
+    for m in FLOATS {
+        require(m, FLOATING);
+    }
+    drifts
+}
+
+/// The numeric-conversion MATRIX gate (#956). The conversion family is defined
+/// by a rule, not by enumeration-by-hand: every numeric carrier is built FROM
+/// any `Numeric` source by its own module's generic constructors, never by a
+/// point-wise `to_<carrier>` / `from_<carrier>` cell on another module. Each
+/// integer carrier {Int, Int8..Int64, UInt8..UInt64} carries `from` (exact,
+/// aborts outside the range), `from_checked` (Option), `from_saturating`
+/// (clamp) and `from_wrapping`, plus `min_value`/`max_value`; each float
+/// carrier {Float, Float32, Float64} carries `from` and `from_checked`. The
+/// retired pair-wise spellings must stay absent, so the family can never again
+/// be extended point-wise: a new carrier or a forgotten cell is a drift here.
+fn check_numeric_conversion_matrix() -> Vec<String> {
+    const INTEGERS: &[&str] = &["int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"];
+    const FLOATS: &[&str] = &["float", "float32", "float64"];
 
     let mut expect_present: Vec<(&str, String)> = Vec::new();
     let mut expect_absent: Vec<(&str, String)> = Vec::new();
-    for s in CARRIERS {
-        for d in CARRIERS.iter().filter(|d| d.0 != s.0) {
-            expect_present.push((s.0, format!("to_{}", d.0)));
-            let target = if lossy(s, d) { &mut expect_present } else { &mut expect_absent };
-            target.push((s.0, format!("to_{}_checked", d.0)));
-            target.push((s.0, format!("to_{}_saturating", d.0)));
+    for m in INTEGERS {
+        for f in ["from", "from_checked", "from_saturating", "from_wrapping", "min_value", "max_value"] {
+            expect_present.push((*m, f.to_string()));
         }
-        // The Int column is spelled on the `int` module: plain `from_<s>`, and
-        // the trio tail exactly for the one lossy widening (UInt64 → Int).
-        expect_present.push(("int", format!("from_{}", s.0)));
-        let target = if lossy(s, &INT) { &mut expect_present } else { &mut expect_absent };
-        target.push(("int", format!("from_{}_checked", s.0)));
-        target.push(("int", format!("from_{}_saturating", s.0)));
-        // The Int row: plain `to_<d>` always; trio iff lossy (Int → Int64 is
-        // the identity range, so its checked/saturating must not exist).
-        expect_present.push(("int", format!("to_{}", s.0)));
-        let target = if lossy(&INT, s) { &mut expect_present } else { &mut expect_absent };
-        target.push(("int", format!("to_{}_checked", s.0)));
-        target.push(("int", format!("to_{}_saturating", s.0)));
     }
-    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
-        expect_present.push((m, "min_value".to_string()));
-        expect_present.push((m, "max_value".to_string()));
+    for m in FLOATS {
+        for f in ["from", "from_checked"] {
+            expect_present.push((*m, f.to_string()));
+        }
+    }
+    for m in INTEGERS.iter().chain(FLOATS) {
+        for d in INTEGERS.iter().chain(FLOATS).filter(|d| *d != m) {
+            for f in [format!("to_{d}"), format!("to_{d}_checked"), format!("to_{d}_saturating"), format!("from_{d}")] {
+                expect_absent.push((*m, f));
+            }
+        }
     }
 
     let mut drifts = Vec::new();
     let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
-    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
-        let (file, bundled_module) = super::compile::resolve_module_to_file(m);
-        let (program, source_text, checker) =
-            super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
-        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        let iface = almide::interface::extract(&ir, m, Some(&source_text));
-        surface.insert(m, iface.functions.iter().map(|f| f.name.clone()).collect());
+    // Read exactly the modules the expectations name, so a new row's module
+    // is never a second list to keep in step.
+    for (m, _) in expect_present.iter().chain(&expect_absent) {
+        surface.entry(*m).or_insert_with(|| module_function_names(m));
     }
     for (m, f) in &expect_present {
         if !surface[m].contains(f) {
-            drifts.push(format!("numeric matrix: `{m}.{f}` is required (lossy pair or bounds) but missing"));
+            drifts.push(format!("numeric matrix: `{m}.{f}` is required but missing"));
         }
     }
     for (m, f) in &expect_absent {
         if surface[m].contains(f) {
-            drifts.push(format!("numeric matrix: `{m}.{f}` exists but the pair is lossless — a checked/saturating form there is noise; remove it or fix the range table"));
+            drifts.push(format!("numeric matrix: `{m}.{f}` is a point-wise conversion cell; build the value with `{}.from` / `from_checked` instead", f.trim_start_matches("to_").trim_start_matches("from_").trim_end_matches("_checked").trim_end_matches("_saturating")));
         }
     }
     drifts

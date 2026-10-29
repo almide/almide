@@ -1,5 +1,5 @@
 // #924: the float `**` operator is a VENDORED-musl-libm transcendental — the
-// same class `math.pow` already abstains on in the reference interpreter.
+// same class `int.pow` already abstains on in the reference interpreter.
 // Both backends route it through the vendored pow; Rust's `f64::powf` calls
 // the PLATFORM libm, which differs in the last ULP. The module path returned
 // Unsupported (an honest skip) while the OPERATOR arm silently voted with the

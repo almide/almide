@@ -73,8 +73,15 @@ pub(super) fn insert_clones_map_access(object: IrExpr, key: IrExpr, ty: Ty, span
 /// through the reference. Wrap the access in Clone when the field itself
 /// needs cloning.
 pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let can_move = matches!(object.kind, IrExprKind::Var { id }
-        if ctx.owned.contains(&id) && !ctx.always.contains(&id)
+    // The record may sit behind a recursive field's box (`(*c).next` of a
+    // `Cons(c)` binder, #4249): the box binder's last read moves it too.
+    let root = match &object.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Deref { expr } => match expr.kind { IrExprKind::Var { id } => Some(id), _ => None },
+        _ => None,
+    };
+    let can_move = root.is_some_and(|id|
+        ctx.owned.contains(&id) && !ctx.always.contains(&id)
             && (!ctx.in_loop || (ctx.fresh.contains(&id) && !ctx.loops.binders.contains(&id)))
             && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
     let object = if let IrExprKind::IndexAccess { object: base, index } = &object.kind
@@ -113,7 +120,17 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
 pub(super) fn insert_clones_reassign(var: VarId, value: IrExpr, ctx: &mut CloneCtx) -> IrStmtKind {
     let local = ctx.owned.contains(&var) && !ctx.always.contains(&var) && !ctx.captured.contains(&var);
     let value = if local { interp_as_append(value, var, None) } else { value };
-    let movable = local && reads_once_plainly(&value, var);
+    if let Some(value) = super::pass_clone_record_fields::rewrite_spread_reassign(var, &value, ctx) {
+        return IrStmtKind::Assign { var, value };
+    }
+    // #4260: a `var` whose ONLY read is this reassignment's rhs (`b = add(b,
+    // i)` in a loop, `b` never read after it) has one syntactic use that the
+    // loop bumps, so it is classed `always`. That class exists for a read the
+    // next iteration repeats on the SAME value; here the statement overwrites
+    // `x` right after its read, so the read is its last use all the same.
+    let bumped_only = ctx.always.contains(&var) && ctx.bumped.contains(&var);
+    let movable = (local || (bumped_only && ctx.owned.contains(&var) && !ctx.captured.contains(&var)))
+        && reads_once_plainly(&value, var);
     let mut value = insert_clones_live(value, ctx);
     if movable {
         strip_var_clone(&mut value, var);

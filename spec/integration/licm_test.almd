@@ -40,7 +40,7 @@ test "list.push not hoisted" {
 
 // Impure: bytes.push must NOT be hoisted
 test "bytes.push not hoisted" {
-  var buf = bytes.new(0)
+  var buf = bytes.new()
   for i in 0..<3 {
     bytes.push(buf, 65 + i)
   }

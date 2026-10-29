@@ -38,6 +38,7 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
     let rs_code = super::build::arm_alloc_count(rs_code);
+    let rs_code = super::build::inject_fs_scope(rs_code);
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
@@ -141,10 +142,13 @@ pub(crate) fn build_native_cached(
     let bin_path = project_dir.join("target").join(profile_dir).join(format!("almide-{}", code_hash));
 
     // The binary's NAME is its full content key and it lands via atomic rename
-    // (below), so bare existence is a complete, lock-free cache hit. The
-    // touch is what keeps a hit out of the age-based eviction (#2500).
-    if bin_path.exists() {
+    // (below). A hit is a binary whose bytes still hash to the digest recorded
+    // when it was built (#4180): existence alone would execute whatever sits
+    // under that name. The touch is what keeps a hit out of the age-based
+    // eviction (#2500).
+    if cached_binary_intact(&bin_path) {
         touch_used(&bin_path);
+        touch_used(&binary_digest_path(&bin_path));
         return Ok(bin_path);
     }
 
@@ -167,9 +171,11 @@ pub(crate) fn build_native_cached(
     let _flock = BuildDirLock::acquire(&project_dir)?;
 
     // Re-check the cache under the lock: another process/thread may have built
-    // this exact binary while we waited, making a rebuild redundant.
-    if bin_path.exists() {
+    // this exact binary while we waited, making a rebuild redundant. A binary
+    // whose digest is missing or wrong is rebuilt over (#4180).
+    if cached_binary_intact(&bin_path) {
         touch_used(&bin_path);
+        touch_used(&binary_digest_path(&bin_path));
         return Ok(bin_path);
     }
 
@@ -219,10 +225,45 @@ pub(crate) fn build_native_cached(
                 return Err(format!("failed to stage built binary {} -> {}: {}",
                     built_path.display(), bin_path.display(), e));
             }
+            record_binary_digest(&bin_path)?;
             Ok(bin_path)
         }
         Err(e) => Err(e),
     }
+}
+
+/// Where the content digest of a cached binary is kept (#4180).
+fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
+    let mut name = bin.file_name().unwrap_or_default().to_os_string();
+    name.push(".sha256");
+    bin.with_file_name(name)
+}
+
+/// The lowercase hex SHA-256 of the file at `path`.
+fn file_sha256(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).ok()?;
+    Some(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Is the cached binary at `bin` the one this compiler built there: present,
+/// with a recorded digest its bytes still hash to (#4180)?
+pub(crate) fn cached_binary_intact(bin: &std::path::Path) -> bool {
+    let Ok(want) = std::fs::read_to_string(binary_digest_path(bin)) else { return false };
+    file_sha256(bin).is_some_and(|got| got == want.trim())
+}
+
+/// Record the digest of the binary just installed at `bin`, through a staged
+/// file and a rename like the binary itself.
+fn record_binary_digest(bin: &std::path::Path) -> Result<(), String> {
+    let digest = file_sha256(bin).ok_or_else(|| format!("cannot read the built binary {}", bin.display()))?;
+    let path = binary_digest_path(bin);
+    let staged = path.with_extension(format!("stage-{}", std::process::id()));
+    std::fs::write(&staged, digest).map_err(|e| format!("cannot record the binary digest {}: {e}", staged.display()))?;
+    std::fs::rename(&staged, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&staged);
+        format!("cannot record the binary digest {}: {e}", path.display())
+    })
 }
 
 /// The launcher's own working directory, exported to the child as
@@ -336,7 +377,17 @@ pub fn run_binary_captured(bin: &std::path::Path, program_args: &[String]) -> (i
 /// attributes a test's stdout to the test from libtest's markers, which only
 /// the stdout stream carries (#2538).
 pub fn run_binary_captured_io(bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
-    let Some(out) = with_exec_retry(|| binary_command(bin, program_args).output()) else {
+    run_binary_captured_io_env(bin, program_args, &[])
+}
+
+/// [`run_binary_captured_io`] with extra environment for the child — the
+/// test harness's completion ledger path (#4255).
+pub fn run_binary_captured_io_env(bin: &std::path::Path, program_args: &[String], env: &[(&str, &std::ffi::OsStr)]) -> (i32, String, String) {
+    let Some(out) = with_exec_retry(|| {
+        let mut cmd = binary_command(bin, program_args);
+        cmd.envs(env.iter().copied());
+        cmd.output()
+    }) else {
         return (1, String::new(), String::new());
     };
     (
@@ -468,7 +519,7 @@ pub fn cmd_run(args: RunArgs) {
 /// paths by preopening the host root (`--dir=/`). Windows has no "/" to
 /// preopen: the guest gets the CWD (relative fs paths keep working) plus the
 /// host's real temp dir mapped at the WASI `/tmp` convention, with `TMPDIR`
-/// steering `fs.temp_dir`/`env.temp_dir` there (the guest-side rule is
+/// steering `fs.temp_dir` there (the guest-side rule is
 /// `$TMPDIR ?? "/tmp"`, C-189 — the explicit `--env` wins over inherit-env,
 /// which on Windows would carry no TMPDIR at all). Shared by `cmd_run_wasm`
 /// and the wasm test harness so both legs see one filesystem contract.

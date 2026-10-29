@@ -12,7 +12,7 @@ const SRC: &str = r#"fn main() -> Unit = {
   let xs: List[Bool] = [true, false]
   let m: Map[String, Int] = ["k0": (if list.all(xs, (x) => x) then 10 else 1), "k1": list.count([1, 2, 3], (n) => n > 1)]
   let keyed: Map[String, Int] = [(if list.any(xs, (x) => x) then "yes" else "no"): 7]
-  println("${map.get_or(m, "k0", -1)} ${map.get_or(m, "k1", -1)} ${map.get_or(keyed, "yes", -1)}")
+  println("${map.get(m, "k0") ?? -1} ${map.get(m, "k1") ?? -1} ${map.get(keyed, "yes") ?? -1}")
 }
 "#;
 

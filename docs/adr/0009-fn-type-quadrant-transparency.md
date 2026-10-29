@@ -138,3 +138,40 @@ Phase 3 切替時に #1051 の文脈資格ルールは D2 の型規則に置き�
 - 内部: #1055(原題スケッチ)、#1051 / #489(現行モデルの固定点)、
   2026-08-05 matrix の `purity/*`・`effectctx/*` セル(ロンダリング probe 保存済み)、
   ADR-0002 / 0003 / 0006 / 0008
+
+## Implementation note — the effect bit through values (#4151, 2026-10-25)
+
+D2's laundering hole was still open for named effect fns used as values
+(`list.map(xs, fs.read_text)`, a user HOF, a record field, a closure handed
+down through pure helpers). It is closed as follows; the choices below are the
+conservative ones where this ADR is silent.
+
+1. **Naming an effect fn as an argument is an effect call** (D2's rule, at the
+   checker): a bare name already was E006 from a pure fn; a module path
+   (`fs.read_text`) now is too. An explicit `effect` slot (D3) is exempt.
+2. **The bit rides the value, not `Ty::Fn`.** D5 planned the bit as a type
+   bit. It is carried instead by the value-flow analysis that already carries
+   ADR-0026's category sets (`crates/almide-codegen/src/effect_flow`), as one
+   more bit of the same mask: an `effect fn`'s own node and every unscanned
+   stdlib `effect fn` call set it. That follows a value through record fields,
+   lists, options and closures (ADR-0026 D1: a stored value keeps its set)
+   with no new surface syntax and nothing for monomorphisation to multiply.
+3. **E109.** A pure fn whose solved set holds the bit concretely — through a
+   value it reads, not through a fn-typed parameter of its own (that is D2's
+   transparency, charged at its call sites) — is refused, with the path. A
+   record field of plain fn type is *not* transparent: the pure fn that runs
+   it is refused, the effect fn that stored it is not.
+4. **Soundness over precision.** A value leaving the tracked positions is
+   pooled per fn signature, and a call of a pooled value is charged with the
+   pool; a pure fn reading a fn from a list is refused if any fn of that
+   signature that runs an effect fn was put in a list anywhere. Measured on
+   the repo (spec/, stdlib/, examples/, tests/: 3,459 files, build route; all
+   5,102 `.almd` files, `check`): no legitimate program is refused; two
+   fixtures that passed `process.exec` from a pure `main` were made `effect`.
+5. **Abort is not an effect.** `process.exit` (bodyless, `-> Never`) does not
+   carry the bit — ADR-0022's abort, which the lowered `assert` arm calls.
+   Read off the declaration, not a name list.
+6. **Not changed:** an `effect (A) -> B` value passed to a plain `(A) -> B`
+   parameter still passes check (unify ignores `is_effect`) and then fails
+   rustc (E0271) on the two return representations. That is a typing gap of
+   its own, not laundering: the analysis charges the call site.

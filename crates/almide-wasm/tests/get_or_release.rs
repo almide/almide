@@ -1,11 +1,11 @@
-//! #2932 — `map.get_or` / `list.get_or` hand back an OWNED value and
-//! release everything else they touched, so a loop over them balances:
+//! #2932 — a `map.get` / `list.get` read with a `??` default hands back an
+//! OWNED value and releases everything else it touched, so a loop over it balances:
 //! every block the module allocates is freed (`allocs == frees`).
 //!
 //! Before the fix both arms declared their result a view. The default is
 //! lowered with a Retain credit, so a heap default (`some(0)`, a computed
 //! string, a list) leaked one block per call, hit or miss; and
-//! `list.get_or`'s hit leaked the Option shell `$list_get` allocates even
+//! the `list.get` hit leaked the Option shell `$list_get` allocates even
 //! for a scalar list. The printed output was right — the leak showed only
 //! in the counters, or as an OOM under `--heap-cap` (heap_cap_test's
 //! map-literal churn).
@@ -33,22 +33,22 @@ const MAP_OPTION_DEFAULT: &str = r#"effect fn main() -> Unit = {
   var acc = 0
   while i < 1000 {
     let m = ["k1": some(i + 1)]
-    acc = acc + (map.get_or(m, "k1", some(0)) ?? 0)
-    acc = acc + (map.get_or(m, "k2", some(1)) ?? 0)
+    acc = acc + ((map.get(m, "k1") ?? some(0)) ?? 0)
+    acc = acc + ((map.get(m, "k2") ?? some(1)) ?? 0)
     i = i + 1
   }
   println(int.to_string(acc))
 }
 "#;
 
-/// `list.get_or` over a scalar list: the hit's Option shell.
+/// `list.get(..) ?? d` over a scalar list: the hit's Option shell.
 const LIST_SCALAR: &str = r#"effect fn main() -> Unit = {
   var i = 0
   var acc = 0
   while i < 1000 {
     let xs = [i, 2]
-    acc = acc + list.get_or(xs, 0, 7)
-    acc = acc + list.get_or(xs, 9, 7)
+    acc = acc + list.get(xs, 0) ?? 7
+    acc = acc + list.get(xs, 9) ?? 7
     i = i + 1
   }
   println(int.to_string(acc))
@@ -60,7 +60,7 @@ const LIST_SCALAR: &str = r#"effect fn main() -> Unit = {
 /// across iterations, and results that outlive their container.
 const HEAP_SHAPES: &str = r#"type P = { name: String, n: Int }
 
-fn pick(m: Map[String, List[String]], k: String, d: List[String]) -> List[String] = map.get_or(m, k, d)
+fn pick(m: Map[String, List[String]], k: String, d: List[String]) -> List[String] = map.get(m, k) ?? d
 
 effect fn main() -> Unit = {
   let d = ["dflt"]
@@ -70,15 +70,15 @@ effect fn main() -> Unit = {
     let m = ["a": ["x" + int.to_string(i), "y"], "b": ["q"]]
     let r1 = pick(m, "a", d)
     let r2 = pick(m, "c", d)
-    let r3 = map.get_or(m, "b", d)
+    let r3 = map.get(m, "b") ?? d
     let ps = [{ name: "p" + int.to_string(i), n: i }]
-    let q = list.get_or(ps, 0, dp)
-    let q2 = list.get_or(ps, 3, dp)
+    let q = list.get(ps, 0) ?? dp
+    let q2 = list.get(ps, 3) ?? dp
     let so = ["s": some("v" + int.to_string(i))]
-    let o = map.get_or(so, "s", none) ?? "none"
-    let o2 = map.get_or(so, "t", some("w")) ?? "none"
+    let o = (map.get(so, "s") ?? none) ?? "none"
+    let o2 = (map.get(so, "t") ?? some("w")) ?? "none"
     let ls = ["a" + int.to_string(i), "b"]
-    let e = list.get_or(ls, 1, "c" + int.to_string(i))
+    let e = list.get(ls, 1) ?? ("c" + int.to_string(i))
     if i % 50 == 0 then {
       out = out + [list.join(r1, ","), list.join(r2, ","), int.to_string(list.len(r3)), q.name, q2.name, o, o2, e]
     } else ()
@@ -92,14 +92,14 @@ effect fn main() -> Unit = {
 fn map_get_or_with_an_option_default_frees_every_block() {
     let (out, allocs, frees) = counts(MAP_OPTION_DEFAULT);
     assert_eq!(out, "501500\n");
-    assert_eq!(allocs, frees, "map.get_or leaked {} block(s)", allocs - frees);
+    assert_eq!(allocs, frees, "map.get ?? default leaked {} block(s)", allocs - frees);
 }
 
 #[test]
 fn list_get_or_frees_the_option_shell_of_a_hit() {
     let (out, allocs, frees) = counts(LIST_SCALAR);
     assert_eq!(out, "506500\n");
-    assert_eq!(allocs, frees, "list.get_or leaked {} block(s)", allocs - frees);
+    assert_eq!(allocs, frees, "list.get ?? default leaked {} block(s)", allocs - frees);
 }
 
 #[test]

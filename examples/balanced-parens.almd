@@ -5,7 +5,7 @@
 //
 //   almide run examples/balanced-parens.almd
 fn is_balanced(s: String) -> Bool = match list.fold(
-  string.chars(s),
+  string.to_list(s),
   some([]),
   (acc, c) => match acc {
     none => none,

@@ -15,7 +15,7 @@ use std::process::Command;
 
 const PROGRAM: &str = r#"fn has_digit(s: String) -> Bool = {
   var out = false
-  for c in string.chars(s) {
+  for c in string.to_list(s) {
     let hit = c >= "0" and c <= "9"
     if hit then { out = true } else ()
   }
@@ -60,7 +60,7 @@ fn keep_list(xs: List[Int]) -> List[Int] = {
 
 fn first_upper(s: String) -> String = {
   var found = ""
-  for c in string.chars(s) {
+  for c in string.to_list(s) {
     if found == "" and c >= "A" and c <= "Z" then { found = c } else ()
   }
   found
@@ -136,11 +136,15 @@ fn borrowed_loop_binder_compares_as_str_and_borrowed_param_stores_owned() {
     assert!(emitted.status.success(), "{}", String::from_utf8_lossy(&emitted.stderr));
     let rust = String::from_utf8(emitted.stdout).unwrap();
     // The read-only binders keep the per-element borrow: no clone per char.
-    for name in ["has_digit", "count_above", "starts_upper"] {
+    // #4294: `classify` only matches its binder against string literals —
+    // a read through `&str`, so its source is borrowed too.
+    for name in ["has_digit", "count_above", "classify", "starts_upper"] {
         let body = fn_body(&rust, name);
         assert!(body.contains(".iter()") && !body.contains(".cloned()"), "{name} lost its borrowed binder: {body}");
         assert!(!body.contains(".clone()") && !body.contains(".to_string()") && !body.contains(".to_almide()"), "{name} clones: {body}");
     }
+    // #4294: the literal match reads the element, so the source is borrowed.
+    assert!(fn_body(&rust, "classify").starts_with("xs: &[AlmideString])"), "{}", fn_body(&rust, "classify"));
     // The stores convert the borrow into the owned binding's type.
     assert!(fn_body(&rust, "keep").contains("model = lit.to_almide();"), "{}", fn_body(&rust, "keep"));
     assert!(fn_body(&rust, "keep_list").contains("out = xs.to_vec();"), "{}", fn_body(&rust, "keep_list"));

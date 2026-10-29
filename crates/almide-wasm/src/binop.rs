@@ -32,7 +32,7 @@ pub(crate) fn is_uint64(t: &Ty) -> bool {
 impl Emitter<'_> {
     /// Re-wrap the i64 on the stack to the operands' declared narrow
     /// width (no-op when neither operand is narrow).
-    fn emit_narrow_wrap(&mut self, lt: &Ty, rt: &Ty) {
+    pub(crate) fn emit_narrow_wrap(&mut self, lt: &Ty, rt: &Ty) {
         let Some((bits, signed)) = narrow_width(lt).or_else(|| narrow_width(rt)) else {
             return;
         };
@@ -318,11 +318,11 @@ impl Emitter<'_> {
     /// `**` on floats IS the vendored libm pow (the interp's PowFloat →
     /// almide_rt_libm_pow) — one table, bit parity.
     fn lower_pow_float(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
-        self.lower_float_call("math.fpow", "PowFloat", left, right)
+        self.lower_float_call("math.__fpow", "PowFloat", left, right)
     }
 
     /// A float binop that IS a linked self-host fn of (Float, Float) -> Float:
-    /// `**` (math.fpow) and `%` (float.fmod — wasm has no float remainder).
+    /// `**` (math.__fpow) and `%` (float.fmod — wasm has no float remainder).
     fn lower_float_call(&mut self, key: &str, op: &str, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
         let Some(fi) = self.resolve_qualified(key) else {
             return unsup(&format!("binop:{op}-unlinked"));

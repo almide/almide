@@ -12,7 +12,7 @@ let read_file path =
 
 let () =
   if Array.length Sys.argv < 3 then (
-    prerr_endline "usage: checker <ownership|names|caps|caps-transitive> <witness-file>";
+    prerr_endline "usage: checker <ownership|names|caps|caps-transitive|call-modes|bounds|init> <witness-file>";
     exit 2);
   let mode = Sys.argv.(1) in
   let bytes = read_file Sys.argv.(2) in
@@ -23,8 +23,10 @@ let () =
     | "caps" -> Checker.check_caps_cert bytes
     | "caps-transitive" -> Checker.check_prog_cert bytes  (* call-graph: transitive reach ⊆ declared *)
     | "call-modes" -> Checker.check_modes_cert bytes  (* per-call-site param modes = callee's declared signature *)
+    | "bounds" -> Checker.check_bounds_cert bytes  (* every elided bounds check re-derived; accept ⟹ Spatial (#4005) *)
+    | "init" -> Checker.check_init_cert bytes  (* every construction site fills its block; accept ⟹ initialized (#4013) *)
     | m ->
-      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive | call-modes)");
+      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive | call-modes | bounds | init)");
       exit 2
   in
   if accepted then (print_endline "ACCEPT"; exit 0)

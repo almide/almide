@@ -36,6 +36,8 @@ mod mut_param_place;
 mod mut_param_tail_value;
 mod mut_param_unpropagated;
 pub mod exit_code;
+pub mod entry_split;
+pub mod addr_hold;
 pub mod diverge;
 pub mod fusion;
 pub mod speculation;
@@ -46,6 +48,7 @@ pub mod record_shape;
 pub mod mono_name;
 pub mod runtime_use;
 pub mod meter_plan;
+pub mod declared_repr;
 
 mod wasm_repr;
 

@@ -35,6 +35,21 @@ impl Checker {
             return;
         }
         let mut diags: Vec<Diagnostic> = Vec::new();
+        // #4008: an `@extern` fn's body is foreign code — outside the
+        // memory-safety guarantee, so critical refuses the declaration itself.
+        if critical {
+            for decl in &program.decls {
+                if let ast::Decl::Fn { name, extern_attrs, span, .. } = decl
+                    && !extern_attrs.is_empty()
+                {
+                    diags.push(memory_unsafe_err(
+                        "an `@extern` function is outside the memory-safety guarantee and is not admissible under `--profile critical`",
+                        name.as_str(),
+                        *span,
+                    ));
+                }
+            }
+        }
         for decl in &program.decls {
             let ast::Decl::Fn { name, attrs, body: Some(body), span, .. } = decl else {
                 continue;
@@ -90,13 +105,13 @@ impl Checker {
 }
 
 /// Pure stdlib modules a @bounded fn may call FIRST-ORDER members of (ALS-B7).
-/// `hash` and `error` reach intrinsics, but the intrinsics are computations
-/// (FNV/SHA over bytes, error-chain text) with no host effect; `path` is string
+/// `hash` reaches intrinsics, but the intrinsics are computations
+/// (FNV/SHA over bytes) with no host effect; `path` is string
 /// arithmetic on separators and never touches the filesystem.
 const BOUNDED_PURE_MODULES: &[&str] = &[
     "int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float",
-    "float32", "float64", "string", "list", "map", "set", "math", "option", "result", "value",
-    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "error", "path",
+    "float32", "float64", "bool", "string", "list", "map", "set", "math", "option", "result", "value",
+    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "path",
 ];
 
 /// Effect / host-reaching modules E076 rejects outright (ALS-B9); `io` is
@@ -106,9 +121,35 @@ const BOUNDED_PURE_MODULES: &[&str] = &[
 /// registry module, so `bounded_tables_name_real_modules` admits them by name.
 /// `prim` is the raw-memory floor; nothing bounded may reach it directly.
 const BOUNDED_DENIED_MODULES: &[&str] = &[
-    "env", "fs", "http", "net", "process", "random", "zlib", "datetime", "args",
-    "testing", "fan", "compute", "duration", "prim",
+    "env", "fs", "http", "net", "unix", "process", "random", "uuid", "zlib", "datetime", "args",
+    "testing", "fan", "compute", "duration", "prim", "ffi",
 ];
+
+/// #4008: is `m.f` outside the memory-safety guarantee? Declared once, at the
+/// functions (`@memory_unsafe` in stdlib/ffi.almd and on the deprecated
+/// `bytes` raw-pointer spellings). `--profile critical` refuses such a call
+/// with E100, and no `--allow` grants it back.
+pub fn is_memory_unsafe_call(m: &str, f: &str) -> bool {
+    almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, f)
+}
+
+/// E100 (#4008): a construct outside the memory-safety guarantee under
+/// `--profile critical`. Not an ALS §B rule (E070–E079): the plain `@bounded`
+/// attribute does not raise it; the critical profile does.
+fn memory_unsafe_err(msg: &str, fn_name: &str, span: Option<BSpan>) -> Diagnostic {
+    let mut d = Diagnostic::error(
+        msg.to_string(),
+        "the critical profile admits only code inside the memory-safety guarantee — keep raw-address and foreign code in a module that is not checked with `--profile critical`".to_string(),
+        format!("fn {}()", fn_name),
+    )
+    .with_code("E100");
+    if let Some(s) = span {
+        d.line = Some(s.line);
+        d.col = Some(s.col);
+        d.end_col = Some(s.end_col);
+    }
+    d
+}
 
 /// `--allow` capability names → the modules a grant un-denies (#567). Kept
 /// beside the denied set so a grant cannot name a module the profile never
@@ -117,10 +158,10 @@ const BOUNDED_DENIED_MODULES: &[&str] = &[
 /// component-model async mapping gives its arms a bounded-cost story (#1628).
 pub const CAPABILITY_GRANTS: &[(&str, &[&str])] = &[
     ("IO", &["io", "fs"]),
-    ("Net", &["http", "net"]),
+    ("Net", &["http", "net", "unix"]),
     ("Env", &["env", "args"]),
     ("Time", &["datetime", "duration"]),
-    ("Rand", &["random"]),
+    ("Rand", &["random", "uuid"]),
     ("Process", &["process"]),
 ];
 
@@ -166,8 +207,11 @@ mod bounded_tables_tests {
 
     /// Every registry module is classified pure or denied (or is `io`, the
     /// print-family special case), so a new host-reaching module cannot slip
-    /// past the profile unclassified: an unlisted module is E074 today by
-    /// accident of the fall-through, not by decision.
+    /// past the profile unclassified. A module the effect table declares
+    /// `Pure` and the profile does not list (`deque`, `heap`) is decided, not
+    /// fallen through: it reaches no host, and its calls are E074 until its
+    /// functions are shown to fit the profile. The pure list only shrinks
+    /// (proofs/name-keyed-sites.toml), so it is not where a new module goes.
     #[test]
     fn every_registry_module_is_classified() {
         let unclassified: Vec<&str> = STDLIB_MODULES
@@ -175,7 +219,10 @@ mod bounded_tables_tests {
             .chain(BUNDLED_MODULES)
             .copied()
             .filter(|m| {
-                *m != "io" && !BOUNDED_PURE_MODULES.contains(m) && !BOUNDED_DENIED_MODULES.contains(m)
+                *m != "io"
+                    && !BOUNDED_PURE_MODULES.contains(m)
+                    && !BOUNDED_DENIED_MODULES.contains(m)
+                    && almide_ir::effect::module_effects(m) != Some(almide_ir::effect::ModuleEffects::Pure)
             })
             .collect();
         assert!(unclassified.is_empty(), "registry modules the profile does not classify: {unclassified:?}");
@@ -194,7 +241,7 @@ const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
     ("list.with_capacity", &[0]),
     ("list.range", &[0, 1]),
     ("list.repeat", &[1]),
-    ("bytes.new", &[0]),
+    ("bytes.zeros", &[0]),
     ("bytes.repeat", &[1]),
     ("string.pad_start", &[1]),
     ("string.pad_end", &[1]),
@@ -203,8 +250,13 @@ const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
 /// In-loop allocating calls (ALS-B4).
 const BOUNDED_ALLOC_CALLS: &[&str] = &[
     "list.push", "string.push", "bytes.push", "list.concat", "string.concat", "list.append",
-    "map.insert", "set.insert", "bytes.append",
+    "map.set", "set.insert", "bytes.append",
 ];
+
+/// The `float.*` members that COMPUTE on Floats (ALS-B10 / E077): the
+/// former `math.fpow` / `fmin` / `fmax` computations moved here (R-math-01). The
+/// rest of `float.*` observes a Float (`to_string`, `sign`, ...).
+const BOUNDED_FLOAT_COMPUTE_CALLS: &[&str] = &["float.pow", "float.min", "float.max"];
 
 fn bounded_err(
     msg: &str,
@@ -869,6 +921,17 @@ impl BoundedCx<'_, '_> {
     /// capability questions, and a module outside the pure set is not a
     /// profile callee. `true` when that settles the call.
     fn member_module_decided(&mut self, call: &ast::Expr, m: &str, f: &str) -> bool {
+        // #4008: outside the memory-safety guarantee — no grant reaches it.
+        if self.checker.profile_critical && is_memory_unsafe_call(m, f) {
+            self.diags.push(memory_unsafe_err(
+                &format!(
+                    "`{m}.{f}` is outside the memory-safety guarantee and is not admissible under `--profile critical`"
+                ),
+                self.fn_name,
+                call.span.or(self.fn_span),
+            ));
+            return true;
+        }
         if m == "io" {
             if self.module_granted("io") {
                 return true;
@@ -955,8 +1018,9 @@ impl BoundedCx<'_, '_> {
         }
         // ALS-B10 / E077: a stdlib call computing on Float arguments.
         // float.to_string / float.sign etc. OBSERVE a Float — computing
-        // modules (math.*) reject it
-        if m == "math" && args.iter().any(|a| self.expr_is_float(a)) {
+        // calls (math.*, BOUNDED_FLOAT_COMPUTE_CALLS) reject it
+        let computes = m == "math" || BOUNDED_FLOAT_COMPUTE_CALLS.contains(&full.as_str());
+        if computes && args.iter().any(|a| self.expr_is_float(a)) {
             self.err(
                 "a Float operation is not admissible in a @bounded function",
                 "keep to Int arithmetic — Float values may be held and passed, not computed on",

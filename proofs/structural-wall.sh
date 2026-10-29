@@ -28,6 +28,14 @@
 # implementations of one number — and a drill flips one byte of a built
 # artifact, which almide-verify must reject.
 #
+# ANCHORS (#4011 (d)): the producer also writes where in the shipped bytes
+# each bounds and init event is, and almide-anchor-check (its own wasm
+# decoder, no compiler code) holds every located event to the instruction
+# there — a site's allocation size and its stores' width, offset and address
+# local, a fill loop's exact shape, a check's compare-and-abort, an access's
+# load or store. Every fixture must read ANCHORS OK: the events the proven
+# checkers judge are the instructions the artifact contains.
+#
 # Every witness is judged by THREE independent verdicts, and all three must
 # agree: the checker extracted from the Coq proof (proofs/checker), the Rocq
 # KERNEL itself (a generated file of vm_compute goals, coqc'd), and
@@ -47,17 +55,30 @@ COQC="${COQC:-$(command -v coqc || true)}"
 [ -n "$COQC" ] || { echo "STRUCTURAL WALL FAIL: coqc is not on PATH (the kernel verdict needs it)" >&2; exit 1; }
 
 echo "== build the compiler, the bundle producer, almide-verify and the kernel-proven checker =="
-(cd "$ROOT" && cargo build -q --bin almide && cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q -p almide-verify)
+(cd "$ROOT" && cargo build -q --bin almide && cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q -p almide-verify -p almide-anchor-check)
 TD="${CARGO_TARGET_DIR:-$ROOT/target}/debug"
 ALMIDE="$TD/almide"
 PRODUCER="$TD/examples/emit_structural_bundle"
 VERIFY="$TD/almide-verify"
+ANCHORCHECK="$TD/almide-anchor-check"
 ./build-checker.sh >/dev/null
 HASHES="$ROOT/proofs/structural-artifacts.sha256"
 
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
+# The full certified list on a full run (a push to develop or main, a tag, a
+# manual run, a PR into main). Under ALMIDE_CI_SLICE=k (a PR into develop) the
+# commit-rotated 1-in-k slice plus the fixtures the change touches
+# (scripts/lib/ci-slice.sh), so consecutive PRs certify different slices. A
+# slice judges exceptions only for the fixtures it ran and does not rewrite
+# the artifact digest file.
+. "$ROOT/scripts/lib/ci-slice.sh"
+grep -v -E '^(#|$)' "$FIXTURES" > "$OUT/listed"
+(cd "$ROOT" && ci_slice_filter structural-wall < "$OUT/listed") > "$OUT/selected"
+if ci_slice_active; then
+  HASHES="$OUT/structural-artifacts.sha256"
+fi
 echo "== build each certified fixture (almide build --target wasm) and produce its bundle =="
 N=0
 {
@@ -72,7 +93,7 @@ while IFS= read -r f; do
     sed 's/^/  /' "$OUT/$N.err" >&2
     exit 1
   fi
-  if ! (cd "$ROOT" && "$PRODUCER" "$f" --artifact "$OUT/$N.wasm") > "$OUT/$N.bundle" 2> "$OUT/$N.err"; then
+  if ! (cd "$ROOT" && "$PRODUCER" "$f" --artifact "$OUT/$N.wasm" --anchors "$OUT/$N.anchors") > "$OUT/$N.bundle" 2> "$OUT/$N.err"; then
     echo "STRUCTURAL WALL FAIL: the producer refused a certified fixture: $f" >&2
     sed 's/^/  /' "$OUT/$N.err" >&2
     exit 1
@@ -91,10 +112,33 @@ while IFS= read -r f; do
     exit 1
   fi
   printf '%s  %s\n' "$sum" "$f" >> "$HASHES.tmp"
-done < "$FIXTURES"
+  # #4011 (d): every located bounds / init event is its instruction.
+  if ! "$ANCHORCHECK" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1; then
+    echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
+    sed 's/^/  /' "$OUT/$N.anchor" >&2
+    exit 1
+  fi
+done < "$OUT/selected"
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
+[ "$N" -eq "$(wc -l < "$OUT/selected" | tr -d ' ')" ] || { echo "STRUCTURAL WALL FAIL: built $N of the selected fixtures — the scan went blind" >&2; exit 1; }
 mv "$HASHES.tmp" "$HASHES"
 echo "  $N fixture bundle(s); artifact digests in proofs/structural-artifacts.sha256"
+python3 - "$OUT" <<'PYEOF'
+import os, re, sys
+out = sys.argv[1]
+keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated"]
+tot = dict.fromkeys(keys, 0)
+pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated")
+for f in os.listdir(out):
+    if f.endswith(".anchor"):
+        m = pat.search(open(os.path.join(out, f)).read())
+        if m:
+            for k, v in zip(keys, m.groups()):
+                tot[k] += int(v)
+print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
+      f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes; unlocated (dead bodies): "
+      f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")
+PYEOF
 
 echo "== drill: one byte of a shipped artifact changed — the verifier must reject =="
 mkdir -p "$OUT/tamper"
@@ -124,7 +168,8 @@ python3 - "$OUT" "$ROOT/proofs/checker" "$EXCEPTIONS" "$KGEN" <<'PYEOF'
 import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
-      "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert"}
+      "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
+      "bounds": "check_bounds_cert", "init": "check_init_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -206,13 +251,14 @@ for row in open(os.path.join(out, "index")):
     fixtures_ok += all_ok
     if all_ok and vrc != "0":
         fail.append(f"{fx}: every witness accepts, but almide-verify's bundle outcome is exit {vrc}")
-for key in sorted(exceptions - rejected_seen):
+ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
+for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
 
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -230,6 +276,19 @@ with open(kgen, "w") as g:
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
+# #4005 coverage: how many index-operator accesses the bounds witnesses
+# record, and how many of them carry no check of their own token count
+# (elided by #3345 and re-derived by the checker). Only accepted witnesses.
+import re as _re
+toks = {k: 0 for k in "acws"}
+for w in accepts["bounds"]:
+    for t in _re.findall(r"[acws](?=\d)", w):
+        toks[t] += 1
+print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
+# #4013 coverage: the construction sites the init witnesses record (list
+# literals today; every other allocation site records nothing).
+sites = sum(len([x for x in w.split(";") if x.strip()]) for w in accepts["init"])
+print(f"  [init] recorded: {sites} construction site(s), over {sum(1 for w in accepts['init'] if w.strip())} non-empty witness(es)")
 n = sum(1 for _ in open(os.path.join(out, "index")))
 print(f"  {fixtures_ok}/{n} fixture(s) accepted on every property; {len(rejects)} rejected witness(es), each named in the exception ledger")
 for m in fail[:20]:
@@ -300,8 +359,53 @@ else
   rm -f "$PGEN"; exit 1
 fi
 
+# BOUNDS / INIT POISON LEG (#4005, #4013): proofs/poisoned-certs/<property>/*.cert
+# are the witnesses the structural emitter writes with a bounds check or a
+# slot store lost — scripts/witness-reinject.sh <property> re-injects each
+# bug and pins its witness to
+# these files. Every verdict must REJECT each one, on every run.
+for prop in bounds init; do
+  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; esac
+  echo "== $(printf %s "$prop" | tr a-z A-Z) POISON LEG: every lost-${prop} witness is REJECTED by all three verdicts =="
+  PPOISONED=("$ROOT"/proofs/poisoned-certs/$prop/*.cert)
+  if [ ! -e "${PPOISONED[0]}" ]; then
+    echo "STRUCTURAL WALL FAIL: proofs/poisoned-certs/$prop/ holds no certificate — the $prop poison leg would pass vacuously." >&2
+    exit 1
+  fi
+  PGEN="$(mktemp /tmp/KernelPoison_XXXXXX).v"
+  python3 - "$PMOD" "$PFN" "${PPOISONED[@]}" > "$PGEN" <<'PYEOF'
+import sys
+mod, fn = sys.argv[1], sys.argv[2]
+print("From AlmideTrust Require Import %s." % mod)
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+for path in sys.argv[3:]:
+    print('Goal %s "%s" = false.' % (fn, open(path).read().replace('"', '""')))
+    print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+  for cert in "${PPOISONED[@]}"; do
+    name="${cert#"$ROOT"/}"
+    set +e
+    ./checker "$prop" "$cert" >/dev/null 2>&1; XRC=$?
+    "$VERIFY" "$prop" "$cert" >/dev/null 2>&1; PRC=$?
+    set -e
+    if [ "$XRC" -ne 1 ] || [ "$PRC" -ne 1 ]; then
+      echo "STRUCTURAL WALL FAIL: $name was not rejected (extracted checker exit $XRC, almide-verify exit $PRC; want 1 and 1)." >&2
+      rm -f "$PGEN"; exit 1
+    fi
+    echo "  REJECT $name (extracted checker + almide-verify)"
+  done
+  if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$PGEN" >/dev/null 2>&1); then
+    echo "  KERNEL OK: the Rocq kernel rejects all ${#PPOISONED[@]} $prop poisoned certificate(s)"
+    rm -f "$PGEN" "${PGEN%.v}.vo" "${PGEN%.v}.vos" "${PGEN%.v}.vok" "${PGEN%.v}.glob"
+  else
+    echo "STRUCTURAL WALL FAIL: the KERNEL did not reject a $prop poisoned certificate ($PFN = false failed)." >&2
+    rm -f "$PGEN"; exit 1
+  fi
+done
+
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
-echo "name-totality, capability and call-graph witness of the structural build is accepted —"
+echo "bounds, init, name-totality, capability and call-graph witness of the structural build is accepted —"
 echo "the extracted checker, the Rocq kernel and almide-verify agreeing on every verdict — and"
 echo "every bundle names the SHA-256 of the file 'almide build --target wasm' shipped for it."

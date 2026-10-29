@@ -1,0 +1,5 @@
+import io
+
+effect fn first_byte(h: io.Stdin) -> Int = bytes.get(io.read(h, 1)!, 0) ?? -1
+
+effect fn main() -> Unit = println("${first_byte(io.stdin()!)!}")

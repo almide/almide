@@ -1,0 +1,3 @@
+expects_code = "E033"
+expects_error = "cannot build a literal of opaque type 'Secret' outside its module 'secret'"
+hint_substring = "secret.new"

@@ -19,10 +19,6 @@ impl Emitter<'_> {
         if let Some(out) = self.lower_list_order_call(func, args)? {
             return Ok(out);
         }
-        // #2749: list.shuffle shares random.shuffle's arm (random.rs).
-        if let Some(out) = self.lower_random_call("list", func, args)? {
-            return Ok(out);
-        }
         if let Some(out) = self.lower_list_mut_call(func, args, ret_hint)? {
             return Ok(out);
         }
@@ -30,17 +26,17 @@ impl Emitter<'_> {
             // Shape-grouped dispatch: or-patterns keep this match at
             // pattern-count complexity; the name split happens in the
             // per-shape sub-dispatchers below.
-            ("len" | "length" | "first" | "last" | "sum" | "dedup" | "product"
+            ("len" | "length" | "first" | "last" | "__sum_int" | "dedup" | "__product_int"
             | "flatten" | "unique" | "enumerate", [xs]) => {
                 self.lower_list_unary_named(func, xs)
             }
-            ("get" | "join" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
+            ("get" | "__join_string" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
             | "zip" | "map" | "filter" | "any" | "all" | "count" | "take_while"
-            | "drop_while" | "reduce" | "flat_map" | "filter_map" | "binary_search"
+            | "drop_while" | "reduce" | "flat_map" | "filter_map"
             | "window" | "unique_by" | "group_by" | "partition", [a, b]) => {
                 self.lower_list_pair_named(func, a, b)
             }
-            ("get_or" | "set" | "swap" | "update" | "scan" | "zip_with" | "slice"
+            ("set" | "swap" | "update" | "scan" | "zip_with" | "slice"
             | "fold", [a, b, c]) => {
                 self.lower_list_triple_named(func, a, b, c)
             }
@@ -213,12 +209,14 @@ impl Emitter<'_> {
         self.f.instructions().local_set(bh);
         self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
         let ah = self.hold_i64()?;
-        self.f.instructions().local_set(ah);
+        // #4147: both bounds clamp into [0, count] — a negative bound is 0.
+        self.f.instructions().local_set(ah).local_get(ah).i64_const(0).local_get(ah).i64_const(0).i64_gt_s().select().local_set(ah);
         self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
         let eh = self.hold_i64()?;
-        // e = min(b, count); s = a; s < 0 or s >= e → []
+        // e = min(b, count); s = a; s >= e → []
         let mut ins = self.f.instructions();
-        ins.local_tee(eh);
+        ins.local_set(eh);
+        ins.local_get(eh).i64_const(0).local_get(eh).i64_const(0).i64_gt_s().select().local_tee(eh);
         ins.local_get(bh)
             .i32_load(len_memarg())
             .i64_extend_i32_u()
@@ -394,9 +392,9 @@ impl Emitter<'_> {
             "length" => self.lower_list_length_arm(xs),
             "first" => self.lower_list_first_arm(xs),
             "last" => self.lower_list_last(xs),
-            "sum" => self.lower_list_sum(xs),
+            "__sum_int" => self.lower_list_sum(xs),
             "dedup" => self.lower_list_dedup(xs),
-            "product" => self.lower_list_product(xs),
+            "__product_int" => self.lower_list_product(xs),
             "flatten" => self.lower_list_flatten(xs),
             "unique" => self.lower_list_unique(xs),
             _ => self.lower_list_enumerate(xs),
@@ -412,7 +410,7 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match func {
             "get" => self.lower_list_get_arm(a, b),
-            "join" => self.lower_list_join_arm(a, b),
+            "__join_string" => self.lower_list_join_arm(a, b),
             "find" => self.lower_list_find(a, b),
             // #1423 stage 4: the index sibling — the same first-match
             // scan, the some payload is the INDEX (an Int slot).
@@ -439,7 +437,6 @@ impl Emitter<'_> {
         c: &IrExpr,
     ) -> ArmResult {
         match func {
-            "get_or" => self.lower_list_get_or(a, b, c),
             "set" => self.lower_list_set(a, b, c),
             "swap" => self.lower_list_swap(a, b, c),
             "update" => self.lower_list_update(a, b, c),
@@ -667,7 +664,16 @@ impl Emitter<'_> {
         self.loop_src_load(src);
         self.f.instructions().local_set(x_p);
         self.witness_callback_open(cb, Some(acc_p));
-        self.lower_fold_body(cb, body, b)?;
+        // #4208: a body ending in `map.remove(acc, k)` holes the
+        // accumulator's block; the fold's result settles it below.
+        let acc_var = match &cb.kind {
+            IrExprKind::Lambda { params, .. } => params.first().map(|(v, _)| *v),
+            _ => None,
+        };
+        match acc_var {
+            Some(acc) => self.with_tomb_tail(acc, body, |em| em.lower_fold_body(cb, body, b))?,
+            None => self.lower_fold_body(cb, body, b)?,
+        }
         // The accumulator OWNS one credit on every step: a borrowed body
         // result (a captured var, the accumulator itself) takes its share,
         // and the previous accumulator is released before the rebind
@@ -681,67 +687,13 @@ impl Emitter<'_> {
         self.witness_loop_close();
         self.loop_src_step(src);
         self.f.instructions().local_get(acc_p);
+        if let Some(acc) = acc_var {
+            self.settle_tomb_read(&acc, b);
+        }
         self.loop_src_close(src);
         Ok(Some(Lowered::owned(b)))
     }
 
-    /// `list.get_or(xs, i, d)`: (xs.get(i)) ?? d, inlined via the get
-    /// helper — extracted for complexity budget.
-    pub(crate) fn lower_list_get_or(
-        &mut self,
-        xs: &IrExpr,
-        idx: &IrExpr,
-        default: &IrExpr,
-    ) -> ArmResult {
-        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
-            SliceTy::List(h) => self.types.el(h),
-            other => return unsup(&format!("list-get-of:{other:?}")),
-        };
-        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
-        let helper = match elem.slot_size() {
-            8 => F_LIST_GET_8,
-            _ => F_LIST_GET_4,
-        };
-        // The default ALWAYS evaluates, after the lookup and before the
-        // select — native argument order (#1919): an in-branch lowering
-        // skipped its effects (and its aborts) on a hit, so
-        // `list.get_or(xs, 0, int.clamp(5, 1, 0))` died on native and ran
-        // on wasm. The lookup's Option handle waits in a held local; the
-        // default's own lowering may use the scratch local.
-        let hres = self.hold_i32()?;
-        self.f.instructions().call(helper).local_set(hres);
-        let hd = self.hold_for(elem)?;
-        self.lower_arg(default, Some(elem), ArgMode::Retain)?;
-        self.f.instructions().local_set(hd);
-        // Owned either way (#2932): a miss hands the default's Retain
-        // credit over; a hit shares the element (+1, the list keeps its
-        // own credit), releases the unused default and frees the Option
-        // shell `$list_get` allocated — its payload took no share here, so
-        // the flat release is the whole of it. Before, the shell leaked on
-        // every hit and a heap default leaked on every call.
-        self.f.instructions().local_get(hres).i32_eqz().if_(BlockType::Result(elem.val_type()));
-        self.f.instructions().local_get(hd);
-        self.f.instructions().else_().local_get(hres);
-        self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
-        self.share_handle_top(elem);
-        self.emit_release_hold(hd, elem);
-        self.f.instructions().local_get(hres).call(crate::F_DEC_FLAT);
-        self.f.instructions().end();
-        self.release_for(elem);
-        self.release_i32();
-        Ok(Some(self.selected_default_result(elem)))
-    }
-
-    /// A `get_or` arm's result: the selected value carries one owned
-    /// credit when it is a handle the frame releases (the hit branch's
-    /// `share_handle_top` paid it), and is a plain value otherwise.
-    pub(crate) fn selected_default_result(&self, v: SliceTy) -> Lowered {
-        if self.elem_is_handle(v) && self.rc_droppable(v) {
-            Lowered::owned(v)
-        } else {
-            Lowered::view(v)
-        }
-    }
 }
 
 impl Emitter<'_> {
@@ -758,7 +710,6 @@ impl Emitter<'_> {
             "drop_while" => self.lower_list_drop_while(a, b),
             "reduce" => self.lower_list_reduce(a, b),
             "flat_map" => self.lower_list_flat_map(a, b),
-            "binary_search" => self.lower_list_binary_search(a, b),
             "window" => self.lower_list_window(a, b),
             "unique_by" => self.lower_list_unique_by(a, b),
             "group_by" => self.lower_list_group_by(a, b),

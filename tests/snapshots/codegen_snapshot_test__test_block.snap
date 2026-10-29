@@ -2,6 +2,824 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
+pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>) {
+    let Some(p) = window(pos, 1, b.len()) else { return (pos, None); };
+    (pos + 1, Some(b[p] != 0))
+}
+
+
+// Same window rule as the cursor macros above. This one was already correct,
+// but only by accident of the cast (a negative `pos` or `n` became huge and the
+// `checked_add` then failed); the two sign tests are written out so the rule is
+// visible where it is applied (#2479).
+pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Vec<u8>>) {
+    let Ok(nn) = usize::try_from(n) else { return (pos, None); };
+    let Some(p) = window(pos, nn, b.len()) else { return (pos, None); };
+    (pos + n, Some(b[p..p + nn].to_vec()))
+}
+
+// ── Big-endian appenders ──
+
+pub fn almide_rt_bytes_append_u16_be(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as u16).to_be_bytes()));
+}
+pub fn almide_rt_bytes_append_u32_be(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as u32).to_be_bytes()));
+}
+pub fn almide_rt_bytes_append_i32_be(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as i32).to_be_bytes()));
+}
+pub fn almide_rt_bytes_append_i64_be(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&val.to_be_bytes());
+}
+// Every bytes float writer — `append_f*`, `set_f*`, `set_float32`,
+// `write_f64_be`, `write_float32` — is a NaN observation boundary (C-210): a
+// NaN writes the one canonical pattern, as `float.to_bits` reads it, never its
+// raw sign/payload bits (#3647: x86 arithmetic sets the NaN sign where aarch64
+// does not, and `float.from_bits` smuggles any payload; #3658: the sets and
+// writes too). Every writer takes its value through these two helpers.
+fn canonical_f64(val: f64) -> f64 {
+    if val.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { val }
+}
+fn canonical_f32(val: f64) -> f32 {
+    if val.is_nan() { f32::from_bits(0x7FC0_0000) } else { val as f32 }
+}
+pub fn almide_rt_bytes_append_f32_be(b: &mut Vec<u8>, val: f64) {
+    b.extend_from_slice(&canonical_f32(val).to_be_bytes());
+}
+pub fn almide_rt_bytes_append_f64_be(b: &mut Vec<u8>, val: f64) {
+    b.extend_from_slice(&canonical_f64(val).to_be_bytes());
+}
+
+// ── Big-endian bulk readers ──
+
+pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
+        out.push(u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
+        p += 4;
+    }
+    out
+}
+pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
+        out.push(i32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
+        p += 4;
+    }
+    out
+}
+pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
+        out.push(i64::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
+        p += 8;
+    }
+    out
+}
+pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
+        out.push(f32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64);
+        p += 4;
+    }
+    out
+}
+pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
+        out.push(f64::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
+        p += 8;
+    }
+    out
+}
+
+// ── Little-endian reads (match stdlib/defs/bytes.toml) ──
+
+pub fn almide_rt_bytes_read_i32_le(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
+    i32::from_le_bytes(bytes_fixed::<4>(b, p)) as i64
+}
+pub fn almide_rt_bytes_read_u32_le(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
+    u32::from_le_bytes(bytes_fixed::<4>(b, p)) as i64
+}
+pub fn almide_rt_bytes_read_u16_le(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
+    u16::from_le_bytes(bytes_fixed::<2>(b, p)) as i64
+}
+pub fn almide_rt_bytes_read_i64_le(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
+    i64::from_le_bytes(bytes_fixed::<8>(b, p))
+}
+pub fn almide_rt_bytes_read_f32_le(b: &Vec<u8>, pos: i64) -> f64 {
+    let p = pos as usize;
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0.0; }
+    f32::from_le_bytes(bytes_fixed::<4>(b, p)) as f64
+}
+pub fn almide_rt_bytes_read_f64_le(b: &Vec<u8>, pos: i64) -> f64 {
+    let p = pos as usize;
+    if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
+    f64::from_le_bytes(bytes_fixed::<8>(b, p))
+}
+// F16 → F32: reassemble the u16 bits and expand.
+pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
+    let p = pos as usize;
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0.0; }
+    let bits = u16::from_le_bytes(bytes_fixed::<2>(b, p));
+    f16_bits_to_f64(bits) as f64
+}
+
+
+// Bulk array reads: avoid per-element Almide-side loops.
+
+pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
+        out.push(i32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
+        p += 4;
+    }
+    out
+}
+
+pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
+        out.push(i64::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
+        p += 8;
+    }
+    out
+}
+
+pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
+        out.push(u32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
+        p += 4;
+    }
+    out
+}
+
+pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
+        out.push(f64::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
+        p += 8;
+    }
+    out
+}
+
+pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
+        out.push(f32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64);
+        p += 4;
+    }
+    out
+}
+
+pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
+    let n = if count < 0 { 0usize } else { count as usize };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 2; continue; }
+        let bits = u16::from_le_bytes([b[p], b[p+1]]);
+        out.push(f16_bits_to_f64(bits) as f64);
+        p += 2;
+    }
+    out
+}
+
+
+// IEEE-754 half precision → f32. Hardware-free reference impl.
+fn f16_bits_to_f64(bits: u16) -> f32 {
+    let sign = (bits >> 15) & 1;
+    let exp = ((bits >> 10) & 0x1f) as i32;
+    let mant = (bits & 0x3ff) as u32;
+    let sign_f = if sign == 1 { -1.0f32 } else { 1.0 };
+    if exp == 0 {
+        // subnormal or zero: value = sign * mant * 2^-24
+        sign_f * (mant as f32) * (2.0f32).powi(-24)
+    } else if exp == 31 {
+        if mant == 0 { sign_f * f32::INFINITY } else { f32::NAN }
+    } else {
+        // normal: (1 + mant/1024) * 2^(exp - 15)
+        let m = 1.0f32 + (mant as f32) / 1024.0;
+        sign_f * m * (2.0f32).powi(exp - 15)
+    }
+}
+
+
+pub fn almide_rt_bytes_append_f64_le(b: &mut Vec<u8>, val: f64) {
+    b.extend_from_slice(&canonical_f64(val).to_le_bytes());
+}
+
+pub fn almide_rt_bytes_append_f32_le(b: &mut Vec<u8>, val: f64) {
+    b.extend_from_slice(&canonical_f32(val).to_le_bytes());
+}
+
+pub fn almide_rt_bytes_append_u8(b: &mut Vec<u8>, val: i64) {
+    b.push((val as u8) & 0xFF);
+}
+
+pub fn almide_rt_bytes_append_u16_le(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as u16).to_le_bytes()));
+}
+
+pub fn almide_rt_bytes_append_u32_le(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as u32).to_le_bytes()));
+}
+
+pub fn almide_rt_bytes_append_i32_le(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as i32).to_le_bytes()));
+}
+
+pub fn almide_rt_bytes_append_i64_le(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&val.to_le_bytes());
+}
+
+// errtext — C-418's escaper for user data in runtime error texts (#4126).
+//
+// The text is almide-base's err_text.rs, inlined here ONCE: fs.rs, process.rs
+// and net.rs call `almide_rt_errtext_quote` / `almide_rt_errtext_escape`, and
+// RUNTIME_DEPS pulls this module in beside any of them by that prefix. A copy
+// in each caller would collide in the one generated crate (E0428, the
+// native_runtime_name_collision_pin_test class).
+// err_text (C-418, #4126): the ONE escaper for user data a runtime error text
+// embeds — a path, a command, a socket path, a host name. Without it a path
+// holding `\n` forges a second log line and one holding ESC drives the
+// reader's terminal.
+//
+// The escape set is the characters that move, hide or break text when
+// printed, declared ONCE as [`ALMIDE_RT_ERRTEXT_ESCAPED`]:
+//
+// - C0 controls U+0000..=U+001F and DEL U+007F;
+// - C1 controls U+0080..=U+009F (U+0085 is a line break to some readers);
+// - every character of General Category Cf (format), Zl (line separator)
+//   and Zp (paragraph separator), Unicode 16.0, read from the UCD's
+//   DerivedGeneralCategory: the bidirectional controls (Trojan Source,
+//   #4092), U+2028 / U+2029 (a line break to JS log viewers), the zero-width
+//   and invisible characters (U+200B..=U+200D, U+2060..=U+2064, U+FEFF), the
+//   soft hyphen U+00AD and the rest of Cf (#4265);
+// - the whole Tags block U+E0000..=U+E007F (its assigned members are Cf):
+//   invisible ASCII a model reads as text, an instruction smuggled to the
+//   agent that reads the error (#4265).
+//
+// Each is written the way Rust's `{:?}` writes it: `\n` `\r` `\t` `\0`, else
+// `\u{<lowercase hex, no leading zeros>}` (ESC is `\u{1b}`). EVERY OTHER
+// character is kept as is — the backslash and the quote included, so an
+// ordinary path (a Windows one too) reads back exactly as written. A leg that
+// cannot call this file (the stock artifact's fs service in WAT, the
+// self-hosted `string.__err_text`) carries the same ranges, and
+// `crates/almide-base/tests/err_text.rs` reads each copy back and fails on any
+// difference from this table.
+//
+// ONE source, every consumer: `almide_base::err_text` is this file as a
+// module; runtime/rs/src/errtext.rs `include!`s it into the generated crate
+// (once — the modules that call it depend on that module by its
+// `almide_rt_errtext_` prefix); almide-rt-core's cores see it through
+// lib.rs. Splice discipline: no `crate::` paths, no `mod`, no `use` lines,
+// every name prefixed `almide_rt_errtext_`.
+
+/// The characters C-418 escapes, as sorted, disjoint, inclusive ranges (see
+/// the file header): C0, DEL and C1, then Cf + Zl + Zp of Unicode 16.0 (two
+/// adjacent runs merged: U+2028..=U+2029 Zl/Zp with U+202A..=U+202E Cf), then
+/// the Tags block whole.
+pub const ALMIDE_RT_ERRTEXT_ESCAPED: &[(u32, u32)] = &[
+    (0x0000, 0x001f),
+    (0x007f, 0x009f),
+    (0x00ad, 0x00ad),
+    (0x0600, 0x0605),
+    (0x061c, 0x061c),
+    (0x06dd, 0x06dd),
+    (0x070f, 0x070f),
+    (0x0890, 0x0891),
+    (0x08e2, 0x08e2),
+    (0x180e, 0x180e),
+    (0x200b, 0x200f),
+    (0x2028, 0x202e),
+    (0x2060, 0x2064),
+    (0x2066, 0x206f),
+    (0xfeff, 0xfeff),
+    (0xfff9, 0xfffb),
+    (0x110bd, 0x110bd),
+    (0x110cd, 0x110cd),
+    (0x13430, 0x1343f),
+    (0x1bca0, 0x1bca3),
+    (0x1d173, 0x1d17a),
+    (0xe0000, 0xe007f),
+];
+
+/// True for a character C-418 escapes in an error text.
+pub fn almide_rt_errtext_is_escaped(c: char) -> bool {
+    let n = c as u32;
+    ALMIDE_RT_ERRTEXT_ESCAPED.iter().any(|&(lo, hi)| lo <= n && n <= hi)
+}
+
+/// `s` with every C-418 character escaped (see the file header).
+pub fn almide_rt_errtext_escape(s: &str) -> String {
+    if !s.chars().any(almide_rt_errtext_is_escaped) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if almide_rt_errtext_is_escaped(c) => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `"s"` with `s` escaped — the operand form of `call("operand"): reason`.
+pub fn almide_rt_errtext_quote(s: &str) -> String {
+    format!("\"{}\"", almide_rt_errtext_escape(s))
+}
+
+
+// float extern — Rust native implementations
+
+pub fn almide_rt_float_to_string(n: f64) -> AlmideString {
+    let __almide_out: String = {
+        let s = format!("{}", n);
+        if n.fract() == 0.0 && !s.contains('.') && !s.contains("inf") && !s.contains("NaN") {
+            format!("{}.0", s)
+        } else {
+            s
+        }
+    };
+    __almide_out.into()
+}
+/// `float32.to_string` (#3079): f32 Display — the shortest decimal that
+/// round-trips to the same f32 — with the same `.0` integer suffix.
+pub fn almide_rt_float32_to_string(n: f32) -> AlmideString {
+    let __almide_out: String = {
+        let s = format!("{}", n);
+        if n.fract() == 0.0 && !s.contains('.') && !s.contains("inf") && !s.contains("NaN") {
+            format!("{}.0", s)
+        } else {
+            s
+        }
+    };
+    __almide_out.into()
+}
+// Finite-only (C-413, #4121): a NaN / inf spelling ("nan", "inf", "Infinity",
+// any case or sign) is `invalid float literal`, and a finite literal that
+// rounds past f64::MAX ("1e400") is `float literal out of range`; underflow to
+// 0 stays ok. Trims ASCII whitespace only (str::trim_ascii, C-413). A
+// non-finite parse of text holding a digit can only be overflow: Rust's
+// grammar spells the specials with letters alone.
+pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> {
+    let t = s.trim_ascii();
+    let r: Result<f64, String> = match t.parse::<f64>() {
+        Ok(v) if v.is_finite() => Ok(v),
+        Ok(_) if t.bytes().any(|b| b.is_ascii_digit()) => Err("float literal out of range".to_string()),
+        Ok(_) => Err("invalid float literal".to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    r.map_err(Into::into)
+}
+pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
+pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
+pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
+pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
+// Explicit NaN/tie decision tree, mirrored bit-for-bit by the self-hosted
+// wasm leg (`float_min`/`float_max` in stdlib/float_core.almd). Deliberately
+// NOT `f64::min`/`f64::max`: those are the llvm.minnum/maxnum intrinsics whose
+// ±0-tie order is UNSPECIFIED — under `#[inline(always)]` x86 selects `maxsd`
+// (returns the SECOND operand on ties), silently contradicting both the
+// non-inlined library call and the wasm emit. Ties follow IEEE-754-2019 zero ordering (C-049,
+// ALS-T23): min(±0 tie) = -0.0, max(±0 tie) = +0.0, commutative.
+pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a < b { a }
+    else if b < a { b }
+    // Tie (a == b, the ±0 pair included): IEEE-754-2019 minimum — a
+    // negative-signed operand wins, commutatively (min(0,-0) = -0).
+    else if a.is_sign_negative() { a } else { b }
+}
+pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a > b { a }
+    else if b > a { b }
+    // Tie: IEEE-754-2019 maximum — a positive-signed operand wins,
+    // commutatively (max(-0,0) = +0).
+    else if a.is_sign_positive() { a } else { b }
+}
+// ALS-T6: lo > hi OR a NaN bound aborts in the T6 form — `!(lo <= hi)` covers
+// both (f64::clamp panics raw on either).
+pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 {
+    if !(lo <= hi) { almide_abort("clamp requires min <= max"); }
+    n.clamp(lo, hi)
+}
+pub fn almide_rt_float_sign(n: f64) -> f64 { n.signum() }
+pub fn almide_rt_float_to_int(n: f64) -> i64 { n as i64 }
+pub fn almide_rt_float_from_int(n: i64) -> f64 { n as f64 }
+pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> AlmideString {
+    let __almide_out: String = {
+        // ALS-T6 form: out-of-domain decimals abort with the 1-line message on BOTH
+        // targets. The old 0..=1_000_000 bound was NOT total: Rust's `format!`
+        // caps runtime precision at u16::MAX and panicked "Formatting argument
+        // out of range" (raw exit 101) at 1e6 while the wasm dragon expansion
+        // trapped (exit 134) — differential-fuzz. An f64's exact expansion never
+        // exceeds ~1074 fractional digits, so 4096 is generous AND total on both.
+        if !(0..=4096).contains(&decimals) {
+            almide_abort("to_fixed requires decimals in 0..=4096");
+        }
+        format!("{:.1$}", n, decimals as usize)
+    };
+    __almide_out.into()
+}
+pub fn almide_rt_float_is_nan(n: f64) -> bool { n.is_nan() }
+pub fn almide_rt_float_is_infinite(n: f64) -> bool { n.is_infinite() }
+// NaN observation is canonical (C-210): raw NaN bits are arch-dependent (x86
+// arithmetic sets the sign where aarch64 does not) and payload-smuggleable via
+// from_bits — every observer sees the single canonical pattern instead.
+pub fn almide_rt_float_to_bits(f: f64) -> i64 {
+    if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 }
+}
+
+// ── Sized conversions (for `@intrinsic` migration of `float.to_*`) ──
+
+pub fn almide_rt_float_to_uint64(n: f64) -> u64 { n as u64 }
+pub fn almide_rt_float_to_float32(n: f64) -> f32 { n as f32 }
+pub fn almide_rt_float_to_float64(n: f64) -> f64 { n }
+
+// ── Widening conversions (sized → Float) ──
+
+pub fn almide_rt_float_from_float32(n: f32) -> f64 { n as f64 }
+pub fn almide_rt_float_from_float64(n: f64) -> f64 { n }
+
+// string extern — Rust native implementations
+// TOML templates use &*{s} which dereferences String to &str
+
+// Codepoint count, per the documented contract ("number of characters").
+// The whole position API (len / index_of / last_index_of / get / slice /
+// take / drop) is CODEPOINT-indexed — one unit, no byte/char mixing (#419).
+pub fn almide_rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }
+// Case mapping never folds a non-ASCII scalar INTO ASCII (C-412, #4121): an
+// ASCII scalar maps by the ASCII rules; a non-ASCII scalar takes its default
+// (locale-independent, full SpecialCasing) Unicode mapping UNLESS that mapping
+// contains an ASCII scalar, and then it is left unchanged — so "adm\u{131}n"
+// never upper-cases to "ADMIN" nor "\u{212A}ey" lower-cases to "key". The
+// scalars this holds back (Unicode as shipped with the pinned rustc): upper
+// U+00DF U+0131 U+0149 U+017F U+01F0 U+1E96..U+1E9A U+FB00..U+FB06; lower
+// U+0130 U+212A. The wasm tables (scripts/gen-case-tables.py) apply the same
+// filter. Not for identity comparison either way.
+fn almide_case_push(out: &mut String, c: char, mapped: impl Iterator<Item = char> + Clone) {
+    if !c.is_ascii() && mapped.clone().any(|m| m.is_ascii()) { out.push(c) } else { out.extend(mapped) }
+}
+pub fn almide_rt_string_to_upper(s: &str) -> AlmideString {
+    if s.is_ascii() { return s.to_ascii_uppercase().into(); }
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() { almide_case_push(&mut out, c, c.to_uppercase()); }
+    out.into()
+}
+// str::to_lowercase carries Final_Sigma (Σ → ς by its context in the WHOLE
+// source string); every other scalar lowers alone. Walk that result in step
+// with the per-scalar lengths so each source scalar's span is known, and hold
+// back a span that would fold a non-ASCII scalar into ASCII.
+pub fn almide_rt_string_to_lower(s: &str) -> AlmideString {
+    if s.is_ascii() { return s.to_ascii_lowercase().into(); }
+    let full = s.to_lowercase();
+    let mut lowered = full.chars();
+    let mut out = String::with_capacity(full.len());
+    for c in s.chars() {
+        let span: Vec<char> = lowered.by_ref().take(c.to_lowercase().count()).collect();
+        almide_case_push(&mut out, c, span.into_iter());
+    }
+    out.into()
+}
+pub fn almide_rt_string_trim(s: &str) -> AlmideString { let __almide_out: String = s.trim().to_string(); __almide_out.into() }
+pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { let __almide_out: String = s.trim_start().to_string(); __almide_out.into() }
+pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { let __almide_out: String = s.trim_end().to_string(); __almide_out.into() }
+pub fn almide_rt_string_contains(s: &str, sub: &str) -> bool { s.contains(sub) }
+/// C-418's escaper (#4126), for `string.__err_text`: the self-hosted error
+/// texts' twin of what the native runtime calls directly.
+pub fn almide_rt_string___err_text(s: &str) -> AlmideString { almide_rt_errtext_escape(s).into() }
+/// Constant-time equality over the UTF-8 bytes (#4106): same algorithm as
+/// `almide_rt_bytes_is_equal_constant_time` (kept self-contained so this
+/// module links without `bytes`). Length mismatch is false at once.
+#[inline(never)]
+pub fn almide_rt_string_is_equal_constant_time(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() { return false; }
+    let mut acc: u8 = 0;
+    for i in 0..a.len() {
+        acc |= core::hint::black_box(a[i] ^ b[i]);
+    }
+    core::hint::black_box(acc) == 0
+}
+pub fn almide_rt_string_starts_with(s: &str, prefix: &str) -> bool { s.starts_with(prefix) }
+pub fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool { s.ends_with(suffix) }
+// A one-byte ASCII separator is searched as a `char` (a memchr scan) rather
+// than as a `&str`, whose `StrSearcher` set-up is paid on every call and
+// outweighs the scan of a short line — measured 2026-10-09: `split_once` over
+// a 2M-line `station;12.3` file, 0.163 s → 0.145 s. Both find the same
+// matches: an ASCII byte is a whole UTF-8 character.
+fn almide_string_ascii_sep(sep: &str) -> Option<char> {
+    match sep.as_bytes() {
+        [c] if c.is_ascii() => Some(*c as char),
+        _ => None,
+    }
+}
+// Each piece is built as the Almide String directly: collecting `String`s and
+// converting the Vec would allocate, copy and free every piece twice under
+// the shared buffer.
+pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<AlmideString> {
+    match almide_string_ascii_sep(sep) {
+        Some(c) => s.split(c).map(AlmideString::from).collect(),
+        None => s.split(sep).map(AlmideString::from).collect(),
+    }
+}
+// Two allocations and no Vec — the hot-loop form when only the first
+// separator matters (`station;temp` parsing). None ⇔ sep absent.
+pub fn almide_rt_string_split_once(s: &str, sep: &str) -> Option<(AlmideString, AlmideString)> { let __almide_v: Option<(String, String)> = { almide_rt_string_split_once_ref(s, sep).map(|(a, b)| (a.to_string(), b.to_string())) }; __almide_v.into_almide() }
+// The borrowing twin (codegen-only, `SliceBindersPass`): a `match` whose
+// payload binders are only read takes the halves as slices of `s` — the same
+// bytes, no copy. Not an Almide-visible function.
+pub fn almide_rt_string_split_once_ref<'a>(s: &'a str, sep: &str) -> Option<(&'a str, &'a str)> {
+    match almide_string_ascii_sep(sep) {
+        Some(c) => s.split_once(c),
+        None => s.split_once(sep),
+    }
+}
+pub fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { let __almide_out: String = s.replace(from, to); __almide_out.into() }
+// Negative counts clamp to 0 (C-054 discipline; `n as usize` on a negative
+// i64 reinterpreted to a huge count — a native "capacity overflow" panic
+// while the wasm leg trapped on the negative alloc size).
+/// Largest byte length a `repeat` may produce: 2^31, comfortably inside wasm32's
+/// address space so BOTH targets accept exactly the same counts. Above it, both
+/// abort in the T6 form instead of diverging into a native allocation failure
+/// (exit 1) vs a wasm out-of-bounds trap (exit 134) — the C-161 rule, applied to
+/// the repeat family.
+pub const ALMIDE_REPEAT_MAX_BYTES: i64 = 1 << 31;
+
+pub fn almide_rt_string_repeat(s: &str, n: i64) -> AlmideString {
+    let __almide_out: String = {
+        let n = n.max(0);
+        if (s.len() as i64).saturating_mul(n) > ALMIDE_REPEAT_MAX_BYTES {
+            almide_abort("repeat result too large");
+        }
+        s.repeat(n as usize)
+    };
+    __almide_out.into()
+}
+pub fn almide_rt_string_reverse(s: &str) -> AlmideString { let __almide_out: String = s.chars().rev().collect(); __almide_out.into() }
+pub fn almide_rt_string_chars(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.chars().map(|c| c.to_string()).collect() }; __almide_v.into_almide() }
+pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<AlmideString> {
+    let __almide_v: Option<String> = {
+        if i < 0 { return None; }
+        s.chars().nth(i as usize).map(|c| c.to_string())
+    };
+    __almide_v.into_almide()
+}
+pub fn almide_rt_string_char_count(s: &str) -> i64 { s.chars().count() as i64 }
+pub fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> { s.find(sub).map(|b| s[..b].chars().count() as i64) }
+pub fn almide_rt_string_last_index_of(s: &str, sub: &str) -> Option<i64> { s.rfind(sub).map(|b| s[..b].chars().count() as i64) }
+pub fn almide_rt_string_count_matches(s: &str, sub: &str) -> i64 { s.matches(sub).count() as i64 }
+pub fn almide_rt_string_lines(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.lines().map(|l| l.to_string()).collect() }; __almide_v.into_almide() }
+pub fn almide_rt_string_is_empty(s: &str) -> bool { s.is_empty() }
+pub fn almide_rt_string_is_whitespace(s: &str) -> bool { s.chars().all(|c| c.is_whitespace()) }
+pub fn almide_rt_string_is_alpha(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphabetic()) }
+pub fn almide_rt_string_is_digit(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) }
+pub fn almide_rt_string_is_alphanumeric(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphanumeric()) }
+pub fn almide_rt_string_is_upper(s: &str) -> bool { !s.is_empty() && s.chars().any(|c| c.is_alphabetic()) && s.chars().all(|c| !c.is_alphabetic() || c.is_uppercase()) }
+pub fn almide_rt_string_is_lower(s: &str) -> bool { !s.is_empty() && s.chars().any(|c| c.is_alphabetic()) && s.chars().all(|c| !c.is_alphabetic() || c.is_lowercase()) }
+// The first scalar upper-cases under the to_upper rule (C-412): never into ASCII from non-ASCII.
+pub fn almide_rt_string_capitalize(s: &str) -> AlmideString {
+    let mut c = s.chars();
+    let mut out = String::with_capacity(s.len());
+    if let Some(f) = c.next() { almide_case_push(&mut out, f, f.to_uppercase()); out.push_str(c.as_str()); }
+    out.into()
+}
+pub fn almide_rt_string_to_int(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim_ascii().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_string_to_float(s: &str) -> Result<f64, AlmideString> { almide_rt_float_parse(s) }
+/// `string.to_codepoint` (R-string-14): the scalar value of a string that is
+/// EXACTLY one codepoint; none for "" and for two or more.
+pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { let mut it = s.chars(); match (it.next(), it.next()) { (Some(c), None) => Some(c as i64), _ => None } }
+// `try_from` BEFORE `from_u32`: the old `cp as u32` truncated, so 2^32 — which is not a
+// codepoint — became 0, which is, and this leg answered a one-byte NUL string where the
+// self-host answered "". The `unwrap_or_default` was already the right intent; the cast
+// in front of it was silently converting invalid input into valid input.
+pub fn almide_rt_string___from_codepoint(cp: i64) -> AlmideString { let __almide_out: String = u32::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default(); __almide_out.into() }
+
+pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {
+    let __almide_out: String = {
+        // CODEPOINT indices, clamped to [0, char_count]; the `end = i64::MAX`
+        // default degrades to "to the end".
+        let s_idx = start.max(0) as usize;
+        let e_idx = end.max(0) as usize;
+        if s_idx >= e_idx { String::new() }
+        else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() }
+    };
+    __almide_out.into()
+}
+
+// str::get checks UTF-8 boundaries without scanning or copying the source.
+pub fn almide_rt_string_byte_slice(s: &str, start: i64, end: i64) -> Option<AlmideString> {
+    let __almide_v: Option<String> = {
+        let start = usize::try_from(start).ok()?;
+        let end = usize::try_from(end).ok()?;
+        s.get(start..end).map(str::to_owned)
+    };
+    __almide_v.into_almide()
+}
+
+// A NEGATIVE width means "no padding needed" — the SAME answer the wasm self-host
+// gives (`if scount >= width then copy`), and the C-034 signed-clamp rule the
+// `repeat` family follows. The old `width as usize` turned -128 into ~1.8e19, so
+// `w - len` was astronomical and native panicked with a raw-vec capacity overflow
+// (exit 101) where wasm returned the string unchanged (differential-fuzz).
+pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> AlmideString {
+    let __almide_out: String = {
+        let w = width.max(0) as usize; let len = s.chars().count();
+        if len >= w { return (s.to_string()).into(); }
+        let p = pad.chars().next().unwrap_or(' ');
+        // No chosen ceiling (ratified A, 2026-08-17): the pad byte count is computed
+        // with CHECKED arithmetic — the product is what overflows — and a size this
+        // machine cannot satisfy is the C-197 abort via try_reserve, never a raw
+        // panic. The wasm leg aborts identically at its own i32 floor bound.
+        let need = (w - len)
+            .checked_mul(p.len_utf8())
+            .and_then(|x| x.checked_add(s.len()));
+        let mut out = String::new();
+        if !need.is_some_and(|n| out.try_reserve_exact(n).is_ok()) {
+            almide_abort_oom();
+        }
+        for _ in 0..(w - len) { out.push(p); }
+        out.push_str(s);
+        out
+    };
+    __almide_out.into()
+}
+
+pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> AlmideString {
+    let __almide_out: String = {
+        let w = width.max(0) as usize; let len = s.chars().count();
+        if len >= w { return (s.to_string()).into(); }
+        let p = pad.chars().next().unwrap_or(' ');
+        // No chosen ceiling (ratified A, 2026-08-17): the pad byte count is computed
+        // with CHECKED arithmetic — the product is what overflows — and a size this
+        // machine cannot satisfy is the C-197 abort via try_reserve, never a raw
+        // panic. The wasm leg aborts identically at its own i32 floor bound.
+        let need = (w - len)
+            .checked_mul(p.len_utf8())
+            .and_then(|x| x.checked_add(s.len()));
+        let mut out = String::new();
+        if !need.is_some_and(|n| out.try_reserve_exact(n).is_ok()) {
+            almide_abort_oom();
+        }
+        out.push_str(s);
+        for _ in 0..(w - len) { out.push(p); }
+        out
+    };
+    __almide_out.into()
+}
+
+pub fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> AlmideString { let __almide_out: String = if let Some(pos) = s.find(from) { format!("{}{}{}", &s[..pos], to, &s[pos + from.len()..]) } else { s.to_string() }; __almide_out.into() }
+
+pub fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.strip_prefix(prefix).map(|r| r.to_string()) }; __almide_v.into_almide() }
+pub fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.strip_suffix(suffix).map(|r| r.to_string()) }; __almide_v.into_almide() }
+// Borrowing twins of the two above (codegen-only, `SliceBindersPass`).
+pub fn almide_rt_string_strip_prefix_ref<'a>(s: &'a str, prefix: &str) -> Option<&'a str> { s.strip_prefix(prefix) }
+pub fn almide_rt_string_strip_suffix_ref<'a>(s: &'a str, suffix: &str) -> Option<&'a str> { s.strip_suffix(suffix) }
+
+
+pub fn almide_rt_string_first(s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.chars().next().map(|c| c.to_string()) }; __almide_v.into_almide() }
+pub fn almide_rt_string_last(s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.chars().last().map(|c| c.to_string()) }; __almide_v.into_almide() }
+pub fn almide_rt_string_take(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().take(n.max(0) as usize).collect(); __almide_out.into() }
+/// Byte offset where the last `n` codepoints start (`0` when the string has
+/// no more than `n`; a negative `n` is 0, #4147 — it was a huge count through
+/// `n as usize`). Walks back from the end, so finding it costs O(n), not O(len).
+fn almide_string_tail_start(s: &str, n: i64) -> usize {
+    let k = n.max(0) as usize;
+    if k == 0 {
+        return s.len();
+    }
+    s.char_indices().rev().nth(k - 1).map_or(0, |(i, _)| i)
+}
+pub fn almide_rt_string_take_end(s: &str, n: i64) -> AlmideString { let __almide_out: String = s[almide_string_tail_start(s, n)..].to_string(); __almide_out.into() }
+pub fn almide_rt_string_drop(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().skip(n.max(0) as usize).collect(); __almide_out.into() }
+pub fn almide_rt_string_drop_end(s: &str, n: i64) -> AlmideString { let __almide_out: String = s[..almide_string_tail_start(s, n)].to_string(); __almide_out.into() }
+
+// ── Algorithmic primitives (Phase 3 stdlib expansion) ──
+
+
+// ── Mutable string operations ──
+
+pub fn almide_rt_string_push(s: &mut AlmideString, suffix: &str) { s.push_str(suffix); }
+pub fn almide_rt_string_push_char(s: &mut AlmideString, ch: &str) { s.push_str(ch); }
+pub fn almide_rt_string_clear(s: &mut AlmideString) { s.clear(); }
+
+//__ALMIDE_RT_BOUNDARY__
 pub fn add(a: i64, b: i64) -> i64 {
     (a).wrapping_add(b)
 }
@@ -9,8 +827,26 @@ pub fn add(a: i64, b: i64) -> i64 {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
+    struct AlmdTestDone(&'static str);
+    impl Drop for AlmdTestDone {
+        fn drop(&mut self) {
+            if std::thread::panicking() { return; }
+            let Some(path) = std::env::var_os("ALMIDE_TEST_LEDGER") else { return };
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{}", self.0);
+            }
+        }
+    }
+
     #[test]
     fn __test_almd_0000_addition() {
-        assert_eq!(add(1i64, 2i64), 3i64, "{}", "at line 5")
+        let _almd_done = AlmdTestDone("__test_almd_0000_addition");
+        {
+            let __assert_0: i64 = add(1i64, 2i64);
+            assert!(almide_eq!(__assert_0, 3i64), "{} (at line 5)", AlmideString::from_fmt(format_args!("assert_eq\n  expected: {}\n  found: {}", almide_rt_string___err_text(&*AlmideString::from_fmt(format_args!("{}", 3i64))), almide_rt_string___err_text(&*AlmideString::from_fmt(format_args!("{}", __assert_0))))));
+            ()
+        }
     }
 }

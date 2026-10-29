@@ -67,7 +67,7 @@ pub(super) struct WasmBuild<'a> {
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
 pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     let file = req.file;
-    let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
+    let default_output = default_wasm_output(file);
     let output = req.output.unwrap_or(&default_output);
     // `--host js` (#2265): the compiler writes the JS host next to the
     // module. The module exports its allocator + release under the guard,
@@ -80,7 +80,7 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, req.allow_unverified, req.verified, true, false) {
+    let (bytes, host_ops, surface, outside_guarantee) = match compile_to_wasm_bytes_surfaced(file, req.allow_unverified, req.verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -103,7 +103,24 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // The JS host is derived from the bytes that SHIP (#2276): after the
     // optional `wasm-opt` rewrite below, never from the pre-opt module.
     let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface) } else { String::new() };
-    report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped);
+    report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped, &super::build::guarantee_note(&outside_guarantee));
+}
+
+/// The core module a plain `almide build --target wasm` writes for this
+/// render (no `--component`), or — when the program ships as a component
+/// (an `http.serve` export) — the leg it ships on, as the refusal. `almide
+/// verify` pins the certificate to exactly these bytes.
+pub(super) fn shipped_core_module(file: &str, bytes: &[u8], host_ops: &[i32]) -> Result<Vec<u8>, &'static str> {
+    let shape = WasmPackage::decide(host_ops, false);
+    if shape.component {
+        return Err(shape.leg());
+    }
+    Ok(shape.package(file, bytes, host_ops))
+}
+
+/// The file `almide build <file> --target wasm` writes without `-o`.
+pub(super) fn default_wasm_output(file: &str) -> String {
+    format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
 }
 
 /// Refuse the two host-op shapes no requested packaging can carry, before
@@ -251,7 +268,7 @@ fn or_almide_bug<T, E: std::fmt::Display>(result: Result<T, E>, what: &str) -> T
 /// an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
 /// see the wasm-opt parity leg (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`) for the
 /// differential-testing evidence backing this tier's own guarantee.
-fn report_built(output: &str, bytes: &[u8], leg: &str, wasm_opt: bool, host_from_shipped: impl Fn(&[u8]) -> String) {
+fn report_built(output: &str, bytes: &[u8], leg: &str, wasm_opt: bool, host_from_shipped: impl Fn(&[u8]) -> String, note: &str) {
     let pre_size = bytes.len();
     // The trust word belongs to what earned it: the structural leg is
     // trusted end to end with its certificate PENDING (#1696,
@@ -261,8 +278,8 @@ fn report_built(output: &str, bytes: &[u8], leg: &str, wasm_opt: bool, host_from
     if !wasm_opt {
         let host_note = host_from_shipped(bytes);
         err(&format!(
-            "Built {}{} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
-            output, host_note, pre_size, leg, trust
+            "Built {}{} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer){}",
+            output, host_note, pre_size, leg, trust, note
         ));
         return;
     }
@@ -272,15 +289,15 @@ fn report_built(output: &str, bytes: &[u8], leg: &str, wasm_opt: bool, host_from
             let host_note = host_from_shipped(&shipped);
             let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
             err(&format!(
-                "Built {}{} ({} bytes → {} bytes, -{:.1}%, {}) — wasm-opt applied: these are NOT the renderer's own bytes",
-                output, host_note, pre_size, post_size, pct, leg
+                "Built {}{} ({} bytes → {} bytes, -{:.1}%, {}) — wasm-opt applied: these are NOT the renderer's own bytes{}",
+                output, host_note, pre_size, post_size, pct, leg, note
             ));
         }
         Err(why) => {
             let host_note = host_from_shipped(bytes);
             err(&format!(
-                "Built {}{} ({} bytes, {}, {}) — --wasm-opt requested but not applied: {}; shipped the renderer's own module unoptimized",
-                output, host_note, pre_size, leg, trust, why
+                "Built {}{} ({} bytes, {}, {}) — --wasm-opt requested but not applied: {}; shipped the renderer's own module unoptimized{}",
+                output, host_note, pre_size, leg, trust, why, note
             ));
         }
     }

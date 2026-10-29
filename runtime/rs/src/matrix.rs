@@ -154,20 +154,6 @@ pub fn almide_rt_matrix_rows_uniform(rows: &[Vec<f64>]) {
     }
 }
 
-/// `conv1d`'s stride is a STEP: below 1 it has no meaning (0 divides the
-/// output length by zero, a negative one walks backwards) — the head-count
-/// class (C-198), not the negative-dimension clamp class. A stride of 0 was a
-/// raw `attempt to divide by zero` panic natively (exit 101) against the
-/// language's own `Error: division by zero` on the wasm leg; a negative one
-/// wrapped through `as usize` natively to a huge step (one output row) while
-/// the wasm leg divided by it and answered no rows.
-pub fn almide_rt_matrix_stride(stride: i64) -> usize {
-    if stride < 1 {
-        almide_abort("stride must be positive");
-    }
-    stride as usize
-}
-
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     // Row-lazy on purpose (#1532 confirm night, seed 514359535655/2163):
@@ -195,28 +181,32 @@ pub fn almide_rt_matrix_cols(m: &AlmideMatrix) -> i64 {
     if m.is_empty() { 0 } else { m[0].len() as i64 }
 }
 
-/// The INDEX-DOMAIN rule for the element accessor (#1423 night findings, C-282).
-/// `matrix.get` is indexing — the matrix analogue of `xs[i]`, which aborts with
-/// `Error: index out of bounds` (the `almide_index` macro) rather than inventing
-/// a value. An out-of-range row/col used to be a RAW index on both legs: a Rust
-/// slice panic (exit 101) natively against a wasm OOB trap (exit 134), and for a
-/// NEGATIVE index the wasm leg did not even fail — `row as usize` wrapped and it
-/// returned whatever heap bytes it landed on, exit 0 (the silent-wrong class,
-/// found by extending the fuzzer's positive-OOB finding to the whole family).
-/// Compared as i64 BEFORE any cast, so a negative can never wrap past the test.
+/// The INDEX-DOMAIN rule for the element accessor (C-282): `Some(value)` in
+/// range, `None` out of range, NEGATIVE included. An out-of-range row/col used
+/// to be a RAW index on both legs: a Rust slice panic (exit 101) natively
+/// against a wasm OOB trap (exit 134), and for a NEGATIVE index the wasm leg
+/// returned whatever heap bytes it landed on, exit 0. Compared as i64 BEFORE
+/// any cast, so a negative can never wrap past the test. (Before stdlib
+/// redesign R-matrix-08 an out-of-range index aborted.)
 #[inline]
-pub fn almide_rt_matrix_bounds(idx: i64, extent: usize) {
-    if idx < 0 || (idx as u64) >= extent as u64 {
-        almide_abort("matrix index out of bounds");
-    }
+pub fn almide_rt_matrix_in_range(idx: i64, extent: usize) -> bool {
+    idx >= 0 && (idx as u64) < extent as u64
 }
 
-pub fn almide_rt_matrix_get(m: &AlmideMatrix, row: i64, col: i64) -> f64 {
-    almide_rt_matrix_bounds(row, m.len());
+pub fn almide_rt_matrix_get(m: &AlmideMatrix, row: i64, col: i64) -> Option<f64> {
+    if !almide_rt_matrix_in_range(row, m.len()) { return None; }
     let r = &m[row as usize];
     // The COL extent is this row's own width, so a ragged matrix is exact.
-    almide_rt_matrix_bounds(col, r.len());
-    r[col as usize]
+    if !almide_rt_matrix_in_range(col, r.len()) { return None; }
+    Some(r[col as usize])
+}
+
+/// C-341: the byte window fits exactly when `0 <= offset <= len` and
+/// `need <= len - offset` — judged on the buffer side, never as
+/// `offset + need`, which wraps for an offset near i64::MAX.
+#[inline]
+pub fn almide_rt_matrix_window_fits(len: usize, offset: i64, need: usize) -> bool {
+    offset >= 0 && (offset as u64) <= len as u64 && need as u64 <= len as u64 - offset as u64
 }
 
 pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
@@ -237,20 +227,19 @@ pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
     rows.to_vec().into()
 }
 
-pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // #1503: a negative dimension clamps to the empty matrix (the C-034 /
     // C-161 rule the constructors already follow) and a negative offset is
     // out of bounds by definition — the raw `as usize` casts turned either
     // into a multi-exabyte size and died in the forbidden T6 form (capacity
     // overflow, exit 101). `almide_rt_matrix_dims` also enforces the element
-    // ceiling, and the bounds compare is overflow-safe in u128.
+    // ceiling, and the window is judged buffer-side (C-341).
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 4;
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
-        for _ in 0..r { result.push(vec![0.0f64; c]); }
-        return result.into();
+    if !almide_rt_matrix_window_fits(data.len(), offset, need) {
+        return None;
     }
+    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
@@ -263,10 +252,10 @@ pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64
         }
         result.push(row);
     }
-    result.into()
+    Some(result.into())
 }
 
-pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // IEEE-754 half-precision → f32 → f64, inlined to keep the matrix.rs
     // file a single contiguous block of `pub fn almide_rt_matrix_*` functions
     // (simplifies the runtime-stripping logic in src/cli/mod.rs).
@@ -275,14 +264,13 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
     // out of bounds by definition — the raw `as usize` casts turned either
     // into a multi-exabyte size and died in the forbidden T6 form (capacity
     // overflow, exit 101). `almide_rt_matrix_dims` also enforces the element
-    // ceiling, and the bounds compare is overflow-safe in u128.
+    // ceiling, and the window is judged buffer-side (C-341).
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 2;
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
-        for _ in 0..r { result.push(vec![0.0f64; c]); }
-        return result.into();
+    if !almide_rt_matrix_window_fits(data.len(), offset, need) {
+        return None;
     }
+    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
@@ -313,7 +301,7 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
         }
         result.push(row);
     }
-    result.into()
+    Some(result.into())
 }
 
 pub fn almide_rt_matrix_to_lists(m: &AlmideMatrix) -> Vec<Vec<f64>> {
@@ -342,9 +330,6 @@ pub fn almide_rt_matrix_neg(m: &AlmideMatrix) -> AlmideMatrix {
     m.iter().map(|r| r.iter().map(|x| -x).collect()).collect()
 }
 
-pub fn almide_rt_matrix_pow(m: &AlmideMatrix, exp: f64) -> AlmideMatrix {
-    m.iter().map(|r| r.iter().map(|x| almide_rt_libm_pow(*x, exp)).collect()).collect()
-}
 
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     // Dense matmul: BLAS if linked (have_blas → Accelerate cblas_dgemm, ~4.9x
@@ -370,21 +355,8 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     let mut out = vec![0.0f64; m * n];
     #[cfg(have_blas)]
     {
-        // CblasRowMajor=101, CblasNoTrans=111. C = 1.0·A·B + 0.0·C.
-        extern "C" {
-            fn cblas_dgemm(
-                order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32,
-                alpha: f64, a: *const f64, lda: i32, b: *const f64, ldb: i32,
-                beta: f64, c: *mut f64, ldc: i32,
-            );
-        }
-        unsafe {
-            cblas_dgemm(
-                101, 111, 111, m as i32, n as i32, k as i32, 1.0,
-                a.data.as_ptr(), k as i32, b.data.as_ptr(), n as i32,
-                0.0, out.as_mut_ptr(), n as i32,
-            );
-        }
+        // cblas_dgemm, through sys.rs.
+        almide_rt_sys_ffi::dgemm(m, n, k, &a.data, &b.data, &mut out);
     }
     #[cfg(not(have_blas))]
     {
@@ -474,117 +446,20 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     }).collect()
 }
 
-pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
-    // y[i][j] = sum_k x[i][k] * weight[j][k] + bias[j]
-    if x.is_empty() || weight.is_empty() { return vec![].into(); }
-    let r = x.len();
-    let n_in = x[0].len();
-    let n_out = weight.len();
-    // #2483: the weight is (n_out, n_in) and the bias has one entry per
-    // output — `bias[j]` for j < n_out was a raw index panic on a short bias
-    // while the wasm body read 0.0 past the list and printed a value.
-    almide_rt_matrix_shape_eq(weight.cols, n_in);
-    almide_rt_matrix_shape_eq(bias.len(), n_out);
-    let mut out = vec![vec![0.0f64; n_out]; r];
-    for i in 0..r {
-        let xi = &x[i];
-        let oi = &mut out[i];
-        for j in 0..n_out {
-            let wj = &weight[j];
-            let mut s = 0.0;
-            for k in 0..n_in {
-                s += xi[k] * wj[k];
-            }
-            oi[j] = s + bias[j];
-        }
-    }
-    out.into()
-}
 
-pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatrix) -> AlmideMatrix {
-    if x.is_empty() || weight.is_empty() { return vec![].into(); }
-    let r = x.len();
-    let n_in = x[0].len();
-    let n_out = weight.len();
-    almide_rt_matrix_shape_eq(weight.cols, n_in);
-    let mut out = vec![vec![0.0f64; n_out]; r];
-    for i in 0..r {
-        let xi = &x[i];
-        let oi = &mut out[i];
-        for j in 0..n_out {
-            let wj = &weight[j];
-            let mut s = 0.0;
-            for k in 0..n_in {
-                s += xi[k] * wj[k];
-            }
-            oi[j] = s;
-        }
-    }
-    out.into()
-}
 
 pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> AlmideMatrix {
-    // `list.slice` over the rows, with C-034's index doctrine spelled out
-    // instead of left to the `as usize` wrap that used to carry it: a
-    // NEGATIVE start is the EMPTY (0-row) matrix, a negative or past-the-end
-    // end is `len`, and `start >= end` is empty (#2475 — the self-hosted leg
-    // clamped only `end` and read the list header as a row pointer).
+    // `list.slice` over the rows: both bounds clamp into [0, len] — a
+    // negative bound is 0 (#4147; it used to follow the `as usize` wrap, a
+    // negative start empty and a negative end `len`) — and `start >= end` is
+    // the 0-row matrix (#2475 — the self-hosted leg clamped only `end` and
+    // read the list header as a row pointer).
     let len = m.len();
-    let e = if end < 0 { len } else { (end as u64).min(len as u64) as usize };
-    if start < 0 || (start as u64) >= e as u64 { return vec![].into(); }
-    let s = start as usize;
+    let e = (end.max(0) as u64).min(len as u64) as usize;
+    let s = (start.max(0) as u64).min(len as u64) as usize;
+    if s >= e { return vec![].into(); }
     mk(e - s, m.cols, m.data[s * m.cols..e * m.cols].to_vec())
 }
 
-pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64], kernel: i64, stride: i64, padding: i64) -> AlmideMatrix {
-    // input: (T, in_ch). weight: (out_ch, in_ch * kernel). bias: (out_ch,).
-    // Output: (T_out, out_ch) where T_out = floor((T + 2P - K) / S) + 1.
-    // Weight layout within a row: for c in 0..in_ch, for k in 0..kernel: weight[o][c*kernel + k].
-    let t_in = input.len();
-    if t_in == 0 || weight.is_empty() { return vec![].into(); }
-    let in_ch = input[0].len();
-    let out_ch = weight.len();
-    // The count domain, in one fixed order on both legs: stride is a step
-    // (below 1 aborts), kernel and padding are widths (a negative one clamps
-    // to 0 like every C-034/C-161 dimension — a kernel of 0 taps is the
-    // bias-only output both legs already agreed on), and the padded length
-    // is bounded by the shared ceiling BEFORE `t_in + 2 * p` is formed, so
-    // the two legs never disagree by an overflow one of them wrapped.
-    let s = almide_rt_matrix_stride(stride);
-    let k = kernel.max(0) as usize;
-    let p = padding.max(0) as usize;
-    if p as i64 > ALMIDE_MATRIX_MAX_ELEMS {
-        almide_abort("matrix dimensions too large");
-    }
-    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
-    // per output channel: a short weight row or bias was a raw index panic
-    // natively and an out-of-block read on the wasm leg.
-    almide_rt_matrix_shape_eq(weight.cols, in_ch.checked_mul(k).unwrap_or(usize::MAX));
-    almide_rt_matrix_shape_eq(bias.len(), out_ch);
-    let t_padded = t_in + 2 * p;
-    if t_padded < k { return vec![].into(); }
-    let t_out = (t_padded - k) / s + 1;
-    let (t_out, out_ch) = almide_rt_matrix_dims(t_out as i64, out_ch as i64);
-    let mut out = vec![vec![0.0f64; out_ch]; t_out];
-    for t in 0..t_out {
-        let base = t * s;  // start in padded coords
-        for o in 0..out_ch {
-            let wo = &weight[o];
-            let mut sum = bias[o];
-            for c in 0..in_ch {
-                let w_base = c * k;
-                for ki in 0..k {
-                    let tp = base + ki;
-                    if tp >= p && tp < p + t_in {
-                        let tc = tp - p;
-                        sum += wo[w_base + ki] * input[tc][c];
-                    }
-                }
-            }
-            out[t][o] = sum;
-        }
-    }
-    out.into()
-}
 
 include!("matrix_p2.rs");

@@ -175,12 +175,12 @@ effect fn main() -> Unit = {
   let header = ["a", "b"]
   let pairs = header |> list.enumerate |> list.map((entry) => {
     let (i, key) = entry
-    (key, value.str(list.get_or(row, i, "")))
+    (key, value.string(list.get(row, i) ?? ""))
   })
-  println(value.stringify(value.object(pairs)))
+  println(json.stringify(value.object(pairs)))
   let strs = ["p", "q"]
   let objs = strs |> list.map((s) => value.object([(s, value.int(1))]))
-  println(value.stringify(value.array(objs)))
+  println(json.stringify(value.array(objs)))
 }
 "#,
         fns: &["main"],
@@ -234,7 +234,7 @@ fn repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix = {
 effect fn main() -> Unit = {
   let x = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
   let p = per_head_shift(x, [0.5, 1.5], 2, 0.5)
-  println(float.to_string(matrix.get(p, 0, 0)))
+  println(float.to_string(matrix.get(p, 0, 0) ?? 0.0))
   let r2 = repeat_kv(x, 2, 2)
   println(int.to_string(matrix.cols(r2)))
 }
@@ -247,7 +247,7 @@ effect fn main() -> Unit = {
         shape: "env.set / env.sleep_ms as ordinary host calls (host_ops.rs, #2739)",
         src: r#"import env
 effect fn main() -> Unit = {
-  env.set("LIVE_SHAPE_KEY", "v")
+  env.set("LIVE_SHAPE_KEY", "v")!
   env.sleep_ms(0)!
   println(env.get("LIVE_SHAPE_KEY") ?? "unset")
 }

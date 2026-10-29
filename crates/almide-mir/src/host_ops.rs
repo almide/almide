@@ -24,7 +24,7 @@
 //! `tests/host_ops_contract.rs` derives the intrinsic list from
 //! `stdlib/<module>.almd` and fails on an unclassified cell, so a new
 //! capability-bearing intrinsic cannot ride in as capability-free — the
-//! #3302 class (`env.millis` / `datetime.now` read the clock while counting
+//! #3302 class (`datetime.now_ms` / `datetime.now` read the clock while counting
 //! nothing on the native classifier). The same test holds every row to its
 //! stdlib `@intrinsic` and its `runtime/rs/src` signature (no `&mut`, no owned
 //! heap parameter outside [`HostOp::by_value`], no returned reference), and
@@ -119,46 +119,54 @@ pub const HOST_OPS: &[HostOp] = &[
     // ── env: argv, the environment, the clock ──
     op("env", "args", "almide_rt_env_args", ENV),
     op("env", "get", "almide_rt_env_get", ENV),
-    op("env", "set", "almide_rt_env_set", ENV),
-    // `env.cwd` reads PWD and `temp_dir` honours $TMPDIR: environment reads.
+    // `env.set` is an Almide body that refuses the pairs no environment holds
+    // (#4200) before it reaches its private op `__set`.
+    wrapper("env", "set", "__set", "almide_rt_env___set", ENV).result(),
+    op("env", "__set", "almide_rt_env___set", ENV),
+    // `env.remove` hands `__set` the value NUL, `set`'s refused value, as the
+    // unset mark (#3908); `env.vars` keys and sorts `__environ`'s entries.
+    wrapper("env", "remove", "__set", "almide_rt_env___set", ENV).result(),
+    wrapper("env", "vars", "__environ", "almide_rt_env___environ", ENV),
+    op("env", "__environ", "almide_rt_env___environ", ENV),
+    // `env.cwd` reads PWD: an environment read.
     op("env", "cwd", "almide_rt_env_cwd", ENV).result(),
-    op("env", "temp_dir", "almide_rt_env_temp_dir", ENV),
-    op("env", "unix_timestamp", "almide_rt_env_unix_timestamp", CLOCK),
-    op("env", "millis", "almide_rt_env_millis", CLOCK),
     op("env", "sleep_ms", "almide_rt_env_sleep_ms", CLOCK),
-    // ── process: argv[0]-inclusive arguments (every other process fn is walled) ──
-    op("process", "args", "almide_rt_process_args", ENV),
     // ── datetime: the two clock reads (the rest of the module is pure) ──
     op("datetime", "now", "almide_rt_datetime_now", CLOCK),
     op("datetime", "monotonic_ns", "almide_rt_datetime_monotonic_ns", CLOCK),
+    // `datetime.now_ms` (R-datetime-01): the millisecond wall-clock read.
+    op("datetime", "now_ms", "almide_rt_datetime_now_ms", CLOCK),
     // ── random ──
     op("random", "int", "almide_rt_random_int", ENTROPY),
     op("random", "float", "almide_rt_random_float", ENTROPY),
     op("random", "choice", "almide_rt_random_choice", ENTROPY).routed(),
     op("random", "shuffle", "almide_rt_random_shuffle", ENTROPY).routed().by_value(&[0]),
+    // `random.bytes` (C-394): the OS CSPRNG on native, `random_get` on wasm.
+    op("random", "bytes", "almide_rt_random_bytes", ENTROPY),
+    // `uuid.v7`'s process-wide stamp: the clock it was handed, made strictly
+    // increasing by the runtime's last-stamp cell.
+    op("uuid", "__v7_stamp", "almide_rt_uuid___v7_stamp", CLOCK),
     // ── io ──
     op("io", "print", "almide_rt_io_print", OUT),
-    op("io", "write", "almide_rt_io_write", OUT),
-    op("io", "write_bytes", "almide_rt_io_write_bytes", OUT),
+    // stderr rides the output capability, as the eprintln self-host does.
+    op("io", "eprint", "almide_rt_io_eprint", OUT),
+    // The streams' leaves under `io.write(io.stdout() | io.stderr(), b)` and
+    // `io.read(io.stdin(), n)` (R-io-05).
+    op("io", "__write_stdout", "almide_rt_io___write_stdout", OUT),
+    op("io", "__write_stderr", "almide_rt_io___write_stderr", OUT),
     op("io", "read_line", "almide_rt_io_read_line", IN),
-    op("io", "read_line_opt", "almide_rt_io_read_line_opt", IN),
     op("io", "read_all", "almide_rt_io_read_all", IN),
-    op("io", "read_byte", "almide_rt_io_read_byte", IN),
-    op("io", "read_n_bytes", "almide_rt_io_read_n_bytes", IN),
+    op("io", "__read_stdin_bytes", "almide_rt_io___read_stdin_bytes", IN),
     // ── fs: reads ──
     op("fs", "read_text", "almide_rt_fs_read_text", READ).result(),
     op("fs", "read_bytes", "almide_rt_fs_read_bytes", READ).result(),
-    op("fs", "read_bytes_raw", "almide_rt_fs_read_bytes_raw", READ).result(),
     op("fs", "read_lines", "almide_rt_fs_read_lines", READ).result(),
     op("fs", "read_text_if_exists", "almide_rt_fs_read_text_if_exists", READ).result(),
     op("fs", "read_bytes_if_exists", "almide_rt_fs_read_bytes_if_exists", READ).result(),
     op("fs", "read_lines_if_exists", "almide_rt_fs_read_lines_if_exists", READ).result(),
-    op("fs", "read_bytes_raw_if_exists", "almide_rt_fs_read_bytes_raw_if_exists", READ).result(),
     op("fs", "list_dir", "almide_rt_fs_list_dir", READ).result(),
     op("fs", "exists", "almide_rt_fs_exists", READ),
     op("fs", "stat", "almide_rt_fs_stat", READ).result(),
-    op("fs", "file_size", "almide_rt_fs_file_size", READ).result(),
-    op("fs", "modified_at", "almide_rt_fs_modified_at", READ).result(),
     op("fs", "is_dir", "almide_rt_fs_is_dir", READ),
     op("fs", "is_file", "almide_rt_fs_is_file", READ),
     op("fs", "is_symlink", "almide_rt_fs_is_symlink", READ),
@@ -172,57 +180,40 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "for_each_line", "almide_rt_fs_for_each_line", READ).result(),
     op("fs", "__fallible_fold_lines", "almide_rt_fs_fold_lines_effect", READ).routed().by_value(&[1]).result(),
     op("fs", "__fallible_for_each_line", "almide_rt_fs_for_each_line_effect", READ).result(),
-    // `fs.temp_dir` is env.temp_dir's other spelling (C-189): an environment read.
+    // The rooted family's descriptor calls (#4084): `fs.root_*` reach them.
+    op("fs", "__root_read_text", "almide_rt_fs___root_read_text", READ).result(),
+    op("fs", "__root_read_bytes", "almide_rt_fs___root_read_bytes", READ).result(),
+    op("fs", "__root_list_dir", "almide_rt_fs___root_list_dir", READ).result(),
+    op("fs", "__root_exists", "almide_rt_fs___root_exists", READ).result(),
+    // `fs.temp_dir` honours $TMPDIR (C-189): an environment read.
     op("fs", "temp_dir", "almide_rt_fs_temp_dir", ENV),
     // ── fs: writes ──
-    op("fs", "write", "almide_rt_fs_write", WRITE).result(),
+    op("fs", "write_text", "almide_rt_fs_write", WRITE).result(),
     op("fs", "write_bytes", "almide_rt_fs_write_bytes", WRITE).result(),
-    op("fs", "write_bytes_raw", "almide_rt_fs_write_bytes_raw", WRITE).result(),
     op("fs", "mkdir_p", "almide_rt_fs_mkdir_p", WRITE).result(),
     op("fs", "remove_all", "almide_rt_fs_remove_all", WRITE).result(),
+    op("fs", "__root_write_text", "almide_rt_fs___root_write_text", WRITE).result(),
     op("fs", "rename", "almide_rt_fs_rename", WRITE).result(),
     // Read-then-write compositions, and the unique-name creators (entropy suffix).
     op("fs", "copy", "almide_rt_fs_copy", READ_WRITE).result(),
-    op("fs", "append", "almide_rt_fs_append", READ_WRITE).result(),
+    op("fs", "append_text", "almide_rt_fs_append", READ_WRITE).result(),
     op("fs", "remove", "almide_rt_fs_remove", READ_WRITE).result(),
+    op("fs", "__root_remove", "almide_rt_fs___root_remove", READ_WRITE).result(),
     op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),
     op("fs", "create_temp_file", "almide_rt_fs_create_temp_file", WRITE_ENTROPY).result(),
-    // ── http: the String client, one row per verb ──
+    // ── http: the client (R-http-01) — get / request answer the body text,
+    // get_response / send the whole response; the header-taking forms call
+    // their flat-header leaf ──
     op("http", "get", "almide_http_get", NET).result(),
-    op("http", "post", "almide_http_post", NET).result(),
-    op("http", "put", "almide_http_put", NET).result(),
-    op("http", "patch", "almide_http_patch", NET).result(),
-    op("http", "delete", "almide_http_delete", NET).result(),
-    op("http", "request", "almide_http_request", NET).result(),
-    // The result-shape variants: (status, body) and the raw body bytes.
-    op("http", "get_status", "almide_http_get_status", NET).result(),
-    op("http", "request_status", "almide_http_request_status", NET).result(),
-    op("http", "get_bytes", "almide_http_get_bytes", NET).result(),
-    op("http", "request_bytes", "almide_http_request_bytes", NET).result(),
-    // The whole-response twins (#1791).
+    wrapper("http", "request", "__request", "almide_http_request", NET).result(),
     op("http", "get_response", "almide_http_get_response", NET).result(),
-    op("http", "post_response", "almide_http_post_response", NET).result(),
-    op("http", "put_response", "almide_http_put_response", NET).result(),
-    op("http", "patch_response", "almide_http_patch_response", NET).result(),
-    op("http", "delete_response", "almide_http_delete_response", NET).result(),
-    op("http", "request_response", "almide_http_request_response", NET).result(),
-    // The call handle (#2631): start, the four verbs over it, and the
-    // streaming clients built on it — the limited twin, and plain
-    // request_stream as the handle's classic call (no limits named).
+    wrapper("http", "send", "__request_response", "almide_http_request_response", NET).result(),
+    // The call handle (#2631): start and the four verbs over it.
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
     op("http", "read_new", "almide_http_call_read_new", NET),
     op("http", "wait", "almide_http_call_wait", NET).result(),
     op("http", "cancel", "almide_http_call_cancel", NET),
-    wrapper(
-        "http",
-        "request_stream_with_limits",
-        "__request_stream_limited",
-        "almide_rt_http___request_stream_limited",
-        NET,
-    )
-    .result(),
-    op("http", "request_stream", "almide_http_request_stream", NET).result(),
     // ── testing: assert_aborts's site pair (ADR-0029, #3792), test builds only ──
     // The child run starts a child — a re-exec of the native test binary, a
     // fresh instance on the embedded host (op 117) — so it counts Process. The
@@ -236,17 +227,19 @@ pub const HOST_OPS: &[HostOp] = &[
 /// the audited matrix; a stdlib module outside this list must be wholly pure
 /// (`crate::purity::PURE_MODULES` — the contract test checks the partition).
 pub const CAP_MODULES: &[&str] =
-    &["args", "datetime", "env", "fs", "http", "io", "net", "process", "random", "testing", "zlib"];
+    &["args", "datetime", "env", "ffi", "fs", "http", "io", "net", "process", "random", "testing", "unix", "uuid", "zlib"];
 
 /// The capability-module intrinsics that are NEITHER a host op NOR pure: they
 /// are refused by the lowering outright, so they never reach a certificate.
 /// `"*"` covers the rest of a module (a row or a pure admission still wins).
 pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
-    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
+    ("unix", "*", "unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
+    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
-    ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
+    ("http", "__request", "reached only through its wrapper row `http.request`"),
+    ("http", "__request_response", "reached only through its wrapper row `http.send`"),
 ];
 
 /// The typed-twin suffixes a ROUTED row's call name can carry
@@ -335,10 +328,10 @@ mod tests {
     /// The clock readers of #3302 count Clock; the structural leg's mapping holds.
     #[test]
     fn the_clock_readers_count_clock() {
-        for name in ["env.millis", "env.unix_timestamp", "datetime.now", "datetime.monotonic_ns", "env.sleep_ms"] {
+        for name in ["datetime.now", "datetime.monotonic_ns", "datetime.now_ms", "env.sleep_ms"] {
             assert_eq!(host_op_capabilities(name), &[Capability::Clock], "{name}");
         }
-        assert_eq!(host_op_capabilities("env.set"), &[Capability::CliArgs]);
+        assert_eq!(host_op_capabilities("env.__set"), &[Capability::CliArgs]);
         assert_eq!(host_op_capabilities("http.get"), &[Capability::Net]);
         assert_eq!(host_op_capabilities("fs.copy"), &[Capability::FsRead, Capability::FsWrite]);
     }
@@ -361,11 +354,11 @@ mod tests {
         assert_eq!(host_op_for_call_name("random.choice_str").map(|o| o.func), Some("choice"));
         assert_eq!(host_op_for_call_name("fs.fold_lines_msi").map(|o| o.func), Some("fold_lines"));
         assert_eq!(host_op_for_call_name("fs.__fallible_fold_lines_x").map(|o| o.func), Some("__fallible_fold_lines"));
-        assert_eq!(host_op_for_call_name("fs.read_bytes_raw").map(|o| o.func), Some("read_bytes_raw"));
-        assert_eq!(host_op_for_call_name("env.millis_x").map(|o| o.func), Some("millis"));
+        assert_eq!(host_op_for_call_name("fs.read_bytes").map(|o| o.func), Some("read_bytes"));
+        assert_eq!(host_op_for_call_name("env.sleep_ms_x").map(|o| o.func), Some("sleep_ms"));
         // An unrouted row takes no typed suffix, and a pure fn never resolves.
-        assert!(host_op_for_call_name("env.millis_str").is_none());
-        assert!(host_op_for_call_name("http.get_header").is_none());
+        assert!(host_op_for_call_name("env.sleep_ms_str").is_none());
+        assert!(host_op_for_call_name("http.header").is_none());
         assert!(host_op_for_call_name("list.map").is_none());
     }
 
@@ -376,9 +369,9 @@ mod tests {
         assert!(is_uncounted_host_call("net.tcp_connect"));
         assert!(is_uncounted_host_call("env.some_future_reader"));
         // Host ops, pure fns and non-capability modules are accounted for.
-        assert!(!is_uncounted_host_call("env.millis"));
+        assert!(!is_uncounted_host_call("env.sleep_ms"));
         assert!(!is_uncounted_host_call("datetime.add_days"));
-        assert!(!is_uncounted_host_call("http.get_header"));
+        assert!(!is_uncounted_host_call("http.header"));
         assert!(!is_uncounted_host_call("list.map"));
     }
 
@@ -389,7 +382,7 @@ mod tests {
         let call = |name: &str| crate::Op::CallFn { dst: None, name: name.into(), args: Vec::new(), result: None };
         let f = crate::MirFunction {
             name: "f".into(),
-            ops: vec![call("http.get"), call("env.set"), call("datetime.now"), call("list.len")],
+            ops: vec![call("http.get"), call("env.__set"), call("datetime.now"), call("list.len")],
             declared_caps: vec![Capability::Stdout, Capability::CliArgs],
             ..Default::default()
         };

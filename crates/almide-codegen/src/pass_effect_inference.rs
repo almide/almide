@@ -29,12 +29,12 @@ pub use almide_ir::effect::{Effect, FunctionEffects, EffectMap};
 /// in `almide_ir::effect::STDLIB_MODULE_EFFECTS` (#3246). With
 /// [`runtime_name_to_effect`], the only per-operation input of
 /// `crate::effect_flow`.
-pub(crate) fn module_to_effect(module: &str, func: &str) -> Option<Effect> {
+pub(crate) fn module_to_effect(module: &str, func: &str) -> Vec<Effect> {
     almide_ir::effect::stdlib_call_effect(module, func)
 }
 
 /// The category of a runtime call (`almide_rt_<module>_<fn>`).
-pub(crate) fn runtime_name_to_effect(name: &str) -> Option<Effect> {
+pub(crate) fn runtime_name_to_effect(name: &str) -> Vec<Effect> {
     almide_ir::effect::runtime_symbol_effect(name)
 }
 
@@ -44,11 +44,29 @@ pub(crate) fn runtime_name_to_effect(name: &str) -> Option<Effect> {
 /// Before this, its `_` body contributed nothing and a foreign call reached
 /// the host uncategorised, past `[permissions]` and `check --effects`.
 /// `crate::effect_flow` seeds it as a constant on the fn's own node.
-pub(crate) fn declared_direct_effects(func: &IrFunction) -> HashSet<Effect> {
-    if func.extern_attrs.is_empty() {
-        return HashSet::new();
+///
+/// An `@inline_rust` template outside the stdlib is foreign code the same
+/// way (#4100): the native build splices the Rust text in place of the
+/// Almide body, which inference reads but the binary never runs. It is ⊤
+/// too. The stdlib's own templates (`in_stdlib`) are categorised by the
+/// stdlib call table instead, as before.
+pub(crate) fn declared_direct_effects(func: &IrFunction, in_stdlib: bool) -> HashSet<Effect> {
+    if !func.extern_attrs.is_empty() || (!in_stdlib && has_inline_rust(func)) {
+        return Effect::ALL.into_iter().collect();
     }
-    Effect::ALL.into_iter().collect()
+    HashSet::new()
+}
+
+/// Does `func` carry an `@inline_rust` template?
+pub(crate) fn has_inline_rust(func: &IrFunction) -> bool {
+    func.attrs.iter().any(|a| a.name.as_str() == "inline_rust")
+}
+
+/// Is `module` the stdlib's own: a stdlib module name lowered without a
+/// package identity? A dependency package always carries its versioned
+/// name, so one named like a stdlib module is not mistaken for it.
+pub(crate) fn is_stdlib_module(module: &IrModule) -> bool {
+    module.versioned_name.is_none() && almide_lang::stdlib_info::is_any_stdlib(module.name.as_str())
 }
 
 #[derive(Debug)]
@@ -101,30 +119,32 @@ mod tests {
 
     #[test]
     fn module_to_effect_mapping() {
-        assert_eq!(module_to_effect("fs", "read_text"), Some(Effect::IO));
-        assert_eq!(module_to_effect("io", "read_line"), Some(Effect::IO));
-        assert_eq!(module_to_effect("path", "join"), None);
-        assert_eq!(module_to_effect("http", "get"), Some(Effect::Net));
-        assert_eq!(module_to_effect("url", "parse"), None);
-        assert_eq!(module_to_effect("env", "get"), Some(Effect::Env));
-        assert_eq!(module_to_effect("process", "exec"), Some(Effect::Env));
-        assert_eq!(module_to_effect("datetime", "now"), Some(Effect::Time));
-        assert_eq!(module_to_effect("random", "int"), Some(Effect::Rand));
-        assert_eq!(module_to_effect("fan", "map"), Some(Effect::Fan));
-        assert_eq!(module_to_effect("list", "map"), None);
-        assert_eq!(module_to_effect("string", "len"), None);
-        assert_eq!(module_to_effect("math", "sqrt"), None);
+        assert_eq!(module_to_effect("fs", "read_text"), vec![Effect::FsRead]);
+        assert_eq!(module_to_effect("fs", "write_text"), vec![Effect::FsWrite]);
+        assert_eq!(module_to_effect("io", "read_line"), vec![Effect::IoStdin]);
+        assert!(module_to_effect("path", "join").is_empty());
+        assert_eq!(module_to_effect("http", "get"), vec![Effect::NetFetch]);
+        assert!(module_to_effect("url", "parse").is_empty());
+        assert_eq!(module_to_effect("env", "get"), vec![Effect::EnvRead]);
+        assert_eq!(module_to_effect("process", "exec"), vec![Effect::Proc]);
+        assert_eq!(module_to_effect("datetime", "now"), vec![Effect::Time]);
+        assert_eq!(module_to_effect("random", "int"), vec![Effect::Rand]);
+        assert_eq!(module_to_effect("fan", "map"), vec![Effect::Fan]);
+        assert!(module_to_effect("list", "map").is_empty());
+        assert!(module_to_effect("string", "len").is_empty());
+        assert!(module_to_effect("math", "sqrt").is_empty());
     }
 
     #[test]
     fn runtime_name_to_effect_mapping() {
-        assert_eq!(runtime_name_to_effect("almide_rt_fs_read_text"), Some(Effect::IO));
-        assert_eq!(runtime_name_to_effect("almide_rt_http_get"), Some(Effect::Net));
-        assert_eq!(runtime_name_to_effect("almide_rt_env_get"), Some(Effect::Env));
-        assert_eq!(runtime_name_to_effect("almide_rt_datetime_now"), Some(Effect::Time));
-        assert_eq!(runtime_name_to_effect("almide_rt_random_float"), Some(Effect::Rand));
-        assert_eq!(runtime_name_to_effect("almide_rt_list_map"), None);
-        assert_eq!(runtime_name_to_effect("println"), None);
+        assert_eq!(runtime_name_to_effect("almide_rt_fs_read_text"), vec![Effect::FsRead]);
+        assert_eq!(runtime_name_to_effect("almide_http_get"), vec![Effect::NetFetch]);
+        assert_eq!(runtime_name_to_effect("almide_rt_env_get"), vec![Effect::EnvRead]);
+        assert_eq!(runtime_name_to_effect("almide_rt_process_exec"), vec![Effect::Proc]);
+        assert_eq!(runtime_name_to_effect("almide_rt_datetime_now"), vec![Effect::Time]);
+        assert_eq!(runtime_name_to_effect("almide_rt_random_float"), vec![Effect::Rand]);
+        assert!(runtime_name_to_effect("almide_rt_list_map").is_empty());
+        assert!(runtime_name_to_effect("println").is_empty());
     }
 
     fn extern_fn(name: &str, is_effect: bool) -> IrFunction {
@@ -159,14 +179,29 @@ mod tests {
     fn an_extern_fn_is_every_category() {
         for is_effect in [false, true] {
             let f = extern_fn("push_u32", is_effect);
-            assert_eq!(declared_direct_effects(&f), Effect::ALL.into_iter().collect(), "is_effect={is_effect}");
+            assert_eq!(declared_direct_effects(&f, false), Effect::ALL.into_iter().collect(), "is_effect={is_effect}");
         }
+    }
+
+    // #4100: an `@inline_rust` template is foreign code outside the stdlib.
+    #[test]
+    fn an_inline_rust_fn_outside_the_stdlib_is_every_category() {
+        let mut f = extern_fn("splice", false);
+        f.extern_attrs.clear();
+        assert!(declared_direct_effects(&f, false).is_empty(), "a plain fn declares nothing");
+        f.attrs.push(almide_lang::ast::Attribute {
+            name: almide_base::intern::sym("inline_rust"),
+            args: vec![],
+            span: None,
+        });
+        assert_eq!(declared_direct_effects(&f, false), Effect::ALL.into_iter().collect());
+        assert!(declared_direct_effects(&f, true).is_empty(), "the stdlib's own templates are categorised by the call table");
     }
 
     #[test]
     fn effect_display() {
-        assert_eq!(format!("{}", Effect::IO), "IO");
-        assert_eq!(format!("{}", Effect::Net), "Net");
+        assert_eq!(format!("{}", Effect::FsRead), "FS.read");
+        assert_eq!(format!("{}", Effect::Proc), "Proc");
     }
 
     #[test]
@@ -178,8 +213,8 @@ mod tests {
     #[test]
     fn format_effects_sorted() {
         let mut effects = HashSet::new();
-        effects.insert(Effect::Net);
-        effects.insert(Effect::IO);
-        assert_eq!(EffectMap::format_effects(&effects), "{IO, Net}");
+        effects.insert(Effect::NetFetch);
+        effects.insert(Effect::FsRead);
+        assert_eq!(EffectMap::format_effects(&effects), "{FS.read, Net.fetch}");
     }
 }

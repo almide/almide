@@ -69,13 +69,13 @@ fn fixed() -> Vec<u32> {
         }
     }
     v.push((2.0f32).powi(-12).to_bits());
-    v.push(1048576.25f32.to_bits());
+    v.push(1_048_576.3_f32.to_bits());
     v
 }
 
 fn build_program(n: u64) -> String {
     let mut s = String::from(
-        "fn show(b: Int) -> Unit = {\n  let g: Float32 = float.to_float32(int.bits_to_f32(b))\n  println(\"${g} ${float32.to_string(g)}\")\n}\n\nfn main() -> Unit = {\n",
+        "fn show(b: Int) -> Unit = {\n  let g: Float32 = float32.from(float.from(float32.from_bits(b)))\n  println(\"${g} ${float32.to_string(g)}\")\n}\n\nfn main() -> Unit = {\n",
     );
     for b in fixed() {
         s.push_str(&format!("  show({b})\n"));

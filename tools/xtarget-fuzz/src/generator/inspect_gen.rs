@@ -63,11 +63,6 @@ pub struct Target {
 /// refusal instead of the function.
 #[derive(Debug, Clone, PartialEq)]
 enum Domain {
-    /// A narrowing conversion (an Int or Float to `Option[<fixed width>]`):
-    /// the integral value 2, which every fixed-width type holds. The generic
-    /// 1.5 is refused as non-integral, and a size-like `n` leaves Int8 / UInt8
-    /// past 127.
-    Narrow(GenType),
     /// The inverse of a decoder `X -> Result[P]` / `Option[P]`: what its
     /// module's own producer `P -> X` makes of a payload — a payload of size
     /// n when P has a size. A numeral (an Int or Float printed by its own
@@ -79,8 +74,6 @@ enum Domain {
 impl Domain {
     fn expr(&self, n: u64) -> String {
         match self {
-            Domain::Narrow(GenType::Float) => "2.0".into(),
-            Domain::Narrow(_) => "2".into(),
             Domain::Inverse { producer, payload, numeral: true } => format!("string.repeat(\"0\", {n}) + {producer}({})", small(payload)),
             Domain::Inverse { producer, payload, numeral: false } if has_size(payload) => format!("{producer}({})", sized(payload, n)),
             Domain::Inverse { producer, payload, .. } => format!("{producer}({})", small(payload)),
@@ -99,9 +92,6 @@ impl Domain {
             GenType::Result(p) | GenType::Option(p) => (**p).clone(),
             _ => return None,
         };
-        if matches!((ret, &payload, x), (GenType::Option(_), GenType::Sized(_), GenType::Int | GenType::Float)) {
-            return Some(Domain::Narrow(x.clone()));
-        }
         // Producers are matched on closed types only: a generic one has no
         // fixed `P -> X` to invert.
         let closed = HashMap::new();
@@ -118,8 +108,7 @@ impl Domain {
             }
         };
         // A numeral is what the number type's own module prints it as
-        // (`int.to_string`, `float.to_string`); `string.from_codepoint` also
-        // makes a String from an Int, but a character, not a numeral.
+        // (`int.to_string`, `float.to_string`), not a character.
         let numeral = *x == GenType::String && matches!((&payload, producer.module), (GenType::Int, "int") | (GenType::Float, "float"));
         Some(Domain::Inverse { producer: format!("{}.{}", producer.module, producer.func), payload, numeral })
     }
@@ -190,33 +179,26 @@ const SCATTERED_MAP: &str = "list.range(0, {n}) |> list.fold(map.new(), (m, i) =
 /// The present key of the map's `({i} * 7919 mod n)`-th entry.
 const SCATTERED_KEY: &str = "\"k${{i} * 7919 % {n} * 7919 % 1000003}\"";
 
-/// A response of n headers named `k` + the digits of `100000000 + i` least
-/// significant first: two names meet at a position independent of n.
-const FLAT_NAMED_RESPONSE: &str = "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))";
-/// The last of those names.
-const FLAT_LAST_NAME: &str = "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")";
-
 /// n bytes with no short period, for the zlib codecs.
 const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))";
 
 pub mod effect_recipes;
 
 const SHAPE_RECIPES: &[Recipe] = &[
-    // A (T, in_ch) input, an (out_ch, in_ch × kernel) weight, one bias per
-    // out_ch; kernel 3, stride 1, padding 1 give T output rows of out_ch =
-    // in_ch, so the rebound input keeps its shape. n is T.
-    Recipe {
-        func: "matrix.conv1d",
-        size: "input",
-        args: &[
-            ("input", "matrix.zeros({n}, 2)"),
-            ("weight", "matrix.zeros(2, 6)"),
-            ("bias", "[0.5, 1.5]"),
-            ("kernel", "3"),
-            ("stride", "1"),
-            ("padding", "1"),
-        ],
-    },
+    // #4106: the message is the size (the key is fixed, one block, a
+    // Secret[Bytes] like the tag — security table row 20). A verify
+    // call is in-domain only with the right tag — the MAC of the same key and
+    // message, computed once outside the timed calls — so it runs the full
+    // compare and answers true; a 2-byte generic tag is refused
+    // by the length check before any compare.
+    Recipe { func: "hash.hmac_sha256", size: "b", args: &[("key", "secret.new(bytes.from_string(\"key\"))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "hash.is_valid_hmac_sha256", size: "b", args: &[("key", "secret.new(bytes.from_string(\"key\"))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha256(secret.new(bytes.from_string(\"key\")), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
+    Recipe { func: "hash.hmac_sha512", size: "b", args: &[("key", "secret.new(bytes.from_string(\"key\"))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "hash.is_valid_hmac_sha512", size: "b", args: &[("key", "secret.new(bytes.from_string(\"key\"))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha512(secret.new(bytes.from_string(\"key\")), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
+    // Equal operands: the whole walk runs and the answer is true (a length
+    // mismatch is answered before the walk).
+    Recipe { func: "bytes.is_equal_constant_time", size: "a", args: &[("a", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "string.is_equal_constant_time", size: "a", args: &[("a", "string.repeat(\"aé\", {n})"), ("b", "string.repeat(\"aé\", {n})")] },
     // Decoders must be timed on input they accept (#3666): the generic
     // `string.repeat("aé", n)` is refused at its first character, so every
     // shape measured the early-error exit. n bytes of every value, encoded;
@@ -250,69 +232,41 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "string.byte_slice", size: "s", args: &[("s", "string.repeat(\"aé\", {n})"), ("start", "0"), ("end", "3")] },
     // A lookup "err / none if missing": the key the sized object holds last
     // (its keys are `k<100000000 + i>`), so the hit scans the whole object.
-    Recipe { func: "value.field", size: "v", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
-    Recipe { func: "json.get_int", size: "j", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
-    // The header lookups "none / empty if missing": the sized response and
-    // request carry n headers keyed the same way (nominal.rs).
-    Recipe { func: "http.get_header", size: "resp", args: &[("resp", FLAT_NAMED_RESPONSE), ("key", FLAT_LAST_NAME)] },
-    // header_values compares every name with the key: names whose digits run
-    // least significant first meet the key's at a position independent of n
-    // (see `{sized_flat}`); "k1000xxxxx" against the last key drifted the
-    // per-name cost on both legs (rms 8%, no class).
-    Recipe {
-        func: "http.header_values",
-        size: "resp",
-        args: &[("resp", FLAT_NAMED_RESPONSE), ("key", FLAT_LAST_NAME)],
-    },
-    Recipe {
-        func: "http.req_header",
-        size: "req",
-        args: &[("req", "http.new_request(\"GET\", \"/p/1\", \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))"), ("key", FLAT_LAST_NAME)],
-    },
-    // The path lookups "none / err if the path is missing": the last key of
-    // the sized object, so the hit walks it whole.
-    Recipe { func: "json.get_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
-    Recipe { func: "json.set_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
-    Recipe { func: "json.remove_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
+    Recipe { func: "value.get", size: "v", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "value.get_int", size: "v", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    // The header readers (`http.header` / `header_values`) are generic over
+    // `HttpMessage` (R-http-12): a protocol-bounded type variable is not in the
+    // generator's type universe yet, so they carry no recipe here.
     // A router refuses two routes with one pattern: n distinct patterns.
     Recipe {
         func: "http.router",
-        size: "routes",
+        size: "xs",
         args: &[(
-            "routes",
+            "xs",
             "list.range(0, {n}) |> list.map((i) => http.route(\"GET /r${100000000 + i}/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\")))",
         )],
-    },
-    // A body of n fixed-width ints the decode callback accepts (`ok` of its
-    // length, `{as_t}` making the length a T), so the parse and the decode
-    // both run whole and the call returns ok: the 400 responses are its
-    // refusals.
-    Recipe {
-        func: "http.decode_json",
-        size: "req",
-        args: &[
-            ("req", "http.new_request(\"POST\", \"/j\", \"[\" + (list.range(0, {n}) |> list.map((i) => int.to_string(100000000 + i)) |> list.join(\",\")) + \"]\", map.new())"),
-            ("decode", "(v) => match value.as_array(v) { ok(xs) => ok({as_t}(list.len(xs))), err(e) => err(e) }"),
-        ],
     },
     // The name the route binds: the probes run inside its handler, the
     // routed request filling `req` ([`ROUTED`]), so the lookup hits.
     Recipe { func: "http.param", size: "req", args: &[("name", "\"id\"")] },
+    // An attribute name is valid only by its doc comment (a name, not a URL or
+    // event-handler attribute): the generic "aéaé…" name aborts before the
+    // value is escaped. The value (the URL) is the size.
+    Recipe { func: "html.attr", size: "value", args: &[("name", "\"title\""), ("value", "string.repeat(\"aé\", {n})")] },
+    Recipe {
+        func: "html.url_attr",
+        size: "url",
+        args: &[("name", "\"href\""), ("url", "\"https://example.com/\" + string.repeat(\"aé\", {n})")],
+    },
     // n pass-through middleware: what `wrap` composes.
     Recipe { func: "http.wrap", size: "middleware", args: &[("middleware", "list.range(0, {n}) |> list.map((i) => (next) => next)")] },
     // A pattern is not a needle (SEARCH_PARAMS): n copies of every directive.
     Recipe { func: "datetime.format", size: "pattern", args: &[("pattern", "string.repeat(\"%Y-%m-%d %H:%M:%S|\", {n})")] },
-    // The Float32 constructors take their size as a row count.
-    Recipe { func: "matrix.zeros_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
-    Recipe { func: "matrix.ones_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
-    // Percent-escapes and `+` to decode, n of each: the generic "aéaé…" has
-    // nothing to decode.
-    Recipe { func: "http.url_decode", size: "s", args: &[("s", "string.repeat(\"a%C3%A9+\", {n})")] },
     // Deleting an absent key is a no-op. The plain call's per-iteration
     // step re-sets "k0" (see `vary`), so deleting "k0" hits on every call,
     // and the map holds "k0" from the start for the diamond.
     Recipe {
-        func: "map.delete",
+        func: "map.remove",
         size: "m",
         args: &[("m", "map.set({sized}, \"k0\", {small_elem})"), ("key", "\"k0\"")],
     },
@@ -321,13 +275,13 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // they compare (the needle at the end, two equal strings).
     Recipe { func: "testing.assert_gt", size: "a", args: &[("a", "{n}"), ("b", "1")] },
     Recipe { func: "testing.assert_lt", size: "b", args: &[("a", "1"), ("b", "{n}")] },
-    Recipe { func: "testing.assert_approx", size: "a", args: &[("a", "int.to_float({n})"), ("b", "int.to_float({n})"), ("tolerance", "0.5")] },
+    Recipe { func: "testing.assert_approx", size: "a", args: &[("a", "float.from({n})"), ("b", "float.from({n})"), ("tolerance", "0.5")] },
     Recipe { func: "testing.assert_contains", size: "haystack", args: &[("haystack", "string.repeat(\"a\", {n}) + \"b\""), ("needle", "\"b\"")] },
     Recipe { func: "testing.assert_snapshot", size: "actual", args: &[("actual", "string.repeat(\"aé\", {n})"), ("expected", "string.repeat(\"aé\", {n})")] },
-    Recipe { func: "testing.assert_some", size: "opt", args: &[("opt", "some({sized_elem})")] },
-    Recipe { func: "testing.assert_ok", size: "result", args: &[("result", "ok({sized_elem})")] },
-    Recipe { func: "testing.assert_none", size: "", args: &[("opt", "none")] },
-    Recipe { func: "testing.assert_err", size: "", args: &[("result", "err(\"e\")")] },
+    Recipe { func: "testing.assert_some", size: "o", args: &[("o", "some({sized_elem})")] },
+    Recipe { func: "testing.assert_ok", size: "r", args: &[("r", "ok({sized_elem})")] },
+    Recipe { func: "testing.assert_none", size: "", args: &[("o", "none")] },
+    Recipe { func: "testing.assert_err", size: "", args: &[("r", "err(\"e\")")] },
     // Dedup builders over scattered elements (see `{sized_scattered}`).
     Recipe { func: "set.from_list", size: "xs", args: &[("xs", "{sized_scattered}")] },
     Recipe { func: "list.unique", size: "xs", args: &[("xs", "{sized_scattered}")] },
@@ -339,10 +293,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // with n consecutive numerals the wasm index's mean probe fell by 20%
     // from n = 20000 to 80000 and then held, a series no class fits.
     Recipe { func: "map.get", size: "m", args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY)] },
-    Recipe { func: "map.get_or", size: "m", args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY)] },
     Recipe { func: "map.contains", size: "m", args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY)] },
     Recipe {
-        func: "map.insert",
+        func: "map.set",
         size: "m",
         args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY), ("value", "{small}")],
     },
@@ -354,32 +307,23 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The codecs over n bytes that do not repeat in any short period (a run
     // of zeros is one LZ77 match on native); a decoder's input is its own
     // encoder's output, so the run decodes successfully on both legs.
-    Recipe { func: "zlib.compress", size: "data", args: &[("data", CODEC_BYTES)] },
-    Recipe { func: "zlib.compress_level", size: "data", args: &[("data", CODEC_BYTES), ("level", "6")] },
-    Recipe { func: "zlib.deflate", size: "data", args: &[("data", CODEC_BYTES)] },
-    Recipe { func: "zlib.deflate_level", size: "data", args: &[("data", CODEC_BYTES), ("level", "6")] },
-    Recipe { func: "zlib.gzip", size: "data", args: &[("data", CODEC_BYTES)] },
-    Recipe { func: "zlib.decompress", size: "data", args: &[("data", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
-    Recipe { func: "zlib.inflate", size: "data", args: &[("data", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
-    Recipe { func: "zlib.gunzip", size: "data", args: &[("data", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
-    // Native stdout is a 64 KiB BufWriter: a shorter write is copied into it,
-    // a longer one goes straight to the kernel, where neither meter counts it.
-    // n bytes straddled the capacity (moved n per call to 40000, then 0), so
-    // the writes are 4n bytes: every size is past it, in one regime.
-    Recipe { func: "io.write", size: "data", args: &[("data", "bytes.from_list(list.range(0, 4 * {n}) |> list.map((i) => 97 + i % 26))")] },
-    Recipe { func: "io.write_bytes", size: "data", args: &[("data", "list.range(0, 4 * {n}) |> list.map((i) => 97 + i % 26)")] },
+    Recipe { func: "zlib.compress", size: "b", args: &[("b", CODEC_BYTES)] },
+    Recipe { func: "zlib.compress_level", size: "b", args: &[("b", CODEC_BYTES), ("level", "6")] },
+    Recipe { func: "zlib.deflate", size: "b", args: &[("b", CODEC_BYTES)] },
+    Recipe { func: "zlib.deflate_level", size: "b", args: &[("b", CODEC_BYTES), ("level", "6")] },
+    Recipe { func: "zlib.gzip", size: "b", args: &[("b", CODEC_BYTES)] },
+    Recipe { func: "zlib.decompress", size: "b", args: &[("b", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.inflate", size: "b", args: &[("b", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.gunzip", size: "b", args: &[("b", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    // `io.write` is generic over its handle (`H: Write`) now, outside the
+    // generator's type universe, so it has no recipe until the generator
+    // builds handles; its last recipe wrote 4n bytes so every size was past
+    // native stdout's 64 KiB BufWriter, in one regime.
     // zip / zip_with stop at the shorter list: against the generic 2-element
     // partner the result had 2 elements whatever n was, so the order measured
     // was the truncation's. The partner takes the sized one's length.
     Recipe { func: "list.zip", size: "xs", args: &[("ys", "{sized}")] },
     Recipe { func: "list.zip_with", size: "xs", args: &[("ys", "{sized}")] },
-    // Elementwise operands "truncate to overlap": against the generic 2×2
-    // operand the result is 2×2 whatever n is, so the order measured was the
-    // truncation's. Every operand takes the n × 2 shape of the sized one.
-    Recipe { func: "matrix.add", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
-    Recipe { func: "matrix.sub", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
-    Recipe { func: "matrix.fma", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
-    Recipe { func: "matrix.fma3", size: "a", args: &[("b", "matrix.zeros({n}, 2)"), ("c", "matrix.zeros({n}, 2)")] },
     // "No-op if it won't fit" / "clamped to fit": the generic 2 for every
     // offset copied an empty range (2..2) and read past a 2-byte source.
     // Distinct byte values, so the diamond shows the copy.
@@ -388,10 +332,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
         size: "b",
         args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))"), ("src_start", "0"), ("src_end", "2"), ("dst", "2")],
     },
-    Recipe { func: "bytes.copy_from", size: "dst", args: &[("src_off", "0")] },
+    Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
     // A pattern the sized "aéaé…" matches whole; the generic pattern was
     // the sized string and the subject 2 characters, so it never matched.
-    Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
 ];
 
 /// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
@@ -642,7 +585,7 @@ impl Target {
         };
         // `{as_t}`: the conversion of an Int to the instantiated `T` (a
         // generic recipe's callback returns a T at Int and at String alike).
-        let as_t = match self.subst.get("T") {
+        let as_t = match self.subst.get("T").or_else(|| self.subst.get("A")) {
             Some(GenType::String) => "int.to_string",
             _ => "",
         };
@@ -684,7 +627,7 @@ impl Target {
         let inner: String = body.lines().map(|l| if l.is_empty() { "\n".to_string() } else { format!("  {l}\n") }).collect();
         let target = r.target.replace("{n}", &n.to_string());
         format!(
-            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", map.new()))!\n  if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status_code(res)}}\")\n{}}}\n",
+            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", []))!\n  if http.status(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status(res)}}\")\n{}}}\n",
             r.pattern,
             if print_body { "  println(http.body(res))\n" } else { "" }
         )
@@ -912,7 +855,7 @@ impl Target {
     /// A call that consumes its whole input: its diamond runs each path alone.
     pub fn diamond_runs_paths_alone(&self) -> bool {
         // A call that does not return ends its path's program.
-        self.never || matches!(self.name.as_str(), "io.read_all" | "process.stdin_lines")
+        self.never || self.name == "io.read_all"
     }
 
     fn diamond_project_of(&self, n: u64, paths: &[&str]) -> Project {
@@ -1042,6 +985,9 @@ impl Target {
             .map(|i| {
                 let e = match i {
                     _ if Some(i) == slot => "x".to_string(),
+                    // The diamond path's own `var` (`<path>m`); the direct
+                    // program binds the mutated operand as `a<i>`.
+                    _ if Some(i) == self.mut_param && !path.is_empty() => format!("{path}m"),
                     _ if self.per_step(i) => format!("{path}a{i}"),
                     _ => format!("a{i}"),
                 };
@@ -1145,10 +1091,10 @@ fn small(t: &GenType) -> String {
         GenType::Sized(name) => GenType::sized_literal(name, "2"),
         GenType::Bytes => "bytes.from_list([1, 2])".into(),
         GenType::Matrix => "matrix.from_lists([[1.5, 2.0], [0.5, 3.0]])".into(),
-        GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.str(\"x\"))])".into(),
-        GenType::Endian => "BigEndian".into(),
+        GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.string(\"x\"))])".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
+        GenType::Secret(e) => format!("secret.new({})", small(e)),
     }
 }
 
@@ -1174,7 +1120,7 @@ fn absent(t: &GenType) -> String {
 fn elem(t: &GenType) -> String {
     match t {
         GenType::Int => "i".into(),
-        GenType::Float => "int.to_float(i) * 0.5".into(),
+        GenType::Float => "float.from(i) * 0.5".into(),
         GenType::String => "\"s${100000000 + i}\"".into(),
         GenType::Bool => "i % 2 == 0".into(),
         GenType::List(e) => format!("[{}]", elem(e)),
@@ -1183,6 +1129,7 @@ fn elem(t: &GenType) -> String {
         GenType::Tuple3(a, b, c) => format!("({}, {}, {})", elem(a), elem(b), elem(c)),
         GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
         GenType::Set(e) => format!("set.from_list([{}])", elem(e)),
+        GenType::Secret(e) => format!("secret.new({})", elem(e)),
         other => small(other),
     }
 }
@@ -1194,7 +1141,7 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::String => format!("string.repeat(\"aé\", {n})"),
         GenType::List(e) => format!("list.range(0, {n}) |> list.map((i) => {})", elem(e)),
         GenType::Map(v) => format!("list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{100000000 + i}}\", {}))", elem(v)),
-        GenType::Bytes => format!("bytes.new({n})"),
+        GenType::Bytes => format!("bytes.zeros({n})"),
         GenType::Matrix => format!("matrix.zeros({n}, 2)"),
         // An object of n keys: what `field` / `keys` / `pick` / `omit` /
         // `merge` and the case converters walk. Keys and values are fixed
@@ -1202,6 +1149,8 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Value => format!("value.object(list.range(0, {n}) |> list.map((i) => (\"k${{100000000 + i}}\", value.int(100000000 + i))))"),
         GenType::Set(e) => format!("list.range(0, {n}) |> list.map((i) => {}) |> set.from_list", elem(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| nominal::fill(d.sized, "", n)),
+        // The size of what it holds.
+        GenType::Secret(e) => format!("secret.new({})", sized(e, n)),
         other => small(other),
     }
 }
@@ -1266,15 +1215,16 @@ fn digest(v: &str, t: &GenType) -> String {
         // A triple is the Qwen3 layers' (h, k, v): the first element's digest keeps the call live.
         GenType::Tuple3(a, ..) => digest(&format!("{v}.0"), a),
         GenType::Sized(name) if name.starts_with("Float") => {
-            format!("(if float.from_{}({v}) > 0.0 then 1 else 0)", name.to_lowercase())
+            format!("(if float.from({v}) > 0.0 then 1 else 0)")
         }
-        GenType::Sized(name) => format!("int.from_{}({v})", name.to_lowercase()),
+        GenType::Sized(_) => format!("int.from_wrapping({v})"),
         GenType::Bytes => format!("bytes.len({v})"),
         GenType::Matrix => format!("matrix.rows({v})"),
-        GenType::Value => format!("string.len(value.stringify({v}))"),
-        GenType::Endian => "1".into(),
+        GenType::Value => format!("string.len(json.stringify({v}))"),
         GenType::Set(_) => format!("set.len({v})"),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "1".into(), |d| nominal::fill(d.digest, v, 0)),
+        // What it holds, read through the one way out.
+        GenType::Secret(e) => digest(&format!("secret.reveal({v})"), e),
     }
 }
 
@@ -1297,38 +1247,13 @@ pub(crate) mod tests {
 
     /// #3636: the sized Value's stringified length must be a·n + b. With
     /// `value.int(i)` the digit width grew across the sweep (crossing 99999
-    /// between 20k and 320k), so json.stringify / value.stringify /
+    /// between 20k and 320k), so json.stringify /
     /// value.omit fit n at 2.9–3.8% rms against a declared n.
     #[test]
     fn the_sized_value_holds_fixed_width_ints() {
         let s = sized(&GenType::Value, 1000);
         assert!(s.contains("value.int(100000000 + i)"), "{s}");
         assert!(!s.contains("value.int(i)"), "{s}");
-    }
-
-    /// #3637: conv1d got `matrix.zeros(n, 2)` with every other operand 2×2
-    /// and 2 for every count, so the input, weight and bias shapes did not
-    /// line up — every shape exited 1. It gets operands that agree, with n on
-    /// an axis the function accepts, in the plain call and the diamond alike.
-    #[test]
-    fn kernel_geometry_functions_get_operands_that_agree() {
-        // conv1d: (T, in_ch) input, (out_ch, in_ch × kernel) weight, one
-        // bias per out_ch; kernel 3, stride 1, padding 1 keep T rows out.
-        let t = target("matrix.conv1d");
-        let direct = t.direct_program(1000, 4, true);
-        for want in [
-            "  var x: Matrix = matrix.zeros(1000, 2)",
-            "  let a1: Matrix = matrix.zeros(2, 6)",
-            "  let a2: List[Float] = [0.5, 1.5]",
-            "  let a3: Int = 3",
-            "  let a4: Int = 1",
-            "  let a5: Int = 1",
-        ] {
-            assert!(direct.contains(want), "{want}: {direct}");
-        }
-        let project = t.diamond_project(64);
-        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
-        assert!(main.contains("let a0: Matrix = matrix.zeros(64, 2)") && main.contains("let a1: Matrix = matrix.zeros(2, 6)"), "{main}");
     }
 
     /// #3666: the decoders' sized String was `string.repeat("aé", n)`, which
@@ -1389,45 +1314,17 @@ pub(crate) mod tests {
         assert!(t.rebind_programs(1000, 4).iter().all(|(_, s)| !s.contains(ERR_PATH)));
     }
 
-    /// #3671: `float.to_*_checked` got the constant 1.5, which every one of
-    /// them refuses as non-integral, and `int.to_int8_checked` /
-    /// `to_uint8_checked` got the size-like `n` (20000..320000), past their
-    /// range — every stamped run measured `none`. A narrowing conversion is
-    /// recognised by its type (an Int or Float to `Option[<fixed width>]`),
-    /// and gets 2, which every fixed-width type holds, as a constant: its
-    /// cost has no size.
-    #[test]
-    fn a_narrowing_conversion_gets_a_value_every_fixed_width_type_holds() {
-        for (name, ty, want) in [
-            ("int.to_int8_checked", "Int", "2"),
-            ("int.to_uint8_checked", "Int", "2"),
-            ("int.to_int16_checked", "Int", "2"),
-            ("int.to_uint64_checked", "Int", "2"),
-            ("float.to_int8_checked", "Float", "2.0"),
-            ("float.to_uint8_checked", "Float", "2.0"),
-            ("float.to_int64_checked", "Float", "2.0"),
-            ("float.to_uint64_checked", "Float", "2.0"),
-        ] {
-            let t = target(name);
-            assert!(t.in_domain() && t.size_param.is_none(), "{name}");
-            let direct = t.direct_program(1000, 4, true);
-            assert!(direct.contains(&format!("  let a0: {ty} = {want}\n")), "{name}: {direct}");
-            assert!(!direct.contains("1000"), "{name}: the value is not a size: {direct}");
-        }
-    }
-
     /// #3671: a decoder is given what its module's own producer of its input
     /// makes — the inverse it declares by type — instead of the generic
-    /// value it refuses: `int.parse` / `int.from_hex` / `float.parse` got
+    /// value it refuses: `int.parse` / `float.parse` got
     /// "aéaé…" and returned `err`; `value.as_*` got an object. A numeral
     /// scales by leading zeros; a payload with a size is sized.
     #[test]
     fn a_decoder_gets_what_its_module_encodes() {
         for (name, want) in [
             ("int.parse", "string.repeat(\"0\", 1000) + int.to_string(2)"),
-            ("int.from_hex", "string.repeat(\"0\", 1000) + int.to_hex(2)"),
             ("float.parse", "string.repeat(\"0\", 1000) + float.to_string(1.5)"),
-            ("value.as_string", "value.str(string.repeat(\"aé\", 1000))"),
+            ("value.as_string", "value.string(string.repeat(\"aé\", 1000))"),
             ("value.as_array", "value.array(list.range(0, 1000) |> list.map((i) => "),
             ("url.decode_component", "url.encode_component(string.repeat(\"aé\", 1000))"),
         ] {
@@ -1445,10 +1342,6 @@ pub(crate) mod tests {
             assert!(t.in_domain() && t.size_param.is_none(), "{name}");
             assert!(t.direct_program(1000, 4, true).contains(&format!("  let a0: Value = {want}\n")), "{name}");
         }
-        // `string.from_codepoint` makes a String from an Int, but a
-        // character: it is not padded like a numeral.
-        let t = target("string.codepoint");
-        assert!(t.direct_program(1000, 4, true).contains("  let a0: String = string.from_codepoint(2)\n"));
     }
 
     /// #3671: a function whose input is in-domain (a recipe or a derived
@@ -1459,7 +1352,7 @@ pub(crate) mod tests {
     #[test]
     fn an_in_domain_input_stops_every_probe_on_none_or_false() {
         let none = format!("none => panic(\"{OFF_DOMAIN}: none\")");
-        let t = target("int.to_int8_checked");
+        let t = target("string.byte_slice");
         assert!(t.direct_program(1000, 4, true).contains(&none));
         let project = t.diamond_project(64);
         let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
@@ -1486,18 +1379,7 @@ pub(crate) mod tests {
             // voided by #3671
             "int.parse",
             "float.parse",
-            "int.from_hex",
             "string.byte_slice",
-            "int.to_int8_checked",
-            "int.to_uint8_checked",
-            "float.to_int8_checked",
-            "float.to_int16_checked",
-            "float.to_int32_checked",
-            "float.to_int64_checked",
-            "float.to_uint8_checked",
-            "float.to_uint16_checked",
-            "float.to_uint32_checked",
-            "float.to_uint64_checked",
             "string.is_digit",
             "string.is_whitespace",
             "string.is_upper",
@@ -1508,18 +1390,12 @@ pub(crate) mod tests {
             "value.as_array",
             "value.as_bool",
             "value.as_int",
-            "value.field",
-            "json.get_int",
-            "map.delete",
-            "matrix.sub",
-            "matrix.fma",
-            "matrix.fma3",
+            "value.get",
+            "value.get_int",
+            "map.remove",
             "bytes.copy_within",
             "bytes.copy_from",
-            "regex.full_match",
-            // outside the model until a Result could carry a nominal error,
-            // and until a probe could run inside a routed handler
-            "http.decode_json",
+            // outside the model until a probe could run inside a routed handler
             "http.param",
         ] {
             assert!(covered.contains(name), "{name} has no in-domain input");
@@ -1565,28 +1441,6 @@ pub(crate) mod tests {
         assert!(failed.is_empty(), "in-domain probes that did not take the success path:\n{}", failed.join("\n"));
     }
 
-    /// `http.decode_json` is sized by a JSON body its decode callback accepts
-    /// (n ints, decoded to their count), so the call takes the ok path; its
-    /// `Result[T, HttpResponse]` stops every probe on `err` with the
-    /// response shown through HttpResponse's readers. At String the callback
-    /// returns the count as a String.
-    #[test]
-    fn decode_json_is_sized_with_a_body_its_callback_accepts() {
-        let t = target("http.decode_json");
-        assert!(t.in_domain() && t.size_param == Some(0) && t.rebind_param.is_none());
-        let direct = t.direct_program(1000, 4, true);
-        assert!(direct.contains("  var x: HttpRequest = http.new_request(\"POST\", \"/j\", \"[\" + (list.range(0, 1000) |> list.map((i) => int.to_string(100000000 + i))"), "{direct}");
-        assert!(direct.contains("let r: Result[Int, HttpResponse] = http.decode_json(x, (v) => match value.as_array(v) { ok(xs) => ok((list.len(xs))), err(e) => err(e) })"), "{direct}");
-        assert!(direct.contains("err(e) => {\n        let eo: (Int, (String, Map[String, String])) = (http.status_code(e), (http.body(e), http.headers(e)))\n        panic(\"inspect: the probed call returned err: ${eo}\")"), "{direct}");
-        let catalogue = crate::generator::catalogue::build();
-        let sig = catalogue.iter().find(|s| s.module == "http" && s.func == "decode_json").unwrap();
-        let heap = Target::new_filled(sig, &catalogue, GenType::String).expect("heap target");
-        assert!(heap.direct_program(1000, 4, true).contains("ok(int.to_string(list.len(xs)))"));
-        let project = t.diamond_project(64);
-        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
-        assert!(main.contains("let d_o: Result[Int, String] = match d { ok(o0) => ok(o0), err(e0) => {"), "{main}");
-    }
-
     /// `http.param` answers `some` only for a request the router bound path
     /// parameters into: every probe runs inside the handler of a one-route
     /// router, the routed request filling `req`, and the size is the bound
@@ -1600,8 +1454,8 @@ pub(crate) mod tests {
         for with_call in [true, false] {
             let direct = t.direct_program(1000, 4, with_call);
             assert!(direct.contains("  let h: HttpHandler = match http.router([http.route(\"GET /p/{id}\", (req) => {\n    let x: HttpRequest = req\n    let a1: String = \"id\"\n"), "{direct}");
-            assert!(direct.contains("h(http.new_request(\"GET\", \"/p/\" + string.repeat(\"a%C3%A9\", 1000), \"\", map.new()))!"), "{direct}");
-            assert!(direct.contains(&format!("if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered")), "{direct}");
+            assert!(direct.contains("h(http.new_request(\"GET\", \"/p/\" + string.repeat(\"a%C3%A9\", 1000), \"\", []))!"), "{direct}");
+            assert!(direct.contains(&format!("if http.status(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered")), "{direct}");
             assert!(direct.contains("    http.response(200, \"${acc}\")\n  })]) {"), "{direct}");
             assert_eq!(direct.contains("let r: Option[String] = http.param(x, a1)"), with_call, "{direct}");
         }
@@ -1623,34 +1477,20 @@ pub(crate) mod tests {
         }
     }
 
-    /// The streaming clients (ADR-0027 D8: ported, then inspected) are
-    /// probed over the fixture's `/chunked/{n}` route, sized by the url, with
-    /// a generated `on_chunk`.
-    #[test]
-    fn the_streaming_clients_stream_the_fixtures_chunked_route() {
-        for name in ["http.request_stream", "http.request_stream_with_limits"] {
-            let t = target(name);
-            assert!(t.recipe.is_some(), "{name} has no recipe");
-            let direct = t.direct_program(1000, 4, true);
-            assert!(direct.contains("/chunked/1000"), "{name}: {direct}");
-            assert!(direct.contains(&format!("{name}(a0, x, ")) && direct.contains("let a0: String = \"GET\""), "{name}: {direct}");
-        }
-    }
-
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
     /// it on, and each diamond path mutates its own `var` and prints it.
     #[test]
     fn a_mutator_is_called_on_a_var_and_each_diamond_path_prints_its_own_copy() {
         let t = target("bytes.push");
         let direct = t.direct_program(1000, 4, true);
-        assert!(direct.contains("  var x: Bytes = bytes.new(1000)"), "{direct}");
+        assert!(direct.contains("  var x: Bytes = bytes.zeros(1000)"), "{direct}");
         assert!(direct.contains("let r: Unit = bytes.push(x, "), "{direct}");
         let project = t.diamond_project(1000);
         let file = |suffix: &str| project.files.iter().find(|(p, _)| p.ends_with(suffix)).map(|(_, s)| s.clone()).unwrap();
         assert!(file("base.almd").contains("pub fn call(mut a0: Bytes, a1: Int) -> Unit = bytes.push(a0, a1)"), "{}", file("base.almd"));
         let main = file("main.almd");
         for v in ["d", "l", "r"] {
-            assert!(main.contains(&format!("  var {v}m: Bytes = bytes.new(1000)")), "{main}");
+            assert!(main.contains(&format!("  var {v}m: Bytes = bytes.zeros(1000)")), "{main}");
             assert!(main.contains(&format!("let {v}m_o: List[Int] = bytes.to_list({v}m)\n  println(\"{v}m = ${{{v}m_o}}\")")), "{main}");
         }
         assert!(main.contains("println(\"d = ()\")"), "a Unit return prints its one value, not its string form (E089): {main}");

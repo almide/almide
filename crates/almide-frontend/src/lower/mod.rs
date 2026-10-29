@@ -31,6 +31,8 @@ pub use types::lower_bundled_type_decl;
 mod derive;
 mod derive_codec;
 mod auto_try;
+mod declared_repr;
+mod secret_eq;
 
 use expressions::lower_expr;
 pub(crate) use calls::{qualify_callee_module_idents, substitute_call_params};
@@ -76,6 +78,9 @@ pub struct LowerCtx<'a> {
     pub annotated_result_vars: std::collections::HashSet<VarId>,
     /// Functions synthesized during expression lowering (fan.bounded outlining).
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
+    /// Declared-repr walkers being synthesized (`declared_repr.rs`, #4107):
+    /// a recursive type names its own walker before the body exists.
+    declared_repr_pending: Vec<Sym>,
     /// `testing.assert_aborts` sites lifted so far (ADR-0029), in declaration
     /// order: whether each lifted site fn is an effect fn. The dispatcher is
     /// synthesized from it once the program is lowered.
@@ -109,6 +114,7 @@ impl<'a> LowerCtx<'a> {
             in_test: false,
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
+            declared_repr_pending: Vec::new(),
             bounded_counter: 0,
             abort_sites: Vec::new(),
             escaped_fns: std::collections::HashSet::new(),
@@ -144,27 +150,14 @@ impl<'a> LowerCtx<'a> {
     /// Returns the fully qualified function name if:
     /// - The function is explicitly defined in env.functions, OR
     /// - The type declares `deriving <Convention>` (auto-derive will generate the function)
+    ///
     /// A convention method the user wrote EXPLICITLY (not one auto-derive will
     /// synthesize). String interpolation of a record/variant uses this — when no
     /// explicit `repr` exists it falls through to the codegen `AlmideRepr` impl,
     /// the canonical Almide-literal form (quoted strings, Display floats), so a
     /// `deriving Repr` record and a plain record interpolate identically.
     pub(super) fn find_explicit_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
-        if let Ty::Named(type_name, _) = ty {
-            let fn_name = sym(&format!("{}.{}", type_name, convention));
-            if self.explicit_convention_fns.contains(&fn_name) {
-                return Some(fn_name);
-            }
-            // The set above only holds the program being lowered, so a custom
-            // `repr` defined in ANOTHER module was silently skipped and the
-            // value fell through to the derived `AlmideRepr` impl — printing
-            // the variant name with no error anywhere (#1087).
-            let held = crate::canonicalize::registration::convention_fn_key(self.env, &type_name.to_string(), convention)?;
-            if self.env.explicit_convention_fns.contains(&held) {
-                return crate::canonicalize::registration::convention_emit_key(self.env, &type_name.to_string(), convention);
-            }
-        }
-        None
+        declared_repr::explicit_convention_fn(self.env, &self.explicit_convention_fns, ty, convention)
     }
 
     pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
@@ -621,7 +614,11 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
         }
     }
     functions.append(&mut ctx.synthesized_fns);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
+    let operator_requirements = operator_requirement_targets(&mut ctx, env);
+    // The renderer rule's post-mono run (#4239) reads the entry program's
+    // table; a module lowering's IR is folded into the entry's.
+    let declared_reprs = if ctx.current_module.is_none() { ctx.declared_repr_table() } else { Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements, declared_reprs };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
@@ -636,6 +633,51 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
     }
 
     program
+}
+
+/// The function each operator requirement of a declared conforming type
+/// lowers to (#4099): `(BigInt, add) -> bigint.add`. Lowering desugars an
+/// operator on a concrete conforming type itself; this table is for the
+/// operator written on a type PARAMETER (`fn f[T: Numeric](a: T, b: T) = a + b`),
+/// which monomorphization reaches only once `T` is bound. Keyed by the type's
+/// registered spelling and by its bare name.
+fn operator_requirement_targets(
+    ctx: &mut LowerCtx, env: &TypeEnv,
+) -> std::collections::HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget> {
+    use crate::canonicalize::protocols::{NEG_REQUIREMENT, OPERATOR_REQUIREMENTS, ORDER_REQUIREMENT};
+    let methods: Vec<&str> = OPERATOR_REQUIREMENTS.iter().map(|(_, m)| *m)
+        .chain([NEG_REQUIREMENT, ORDER_REQUIREMENT])
+        .collect();
+    // Only a type one of whose protocols requires an operator method can
+    // answer one, and most conforming types (every Eq / Repr / Hash
+    // conformer) require none: read each type's protocols once and keep the
+    // operator methods they require, instead of resolving every (type,
+    // method) pair — this ran for every module lowered (#4289).
+    let required_ops = |name: &str| -> Vec<&str> {
+        let bare = name.rsplit_once('.').map_or(name, |(_, b)| b);
+        let protos: Vec<&almide_base::intern::Sym> = [name, bare].iter()
+            .filter_map(|n| env.type_protocols.get(&sym(n)))
+            .flatten()
+            .collect();
+        methods.iter().copied().filter(|m| protos.iter().any(|p| {
+            env.protocols.get(*p).is_some_and(|d| d.methods.iter().any(|x| x.name.as_str() == *m))
+        })).collect()
+    };
+    let mut names: Vec<(almide_base::intern::Sym, Vec<&str>)> = env.type_protocols.keys()
+        .filter_map(|n| { let ops = required_ops(n.as_str()); (!ops.is_empty()).then_some((*n, ops)) })
+        .collect();
+    names.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    let mut out = std::collections::HashMap::new();
+    for (name, ops) in names {
+        let ty = Ty::Named(name, vec![]);
+        for method in &ops {
+            let Some(target) = expressions::requirement_call_target(ctx, &ty, method) else { continue };
+            let bare = name.as_str().rsplit_once('.').map_or(name.as_str(), |(_, b)| b);
+            out.insert((name, sym(method)), target.clone());
+            out.entry((sym(bare), sym(method))).or_insert(target);
+        }
+    }
+    out
 }
 
 // Post-processing passes shared by both lower_program and module lowering:
@@ -695,90 +737,4 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
 
 include!("module_lowering.rs");
 include!("test_lowering.rs");
-
-/// ADR-0002 Phase 1b (#1103): lift a `-> T!` fn's VALUE exits into `ok(...)`.
-/// Type-driven, mirroring codegen's `wrap_tail_in_ok` discipline: an exit
-/// whose IR type is already Result (Phase 1a's pass-through / `ok` / `err`
-/// bodies, a call to a Result-returning fn) passes through untouched; a
-/// T-typed exit wraps in `ResultOk` at `Result[T, String]`. Runs in the
-/// FRONTEND lowering so all three IR consumers (codegen, mir, interp) see
-/// the same lifted body.
-/// The `E` of the enclosing fallible signature rides in `err_ty` — ADR-0012
-/// D2 (#1193): a `-> T!E` fn's lifted `ok(...)` tail must carry
-/// `Result[T, E]`, not the historical `Result[T, String]` (the codegen's
-/// turbofish prints this node's type verbatim, so a String here was a rustc
-/// E0308 on every typed-E fn). Bare `T!` callers pass `Ty::String`.
-pub(crate) fn wrap_fallible_value_tail(body: IrExpr, err_ty: &Ty) -> IrExpr {
-    let ty = body.ty.clone();
-    let span = body.span.clone();
-    match body.kind {
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let stmts = stmts
-                .into_iter()
-                .map(|stmt| {
-                    let sspan = stmt.span.clone();
-                    match stmt.kind {
-                        IrStmtKind::Guard { cond, else_ } if !else_.ty.is_result() => IrStmt {
-                            kind: IrStmtKind::Guard { cond, else_: wrap_fallible_value_tail(else_, err_ty) },
-                            span: sspan,
-                        },
-                        other => IrStmt { kind: other, span: sspan },
-                    }
-                })
-                .collect();
-            let wrapped = wrap_fallible_value_tail(*tail, err_ty);
-            let wty = wrapped.ty.clone();
-            IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) }, ty: wty, span, def_id: None }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            let then = Box::new(wrap_fallible_value_tail(*then, err_ty));
-            let else_ = Box::new(wrap_fallible_value_tail(*else_, err_ty));
-            let diverges = |e: &IrExpr| matches!(e.ty, Ty::Never) || is_panic_call(e);
-            let wty = if diverges(&then) { else_.ty.clone() } else { then.ty.clone() };
-            IrExpr { kind: IrExprKind::If { cond, then, else_ }, ty: wty, span, def_id: None }
-        }
-        IrExprKind::Match { subject, arms } => {
-            let arms: Vec<IrMatchArm> = arms
-                .into_iter()
-                .map(|arm| IrMatchArm {
-                    pattern: arm.pattern,
-                    guard: arm.guard,
-                    body: wrap_fallible_value_tail(arm.body, err_ty),
-                })
-                .collect();
-            let wty = arms
-                .iter()
-                .find(|a| !matches!(a.body.ty, Ty::Never) && !is_panic_call(&a.body))
-                .or(arms.first())
-                .map(|a| a.body.ty.clone())
-                .unwrap_or_else(|| Ty::result(ty, err_ty.clone()));
-            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: wty, span, def_id: None }
-        }
-        // Already Result — Phase 1a's forms stay untouched.
-        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => body,
-        _ if ty.is_result() => body,
-        // A diverging leaf (`panic(..)`) yields no value to lift; wrapping it
-        // stamped `ok(panic)` at the wrong payload (the native tail wrap
-        // leaves it bare for the same reason, #3118).
-        _ if matches!(ty, Ty::Never) || is_panic_call(&body) => body,
-        _ => {
-            let result_ty = Ty::result(ty.clone(), err_ty.clone());
-            IrExpr {
-                kind: IrExprKind::ResultOk { expr: Box::new(IrExpr { kind: body.kind, ty, span: span.clone(), def_id: None }) },
-                ty: result_ty,
-                span,
-                def_id: None,
-            }
-        }
-    }
-}
-
-/// `panic(..)` as a value leaf (possibly a block's tail): it diverges, so the
-/// lift leaves it bare.
-fn is_panic_call(e: &IrExpr) -> bool {
-    match &e.kind {
-        IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. } => name.as_str() == "panic",
-        IrExprKind::Block { expr: Some(tail), .. } => is_panic_call(tail),
-        _ => false,
-    }
-}
+include!("fallible_tail.rs");

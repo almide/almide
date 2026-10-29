@@ -92,15 +92,20 @@ const PURE_BOUND: &[u32] = &[cap::STDOUT];
 pub fn op_caps(op: i32) -> &'static [u32] {
     use cap::*;
     match op {
-        1 | 4..=6 | 11..=14 | 17 | 18 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
+        1 | 4..=6 | 11..=14 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
         2 | 3 | 7..=10 | 15 | 16 | 20 | 21 => &[FS_WRITE],
         19 => &[FS_READ, FS_WRITE],
-        26..=29 | 33 | 37 => &[ENV],
+        // The rooted family's descriptor ops (#4084, fs_root.rs): read text,
+        // read bytes, list, exists read; write text and remove write.
+        120..=123 => &[FS_READ],
+        124 | 125 => &[FS_WRITE],
+        26..=29 | 33 | 37 | 77 => &[ENV],
         30 | 73 => &[STDOUT],
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
-        43..=50 | 53..=59 | 65 | 70..=72 => &[NET],
+        // 50 (framed raw-bytes http) is retired.
+        43..=49 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
         80..=90 => &[PROC],
         // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
         // site on a fresh instance — a child, the native leg's re-exec — and
@@ -113,7 +118,8 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         // dropped. The op itself reaches nothing — what a chunk could reach is
         // that function's, and the not-served fallback calls the same
         // function from this frame, so the call graph already counts it.
-        74 => &[],
+        // 76 is a deliberate exit's mark (#4203): it answers and reaches nothing.
+        74 | 76 => &[],
         _ => &[SENTINEL],
     }
 }
@@ -407,11 +413,72 @@ pub fn decl_names(decls: &PassDecls) -> Result<BTreeMap<u32, String>, String> {
         .collect())
 }
 
+/// The `almide.fs_call` ops the module `bytes` can make: every call site's op
+/// constant, read off the operand stack the way the capability witness reads
+/// it. `None` when some site's op is not a visible constant, so the set cannot
+/// bound the module. The embedded host serves only these ops (#4102): the
+/// in-process module imports the whole gateway, and this set is what keeps a
+/// program to the host operations it was built with.
+pub fn fs_call_ops(bytes: &[u8]) -> Result<Option<BTreeSet<i32>>, String> {
+    let m = decode(bytes)?;
+    let mut out = BTreeSet::new();
+    for op in m.bodies.iter().flat_map(|b| b.fs_ops.iter()) {
+        match op {
+            Some(op) => {
+                out.insert(*op);
+            }
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(out))
+}
+
+/// The `almide.fs_call` op constants the module `bytes` shows: [`fs_call_ops`]
+/// with a site whose op is not a visible constant adding NOTHING, rather than
+/// voiding the set. The embedded host's allow-list (row 19 of the security
+/// table): a computed op fails closed, reaching only an op some other site
+/// names, where `None` used to leave the module with no list at all.
+pub fn fs_call_ops_visible(bytes: &[u8]) -> Result<BTreeSet<i32>, String> {
+    let m = decode(bytes)?;
+    Ok(m.bodies.iter().flat_map(|b| b.fs_ops.iter()).flatten().copied().collect())
+}
+
 /// The capability witnesses of the structural module `decls.bytes`:
 /// `(flat, graph)` — one `declared|reach` witness per source-declared
 /// function, and the `declared|direct|callees` call graph of every defined
 /// function (`check_prog_cert`).
 pub fn caps(decls: &PassDecls) -> Result<(Vec<(String, String)>, String), String> {
+    caps_allowed(decls, None)
+}
+
+/// The capabilities an `almide.toml [permissions].allow` list grants an
+/// `effect fn` — the same reading as the MIR producer's
+/// `certificate::manifest_caps`: `IO` the console, stdin and the file
+/// system, `Rand` entropy, `Env` arguments, environment and processes,
+/// `Time` the clock, `Net` the network. A name outside the list grants
+/// nothing.
+pub fn manifest_bound(allow: &[String]) -> BTreeSet<u32> {
+    use cap::*;
+    allow
+        .iter()
+        .flat_map(|p| match p.as_str() {
+            "IO" => &[STDOUT, STDIN, FS_READ, FS_WRITE][..],
+            "Rand" => &[ENTROPY][..],
+            "Env" => &[ENV, PROC][..],
+            "Time" => &[CLOCK][..],
+            "Net" => &[NET][..],
+            _ => &[][..],
+        })
+        .copied()
+        .collect()
+}
+
+/// [`caps`] under a manifest: with `allow`, every `effect fn` declares only
+/// what the list grants (a plain `fn` keeps its bound — a manifest never
+/// grants what the effect system denies), so a program that reaches past
+/// its manifest is REJECTED by the checker.
+pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<(String, String)>, String), String> {
+    let manifest = allow.map(manifest_bound);
     let m = decode(&decls.bytes)?;
     let n_imports = m.imports.len() as u32;
     let callees: Vec<BTreeSet<usize>> = m.bodies.iter().map(|b| graph_edges(&m, b)).collect();
@@ -434,7 +501,7 @@ pub fn caps(decls: &PassDecls) -> Result<(Vec<(String, String)>, String), String
         .enumerate()
         .map(|(j, b)| direct_caps(&m, b, meter.get(&j).copied().unwrap_or(0)))
         .collect();
-    let bound = least_bounds(&direct, &callees, &declared);
+    let bound = least_bounds(&direct, &callees, &declared, manifest.as_ref());
     let flat = declared
         .iter()
         .map(|(&j, (name, _))| (name.clone(), format!("{}|{}", ids(bound[j].iter().copied()), ids(reach(&direct, &callees, j)))))
@@ -591,11 +658,12 @@ fn least_bounds(
     direct: &[BTreeSet<u32>],
     callees: &[BTreeSet<usize>],
     declared: &BTreeMap<usize, (String, Declared)>,
+    manifest: Option<&BTreeSet<u32>>,
 ) -> Vec<BTreeSet<u32>> {
     let fixed = |j: usize| {
         declared.get(&j).map(|(_, d)| match d {
             Declared::Pure => PURE_BOUND.iter().copied().collect::<BTreeSet<u32>>(),
-            Declared::Effect => EFFECT_BOUND.iter().copied().collect(),
+            Declared::Effect => EFFECT_BOUND.iter().copied().filter(|c| manifest.is_none_or(|m| m.contains(c))).collect(),
         })
     };
     let mut bound: Vec<BTreeSet<u32>> = (0..direct.len()).map(|j| fixed(j).unwrap_or_else(|| direct[j].clone())).collect();
@@ -669,7 +737,7 @@ mod tests {
         let direct = vec![BTreeSet::new(), BTreeSet::new(), [cap::FS_READ].into()];
         let callees = vec![[1].into(), [2].into(), BTreeSet::new()];
         let declared: BTreeMap<usize, (String, Declared)> = [(0, ("f".to_string(), Declared::Pure))].into();
-        let b = least_bounds(&direct, &callees, &declared);
+        let b = least_bounds(&direct, &callees, &declared, None);
         assert_eq!(b[1], [cap::FS_READ].into());
         assert_eq!(reach(&direct, &callees, 0), vec![cap::FS_READ]);
     }
@@ -685,5 +753,48 @@ mod tests {
         // A read the stack does not show as the constant is never discounted.
         let hidden = Body { fs_ops: vec![None], ..Body::default() };
         assert_eq!(direct_caps(&m, &hidden, 1), [SENTINEL].into());
+    }
+
+    /// A module importing `almide.fs_call` whose `main` calls it once, with
+    /// the op pushed by `push_op`.
+    fn one_call(push_op: impl Fn(&mut wasm_encoder::InstructionSink<'_>)) -> Vec<u8> {
+        use wasm_encoder::{CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Module as Enc, TypeSection, ValType};
+        let mut types = TypeSection::new();
+        types.ty().function([ValType::I32; 5], [ValType::I64]);
+        types.ty().function([ValType::I32], []);
+        let mut imports = ImportSection::new();
+        imports.import("almide", "fs_call", EntityType::Function(0));
+        let mut funcs = FunctionSection::new();
+        funcs.function(1);
+        let mut exports = ExportSection::new();
+        exports.export("main", ExportKind::Func, 1);
+        let mut f = Function::new([]);
+        {
+            let mut i = f.instructions();
+            push_op(&mut i);
+            i.i32_const(0).i32_const(0).i32_const(0).i32_const(0).call(0).drop().end();
+        }
+        let mut code = CodeSection::new();
+        code.function(&f);
+        let mut m = Enc::new();
+        m.section(&types).section(&imports).section(&funcs).section(&exports).section(&code);
+        m.finish()
+    }
+
+    #[test]
+    fn fs_call_ops_reads_constant_ops_and_refuses_a_computed_one() {
+        // #4102: the embedded host's allow-list.
+        let constant = one_call(|i| {
+            i.i32_const(35);
+        });
+        assert_eq!(fs_call_ops(&constant).unwrap(), Some([35].into()));
+        let computed = one_call(|i| {
+            i.local_get(0);
+        });
+        assert_eq!(fs_call_ops(&computed).unwrap(), None, "an op the stack does not show cannot be bounded");
+        // Row 19: the host's list keeps the visible constants and drops the
+        // computed site, so it fails closed instead of vanishing.
+        assert_eq!(fs_call_ops_visible(&constant).unwrap(), [35].into());
+        assert_eq!(fs_call_ops_visible(&computed).unwrap(), BTreeSet::new());
     }
 }

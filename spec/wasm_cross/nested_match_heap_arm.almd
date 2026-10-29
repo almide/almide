@@ -3,10 +3,10 @@
 // parse_number shape): the nested-match arm must lower through the same proven
 // variant-value-match machinery the tail position uses, executing only the
 // taken leaf and moving out its owned String. Uses only linkable self-host
-// calls (int.parse / int.from_hex) so the whole program renders on v1.
+// calls (int.parse / int.parse_radix) so the whole program renders on v1.
 fn classify(c: String) -> String = match int.parse(c) {
   ok(n) => "int:" + int.to_string(n),
-  err(_) => match int.from_hex(c) {
+  err(_) => match int.parse_radix(c, 16) {
     ok(m) => "hex:" + int.to_string(m),
     err(_) => "other:" + c,
   },

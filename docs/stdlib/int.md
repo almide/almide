@@ -2,7 +2,7 @@
 
 Integer arithmetic and bitwise. auto-imported.
 
-### `int.to_string(n: Int) -> String`
+### `int.to_string(x: Int) -> String`
 
 Convert an integer to its decimal string representation.
 
@@ -15,7 +15,7 @@ fn main() -> Unit = {
 42
 ```
 
-### `int.to_hex(n: Int) -> String`
+### `int.to_hex(x: Int) -> String`
 
 Convert an integer to its hexadecimal string representation (lowercase).
 
@@ -31,6 +31,8 @@ ff
 ### `int.parse(s: String) -> Result[Int, String]`
 
 Parse a decimal string into an integer. Returns err if the string is not a valid integer.
+
+Only ASCII whitespace (space, tab, LF, CR, form feed) around the number is ignored. Any other whitespace, such as a no-break space (U+00A0), an ideographic space (U+3000) or a vertical tab, is an error: `int.parse("\u{A0}5")` is `err("invalid digit found in string")`. Call `string.trim` first if you want to accept Unicode whitespace.
 
 ```almd run
 fn main() -> Unit = {
@@ -49,26 +51,7 @@ ok(42)
 err(invalid digit found in string)
 ```
 
-### `int.from_hex(s: String) -> Result[Int, String]`
-
-Parse a hexadecimal string into an integer. Returns err if the string is not valid hex.
-
-```almd run
-fn show(r: Result[Int, String]) -> String = match r { ok(n) => "ok " + int.to_string(n), err(e) => "err " + e }
-
-fn main() -> Unit = {
-  println(show(int.from_hex("ff")))
-  println(show(int.from_hex("FF")))
-  println(show(int.from_hex("zz")))
-}
-```
-```output
-ok 255
-ok 255
-err invalid digit found in string
-```
-
-### `int.abs(n: Int) -> Int`
+### `int.abs(x: Int) -> Int`
 
 Return the absolute value of an integer.
 
@@ -81,7 +64,7 @@ fn main() -> Unit = {
 5
 ```
 
-### `int.is_even(n: Int) -> Bool`
+### `int.is_even(x: Int) -> Bool`
 
 Parity predicate: `true` when `n` is divisible by 2. Negative values and the
 bounds are exact (`%` keeps the dividend's sign, so the test is `% 2 == 0`).
@@ -95,10 +78,10 @@ fn main() -> Unit = {
 true false true
 ```
 
-### `int.is_odd(n: Int) -> Bool`
+### `int.is_odd(x: Int) -> Bool`
 
 The other half of the parity pair: `true` when `n` is not divisible by 2.
-Scalar `int` only — a sized value reaches it through `int.from_int8(x)`.
+Scalar `int` only — a sized value reaches it through `int.from(x)`.
 
 ```almd run
 fn main() -> Unit = {
@@ -202,7 +185,7 @@ fn main() -> Unit = {
 -2
 ```
 
-### `int.bnot(a: Int) -> Int`
+### `int.bnot(x: Int) -> Int`
 
 Bitwise NOT (complement) of an integer.
 
@@ -215,89 +198,65 @@ fn main() -> Unit = {
 -1
 ```
 
-### `int.wrap_add(a: Int, b: Int, bits: Int) -> Int`
+### `int.wrap_add(a: Int, b: Int) -> Int`
 
-Wrapping addition within a given bit width. Overflow wraps around.
+Wrapping addition over the 64-bit Int: overflow wraps around. For an N-bit
+register, compose with `int.wrap`: `int.wrap(int.wrap_add(a, b), bits)`.
 
 ```almd run
 fn main() -> Unit = {
-  println("${int.wrap_add(255, 1, 8)}")
+  println("${int.wrap_add(int.max_value(), 1)}")
+  println("${int.wrap(int.wrap_add(255, 1), 8)}")
+}
+```
+```output
+-9223372036854775808
+0
+```
+
+### `int.wrap_mul(a: Int, b: Int) -> Int`
+
+Wrapping multiplication over the 64-bit Int: overflow wraps around. For an
+N-bit register, compose with `int.wrap`.
+
+```almd run
+fn main() -> Unit = {
+  println("${int.wrap(int.wrap_mul(16, 16), 8)}")
 }
 ```
 ```output
 0
 ```
 
-### `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int`
+### `int.rotate_right(a: Int, n: Int) -> Int`
 
-Wrapping multiplication within a given bit width. Overflow wraps around.
+Rotate the 64 bits of `a` right. The count `n` is taken modulo 64
+(Euclidean), so a negative count rotates left: `rotate_right(1, -1) = 2`.
 
 ```almd run
 fn main() -> Unit = {
-  println("${int.wrap_mul(16, 16, 8)}")
+  println("${int.rotate_right(4, 1)}")
 }
 ```
 ```output
-0
+2
 ```
 
-### `int.rotate_right(a: Int, n: Int, bits: Int) -> Int`
+### `int.rotate_left(a: Int, n: Int) -> Int`
 
-Rotate bits right within a given bit width. The count `n` is taken modulo `bits`
-(Euclidean), so a negative count rotates left: `rotate_right(1, -1, 8) = 2`.
+Rotate the 64 bits of `a` left. The count `n` is taken modulo 64
+(Euclidean), so a negative count rotates right: `rotate_left(2, -1) = 1`.
 
 ```almd run
 fn main() -> Unit = {
-  println("${int.rotate_right(1, 1, 8)}")
-}
-```
-```output
-128
-```
-
-### `int.rotate_left(a: Int, n: Int, bits: Int) -> Int`
-
-Rotate bits left within a given bit width. The count `n` is taken modulo `bits`
-(Euclidean), so a negative count rotates right: `rotate_left(1, -1, 8) = 128`.
-
-```almd run
-fn main() -> Unit = {
-  println("${int.rotate_left(128, 1, 8)}")
+  println("${int.rotate_left(int.min_value(), 1)}")
 }
 ```
 ```output
 1
 ```
 
-### `int.to_u32(a: Int) -> Int`
-
-Truncate an integer to an unsigned 32-bit value (mask to 0...4294967295).
-
-```almd run
-fn main() -> Unit = {
-  println("${int.to_u32(300)}")
-  println("${int.to_u32(-1)}")
-}
-```
-```output
-300
-4294967295
-```
-
-### `int.to_u8(a: Int) -> Int`
-
-Truncate an integer to an unsigned 8-bit value (mask to 0...255).
-
-```almd run
-fn main() -> Unit = {
-  println("${int.to_u8(300)}")
-}
-```
-```output
-44
-```
-
-### `int.clamp(n: Int, lo: Int, hi: Int) -> Int`
+### `int.clamp(x: Int, lo: Int, hi: Int) -> Int`
 
 Clamp an integer to the range [lo, hi].
 
@@ -312,77 +271,35 @@ fn main() -> Unit = {
 0
 ```
 
-### `int.to_float(n: Int) -> Float`
-
-Convert an integer to a floating-point number.
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(int.to_float(42)))
-}
-```
-```output
-42.0
-```
-
-### `int.bits_to_float(bits: Int) -> Float`
-
-Reinterpret an integer's bits as an IEEE 754 float (f64).
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(int.bits_to_float(4607182418800017408)))
-}
-```
-```output
-1.0
-```
-
 ## Matrix completeness (#956)
 
-The `_checked`/`_saturating` families here are the `Int`-source row of the
-integer conversion matrix; every sized module carries the same trio for its own
-lossy pairs, `UInt64 → Int` (the one lossy widening) is `from_uint64_checked` /
-`from_uint64_saturating`, and every carrier has `min_value()`/`max_value()`.
-The surface is derived from the range table and machine-enforced by the
-numeric-matrix gate in `almide docs-gen --check`.
+A conversion is named after the type it builds (R-L0-40): `int.from(x)` (aborts
+outside the range), `int.from_checked(x)` (`none`), `int.from_saturating(x)`
+(clamp, NaN 0) and `int.from_wrapping(x)` (integer sources, two's complement)
+take any numeric source — `UInt64 → Int`, the one lossy widening, included.
+Every sized module carries the same family for its own type, and every carrier
+has `min_value()`/`max_value()`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (72 functions)
+## Signature index (47 functions)
 
 ```
 // Decimal digits, with - when negative.
 // @since 0.5.0 or earlier
-int.to_string(n: Int) -> String
+int.to_string(x: Int) -> String
 
 // Lowercase hex, no 0x; -1 gives 16 f digits.
 // @since 0.5.0 or earlier
-int.to_hex(n: Int) -> String
+int.to_hex(x: Int) -> String
 
-// Decimal Int from trimmed s; err on junk or overflow.
+// Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
 // @since 0.5.0 or earlier
 int.parse(s: String) -> Result[Int, String]
 
-// Hex, any case, 0x optional; err on junk or > 2^63-1.
-// @since 0.6.1 or earlier
-int.from_hex(s: String) -> Result[Int, String]
-
-// Nearest Float; may round when |n| > 2^53.
-// @since 0.5.13 or earlier
-int.to_float(n: Int) -> Float
-
-// Float whose IEEE-754 binary64 bits are bits.
-// @since 0.12.1 or earlier
-int.bits_to_float(bits: Int) -> Float
-
-// Low 32 bits read as binary32, widened to Float.
-// @since 0.15.1 or earlier
-int.bits_to_f32(bits: Int) -> Float
-
-// Magnitude of n; min_value wraps to itself.
+// Magnitude of x; min_value wraps to itself.
 // @since 0.5.0 or earlier
-int.abs(n: Int) -> Int
+int.abs(x: Int) -> Int
 
 // Lesser of a and b.
 // @since 0.5.0 or earlier
@@ -392,17 +309,17 @@ int.min(a: Int, b: Int) -> Int
 // @since 0.5.0 or earlier
 int.max(a: Int, b: Int) -> Int
 
-// n limited to lo..hi; aborts when lo > hi.
+// x limited to lo..hi; aborts when lo > hi.
 // @since 0.5.0 or earlier
-int.clamp(n: Int, lo: Int, hi: Int) -> Int
+int.clamp(x: Int, lo: Int, hi: Int) -> Int
 
-// True when n % 2 == 0; exact for negatives.
+// True when x % 2 == 0; exact for negatives.
 // @since 0.62.0
-int.is_even(n: Int) -> Bool
+int.is_even(x: Int) -> Bool
 
-// True when n % 2 != 0; -3 counts as odd.
+// True when x % 2 != 0; -3 counts as odd.
 // @since 0.62.0
-int.is_odd(n: Int) -> Bool
+int.is_odd(x: Int) -> Bool
 
 // Bitwise AND over all 64 bits.
 // @since 0.5.0 or earlier
@@ -416,9 +333,9 @@ int.bor(a: Int, b: Int) -> Int
 // @since 0.5.0 or earlier
 int.bxor(a: Int, b: Int) -> Int
 
-// Bitwise complement; equals -a - 1.
+// Bitwise complement; equals -x - 1.
 // @since 0.5.0 or earlier
-int.bnot(a: Int) -> Int
+int.bnot(x: Int) -> Int
 
 // a shifted left by n bits; n is taken mod 64.
 // @since 0.5.0 or earlier
@@ -430,207 +347,67 @@ int.bshr(a: Int, n: Int) -> Int
 
 // Leading zero bits of the 64-bit word; 64 for 0.
 // @since 0.16.0 or earlier
-int.count_leading_zeros(n: Int) -> Int
+int.count_leading_zeros(x: Int) -> Int
 
 // Trailing zero bits; 64 for 0.
 // @since 0.16.0 or earlier
-int.count_trailing_zeros(n: Int) -> Int
+int.count_trailing_zeros(x: Int) -> Int
 
 // Number of set bits; 64 for -1.
 // @since 0.16.0 or earlier
-int.pop_count(n: Int) -> Int
+int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)
+
+// Number of set bits; 64 for -1.
+// @since unreleased
+int.count_ones(x: Int) -> Int
 
 // The 64 bits in reverse order; 1 gives min_value.
 // @since 0.16.0 or earlier
-int.bit_reverse(n: Int) -> Int
+int.bit_reverse(x: Int) -> Int
 
 // The 8 bytes in reverse order (endian flip).
 // @since 0.16.0 or earlier
-int.byte_swap(n: Int) -> Int
+int.byte_swap(x: Int) -> Int
 
 // Bits needed to hold n; 0 for 0, 64 if negative.
 // @since 0.16.0 or earlier
-int.bit_width(n: Int) -> Int
+int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)
 
-// Floor of log2(n); -1 when n <= 0.
+// Bits needed to hold x; 0 for 0, 64 if negative.
+// @since unreleased
+int.bit_length(x: Int) -> Int
+
+// Floor of log2(x); -1 when x <= 0.
 // @since 0.16.0 or earlier
-int.log2_floor(n: Int) -> Int
+int.log2_floor(x: Int) -> Int
 
-// Ceiling of log2(n); 0 when n <= 1.
+// Ceiling of log2(x); 0 when x <= 1.
 // @since 0.16.0 or earlier
-int.log2_ceil(n: Int) -> Int
+int.log2_ceil(x: Int) -> Int
 
-// Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
+// Least power of 2 >= x; 1 if x <= 1; min_value past 2^62.
 // @since 0.16.0 or earlier
-int.next_power_of_two(n: Int) -> Int
+int.next_power_of_two(x: Int) -> Int
 
-// Greatest power of 2 <= n; 0 when n <= 0.
+// Greatest power of 2 <= x; 0 when x <= 0.
 // @since 0.16.0 or earlier
-int.prev_power_of_two(n: Int) -> Int
+int.prev_power_of_two(x: Int) -> Int
 
-// (a + b) mod 2^bits, non-negative when bits < 64.
+// a + b wrapped to 64 bits.
 // @since 0.5.0 or earlier
-int.wrap_add(a: Int, b: Int, bits: Int) -> Int
+int.wrap_add(a: Int, b: Int) -> Int
 
-// (a * b) mod 2^bits, non-negative when bits < 64.
+// a * b wrapped to 64 bits.
 // @since 0.5.0 or earlier
-int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
+int.wrap_mul(a: Int, b: Int) -> Int
 
-// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
+// The 64 bits of a rotated right by n; n is taken mod 64.
 // @since 0.5.0 or earlier
-int.rotate_right(a: Int, n: Int, bits: Int) -> Int
+int.rotate_right(a: Int, n: Int) -> Int
 
-// Low bits of a rotated left by n mod bits; bits <= 0 aborts.
+// The 64 bits of a rotated left by n; n is taken mod 64.
 // @since 0.5.0 or earlier
-int.rotate_left(a: Int, n: Int, bits: Int) -> Int
-
-// Low 32 bits as unsigned; -1 becomes 4294967295.
-// @since 0.5.0 or earlier
-int.to_u32(a: Int) -> Int
-
-// Low 8 bits as unsigned; 300 becomes 44.
-// @since 0.5.0 or earlier
-int.to_u8(a: Int) -> Int
-
-// Wraps to 8 bits; 200 becomes -56.
-// @since 0.15.0 or earlier
-int.to_int8(n: Int) -> Int8
-
-// Wraps to 16 bits; 40000 becomes -25536.
-// @since 0.15.0 or earlier
-int.to_int16(n: Int) -> Int16
-
-// Wraps to 32 bits; 2^31 becomes -2^31.
-// @since 0.15.0 or earlier
-int.to_int32(n: Int) -> Int32
-
-// Wraps to 8 bits; -1 becomes 255.
-// @since 0.15.0 or earlier
-int.to_uint8(n: Int) -> UInt8
-
-// Wraps to 16 bits; -1 becomes 65535.
-// @since 0.15.0 or earlier
-int.to_uint16(n: Int) -> UInt16
-
-// Wraps to 32 bits; -1 becomes 2^32-1.
-// @since 0.15.0 or earlier
-int.to_uint32(n: Int) -> UInt32
-
-// Wraps to 64 bits; -1 becomes 2^64-1.
-// @since 0.15.0 or earlier
-int.to_uint64(n: Int) -> UInt64
-
-// Float32 value; may round when |n| > 2^24.
-// @since 0.15.0 or earlier
-int.to_float32(n: Int) -> Float32
-
-// Float64 value; may round when |n| > 2^53.
-// @since 0.15.0 or earlier
-int.to_float64(n: Int) -> Float64
-
-// Same value as Int64; always exact.
-// @since 0.15.0 or earlier
-int.to_int64(n: Int) -> Int64
-
-// Sign-extending widen; always exact.
-// @since 0.15.0 or earlier
-int.from_int8(n: Int8) -> Int
-
-// Sign-extending widen; always exact.
-// @since 0.15.0 or earlier
-int.from_int16(n: Int16) -> Int
-
-// Sign-extending widen; always exact.
-// @since 0.15.0 or earlier
-int.from_int32(n: Int32) -> Int
-
-// Same value as Int; always exact.
-// @since 0.15.0 or earlier
-int.from_int64(n: Int64) -> Int
-
-// Zero-extending widen; always exact.
-// @since 0.15.0 or earlier
-int.from_uint8(n: UInt8) -> Int
-
-// Zero-extending widen; always exact.
-// @since 0.15.0 or earlier
-int.from_uint16(n: UInt16) -> Int
-
-// Zero-extending widen; always exact.
-// @since 0.15.0 or earlier
-int.from_uint32(n: UInt32) -> Int
-
-// Reinterprets bits; values >= 2^63 go negative.
-// @since 0.15.0 or earlier
-int.from_uint64(n: UInt64) -> Int
-
-// some(n), or none outside -128..127.
-// @since 0.15.0 or earlier
-int.to_int8_checked(n: Int) -> Option[Int8]
-
-// some(n), or none outside -32768..32767.
-// @since 0.15.0 or earlier
-int.to_int16_checked(n: Int) -> Option[Int16]
-
-// some(n), or none outside -2^31..2^31-1.
-// @since 0.15.0 or earlier
-int.to_int32_checked(n: Int) -> Option[Int32]
-
-// some(n), or none outside 0..255.
-// @since 0.15.0 or earlier
-int.to_uint8_checked(n: Int) -> Option[UInt8]
-
-// some(n), or none outside 0..65535.
-// @since 0.15.0 or earlier
-int.to_uint16_checked(n: Int) -> Option[UInt16]
-
-// some(n), or none outside 0..2^32-1.
-// @since 0.15.0 or earlier
-int.to_uint32_checked(n: Int) -> Option[UInt32]
-
-// some(n), or none if n is negative.
-// @since 0.15.0 or earlier
-int.to_uint64_checked(n: Int) -> Option[UInt64]
-
-// some(f), or none if the f32 does not hold n exactly.
-// @since 0.15.0 or earlier
-int.to_float32_checked(n: Int) -> Option[Float32]
-
-// Clamps n to -128..127.
-// @since 0.15.0 or earlier
-int.to_int8_saturating(n: Int) -> Int8
-
-// Clamps n to -32768..32767.
-// @since 0.15.0 or earlier
-int.to_int16_saturating(n: Int) -> Int16
-
-// Clamps n to -2^31..2^31-1.
-// @since 0.15.0 or earlier
-int.to_int32_saturating(n: Int) -> Int32
-
-// Clamps n to 0..255.
-// @since 0.15.0 or earlier
-int.to_uint8_saturating(n: Int) -> UInt8
-
-// Clamps n to 0..65535.
-// @since 0.15.0 or earlier
-int.to_uint16_saturating(n: Int) -> UInt16
-
-// Clamps n to 0..2^32-1.
-// @since 0.15.0 or earlier
-int.to_uint32_saturating(n: Int) -> UInt32
-
-// Negative n clamps to 0.
-// @since 0.15.0 or earlier
-int.to_uint64_saturating(n: Int) -> UInt64
-
-// some(n), or none if n exceeds 2^63-1.
-// @since 0.38.0
-int.from_uint64_checked(n: UInt64) -> Option[Int]
-
-// Clamps n to at most 2^63-1.
-// @since 0.38.0
-int.from_uint64_saturating(n: UInt64) -> Int
+int.rotate_left(a: Int, n: Int) -> Int
 
 // Smallest Int: -2^63.
 // @since 0.38.0
@@ -639,6 +416,63 @@ int.min_value() -> Int
 // Largest Int: 2^63-1.
 // @since 0.38.0
 int.max_value() -> Int
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int.compare(a: Int, b: Int) -> Int
+
+// -1, 0 or 1 by the sign of x; 0 for 0.
+// @since unreleased
+int.sign(x: Int) -> Int
+
+// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+// @since unreleased
+int.pow(base: Int, exp: Int) -> Int
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int.floor_div(a: Int, b: Int) -> Int
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int.modulo(a: Int, b: Int) -> Int
+
+// x mod 2^bits, non-negative when bits < 64; bits <= 0 aborts, bits >= 64 keeps x.
+// @since unreleased
+int.wrap(x: Int, bits: Int) -> Int
+
+// a - b wrapped to 64 bits.
+// @since unreleased
+int.wrap_sub(a: Int, b: Int) -> Int
+
+// Zero-filling right shift of the 64 bits; n is taken mod 64.
+// @since unreleased
+int.bshr_logical(a: Int, n: Int) -> Int
+
+// Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
+// @since unreleased
+int.to_string_radix(x: Int, radix: Int) -> String
+
+// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+// err on junk or overflow; radix outside 2..36 aborts.
+// @since unreleased
+int.parse_radix(s: String, radix: Int) -> Result[Int, String]
+
+// x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+// @since unreleased
+int.from(x: S) -> Int
+
+// some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+// @since unreleased
+int.from_checked(x: S) -> Option[Int]
+
+// x as Int, toward zero, clamped to Int's range; NaN is 0.
+// @since unreleased
+int.from_saturating(x: S) -> Int
+
+// The low 64 bits of integer x as Int (two's complement).
+// @since unreleased
+int.from_wrapping(x: S) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

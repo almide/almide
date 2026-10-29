@@ -101,6 +101,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod bytes_append;
+mod kmp;
 mod fan_par;
 pub mod decline_site;
 mod imports;
@@ -111,6 +112,7 @@ mod bytes_recv;
 mod bytes_split;
 pub mod alloc_count;
 pub mod canonical_alloc;
+pub mod checked_alloc;
 mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
@@ -133,6 +135,7 @@ mod map_inplace;
 mod map_holes;
 mod map_index;
 mod map_merge;
+mod map_ordered;
 mod map_remove;
 mod set_insert;
 mod program_tables;
@@ -146,6 +149,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_alloc;
+mod deep_walk;
 mod runtime_large;
 mod runtime_line;
 mod line_bounded;
@@ -198,8 +202,9 @@ mod fs_meta;
 mod host_env;
 mod host_read_all;
 mod host_read_line;
-mod json_path_helpers;
 mod newtype;
+// ADR-0031 D3: a Region argument of a wasm import crosses as (base, len).
+mod extern_region;
 mod arg_rebind;
 mod arg_temps;
 mod arm;
@@ -219,7 +224,9 @@ mod testing;
 mod tco;
 mod types_table;
 mod value;
+pub use value::{VALUE_HELPER_ANCHOR, VALUE_SELFHOST_HELPERS};
 mod utf8_helpers;
+pub use utf8_helpers::emit_errtext_multibyte;
 mod json_helpers;
 mod value_helpers;
 mod whitelist;
@@ -325,7 +332,7 @@ const F_STR_APPEND: u32 = 37;
 /// discipline — cap fast path in place, geometric grow on overflow, the
 /// outgrown block freed at rc==1. The old per-push `emit_copy_grow(b, 1)`
 /// reallocated len+1 EVERY push and never freed the outgrown block, so n
-/// pushes retained Σn ≈ n²/2 bytes — `bytes.new(0)` + 69k pushes OOM'd
+/// pushes retained Σn ≈ n²/2 bytes — `bytes.zeros(0)` + 69k pushes OOM'd
 /// where native and the incumbent complete (#1689).
 const F_BYTES_PUSH: u32 = 38;
 /// `$line_grow(cur, len)`: relocate the line-buffer region to a heap
@@ -477,8 +484,8 @@ enum SliceTy {
     /// `Map[K, V]` — i32 block; payload = INSERTION-ORDERED (k, v) entries
     /// (the oracle's semantics), entry layout from `pack_fields`. Keys are
     /// scalars (equality must be defined); values any slice type. Same
-    /// no-in-place-mutation doctrine: binds deep-copy, `map.insert`'s mut
-    /// form is a var write-back.
+    /// no-in-place-mutation doctrine: binds deep-copy, the in-place
+    /// `m[k] = v` form is a var write-back.
     Map(ETy, ETy),
     /// `Set[T]` — i32 block; an insertion-ordered element vector with the
     /// dedup-on-insert invariant (layout-identical to List[T]).

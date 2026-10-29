@@ -1,0 +1,6 @@
+[package]
+name = "clock"
+version = "0.1.0"
+
+[permissions]
+allow = ["Env", "IO"]

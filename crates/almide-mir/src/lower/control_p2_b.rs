@@ -119,7 +119,7 @@ impl LowerCtx {
             None
         };
         // EFFECT-RESULT SUBJECT (#76): a ctor-`match` over a CAN-ERR EFFECT call returning a Result
-        // — an `@intrinsic`/impure stdlib `Module` effect (`process.kill`/`process.spawn`) or a bare
+        // — an `@intrinsic`/impure stdlib `Module` effect (`process.kill`/`process.start`) or a bare
         // effect `RuntimeCall`. `lower_call_args` REFUSES such a heap-result effect call in argument
         // position (it would defer to an empty Opaque), so the match over it walled. Materialize it
         // HERE as a real OWNED Result handle so the tag-read below executes. HOLE-1: gated on

@@ -567,7 +567,10 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
     // Bare `Matrix` (no args) stays `Ty::Matrix` — the compat rule in
     // `types/mod.rs` bridges bare `Matrix` ↔ `Matrix[Float]`.
     BuiltinTypeHead { name: "Matrix", arity: BuiltinArity::Bare, build: |_| Ty::Matrix },
-    BuiltinTypeHead { name: "RawPtr", arity: BuiltinArity::Bare, build: |_| Ty::RawPtr },
+    // ADR-0031 D1: the opaque foreign token, passed back to an `@extern` fn
+    // only. Its pre-epoch-15 spelling `RawPtr` is gone (E029 names the
+    // rewrite, `almide fix` applies it — proofs/dialect-epochs.toml).
+    BuiltinTypeHead { name: "Handle", arity: BuiltinArity::Bare, build: |_| Ty::RawPtr },
     BuiltinTypeHead { name: "Path", arity: BuiltinArity::Bare, build: |_| Ty::String },
     // `Never` is the bottom type — used by `process.exit` and similar
     // diverging fns. It has to surface as `Ty::Never` (not

@@ -6,5 +6,5 @@ fn main() -> Unit = {
     1 => "b",
     _ => "c",
   })
-  println(string.join(r, ","))
+  println(list.join(r, ","))
 }

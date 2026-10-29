@@ -2,7 +2,7 @@
 // shares the parent module's imports and items; nothing here is pub beyond the parent).
 
 /// `host_ops` is the emitted module's op set (the build path's audit
-/// input): the http block ships when it reaches ops 43..=50, and each env
+/// input): the http block ships when it reaches ops 43..=49, and each env
 /// service import when it names op 26 / 29 / 36.
 pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     to_p3_shaped(bytes, host_ops, false)
@@ -16,7 +16,7 @@ pub fn to_p3_service(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> 
 }
 
 fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result<Vec<u8>> {
-    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op) || *op == 65);
+    let wants_http = host_ops.iter().any(|op| (43..=49).contains(op) || *op == 65);
     let http_types = wants_http || service;
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
@@ -390,7 +390,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
 }
 
 /// The optional shims after `$await`, in function-index order: the http
-/// client (when the op set reaches 43..=50), the env service, then the
+/// client (when the op set reaches 43..=49), the env service, then the
 /// http error helpers.
 fn push_optional_shims(
     code: &mut CodeSection,
@@ -537,8 +537,8 @@ impl P3Types {
         // request-options setters: (self, option<duration> as (disc, u64), retptr).
         let t_opt_set = type_index(types, &[ValType::I32, ValType::I32, ValType::I64, ValType::I32], &[]);
         // The http error helpers: $http_quote, $http_err, $http_hdr_check, $http_env_num.
-        let t_quote = type_index(types, &[ValType::I32; 3], &[ValType::I32]);
-        let t_herr = type_index(types, &[ValType::I32; 10], &[ValType::I64]);
+        let t_quote = type_index(types, &[ValType::I32; 4], &[ValType::I32]);
+        let t_herr = type_index(types, &[ValType::I32; 11], &[ValType::I64]);
         let t_hcheck = type_index(types, &[ValType::I32; 4], &[ValType::I32]);
         let t_hnum = type_index(types, &[ValType::I32, ValType::I32, ValType::I64], &[ValType::I64]);
         P3Types { exit: t_exit, call: t_call, new: t_new, rw: t_rw, fut_read: t_fut_read, drop: t_drop, retptr: t_retptr, random: t_random, print: t_print, fs: t_fs, hread: t_hread, realloc: t_realloc, status: t_status, callback: t_callback, open: t_open, stat: t_stat, rvs: t_rvs, aopen: t_aopen, wvs: t_wvs, avs: t_avs, pathop: t_pathop, ws_new: t_ws_new, ws_join: t_ws_join, ws_wait: t_ws_wait, set4: t_set4, set5: t_set5, consume: t_consume, append: t_append, wait: t_wait, opt_set: t_opt_set, quote: t_quote, herr: t_herr, hcheck: t_hcheck, hnum: t_hnum }

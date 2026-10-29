@@ -1,15 +1,11 @@
 // @contract: C-028
-// Cross-target differential fixture: int.from_hex.
-//
-// Native oracle (runtime/rs/src/int.rs):
-//   i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string())
-// The self-hosted WASM leg `stdlib/int_hex.almd` must mirror it exactly,
-// INCLUDING the native quirks (see contract_notes):
-//   - "0X10" → Err (the "0x" strip is lowercase-only / case-sensitive)
-//   - "0x0xff" → Ok(255) (trim_start_matches strips "0x" REPEATEDLY)
-//   - "f_f" → Err (NO underscore skipping)
-//   - sign accepted after 0x-strip ("0x-ff" → -255)
-// and the four std ParseIntError strings (shared with int.parse).
+// Cross-target differential fixture: hex parsing through `int.parse_radix(s, 16)`
+// (the hex-only parser left the stdlib in dialect epoch 15). The input is
+// trimmed, takes one optional sign, then one optional `0x` / `0X`, then hex
+// digits. The inputs are the old fixture's quirk set — `0x` prefixes in both
+// cases and repeated, an underscore, surrounding whitespace, signs before and
+// after a prefix, empty input, the i64 rails — and both legs must answer the
+// same `ok` / err text.
 fn show(label: String, r: Result[Int, String]) -> Unit = {
   match r {
     ok(v) => println(label + " ok:" + int.to_string(v)),
@@ -18,48 +14,26 @@ fn show(label: String, r: Result[Int, String]) -> Unit = {
 }
 
 fn main() -> Unit = {
-  show("ff", int.from_hex("ff"))
-  // 255
-  show("FF", int.from_hex("FF"))
-  // 255
-  show("0xff", int.from_hex("0xff"))
-  // 255
-  show("0Xff", int.from_hex("0Xff"))
-  // err: invalid digit found in string
-  show("0X10", int.from_hex("0X10"))
-  // err: invalid digit found in string
-  show("0x0xff", int.from_hex("0x0xff"))
-  // 255  (repeated strip)
-  show("0x0x0x10", int.from_hex("0x0x0x10"))
-  // 16
-  show("f_f", int.from_hex("f_f"))
-  // err: invalid digit found in string
-  show("ws", int.from_hex("  ff  "))
-  // 255  (trim)
-  show("-ff", int.from_hex("-ff"))
-  // -255
-  show("+ff", int.from_hex("+ff"))
-  // 255
-  show("0x-ff", int.from_hex("0x-ff"))
-  // -255
-  show("-0xff", int.from_hex("-0xff"))
-  // err: invalid digit found in string
-  show("empty", int.from_hex(""))
-  // err: cannot parse integer from empty string
-  show("0x", int.from_hex("0x"))
-  // err: cannot parse integer from empty string
-  show("0x0x", int.from_hex("0x0x"))
-  // err: cannot parse integer from empty string
-  show("plus", int.from_hex("+"))
-  // err: invalid digit found in string
-  show("z", int.from_hex("z"))
-  // err: invalid digit found in string
-  show("00xff", int.from_hex("00xff"))
-  // err: invalid digit found in string
-  show("max", int.from_hex("7fffffffffffffff"))
-  // 9223372036854775807
-  show("over", int.from_hex("8000000000000000"))
-  // err: number too large to fit in target type
-  // -9223372036854775808
-  show("min", int.from_hex("-8000000000000000"))
+  show("ff", int.parse_radix("ff", 16))
+  show("FF", int.parse_radix("FF", 16))
+  show("0xff", int.parse_radix("0xff", 16))
+  show("0Xff", int.parse_radix("0Xff", 16))
+  show("0X10", int.parse_radix("0X10", 16))
+  show("0x0xff", int.parse_radix("0x0xff", 16))
+  show("0x0x0x10", int.parse_radix("0x0x0x10", 16))
+  show("f_f", int.parse_radix("f_f", 16))
+  show("ws", int.parse_radix("  ff  ", 16))
+  show("-ff", int.parse_radix("-ff", 16))
+  show("+ff", int.parse_radix("+ff", 16))
+  show("0x-ff", int.parse_radix("0x-ff", 16))
+  show("-0xff", int.parse_radix("-0xff", 16))
+  show("empty", int.parse_radix("", 16))
+  show("0x", int.parse_radix("0x", 16))
+  show("0x0x", int.parse_radix("0x0x", 16))
+  show("plus", int.parse_radix("+", 16))
+  show("z", int.parse_radix("z", 16))
+  show("00xff", int.parse_radix("00xff", 16))
+  show("max", int.parse_radix("7fffffffffffffff", 16))
+  show("over", int.parse_radix("8000000000000000", 16))
+  show("min", int.parse_radix("-8000000000000000", 16))
 }

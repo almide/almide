@@ -242,11 +242,10 @@ fn judge(cell: &shapes::Cell, dir: &Path, scratch: &Path, wasm: bool) -> Verdict
         fails.extend(leg("wasm", wb, run_w, &cell.expected));
     }
     let vote = interp_vote(&entry);
-    if let Some(v) = &vote {
-        if v != &cell.expected {
+    if let Some(v) = &vote
+        && v != &cell.expected {
             fails.push(("interp".into(), format!("interp stdout {v:?} (expected {:?})", cell.expected)));
         }
-    }
     fails.sort_by_key(|(c, _)| COLUMNS.iter().position(|k| k == c));
     Verdict {
         columns: fails.iter().map(|(c, _)| c.as_str()).collect::<Vec<_>>().join("+"),

@@ -1,0 +1,6 @@
+// The fix: the function that reads the file says so.
+import fs
+
+effect fn reads(p: String) -> Option[Result[String, String]] = option.map(some(p), fs.read_text)
+
+effect fn main() -> Unit = println("${reads("s.txt")!}")

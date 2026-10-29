@@ -44,8 +44,14 @@ pub fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallbac
 /// bidi controls rustc refuses raw), shared with the v1 native renderer.
 pub use almide_base::rust_lit::{escape_rust_fmt_str, escape_rust_str};
 
-/// Add statement terminator (`;` in Rust, `;` in TS) if the rendered string doesn't already end with one
+/// Add statement terminator (`;` in Rust, `;` in TS) if the rendered string doesn't already end with one.
+/// A statement that renders to nothing (a Perceus `RcInc`/`RcDec`, which only
+/// the wasm leg executes) stays nothing: a lone `;` is rustc's
+/// `redundant_semicolons` warning in every emitted program that reaches it.
 pub fn terminate_stmt(ctx: &RenderContext, rendered: String) -> String {
+    if rendered.trim().is_empty() {
+        return String::new();
+    }
     let term = template_or(ctx, "stmt_terminator", &[], ";");
     if !term.is_empty() && !rendered.ends_with(';') && !rendered.ends_with('}') {
         format!("{}{}", rendered, term)
@@ -148,6 +154,7 @@ pub fn render_body_content(ctx: &RenderContext, expr: &almide_ir::IrExpr) -> Str
         IrExprKind::Block { stmts, expr: tail } => {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| terminate_stmt(ctx, super::statements::render_stmt(ctx, s)))
+                .filter(|s| !s.is_empty())
                 .collect();
             if let Some(e) = tail {
                 let expr_str = super::expressions::render_expr_owned(ctx, e);
@@ -262,7 +269,7 @@ pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Applied(TCI::Map, args) if args.len() == 2 => {
             let (k, v) = (rf(&args[0]), rf(&args[1]));
-            tmpl("type_map", &[("key", k.as_str()), ("value", v.as_str())], format!("HashMap<{}, {}>", k, v))
+            tmpl("type_map", &[("key", k.as_str()), ("value", v.as_str())], format!("std::collections::HashMap<{}, {}>", k, v))
         }
         Ty::Applied(TCI::Option, args) if args.len() == 1 => {
             let inner = rf(&args[0]);

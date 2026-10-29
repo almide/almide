@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'hash.md5_hex'"
+hint_substring = "was removed at dialect epoch 15: rewrite as `hex.encode(hash.sha256(b))`"

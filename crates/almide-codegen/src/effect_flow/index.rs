@@ -1,5 +1,6 @@
 //! Which function a name calls, and the per-arity pools of untracked values.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
@@ -87,55 +88,149 @@ pub(super) fn var_name(vt: &VarTable, id: VarId) -> String {
     vt.entries.get(id.0 as usize).map_or_else(|| format!("v{}", id.0), |v| v.name.to_string())
 }
 
-/// Arity buckets of escaped fn values: `0..=8`, `9` for more, and a wildcard
-/// for a value whose type does not say (a type variable, unknown).
+/// Arity buckets of escaped fn values: `0..=8`, `9` for more.
 const BUCKETS: usize = 10;
-const WILD: usize = BUCKETS;
 
+/// Where an escaped fn value is pooled, by its static type.
+enum Key {
+    /// A fully known fn signature (aliases expanded, `effect` slots in their
+    /// carrier form): only values of that signature are read back at it.
+    Exact(String, usize),
+    /// A fn type with a type variable or an unknown in it: any signature of
+    /// that arity.
+    Arity(usize),
+    /// Not a fn type at all (a type variable, unknown): any fn.
+    Wild,
+}
+
+/// The pools of untracked fn values. Before #4151 a pool was one per arity,
+/// so every escaped closure of one argument was read back by every call of
+/// an untracked one-argument value — an `effect` handler stored in a list
+/// was charged to a pure middleware chain over `(Handler) -> Handler`. A
+/// pool is now one per signature, and a read whose type does not pin the
+/// signature still reads every pool it could alias. Nodes are made on
+/// first use; [`Pools::finish`] wires the reads that span pools.
 pub(super) struct Pools {
-    write: Vec<NodeId>,
-    read: Vec<NodeId>,
+    wild_w: NodeId,
+    arity_w: Vec<NodeId>,
+    arity_r: Vec<NodeId>,
     read_all: NodeId,
+    exact: RefCell<HashMap<String, (usize, NodeId, NodeId)>>,
 }
 
 impl Pools {
     pub fn new(g: &mut Graph) -> Pools {
         let label = || Some("an untracked closure value".to_string());
-        let write: Vec<NodeId> = (0..=WILD).map(|_| g.may_node(label())).collect();
-        let read: Vec<NodeId> = (0..BUCKETS).map(|k| {
+        let wild_w = g.may_node(label());
+        let arity_w: Vec<NodeId> = (0..BUCKETS).map(|_| g.may_node(label())).collect();
+        let arity_r: Vec<NodeId> = (0..BUCKETS).map(|a| {
             let r = g.may_node(label());
-            g.copy(r, write[k]);
-            g.copy(r, write[WILD]);
+            g.copy(r, arity_w[a]);
+            g.copy(r, wild_w);
             r
         }).collect();
         let read_all = g.may_node(label());
-        write.iter().for_each(|&w| g.copy(read_all, w));
-        Pools { write, read, read_all }
+        g.copy(read_all, wild_w);
+        arity_w.iter().for_each(|&w| g.copy(read_all, w));
+        Pools { wild_w, arity_w, arity_r, read_all, exact: RefCell::new(HashMap::new()) }
     }
 
-    fn key(ty: &Ty) -> usize {
+    fn key(ty: &Ty) -> Key {
         match peel(ty) {
-            Ty::Fn { params, .. } => params.len().min(BUCKETS - 1),
-            _ => WILD,
+            Ty::Fn { params, ret, is_effect } => {
+                let a = params.len().min(BUCKETS - 1);
+                let sig = Ty::Fn { params, ret, is_effect };
+                match signature(&sig) {
+                    Some(s) => Key::Exact(s, a),
+                    None => Key::Arity(a),
+                }
+            }
+            _ => Key::Wild,
         }
     }
 
-    pub fn write(&self, ty: &Ty) -> NodeId {
-        self.write[Self::key(ty)]
+    fn exact(&self, g: &mut Graph, sig: String, a: usize) -> (NodeId, NodeId) {
+        if let Some(&(_, w, r)) = self.exact.borrow().get(&sig) {
+            return (w, r);
+        }
+        let label = || Some("an untracked closure value".to_string());
+        let w = g.may_node(label());
+        let r = g.may_node(label());
+        g.copy(r, w);
+        g.copy(r, self.arity_w[a]);
+        g.copy(r, self.wild_w);
+        self.exact.borrow_mut().insert(sig, (a, w, r));
+        (w, r)
     }
 
-    pub fn read(&self, ty: &Ty) -> NodeId {
+    pub fn write(&self, g: &mut Graph, ty: &Ty) -> NodeId {
         match Self::key(ty) {
-            WILD => self.read_all,
-            k => self.read[k],
+            Key::Exact(s, a) => self.exact(g, s, a).0,
+            Key::Arity(a) => self.arity_w[a],
+            Key::Wild => self.wild_w,
+        }
+    }
+
+    pub fn read(&self, g: &mut Graph, ty: &Ty) -> NodeId {
+        match Self::key(ty) {
+            Key::Exact(s, a) => self.exact(g, s, a).1,
+            Key::Arity(a) => self.arity_r[a],
+            Key::Wild => self.read_all,
+        }
+    }
+
+    /// Wires the reads that see every exact pool: an arity read sees each
+    /// signature of its arity, the wildcard read sees them all.
+    pub fn finish(&self, g: &mut Graph) {
+        for &(a, w, _) in self.exact.borrow().values() {
+            g.copy(self.arity_r[a], w);
+            g.copy(self.read_all, w);
         }
     }
 }
 
+/// A type that is (an `Option`/`Result` of) a bare type variable.
+pub(super) fn is_bare_typevar(ty: &Ty) -> bool {
+    matches!(peel(ty), Ty::TypeVar(_))
+}
+
 /// `Option[F]` / `Result[F, E]` → `F`.
-fn peel(ty: &Ty) -> &Ty {
+fn peel(ty: &Ty) -> Ty {
     match ty {
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, args) if !args.is_empty() => peel(&args[0]),
-        _ => ty,
+        Ty::Named(..) => super::scan::aliases::target(ty).map_or_else(|| ty.clone(), |t| peel(&t)),
+        _ => ty.clone(),
     }
+}
+
+/// The signature text of a fn type with every alias expanded and every
+/// `effect (A) -> B` slot in its carrier form `(A) -> Result[B, String]`
+/// (the form a named `effect fn` value has); `None` when a type variable or
+/// an unknown leaves it open.
+fn signature(ty: &Ty) -> Option<String> {
+    let t = expand(ty, 0)?;
+    (!t.has_unresolved_deep()).then(|| t.display())
+}
+
+fn expand(ty: &Ty, depth: usize) -> Option<Ty> {
+    if depth > 32 {
+        return None;
+    }
+    let ty = match ty {
+        Ty::Named(..) => match super::scan::aliases::target(ty) {
+            Some(t) => return expand(&t, depth + 1),
+            None => ty.clone(),
+        },
+        Ty::Fn { params, ret, is_effect: true } => {
+            let ret = if ret.is_result() { (**ret).clone() } else { Ty::result((**ret).clone(), Ty::String) };
+            Ty::Fn { params: params.clone(), ret: Box::new(ret), is_effect: false }
+        }
+        _ => ty.clone(),
+    };
+    let failed = std::cell::Cell::new(false);
+    let out = ty.map_children(&|c| expand(c, depth + 1).unwrap_or_else(|| {
+        failed.set(true);
+        Ty::Unknown
+    }));
+    (!failed.get()).then_some(out)
 }

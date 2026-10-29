@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
-index ccf06d9ba..90f1a5cf3 100644
+index 2a2625bee..8afbff63a 100644
 --- a/crates/almide-wasm/src/calls_modules.rs
 +++ b/crates/almide-wasm/src/calls_modules.rs
-@@ -44,7 +44,7 @@ impl Emitter<'_> {
-                         self.f.instructions().i32_const(1);
-                     }
-                 }
--                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
-+                self.f.instructions().drop();
+@@ -94,7 +94,7 @@ impl Emitter<'_> {
+                 let mut i = self.f.instructions();
+                 i.i32_const(crate::fs_meta::OP_EXIT_MARK).i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                 i.call(F_FS_CALL).drop();
+-                i.call(F_EXIT_IMPORT).unreachable();
++                i.drop();
                  Ok(None)
              }
              CallTarget::Module { module, func, .. }

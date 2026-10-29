@@ -1,14 +1,31 @@
 // The real fix is `almide add almide/llm@v0.1.0`, `import llm` and
 // `llm.openai_streaming_call(...)`; this case checks without dependencies, so
-// it streams the raw body through the stdlib's generic `http.request_stream`.
+// it streams the raw body through the stdlib's call handle (`http.start`, then
+// `read_new` until `poll` answers).
 import http
 
-effect fn ask(key: String, body: String) -> Unit = http.request_stream(
-  "POST",
-  "http://127.0.0.1:9/chat/completions",
-  body,
-  ["Authorization": "Bearer " + key, "Content-Type": "application/json"],
-  (chunk) => println(chunk),
-)!
+effect fn pump(c: HttpCall) -> Result[Unit, String] = match http.poll(c) {
+  none => {
+    println(http.read_new(c))
+    pump(c)
+  },
+  some(r) => {
+    println(http.read_new(c))
+    match r {
+      ok(_) => ok(()),
+      err(e) => err(e),
+    }
+  },
+}
+
+effect fn ask(key: String, body: String) -> Unit = {
+  let req = http.new_request(
+    "POST",
+    "http://127.0.0.1:9/chat/completions",
+    body,
+    [("Authorization", "Bearer " + key), ("Content-Type", "application/json")],
+  )
+  pump(http.start(req, { total_ms: 0, idle_ms: 0 })!)!
+}
 
 effect fn main() -> Unit = ask("k", "{\"stream\": true}")!

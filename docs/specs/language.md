@@ -339,7 +339,12 @@ Attribute names with semantic meaning today:
   a declared export that does not lower both refuse the build (E082, naming
   the fns). テスト: `tests/wasm_export_attr_test.rs`,
   `tests/wasm_export_nonroot_test.rs`.
-- `@inline_rust("template")` — **bundled stdlib only**. Routes the
+- `@inline_rust("template")` — written by the stdlib, and by packages that
+  back a fn with Rust (the aes and sha1 packages do, with a `native/` module
+  behind the template). Outside the stdlib it is **native code** (#4100): it
+  counts as every effect category, like an `@extern` fn, and a dependency that
+  carries one needs the root's `[permissions] native` grant
+  ([package-system.md §6.4](./package-system.md)). Routes the
   Rust target's codegen for the annotated fn to an inline template,
   overriding the TOML-backed `arg_transforms` dispatch. `{param_name}`
   placeholders are replaced with the rendered Rust expression for the
@@ -351,7 +356,11 @@ Attribute names with semantic meaning today:
 `@intrinsic("almide_rt_…")` and `@wasm_intrinsic` are **stdlib only** by
 authority, not just by convention (#2152): the checker accepts them in the
 stdlib's own sources — the bundled stdlib copy, or a file under `stdlib/`
-named after one of its embedded sources — and rejects them anywhere else with
+whose text is exactly the embedded source of its name (#4100: identity, not
+layout; a package that copies the `stdlib/` layout is not the stdlib), or any
+source under a directory the invoker names with `--stdlib-authority <dir>` (a
+command-line flag for harnesses that build a modified stdlib copy; no manifest
+key or environment variable can grant it) — and rejects them anywhere else with
 E085 ("intrinsics live in the stdlib; wrap in an effect fn"). The `prim`
 module (the primitive floor the stdlib is written over) is held to the same
 authority (#3025): `prim.<fn>` and `import prim` outside the stdlib are E085,
@@ -491,6 +500,27 @@ type Point: Codec = { x: Float, y: Float }
 ```
 
 Built-in conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`.
+
+`Codec` derives `T.encode(v: T) -> Value` and `T.decode(v: Value) ->
+Result[T, String]`, and for a record type also `T.decode_strict(v: Value) ->
+Result[T, String]`. `T.decode` ignores keys it does not know;
+`T.decode_strict` first returns `err("unknown key '<k>'")` for the first key
+(in document order) that is not a decoded field's key, then decodes as
+`T.decode` does (C-429). A record field may carry `@skip` (neither decoded
+nor encoded) or `@skip_decode` (never decoded, still encoded); both need a
+default, else E104, and the input's key for such a field is treated as an
+unknown key (C-428). A record field accepts only the attributes `@builtin`,
+`@location`, `@skip` and `@skip_decode`; any other is the error E053 (C-430).
+
+```almide
+type User: Codec = {
+  name: String,
+  @skip_decode is_admin: Bool = false,   // never read from input; still encoded
+  @skip cache_hint: Int = 0,             // neither read nor written
+}
+```
+
+テスト: `spec/wasm_cross/codec_field_skip_matrix.almd`, `tests/codec_field_skip_test.rs`
 
 テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/generic_type_alias_test.almd`, `spec/lang/forward_type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
 
@@ -749,7 +779,7 @@ type Shape =
 fn area(shape: Shape) -> Float = match shape {
   Circle(r) => 3.14 * r * r,
   Rect(w, h) => w * h,
-  Named{ name, sides } => float.from_int(sides),
+  Named{ name, sides } => float.from(sides),
 }
 
 test "every case is handled" {
@@ -876,7 +906,7 @@ Tuple destructuring in for:
 
 ```almide
 fn print_entries(m: Map[String, Int]) -> Unit = {
-  for (k, v) in map.entries(m) {
+  for (k, v) in map.to_list(m) {
     println("${k} = ${v}")
   }
 }
@@ -1280,7 +1310,7 @@ effect fn create_once(path: String) -> Result[Unit, String] = {
     println("already exists")
     ok(())
   }
-  fs.write(path, "")!
+  fs.write_text(path, "")!
   ok(())
 }
 ```
@@ -1572,9 +1602,15 @@ test "built-ins" {
 }
 ```
 
-String representation is not a built-in function: a type declares the `Repr`
-convention and its value renders through interpolation (`"${x}"`, ALS-R2), or
-it defines `fn T.repr(x: T) -> String` and calls `x.repr()`.
+String representation is not a built-in function. Every value prints
+structurally unless its type declares a repr: a record as `Name { f: v }`, a
+list as `[a, b]`, a string inside a container quoted. A type that defines
+`fn T.repr(x: T) -> String` prints through it everywhere it is rendered — at
+the top of an interpolation (`"${x}"`, ALS-R2), inside an enclosing record,
+list, option, result, tuple, map or variant, and in an `assert_eq` /
+`assert_ne` failure and the `almide test` report. `secret.Secret[A]` is the
+stdlib type that declares one: it prints `Secret(***)` on every path
+(`docs/stdlib/secret.md`).
 
 There is no `print` function -- use `println` for all output.
 
@@ -1585,16 +1621,16 @@ There is no `print` function -- use `println` for all output.
 ## 12. Entry Point
 
 ```almide
-import process
+import env
 
 effect fn main() -> Unit = {
-  let args = process.args()
-  let name = list.get(args, 1) ?? "world"
+  let args = env.args()                    // argv without the program name
+  let name = list.get(args, 0) ?? "world"
   println("Hello, ${name}!")
 }
 ```
 
-`main` takes no parameters. Command-line arguments are accessed via `process.args()`. `effect fn main()` is auto-wrapped to return `Result<(), String>` — no need to write `ok(())` or explicit `Result` type.
+`main` takes no parameters. Command-line arguments are accessed via `env.args()` (argv without the program name). `effect fn main()` is auto-wrapped to return `Result<(), String>` — no need to write `ok(())` or explicit `Result` type.
 
 ---
 

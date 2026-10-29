@@ -1,0 +1,7 @@
+import secret
+
+fn main() -> Unit = {
+  let a = secret.new(1234)
+  let b = secret.new(1234)
+  println(if a == b then "same pin" else "different pin")
+}

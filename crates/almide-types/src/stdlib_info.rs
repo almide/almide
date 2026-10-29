@@ -4,14 +4,17 @@
 
 /// All built-in stdlib module names (hardcoded in the compiler).
 pub const STDLIB_MODULES: &[&str] = &[
-    "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
+    "string", "list", "int", "float", "bool", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
-    "option", "error", "datetime", "testing", "value", "set",
+    "option", "datetime", "testing", "value", "set", "deque", "heap",
     "base64", "hex", "hash", "net", "url", "zlib",
+    // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
+    "bigint",
+    // Never auto-imported: `import secret` is the opt-in (#4107).
+    "secret",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-    // Each hosts UFCS conversion methods (`.to_int64()`,
-    // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
-    // so users never need `import int32`.
+    // Each hosts its conversions (`int32.from(x)`, ...). Auto-imported
+    // alongside `int` / `float` so users never need `import int32`.
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -19,11 +22,23 @@ pub const STDLIB_MODULES: &[&str] = &[
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
-    "args", "path", "list", "int", "base64", "hex", "hash", "float", "bytes",
-    "error", "math", "datetime", "value", "option", "result",
-    "map", "set", "string",
+    "args", "path", "list", "int", "base64", "hex", "hash", "float", "bool", "bytes",
+    "math", "datetime", "value", "option", "result",
+    "map", "set", "string", "deque", "heap",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
+    // Raw addresses at the foreign-function boundary (R-ffi-01). Never
+    // auto-imported: `import ffi` is the opt-in.
+    "ffi",
+    // Unix-domain sockets and shared memory (R-unix-01, #3853) and RFC 9562
+    // identifiers (R-uuid-01). Never auto-imported.
+    "unix", "uuid",
+    // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
+    "bigint",
+    // A value every renderer hides (#4107). Never auto-imported: a local
+    // named `secret` is common exactly where the module is used, so the
+    // `import secret` line is the visible opt-in.
+    "secret",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -50,16 +65,18 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
 /// are auto-imported via `TIER1_ALWAYS_ACCESSIBLE` above; this list is for
-/// bundled `.almd` modules that need resolve-time loading.
+/// bundled `.almd` modules that need resolve-time loading. Auto-import is a
+/// NAMING rule: a module here is loaded only when a loaded source reaches it
+/// (`almide_frontend::bundled_reach`, #4071), never into every program.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
-    "list", "int", "float",
+    "list", "int", "float", "bool", "bytes",
     // Stdlib modules migrated from TOML to bundled `.almd` need
     // auto-import so their signatures and dispatch reach every file
     // without requiring a redundant `import <name>`. The set mirrors
     // the auto-import behavior the generated `stdlib_sigs` previously
     // provided.
-    "error", "math", "datetime", "value", "option", "result",
-    "map", "set", "string",
+    "math", "datetime", "value", "option", "result",
+    "map", "set", "string", "deque", "heap",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -85,9 +102,6 @@ pub const RUNTIME_BACKED_TYPES: &[(&str, &str)] = &[
     // The in-flight call of `http.start` (#2631): a shared handle whose last
     // copy going away cancels the call.
     ("http", "HttpCall"),
-    // The opaque path handle of `json.root()`/`json.field(...)` — self-hosted
-    // as a `List[String]` newtype, still spelled `JsonPath` in signatures.
-    ("json", "JsonPath"),
 ];
 
 /// The owning module of a runtime-backed nominal type, accepting the bare
@@ -102,9 +116,41 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The function that DISPLAYS a runtime-backed type (#4204):
+/// `<module>.__<type_in_snake_case>_repr` (`http.__http_request_repr`),
+/// derived from the type's `RUNTIME_BACKED_TYPES` row. The owner module
+/// declares it beside the type's other operations; native implements it as the
+/// runtime's `AlmideRepr` impl, and a self-hosted rep (`HttpRequest` is a
+/// `List[String]` on wasm) shows that same text only through it, never through
+/// the generic display of its carrier — the carrier holds what the repr hides
+/// (every header value). The wasm display engine calls it whenever the module
+/// declares and the self-host registry links one; `None` when `name` is not
+/// runtime-backed.
+pub fn runtime_backed_repr_surface(name: &str) -> Option<String> {
+    let owner = runtime_backed_type_owner(name)?;
+    let bare = name.rsplit_once('.').map(|(_, b)| b).unwrap_or(name);
+    let mut snake = String::new();
+    for (i, c) in bare.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            snake.push('_');
+        }
+        snake.push(c.to_ascii_lowercase());
+    }
+    Some(format!("{owner}.__{snake}_repr"))
+}
+
+/// Is `module.func` the declared repr of one of `module`'s runtime-backed
+/// types ([`runtime_backed_repr_surface`])? A repr reads its value and builds
+/// text: it is pure whatever module declares it.
+pub fn is_runtime_backed_repr(module: &str, func: &str) -> bool {
+    RUNTIME_BACKED_TYPES.iter().any(|(m, ty)| {
+        *m == module && runtime_backed_repr_surface(ty).is_some_and(|s| s.split_once('.').map(|(_, f)| f) == Some(func))
+    })
+}
+
 /// Nominal type names a stdlib module OWNS, `(module, type name)`: the
 /// builtin dynamic `Value`, every `RUNTIME_BACKED_TYPES` row, and every
-/// `type` declared in a bundled module (`fs.FileStat`, `bytes.Endian`, …).
+/// `type` declared in a bundled module (`fs.FileStat`, `net.IpAddr`, …).
 ///
 /// The checker gives a stdlib type its BARE name as its canonical identity
 /// (`Ty::Named("Value")` is what every `json.*` / `value.*` signature
@@ -117,32 +163,69 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
 /// wrong value on wasm). Completeness is machine-checked:
 /// `stdlib_owned_types_matrix` (tests/runtime_backed_types_matrix.rs)
 /// asserts this list is exactly `Value` + the runtime-backed rows + the
-/// bundled `type` declarations.
-pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
-    ("value", "Value"),
-    ("http", "HttpRequest"),
-    ("http", "HttpResponse"),
-    ("http", "HttpCall"),
-    ("json", "JsonPath"),
-    ("bytes", "Endian"),
-    ("http", "HttpLimits"),
-    ("http", "HttpHandler"),
-    ("http", "HttpMiddleware"),
-    ("http", "HttpRoute"),
-    ("fs", "FileStat"),
-    ("html", "SafeHtml"),
-    ("net", "TcpListener"),
-    ("net", "TcpStream"),
-    ("path", "SafePath"),
-    ("process", "ProcessStatus"),
-    ("url", "Url"),
-];
+/// bundled `type` declarations. The declared part is READ from the bundled
+/// sources (a top-level `type` / `mod type` / `local type` line), never kept
+/// as a list: a module that declares a type owns it the day it lands.
+pub fn stdlib_owned_types() -> &'static [(&'static str, &'static str)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out: Vec<(&'static str, &'static str)> = vec![("value", "Value")];
+        out.extend(RUNTIME_BACKED_TYPES.iter().copied());
+        for &module in BUNDLED_MODULES {
+            let Some(src) = bundled_source(module) else { continue };
+            for line in src.lines() {
+                let decl = line.strip_prefix("mod ").or_else(|| line.strip_prefix("local ")).unwrap_or(line);
+                let Some(rest) = decl.strip_prefix("type ") else { continue };
+                let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(rest.len());
+                let name = &rest[..end];
+                if !name.is_empty() && !out.iter().any(|(m, t)| *m == module && *t == name) {
+                    out.push((module, name));
+                }
+            }
+        }
+        out
+    })
+}
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
 /// for a qualified spelling and for every name a stdlib module does not own
 /// (the common case).
 pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
-    STDLIB_OWNED_TYPES.iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
+    stdlib_owned_types().iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
+}
+
+/// The marker a built-in protocol requirement's name starts with when one
+/// stdlib module declares SEVERAL types that satisfy it (`Close`: net's
+/// `TcpStream`, `TcpListener` and `UdpSocket`; `HttpMessage`: http's request
+/// and response). Such a requirement cannot be one module function of its own
+/// name, so it resolves per conforming type ([`requirement_fn_name`]). Every
+/// other requirement of a stdlib type is its module's function of the
+/// requirement's own name (`bigint.add`, `int8.__trunc`).
+pub const PER_TYPE_REQUIREMENT_PREFIX: &str = "__self_";
+
+/// The function of a stdlib type's module that satisfies the protocol
+/// requirement `method` for `type_name` (bare or module-qualified): for a
+/// per-type requirement `__<snake type>_<verb>` (`TcpStream` and `__self_read`
+/// → `__tcp_stream_read`, `HttpRequest` and `__self_header` →
+/// `__http_request_header`), else `method` itself. The one place the spelling
+/// is derived: the checker's conformance check, monomorphization and the
+/// conformance matrix gate all call it.
+pub fn requirement_fn_name(type_name: &str, method: &str) -> String {
+    let Some(verb) = method.strip_prefix(PER_TYPE_REQUIREMENT_PREFIX) else {
+        return method.to_string();
+    };
+    let bare = type_name.rsplit_once('.').map_or(type_name, |(_, b)| b);
+    let mut snake = String::new();
+    let mut prev_lower = false;
+    for c in bare.chars() {
+        if c.is_ascii_uppercase() && prev_lower {
+            snake.push('_');
+        }
+        prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+        snake.push(c.to_ascii_lowercase());
+    }
+    format!("__{}_{}", snake, verb)
 }
 
 /// Are `a` and `b` a stdlib-owned type's own BARE name and a USER scope's
@@ -230,9 +313,10 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "url" => Some(crate::embedded::SRC_URL),
         "hash" => Some(crate::embedded::SRC_HASH),
         "float" => Some(crate::embedded::SRC_FLOAT),
+        "bool" => Some(crate::embedded::SRC_BOOL),
         "bytes" => Some(crate::embedded::SRC_BYTES),
-        "error" => Some(crate::embedded::SRC_ERROR),
         "value" => Some(crate::embedded::SRC_VALUE),
+        "secret" => Some(crate::embedded::SRC_SECRET),
         _ => None,
     }
 }
@@ -243,6 +327,8 @@ fn bundled_source_collections(name: &str) -> Option<&'static str> {
         "result" => Some(crate::embedded::SRC_RESULT),
         "map" => Some(crate::embedded::SRC_MAP),
         "set" => Some(crate::embedded::SRC_SET),
+        "deque" => Some(crate::embedded::SRC_DEQUE),
+        "heap" => Some(crate::embedded::SRC_HEAP),
         "string" => Some(crate::embedded::SRC_STRING),
         "env" => Some(crate::embedded::SRC_ENV),
         "io" => Some(crate::embedded::SRC_IO),
@@ -281,6 +367,10 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         "float64" => Some(crate::embedded::SRC_FLOAT64),
         "net" => Some(crate::embedded::SRC_NET),
         "zlib" => Some(crate::embedded::SRC_ZLIB),
+        "ffi" => Some(crate::embedded::SRC_FFI),
+        "unix" => Some(crate::embedded::SRC_UNIX),
+        "uuid" => Some(crate::embedded::SRC_UUID),
+        "bigint" => Some(crate::embedded::SRC_BIGINT),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
         "prim" => Some(crate::embedded::SRC_PRIM),
@@ -333,12 +423,12 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         // ── string-only ──
         "trim" | "split" | "pad_start"
         | "starts_with" | "ends_with"
-        | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
+        | "to_upper" | "to_lower" | "capitalize"
         | "replace" | "lines"
-        | "chars" | "repeat" | "from_bytes"
+        | "repeat"
         | "is_digit" | "is_alpha" | "is_alphanumeric"
         | "is_whitespace" | "is_upper" | "is_lower"
-        | "codepoint" | "from_codepoint"
+        | "to_codepoint" | "from_codepoint"
         | "pad_end" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
         | "replace_first" | "last_index_of" => vec!["string"],
@@ -351,9 +441,9 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         | "reduce" | "group_by"
         | "remove_at" | "find_index"
         | "scan" | "intersperse"
-        | "windows" | "dedup" | "zip_with"
+        | "dedup" | "zip_with"
         | "push" | "pop"
-        | "shuffle" | "window" => vec!["list"],
+        | "window" => vec!["list"],
 
         // ── list + map + set ──
         "fold" | "any" | "all" => vec!["list", "map", "set"],
@@ -362,9 +452,7 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         "find" | "partition" | "update" => vec!["list", "map"],
 
         // ── map-only ──
-        "keys" | "values" | "entries" | "merge"
-        | "delete"
-        => vec!["map"],
+        "keys" | "values" | "merge" => vec!["map"],
 
         // ── set-only ──
         "union" | "intersection" | "difference" | "symmetric_difference"
@@ -375,27 +463,20 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         // so it belongs to the sized-numeric table below — see #893.)
         "to_hex"
         | "band" | "bor" | "bxor" | "bnot" | "bshl" | "bshr"
-        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left"
-        | "to_u32" | "to_u8" => vec!["int"],
+        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left" => vec!["int"],
 
         // ── float-only ──
-        "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
-        | "is_nan" | "is_infinite" | "to_int" => vec!["float"],
+        "to_fixed" | "round" | "floor" | "ceil"
+        | "is_nan" | "is_infinite" => vec!["float"],
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else" => vec!["option"],
-        "to_list" => vec!["set", "option"],
+        "to_list" => vec!["string", "map", "set", "option"],
 
         // ── result-only ──
         "map_err"
         | "is_ok" | "is_err"
         | "to_err_option" | "to_option" => vec!["result"],
-
-        // ── error-only ──
-        "context" | "message" | "chain" => vec!["error"],
-
-        // ── datetime-only ──
-        "is_before" | "is_after" => vec!["datetime"],
 
         _ => vec![],
     }
@@ -420,7 +501,7 @@ fn resolve_ufcs_ambiguous_string_list(method: &str) -> Vec<&'static str> {
         "take" | "drop" | "take_end" | "drop_end" => vec!["string", "list"],
         "reverse" => vec!["string", "list"],
         "index_of" => vec!["string", "list"],
-        "join" => vec!["string", "list"],
+        "join" => vec!["list"],
         "slice" => vec!["string", "list"],
 
         // ── ambiguous: string + list + map + set ──
@@ -449,36 +530,30 @@ fn resolve_ufcs_ambiguous_container(method: &str) -> Vec<&'static str> {
         "map" | "filter" => vec!["list", "map", "set", "result", "option"],
 
         // ── ambiguous: list + map + set ──
-        "insert" | "clear" => vec!["list", "map", "set"],
+        "insert" => vec!["list", "set"],
+        "clear" => vec!["list", "map", "set"],
         "remove" => vec!["map", "set"],
 
         // ── ambiguous: string + list + map ──
-        "get" | "get_or" => vec!["string", "list", "map"],
+        "get" => vec!["string", "list", "map"],
         "set" => vec!["list", "map"],
 
         // ── ambiguous: list ──
         "swap" | "sort" | "min" | "max" => vec!["list"],
 
         // ── ambiguous: int + float ──
-        "abs" | "clamp" => vec!["int", "float"],
-        "to_float" => vec!["string", "int"],
-
-        // ── ambiguous: math + float ──
-        "sign" => vec!["math", "float"],
+        "abs" | "clamp" | "sign" => vec!["int", "float"],
 
         _ => vec![],
     }
 }
 
-/// Sized numeric conversion methods (Stage 3). Every sized int / float
-/// provides these UFCS methods. The concrete module (int32, uint8, float32,
-/// ...) is picked by the receiver's type at codegen (`resolve_module_from_ty`).
+/// Methods every sized int / float module provides. The concrete module
+/// (int32, uint8, float32, ...) is picked by the receiver's type at codegen
+/// (`resolve_module_from_ty`).
 fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
     match method {
-        "to_int8" | "to_int16" | "to_int32" | "to_int64"
-        | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
-        | "to_float32" | "to_float64"
-        // `to_string` too (#893): every sized-numeric module declares one, and
+        // `to_string` (#893): every sized-numeric module declares one, and
         // the UFCS resolver reaches this table when `env.functions` has no
         // entry — which is the case for an embedder that hands the renderer a
         // bare source (no resolved bundled modules), so `big.to_string()`
@@ -487,7 +562,7 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
         // candidate list is only consulted after `builtin_module_for_type`
         // has already picked the ONE module for the receiver's type, so
         // listing them together cannot make a call ambiguous.
-        | "to_string" => vec![
+        "to_string" => vec![
             "int", "float",
             "int8", "int16", "int32", "int64",
             "uint8", "uint16", "uint32", "uint64",
@@ -509,40 +584,99 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
 pub fn ordered_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
     use std::sync::OnceLock;
     static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut out = Vec::new();
-        for &module in BUNDLED_MODULES {
-            let Some(src) = bundled_source(module) else { continue };
-            if !src.contains("@ordered") {
-                continue;
-            }
-            let mut pending = false;
-            let mut intrinsic: Option<String> = None;
-            for line in src.lines() {
-                let line = line.trim_start();
-                if line.starts_with("@ordered") {
-                    pending = true;
-                } else if let Some(rest) = line.strip_prefix("@intrinsic(\"") {
-                    intrinsic = rest.split('"').next().map(str::to_string);
-                } else if line.starts_with('@') || line.starts_with("///") {
-                    // another attribute or a doc line between the mark and its fn
-                } else if pending {
-                    pending = false;
-                    let decl = line.strip_prefix("effect ").unwrap_or(line);
-                    if let Some(rest) = decl.strip_prefix("fn ") {
-                        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
-                        if !name.is_empty() {
-                            out.push((module, name, intrinsic.take()));
-                        }
+    TABLE.get_or_init(|| marked_stdlib_fns("@ordered"))
+}
+
+/// Every bundled stdlib fn declared `@memory_unsafe` (#4008, R-L0-45): it
+/// reads or writes memory at a raw address, or hands out the address that
+/// does, outside Almide's memory-safety guarantee — `ffi.*` and the deprecated
+/// `bytes` raw-pointer spellings. `--profile critical` refuses a call to one
+/// (E100), and an `effect fn` carrying it in a `Pure` effect module is
+/// explained by it (its effect is memory, not a host capability).
+pub fn memory_unsafe_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| marked_stdlib_fns("@memory_unsafe"))
+}
+
+/// True if `module.func` is a `@memory_unsafe` stdlib fn (#4008).
+pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
+    memory_unsafe_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
+
+/// The import that opts a source file into the `@memory_unsafe` surface
+/// (#4043): outside the stdlib, a call to a `@memory_unsafe` fn is E100
+/// unless the calling file writes `import ffi`. Never auto-imported, so the
+/// import line is the one visible place a reader finds raw memory in a file.
+pub const MEMORY_UNSAFE_OPT_IN: &str = "ffi";
+
+/// The `ffi` module's bounds-checked memory view (ADR-0031 D1), declared in
+/// stdlib/ffi.almd. An `@extern(c)` parameter of this type crosses as
+/// (pointer, `size_t` length) and a wasm `@extern` one as (pointer, length);
+/// a return of it needs `@region(len = …, release = "…")`.
+pub const FFI_REGION_TYPE: &str = "Region";
+
+/// The attribute that states a foreign Region's length and release function
+/// on an `@extern` declaration (ADR-0031 D2, D6).
+pub const REGION_ATTR: &str = "region";
+
+/// Every bundled stdlib fn declared `@signals_process` (#4125): it starts no
+/// child but signals or probes a pid, so `[permissions] proc` bounds it as the
+/// `kill` command it used to run. Derived from the one declaration site.
+pub fn signals_process_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| marked_stdlib_fns("@signals_process"))
+}
+
+/// True if `module.func` is a `@signals_process` stdlib fn (#4125).
+pub fn is_signals_process_stdlib_fn(module: &str, func: &str) -> bool {
+    signals_process_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
+
+/// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
+/// text scan of the bundled sources (an attribute block, then the fn it
+/// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
+fn marked_stdlib_fns(mark: &str) -> Vec<(&'static str, String, Option<String>)> {
+    let mut out = Vec::new();
+    for &module in BUNDLED_MODULES {
+        let Some(src) = bundled_source(module) else { continue };
+        if !src.contains(mark) {
+            continue;
+        }
+        let mut pending = false;
+        let mut intrinsic: Option<String> = None;
+        for line in src.lines() {
+            let line = line.trim_start();
+            // `@ordered`, `@ordered(..)` — not a longer attribute name that
+            // merely starts with the mark
+            let marked = line
+                .strip_prefix(mark)
+                .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'));
+            if marked {
+                pending = true;
+            } else if let Some(rest) = line.strip_prefix("@intrinsic(\"") {
+                intrinsic = rest.split('"').next().map(str::to_string);
+            } else if line.starts_with('@') || line.starts_with("///") {
+                // another attribute or a doc line between the mark and its fn
+            } else if pending {
+                pending = false;
+                // A module-private fn (`local fn`, `mod fn`) carries its mark too.
+                let decl = line.strip_prefix("local ").or_else(|| line.strip_prefix("mod ")).unwrap_or(line);
+                let decl = decl.strip_prefix("effect ").unwrap_or(decl);
+                if let Some(rest) = decl.strip_prefix("fn ") {
+                    let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                    if !name.is_empty() {
+                        out.push((module, name, intrinsic.take()));
                     }
-                    intrinsic = None;
-                } else {
-                    intrinsic = None;
                 }
+                intrinsic = None;
+            } else {
+                intrinsic = None;
             }
         }
-        out
-    })
+    }
+    out
 }
 
 /// True if `module.func` is an `@ordered` stdlib fn (ADR-0024 D3).
@@ -550,10 +684,14 @@ pub fn is_ordered_stdlib_fn(module: &str, func: &str) -> bool {
     ordered_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
-/// True if the runtime symbol (`almide_rt_env_set`) is the intrinsic of an
+/// True if the runtime symbol (`almide_rt_env___set`) is the intrinsic of an
 /// `@ordered` stdlib fn — the shape a lowered stdlib call has in codegen.
 pub fn is_ordered_runtime_symbol(symbol: &str) -> bool {
-    ordered_stdlib_fns().iter().any(|(_, _, i)| i.as_deref() == Some(symbol))
+    // An intrinsic answers by its symbol; a bodied stdlib fn (`env.set` over
+    // `__set`, #4200) by the `almide_rt_<module>_<fn>` name codegen gives it.
+    ordered_stdlib_fns()
+        .iter()
+        .any(|(m, f, i)| i.as_deref() == Some(symbol) || (i.is_none() && symbol == format!("almide_rt_{m}_{f}")))
 }
 
 #[cfg(test)]
@@ -562,16 +700,56 @@ mod ordered_tests {
     fn the_ordered_table_is_the_d3_set() {
         let t = super::ordered_stdlib_fns();
         assert!(super::is_ordered_stdlib_fn("env", "set"));
-        assert!(super::is_ordered_stdlib_fn("fs", "write"));
+        assert!(super::is_ordered_stdlib_fn("env", "remove"));
+        assert!(super::is_ordered_stdlib_fn("fs", "write_text"));
         assert!(super::is_ordered_stdlib_fn("io", "read_line"));
-        assert!(super::is_ordered_stdlib_fn("process", "spawn"));
-        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"));
-        assert!(super::is_ordered_runtime_symbol("almide_rt_process_spawn"));
+        assert!(super::is_ordered_stdlib_fn("process", "start"));
+        assert!(super::is_ordered_stdlib_fn("io", "read"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_env___set"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"), "env.set's bodied wrapper");
+        assert!(super::is_ordered_runtime_symbol("almide_rt_process___os_start"));
         // reads, output and the clock are not ordered (D3)
         assert!(!super::is_ordered_stdlib_fn("env", "get"));
+        assert!(!super::is_ordered_stdlib_fn("env", "vars"));
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 28, "{t:?}");
+        assert_eq!(t.len(), 30, "{t:?}");
+    }
+
+    #[test]
+    fn the_memory_unsafe_table_is_the_ffi_surface() {
+        let mut t: Vec<String> = super::memory_unsafe_stdlib_fns().iter().map(|(m, f, _)| format!("{m}.{f}")).collect();
+        t.sort();
+        assert_eq!(
+            t,
+            [
+                "ffi.__address", "ffi.__load", "ffi.__store",
+                "ffi.alloc", "ffi.is_writable", "ffi.len", "ffi.read", "ffi.region", "ffi.to_bytes", "ffi.write",
+            ]
+        );
+        assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
+    }
+
+    /// A per-type requirement names its type in snake case; any other
+    /// requirement is the module function of its own name.
+    #[test]
+    fn a_per_type_requirement_names_its_type() {
+        assert_eq!(super::requirement_fn_name("TcpStream", "__self_read"), "__tcp_stream_read");
+        assert_eq!(super::requirement_fn_name("net.UdpSocket", "__self_close"), "__udp_socket_close");
+        assert_eq!(super::requirement_fn_name("HttpRequest", "__self_set_body_bytes"), "__http_request_set_body_bytes");
+        assert_eq!(super::requirement_fn_name("Fd", "__self_write"), "__fd_write");
+        assert_eq!(super::requirement_fn_name("BigInt", "add"), "add");
+        assert_eq!(super::requirement_fn_name("Int8", "__trunc"), "__trunc");
+    }
+
+    /// #4043: the opt-in is an import a file must WRITE — a module every file
+    /// sees without one would make the gate vacuous.
+    #[test]
+    fn the_memory_unsafe_opt_in_is_never_auto_imported() {
+        let m = super::MEMORY_UNSAFE_OPT_IN;
+        assert!(!super::TIER1_ALWAYS_ACCESSIBLE.contains(&m));
+        assert!(!super::AUTO_IMPORT_BUNDLED.contains(&m));
+        assert!(super::memory_unsafe_stdlib_fns().iter().any(|(module, _, _)| *module == m));
     }
 }

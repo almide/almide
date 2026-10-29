@@ -1,0 +1,30 @@
+// #4237: a record pattern's shorthand field named like a builtin constructor
+// (`ok`, `err`, `some`) binds that name, and the binding shadows the bare
+// constructor word in its scope — in an interpolation as anywhere else.
+type Fresh = { ok: Bool, err: String, some: Int }
+
+fn show(t: Fresh) -> String = match t {
+  Fresh { ok, err, some } => "${ok} ${err} ${some}"
+}
+
+test "a shorthand field named like a constructor reads the bound field" {
+  assert_eq(show(Fresh { ok: true, err: "e", some: 3 }), "true e 3")
+}
+
+test "the bound field is the value in every position" {
+  match Fresh { ok: false, err: "x", some: 7 } {
+    Fresh { ok, some, .. } => {
+      assert_eq(ok, false)
+      assert_eq(some + 1, 8)
+      let r: Result[Int, String] = ok(5)
+      assert_eq(r, ok(5))
+    }
+  }
+}
+
+test "outside the binding the bare word is still the constructor" {
+  let wrap = some
+  assert_eq(wrap(2), some(2))
+  let lift: (Int) -> Result[Int, String] = ok
+  assert_eq(lift(4), ok(4))
+}

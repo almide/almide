@@ -49,7 +49,7 @@ fn wasm_string_join() {
     assert_cross_target(r#"
 fn main() -> Unit = {
   let xs = ["hello", "world", "test"]
-  println(string.join(xs, "-"))
+  println(list.join(xs, "-"))
 }
 "#);
 }
@@ -287,7 +287,7 @@ import json
 
 fn main() -> Unit = {
   let v = json.parse("{\"name\":\"test\",\"val\":42}") ?? value.null()
-  let name_val = value.field(v, "name") ?? value.null()
+  let name_val = value.get(v, "name") ?? value.null()
   let name = value.as_string(name_val) ?? "none"
   println(name)
 }

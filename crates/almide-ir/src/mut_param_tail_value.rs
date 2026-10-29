@@ -40,7 +40,7 @@
 //! params, in order, with a callee of the same tuple (and carrier). Anything
 //! else is left untouched.
 
-use crate::mut_param::{call_spelling, scope_key, MutFns};
+use crate::mut_param::{mut_call_spelling, scope_key, MutFns};
 use crate::*;
 use almide_lang::types::Ty;
 
@@ -108,7 +108,7 @@ impl Shape<'_> {
     /// Does the call `target(args)` forward exactly these buffers, in slot
     /// order, to a move-mode fn of the same shape?
     fn forwards(&self, target: &CallTarget, args: &[IrExpr]) -> bool {
-        let Some(name) = call_spelling(target) else { return false };
+        let Some(name) = mut_call_spelling(target) else { return false };
         let Some((idx, buf_ty, was_unit, orig, extra)) =
             self.mut_fns.get(&name).or_else(|| self.mut_fns.get(&scope_key(self.scope, &name)))
         else {

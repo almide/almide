@@ -1,6 +1,6 @@
 // @contract: C-374, C-214
-// The subprocess family on the embedded wasm host (#2589, ADR-0025): every
-// `process.*` call that starts, signals or asks about a child answers what
+// The subprocess family on the embedded wasm host (#2589, ADR-0025,
+// R-process-02): every `process.*` call the host serves answers what
 // native answers — the captured text, the exit code, the err strings — since
 // both run one core (crates/almide-rt-core/src/process_core.rs) and the host
 // serves it as the private `almide:process/spawn` capability. Every line
@@ -9,6 +9,7 @@
 // they are printed as predicates. The commands are POSIX `sh` / `cat` /
 // `sleep`, present on every CI image this lane runs on.
 import process
+import env
 
 fn show(r: Result[String, String]) -> String = match r {
   ok(s) => "ok ${s}",
@@ -24,33 +25,33 @@ effect fn main() -> Unit = {
   println(show(process.exec("sh", ["-c", "printf 'hi'"])))
   println(show(process.exec("sh", ["-c", "printf oops >&2; exit 3"])))
   println(show(process.exec("almide-no-such-binary-2589", [])))
-  println(show(process.exec_in("/", "sh", ["-c", "pwd"])))
-  println(show(process.exec_with_stdin("cat", [], "piped héllo")))
-  println(show_status(process.exec_status("sh", [
-    "-c",
-    "printf 'wörld\\n2'; printf e >&2; exit 5"
-  ])))
-  println(show_status(process.exec_status("almide-no-such-binary-2589", [])))
-  println(show_status(process.exec_status_timeout("sh", ["-c", "printf fast"], 30000)))
-  println(show_status(process.exec_status_timeout("sleep", ["5"], 100)))
-  match process.run("sh", ["-c", "exit 7"]) {
+  println(show_status(process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "pwd"], dir: "/" })))
+  println(show_status(process.output(process.ProcessCommand { cmd: "cat", args: [], stdin: "piped héllo" })))
+  println(show_status(process.output(process.ProcessCommand {
+    cmd: "sh",
+    args: [
+      "-c",
+      "printf 'wörld\\n2'; printf e >&2; exit 5"
+    ],
+  })))
+  println(show_status(process.output(process.ProcessCommand { cmd: "almide-no-such-binary-2589", args: [] })))
+  println(show_status(process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "printf fast"], timeout_ms: 30000 })))
+  println(show_status(process.output(process.ProcessCommand { cmd: "sleep", args: ["5"], timeout_ms: 100 })))
+  match process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 7"] }) {
     ok(code) => println("run code=${code}"),
     err(e) => println("run err ${e}"),
   }
   // The exit code is 9 only when the child's working directory is `/`.
-  match process.run_in("/", "sh", ["-c", "test \"$(pwd)\" = / && exit 9; exit 1"]) {
+  match process.run(process.ProcessCommand {
+    cmd: "sh",
+    args: ["-c", "test \"$(pwd)\" = / && exit 9; exit 1"],
+    dir: "/",
+  }) {
     ok(code) => println("run_in code=${code}"),
     err(e) => println("run_in err ${e}"),
   }
-  let pid = process.spawn("sleep", ["5"])!
-  println("spawned=${pid > 0} alive=${process.is_alive(pid)}")
-  process.kill(pid, 9)!
-  process.sleep(300)
-  println("after kill alive=${process.is_alive(pid)}")
-  match process.spawn("almide-no-such-binary-2589", []) {
-    ok(_) => println("spawn ok?"),
-    err(e) => println("spawn err ${e}"),
-  }
+  // The `start` handle (poll / wait / stop) is native-only (E081 on the wasm
+  // legs); its tests are spec/stdlib/process_start_test.almd.
   println("self pid positive=${process.pid() > 0}")
-  println("home set=${process.env("HOME") != none} unset=${process.env("ALMIDE_NONEXISTENT_VAR_2589") == none}")
+  println("home set=${env.get("HOME") != none} unset=${env.get("ALMIDE_NONEXISTENT_VAR_2589") == none}")
 }

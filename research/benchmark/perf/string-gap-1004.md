@@ -15,7 +15,7 @@ from a differential experiment in this directory; nothing is inferred.
 ## The workload and the two references
 
 `strchurn/strchurn.almd` is the #1004 workload verbatim: N ints →
-`int.to_string` → `string.join` → `string.split` → `string.len` → `list.sum`.
+`int.to_string` → `list.join` → `string.split` → `string.len` → `list.sum`.
 
 It has **two** Rust references, and keeping them apart is what makes the
 attribution possible:

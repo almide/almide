@@ -1,0 +1,37 @@
+// @contract: C-392
+// The rooted fs family (#4022) answers identically on both targets: a path
+// that stays inside the root is read, written, listed, tested and removed
+// relative to it (`a/../b` included); a `..` past the root and an absolute
+// path are refused with `fs: path escapes root: <path>` before anything is
+// touched; `open_root` of a missing directory errs. The symlink case needs a
+// link the stdlib cannot make, so it lives in tests/fs_scope_test.rs. Temp-dir
+// paths carry entropy suffixes and are never printed.
+import fs
+
+fn show(label: String, r: Result[String, String]) -> Unit = match r {
+  ok(v) => println("${label}: ok ${v}"),
+  err(e) => println("${label}: err ${e}"),
+}
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("root_escape")!
+  fs.mkdir_p(d + "/data/sub")!
+  fs.write_text(d + "/data/sub/a.txt", "inside")!
+  fs.write_text(d + "/secret.txt", "outside")!
+  let root = fs.open_root(d + "/data")!
+  show("nested", fs.root_read_text(root, "sub/a.txt"))
+  show("dot segments", fs.root_read_text(root, "./sub/../sub/a.txt"))
+  show("dotdot", fs.root_read_text(root, "../secret.txt"))
+  show("deep dotdot", fs.root_read_text(root, "sub/../../secret.txt"))
+  show("absolute", fs.root_read_text(root, "/etc/hosts"))
+  show("write", fs.root_write_text(root, "sub/b.txt", "new") |> result.map((_) => "written"))
+  show("write escape", fs.root_write_text(root, "../c.txt", "no") |> result.map((_) => "written"))
+  show("list", fs.root_list_dir(root, "sub") |> result.map((xs) => list.join(xs, ",")))
+  show("exists", fs.root_exists(root, "sub/b.txt") |> result.map((b) => "${b}"))
+  show("exists escape", fs.root_exists(root, "../secret.txt") |> result.map((b) => "${b}"))
+  show("remove", fs.root_remove(root, "sub/b.txt") |> result.map((_) => "removed"))
+  show("remove escape", fs.root_remove(root, "../secret.txt") |> result.map((_) => "removed"))
+  println("outside kept: ${fs.exists(d + "/secret.txt")} c.txt made: ${fs.exists(d + "/c.txt")}")
+  show("missing root", fs.open_root("no_such_root_4022") |> result.map((_) => "opened"))
+  fs.remove_all(d)!
+}

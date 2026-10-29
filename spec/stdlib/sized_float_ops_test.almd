@@ -1,0 +1,162 @@
+// The FloatingPoint requirements on Float32 and Float64: total-order compare
+// (R-sized-02), min/max/clamp and the classifiers (R-sized-08), abs and the four
+// roundings plus signum (R-sized-11), and the bits and constants (R-sized-03). The
+// values are the `float` functions' values in the narrower type; to_bits pins the
+// binary32 layout, the subnormals and the one canonical NaN included.
+import testing
+
+fn f32(x: Float) -> Float32 = float32.from(x)
+
+fn f64(x: Float) -> Float64 = float64.from(x)
+
+// ── compare ──
+test "compare is IEEE total order with one NaN" {
+  assert_eq(float32.compare(f32(1.0), f32(2.0)), -1)
+  assert_eq(float32.compare(f32(2.0), f32(2.0)), 0)
+  assert_eq(float32.compare(f32(-0.0), f32(0.0)), -1)
+  assert_eq(float32.compare(f32(0.0), f32(-0.0)), 1)
+  assert_eq(float32.compare(float32.nan(), float32.infinity()), 1)
+  assert_eq(float32.compare(float32.infinity(), float32.nan()), -1)
+  assert_eq(float32.compare(float32.nan(), float32.nan()), 0)
+  assert_eq(float32.compare(f32(0.0) - float32.infinity(), f32(-1.0)), -1)
+  assert_eq(float64.compare(f64(-0.0), f64(0.0)), -1)
+  assert_eq(float64.compare(float64.nan(), float64.max_value()), 1)
+  assert_eq(float64.compare(float64.nan(), float64.nan()), 0)
+  assert_eq(float64.compare(f64(3.5), f64(-3.5)), 1)
+}
+
+// ── min / max / clamp ──
+test "min and max ignore a NaN operand and order -0.0 below 0.0" {
+  assert_eq(float32.min(f32(1.5), float32.nan()), f32(1.5))
+  assert_eq(float32.max(float32.nan(), f32(1.5)), f32(1.5))
+  assert_eq(float32.to_bits(float32.min(f32(-0.0), f32(0.0))), 2147483648)
+  assert_eq(float32.to_bits(float32.max(f32(-0.0), f32(0.0))), 0)
+  assert_eq(float32.min(f32(-2.0), f32(3.0)), f32(-2.0))
+  assert_eq(float64.max(f64(-2.0), f64(3.0)), f64(3.0))
+  assert_eq(float64.min(float64.nan(), f64(-1.0)), f64(-1.0))
+}
+
+test "clamp limits to lo..hi and passes NaN through" {
+  assert_eq(float32.clamp(f32(5.0), f32(0.0), f32(1.0)), f32(1.0))
+  assert_eq(float32.clamp(f32(-5.0), f32(0.0), f32(1.0)), f32(0.0))
+  assert_eq(float32.clamp(f32(0.25), f32(0.0), f32(1.0)), f32(0.25))
+  assert_eq(float32.is_nan(float32.clamp(float32.nan(), f32(0.0), f32(1.0))), true)
+  assert_eq(float64.clamp(f64(5.0), f64(0.0), f64(1.0)), f64(1.0))
+}
+
+test "clamp aborts when lo > hi" {
+  testing.assert_aborts(
+    "clamp requires min <= max",
+    () => float32.clamp(float32.from(0.5), float32.from(1.0), float32.from(0.0)),
+  )
+  testing.assert_aborts(
+    "clamp requires min <= max",
+    () => float64.clamp(float64.from(0.5), float64.from(1.0), float64.from(0.0)),
+  )
+}
+
+// ── classify ──
+test "is_nan, is_infinite and is_finite" {
+  assert_eq(float32.is_nan(float32.nan()), true)
+  assert_eq(float32.is_nan(f32(1.0)), false)
+  assert_eq(float32.is_infinite(float32.infinity()), true)
+  assert_eq(float32.is_infinite(float32.nan()), false)
+  assert_eq(float32.is_finite(float32.max_value()), true)
+  assert_eq(float32.is_finite(float32.nan()), false)
+  assert_eq(float32.is_finite(float32.infinity()), false)
+  assert_eq(float64.is_nan(float64.nan()), true)
+  assert_eq(float64.is_infinite(float64.infinity()), true)
+  assert_eq(float64.is_finite(float64.min_value()), true)
+  assert_eq(float64.is_finite(float64.infinity()), false)
+}
+
+// ── abs / floor / ceil / round / trunc / signum ──
+test "abs and the four roundings" {
+  assert_eq(float32.abs(f32(-2.5)), f32(2.5))
+  assert_eq(float32.to_bits(float32.abs(f32(-0.0))), 0)
+  assert_eq(float32.floor(f32(-0.5)), f32(-1.0))
+  assert_eq(float32.floor(f32(2.7)), f32(2.0))
+  assert_eq(float32.to_bits(float32.ceil(f32(-0.5))), 2147483648)
+  assert_eq(float32.ceil(f32(2.1)), f32(3.0))
+  assert_eq(float32.round(f32(2.5)), f32(3.0))
+  assert_eq(float32.round(f32(-2.5)), f32(-3.0))
+  assert_eq(float32.round(f32(2.4)), f32(2.0))
+  assert_eq(float32.trunc(f32(-1.7)), f32(-1.0))
+  assert_eq(float32.trunc(f32(2.9)), f32(2.0))
+  assert_eq(float32.to_bits(float32.trunc(f32(-0.5))), 2147483648)
+  assert_eq(float32.is_nan(float32.trunc(float32.nan())), true)
+  assert_eq(float64.abs(f64(-2.5)), f64(2.5))
+  assert_eq(float64.floor(f64(-0.5)), f64(-1.0))
+  assert_eq(float64.ceil(f64(2.1)), f64(3.0))
+  assert_eq(float64.round(f64(-2.5)), f64(-3.0))
+  assert_eq(float64.trunc(f64(-1.7)), f64(-1.0))
+  assert_eq(float64.to_bits(float64.trunc(f64(-0.5))), -9223372036854775807 - 1)
+}
+
+test "signum follows the sign bit" {
+  assert_eq(float32.signum(f32(0.0)), f32(1.0))
+  assert_eq(float32.signum(f32(-0.0)), f32(-1.0))
+  assert_eq(float32.signum(f32(-3.0)), f32(-1.0))
+  assert_eq(float32.signum(float32.infinity()), f32(1.0))
+  assert_eq(float32.is_nan(float32.signum(float32.nan())), true)
+  assert_eq(float64.signum(f64(-0.0)), f64(-1.0))
+  assert_eq(float64.signum(f64(2.0)), f64(1.0))
+  assert_eq(float64.is_nan(float64.signum(float64.nan())), true)
+}
+
+// ── to_bits / from_bits ──
+test "float32 bits are the binary32 layout" {
+  assert_eq(float32.to_bits(f32(1.0)), 1065353216)
+  assert_eq(float32.to_bits(f32(-2.0)), 3221225472)
+  assert_eq(float32.to_bits(f32(0.1)), 1036831949)
+  assert_eq(float32.to_bits(f32(-0.0)), 2147483648)
+  assert_eq(float32.to_bits(float32.infinity()), 2139095040)
+  assert_eq(float32.to_bits(f32(0.0) - float32.infinity()), 4286578688)
+  assert_eq(float32.to_bits(float32.nan()), 2143289344)
+  assert_eq(float32.from_bits(1065353216), f32(1.0))
+  assert_eq(float32.from_bits(3221225472), f32(-2.0))
+}
+
+test "float32 bits round-trip through the subnormals" {
+  assert_eq(float32.to_bits(float32.from_bits(1)), 1)
+  assert_eq(float32.to_bits(float32.from_bits(8388607)), 8388607)
+  assert_eq(float32.to_bits(float32.from_bits(4194304)), 4194304)
+  assert_eq(float32.to_bits(float32.from_bits(8388608)), 8388608)
+  assert_eq(float32.to_bits(float32.from_bits(2155872255)), 2155872255)
+  assert_eq(float32.to_bits(float32.from_bits(2139095039)), 2139095039)
+}
+
+test "float64 bits are the binary64 layout" {
+  assert_eq(float64.to_bits(f64(1.0)), 4607182418800017408)
+  assert_eq(float64.to_bits(f64(-0.0)), -9223372036854775807 - 1)
+  assert_eq(float64.to_bits(float64.nan()), 9221120237041090560)
+  assert_eq(float64.from_bits(4607182418800017408), f64(1.0))
+  assert_eq(float64.to_bits(float64.from_bits(1)), 1)
+}
+
+// ── constants ──
+test "infinity, nan, epsilon, max_value and min_value" {
+  assert_eq(float.from(float32.infinity()) > 0.0, true)
+  assert_eq(float32.is_infinite(float32.infinity()), true)
+  assert_eq(float32.is_nan(float32.nan()), true)
+  assert_eq(float.from(float32.epsilon()), 1.0 / 8388608.0)
+  assert_eq(float32.to_bits(float32.max_value()), 2139095039)
+  assert_eq(
+    float32.is_infinite(float32.from(float.from(float32.max_value()) * 2.0)),
+    true,
+  )
+  assert_eq(float.from(float32.min_value()), 0.0 - float.from(float32.max_value()))
+  assert_eq(float.from(float64.infinity()) > 0.0, true)
+  assert_eq(float64.is_nan(float64.nan()), true)
+  assert_eq(float.from(float64.epsilon()), 1.0 / 4503599627370496.0)
+  assert_eq(1.0 + float.from(float64.epsilon()) > 1.0, true)
+  assert_eq(float64.to_bits(float64.max_value()), 9218868437227405311)
+  assert_eq(float.from(float64.min_value()), 0.0 - float.from(float64.max_value()))
+}
+
+// ── parse ──
+test "float64 parse reads the float grammar" {
+  assert_eq(float64.parse("1.5"), ok(f64(1.5)))
+  assert_eq(float64.parse(" -0.25 "), ok(f64(-0.25)))
+  assert_eq(float64.parse("abc").is_err(), true)
+}

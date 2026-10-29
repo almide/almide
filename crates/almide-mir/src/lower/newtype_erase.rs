@@ -19,11 +19,12 @@ fn seed_selfhost_newtype_reps(
     declared: &std::collections::HashSet<&str>,
 ) {
     use almide_lang::types::Ty;
-    // JsonPath — the self-host rep is a List[String] of segments
-    // (stdlib/json_path.almd).
-    if !declared.contains("JsonPath") {
+    // Path — value.Path's self-host rep is json_path.almd's List[String] of
+    // segments (#4220); value.almd's own List[(Bool, String, Int)] body is the
+    // native one, and the two never meet (Path is opaque outside value).
+    if !declared.contains("Path") {
         map.insert(
-            "JsonPath".to_string(),
+            "Path".to_string(),
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
@@ -113,14 +114,25 @@ impl NewtypeEraser<'_> {
 }
 impl almide_ir::visit_mut::IrMutVisitor for NewtypeEraser<'_> {
     fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+        // Patterns are erased against their subject's type BEFORE the walk
+        // substitutes it away (#4275).
+        if let almide_ir::IrExprKind::Match { subject, arms } = &mut e.kind {
+            for arm in arms.iter_mut() {
+                self.erase_newtype_pattern(&mut arm.pattern, Some(&subject.ty));
+            }
+        }
         almide_ir::visit_mut::walk_expr_mut(self, e);
-        e.ty = self.subst(&e.ty);
+        let declared = std::mem::replace(&mut e.ty, almide_lang::types::Ty::Unknown);
+        e.ty = self.subst(&declared);
         self.subst_lambda_param_tys(e);
-        self.erase_newtype_ctor_call(e);
+        self.erase_newtype_ctor_call(e, &declared);
         self.erase_unit_bind_match(e);
     }
     fn visit_stmt_mut(&mut self, s: &mut almide_ir::IrStmt) {
         use almide_ir::IrStmtKind;
+        if let IrStmtKind::BindDestructure { pattern, value } = &mut s.kind {
+            self.erase_newtype_pattern(pattern, Some(&value.ty));
+        }
         almide_ir::visit_mut::walk_stmt_mut(self, s);
         if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
             *ty = self.subst(ty);
@@ -132,18 +144,63 @@ impl almide_ir::visit_mut::IrMutVisitor for NewtypeEraser<'_> {
         if let IrPattern::Bind { ty, .. } = p {
             *ty = self.subst(ty);
         }
-        // The 1-arg newtype ctor PATTERN always matches — it IS the inner pattern.
-        let inner = if let IrPattern::Constructor { name, args } = p {
-            if args.len() == 1 && self.map.contains_key(name.as_str()) {
-                Some(args.remove(0))
-            } else {
-                None
+    }
+}
+impl NewtypeEraser<'_> {
+    /// Is a constructor `name` at a position typed `ty` the newtype `name`'s
+    /// own constructor? The table is keyed by the bare type name, while a
+    /// user's variant may spell a case the same way — `| Path(String)` beside
+    /// `value`'s `mod type Path` (#4275): the position's type decides. A
+    /// position whose type is not known keeps the name's reading.
+    fn is_newtype_ctor_at(&self, name: &str, ty: Option<&almide_lang::types::Ty>) -> bool {
+        use almide_lang::types::Ty;
+        self.map.contains_key(name)
+            && match ty {
+                Some(Ty::Named(n, _)) => n.as_str() == name,
+                _ => true,
             }
-        } else {
-            None
+    }
+
+    /// The 1-arg newtype ctor PATTERN always matches — it IS the inner
+    /// pattern. `ty` is the type of the value the pattern meets (pre-erasure),
+    /// carried down through the shapes whose sub-position type is evident.
+    fn erase_newtype_pattern(&self, p: &mut almide_ir::IrPattern, ty: Option<&almide_lang::types::Ty>) {
+        use almide_ir::IrPattern;
+        use almide_lang::types::Ty;
+        let arg = |i: usize| match ty {
+            Some(Ty::Applied(_, args)) => args.get(i).cloned(),
+            _ => None,
         };
-        if let Some(ip) = inner {
-            *p = ip;
+        match p {
+            IrPattern::Constructor { name, args } if args.len() == 1 && self.is_newtype_ctor_at(name, ty) => {
+                let target = self.map.get(name.as_str()).cloned();
+                let mut inner = args.remove(0);
+                self.erase_newtype_pattern(&mut inner, target.as_ref());
+                *p = inner;
+            }
+            IrPattern::Constructor { args, .. } => {
+                for a in args.iter_mut() { self.erase_newtype_pattern(a, None); }
+            }
+            IrPattern::RecordPattern { fields, .. } => {
+                for f in fields.iter_mut() {
+                    if let Some(fp) = &mut f.pattern { self.erase_newtype_pattern(fp, None); }
+                }
+            }
+            IrPattern::Tuple { elements } => {
+                for (i, el) in elements.iter_mut().enumerate() {
+                    let et = match ty { Some(Ty::Tuple(ts)) => ts.get(i).cloned(), _ => None };
+                    self.erase_newtype_pattern(el, et.as_ref());
+                }
+            }
+            IrPattern::Some { inner } | IrPattern::Ok { inner } => self.erase_newtype_pattern(inner, arg(0).as_ref()),
+            IrPattern::Err { inner } => self.erase_newtype_pattern(inner, arg(1).as_ref()),
+            IrPattern::As { inner, .. } => self.erase_newtype_pattern(inner, ty),
+            IrPattern::List { elements, rest } => {
+                let et = arg(0);
+                for el in elements.iter_mut() { self.erase_newtype_pattern(el, et.as_ref()); }
+                if let Some(r) = rest { self.erase_newtype_pattern(r, ty); }
+            }
+            IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
         }
     }
 }
@@ -162,11 +219,13 @@ impl NewtypeEraser<'_> {
 
     /// The 1-arg newtype ctor CALL is the payload itself (same block, same
     /// ownership — the arg was already erased/visited by the caller).
-    fn erase_newtype_ctor_call(&self, e: &mut almide_ir::IrExpr) {
+    /// `declared` is the call's type before erasure: a construction the
+    /// checker typed as another type's case is that case (#4275).
+    fn erase_newtype_ctor_call(&self, e: &mut almide_ir::IrExpr, declared: &almide_lang::types::Ty) {
         use almide_ir::{CallTarget, IrExprKind};
         let is_newtype_ctor = matches!(&e.kind,
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                if args.len() == 1 && self.map.contains_key(name.as_str()));
+                if args.len() == 1 && self.is_newtype_ctor_at(name.as_str(), Some(declared)));
         if is_newtype_ctor {
             if let IrExprKind::Call { args, .. } = &mut e.kind {
                 let payload = args.pop().expect("1-arg ctor");
@@ -261,7 +320,7 @@ fn build_newtype_substitution_map(
         collect(&m.type_decls, &mut map);
     }
     // SELF-HOST REP table: opaque STDLIB nominals whose v1 self-host owns the
-    // representation (`stdlib/json_path.almd` — JsonPath = a List[String] of
+    // representation (`stdlib/json_path.almd` — value.Path = a List[String] of
     // segments). Publishing the rep here makes every user-side bind/param of the
     // opaque type route the CORRECT drop (heap_elem_list str). Only when the
     // program does not declare its own type of the same name.
@@ -323,6 +382,10 @@ fn erase_newtypes_in_program_body(
 }
 
 pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
+    // While the runtime-backed nominal types are still visible, route their
+    // interpolations to the declared repr (see runtime_backed_interp.rs) —
+    // erasure below turns the self-hosted ones into their carrier.
+    rewrite_runtime_backed_interps(program);
     let map = build_newtype_substitution_map(program);
     if map.is_empty() {
         return;
@@ -523,8 +586,8 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
             // site freezes the read at the init value (writes through the global slot
             // become invisible — `speeds[i]` read `list.repeat(0.0, 4)[i]` = 0.0 forever).
             .filter(|tl| !tl.mutable)
-            // Nor may an IN-PLACE MUTATOR's receiver (#906): substituting `bytes.new(64)`
-            // into `bytes.set_f32_le(g_pool, …)` turns the receiver into a fresh temporary,
+            // Nor may an IN-PLACE MUTATOR's receiver (#906): substituting `bytes.zeros(64)`
+            // into `bytes.put_f32_le(g_pool, …)` turns the receiver into a fresh temporary,
             // and the wall that catches it names the SUBSTITUTED shape ("a non-var
             // receiver") instead of the global the user wrote. Keeping the `Var` lets the
             // receiver check report the real cause and the real fix (declare it `var`).
@@ -716,71 +779,4 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
     }
 }
 
-/// Every var used as the RECEIVER (args[0]) of an in-place `&mut` mutator anywhere in
-/// the program — the [`inline_pure_call_globals`] fence (#906). A receiver position is
-/// a WRITE target, so substituting a global's initializer there produces a temporary
-/// nobody owns; keeping the `Var` lets the receiver check name the global and the fix.
-/// Over-approximating by ignoring VarId regions is harmless: an id that is a local in
-/// one region and a top-let in another only loses an inlining opportunity.
-fn collect_inplace_mutator_receivers(
-    program: &almide_ir::IrProgram,
-) -> std::collections::HashSet<almide_ir::VarId> {
-    use almide_ir::visit::{walk_expr, IrVisitor};
-    use almide_ir::{CallTarget, IrExprKind};
-    struct V(std::collections::HashSet<almide_ir::VarId>);
-    impl IrVisitor for V {
-        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            | IrExprKind::TailCall {
-                target: CallTarget::Module { module, func, .. }, args, ..
-            } = &e.kind
-            {
-                if crate::lower::is_inplace_mutator(module.as_str(), func.as_str()) {
-                    if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
-                        self.0.insert(*id);
-                    }
-                }
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut v = V(std::collections::HashSet::new());
-    for f in &program.functions {
-        v.visit_expr(&f.body);
-    }
-    for tl in &program.top_lets {
-        v.visit_expr(&tl.value);
-    }
-    for m in &program.modules {
-        for f in &m.functions {
-            v.visit_expr(&f.body);
-        }
-        for tl in &m.top_lets {
-            v.visit_expr(&tl.value);
-        }
-    }
-    v.0
-}
-
-/// True when the expression tree contains ANY `Var` node — the cross-region
-/// substitution fence: a region-local id spliced into another region would
-/// resolve to an unrelated variable.
-fn expr_contains_var(e: &almide_ir::IrExpr) -> bool {
-    use almide_ir::visit::{walk_expr, IrVisitor};
-    struct V(bool);
-    impl IrVisitor for V {
-        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-            if self.0 {
-                return;
-            }
-            if matches!(e.kind, almide_ir::IrExprKind::Var { .. }) {
-                self.0 = true;
-                return;
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut v = V(false);
-    v.visit_expr(e);
-    v.0
-}
+include!("newtype_erase_receivers.rs");

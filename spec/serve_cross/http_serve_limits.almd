@@ -1,4 +1,4 @@
-// @contract: C-367
+// @contract: C-367, C-389, C-405, C-407
 // A SERVER fixture for what the shared server core answers ITSELF and how it
 // shapes a handler's answer (almide/almide#2823, #2826, #2822): no generic
 // runner executes it. The driver (tests/http_serve_cross_test.rs in
@@ -10,34 +10,37 @@
 // CR/LF, and the answers the core refuses or reshapes: a status that is not
 // a final status code, a header name that is not a token, a value holding a
 // control character, and the framing fields the server owns. Each leg must
-// answer the same.
+// answer the same. It also holds one connection open sending its request
+// head byte by byte (almide/almide#4021, C-389): another client must be
+// answered at once, and the slow one `408` at the 10 s header deadline.
+// And it sends the header field lines RFC 9112 refuses (almide/almide#4112,
+// C-405): whitespace between a field name and its colon
+// (`Transfer-Encoding : chunked`), a line without a colon, and an obs-fold
+// continuation line. Each is `400` on both legs before the handler runs.
+// Every answer, the core's own included, carries `X-Content-Type-Options:
+// nosniff` unless the handler set the field (almide/almide#4134, C-407).
 // Usage: almide run http_serve_limits.almd [--target wasm] -- <port>
 import env
 import http
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let path = http.req_path(req)
-  eprintln("${http.req_method(req)} ${path}")
+  let path = http.path(req)
+  eprintln("${http.method(req)} ${path}")
   match path {
-    "/split" => http.with_headers(200, "split", ["X-A": "1\r\nSet-Cookie: evil=1"]),
+    "/split" => http.with_headers(200, "split", [("X-A", "1\r\nSet-Cookie: evil=1")]),
     "/429" => http.response(429, "slow down"),
     "/503" => http.response(503, "later"),
     "/s42" => http.response(42, "x"),
     "/s103" => http.response(103, "x"),
     "/s600" => http.response(600, "x"),
-    "/hname" => http.with_headers(200, "x", ["a b": "v"]),
-    "/hctl" => http.with_headers(200, "x", ["X-C": "a\u{1}b"]),
+    "/hname" => http.with_headers(200, "x", [("a b", "v")]),
+    "/hctl" => http.with_headers(200, "x", [("X-C", "a\u{1}b")]),
     "/hframe" => http.with_headers(
       200,
       "hello",
-      [
-        "Content-Length": "99",
-        "Transfer-Encoding": "chunked",
-        "Keep-Alive": "timeout=5",
-        "X-Kept": "1"
-      ],
+      [("Content-Length", "99"), ("Transfer-Encoding", "chunked"), ("Keep-Alive", "timeout=5"), ("X-Kept", "1")],
     ),
-    _ => http.response(200, "${http.req_method(req)} ${path} ${http.req_body(req)}"),
+    _ => http.response(200, "${http.method(req)} ${path} ${http.body(req)}"),
   }
 }
 

@@ -42,13 +42,24 @@ const STRING_MEMBER_REWRITES: &[MemberRewrite] = &[
     MemberRewrite { field: "length", fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
     MemberRewrite { field: "len",    fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
     MemberRewrite { field: "size",   fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
-    MemberRewrite { field: "chars",  fn_name: "string.to_chars", args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "chars",  fn_name: "string.to_list",  args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
 ];
 
 impl Checker {
     pub(crate) fn infer_expr(&mut self, expr: &mut ast::Expr) -> Ty {
         if let Some(span) = expr.span {
             self.current_span = Some(span);
+        }
+        // #4237: a bare constructor word (`ok`, `err`, `some`, `none`) names
+        // a binding of that name when one is in scope — a record pattern's
+        // shorthand field `{ ok }` binds `ok`, as a backtick `ok` binding does —
+        // so the innermost binding shadows the constructor, as every other
+        // name in scope does. Rewritten to the name here, before its type is
+        // recorded, so the lowering resolves the same binding.
+        if let Some(word) = expr.bare_ctor_word()
+            && self.env.lookup_var(word).is_some()
+        {
+            expr.kind = ExprKind::Ident { name: almide_base::intern::sym(word) };
         }
         // #626: register a candidate for any int literal that overflows i64. The
         // actual range error is decided post-solve against context (a wider
@@ -208,7 +219,13 @@ impl Checker {
                 }
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
-                    self.infer_expr_record_named(n, fields)
+                    let n = *n;
+                    // The type the literal BUILDS, not its spelling: a module's
+                    // own `type Secret` is `m.Secret`, never the bundled one,
+                    // and an alias of the bundled type is the bundled type.
+                    let built = self.record_type_canon(&n);
+                    self.reject_foreign_opaque_record(&Ty::Named(built, vec![]), "build a literal of");
+                    self.infer_expr_record_named(&n, fields)
                 } else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
                         let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
@@ -282,8 +299,8 @@ impl Checker {
     // early-return to the caller, `None` to continue.
     fn check_record_enum_misuse(&mut self, n: &Sym) -> Option<Ty> {
         // The literal's TYPE resolves canonically: the entry program's
-        // `type Endian = { n: Int }` is `self.Endian`, not the bundled
-        // `Endian` enum the bare key holds (#1828).
+        // `type IpAddr = { n: Int }` is `self.IpAddr`, not the bundled
+        // `IpAddr` enum the bare key holds (#1828).
         let key = crate::canonicalize::resolve::canonical_user_type_sym(
             n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
         ).unwrap_or(*n);
@@ -422,7 +439,11 @@ impl Checker {
             ).with_code("E029"));
             return Err(Ty::Unknown);
         }
-        let generic_args = self.instantiate_type_generics(n);
+        // The generics of the type the literal BUILDS: by its bare spelling,
+        // the entry program's own `type Secret = { .. }` picked up the
+        // bundled `Secret[A]`'s parameter and was E025 (`self.Secret[?0]`).
+        let generics_key = if self.env.types.contains_key(&canon) { canon } else { *n };
+        let generic_args = self.instantiate_type_generics(generics_key.as_str());
         let named = Ty::Named(canon, generic_args);
         let (decl, closed) = match self.env.resolve_named(&named) {
             Ty::Record { fields } => (fields, true),
@@ -635,7 +656,7 @@ fn dead_spelling<'a>(module: &str, name: &'a str) -> Option<DeadSpelling<'a>> {
     let rewrite = match (module, core) {
         ("list", "fold" | "scan") => format!("list.{core}(xs, z, (a, x) => f(a, x)!)!"),
         ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
-        ("map", "fold") => "map.fold(m, z, (a, k, v) => f(a, k, v)!)!".to_string(),
+        ("map", "fold") => "map.fold(m, z, (a, (k, v)) => f(a, k, v)!)!".to_string(),
         ("fs", "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
         ("fs", _) => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
         (m, _) => format!("{m}.{core}(.., (x) => f(x)!)!"),

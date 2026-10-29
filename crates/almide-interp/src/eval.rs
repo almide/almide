@@ -114,7 +114,21 @@ impl<'a> Interpreter<'a> {
             IrExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right, scope),
             IrExprKind::UnOp { op, operand } => {
                 let v = val!(self.eval_expr(operand, scope));
-                self.eval_unop(*op, v)
+                // `-m` on a Matrix is `matrix.__neg(m)` on both backends.
+                if crate::surface::is_matrix_ty(&operand.ty) {
+                    return Some(self.dispatch_module_resolved(
+                        almide_base::intern::sym("matrix"),
+                        almide_base::intern::sym("__neg"),
+                        vec![v],
+                    ));
+                }
+                let flow = self.eval_unop(*op, v);
+                // #4163: a sized int's negation wraps at its width, as `0 - x` does.
+                if matches!(op, UnOp::NegInt) {
+                    Self::narrow_wrap_flow(flow, BinOp::SubInt, &operand.ty, &operand.ty)
+                } else {
+                    flow
+                }
             }
             _ => return None,
         })
@@ -238,16 +252,41 @@ impl<'a> Interpreter<'a> {
             // ── Calls ──
             IrExprKind::Call { target, args, .. } => {
                 let flow = self.eval_call(target, args, scope);
-                lift_to_declared_carrier(&expr.ty, flow)
+                self.lift_unless_intrinsic_stub(target, &expr.ty, flow)
             }
             // TailCall is codegen-inserted (TailCallMarkPass, post-cut) but we
             // treat it == Call defensively.
             IrExprKind::TailCall { target, args } => {
                 let flow = self.eval_call(target, args, scope);
-                lift_to_declared_carrier(&expr.ty, flow)
+                self.lift_unless_intrinsic_stub(target, &expr.ty, flow)
             }
             _ => return None,
         })
+    }
+
+    /// [`lift_to_declared_carrier`], except at a call of a lowered module's
+    /// `@intrinsic` stub (a `Hole` body) whose DECLARED return is not a
+    /// Result. Both backends call the runtime fn behind such a stub
+    /// directly, and it answers the declared type bare (`env.get` is
+    /// `almide_rt_env_get -> Option<String>`), while a module lowered as a
+    /// user module types the effect call at its ABI carrier,
+    /// `Result[String?, String]`. Lifting there handed `option.map` an
+    /// `ok(some(..))` inside `env.secret` (C-438): the stub's declaration,
+    /// not the site's carrier, says what shape the value has.
+    fn lift_unless_intrinsic_stub(&self, target: &CallTarget, ty: &Ty, flow: Flow) -> Flow {
+        let callee = match target {
+            CallTarget::Module { module, func, .. } => self.module_fns.get(&(*module, *func)).copied(),
+            CallTarget::Named { name } => self
+                .program
+                .modules
+                .get((self.cur_space.get() as usize).wrapping_sub(1))
+                .and_then(|m| self.module_fns.get(&(m.name, *name)).copied()),
+            _ => None,
+        };
+        match callee {
+            Some(d) if matches!(d.body.kind, IrExprKind::Hole) && !d.ret_ty.is_result() => flow,
+            _ => lift_to_declared_carrier(ty, flow),
+        }
     }
 
     /// Collection construction, ranges, and element/field access.

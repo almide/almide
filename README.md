@@ -31,7 +31,7 @@
 
 ---
 
-Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix**. Programs compile to native binaries (via Rust) and to WebAssembly, with byte-identical output on every [contracted behaviour](./docs/contracts/). `almide verify` checks their ownership, name and capability witnesses ([what is proven, what is trusted](./docs/contracts/proven-vs-trusted.md)).
+Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix**. Programs compile to native binaries (via Rust) and to WebAssembly, with byte-identical output on every [contracted behaviour](./docs/contracts/). `almide verify` checks the ownership, bounds, name and capability witnesses of the wasm module `almide build` ships, pinned to that file by its SHA-256 ([what is proven, what is trusted](./docs/contracts/proven-vs-trusted.md)).
 
 ## An edit that survives
 
@@ -67,7 +67,7 @@ The diagnostic is the fix: the model's next turn is `Triangle(b, h) => 0.5 * b *
 **[Try it in your browser →](https://almide.github.io/playground/)** — no installation.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 

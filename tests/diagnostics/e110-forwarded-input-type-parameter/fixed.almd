@@ -1,0 +1,15 @@
+// The wrapper declares itself an input sink, so each caller's type is judged.
+import http
+
+type NoteInput: Decode = { text: String }
+
+@input_sink
+fn body_as[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = http.decode_json[T](req)
+
+effect fn main() -> Unit = {
+  let r: Result[NoteInput, HttpResponse] = body_as(http.new_request("POST", "/n", "{\"text\":\"hi\"}", []))
+  println(match r {
+    ok(n) => n.text,
+    err(bad) => http.body(bad),
+  })
+}

@@ -88,7 +88,13 @@ impl Emitter<'_> {
                         self.f.instructions().i32_const(1);
                     }
                 }
-                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
+                // #4203: mark the exit as the program's own, after the code is
+                // evaluated (an abort inside it stays an abort).
+                self.note_host_op(crate::fs_meta::OP_EXIT_MARK);
+                let mut i = self.f.instructions();
+                i.i32_const(crate::fs_meta::OP_EXIT_MARK).i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                i.call(F_FS_CALL).drop();
+                i.call(F_EXIT_IMPORT).unreachable();
                 Ok(None)
             }
             CallTarget::Module { module, func, .. }
@@ -132,7 +138,7 @@ impl Emitter<'_> {
             // i64 → f64 is one wasm op; f64.convert_i64_s IS Rust's
             // `as f64` (IEEE round-to-nearest-even), bit-exact.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "int" && func.as_str() == "to_float" && args.len() == 1 =>
+                if module.as_str() == "int" && func.as_str() == "__raw_to_float" && args.len() == 1 =>
             {
                 self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
@@ -162,54 +168,6 @@ impl Emitter<'_> {
                 self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify_pretty()?;
                 Ok(Some(Lowered::owned(STR)))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json"
-                    && func.as_str() == "set_path"
-                    && args.len() == 3 =>
-            {
-                // #2010 item 5: `$jp_set` BORROWS the document and the new
-                // value and takes its own credit on every block it shares.
-                let vdec = self.dec_fn_of(SliceTy::Value);
-                let h = self.work.helper(crate::work::Helper::JsonPathSet { vdec });
-                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
-                self.f.instructions().i32_const(0);
-                self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.f.instructions().call(h);
-                // ok(v) — the surface is Result[Value, String], always ok.
-                let hv = self.tmp_i32_local;
-                let mut i = self.f.instructions();
-                i.local_set(hv);
-                i.i32_const(16)
-                    .call(F_ALLOC)
-                    .local_tee(self.scr_i32_local)
-                    .i32_const(0)
-                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                i.local_get(self.scr_i32_local)
-                    .local_get(hv)
-                    .i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                i.local_get(self.scr_i32_local);
-                let _ = i;
-                let vh = self.types.intern(SliceTy::Value);
-                Ok(Some(Lowered::owned(SliceTy::Result(vh, self.types.intern(STR)))))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json" && func.as_str() == "to_map" && args.len() == 1 =>
-            {
-                self.lower_json_to_map(&args[0])
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json"
-                    && func.as_str() == "remove_path"
-                    && args.len() == 2 =>
-            {
-                let h = self.work.helper(crate::work::Helper::JsonPathRemove);
-                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
-                self.f.instructions().i32_const(0);
-                self.f.instructions().call(h);
-                Ok(Some(Lowered::owned(SliceTy::Value)))
             }
             _ => self.lower_module_call_b(target, args, tail, ret_hint),
         }
@@ -306,7 +264,10 @@ impl Emitter<'_> {
                 if let Some(out) = self.lower_fs_call(func.as_str(), args)? {
                     return Ok(out);
                 }
-                unsup(&format!("call:fs.{func}"))
+                // An fs fn written in Almide over the host ops (the rooted
+                // family, #4022) takes the linked route; one with neither
+                // walls as `call:fs.<func>` there, as before.
+                self.lower_linked_call("fs", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. }
                 if matches!(module.as_str(), "env" | "io" | "process") =>
@@ -317,8 +278,16 @@ impl Emitter<'_> {
                 // The subprocess family (#2589) is self-hosted over the
                 // `__proc_*` leaves (stdlib/process_wasm.almd): the registry
                 // route, as http's non-host fns take it.
-                if module.as_str() == "process" {
+                // io's handle layer (R-L0-44: `io.read` / `io.write` over a
+                // handle, the streams' `__stdin_read` / `__stdout_write`) is
+                // Almide over the leaves above, and takes the same route.
+                if matches!(module.as_str(), "process" | "io") {
                     return self.lower_module_call_c(target, args, tail, ret_hint);
+                }
+                // `env.set` is written in Almide over its `__set` op (#4200):
+                // the linked route, as fs's rooted family takes it.
+                if module.as_str() == "env" {
+                    return self.lower_linked_call("env", func.as_str(), args, tail);
                 }
                 unsup(&format!("call:{module}.{func}"))
             }
@@ -327,6 +296,15 @@ impl Emitter<'_> {
             // generic route.
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "monotonic_ns") =>
+            {
+                if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:{module}.{func}"))
+            }
+            // datetime.now_ms (R-datetime-01): the third clock read.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "datetime" && func.as_str() == "now_ms" =>
             {
                 if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
                     return Ok(out);
@@ -346,19 +324,14 @@ impl Emitter<'_> {
                 // response constructors) exactly as before the port.
                 self.lower_module_call_c(target, args, tail, ret_hint)
             }
-            // #1423 stage 4: the error trio — semantics verbatim from
-            // runtime/rs/src/error.rs.
-            CallTarget::Module { module, func, .. } if module.as_str() == "error" => {
-                if let Some(out) = self.lower_error_call(func.as_str(), args)? {
-                    return Ok(out);
-                }
-                unsup(&format!("call:error.{func}"))
-            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);
                 }
-                unsup(&format!("call:value.{func}"))
+                // A value fn written in Almide (the Option readers and the Path
+                // family, #4220) takes the linked route, as fs's rooted family
+                // does; one with neither walls as `call:value.<func>` there.
+                self.lower_linked_call("value", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)

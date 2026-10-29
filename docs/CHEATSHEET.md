@@ -74,7 +74,7 @@ type Event: Codec = | Click(Int, Int) | Scroll{dy: Int} | Quit
 // Event.encode(Quit)             → {"Quit": null}
 ```
 Skip `: Codec` only for variants that never serialize
-(internal enums like `Endian` in `stdlib/bytes.almd`). Every other
+(internal enums a program never writes out). Every other
 variant should opt in — the roundtrip code is LLM-error prone when
 hand-written.
 
@@ -177,12 +177,12 @@ let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
 ```almide check
 fn incr(mut x: Int) -> Unit = { x = x + 1 }
 
-fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.put_u8(b, 0, v)  // a helper that fills its caller's buffer
 
 fn main() -> Unit = {
   var n = 5
   incr(n)          // n is now 6 -- mutated in place, not returned
-  var buf = bytes.new(4)   // `var`, not `let`: the writers take `mut b`
+  var buf = bytes.zeros(4)   // `var`, not `let`: the writers take `mut b`
   bytes.append_u8(buf, 7)
   stamp(buf, 9)
   println("${n} ${bytes.to_list(buf)}")
@@ -190,9 +190,9 @@ fn main() -> Unit = {
 ```
 Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
 is E032). `mut` can be on any parameter, any position. This is how every
-in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
-`map.delete`, `map.clear`, `string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
-`set_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
+in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.clear`,
+`string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
+`put_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
@@ -211,7 +211,7 @@ A user-declared effect fn is **always fallible**: a call yields
 `Result[T, String]`, even when the body cannot fail. `-> T` is the canonical
 spelling — the `effect` already says it can fail.
 
-A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read_byte`, `io.read_n_bytes`, `process.args` and the `args` readers (`args.flag`, `args.option`, `args.option_or`, `args.positional`, `args.positional_at`, `args.raw`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006). The ones returning `String?` (`args.option`, `args.positional_at`) take `!` before a default — `args.positional_at(0)! ?? "in.txt"`: `!` propagates the error, `??` defaults the none (#3522).
+A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read` / `io.read_exact` / `io.read_to_end` on `io.stdin()!`, `env.args` and the `args` readers (`args.has_flag`, `args.option`, `args.positional`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` does (dialect epoch 8; a pure fn calling one is E006). The one returning `String?` (`args.option`) takes `!` before a default — `args.option("out")! ?? "out.txt"`: `!` propagates the error, `??` defaults the none (#3522).
 
 Read the `!` on an effect call like Swift's `await`: it marks the point where
 the world is touched, whether or not this particular call can fail (Almide has
@@ -222,6 +222,7 @@ it propagates the error to the enclosing fn and never traps.
 |---|---|
 | a user-declared effect fn, or a stdlib one that can fail (`fs.read_text`, …) | `f()!` to propagate · `let _ = f()` to discard on purpose · or `match` on `ok`/`err`. A bare `let x = f()` is E041, a bare statement `f()` is E042 |
 | a stdlib effect fn that cannot fail (`random.int`, `io.read_line`, `fs.exists`, …) | the value is plain; a `!` on it is a harmless no-op |
+| a stdlib effect fn written in Almide that returns a plain value (`io.stdin()`, `io.stdout()`, `uuid.v4()`, `process.child_pid(c)`, …) | like a user-declared one, a call yields a `Result`: write `!` — `io.write(io.stdout()!, data)!` |
 
 The one rule that is always right: **write `!` on every effect call.** You never
 need to know whether a stdlib effect fn can fail to append it.
@@ -304,7 +305,7 @@ Absence is a value, not an error — never branch on the error text:
 ```almide
 let cfg = fs.read_text_if_exists(path)! ?? "default"
 //  ok(none) = absent (missing parents too) / err = permission, IO — real failures
-// family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
+// family: read_text / read_bytes / read_lines + _if_exists
 ```
 
 ### Error-handling doctrine (ADR-0004)
@@ -469,6 +470,14 @@ let f = (x) => {
   let y = x * 2
   y + 1
 }
+
+// a tuple parameter: destructure it with a pattern
+pairs |> list.map(((a, b)) => a + b)
+// map callbacks take the entry as ONE (K, V) tuple
+map.filter(m, ((k, v)) => v > 0)
+map.fold(m, 0, (acc, (k, v)) => acc + v)
+// where the ONLY parameter is a tuple, its elements may be written as separate parameters
+map.filter(m, (k, v) => v > 0)
 ```
 
 **Lambdas and effects**: a lambda inherits the enclosing fn's effect
@@ -481,7 +490,7 @@ In a pure fn the same lambda is an error. Exception: metered regions
 rejected there even inside an effect fn.
 
 **Effect fn-typed slots** (`effect (A) -> B`): a HOF can declare that its
-callback runs effects — `effect fn serve(port: Int, f: effect
+callback runs effects — `effect fn serve(port: Int, handler: effect
 (HttpRequest) -> HttpResponse) -> Unit`. A lambda checked against an
 `effect (…) -> …` slot gets full effect-fn body ergonomics: effect calls are
 permitted and `!` propagates (into the handler's own failure channel — a
@@ -496,7 +505,12 @@ http.serve(8080, (req) => {
 ```
 
 Calling an effect fn-typed VALUE is itself an effect call (`h(x)!` inside the
-HOF); doing it from a pure fn is E006. A plain `(A) -> B` slot still rejects
+HOF); doing it from a pure fn is E006. An effect fn passed as an argument —
+`list.map(xs, fs.read_text)`, `apply(fs.read_text, p)` — makes the call an
+effect call (a bare fn-type parameter is transparent), so from a pure fn it
+is E006 too. A pure fn that runs an effect fn it reached through a value — a
+record field, a list element, a closure an effect fn built — is E109: the
+effect bit rides the value, so mark the fn `effect fn` (#4151). A plain `(A) -> B` slot still rejects
 fallible lambdas (E005) — declare the slot `(A) -> B!` or `effect (A) -> B`.
 The bare arrow form is the canonical spelling; `almide fmt` normalizes the
 legacy `fn(A) -> B` to it.
@@ -595,7 +609,7 @@ m["key"] = value           // index write (var only)
 Numbers, `Bool` and `String` print their value; a `List`, `Map`, `Set`,
 `Option`, `Result`, tuple, record or variant prints its Almide-literal form
 (`[1, 2]`, `["a": 1]`, `some(3)`, `P { n: 1 }`). A value with no string form —
-`Bytes`, `Unit`, `Matrix`, a raw pointer, a function value, or a container
+`Bytes`, `Unit`, `Matrix`, a Handle, a function value, or a container
 holding one — is [E089](diagnostics/E089.md): interpolate what you mean
 (`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`).
 
@@ -882,20 +896,21 @@ All six are callable from a pure `fn` — output and aborts do not need `effect`
 ```almide check
 import io                                     // io is NOT auto-imported
 effect fn main() -> Unit = {
-  let line = io.read_line()                   // plain String — it cannot fail, so NOT a Result (`!` is a no-op, `?` is E034)
+  let line = io.read_line() ?? ""             // String? — none at end of input; it cannot fail, so NOT a Result
   let n = int.parse(string.trim(line)) ?? 0   // int.parse(s) -> Result[Int, String]
   println(int.to_string(n))
 }
 ```
-`io.read_line()` reads one stdin line with the trailing newline stripped, returns `""` on EOF,
-and requires an `effect fn` caller. `int.parse` / `float.parse` return `Result` — unwrap with
+`io.read_line()` reads one stdin line with the trailing newline stripped and returns
+`String?`: `none` at end of input, `some("")` for an empty line. It requires an `effect fn`
+caller. For bytes, read a handle: `io.read(io.stdin()!, n)!`, `io.read_to_end(io.stdin()!)!`. `int.parse` / `float.parse` return `Result` — unwrap with
 `??`, `!` (effect fn), or `?`. There is no `int.from_string`.
 
 ## Entry point
 ```
 effect fn main() -> Unit = {
-  let args = process.args()              // command-line args (Go-style)
-  let name = list.get(args, 1) ?? "world"
+  let args = env.args()              // command-line args, without the program name
+  let name = list.get(args, 0) ?? "world"
   let content = fs.read_text("config.txt")!   // propagate error with !
   println("Hello, ${name}: ${content}")
 }
@@ -903,16 +918,20 @@ effect fn main() -> Unit = {
 `effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
 Write `effect fn main()` only when `main` does a real effect (reads, files, network, `fan`, `!`); a `main` that only computes and prints is `fn main() -> Unit`.
 
-**Temp files**: never hardcode `/tmp` — it does not exist on Windows. Use
-`fs.temp_dir()` (platform-correct: `%TMP%` on Windows native; on wasm the
-Go/Python WASI rule `$TMPDIR` else `/tmp`, so it converges on the host's
-real temp dir) or `fs.create_temp_file(prefix)` / `fs.create_temp_dir(prefix)`:
+**Temp files**: create them with `fs.create_temp_file(prefix)` /
+`fs.create_temp_dir(prefix)` — never a fixed name under `fs.temp_dir()`.
+The temp dir is shared, so a fixed name is one another user can create
+first (as a symlink to your file). The create functions pick a random name,
+create it exclusively (an existing entry is never reused or followed) and
+make it private to you; they return the path. `fs.temp_dir()` is a
+location, not a safe name. Never hardcode `/tmp` either: it does not exist
+on Windows.
 
 ```almide
-let dir = fs.temp_dir()
-fs.write("${dir}/scratch.txt", data)!
+let path = fs.create_temp_file("report")!
+fs.write_text(path, data)!
 ```
-Command-line arguments are accessed via `process.args()` (not main parameters).
+Command-line arguments are accessed via `env.args()` (not main parameters); argv[0], the program name, is not in the list.
 
 ## Operators (precedence high→low)
 `. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `..< ...` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
@@ -934,27 +953,57 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [list](stdlib/list.md) | List operations | auto-imported | 59 |
 | [map](stdlib/map.md) | Map (dictionary) operations | auto-imported | 24 |
 | [set](stdlib/set.md) | Set operations | auto-imported | 19 |
+| [deque](stdlib/deque.md) | Double-ended queue: push/pop at both ends | auto-imported | 58 |
+| [heap](stdlib/heap.md) | Priority queue, least first | auto-imported | 16 |
 | [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 22 |
 | [float](stdlib/float.md) | Floating-point operations | auto-imported | 17 |
+| [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported | 3 |
 | [value](stdlib/value.md) | Dynamic value manipulation | auto-imported | 19 |
 | [result](stdlib/result.md) | Result type operations | auto-imported | 12 |
 | [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
 | [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
 | [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
-| [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
+| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` | 16 |
 | [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
 | [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
 | [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
 | [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
 | [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
-| [error](stdlib/error.md) | Error construction | auto-imported | 3 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
-| [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |
-| [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
-| [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
-| [random](stdlib/random.md) | Random number generation | `import random` | 4 |
+| [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` | 17 |
+| [io](stdlib/io.md) | Standard streams; `read` / `write` / `close` over any handle | `import io` | 12 |
+| [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` | 16 |
+| [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` | 10 |
+| [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` | 7 |
+| [http](stdlib/http.md) | HTTP client and server; `HttpRequest` and `HttpResponse` share `header` / `headers` / `body` / `set_header` / `set_body` | `import http` | 36 |
+| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
+
+### Regex: compile once, pass the `Regex` first
+
+Every `regex` operation takes a `Regex`, never a pattern string. `regex.new` takes
+a literal pattern (checked by `almide check`, E102; a refused one aborts);
+`regex.compile` takes one built at run time and answers `err(reason)`. A
+capture group that took no part is `none`.
+
+```almide check
+import regex
+
+fn main() -> Unit = {
+  let digits = regex.new("[0-9]+")
+  println(regex.find(digits, "order 66") ?? "none")
+  println(regex.find_all(digits, "1 22 333") |> list.join(","))
+  let date = regex.new("(\\d+)-(\\d+)(-x)?")
+  let groups = regex.captures(date, "2026-10") ?? []
+  println(groups |> list.map((g) => g ?? "-") |> list.join("|"))
+  match regex.compile("a(b") {
+    ok(_) => println("valid"),
+    err(reason) => println(reason),
+  }
+  println(regex.replace_with(digits, "a1b22", (cs) => "<${(list.get(cs, 0) ?? none) ?? ""}>"))
+}
+```
 
 ## JSON & the wire
 
@@ -974,7 +1023,7 @@ type OtlpSpan: Codec = {
   parentSpanId: Option[String],  // none = key omitted (proto3 unset)
   startTimeUnixNano: String,
 }
-// send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), headers)
+// send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), [("Content-Type", "application/json")])!
 // receive: OtlpSpan.decode(json.parse(body) ?? value.null())
 ```
 Domain logic that wants Almide-shaped names defines its own type and maps in
@@ -1017,11 +1066,11 @@ type Scroll: Codec = { dy: Int }
 type Event = | C(Click) | S(Scroll)
 
 fn Event.encode(e: Event) -> Value = match e {
-  C(c) => value.merge(Click.encode(c), value.object([("type", value.str("click"))])),
-  S(s) => value.merge(Scroll.encode(s), value.object([("type", value.str("scroll"))])),
+  C(c) => value.merge(Click.encode(c), value.object([("type", value.string("click"))])),
+  S(s) => value.merge(Scroll.encode(s), value.object([("type", value.string("scroll"))])),
 }
 fn Event.decode(v: Value) -> Result[Event, String] = {
-  let tag = value.as_string(value.field(v, "type")!)!
+  let tag = value.as_string(value.get(v, "type")!)!
   match tag {
     "click"  => result.map(Click.decode(v), (c) => C(c)),
     "scroll" => result.map(Scroll.decode(v), (s) => S(s)),
@@ -1033,12 +1082,115 @@ fn Event.decode(v: Value) -> Result[Event, String] = {
 Always pair a hand-written codec with a roundtrip test:
 `test "Event roundtrips" { assert_eq(Event.decode(Event.encode(C(Click{x:1,y:2}))), ok(C(Click{x:1,y:2}))) }`
 
+**Rule 5 — a request decodes into an input type (`: Decode`), never into a
+type you also send or store (`: Codec`).** `Codec` is `Encode + Decode`:
+`: Decode` derives only `T.decode` and `T.decode_strict`, `: Encode` only
+`T.encode`. A `: Decode`-only type is an INPUT type, and every field of it
+is input — so it lists exactly what the client may set. `http.decode_json[T](req)`
+accepts only an input type, record or variant (a `Codec` type is E110, so
+`{"is_admin": true}` can never reach `User`), decodes strictly (a key outside
+`T` at any depth is `400 Bad Request: unknown key '<k>'`, with its path:
+`…, at address`), and the handler builds the domain value in code. Records
+nested in an input type are input types too. Elsewhere `T.decode` stays
+lenient (unknown keys ignored) and `T.decode_strict` refuses them at every
+depth:
+
+```almide check
+import http
+import secret
+
+// Only what the client may set. Every field of a `: Decode` type is input.
+// The password stays a Secret: it prints as Secret(***) in logs and asserts.
+type SignupInput: Decode = { name: String, email: String, password: Secret[String] }
+type User = { name: String, email: String, password: Secret[String], is_admin: Bool }
+
+effect fn signup(req: HttpRequest) -> HttpResponse = match http.decode_json[SignupInput](req) {
+  ok(i) => {
+    let user = User { name: i.name, email: i.email, password: i.password, is_admin: false }
+    http.response(201, user.name)
+  },
+  err(bad) => bad,   // unknown key, bad JSON, wrong field type → 400
+}
+
+// A type that must be Codec both ways (persisted, mirrored) keeps input off a
+// field with @skip_decode (never read, still encoded) — it needs a default.
+type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
+```
+`@skip` keeps a field out of both `decode` and `encode`. Field attributes are
+exactly `@skip`, `@skip_decode` (and WGSL's `@builtin`/`@location`); serde- or
+pydantic-style spellings (`@serde(skip)`, `@json_ignore`, `@redact`) are the
+error E053, never silently ignored.
+
 Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
 types, and any nesting of `Option`/`List` over those (`List[Option[Int]]`
 keeps element nulls; `Option[List[T]]` omits when none). Rejected at
 declaration: `Option[Option[T]]` (indistinguishable on the wire), `Option[Value]`
 outside field position, and non-wire leaves (Map, Bytes, tuples, sized ints,
 fn types, Result) — wrap those in a named Codec type or convert at the boundary.
+
+**Secrets: `Secret[A]` (`import secret`).** Every value prints structurally
+unless its type declares a repr, so a password in a plain `String` field
+shows up in `"${user}"`, in an `assert_eq` failure and in the `almide test`
+report. Hold it as `Secret[String]`: every renderer prints `Secret(***)`,
+`secret.reveal(s)` is the one way out, `==` on `Secret[String]` /
+`Secret[Bytes]` is constant time (any other `Secret` has no `==`, E103), and a
+record with a Secret field is read, never written: declare it `: Decode`
+(a `: Codec` one derives `decode` only and `T.encode` is E023), and build an
+outgoing Value by hand with `secret.reveal`. A token from the environment is
+born a Secret: `env.secret(name)` answers `Option[Secret[String]]`.
+
+```almide check
+import json
+import secret
+
+type LoginInput: Decode = { user: String, password: Secret[String] }
+
+effect fn main() -> Unit = {
+  let input = LoginInput.decode(json.parse("{\"user\":\"ana\",\"password\":\"hunter2\"}")!)!
+  println("${input}")   // LoginInput { user: "ana", password: Secret(***) }
+  println(if input.password == secret.new("hunter2") then "ok" else "denied")
+}
+```
+
+## Verifying a webhook signature (HMAC)
+
+`import hash` and `import secret`. The key and the tag are `Secret[Bytes]`;
+read the key with `env.secret(name)`, which answers `Secret[String]`. Verify
+with the `is_valid_` cell, key first: it computes HMAC-SHA256 and compares in
+constant time. A tag's own `==` is the constant-time one too (it is a
+`Secret[Bytes]`), so never `secret.reveal` two tags to compare them, and never
+`hash.sha256(key + body)` (forgeable by length extension). The header's hex
+goes through `hex.decode`; bad hex becomes an empty tag, which verifies
+`false`, never an abort. To sign, the header value is
+`hex.encode(secret.reveal(hash.hmac_sha256(key, body)))`.
+
+```almide check
+import env
+import hash
+import hex
+import secret
+
+fn is_signed(key: Secret[Bytes], body: String, header: String) -> Bool = {
+  let sig = string.strip_prefix(header, "sha256=") ?? header
+  let tag = secret.new(hex.decode(sig) ?? bytes.from_list([]))   // bad hex -> empty tag -> false
+  hash.is_valid_hmac_sha256(key, bytes.from_string(body), tag)
+}
+
+effect fn main() -> Unit = {
+  match env.secret("WEBHOOK_SECRET")! {
+    some(s) => {
+      let key = secret.new(bytes.from_string(secret.reveal(s)))
+      println("${is_signed(key, "{}", "sha256=00")}")
+    },
+    none => println("WEBHOOK_SECRET is not set"),
+  }
+}
+```
+
+Comparing two tokens yourself: hold both as `Secret[String]` (`env.secret`,
+`secret.new`) and compare with `==`, which is constant time (C-426).
+`hash.md5` / `hash.sha1` are not in the stdlib: they were removed at dialect
+epoch 15; use `hash.sha256`.
 
 ## Key rules
 - Newline = statement separator (no semicolons needed)
@@ -1061,11 +1213,11 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 
 ## Naming conventions across stdlib
 
-- `bytes`: `read_<dtype>_le|be(b, pos)` for one value, `read_<dtype>_le_array(b, pos, count)` for bulk, `set_<dtype>_le(b, pos, val)` to overwrite, `append_<dtype>_le(b, val)` to grow. `<dtype>` ∈ `u8|u16|u32|i32|i64|f16|f32|f64`.
-- `matrix` holds the generic dense ops; the neural-network kernels (`gelu`, `softmax_rows`, attention, RoPE, norms, Q1_0/Q8_0, Qwen3 blocks) are package `almide/nnlib` and the OpenAI / Anthropic streaming clients package `almide/llm` since dialect epoch 14 (`import nnlib`, `nnlib.gelu(m)`).
-- `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
+- `bytes`: typed byte IO is one matrix — `get_<t>(b, pos) -> T?` reads at a position (none out of range), `next_<t>(b, pos) -> (T?, next_pos)` reads and advances (the position stays when nothing is read), `put_<t>(b, pos, x)` overwrites in place (a window outside the buffer aborts), `append_<t>(b, x)` grows; `get_<t>_array(b, pos, count) -> List[T]?` for bulk. Every type of 2+ bytes carries `_le` / `_be`; `<t>` ∈ `u8|i8|u16|i16|u32|i32|i64|f16|f32|f64|bool` (no u64: `get_i64_*` reads the same bits). `bytes.new()` is empty, `bytes.zeros(n)` is n zero bytes.
+- `matrix` holds the generic dense ops; the neural-network kernels (`gelu`, `softmax_rows`, attention, RoPE, norms, Q1_0/Q8_0, Qwen3 blocks) are module `nn.kernels` of package `almide-graphics/nn` and the OpenAI / Anthropic streaming clients package `almide/llm` since dialect epoch 14 (`import nn.kernels`, `kernels.gelu(m)`).
+- `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
 - `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).
-- sized integers (`int8`…`int64`, `uint8`…`uint64`, plus `int` = i64): `x.to_<dst>()` truncates (Rust `as` semantics); every **lossy** pair also has `to_<dst>_checked` → `Option` (None on overflow) and `to_<dst>_saturating` (clamp) — lossless pairs have only the plain form. Every carrier has `min_value()`/`max_value()`. Widening is `int.from_<src>(x)`; the one lossy widening `UInt64 → Int` has `int.from_uint64_checked/_saturating`.
+- numeric conversions are named after the type they build (`int`, `float`, `int8`…`int64`, `uint8`…`uint64`, `float32`, `float64`): `T.from(x)` takes any numeric `x` and aborts when the value is not a `T` (a Float is truncated toward zero first); `T.from_checked(x)` → `Option` (`none` unless `T` holds x exactly); `T.from_saturating(x)` clamps (NaN 0); `T.from_wrapping(x)` keeps the low bits of an integer (two's complement). E.g. `float.from(n)`, `int.from_saturating(f)`, `uint8.from_wrapping(n)`. Every integer carrier has `min_value()`/`max_value()`.
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
@@ -1087,6 +1239,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `let err = f()` → **WRONG**. `ok`/`err`/`some`/`none` (and capitalized forms) are the built-in Result/Option constructors — reserved words. Rename the binding (`let msg = f()`), or backtick-escape to keep the name (`let `err` = f()`)
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
+- `random.int(0, 255)` in a loop for a token, key or password → **WRONG**. `random.int` / `float` / `choice` / `shuffle` are not for secrets. For secrets use `random.bytes(n)`, the OS cryptographic source
 - `try f()` / `try! f()` / `f()?` for an effect call → **WRONG**. Write `f()!`. Almide's `!` is Swift's `try` (propagate), never `try!` (trap); `?` converts Result → Option
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan { }` / `fan.map` / `fan.settle` / `fan.min(clock)` / `fan.bounded` / `fan.timeout`
 - `fan.race { … }` → **WRONG** (renamed in dialect epoch 14, E027). Write `fan.min(compute.ms(5)) { … }` — the clock argument is required and says what "least" is measured on
@@ -1097,11 +1250,19 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
 - `let list = [1, 2]` then `list.len(list)` → **WRONG**. A local binding shadows the module of the same name in member position too, so this reads as the LOCAL's `len` method with the receiver as its first argument, and the one you wrote as a second (E004). Do not name a binding after a module you still need — `list`, `string`, `map`, `set` are the ones that get written by accident. Two fixes, both accepted: rename the binding (`let xs = [1, 2]`, then `list.len(xs)`), or drop the argument and call the method on the local — `list.len()` prints `2`, because the shadowed name IS the local. The auto-imported modules shadow SILENTLY: there is no import statement to report as unused, so nothing warns you
+- `io.read_line_opt()` → **WRONG** (removed). `io.read_line()` itself returns `String?`: `none` at end of input
+- `io.read_byte()` / `io.read_n_bytes(n)` / `io.write_bytes(xs)` / `io.write(data)` → **WRONG** (removed). Bytes go through a handle: `io.read(io.stdin()!, 1)!`, `io.read_exact(io.stdin()!, n)!`, `io.write(io.stdout()!, data)!` (`data: Bytes`)
+- `net.tcp_read(s, n)` / `net.tcp_read_exact` / `net.tcp_write` / `net.tcp_close` / `net.tcp_close_listener` → **WRONG** (removed). A `net.TcpStream` is an io handle: `io.read(s, n)!`, `io.read_exact(s, n)!`, `io.write(s, data)!`, `io.close(s)!` — `import io` beside `import net`
+- `net.unix_connect` / `net.unix_send` / `net.shm_create` / … → **WRONG** (moved). `import unix`: `unix.connect`, `unix.write_fds`, `unix.select` (was `unix_wait`), `unix.shm_create`; bytes via `io.read` / `io.write` / `io.close` on the `unix.Fd`
+- `process.exec_status` / `exec_status_timeout` / `exec_in` / `exec_with_stdin` → **WRONG** (removed). One record: `process.output(process.ProcessCommand { cmd: "git", args: ["status"], dir: "repo", stdin: "", timeout_ms: 5000 })!` → `{code, stdout, stderr}`; write the type name so `dir` / `stdin` / `timeout_ms` can be left out
+- `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` returns the exit code
+- a background child: `let c = process.start(process.ProcessCommand { cmd, args })!`, then `process.poll(c)!` (`none` while running), `process.wait(c)!`, `process.stop(c, 500)!`, `process.child_pid(c)!`
+- `process.exec("sh", ["-c", "git status | head"])` to get a shell → avoid. Programs take argv lists: `process.exec("git", ["status"])!`, and do the piping in Almide
 
 ## Complete example
 ```almide check
 import fs
-import process
+import env
 
 type AppError =
   | NotFound(String)
@@ -1114,15 +1275,15 @@ effect fn greet(name: String) -> Result[Unit, AppError] = {
 }
 
 effect fn main() -> Result[Unit, AppError] = {
-  let args = process.args()
-  let cmd = list.get(args, 1) ?? "help"
+  let args = env.args()
+  let cmd = list.get(args, 0) ?? "help"
   match cmd {
     "greet" => {
-      let name = list.get(args, 2) ?? "world"
+      let name = list.get(args, 1) ?? "world"
       greet(name)
     },
     "read" => {
-      let path = list.get(args, 2) ?? "input.txt"
+      let path = list.get(args, 1) ?? "input.txt"
       let content = fs.read_text(path).map_err((e) => Io(e))!
       println(content)
       ok(())

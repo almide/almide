@@ -4,20 +4,6 @@ The dynamic `Value` **data model**: constructors and accessors.
 auto-imported. The `json` module is the format over it
 (`json.parse` / `json.stringify`) — see [json.md](./json.md).
 
-### `value.field(v: Value, key: String) -> Result[Value, String]`
-
-Get a field from a Value object by key. `err("expected Object")` on a
-non-Object subject, `err("missing field '<k>'")` when absent. For an
-Option instead, apply `?`: `value.field(v, k)?`.
-
-(The retired `value.get` alias of this fn was dropped after its E040
-deprecation window — `get` means Option everywhere else: `map.get` /
-`list.get`.)
-
-### `value.keys(v: Value) -> List[String]`
-
-All keys of a Value object, `[]` for non-Objects.
-
 ### `value.as_string(v: Value) -> Result[String, String]`
 
 Extract a String from a Value. Returns err if not a Str.
@@ -38,7 +24,7 @@ Extract a Bool from a Value. Returns err if not a Bool.
 
 Extract a List[Value] from a Value. Returns err if not an Array.
 
-### `value.str(s: String) -> Value`
+### `value.string(s: String) -> Value`
 
 Create a Value from a String.
 
@@ -56,7 +42,12 @@ Create a Value from a Bool.
 
 ### `value.object(pairs: List[(String, Value)]) -> Value`
 
-Create a Value object from a list of key-value pairs.
+Create a Value object from a list of key-value pairs. No object holds a key
+twice (C-401, #4112): a key the list repeats keeps the position of its first
+occurrence and the value of its last (C-380), so `value.get`,
+`value.as_object` and every serializer see one entry —
+`json.stringify(value.object([("role", value.string("user")), ("role", value.string("admin"))]))`
+is `{"role":"admin"}`, never a document with `role` twice.
 
 ### `value.array(items: List[Value]) -> Value`
 
@@ -68,7 +59,9 @@ Create a null Value.
 
 ### `value.pick(v: Value, keys: List[String]) -> Value`
 
-Pick specific keys from an Object, discarding the rest.
+Pick specific keys from an Object, discarding the rest. A value that is not
+an object has none of the keys, so it picks to `{}` (C-401): an allowlist over
+a value that is not an object lets nothing through.
 
 ### `value.omit(v: Value, keys: List[String]) -> Value`
 
@@ -78,28 +71,14 @@ Remove specific keys from an Object.
 
 Merge two Objects. Keys from b override keys from a.
 
-### `value.to_camel_case(v: Value) -> Value`
-
-Convert Object keys from snake_case to camelCase.
-
-### `value.to_snake_case(v: Value) -> Value`
-
-Convert Object keys from camelCase to snake_case.
-
-### `value.stringify(v: Value) -> String`
-
-Convert a Value to a JSON-like string representation — the same text as `json.stringify`:
-a Float prints in its shortest form without a trailing `.0`, and a non-finite Float
-(NaN, +inf, -inf) is written as `null`.
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (20 functions)
+## Signature index (29 functions)
 
 ```
-// Wraps items as an Array Value.
+// Wraps xs as an Array Value.
 // @since 0.6.0 or earlier
-value.array(items: List[Value]) -> Value
+value.array(xs: List[Value]) -> Value
 
 // Array items; err if v is another kind.
 // @since 0.6.0 or earlier
@@ -141,41 +120,77 @@ value.merge(a: Value, b: Value) -> Value
 // @since 0.6.0 or earlier
 value.null() -> Value
 
-// Wraps pairs as an Object; duplicate keys kept.
+// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 // @since 0.6.0 or earlier
-value.object(pairs: List[(String, Value)]) -> Value
+value.object(xs: List[(String, Value)]) -> Value
 
 // v minus the listed keys; non-objects as-is.
 // @since 0.6.0 or earlier
 value.omit(v: Value, keys: List[String]) -> Value
 
-// Only the listed keys of v; non-objects as-is.
+// Only the listed keys of v; a non-object picks to {}.
 // @since 0.6.0 or earlier
 value.pick(v: Value, keys: List[String]) -> Value
 
 // Value holding the String s.
 // @since 0.6.0 or earlier
-value.str(s: String) -> Value
+value.string(s: String) -> Value
 
-// Compact JSON; NaN/inf print as null.
-// @since 0.6.0 or earlier
-value.stringify(v: Value) -> String
+// Object pairs in order; err if v is another kind.
+// @since unreleased
+value.as_object(v: Value) -> Result[List[(String, Value)], String]
 
-// Top-level keys to camelCase; nested untouched.
-// @since 0.6.0 or earlier
-value.to_camel_case(v: Value) -> Value
+// Value at key; none if absent or v is not an Object.
+// @since unreleased
+value.get(v: Value, key: String) -> Option[Value]
 
-// Top-level keys to snake_case; userID -> user_i_d.
-// @since 0.6.0 or earlier
-value.to_snake_case(v: Value) -> Value
+// String at key; none if absent or another kind.
+// @since unreleased
+value.get_string(v: Value, key: String) -> Option[String]
 
-// Value at key; err if missing or v not an Object.
-// @since 0.6.0 or earlier
-value.field(v: Value, key: String) -> Result[Value, String]
+// Int at key; none if absent or not an Int (a Float is never truncated).
+// @since unreleased
+value.get_int(v: Value, key: String) -> Option[Int]
 
-// Object keys in order; [] for non-objects.
-// @since 0.26.0 or earlier
-value.keys(v: Value) -> List[String]
+// Float at key (an Int widens); none if absent or another kind.
+// @since unreleased
+value.get_float(v: Value, key: String) -> Option[Float]
+
+// Bool at key; none if absent or another kind.
+// @since unreleased
+value.get_bool(v: Value, key: String) -> Option[Bool]
+
+// Array items at key; none if absent or another kind.
+// @since unreleased
+value.get_array(v: Value, key: String) -> Option[List[Value]]
+
+// Object pairs at key; none if absent or another kind.
+// @since unreleased
+value.get_object(v: Value, key: String) -> Option[List[(String, Value)]]
+
+// The empty path: the whole value.
+// @since unreleased
+value.root() -> Path
+
+// p extended by the object key name.
+// @since unreleased
+value.key(p: Path, name: String) -> Path
+
+// p extended by the array index i; a negative i is out of range.
+// @since unreleased
+value.index(p: Path, i: Int) -> Path
+
+// Value at p, or none if a step misses.
+// @since unreleased
+value.get_path(v: Value, p: Path) -> Option[Value]
+
+// v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
+// @since unreleased
+value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]
+
+// v minus the entry at p; unchanged if absent; null for the root.
+// @since unreleased
+value.remove_path(v: Value, p: Path) -> Value
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

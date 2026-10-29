@@ -2,7 +2,7 @@
 
 use almide_lang::ast;
 use almide_lang::ast::ExprKind;
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
 use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_ty;
 use super::Checker;
@@ -60,6 +60,15 @@ impl Checker {
                 return Some(ty);
             }
         }
+        // `A.method(...)` where `A` is a type parameter in scope: a protocol
+        // requirement reached through the type variable, with no receiver
+        // (`A.__sum(xs)` under `[A: Numeric]`). Monomorphization sends it to
+        // the concrete type's own function once `A` is known.
+        if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
+            if let Some(ty) = self.check_typevar_static_requirement(*type_name, field, arg_tys) {
+                return Some(ty);
+            }
+        }
         // TypeName.method() — direct convention call
         if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
             let key = format!("{}.{}", type_name, field);
@@ -68,6 +77,28 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// A requirement of one of type parameter `tv`'s bounds, called through
+    /// the type variable. Checks the arguments against the requirement with
+    /// `Self` read as `tv` and returns its result type; `None` when `tv` is not
+    /// a bounded type parameter or no bound declares `field`.
+    fn check_typevar_static_requirement(&mut self, tv: Sym, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let protos = self.env.generic_protocol_bounds.get(&tv).cloned()?;
+        let self_ty = Ty::TypeVar(tv);
+        let sig = protos.iter()
+            .filter_map(|p| self.env.protocols.get(p))
+            .find_map(|p| p.methods.iter().find(|m| m.name.as_str() == field).cloned())?;
+        if sig.params.len() != arg_tys.len() {
+            self.emit(super::err(
+                format!("{}.{}() expects {} argument(s) but got {}", tv, field, sig.params.len(), arg_tys.len()),
+                "Check the number of arguments", format!("call to {}.{}()", tv, field)).with_code("E004"));
+        }
+        for ((pname, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
+            let expected = self.substitute_self_in_ty(pty, &self_ty);
+            self.constrain(expected, aty.clone(), format!("argument '{}' of {}.{}", pname, tv, field));
+        }
+        Some(self.substitute_self_in_ty(&sig.ret, &self_ty))
     }
 
     /// Dot-chain submodule access (`a.b.fn(...)`), which the module system no
@@ -122,6 +153,9 @@ impl Checker {
         // firewall (bare Int and cross-clock arguments are type errors at the
         // consuming heads).
         if module == "compute" || module == "duration" {
+            if field == "compare" {
+                return Some(self.resolve_time_compare(module, arg_tys));
+            }
             return Some(self.resolve_time_ctor(module, field, arg_tys));
         }
         // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
@@ -136,6 +170,10 @@ impl Checker {
         {
             let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
             if self.has_codec_encode(&arg_concrete) {
+                self.env.import_table.mark_used(module);
+                return Some(Ty::String);
+            }
+            if self.reject_secret_encode(&arg_concrete) {
                 self.env.import_table.mark_used(module);
                 return Some(Ty::String);
             }
@@ -172,6 +210,26 @@ impl Checker {
         }
         self.constrain(arg_tys[0].clone(), Ty::Int, "time constructor argument");
         Ty::Named(sym(ty_name), vec![])
+    }
+
+    /// `compute.compare(a, b)` / `duration.compare(a, b)` (R-duration-01,
+    /// R-compute-01): the function form of the clock's `Ord` — both operands of
+    /// the module's own clock, an Int answer. Lowering erases it to an Int
+    /// three-way compare of the two nanosecond counts.
+    fn resolve_time_compare(&mut self, module: &str, arg_tys: &[Ty]) -> Ty {
+        let ty_name = almide_lang::time_units::clock_type_of_module(module)
+            .expect("resolve_time_compare called for a non-clock module");
+        if arg_tys.len() != 2 {
+            self.emit(super::err(
+                format!("{}.compare() expects 2 arguments but got {}", module, arg_tys.len()),
+                format!("Usage: {}.compare(a, b)", module),
+                format!("call to {}.compare()", module)));
+            return Ty::Int;
+        }
+        for a in arg_tys {
+            self.constrain(Ty::Named(sym(ty_name), vec![]), a.clone(), "clock compare argument");
+        }
+        Ty::Int
     }
 
     fn resolve_fan_call(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
@@ -451,6 +509,24 @@ impl Checker {
             }
             _ => None,
         }
+    }
+
+    /// E023 (#4107, R-secret-04): `T.encode` on a type that holds a Secret.
+    /// The Codec derive never writes a Secret out, so the type has `decode`
+    /// only; name that rather than a missing method. True when reported.
+    pub(crate) fn reject_secret_encode(&mut self, ty: &Ty) -> bool {
+        let Ty::Named(name, _) = ty else { return false };
+        let Some(shape) = self.env.types.get(name).cloned() else { return false };
+        if !crate::secret_type::holds_secret(&self.env, &shape) {
+            return false;
+        }
+        let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str()).to_string();
+        self.emit(super::err(
+            format!("type '{}' holds a Secret, so the Codec derive does not derive '{}.encode'", bare, bare),
+            "A Secret is decoded, never written out. Build the Value by hand and reveal the field you mean to send: `value.object([(\"user\", value.string(x.user)), (\"password\", value.string(secret.reveal(x.password)))])`".to_string(),
+            format!("{}.encode", bare),
+        ).with_code("E023"));
+        true
     }
 
     /// Check if a type has a Codec encode function registered.

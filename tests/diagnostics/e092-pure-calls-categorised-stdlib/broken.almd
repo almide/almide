@@ -1,7 +1,8 @@
 import io
 
-// #3250: io.write is a plain fn, but it writes stdout — it has the IO category.
+// #3250: io.print writes stdout — it has the IO.stdout category (and it is
+// an `effect fn`, so the call is E006 as well).
 @pure
-fn emit(b: Bytes) -> Unit = io.write(b)
+fn emit(s: String) -> Unit = io.print(s)
 
-fn main() -> Unit = emit(bytes.from_string("hi"))
+fn main() -> Unit = emit("hi")

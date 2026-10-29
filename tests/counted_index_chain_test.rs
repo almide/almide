@@ -46,7 +46,7 @@ const ROWS: &[(&str, &str, &str, &str)] = &[
     (
         "range_map_map",
         "List[Float]",
-        "list.range(0, n) |> list.map((i) => i + 1) |> list.map((x) => float.from_int(x) / 2.0)",
+        "list.range(0, n) |> list.map((i) => i + 1) |> list.map((x) => float.from(x) / 2.0)",
         "[0.5, 1, 1.5, 2] []",
     ),
     (
@@ -146,7 +146,7 @@ fn every_counted_collecting_range_chain_reserves_its_span() {
         let rust = emit(dir.path(), &program(ty, chain, "4"));
         let body = fn_body(&rust, "shape");
         let reserved = body.contains("try_reserve_exact(")
-            && body.contains("almide_abort(\"out of memory\")")
+            && body.contains("almide_abort_oom()")
             && body.contains("(__almide_rs..__almide_re)");
         if !reserved || body.contains(".collect::<Vec<_>>()") || body.contains("almide_rt_list_range(") {
             failures.push(format!("{name}: not a counted chain into a span-reserved vector:\n{body}"));

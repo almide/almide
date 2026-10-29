@@ -57,7 +57,7 @@ impl<T: AlmideIntoStr> AlmideIntoStr for Option<T> { type Out = Option<T::Out>; 
 impl<A: AlmideIntoStr, B: AlmideIntoStr> AlmideIntoStr for Result<A, B> { type Out = Result<A::Out, B::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { match self { Ok(a) => Ok(a.into_almide()), Err(b) => Err(b.into_almide()) } } }
 impl<A: AlmideIntoStr, B: AlmideIntoStr> AlmideIntoStr for (A, B) { type Out = (A::Out, B::Out); #[inline(always)] fn into_almide(self) -> Self::Out { (self.0.into_almide(), self.1.into_almide()) } }
 impl<A: AlmideIntoStr, B: AlmideIntoStr, C: AlmideIntoStr> AlmideIntoStr for (A, B, C) { type Out = (A::Out, B::Out, C::Out); #[inline(always)] fn into_almide(self) -> Self::Out { (self.0.into_almide(), self.1.into_almide(), self.2.into_almide()) } }
-impl<K: AlmideIntoStr, V: AlmideIntoStr> AlmideIntoStr for HashMap<K, V> where K::Out: std::hash::Hash + Eq { type Out = HashMap<K::Out, V::Out>; fn into_almide(self) -> Self::Out { self.into_iter().map(|(k, v)| (k.into_almide(), v.into_almide())).collect() } }
+impl<K: AlmideIntoStr, V: AlmideIntoStr> AlmideIntoStr for std::collections::HashMap<K, V> where K::Out: std::hash::Hash + Eq { type Out = std::collections::HashMap<K::Out, V::Out>; fn into_almide(self) -> Self::Out { self.into_iter().map(|(k, v)| (k.into_almide(), v.into_almide())).collect() } }
 macro_rules! almide_into_str_leaf { ($($t:ty),*) => { $(impl AlmideIntoStr for $t { type Out = $t; #[inline(always)] fn into_almide(self) -> $t { self } })* } }
 almide_into_str_leaf!((), bool, char, u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, f32, f64);
 ";

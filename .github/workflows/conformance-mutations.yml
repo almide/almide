@@ -17,19 +17,24 @@ env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   mutation-gate:
     name: 5 seeded emit bugs must all be caught
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         # The gate builds under its OWN target dir (target/mutations, #1845)
         # so a mutant binary can never outlive it; that dir is what is worth
         # caching here, and the key carries the dir name so the cache saved
@@ -42,7 +47,7 @@ jobs:
           key: mutation-gate-target-mutations-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: wasmtime-v49.0.1-x86_64-linux.tar.xz
           key: wasmtime-v49.0.1-x86_64-linux

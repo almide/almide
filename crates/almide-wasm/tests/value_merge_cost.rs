@@ -19,8 +19,8 @@ fn probe(n: u32, merge: bool) -> String {
   let a = value.object(list.range(0, {n}) |> list.map((i) => ("k${{i}}", value.int(i))))
   let b = value.object([("k1", value.int(-1)), ("new", value.int(7))])
   let r = {r}
-  let ks = value.keys(r)
-  let k1 = value.as_int(value.field(r, "k1") ?? value.null()) ?? 99
+  let ks = list.map(value.as_object(r) ?? [], (kv) => kv.0)
+  let k1 = value.as_int(value.get(r, "k1") ?? value.null()) ?? 99
   list.len(ks) * 1000 + k1
 }}
 "#

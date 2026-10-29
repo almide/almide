@@ -24,12 +24,14 @@ impl<'a> Interpreter<'a> {
             "fold" => self.hof_try_map_fold(a),
             "update" => self.hof_try_map_update(a, false),
             "upsert" => self.hof_try_map_update(a, true),
+            h if almide_lang::fallible_hofs::is_fallible_hof("list", h) => self.try_sequence_cell(h, a),
             _ => Flow::Unsupported(format!("HOF map.__fallible_{hof}")),
         }
     }
 
-    /// The `(k, v) -> Bool` cells. `FindIndex` answers the entry itself and
-    /// `Partition` the kept entries, which is `find` / `filter`.
+    /// The `((k, v)) -> Bool` cells — the entry as one tuple (R-map-09).
+    /// `FindIndex` answers the entry itself and `Partition` the kept entries,
+    /// which is `find` / `filter`.
     fn try_pred_entries(&mut self, a: &[Value], p: TryPred) -> Flow {
         let entries = match Self::recv_entries(a) {
             Ok(e) => e,
@@ -39,7 +41,7 @@ impl<'a> Interpreter<'a> {
             Ok(c) => c,
             Err(f) => return f,
         };
-        let rows = entries.iter().map(|(k, v)| vec![k.clone(), v.clone()]).collect();
+        let rows = entries.iter().map(|(k, v)| entry_args(&clo, vec![], k, v)).collect();
         let answers = match self.try_ask(&clo, rows, p) {
             Ok(v) => v,
             Err(f) => return f,
@@ -94,7 +96,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            acc = match self.try_step(&clo, vec![acc, k.clone(), v.clone()]) {
+            acc = match self.try_step(&clo, entry_args(&clo, vec![acc], k, v)) {
                 Ok(nv) => nv,
                 Err(f) => return f,
             };
@@ -159,6 +161,7 @@ impl<'a> Interpreter<'a> {
                     other => other,
                 }
             }
+            h if almide_lang::fallible_hofs::is_fallible_hof("list", h) => self.try_sequence_cell(h, a),
             _ => Flow::Unsupported(format!("HOF set.__fallible_{hof}")),
         }
     }

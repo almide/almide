@@ -5,13 +5,16 @@ use crate::types::{Ty, TypeConstructorId};
 use almide_base::intern::sym;
 
 /// Auto-derive Codec encode: `fn T.encode(t: T) -> Value`
-/// Generates: `value.object([("field1", value.str(t.field1)), ...] + <conditional Option chunks>)`
+/// Generates: `value.object([("field1", value.string(t.field1)), ...] + <conditional Option chunks>)`
 pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let type_name = wk.type_name.to_string();
     let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
     let value_ty = Ty::Named(sym("Value"), vec![]);
 
-    let entries: Vec<(String, Ty, IrExpr)> = fields.iter().map(|f| {
+    // `@skip` fields are never written (#4108): CODEC_FIELD_SKIPS decides.
+    let entries: Vec<(String, Ty, IrExpr)> = fields.iter()
+        .filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).encoded)
+        .map(|f| {
         let field_access = IrExpr {
             kind: IrExprKind::Member {
                 object: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None, def_id: None }),
@@ -132,7 +135,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
         return field_expr.clone();
     }
     let (module, func) = match field_ty {
-        Ty::String => ("value", "str"),
+        Ty::String => ("value", "string"),
         Ty::Int => ("value", "int"),
         Ty::Float => ("value", "float"),
         Ty::Bool => ("value", "bool"),
@@ -186,8 +189,8 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
                     ty: value_ty.clone(), span: None, def_id: None,
                 };
             }
-            // Fallback: value.str(to_string(field))
-            ("value", "str")
+            // Fallback: value.string(to_string(field))
+            ("value", "string")
         }
     };
     IrExpr {
@@ -237,6 +240,9 @@ pub(super) struct CodecWk<'a> {
     pub type_name: &'a str,
     pub out: &'a mut Vec<IrFunction>,
     pub seen: &'a mut std::collections::HashSet<String>,
+    /// Does the named type derive `Decode` — so it has a `T.__strict`
+    /// walk the strict decode of an enclosing type enters (C-436)?
+    pub strict_types: &'a dyn Fn(almide_base::intern::Sym) -> bool,
 }
 
 fn e_(kind: IrExprKind, ty: Ty) -> IrExpr {
@@ -705,7 +711,7 @@ fn opt_field_dec_worker(wk: &mut CodecWk, inner: &Ty, value_ty: &Ty) -> String {
         }, res_ty.clone())),
     }, res_ty.clone());
     let body = e_(IrExprKind::Match {
-        subject: Box::new(call_mod_("value", "field", vec![
+        subject: Box::new(call_mod_("value", "__field", vec![
             e_(IrExprKind::Var { id: v }, value_ty.clone()),
             e_(IrExprKind::Var { id: key }, Ty::String),
         ], Ty::result(value_ty.clone(), Ty::String))),
@@ -750,7 +756,7 @@ pub(super) fn decode_option_field_inline(wk: &mut CodecWk, payload: IrExpr, key:
     let fv_expr = IrExpr { kind: IrExprKind::Var { id: fv }, ty: value_ty.clone(), span: None, def_id: None };
     let field_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
             args: vec![payload, IrExpr { kind: IrExprKind::LitStr { value: key.to_string() }, ty: Ty::String, span: None, def_id: None }],
             type_args: vec![],
         },
@@ -777,5 +783,7 @@ pub(super) fn decode_option_field_inline(wk: &mut CodecWk, payload: IrExpr, key:
 }
 
 include!("derive_codec_decode.rs");
+include!("derive_codec_strict.rs");
 
 include!("derive_codec_variant.rs");
+include!("derive_codec_arity.rs");

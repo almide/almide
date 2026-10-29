@@ -1,0 +1,24 @@
+diff --git a/crates/almide-wasm/src/list_fuse.rs b/crates/almide-wasm/src/list_fuse.rs
+index 1cf98710b..8df2431ef 100644
+--- a/crates/almide-wasm/src/list_fuse.rs
++++ b/crates/almide-wasm/src/list_fuse.rs
+@@ -277,19 +277,6 @@ impl Emitter<'_> {
+         self.witness_stage_param(fold_params[1], cur_ty, pending.is_some());
+         owners.extend(pending.take().map(|t| (fold_params[1], t)));
+         self.lower_fold_body(cb, fold_body, acc_ty)?;
+-        // The accumulator OWNS one credit on every step, exactly as the
+-        // staged `lower_list_fold` has since 10fed0494: a borrowed body
+-        // result — the element itself (`(n, y) => y`), a captured var —
+-        // takes its share, and the previous accumulator is released
+-        // before the rebind. This fused copy was written before that
+-        // rule and never received it, so `fold(filter(xs), …)` returned
+-        // an element the list's own release then freed: a wrong byte on
+-        // wasm, no trap, only through a chain that fuses (#2397). A
+-        // fresh body result already carries its credit and takes no +1.
+-        self.rc_share_guard(fold_body, acc_ty);
+-        if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
+-            self.f.instructions().local_get(fold_params[0]).call(dec);
+-        }
+         self.witness_fold_step(fold_body, fold_params[0], acc_ty);
+         self.f.instructions().local_set(fold_params[0]);
+         // The owners' releases are the iteration-end `d`s the recorder

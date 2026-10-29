@@ -22,6 +22,6 @@ effect fn main() -> Unit = {
   show("slashes", http.get("HTTP:/x"))
   show("escaped", http.get("x\ty\"z"))
   show("connect-get", http.get("http://127.0.0.1:9/"))
-  show("connect-post", http.post("http://127.0.0.1:9/x", "{}"))
-  show("connect-framed", http.request("PUT", "http://127.0.0.1:9/x", "y", ["X-Ok": "fine"]))
+  show("connect-post", http.request("POST", "http://127.0.0.1:9/x", "{}", []))
+  show("connect-framed", http.request("PUT", "http://127.0.0.1:9/x", "y", [("X-Ok", "fine")]))
 }

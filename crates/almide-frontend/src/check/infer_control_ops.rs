@@ -196,7 +196,20 @@ impl Checker {
             ExprKind::Tuple { elements, .. } => Ty::Tuple(elements.iter_mut().map(|e| self.infer_expr(e)).collect()),
             ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
+                // E033: an update of a foreign opaque record builds a value of
+                // that type from fields the program chose — a Region with a
+                // forged length (ADR-0031), a Secret with a swapped payload.
+                let concrete_base = resolve_ty(&base_ty, &self.uf);
+                self.reject_foreign_opaque_record(&concrete_base, "update the fields of");
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
+                // An update builds a new value of the base's type field by
+                // field: of an opaque record outside its module it is a
+                // literal of it (E033, #4107).
+                self.reject_foreign_opaque_record(&resolve_ty(&base_ty, &self.uf), "build a record update of");
+                // Every spread form (`{ ...b }`, `{ ...b, f: v }`, `T { ...b }`)
+                // copies the base's fields; a base still open here is judged
+                // once it resolves.
+                self.deferred_opaque_spreads.push((base_ty.clone(), self.current_span));
                 // #3358: an updated field takes the base record's DECLARED field
                 // type, as the same field of a record literal does
                 // (`constrain_record_fields`). Without this the value was
@@ -348,7 +361,7 @@ impl Checker {
         expect: Option<&super::types::TailExpect>,
     ) -> MatchArmTypes {
         // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
-        // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
+        // re-wraps — base64 decode's `match bs { ok(b) => ok(bytes.to_string_lossy(b)), err(e) =>
         // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
         // match types as Result, not its OK type. (Auto-unwrapping only the effect-call arms
         // while a ctor arm stayed Result mismatched — `Result[(String,Int),String]` vs
@@ -785,3 +798,26 @@ fn same_head_applied_mismatch(lc: &Ty, rc: &Ty) -> bool {
         _ => false,
     }
 }
+
+/// #4018: both operands are concrete scalars of different kinds — a number, a
+/// `String`, a `Bool`, `Bytes`, `Unit`, a `Matrix` or a `RawPtr` — which no
+/// equality can relate. Numbers of different widths are one kind here: literal
+/// typing decides those, and this check must not second-guess it.
+fn scalar_kind_mismatch(lc: &Ty, rc: &Ty) -> bool {
+    fn kind(t: &Ty) -> Option<u8> {
+        Some(match t {
+            Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64 => 0,
+            Ty::String => 1,
+            Ty::Bool => 2,
+            Ty::Bytes => 3,
+            Ty::Unit => 4,
+            Ty::Matrix => 5,
+            Ty::RawPtr => 6,
+            _ => return None,
+        })
+    }
+    matches!((kind(lc), kind(rc)), (Some(a), Some(b)) if a != b)
+}
+

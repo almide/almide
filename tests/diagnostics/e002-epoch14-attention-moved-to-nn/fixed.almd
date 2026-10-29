@@ -1,0 +1,8 @@
+// The real fix is `almide add almide-graphics/nn@v0.2.0 --trust github.com/almide-graphics`, `import nn.kernels` and
+// `kernels.multi_head_attention(x, x, x, 2)`; this case checks without
+// dependencies, so it keeps the product the attention starts from.
+fn main() -> Unit = {
+  let x = matrix.ones(2, 4)
+  let y = x * matrix.transpose(x)
+  println(int.to_string(matrix.rows(y)))
+}

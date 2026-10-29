@@ -191,7 +191,7 @@ fn let_kinds() -> Vec<LetKind> {
             callable: false,
             tag: "record_bytes",
             prelude: "type Blob = { data: Bytes, n: Int }\n",
-            init: "{ data: bytes.new(2), n: 1 }",
+            init: "{ data: bytes.zeros(2), n: 1 }",
             annot: ": Blob",
             obs: |r| format!("{r}.n + bytes.len({r}.data)"),
             val: 3,
@@ -581,7 +581,7 @@ fn payloads() -> Vec<Payload> {
             prelude: "",
             ty: "Bytes",
             value: "bytes.from_list([1, 2, 3, 4, 5])",
-            init: "bytes.new(0)",
+            init: "bytes.zeros(0)",
             obs: |r| format!("bytes.len({r})"),
             val: 5,
         },
@@ -935,8 +935,7 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
     let mut val = kind.val * names.len() as i64;
     let mut root_decls = String::new();
     // Spell a root let as this module's mangled static.
-    if let Some(m) = modname {
-        if d.chance(1, 3) {
+    if let Some(m) = modname.filter(|_| d.chance(1, 3)) {
             let spelled = format!("almide_rt_{m}_{}", names[0].to_ascii_lowercase());
             if !root_names.contains(&spelled) {
                 let _ = writeln!(root_decls, "let {spelled} = 100");
@@ -945,7 +944,6 @@ fn random_toplet_part(d: &mut Draw, q: &str, modname: Option<&str>, i: usize, ro
                 val += 100;
             }
         }
-    }
     Part { decls, root_decls, stmts, val }
 }
 

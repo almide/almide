@@ -46,6 +46,31 @@ fn bind_assert_operands(
     (stmts, vars)
 }
 
+/// An assert operand as its failure text shows it (#4262): the ALS-R2
+/// rendering (through a declared repr where one exists) passed through C-418's
+/// escaper `string.__err_text`, so a control or bidi character of the
+/// program's data reads `\n` / `\u{1b}` / `\u{202e}` and a newline cannot
+/// forge a line of the block. One rule on every lane and route: the program's
+/// own abort, both test lanes, both legs.
+fn assert_shown(ctx: &mut LowerCtx, operand: IrExpr, span: Option<ast::Span>) -> IrExpr {
+    let rendered = ctx.render_declared(operand);
+    let text = if matches!(rendered.ty, Ty::String) {
+        rendered
+    } else {
+        ctx.mk(IrExprKind::StringInterp { parts: vec![IrStringPart::Expr { expr: rendered }] }, Ty::String, span)
+    };
+    let call = IrExprKind::Call {
+        target: CallTarget::Module {
+            module: sym("string"),
+            func: sym("__err_text"),
+            def_id: ctx.def_map.get(&sym("string.__err_text")).copied(),
+        },
+        args: vec![text],
+        type_args: vec![],
+    };
+    ctx.mk(call, Ty::String, span)
+}
+
 /// `{ eprintln("<parts>"); process.exit(1) }` — the failure arm every T18
 /// desugar shares, so every consumer (native, both wasm legs, the interp)
 /// inherits the same bytes.
@@ -141,16 +166,17 @@ fn desugar_testing_assert_outside_test(
     let at = span.as_ref().map(|s| format!("\n  at: line {}", s.line)).unwrap_or_default();
     let head = |rel: &str| IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: {rel}") };
     let lit = |s: &str| IrStringPart::Lit { value: s.to_string() };
-    let val = |e: &IrExpr| IrStringPart::Expr { expr: e.clone() };
+    let shown: Vec<IrExpr> = v.iter().map(|e| assert_shown(ctx, e.clone(), span)).collect();
+    let val = |i: usize| IrStringPart::Expr { expr: shown[i].clone() };
     let found = || lit("\n  found: ");
     let (parts, verdict) = match f {
         "assert_gt" => {
             let cond = testing_binop(ctx, BinOp::Gt, &v[0], &v[1], span);
-            (vec![head("> "), val(&v[1]), found(), val(&v[0])], TestingVerdict::Cond(cond))
+            (vec![head("> "), val(1), found(), val(0)], TestingVerdict::Cond(cond))
         }
         "assert_lt" => {
             let cond = testing_binop(ctx, BinOp::Lt, &v[0], &v[1], span);
-            (vec![head("< "), val(&v[1]), found(), val(&v[0])], TestingVerdict::Cond(cond))
+            (vec![head("< "), val(1), found(), val(0)], TestingVerdict::Cond(cond))
         }
         // `abs(a - b) < tolerance`, strict, as `a - b < t and b - a < t`:
         // IEEE subtraction negates exactly, and a NaN fails both halves.
@@ -160,7 +186,7 @@ fn desugar_testing_assert_outside_test(
             let lo = testing_binop(ctx, BinOp::Lt, &ab, &v[2], span);
             let hi = testing_binop(ctx, BinOp::Lt, &ba, &v[2], span);
             let cond = testing_binop(ctx, BinOp::And, &lo, &hi, span);
-            let parts = vec![head("within "), val(&v[2]), lit(" of "), val(&v[1]), found(), val(&v[0])];
+            let parts = vec![head("within "), val(2), lit(" of "), val(1), found(), val(0)];
             (parts, TestingVerdict::Cond(cond))
         }
         "assert_contains" => {
@@ -174,20 +200,20 @@ fn desugar_testing_assert_outside_test(
                 type_args: vec![],
             };
             let cond = ctx.mk(call, Ty::Bool, span);
-            (vec![head("contains "), val(&v[1]), found(), val(&v[0])], TestingVerdict::Cond(cond))
+            (vec![head("contains "), val(1), found(), val(0)], TestingVerdict::Cond(cond))
         }
         "assert_some" => {
             let pat = IrPattern::Some { inner: Box::new(IrPattern::Wildcard) };
             (vec![head("some(_)"), found(), lit("none")], TestingVerdict::Arm(pat))
         }
-        "assert_none" => (vec![head("none"), found(), val(&v[0])], TestingVerdict::Arm(IrPattern::None)),
+        "assert_none" => (vec![head("none"), found(), val(0)], TestingVerdict::Arm(IrPattern::None)),
         "assert_ok" => {
             let pat = IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) };
-            (vec![head("ok(_)"), found(), val(&v[0])], TestingVerdict::Arm(pat))
+            (vec![head("ok(_)"), found(), val(0)], TestingVerdict::Arm(pat))
         }
         "assert_err" => {
             let pat = IrPattern::Err { inner: Box::new(IrPattern::Wildcard) };
-            (vec![head("err(_)"), found(), val(&v[0])], TestingVerdict::Arm(pat))
+            (vec![head("err(_)"), found(), val(0)], TestingVerdict::Arm(pat))
         }
         _ => return None,
     };

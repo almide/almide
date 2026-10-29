@@ -1,4 +1,4 @@
-> Last updated: 2026-10-10
+> Last updated: 2026-10-25
 
 # Effect System
 
@@ -49,7 +49,8 @@ Test: `spec/integration/modules/vis_effect_test.almd`
 Six builtins may be called from a pure `fn`: **`println`, `eprintln`,
 `panic`, `assert`, `assert_eq`, `assert_ne`**. The set is closed. Every other
 output path is a stdlib effect fn and stays E006 from a pure fn, including
-`io.print`, `io.write` and `io.write_bytes`.
+`io.print`, `io.eprint` and `io.write` (on `io.stdout()` or any other
+handle).
 
 1. **They write, or they abort. They never read.** `println` appends to stdout
    and `eprintln` to stderr. `panic` and a failing assert end the process
@@ -117,34 +118,39 @@ Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
 
 ### 2.2 Stdlib readers are effect fns
 
-*Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and
-`process.args` read stdin or argv, and are `effect fn`s like `io.read_line`
-and `env.args`. They were plain `fn`s, so a pure fn could read the outside
-world through them; a call from a pure fn is now E006.
+*Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and the
+`process` argv reader read stdin or argv, and became `effect fn`s like
+`io.read_line` and `env.args` (argv now lives only in `env.args`). They were plain `fn`s, so a pure fn could read the outside
+world through them; a call from a pure fn is now E006. The byte readers have
+since been replaced by `io.read`, `io.read_exact` and `io.read_to_end` over a
+`Read` handle (`io.stdin()`, a `net.TcpStream`, a `unix.Fd`), which are
+`effect fn`s the same way.
 
-*Dialect epoch 13.* The `args` module's readers (`args.raw`, `args.flag`,
-`args.option`, `args.option_or`, `args.positional`, `args.positional_at`)
-read argv the same way and are `effect fn`s too (#848's ruling: argv is an
+*Dialect epoch 13.* The `args` module's readers (`args.has_flag`,
+`args.option`, `args.positional`) read argv the same way and are `effect fn`s too (#848's ruling: argv is an
 effect). Mark the caller `effect fn`, or read the arguments in
 `effect fn main` and pass the value in. Unlike the template-dispatched
 readers above, they have Almide bodies, so a call is typed
 `Result[T, String]` like a user effect fn's and is propagated with `!`
-(`args.flag("verbose")!`).
+(`args.has_flag("verbose")!`).
 
 ```almide check-fail=E006
 import io
 
-fn first_byte() -> Int = io.read_byte()
+fn first_byte(h: io.Stdin) -> Int = match io.read(h, 1) {
+  ok(b) => bytes.get(b, 0) ?? -1,
+  err(_) => -1,
+}
 ```
 
 ```almide check-fail=E006
 import args
 
-fn verbose() -> Bool = args.flag("verbose")
+fn verbose() -> Bool = args.has_flag("verbose")
 ```
 
-Tests: `tests/diagnostics/e006-io-read-byte-in-pure-fn/`,
-`tests/diagnostics/e006-io-read-n-bytes-in-pure-fn/`,
+Tests: `tests/diagnostics/e006-io-read-in-pure-fn/`,
+`tests/diagnostics/e006-io-read-exact-in-pure-fn/`,
 `tests/diagnostics/e006-process-args-in-pure-fn/`,
 `tests/diagnostics/e006-args-*-in-pure-fn/` (one per `args` reader).
 
@@ -185,6 +191,63 @@ Tests: `tests/diagnostics/e092-pure-calls-println/`,
 `tests/diagnostics/e092-pure-reaches-assert-via-helper/`,
 `tests/diagnostics/e092-pure-calls-categorised-stdlib/`,
 `tests/diagnostics/e092-pure-on-effect-fn/`.
+
+### 2.4 Effect fns reached as values (E006, E109)
+
+*Added with #4151.* The guarantee of §1 holds for an effect fn reached as a
+VALUE too: a callback, a record field, a list element, a closure another
+function built. Two rules carry it (ADR-0009 D2, ADR-0026 D1):
+
+1. **Naming an effect fn as an argument is an effect call.** A bare fn-typed
+   parameter is transparent: `apply(fs.read_text, p)` runs whatever `apply`
+   runs, so the call is an effect call, and from a pure fn it is E006 — for a
+   bare name (`list.map(xs, eff)`) and a module path (`list.map(xs,
+   fs.read_text)`) alike. An explicit `effect (A) -> B` slot is exempt: it
+   asks for an effect fn, and only an effect context may call it.
+2. **The effect bit rides the value.** A function value carries the bit when
+   it is an `effect fn` or a closure that calls one, and keeps it wherever it
+   is stored. A pure fn whose body runs a value carrying the bit — not through
+   a fn-typed parameter of its own, which rule 1 charges at its call sites —
+   is E109, with the path from the pure fn to the effect fn.
+
+```almide check-fail=E109
+import fs
+
+type Reader = { read: (String) -> Result[String, String] }
+
+// E109: `main` stored fs.read_text in the field; this pure fn runs it.
+fn pure_looking(r: Reader) -> Result[String, String] = (r.read)("s.txt")
+
+effect fn main() -> Unit = {
+  let r = Reader { read: fs.read_text }
+  println(pure_looking(r) ?? "none")
+}
+```
+
+```almide check-fail=E006
+import fs
+
+fn apply(f: (String) -> Result[String, String], p: String) -> Result[String, String] = f(p)
+
+// E006: `apply` is transparent, so this call reads the file.
+fn sneaky(p: String) -> Result[String, String] = apply(fs.read_text, p)
+```
+
+From an `effect fn` both programs are accepted: `effect fn reads(r: Reader)`
+may run the field, and `apply(fs.read_text, p)` in an effect fn is an effect
+call like any other. `process.exit` (`-> Never`) does not carry the bit: it is
+§2.1's abort.
+
+The analysis is whole-program, after type checking, on every route (`check`,
+`build`, `run`, `test`, both targets) and conservative: a value that leaves the
+tracked positions is pooled with every other value of its signature (§8,
+*Callbacks*), so a pure fn calling a function it read from a list is refused
+when any function of that signature that runs an effect fn was put in a list
+anywhere in the program. `almide check` judges the entry file's own functions;
+a module's functions are judged by the build routes, which lower every module.
+
+Tests: `tests/diagnostics/e109-*`, `tests/diagnostics/e006-effect-fn-path-to-user-hof/`,
+`tests/diagnostics/e006-effect-fs-remove-as-value/`, `tests/effect_value_laundering_test.rs`.
 
 ## 3. Return Type Wrapping
 
@@ -404,10 +467,17 @@ The `[permissions]` section in `almide.toml` restricts which effect categories a
 
 ```toml
 [permissions]
-allow = ["IO", "Net"]
+allow = ["FS.read", "IO", "Net.fetch"]
 ```
 
-If `[permissions]` is absent or `allow` is empty, all capabilities are permitted (backwards compatible).
+If `[permissions]` is absent, or it has no `allow` key, capabilities are not
+checked (backwards compatible). An explicit **`allow = []` allows none**
+(#4101): every function that reaches a capability is a capability violation,
+so `allow = []` is how a manifest says "this program touches nothing". It used
+to read the same as an absent key, which granted everything. Output counts:
+`println` is `IO.stdout` (the table below), so under `allow = []` a program
+that prints is refused, even though a plain `fn` may call `println` (ADR-0022).
+Grant `IO.stdout` to let it print and nothing else.
 
 `almide.toml` is read as TOML, so `allow` may use any array spelling: one
 line, several lines, a trailing comma, comments between the items (#3253).
@@ -415,40 +485,59 @@ A multi-line array used to read as empty, which permitted everything.
 
 ### Effect categories
 
-The `EffectInferencePass` classifies each call into one of six categories. The
-classification is one table, `STDLIB_MODULE_EFFECTS` in
-`crates/almide-ir/src/effect.rs`; a gate beside it refuses a stdlib module with
-no row, and an `@intrinsic` whose runtime symbol classifies unlike the function
-that declares it (#3246).
+Categories are ADR-0026 D2's closed two-level hierarchy (#4155). Inference and
+`[permissions]` work in **leaves**; a manifest may grant a **parent**, which
+means the leaves listed under it here — a leaf added later does not join a
+parent on its own.
 
-| Category | What carries it |
-|----------|-----------------|
-| `IO` | `fs`, `io` (files and the standard streams) |
-| `Net` | `net`, and the `effect fn`s of `http` (its builders and router are pure) |
-| `Env` | `env`, `process`, `args` |
-| `Time` | the `effect fn`s of `datetime` (`now`, `monotonic_ns`); the calendar math is pure |
-| `Rand` | `random` |
-| `Fan` | `fan` |
+| Parent | Leaves | What carries them |
+|--------|--------|-------------------|
+| `FS` | `FS.read`, `FS.write` | `fs`: reading and listing is `FS.read`; writing, removing, renaming, creating is `FS.write` (`fs.copy` both) |
+| `Net` | `Net.fetch`, `Net.listen` | `http`'s `effect fn`s are `Net.fetch`, `http.serve` `Net.listen`; `net.tcp_connect` / `unix_connect` `Net.fetch`, the listen/accept fns `Net.listen`, and an operation on an open stream or a shared-memory region both (it cannot tell which side opened it) |
+| `IO` | `IO.stdin`, `IO.stdout`, `IO.stderr` | the `io` readers are `IO.stdin`, `io.print` / `write` / `write_bytes` and `println` are `IO.stdout`, `eprintln` is `IO.stderr` |
+| `Env` | `Env.read`, `Env.write` | `env` and `args` read (`Env.read`); `env.set` writes (`Env.write`); `process.pid` reads |
+| — | `Proc` | starting and signalling a process: `process.exec` and friends, `kill`. No parent grants it: a started command can reach every other capability |
+| — | `Time` | the clock: `datetime.now` / `now_ms` / `monotonic_ns`, `env.sleep_ms` |
+| — | `Rand` | `random` |
+| — | `Fan` | `fan` |
+| — | `Abort` | `panic`, a failing `assert*`, `process.exit` (`panic` and a failing assert also write `IO.stderr`) |
 
-Every other stdlib module — `path`, `url`, `json`, `regex`, `zlib`, the
-collections and numerics — carries no category.
+A module's row in `STDLIB_MODULE_EFFECTS` (`crates/almide-ir/src/effect.rs`)
+is its default; a function whose operation differs declares its own leaves on
+its declaration, `@category("FS.write")`. The gate beside the table refuses a
+stdlib module with no row, an `@intrinsic` whose runtime symbol classifies
+unlike the function that declares it (#3246), a `@category` naming no leaf,
+and an `effect fn` of a classified module with no category.
 
-A call to an **`@extern` fn is every category** (⊤, #3245). Its body is foreign,
-inference cannot see into it, and no bound can be declared on it yet (ADR-0027
-§5 proposes one), so it passes `[permissions]` only when `allow` lists all six.
+`path`, `url`, `json`, `regex`, `zlib`, the collections and numerics carry
+none. A call to an **`@extern` fn is every leaf** (⊤, #3245): its body is
+foreign, so it passes `[permissions]` only when `allow` grants all fourteen.
+An **`@inline_rust` fn outside the stdlib is every leaf too** (#4100): the
+native build splices its Rust template in place of the Almide body, so the
+body inference reads is not the code that runs. The stdlib's own templates
+are categorised by the call table above.
 
-Tests: `tests/effect_permissions_test.rs`; the table's gate is the
-`classification_gate` module in `crates/almide-ir/src/effect.rs`.
+**Since dialect epoch 15** `IO` no longer covers files (they are `FS`), `Env`
+no longer admits starting a process (it is `Proc`), and the output and abort
+builtins carry `IO.stdout` / `IO.stderr` / `Abort`. A refused leaf the old
+name would have covered prints a `note:` naming the new one.
+
+`[permissions].allow` granting `Proc` with no `proc = [...]` command list
+(ADR-0025) is a warning on every route — the program may start any command —
+and an error under `almide check --profile critical`.
+
+Tests: `tests/effect_permissions_test.rs`, `tests/proc_category_test.rs`; the
+table's gate is the `classification_gate` module in `crates/almide-ir/src/effect.rs`.
 
 ### Unknown names
 
-`allow` accepts exactly these six names. Any other name, including a
-different case (`io`), is an error on the manifest line that writes it, before
-any command runs (#3247):
+`allow` accepts exactly the four parents and the fourteen leaves. Any other
+name, including a different case (`io`), is an error on the manifest line that
+writes it, before any command runs (#3247):
 
 ```
-error: almide.toml:6: unknown capability `Fil` in [permissions].allow — grantable capabilities are IO, Net, Env, Time, Rand, Fan
-  hint: did you mean `IO`?
+error: almide.toml:6: unknown capability `Fil` in [permissions].allow — grantable capabilities are FS, Net, IO, Env, FS.read, FS.write, Net.fetch, Net.listen, IO.stdin, IO.stdout, IO.stderr, Env.read, Env.write, Proc, Time, Rand, Fan, Abort
+  hint: did you mean `FS`?
 ```
 
 The hint names the nearest capability, the same way `almide check --profile
@@ -472,14 +561,89 @@ allow = ["IO"]
 // file: main.almd
 import http
 
-// This function uses Net (http.get) -> build error
+// This function uses Net.fetch (http.get) -> build error
 effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 //   error: capability violation in `fetch`
-//     Net is not in [permissions].allow
+//     Net.fetch is not in [permissions].allow
 ```
 
-The gate runs after codegen: `almide check` and `almide test` accept the file,
-`almide build` refuses it.
+Every route applies the gate: `almide check`, `build`, `run`, `emit` and both
+`almide test` lanes, on both targets. The manifest is the entry file's project
+— the nearest `almide.toml` at or above the entry file, else the working
+directory's — and `check` judges every user module, not only the entry file.
+
+Test: `tests/permissions_routes_test.rs`.
+
+### Directory scope: `fs`
+
+`[permissions] fs` lists the directories a program may touch at all (#4022):
+
+```toml
+[permissions]
+fs = ["./data", "/tmp"]
+```
+
+A relative entry is a directory of the project, anchored to the directory of
+`almide.toml` (as a relative `path` dependency is), so the scope does not move
+with the directory the program is started from.
+
+- **Absent** (no `fs` key): every path, as before. This is the default, so no
+  program that works today stops working. `fs = []` allows no path.
+- **Resolution, not spelling.** A path is judged by where the OS would reach:
+  absolute against the working directory, the longest existing prefix with
+  every symlink and `..` resolved by the OS, the rest applied lexically. A
+  path that lands outside every granted directory, or passes a dangling
+  symlink, is refused before it is touched: `fs.exists`, `fs.is_dir`,
+  `fs.is_file` and `fs.is_symlink` answer `false`, every other `fs` call
+  `err("fs: \"<path>\" is outside [permissions] fs")`. The no-follow calls
+  are judged by where the path leads too, so a link inside a granted
+  directory that points out of it can be neither asked about nor removed.
+  `copy` and `rename` check both paths, the temp calls the temp dir they
+  create in, `glob` its pattern's literal base.
+- **Native** (`almide run`, `almide build`, `almide test`): the build wraps
+  each of the program's calls to the fs runtime in the check, with the roots
+  baked in and resolved on the first fs call, and calls a scoped twin of the
+  runtime fn (`src/cli/fs_scope_twin.rs`: the same bodies with their
+  `std::fs` calls made through the scope); the runtime itself is unchanged.
+  A test harness build has no `main` and is bounded the same way (#4084).
+- **Wasm, embedded host** (`almide run --target wasm`, the wasm leg of
+  `almide test`): the same check, from the same source
+  (`crates/almide-rt-core/src/fs_scope.rs`), sits in front of the host's one
+  fs import, and the host's fs calls go through the same scoped core, so
+  both targets refuse the same paths with the same bytes. A
+  program that runs as its p3 component (the full-response http family)
+  gets the granted directories as its WASI preopens — and, without the key,
+  the working directory and the temp dir, no longer `/` — so there the
+  refusal is WASI's own error.
+- **Wasm, stock runtime**: an artifact from `almide build --target wasm`
+  reaches what its operator preopens (`wasmtime --dir`); the manifest does
+  not travel with it.
+
+The check only decides where a path lands; on native and the embedded host
+the operation then runs beneath a descriptor of the granted directory it
+lands under, opened once on first use (`crates/almide-rt-core/src/fs_scoped_core.rs`,
+#4084): the decided segments are walked from that descriptor without
+following a symlink (openat2 `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` on Linux,
+an `O_NOFOLLOW` openat walk on macOS) and the last one is opened, created,
+listed, removed or renamed from its parent's descriptor. A tree rewritten
+between the check and the call (a directory swapped for a symlink) is refused
+by the call with the same `err`, never followed. What remains path-based: an
+operation on a granted directory itself, the metadata of an entry the process
+may not open, and every call on a platform other than 64-bit Linux and macOS,
+where the check still runs before a plain call and a rewrite can race it. The
+p3 component's bound is its preopens, which the runtime (wasmtime-wasi over
+cap-std) resolves beneath the preopened descriptor at the call itself. Within a program, `fs.open_root`
+(`docs/stdlib/fs.md`) bounds the paths built from untrusted input to one
+directory on top of this scope, and its calls refuse a symlink by descriptor
+on every leg (#4084), so a rewrite cannot race them.
+
+Flipping the default — an absent `fs` key meaning the project directory only —
+would refuse every program that reads outside its project today (absolute
+config paths, `$HOME` files, `/dev/stdin`). It needs a dialect epoch entry, a
+`fs = ["/"]` hint in the refusal, and `almide init` writing the key; it is not
+part of this change.
+
+Test: `tests/fs_scope_test.rs`
 
 ### Callbacks: the set rides the value (ADR-0026 D1)
 
@@ -496,15 +660,24 @@ written:
   field (the union of every closure stored in that field), a return value, a
   top-level `let`.
 - A closure put anywhere else (a list, an option payload, a variant, an
-  argument of a stdlib call) joins a pool of its arity; calling a value read
-  back from such a place is charged with that pool. A stdlib call is assumed
-  to run every closure it is given.
+  argument of an unknown callee) joins the pool of its signature (aliases
+  expanded, an `effect (A) -> B` slot in its carrier form); calling a value
+  read back from such a place is charged with that pool, and a read whose type
+  leaves the signature open (a type variable) is charged with every pool it
+  could alias. A value passed into a generic parameter is pooled at its
+  concrete type by the call site (#4151).
+- A stdlib function whose body is the runtime's (`@intrinsic`, `= _`) runs
+  each fn-typed argument and keeps none; a value it receives in a type-variable
+  parameter is pooled, and its result is read from the pools at the call's
+  type. Before #4152 such a body was read as "does nothing", so
+  `list.map(paths, fs.read_text)` charged `IO` to nobody and a manifest
+  without `IO` built it. A stdlib fn taken as a value carries its category.
 
 ```
-  call_box  → {IO}
-  make  → {} (effect fn); returns a closure doing {IO}
+  call_box  → {FS.read}
+  make  → {} (effect fn); returns a closure doing {FS.read}
   use_it  → {} + whatever f (arg 1) does
-  main  → {IO} (effect fn)
+  main  → {FS.read, IO.stdout} (effect fn)
 ```
 
 `[permissions].allow` is checked on these sets, so a violation names the
@@ -515,7 +688,7 @@ pooled value) the next step is prefixed `e.g.`:
 
 ```
 error: capability violation in `main`
-  IO is not in [permissions].allow
+  FS.read is not in [permissions].allow
   path: main → use_it → f (arg 1 of use_it) → closure (line 3:42 in make) → fs.read_text (line 3:49)
 ```
 
@@ -524,6 +697,22 @@ not in `Ty::Fn`: they are computed after type checking and dropped with the
 report, so monomorphisation never sees them. No surface syntax is involved.
 
 Tests: `tests/effect_category_flow_test.rs`, `tests/effects_report_callbacks_test.rs`
+
+### Native code from dependencies: `native` (#4093)
+
+The categories above are inferred from Almide code. A dependency's native code
+(`native/*.rs`, `[native-deps]` crates and their `build.rs`, `@extern(rust|c)`
+fns) runs before and outside that inference, while cargo builds the program.
+`[permissions] native` lists the dependency packages allowed to bring it:
+
+```toml
+[permissions]
+native = ["nat"]
+```
+
+`build`, `run`, `test` and `bench` refuse an ungranted one on every target;
+the root package's own native code needs no grant
+([package-system.md §6.4](./package-system.md#64-native-code-from-a-dependency-needs-a-grant-permissions-native)).
 
 ### Design layers
 
@@ -540,4 +729,5 @@ Test: Effect inference unit tests in `crates/almide-codegen/src/pass_effect_infe
 | E006 | Effect isolation violation | Pure `fn` calls an `effect fn` | Mark the caller as `effect fn`; a call whose Result is not already consumed (`!` / `??` / `?` / `match`) also takes `!` — the hint names both steps, and the same expression's `expected T but got Result[T, String]` is not reported separately (#3515, test: `tests/e006_fallible_cascade_test.rs`) |
 | E007 | Fan block in pure function | `fan { ... }` used outside effect context | Mark the enclosing function as `effect fn` |
 | E008 | Mutable variable capture in fan | `fan` block references a `var` binding | Change `var` to `let`, or copy the value into a `let` before the `fan` |
+| E109 | Effect fn run through a value | A pure `fn` runs an `effect fn` it reached as a value (a field, a list element, a stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
 | E092 | `@pure` fn is not pure | A `@pure` fn reaches output, an abort, a categorised stdlib call or an `@extern` | Move the call to a caller, or remove `@pure` |

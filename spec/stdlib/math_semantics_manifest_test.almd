@@ -3,10 +3,6 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-test "math.abs unit=value" {
-  assert_eq("${math.abs(0 - 5)}", "5")
-}
-
 test "math.choose unit=count" {
   assert_eq("${math.choose(5, 2)}", "10")
 }
@@ -15,18 +11,10 @@ test "math.factorial unit=count" {
   assert_eq("${math.factorial(5)}", "120")
 }
 
-test "math.max unit=value" {
-  assert_eq("${math.max(3, 9)}", "9")
+test "math.__pow unit=value" {
+  assert_eq("${math.__pow(2, 10)}", "1024")
 }
 
-test "math.min unit=value" {
-  assert_eq("${math.min(3, 9)}", "3")
-}
-
-test "math.pow unit=value" {
-  assert_eq("${math.pow(2, 10)}", "1024")
-}
-
-test "math.sign unit=ordering" {
-  assert_eq("${math.sign(0 - 7)}", "-1")
+test "math.__sign unit=ordering" {
+  assert_eq("${math.__sign(0 - 7)}", "-1")
 }

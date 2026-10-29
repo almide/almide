@@ -1,0 +1,19 @@
+// E006 (#4158): `save` is an `effect` method of the protocol, so calling it
+// through the bound `T: Saver` is an effect call — as calling `Src.save` on
+// a concrete `Src` already was. A pure generic fn wrote a file.
+import fs
+
+protocol Saver {
+  effect fn save(a: Self) -> Unit
+}
+
+type Src: Saver = { path: String }
+
+effect fn Src.save(a: Src) -> Unit = fs.write_text(a.path, "pure fn wrote this")!
+
+fn use_it[T: Saver](x: T) -> Int = {
+  let _ = x.save()
+  1
+}
+
+effect fn main() -> Unit = println("${use_it(Src { path: "out.txt" })}")

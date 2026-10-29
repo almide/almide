@@ -25,14 +25,14 @@
 //! output (println/eprintln/io.print/io.write), exit codes, stdin
 //! read-to-end, entropy, the wall clock, and — through the spliced fs
 //! service (`fs_service.rs`, #2742) — the fs ops with `env.os` /
-//! `env.temp_dir` / `env.cwd`. Other ops (process, http) take the
+//! `fs.temp_dir` / `env.cwd`. Other ops (process, http) take the
 //! DEFINED refusal: a named message on stderr + exit 1 — never a silent
 //! wrong answer (the target-availability doctrine, #1423).
 //!
 //! The env/args SERVICES are reachability-gated (#1841, the #1712
 //! discipline applied to the transform): `env.get` (op 26) ships the
 //! environ pair of imports + its scan shim, `env.set` (op 37) its
-//! overlay-append shim, `env.args`/`process.args` (op 29) the args
+//! overlay-append shim, `env.args` (op 29) the args
 //! pair of imports + its frames shim — each only when the emitted op
 //! set names the op. A hello-world artifact carries none of them
 //! (two imports, five shims), and an op that never reached the module
@@ -55,14 +55,23 @@ use wasmparser::{Parser, Payload};
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
 pub const P1_SERVED_OPS: &[i32] = &[
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+    // 17 and 18 (fs.file_size / fs.modified_at) are retired: the fs service
+    // no longer carries their bodies (62 is fold_lines_chunked's size probe).
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
+    // `env.vars`' environ frames (#3908): the args shim over the environ pair.
+    77,
     // The instance-parallel fan offer (#3003): answered "not served" (0), so
     // the guest's sequential path runs — byte-identical to the embedded host.
     74,
+    // A deliberate exit's mark (#4203): answered 0, nothing to do here.
+    76,
     // The subprocess family (#2589, ADR-0025): forwarded to the private
     // `almide:process/spawn` import, which a stock runtime refuses at load.
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+    // The rooted fs family by descriptor (#4084): the fs service's segment
+    // walk from the root, lookupflags 0 at every step.
+    120, 121, 122, 123, 124, 125,
 ];
 
 pub mod env_overlay;
@@ -323,9 +332,12 @@ pub struct P1Services {
     pub env_get: bool,
     /// op 37 (`env.set`): the overlay-append shim (no import).
     pub env_set: bool,
-    /// op 29 (`env.args` / `process.args`): args_sizes_get + args_get,
+    /// op 29 (`env.args`): args_sizes_get + args_get,
     /// the frames shim.
     pub args: bool,
+    /// op 77 (`env.vars`, #3908): environ_sizes_get + environ_get re-framed
+    /// by the frames shim, then the overlay log's entries.
+    pub env_vars: bool,
     /// any op of [`FS_SERVICE_OPS`] (#2742): the spliced fs service, its
     /// own page past the park, and the WASI imports it reaches.
     pub fs: bool,
@@ -341,6 +353,7 @@ impl P1Services {
             env_get: host_ops.contains(&26),
             env_set: host_ops.contains(&37),
             args: host_ops.contains(&29),
+            env_vars: host_ops.contains(&77),
             fs: host_ops.iter().any(|op| fs_service::serves(*op)),
             proc: wants_proc(host_ops),
         }
@@ -349,13 +362,19 @@ impl P1Services {
     /// Whether a service can stage a result outside the park (#2120), so the
     /// module carries `g_ppos`, the pointer `host_read` copies from.
     pub fn stages_outside_park(self) -> bool {
-        self.env_get || self.args || self.fs || self.proc
+        self.env_get || self.args || self.env_vars || self.fs || self.proc
+    }
+
+    /// Whether the environ pair ships: `env.get` scans it, `env.vars`
+    /// frames it.
+    pub fn environ(self) -> bool {
+        self.env_get || self.env_vars
     }
 
     /// The WASI imports this selection adds past the base five (the fs
     /// service's own count on top, which depends on the ops it reaches).
     pub fn extra_imports(self) -> u32 {
-        2 * u32::from(self.env_get) + 2 * u32::from(self.args) + u32::from(self.proc)
+        2 * u32::from(self.environ()) + 2 * u32::from(self.args) + u32::from(self.proc)
     }
 }
 
@@ -440,7 +459,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let park: u64 = heap_init;
     // The fs service (#2742): its page sits right past the park, so the heap
     // moves up by one more page when it ships.
-    let fs = fs_service::FsSplice::plan(host_ops, (park + PARK_SPAN) as u32, services.env_get)?;
+    let fs = fs_service::FsSplice::plan(host_ops, (park + PARK_SPAN) as u32, services.environ())?;
     let fs_span: u64 = fs.as_ref().map_or(0, |_| fs_service::FS_PAGE);
     let shift: u32 = services.extra_imports() + fs.as_ref().map_or(0, fs_service::FsSplice::fresh_imports);
     let imports_count: u32 = 5 + shift + foreign_imports.len() as u32;
@@ -452,7 +471,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let g_ppos = (services.stages_outside_park() || host_ops.contains(&35)).then_some(global_count + 1);
     // The overlay log's globals (length, base, capacity) exist only when an
     // env service ships — nothing else reads or writes the log.
-    let g_ovl = (services.env_get || services.env_set).then(|| {
+    let g_ovl = (services.env_get || services.env_set || services.env_vars).then(|| {
         let g = global_count + 1 + u32::from(g_ppos.is_some());
         env_overlay::OverlayLog { g_len: g, g_base: g + 1, g_cap: g + 2 }
     });
@@ -509,7 +528,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     // import indices 0..4 stay put; each pair is present only when its
     // service ships (#1841), and its shim takes the indices it landed on.
     let mut next_import = 5u32;
-    let environ_imports = services.env_get.then(|| {
+    let environ_imports = services.environ().then(|| {
         imports.import(W, "environ_sizes_get", EntityType::Function(t_random));
         imports.import(W, "environ_get", EntityType::Function(t_random));
         next_import += 2;
@@ -555,6 +574,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let f_env_get = service_slot(services.env_get);
     let f_env_set = service_slot(services.env_set);
     let f_args = service_slot(services.args);
+    let f_env_vars = service_slot(services.env_vars);
     let f_proc = service_slot(services.proc);
     // `cabi_realloc` (another type, so not a service slot) sits right after.
     let f_realloc = t_proc.map(|(_, t_realloc)| {
@@ -567,7 +587,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let fs_first = next_shim;
     let f_fs = fs.as_ref().zip(fs_types.as_ref()).map(|(f, t)| f.declare(&mut functions, t, fs_first));
     // shim_fs_call's forwarding rows: the env/args services, then the fs ops.
-    let forward: Vec<(i32, u32)> = [(26, f_env_get), (37, f_env_set), (29, f_args)]
+    let forward: Vec<(i32, u32)> = [(26, f_env_get), (37, f_env_set), (29, f_args), (77, f_env_vars)]
         .into_iter()
         .filter_map(|(c, t)| t.map(|t| (c, t)))
         .chain(f_proc.into_iter().flat_map(|t| PROC_OPS.filter(|op| host_ops.contains(op)).map(move |op| (op, t))))
@@ -660,6 +680,11 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
         code.function(&shim_args(park, g_plen, g_ppos.expect("args stages"), i_sizes, i_get));
     }
+    if f_env_vars.is_some() {
+        let (i_sizes, i_get) = environ_imports.expect("env.vars imports the environ pair");
+        let log = g_ovl.expect("env service global");
+        code.function(&shim_env_vars(park, g_plen, g_ppos.expect("env.vars stages"), log, i_sizes, i_get));
+    }
     f_proc.and(proc_import).into_iter().for_each(|i_call| {
         code.function(&proc_service::shim_proc(park, g_plen, g_ppos.expect("the proc service stages"), i_call));
         code.function(&proc_service::shim_cabi_realloc(heap_global));
@@ -690,7 +715,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     }
     // The high-staging services, the overlay log's growth and stdin take-n's
     // arena are the only shim-side callers of memory.grow.
-    if f_env_get.is_some() || f_env_set.is_some() || f_args.is_some() || host_ops.contains(&35) {
+    if f_env_get.is_some() || f_env_set.is_some() || f_args.is_some() || f_env_vars.is_some() || host_ops.contains(&35) {
         data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
     }
 

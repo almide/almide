@@ -4,7 +4,7 @@ fn bscalar(content: List[String], ind: String, end: Int) -> (Value, Int) = {
     content,
     " ",
   )
-  (value.str(if string.ends_with(ind, "-") then joined else joined + "\n"), end)
+  (value.string(if string.ends_with(ind, "-") then joined else joined + "\n"), end)
 }
 
 fn show(content: List[String], ind: String) -> String = {

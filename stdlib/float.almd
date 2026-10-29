@@ -16,51 +16,47 @@
 // ── Conversions ──
 /// Shortest round-trip digits, no exponent; 2.0 keeps .0.
 @intrinsic("almide_rt_float_to_string")
-fn to_string(n: Float) -> String = _
+fn to_string(x: Float) -> String = _
 
 /// Truncates toward 0, saturating; NaN gives 0.
 @intrinsic("almide_rt_float_to_int")
-fn to_int(n: Float) -> Int = _
+fn __to_int(n: Float) -> Int = _
 
 /// Nearest Float; may round when |n| > 2^53.
 @intrinsic("almide_rt_float_from_int")
-fn from_int(n: Int) -> Float = _
+fn __from_int(n: Int) -> Float = _
 
-/// Float from trimmed s; takes 1e3, inf, NaN; err on junk.
+/// Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 @intrinsic("almide_rt_float_parse")
 fn parse(s: String) -> Result[Float, String] = _
 
 /// Fixed-point, ties to even; decimals outside 0..4096 abort.
 @intrinsic("almide_rt_float_to_fixed")
-fn to_fixed(n: Float, decimals: Int) -> String = _
+fn to_fixed(x: Float, decimals: Int) -> String = _
 
 /// IEEE-754 bits as Int; any NaN gives the canonical NaN.
 @intrinsic("almide_rt_float_to_bits")
 fn to_bits(f: Float) -> Int = _
 
 // ── Arithmetic (inlined as native Rust method calls) ──
-/// Square root; NaN below 0, -0.0 stays -0.0.
-@intrinsic("almide_rt_float_sqrt")
-fn sqrt(n: Float) -> Float = _
-
 /// Magnitude; -0.0 gives 0.0, NaN stays NaN.
 @intrinsic("almide_rt_float_abs")
-fn abs(n: Float) -> Float = _
+fn abs(x: Float) -> Float = _
 
 /// Round toward -inf; -0.5 gives -1.0.
 @intrinsic("almide_rt_float_floor")
-fn floor(n: Float) -> Float = _
+fn floor(x: Float) -> Float = _
 
 /// Round toward +inf; -0.5 gives -0.0.
 @intrinsic("almide_rt_float_ceil")
-fn ceil(n: Float) -> Float = _
+fn ceil(x: Float) -> Float = _
 
 // Round half AWAY from zero, exactly on the true value (`f64::round`; #2477,
 // C-358): round(0.49999999999999994) = 0.0, an odd integer above 2^52 is
 // unchanged. The self-hosted twin is stdlib/float_round.almd.
 /// Nearest whole value; halves round away from zero.
 @intrinsic("almide_rt_float_round")
-fn round(n: Float) -> Float = _
+fn round(x: Float) -> Float = _
 
 /// Lesser; a NaN operand is ignored; -0.0 < 0.0.
 @intrinsic("almide_rt_float_min")
@@ -70,138 +66,51 @@ fn min(a: Float, b: Float) -> Float = _
 @intrinsic("almide_rt_float_max")
 fn max(a: Float, b: Float) -> Float = _
 
-/// n limited to lo..hi; lo > hi or a NaN bound aborts.
+/// x limited to lo..hi; lo > hi or a NaN bound aborts.
 @intrinsic("almide_rt_float_clamp")
-fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
+fn clamp(x: Float, lo: Float, hi: Float) -> Float = _
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+@deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
 @intrinsic("almide_rt_float_sign")
 fn sign(n: Float) -> Float = _
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float) -> Float = if float.is_nan(x) then x
+else if float.to_bits(x) < 0 then -1.0 else 1.0
 
 // ── Classification ──
 /// True only for NaN (unequal to itself).
 @intrinsic("almide_rt_float_is_nan")
-fn is_nan(n: Float) -> Bool = _
+fn is_nan(x: Float) -> Bool = _
 
 /// True for inf and -inf; false for NaN.
 @intrinsic("almide_rt_float_is_infinite")
-fn is_infinite(n: Float) -> Bool = _
+fn is_infinite(x: Float) -> Bool = _
 
 // ── Sized type conversions (Stage 3) ──
 /// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int8")
-fn to_int8(n: Float) -> Int8 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int16")
-fn to_int16(n: Float) -> Int16 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int32")
-fn to_int32(n: Float) -> Int32 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_uint8")
-fn to_uint8(n: Float) -> UInt8 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_uint16")
-fn to_uint16(n: Float) -> UInt16 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_uint32")
-fn to_uint32(n: Float) -> UInt32 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
 @intrinsic("almide_rt_float_to_uint64")
-fn to_uint64(n: Float) -> UInt64 = _
+fn __to_uint64(n: Float) -> UInt64 = _
 
 /// Nearest Float32; overflow gives inf.
 @intrinsic("almide_rt_float_to_float32")
-fn to_float32(n: Float) -> Float32 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int64")
-fn to_int64(n: Float) -> Int64 = _
+fn __raw_to_float32(n: Float) -> Float32 = _
 
 /// Same f64 value; always exact.
 @intrinsic("almide_rt_float_to_float64")
-fn to_float64(n: Float) -> Float64 = _
+fn __to_float64(n: Float) -> Float64 = _
 
 // ── Widening: sized float → Float ──
 /// Exact widening; never rounds.
 @intrinsic("almide_rt_float_from_float32")
-fn from_float32(n: Float32) -> Float = _
+fn __from_float32(n: Float32) -> Float = _
 
 /// Same f64 value; always exact.
 @intrinsic("almide_rt_float_from_float64")
-fn from_float64(n: Float64) -> Float = _
+fn __from_float64(n: Float64) -> Float = _
 
 // ── Safety variants: range-checked and saturating ──
-// `to_<T>()` above follows Rust `as`-semantics on float→int (already
-// saturating; NaN → 0; out-of-range clamps to T::MIN / T::MAX). The
-// `_checked` variants return `None` for NaN / infinity / out-of-range
-// so callers can distinguish "lossless conversion" from "data
-// squashed". `_saturating` is an explicit alias over `to_<T>()` for
-// intent; both resolve to `I32TruncSatF64S` / `as i32` etc. which the
-// language contract pins as saturating on both Rust and WASM targets.
-// Semantics: `_checked` returns `Some(T)` iff the float is an exact
-// representable integer in T's range — mirrors Swift's
-// `Int(exactly:)`. NaN / infinity / fractional parts / out-of-range
-// all return `None`.
-//
-// THE FAMILY RULE (#2487): every cell is a RANGE test on the source
-// value against the target's exact bounds plus an INTEGRALITY test
-// (`floor(n) == n`), and never a round trip through a conversion that
-// wraps or saturates. The old shape compared `int.to_float(int.from_T(to_T(n)))`
-// with `n`, which is exact for every pivot up to 32 bits but wrong for
-// the two 64-bit pivots: `int.from_uint64` reinterprets `[2^63, 2^64)`
-// as a negative Int, so `to_uint64_checked(2^63)` was `none` although
-// 2^63 is an exact UInt64. The upper bound is `>=` where the bound
-// itself is the first value OUTSIDE the type (2^63, 2^64 — the f64
-// nearest to T::MAX rounds up to it) and `>` where T::MAX is exact.
-// `-0.0` passes as `some(0)` (C-307). The same rule, cell for cell, in
-// stdlib/float_checked.almd (the wasm legs).
-/// some iff n is an integer in -128..127.
-fn to_int8_checked(n: Float) -> Int8? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
-  else if float.floor(n) == n then some(float.to_int8(n)) else none
-
-/// some iff n is an integer in -32768..32767.
-fn to_int16_checked(n: Float) -> Int16? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then none
-  else if float.floor(n) == n then some(float.to_int16(n)) else none
-
-/// some iff n is an integer in -2^31..2^31-1.
-fn to_int32_checked(n: Float) -> Int32? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then none
-  else if float.floor(n) == n then some(float.to_int32(n)) else none
-
-/// some iff n is an integer in -2^63..2^63-1.
-fn to_int64_checked(n: Float) -> Int64? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
-  else if float.floor(n) == n then some(float.to_int64(n)) else none
-
-/// some iff n is an integer in 0..255.
-fn to_uint8_checked(n: Float) -> UInt8? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then none
-  else if float.floor(n) == n then some(float.to_uint8(n)) else none
-
-/// some iff n is an integer in 0..65535.
-fn to_uint16_checked(n: Float) -> UInt16? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then none
-  else if float.floor(n) == n then some(float.to_uint16(n)) else none
-
-/// some iff n is an integer in 0..2^32-1.
-fn to_uint32_checked(n: Float) -> UInt32? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then none
-  else if float.floor(n) == n then some(float.to_uint32(n)) else none
-
-/// some iff n is an integer in 0..2^64-1.
-fn to_uint64_checked(n: Float) -> UInt64? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709552000.0 then none
-  else if float.floor(n) == n then some(float.to_uint64(n)) else none
-
 // `Float → Float32` loses precision for values outside f32's range
 // (±3.4e38) and for subnormal-boundary reals. The round trip here is
 // through the WIDENING `from_float32`, which is exact, so it detects
@@ -210,34 +119,123 @@ fn to_uint64_checked(n: Float) -> UInt64? =
 // are `none`, even though an f32 has both infinities and the round trip is
 // exact for them (the judge's reference evaluator reads the ledger this way).
 /// some if n is exact in Float32; NaN and ±inf give none.
-fn to_float32_checked(n: Float) -> Float32? = {
-  let f: Float32 = float.to_float32(n)
-  let back: Float = float.from_float32(f)
+fn __to_float32_checked(n: Float) -> Float32? = {
+  let f: Float32 = float.__raw_to_float32(n)
+  let back: Float = float.__from_float32(f)
   if float.is_nan(n) then none
   else if float.is_infinite(n) then none
   else if back == n then some(f) else none
 }
 
-/// Truncates, clamps to -128..127; NaN gives 0.
-fn to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
-
-/// Truncates, clamps to -32768..32767; NaN gives 0.
-fn to_int16_saturating(n: Float) -> Int16 = float.to_int16(n)
-
-/// Truncates, clamps to Int32 range; NaN gives 0.
-fn to_int32_saturating(n: Float) -> Int32 = float.to_int32(n)
-
-/// Truncates, clamps to Int64 range; NaN gives 0.
-fn to_int64_saturating(n: Float) -> Int64 = float.to_int64(n)
-
-/// Truncates, clamps to 0..255; NaN gives 0.
-fn to_uint8_saturating(n: Float) -> UInt8 = float.to_uint8(n)
-
-/// Truncates, clamps to 0..65535; NaN gives 0.
-fn to_uint16_saturating(n: Float) -> UInt16 = float.to_uint16(n)
-
-/// Truncates, clamps to 0..2^32-1; NaN gives 0.
-fn to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
-
 /// Truncates, clamps to 0..2^64-1; NaN gives 0.
-fn to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)
+fn __to_uint64_saturating(n: Float) -> UInt64 = float.__to_uint64(n)
+
+// ── FloatingPoint: rounding, classification, power, order (R-float-04, R-math-01, R-sized-02) ──
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float) -> Float = if x < 0.0 then float.ceil(x) else float.floor(x)
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float) -> Bool = not (float.is_nan(x) or float.is_infinite(x))
+
+/// base to the exp; NaN for a negative base with a fractional exp.
+fn pow(base: Float, exp: Float) -> Float = math.__fpow(base, exp)
+
+/// -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+fn compare(a: Float, b: Float) -> Int = int.compare(order_key(a), order_key(b))
+
+// The bits read as a signed key whose Int order is the total order; to_bits has one NaN.
+local fn order_key(x: Float) -> Int = {
+  let bits = float.to_bits(x)
+  if bits < 0 then int.bxor(bits, int.max_value()) else bits
+}
+
+// ── FloatingPoint: bits and constants (R-float-02, R-float-03) ──
+/// Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+fn from_bits(bits: Int) -> Float = int.__bits_to_float(bits)
+
+/// Positive infinity.
+fn infinity() -> Float = from_bits(9218868437227405312)
+
+/// The one quiet NaN (bits 0x7ff8000000000000).
+fn nan() -> Float = from_bits(9221120237041090560)
+
+/// Gap between 1.0 and the next Float: 2^-52.
+fn epsilon() -> Float = from_bits(4372995238176751616)
+
+/// Largest finite Float, about 1.7976931348623157e308.
+fn max_value() -> Float = from_bits(9218868437227405311)
+
+/// Most negative finite Float (= -max_value()), not the smallest positive.
+fn min_value() -> Float = from_bits(-4503599627370497)
+
+// ── The `from` family (R-L0-40): Float from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as the nearest Float (ties to even); NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float = x.__to_float()
+
+/// some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float? = x.__to_float_exact()
+
+// ── Numeric requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Float) -> Int? =
+  if x == float.trunc(x) and x >= -9223372036854775808.0 and x < 9223372036854775808.0 then some(float.__to_int(x))
+  else none
+
+fn __uint64_exact(x: Float) -> UInt64? =
+  if x == float.trunc(x) and x >= 0.0 and x < 18446744073709551616.0 then some(float.__to_uint64(x))
+  else none
+
+fn __trunc(x: Float) -> Float = float.trunc(x)
+
+fn __int_sat(x: Float) -> Int =
+  if float.is_nan(x) then 0
+  else if x >= 9223372036854775808.0 then int.max_value()
+  else if x <= -9223372036854775808.0 then int.min_value()
+  else float.__to_int(x)
+
+fn __uint64_sat(x: Float) -> UInt64 = float.__to_uint64_saturating(x)
+
+fn __to_float(x: Float) -> Float = x
+
+fn __to_float_exact(x: Float) -> Float? = if float.is_nan(x) then none else some(x)
+
+fn __to_float32(x: Float) -> Float32 = float.__raw_to_float32(x)
+
+fn __to_float32_exact(x: Float) -> Float32? = float.__to_float32_checked(x)
+
+fn __decimal_exact(x: Float) -> String? = match float.__int_exact(x) {
+  some(n) => some(int.to_string(n)),
+  none => if float.is_finite(x) and x == float.trunc(x) then some(decimal_of_integral(x)) else none,
+}
+
+fn __sum(xs: List[Float]) -> Float = list.fold(xs, 0.0, (a, b) => a + b)
+
+fn __product(xs: List[Float]) -> Float = list.fold(xs, 1.0, (a, b) => a * b)
+
+// The exact digits of an integral Float beyond Int: mantissa * 2^exponent,
+// doubled in base-10^9 limbs (little end first).
+local fn decimal_of_integral(x: Float) -> String = {
+  let bits = float.to_bits(x)
+  let e = int.band(int.bshr(bits, 52), 2047) - 1075
+  let m = int.bor(int.band(bits, 4503599627370495), 4503599627370496)
+  let limbs = double_n([m % 1000000000, m / 1000000000], e)
+  let digits = list.reverse(limbs) |> list.enumerate |> list.map(((i, d)) => if i == 0 then int.to_string(d) else pad9(int.to_string(d)))
+  (if x < 0.0 then "-" else "") + list.fold(digits, "", (a, b) => a + b)
+}
+
+local fn double_n(l: List[Int], n: Int) -> List[Int] = if n <= 0 then l
+else double_n(double_from(l, 0, 0, []), n - 1)
+
+local fn double_from(l: List[Int], i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(l) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let v = (list.get(l, i) ?? 0) * 2 + carry
+    double_from(l, i + 1, v / 1000000000, acc + [v % 1000000000])
+  }
+
+local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" + s)

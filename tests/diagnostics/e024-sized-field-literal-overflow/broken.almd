@@ -10,5 +10,5 @@ fn main() -> Unit = {
   let r: Rec = { b: 65535, n: 9999 }
   let n: ((Int8, Int), Int) = ((300, 1000), 2000)
   let a: List[(Int8, Int)] = [(1, 100), (300, 200)]
-  println("${int.to_string(int.from_int8(r.b))}:${int.to_string(n.1)}:${int.to_string(list.len(a))}")
+  println("${int.to_string(int.from(r.b))}:${int.to_string(n.1)}:${int.to_string(list.len(a))}")
 }

@@ -16,13 +16,13 @@
 // literal `\` followed by `users` — which is how a non-escape is spelled.
 test "hex escape \\xNN decodes to a codepoint" {
   assert_eq("\x41", "A")
-  assert_eq("\x1b", string.from_codepoint(27))
+  assert_eq(some("\x1b"), string.from_codepoint(27))
 }
 
 test "unicode escape \\u{...} decodes to a codepoint" {
   assert_eq("\u{41}", "A")
-  assert_eq("\u{1b}", string.from_codepoint(27))
-  assert_eq("\u{3042}", string.from_codepoint(12354))
+  assert_eq(some("\u{1b}"), string.from_codepoint(27))
+  assert_eq(some("\u{3042}"), string.from_codepoint(12354))
   // An astral codepoint is a single codepoint (string.len counts codepoints).
   assert_eq(string.len("\u{1f600}"), 1)
   // The range boundary: U+10FFFF is the last scalar value there is.
@@ -31,8 +31,8 @@ test "unicode escape \\u{...} decodes to a codepoint" {
 
 test "basic escapes still work and a doubled backslash is one backslash" {
   assert_eq(string.len("\n\t"), 2)
-  assert_eq("\\users", string.from_codepoint(92) + "users")
-  assert_eq("\\xyz", string.from_codepoint(92) + "xyz")
+  assert_eq("\\users", (string.from_codepoint(92) ?? "") + "users")
+  assert_eq("\\xyz", (string.from_codepoint(92) ?? "") + "xyz")
   // A raw string has no escape layer at all.
-  assert_eq(r"\d+", string.from_codepoint(92) + "d+")
+  assert_eq(r"\d+", (string.from_codepoint(92) ?? "") + "d+")
 }

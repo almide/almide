@@ -3,17 +3,18 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-import io
-
-test "io.read_byte unit=byte-value" {
+test "io.__read_stdin_bytes unit=byte-count" {
   assert_eq("${1}", "1")
 }
 
-test "io.read_n_bytes unit=byte-count" {
+test "io.__stdin_read unit=byte-count" {
   assert_eq("${1}", "1")
 }
 
-test "io.write_bytes unit=byte-value" {
-  io.write_bytes([])
-  assert_eq("${true}", "true")
+test "io.read unit=byte-count" {
+  assert_eq("${1}", "1")
+}
+
+test "io.read_exact unit=byte-count" {
+  assert_eq("${1}", "1")
 }

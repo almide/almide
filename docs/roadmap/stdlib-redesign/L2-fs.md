@@ -84,6 +84,7 @@
 
 ### R-fs-04 5/9 以上が持つが Almide に無い役割 — × 不採用（いまは足さない）
 
+- 理由: どの役割も、いまの関数で足りるか（`mkdir` は `mkdir_p`、ハンドルは行を流す族と `append`）、WASI に経路がないか（chmod）、要望がまだありません（役割ごとの理由は下の各行）。
 - ディレクトリを 1 段だけ作る `mkdir`: `mkdir_p` で足ります。「すでにあると err」を使うのはロックの用途だけで、2 つあると選び間違えます（R-L0-01）。
 - シンボリックリンクを作る・読む: `wasi:filesystem` に `symlink-at`・`readlink-at` はありますが、使用の要望がまだありません。`is_symlink` で判定はできます。要望が出たら `symlink`・`read_link` の対で足します。
 - 権限（chmod）: WASI の filesystem に権限の操作がありません。R-L0-15 の 3 つの経路のうち、標準の WASI インタフェースには乗らず、暫定の host op を足す理由（使用の要望）もありません。要望が出たら package（native の権限と、それを持たない wasm の扱いを package 側で決める）として提供します。標準には足しません。
@@ -102,6 +103,24 @@
 - 完全性の規則: `fs` のファイル全体の読み書きは {read, write, append} × {text, bytes} の 6 セルです。
 - issue: #3979
 
+### R-fs-06 根を決めて、その下だけを触る関数（`fs.open_root`・`fs.root_*`）を足す — ○ 採用
+
+- いま: `fs.*` はどの `String` の道筋も受け取ります。信頼しない入力を基準のディレクトリにつなぐと、`..`・絶対パス・シンボリックリンクで外に出られます（#4022、セキュリティ表の行 10）。`path.from_string` は `..` を字面で拒みますが、シンボリックリンクは見ません。
+- 案: Go 1.24 の `os.Root` に当たる「根」の型 `FsRoot` と、根の下だけを触る関数を足します。
+  - `effect fn open_root(dir: String) -> FsRoot`（ディレクトリでなければ err）
+  - `root_read_text(root, path) -> String`、`root_read_bytes(root, path) -> Bytes`、`root_write_text(root, path, content) -> Unit`、`root_list_dir(root, path) -> List[String]`、`root_exists(root, path) -> Bool`、`root_remove(root, path) -> Unit`
+  - `path` が絶対パス、根より上に出る `..`、根の下のどこかの段がシンボリックリンク（指す先を問わない）のときは、何も触らずに `err("fs: path escapes root: <path>")` を返します。それ以外は、`.` と `..` を字面で畳んだ `<根>/<段>` に普通の fs 関数を呼んだ答えです。
+  - 検査は Almide で 1 回だけ書き（`stdlib/fs.almd`）、普通の fs 関数の上に乗せます。native と wasm が同じ道筋を同じ文言で拒みます。
+- 名前: 読む・書く・一覧・有無・削除の最小の組です。動詞は既存の `read_text`・`read_bytes`・`write_text`（R-fs-05 の新しい綴り）・`list_dir`・`exists`・`remove` に `root_` を前置きした形で、引数名は主語が `root`、道筋が `path`（R-L0-30）、書く中身は `content`。どれもコピーを返す関数なので R-L0-04 の動詞の制約にはかかりません。`root_exists` は根の外を問われたときに黙って false にせず err にするため `Bool` を `Result` で包みます。
+- 根拠の L0 規則: R-L0-30、R-L0-15（両 target で同じ）、R-L0-47（信頼しない入力を既定で守る）。
+- (a) Go 1.24 `os.Root`（`OpenRoot`、`Root.Open`・`ReadFile`・`WriteFile`・`Remove`）、Rust `cap-std` の `Dir`、Linux `openat2(RESOLVE_BENEATH)`、WASI の preopen。シンボリックリンクは、Go が根の中に留まるものだけ辿るのに対し、ここでは辿りません（`RESOLVE_NO_SYMLINKS` と同じ）。辿るには `read_link` が要り、fs にはまだありません（R-fs-04）。
+- (b) wasm: 普通の fs 関数の上の Almide なので、両 target で同じ経路です。
+- (c) 外からの名前をつなぐのは LLM がいちばん書きやすい形です。根を開いて渡す形にすれば、`..` やリンクの検査を書き忘れても外には出ません。
+- (d) 追加のみ。既存の関数の意味は変わりません。
+- 残る穴: 検査は呼び出しの前に走るので、その間にディレクトリをリンクに差し替えられると競合します。閉じるには記述子ベースの解決（native の `openat2`、wasm の preopen）が要ります。プログラム全体の上限は `almide.toml` の `[permissions] fs`（docs/specs/effect-system.md）。
+- ゲート: `spec/wasm_cross/fs_root_escape.almd`（`..`・絶対パス・入れ子）、`tests/fs_scope_test.rs`（根の中のリンクが外を指すとき、両 target で同じ err）、`spec/stdlib/fs_root_test.almd`。
+- issue: #4022
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -116,7 +135,7 @@
 | `fs.read_bytes_raw_if_exists` | `effect fn read_bytes_raw_if_exists(path: String) -> Bytes?` | — | 撤去（→ `read_bytes_if_exists`） | R-fs-01・R-fs-03 |
 | `fs.fold_lines` | `effect fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> A` | OCaml `In_channel.fold_lines` / Kotlin `useLines` | 据え置き | — |
 | `fs.for_each_line` | `effect fn for_each_line(path: String, f: (String) -> Unit) -> Unit` | Kotlin `forEachLine` / Rust `lines()` | 据え置き | — |
-| `fs.fold_lines_range` | `effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | —（Almide 固有） | 据え置き | — |
+| `fs.fold_lines_range` | `effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | —（Almide 固有） | 意味変更（負の位置で abort） | R-L0-29、R-L0-46 |
 | `fs.fold_lines_chunked` | `effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` | —（Almide 固有。`@concurrent`） | 据え置き | — |
 | `fs.write` | `effect fn write(path: String, content: String) -> Unit` | Rust `fs::write` / Go `WriteFile` / Python `write_text` / Elixir `File.write` | 改名 → `write_text` | R-fs-05 |
 | `fs.write_bytes` | `effect fn write_bytes(path: String, bytes: List[Int]) -> Unit` | Python `write_bytes` / Kotlin `writeBytes` | 意味変更（`data: Bytes` にする） | R-fs-01 |
@@ -141,3 +160,10 @@
 | `fs.create_temp_file` | `effect fn create_temp_file(prefix: String) -> String` | Go `CreateTemp` / Python `mkstemp` | 据え置き | — |
 | `fs.create_temp_dir` | `effect fn create_temp_dir(prefix: String) -> String` | Go `MkdirTemp` / Python `mkdtemp` / Node `mkdtemp` | 据え置き | — |
 | `fs.append_bytes` | `effect fn append_bytes(path: String, data: Bytes) -> Unit`（案） | Kotlin `appendBytes` / Python `open("ab")` | 追加 | R-fs-05 |
+| `fs.open_root` | `effect fn open_root(dir: String) -> FsRoot`（案） | Go `os.OpenRoot` / Rust cap-std `Dir::open_ambient_dir` | 追加 | R-fs-06 |
+| `fs.root_read_text` | `effect fn root_read_text(root: FsRoot, path: String) -> String`（案） | Go `Root.ReadFile` | 追加 | R-fs-06 |
+| `fs.root_read_bytes` | `effect fn root_read_bytes(root: FsRoot, path: String) -> Bytes`（案） | Go `Root.ReadFile` | 追加 | R-fs-06 |
+| `fs.root_write_text` | `effect fn root_write_text(root: FsRoot, path: String, content: String) -> Unit`（案） | Go `Root.WriteFile` | 追加 | R-fs-06 |
+| `fs.root_list_dir` | `effect fn root_list_dir(root: FsRoot, path: String) -> List[String]`（案） | Go `Root.Open` + `ReadDir` | 追加 | R-fs-06 |
+| `fs.root_exists` | `effect fn root_exists(root: FsRoot, path: String) -> Bool`（案） | Go `Root.Stat` | 追加 | R-fs-06 |
+| `fs.root_remove` | `effect fn root_remove(root: FsRoot, path: String) -> Unit`（案） | Go `Root.Remove` | 追加 | R-fs-06 |

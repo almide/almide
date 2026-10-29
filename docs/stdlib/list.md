@@ -28,20 +28,7 @@ fn main() -> Unit = {
 some(20)
 ```
 
-### `list.get_or(xs: List[A], i: Int, default: A) -> A`
-
-Get the element at index i, or return a default value.
-
-```almd run
-fn main() -> Unit = {
-  println("${list.get_or([1, 2], 5, 0)}")
-}
-```
-```output
-0
-```
-
-### `list.set(xs: List[A], i: Int, val: A) -> List[A]`
+### `list.set(xs: List[A], i: Int, x: A) -> List[A]`
 
 Return a new list with the element at index i replaced.
 
@@ -140,7 +127,7 @@ fn main() -> Unit = {
 [(1, "a"), (2, "b")]
 ```
 
-### `list.flatten(xss: List[List[T]]) -> List[T]`
+### `list.flatten(xs: List[List[A]]) -> List[A]`
 
 Flatten a list of lists into a single list.
 
@@ -545,7 +532,7 @@ fn main() -> Unit = {
 [2, 3, 4]
 ```
 
-### `list.insert(xs: List[A], i: Int, val: A) -> List[A]`
+### `list.insert(xs: List[A], i: Int, x: A) -> List[A]`
 
 Insert an element at index i, shifting elements right.
 
@@ -597,7 +584,7 @@ fn main() -> Unit = {
 [1, 20, 3]
 ```
 
-### `list.repeat(val: A, n: Int) -> List[A]`
+### `list.repeat(x: A, n: Int) -> List[A]`
 
 Create a list with a value repeated n times.
 
@@ -634,19 +621,6 @@ fn main() -> Unit = {
 ```
 ```output
 [1, 0, 2, 0, 3]
-```
-
-### `list.windows(xs: List[A], n: Int) -> List[List[A]]`
-
-Return sliding windows of size n.
-
-```almd run
-fn main() -> Unit = {
-  println("${list.windows([1, 2, 3, 4], 2)}")
-}
-```
-```output
-[[1, 2], [2, 3], [3, 4]]
 ```
 
 ### `list.dedup(xs: List[A]) -> List[A]`
@@ -732,18 +706,6 @@ Remove duplicates by key function, preserving first occurrence.
 fn main() -> Unit = {
   let firsts = list.unique_by(["aa", "ab", "ba"], (s) => string.get(s, 0))
   println("${firsts}")
-}
-```
-
-### `list.shuffle(xs: List[A]) -> List[A]`
-
-Return a randomly shuffled copy of the list.
-
-```almd check
-fn main() -> Unit = {
-  let shuffled = list.shuffle([1, 2, 3, 4])
-  println("${list.len(shuffled)}")
-  println("${list.sort(shuffled)}")
 }
 ```
 
@@ -847,7 +809,7 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (67 functions)
+## Signature index (74 functions)
 
 ```
 // Element count; 0 for an empty list.
@@ -862,13 +824,9 @@ list.length(xs: List[A]) -> Int   (deprecated — use list.len)
 // @since 0.5.0 or earlier
 list.get(xs: List[A], i: Int) -> Option[A]
 
-// Element at i, or default when out of range.
+// Copy with slot i = x; no-op if i out of range.
 // @since 0.5.0 or earlier
-list.get_or(xs: List[A], i: Int, default: A) -> A
-
-// Copy with slot i = val; no-op if i out of range.
-// @since 0.5.0 or earlier
-list.set(xs: List[A], i: Int, val: A) -> List[A]
+list.set(xs: List[A], i: Int, x: A) -> List[A]
 
 // Copy with i and j swapped; no-op if either OOB.
 // @since 0.5.0 or earlier
@@ -896,19 +854,15 @@ list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
 
 // Inner lists concatenated in order.
 // @since 0.5.0 or earlier
-list.flatten(xss: List[List[T]]) -> List[T]
+list.flatten(xs: List[List[A]]) -> List[A]
 
-// First n elements; all if n >= len or n < 0.
+// First n elements; all if n >= len, [] if n < 0.
 // @since 0.5.0 or earlier
 list.take(xs: List[A], n: Int) -> List[A]
 
-// All but the first n; [] if n >= len or n < 0.
+// All but the first n; [] if n >= len, all if n < 0.
 // @since 0.5.0 or earlier
 list.drop(xs: List[A], n: Int) -> List[A]
-
-// All but the first element; [] when empty.
-// @since 0.16.5 or earlier
-list.tail(xs: List[A]) -> List[A]
 
 // Duplicates removed; first occurrences kept.
 // @since 0.5.0 or earlier
@@ -922,17 +876,17 @@ list.index_of(xs: List[A], x: A) -> Option[Int]
 // @since 0.5.0 or earlier
 list.last(xs: List[A]) -> Option[A]
 
-// Runs of n, last may be short; n = 0 aborts.
+// Runs of n, last may be short; n <= 0 aborts.
 // @since 0.5.0 or earlier
 list.chunk(xs: List[A], n: Int) -> List[List[A]]
 
-// Sum; 0 when empty; wraps on overflow.
+// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
 // @since 0.5.0 or earlier
-list.sum(xs: List[Int]) -> Int
+list.sum(xs: List[A]) -> A
 
-// Product; 1 when empty; wraps on overflow.
+// Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
 // @since 0.5.0 or earlier
-list.product(xs: List[Int]) -> Int
+list.product(xs: List[A]) -> A
 
 // Head element, or none when empty.
 // @since 0.5.0 or earlier
@@ -950,9 +904,9 @@ list.min(xs: List[A]) -> Option[A]
 // @since 0.5.0 or earlier
 list.max(xs: List[A]) -> Option[A]
 
-// Strings joined by sep; empty string for [].
+// The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
 // @since 0.5.0 or earlier
-list.join(xs: List[String], sep: String) -> String
+list.join(xs: List[T], sep: T) -> T
 
 // f applied to each element, in order.
 // @since 0.5.0 or earlier
@@ -1038,53 +992,45 @@ list.unique_by(xs: List[A], f: (A) -> K) -> List[A]
 // @since 0.5.0 or earlier
 list.range(start: Int, end: Int) -> List[Int]
 
-// Indices start..<end, clamped; [] if start >= end.
+// Indices start..<end, each clamped to 0..len; [] if start >= end.
 // @since 0.5.0 or earlier
 list.slice(xs: List[A], start: Int, end: Int) -> List[A]
 
-// Copy with val at i; i >= len or i < 0 appends.
+// Copy with x at i; i >= len or i < 0 appends.
 // @since 0.5.0 or earlier
-list.insert(xs: List[A], i: Int, val: A) -> List[A]
+list.insert(xs: List[A], i: Int, x: A) -> List[A]
 
 // Copy without slot i; no-op if i out of range.
 // @since 0.5.0 or earlier
 list.remove_at(xs: List[A], i: Int) -> List[A]
 
-// n copies of val; [] for n <= 0.
+// n copies of x; [] for n <= 0.
 // @since 0.5.0 or earlier
-list.repeat(val: A, n: Int) -> List[A]
+list.repeat(x: A, n: Int) -> List[A]
 
 // sep between adjacent elements.
 // @since 0.5.0 or earlier
 list.intersperse(xs: List[A], sep: A) -> List[A]
 
-// All n-long runs; [] if n > len; n = 0 aborts.
-// @since 0.5.0 or earlier
-list.windows(xs: List[A], n: Int) -> List[List[A]]
-
 // Adjacent equal runs collapsed; not global.
 // @since 0.5.0 or earlier
 list.dedup(xs: List[A]) -> List[A]
 
-// Last n elements; all if n >= len or n < 0.
+// Last n elements; all if n >= len, [] if n < 0.
 // @since 0.7.0 or earlier
 list.take_end(xs: List[A], n: Int) -> List[A]
 
-// All but the last n; [] if n >= len or n < 0.
+// All but the last n; [] if n >= len, all if n < 0.
 // @since 0.7.0 or earlier
 list.drop_end(xs: List[A], n: Int) -> List[A]
 
-// Random permutation; unseeded, differs per run.
-// @since 0.7.0 or earlier
-list.shuffle(xs: List[A]) -> List[A]
-
-// All n-long runs; [] if n > len; n = 0 aborts.
+// All n-long runs; [] if n > len; n <= 0 aborts.
 // @since 0.7.0 or earlier
 list.window(xs: List[A], n: Int) -> List[List[A]]
 
-// Index of target in ascending xs, or none.
+// Index of target in xs sorted ascending (list.sort's order), or none.
 // @since 0.14.6 or earlier
-list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+list.binary_search(xs: List[A], target: A) -> Option[Int]
 
 // Appends x to xs in place.
 // @since 0.9.3 or earlier
@@ -1102,21 +1048,65 @@ list.pop(mut xs: List[A]) -> Option[A]
 // @since 0.9.3 or earlier
 list.clear(mut xs: List[A]) -> Unit
 
-// n + 1; bundled-dispatch smoke fn.
+// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 // @since 0.14.6 or earlier
-list.bundled_probe(n: Int) -> Int
-
-// (take n, drop n); n past the end gives (xs, []).
-// @since 0.14.6 or earlier
-list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
+list.split_at(xs: List[A], n: Int) -> (List[A], List[A])
 
 // [seed, f(seed), ...] of length n; [] if n <= 0.
 // @since 0.14.6 or earlier
-list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
+list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]
 
 // The first some that f gives, or none; f is not called after the hit.
 // @since unreleased
 list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]
+
+// An empty list; the same value as [].
+// @since unreleased
+list.new() -> List[A]
+
+// xs itself; the Container constructor from a list.
+// @since unreleased
+list.from_list(xs: List[A]) -> List[A]
+
+// xs itself; the Container view as a list.
+// @since unreleased
+list.to_list(xs: List[A]) -> List[A]
+
+// Stable sort by cmp: negative puts a first, 0 keeps input order.
+// @since unreleased
+list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]
+
+// Element with the least key f(x); the first on ties; f runs once per x.
+// @since unreleased
+list.min_by(xs: List[A], f: (A) -> K) -> Option[A]
+
+// Element with the greatest key f(x); the first on ties; f runs once per x.
+// @since unreleased
+list.max_by(xs: List[A], f: (A) -> K) -> Option[A]
+
+// Least element by cmp; the first on ties; none when empty.
+// @since unreleased
+list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Greatest element by cmp; the first on ties; none when empty.
+// @since unreleased
+list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Index of target among keys f(x) of xs sorted by key, or none.
+// @since unreleased
+list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Option[Int]
+
+// Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+// @since unreleased
+list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]
+
+// (firsts, seconds) of a list of pairs; the inverse of zip.
+// @since unreleased
+list.unzip(xs: List[(A, B)]) -> (List[A], List[B])
+
+// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
+// @since unreleased
+list.range_step(start: Int, end: Int, step: Int) -> List[Int]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

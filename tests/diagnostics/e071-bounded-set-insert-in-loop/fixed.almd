@@ -1,0 +1,9 @@
+// ALS-B4: insert outside the loop; the loop is not needed for one element.
+@bounded
+fn fill() -> Int = {
+  var s: Set[Int] = set.new()
+  s = set.insert(s, 2)
+  set.len(s)
+}
+
+fn main() -> Unit = println("${fill()}")

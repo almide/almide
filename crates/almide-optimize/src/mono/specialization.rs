@@ -16,6 +16,7 @@ pub(super) fn specialize_function(
     bindings: &HashMap<String, Ty>,
     vt: &mut VarTable,
     globals: &std::collections::HashSet<VarId>,
+    operator_requirements: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
 ) -> IrFunction {
     // Phase 1: Collect all VarIds referenced in the original function
     let mut old_ids = Vec::new();
@@ -55,6 +56,9 @@ pub(super) fn specialize_function(
     // Phase 4: Clone body, substitute types, and remap VarIds
     let mut body = orig.body.clone();
     substitute_expr_types(&mut body, bindings);
+    if !operator_requirements.is_empty() {
+        lower_requirement_operators(&mut body, operator_requirements);
+    }
     remap_expr_varids(&mut body, &remap);
 
     // Phase 5: rename self-recursive `Named { orig.name }` calls in the
@@ -68,8 +72,13 @@ pub(super) fn specialize_function(
     // definition, the module-call rewriter, top-level mono's rewrite_calls —
     // agrees on the identifier spelling. The instance is named in the
     // compiler's `__almd_mono` space, which no user fn can spell (#3492).
+    // Only a self-call at THIS instance's types is this instance: `alt(b, a)`
+    // inside `alt[A, B]` asks for `alt[B, A]`, which discovery finds and
+    // specializes once the call keeps its generic name (#4287). Renaming it
+    // too kept an ill-typed call (wasm E082, rustc E0308).
     let spec_name = almide_ir::mono_instance_name(orig.name.as_str(), suffix);
-    rename_named_calls(&mut body, orig.name.as_str(), &spec_name);
+    let param_tys: Vec<Ty> = params.iter().map(|p| p.ty.clone()).collect();
+    rename_named_calls(&mut body, orig.name.as_str(), &spec_name, &param_tys);
 
     IrFunction {
         name: spec_name.into(),
@@ -97,25 +106,107 @@ pub(super) fn specialize_function(
     }
 }
 
+// ── Operators on a bound conforming type (#4099) ───────────────
+
+/// The requirement method an arithmetic `BinOp` stands for.
+fn requirement_method(op: BinOp) -> Option<&'static str> {
+    Some(match op {
+        BinOp::AddInt | BinOp::AddFloat => "add",
+        BinOp::SubInt | BinOp::SubFloat => "sub",
+        BinOp::MulInt | BinOp::MulFloat => "mul",
+        BinOp::DivInt | BinOp::DivFloat => "div",
+        BinOp::ModInt | BinOp::ModFloat => "rem",
+        _ => return None,
+    })
+}
+
+/// The requirement function of `method` on the (now concrete) type `ty`.
+fn operator_requirement_target(
+    ty: &Ty, method: &str,
+    table: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
+) -> Option<CallTarget> {
+    let Ty::Named(name, _) = ty else { return None };
+    let m = almide_base::intern::sym(method);
+    table.get(&(*name, m)).cloned().or_else(|| {
+        let bare = name.as_str().rsplit_once('.').map(|(_, b)| b)?;
+        table.get(&(almide_base::intern::sym(bare), m)).cloned()
+    })
+}
+
+/// A generic body's operator on a type parameter lowered to a `BinOp` /
+/// `UnOp`, since nothing about `T` named a function. Once `T` is bound to a
+/// declared type conforming to the operator's protocol (`BigInt: Numeric`),
+/// the operator is that type's requirement — the call lowering gives the
+/// same operator on a concrete `BigInt` (R-bigint-04): `a + b` is
+/// `bigint.add(a, b)`, `a < b` is `bigint.compare(a, b) < 0`, `-a` is
+/// `bigint.neg(a)`. `==` stays: equality is structural on every type.
+fn lower_requirement_operators(
+    expr: &mut IrExpr,
+    table: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
+) {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    struct Lower<'a> { table: &'a HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget> }
+    impl IrMutVisitor for Lower<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let span = expr.span;
+            match &mut expr.kind {
+                IrExprKind::BinOp { op, left, right } => {
+                    if let Some(method) = requirement_method(*op) {
+                        let Some(target) = operator_requirement_target(&left.ty, method, self.table) else { return };
+                        let (l, r) = (std::mem::take(&mut **left), std::mem::take(&mut **right));
+                        expr.kind = IrExprKind::Call { target, args: vec![l, r], type_args: vec![] };
+                    } else if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte) {
+                        let Some(target) = operator_requirement_target(&left.ty, "compare", self.table) else { return };
+                        let (l, r) = (std::mem::take(&mut **left), std::mem::take(&mut **right));
+                        **left = IrExpr {
+                            kind: IrExprKind::Call { target, args: vec![l, r], type_args: vec![] },
+                            ty: Ty::Int, span, def_id: None,
+                        };
+                        **right = IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span, def_id: None };
+                    }
+                }
+                IrExprKind::UnOp { op: UnOp::NegInt | UnOp::NegFloat, operand } => {
+                    let Some(target) = operator_requirement_target(&operand.ty, "neg", self.table) else { return };
+                    let a = std::mem::take(&mut **operand);
+                    expr.kind = IrExprKind::Call { target, args: vec![a], type_args: vec![] };
+                }
+                _ => {}
+            }
+        }
+    }
+    Lower { table }.visit_expr_mut(expr);
+}
+
 // ── Self-recursive Named rename ────────────────────────────────
 
-fn rename_named_calls(expr: &mut IrExpr, from: &str, to: &str) {
+fn rename_named_calls(expr: &mut IrExpr, from: &str, to: &str, param_tys: &[Ty]) {
     use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
     use almide_base::intern::sym;
 
-    struct Renamer<'a> { from: &'a str, to: &'a str }
+    struct Renamer<'a> { from: &'a str, to: &'a str, param_tys: &'a [Ty] }
     impl<'a> IrMutVisitor for Renamer<'a> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
-            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &mut expr.kind {
-                if name.as_str() == self.from {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind {
+                if name.as_str() == self.from && !at_other_types(args, self.param_tys) {
                     *name = sym(self.to);
                 }
             }
         }
     }
 
-    Renamer { from, to }.visit_expr_mut(expr);
+    Renamer { from, to, param_tys }.visit_expr_mut(expr);
+}
+
+/// A self-call whose concrete argument types differ from the instance's
+/// parameter types: a call to ANOTHER instance of the same generic. An
+/// argument type still open (a type variable, `Unknown`) proves nothing and
+/// keeps the call on this instance, as before.
+fn at_other_types(args: &[IrExpr], param_tys: &[Ty]) -> bool {
+    let open = |t: &Ty| t.any_child_recursive(&|c| matches!(c, Ty::TypeVar(_) | Ty::Unknown));
+    args.len() == param_tys.len()
+        && args.iter().zip(param_tys).any(|(a, p)| !open(&a.ty) && !open(p) && a.ty != *p)
 }
 
 /// Re-dispatch a type-dispatched `BinOp` when a generic binding
@@ -342,37 +433,33 @@ fn substitute_match_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
 
 fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
     let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
-    // A protocol method specialized to a concrete type, rewritten to the
-    // `Named` + receiver-as-argument-0 form (see below). Collected first
-    // because it replaces `target` and pushes onto `args`.
-    let mut specialized: Option<(almide_base::intern::Sym, IrExpr)> = None;
+    // A protocol requirement reached through a type variable, rewritten once
+    // the variable is concrete: `T.show` → `Dog.show` (a convention method,
+    // `Named`), `S.__trunc` → `float32.__trunc` (a built-in type's module
+    // function, `Module`). `Some(receiver)` for the method form, whose
+    // receiver becomes argument 0; `None` for the receiver-less `A.zero()`.
+    let mut specialized: Option<(CallTarget, Option<IrExpr>)> = None;
     match target {
         CallTarget::Method { object, method } => {
+            let was_generic = matches!(object.ty, Ty::TypeVar(_));
             substitute_expr_types(object, bindings);
-            // Rewrite protocol method calls: T.show → Dog.show when T → Dog
-            if let Some(dot_pos) = method.find('.') {
-                let tv_name = &method[..dot_pos];
-                if let Some(concrete_ty) = bindings.get(tv_name) {
-                    if let Some(concrete_name) = ty_to_name(concrete_ty) {
-                        let method_name = &method[dot_pos + 1..];
-                        // The DEFINITION of a convention method is named with
-                        // the BARE type and carries its module in
-                        // `module_origin`, and only the `Named` path
-                        // re-attaches that module. Left as a qualified
-                        // `Method`, this flattened to a call to
-                        // `lib_P_encode` against a definition called
-                        // `almide_rt_lib_P_encode`, so a `[T: Codec]` bound
-                        // could not be applied to a type from another module
-                        // (#1087).
-                        let bare = concrete_name
-                            .rsplit_once('.')
-                            .map_or(concrete_name.as_str(), |(_, t)| t);
-                        specialized = Some((
-                            almide_base::intern::sym(&format!("{}.{}", bare, method_name)),
-                            (**object).clone(),
-                        ));
-                    }
+            if let Some(t) = requirement_target(method.as_str(), bindings) {
+                specialized = Some((t, Some((**object).clone())));
+            } else if was_generic && !method.contains('.') {
+                // A bare method on a receiver that was a type variable and is
+                // now a built-in type: the module call every leg understands
+                // (codegen's Rust-only UFCS fallback is not on the wasm leg).
+                if let Some(module) = object.ty.stdlib_module()
+                    .filter(|m| almide_lang::stdlib_info::resolve_ufcs_candidates(method.as_str()).contains(m))
+                {
+                    let t = CallTarget::Module { module: almide_base::intern::sym(module), func: *method, def_id: None };
+                    specialized = Some((t, Some((**object).clone())));
                 }
+            }
+        }
+        CallTarget::Named { name } => {
+            if let Some(t) = requirement_target(name.as_str(), bindings) {
+                specialized = Some((t, None));
             }
         }
         CallTarget::Computed { callee: object } => {
@@ -380,11 +467,39 @@ fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         }
         _ => {}
     }
-    if let Some((name, receiver)) = specialized {
-        *target = CallTarget::Named { name };
-        args.insert(0, receiver);
+    if let Some((t, receiver)) = specialized {
+        *target = t;
+        if let Some(r) = receiver { args.insert(0, r); }
     }
     for a in args { substitute_expr_types(a, bindings); }
+}
+
+/// The concrete call a `TV.method` requirement key becomes when `TV` is bound.
+/// A built-in or stdlib-declared type's requirement is its stdlib module's
+/// function of that name (`Ty::owning_module`: `int8.__trunc`, `bigint.add`);
+/// a user-declared
+/// type's is its convention method `Type.method`. The DEFINITION of a
+/// convention method is named with the BARE type and carries its module in
+/// `module_origin`, and only the `Named` path re-attaches that module (#1087).
+fn requirement_target(key: &str, bindings: &HashMap<String, Ty>) -> Option<CallTarget> {
+    let (tv_name, method_name) = key.split_once('.')?;
+    let concrete_ty = bindings.get(tv_name)?;
+    if let Some(module) = concrete_ty.owning_module() {
+        // A per-type requirement (`__self_close`, which several types of one
+        // module satisfy) names the type: `net.__tcp_listener_close`.
+        let func = match ty_to_name(concrete_ty) {
+            Some(n) => almide_lang::stdlib_info::requirement_fn_name(&n, method_name),
+            None => method_name.to_string(),
+        };
+        return Some(CallTarget::Module {
+            module: almide_base::intern::sym(module),
+            func: almide_base::intern::sym(&func),
+            def_id: None,
+        });
+    }
+    let concrete_name = ty_to_name(concrete_ty)?;
+    let bare = concrete_name.rsplit_once('.').map_or(concrete_name.as_str(), |(_, t)| t);
+    Some(CallTarget::Named { name: almide_base::intern::sym(&format!("{}.{}", bare, method_name)) })
 }
 
 fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {

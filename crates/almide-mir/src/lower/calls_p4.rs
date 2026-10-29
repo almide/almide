@@ -241,7 +241,7 @@ impl LowerCtx {
 
     /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
     /// #852): which of the four admitted `Call` shapes an operand call is — the `prim`
-    /// module floor, the identity int widening, the `float.from_int` sitofp prim, or the
+    /// module floor, the identity int widening, the `float.__from_int` sitofp prim, or the
     /// general scalar-result call. The arm ORDER is load-bearing (the `prim` module arm and
     /// the two predicate arms all precede the general `!is_heap_ty` admission) and is
     /// preserved exactly; a `Call` matching an earlier arm that then yields None stays None
@@ -257,7 +257,7 @@ impl LowerCtx {
             {
                 self.lower_prim_call(func.as_str(), args).ok().flatten()
             }
-            // A sized-int WIDENING conversion (`int8.to_int64(x)` …) — the IDENTITY on
+            // A sized-int WIDENING conversion (`int.__to_int64(x)` …) — the IDENTITY on
             // the canonical-i64 slot (see `identity_int_widening_call`): forward the
             // operand's value, no call, no ownership. The caps counter skips the node
             // by the same predicate, so `mir == ir` holds by construction.
@@ -267,7 +267,7 @@ impl LowerCtx {
                 let operand = crate::lower::identity_int_widening_call(expr)?;
                 self.lower_scalar_value(operand)
             }
-            // `float.from_int(x)` — the single-instruction sitofp floor (#806 step 2):
+            // `float.__from_int(x)` — the single-instruction sitofp floor (#806 step 2):
             // one `PrimKind::F64FromInt`, no call, no ownership. The caps counter
             // skips the node by the same predicate, so `mir == ir` by construction.
             IrExprKind::Call { .. }
@@ -359,7 +359,11 @@ impl LowerCtx {
                 // A VARIANT (Option/Result) subject — execute via the tag-read value-match
                 // (ctor patterns are not `subj == lit`, so `desugar_match_to_if` can't reach
                 // them; the result would stay an unset 0 = a silent miscompile).
-                if is_heap_ty(&subject.ty) {
+                // A `String` subject is no variant: its literal arms desugar to the
+                // `subj == "lit"` chain below, the same string compare a scalar `if`
+                // lowers (a `match t.name { "heavy" => .. }` operand inside a real
+                // per-element `for` loop walled the whole loop on this route).
+                if is_heap_ty(&subject.ty) && !matches!(subject.ty, Ty::String) {
                     return self.try_lower_variant_value_match(subject, arms, &expr.ty);
                 }
                 // The desugared chain may be an `If` (literal arms) OR a `Block` (`{ let x =
@@ -400,7 +404,8 @@ impl LowerCtx {
                         let zero = self.fresh_value();
                         self.ops.push(Op::ConstInt { dst: zero, value: 0 });
                         self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: zero, b: x });
-                        Some(dst)
+                        // #4163: a sized int's negation wraps at its width, as binary `-` does.
+                        Some(self.wrap_to_declared_width(dst, &operand.ty))
                     }
                     // Float negation: the existing `f64.neg` prim (the i64-uniform value
                     // holds the f64 bits; the prim reinterprets around `f64.neg` — sign-bit
@@ -637,15 +642,15 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use almide_ir::BinOp;
         // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
-        // the self-hosted pow stdlib, exactly as if the user wrote `math.fpow(a, b)` /
-        // `math.pow(a, b)`. `PowFloat` → `math.fpow` (the bit-exact libm transcription),
-        // `PowInt` → `math.pow` (exponentiation-by-squaring). Both callees live in a
+        // the self-hosted pow stdlib (`math.__fpow(a, b)` / `int.pow(a, b)`).
+        // `PowFloat` → `math.__fpow` (the bit-exact libm transcription),
+        // `PowInt` → `int.pow` (exponentiation-by-squaring). Both callees live in a
         // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
         // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
         // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
         let pow_callee = match op {
-            BinOp::PowFloat => Some("math.fpow"),
-            BinOp::PowInt => Some("math.pow"),
+            BinOp::PowFloat => Some("math.__fpow"),
+            BinOp::PowInt => Some("int.pow"),
             _ => None,
         };
         if let Some(callee) = pow_callee {
@@ -659,12 +664,12 @@ impl LowerCtx {
                 args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
                 result: Some(repr),
             });
-            // `math.pow` computes in the i64 carrier every integer rides here, so a
+            // `int.pow` computes in the i64 carrier every integer rides here, so a
             // NARROW result type (`Int32`, `UInt8`, …) has to come back to its declared
             // width — the same wrap `*` and `+` already apply through `narrow_wrap`.
             // Without it `let a: Int32 = 999997` made `a ^ 2` print the un-narrowed
             // `999994000009` on wasm against native's `-733379959`, while `a * a` at the
-            // very same type agreed on both legs. `math.fpow` returns a float and has no
+            // very same type agreed on both legs. `math.__fpow` returns a float and has no
             // declared-width notion, so only the integer operator wraps.
             if matches!(op, BinOp::PowInt) {
                 return Some(self.wrap_to_declared_width(dst, &expr.ty));

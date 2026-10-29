@@ -51,5 +51,5 @@ test "Matrix[Float] and Matrix unify in let" {
 test "Matrix[Float] arith returns Matrix[Float] at type level" {
   let a: Matrix[Float] = matrix.ones(3, 3)
   let b: Matrix[Float] = matrix.scale(a, 0.5)
-  assert_eq(matrix.get(b, 0, 0), 0.5)
+  assert_eq(matrix.get(b, 0, 0), some(0.5))
 }

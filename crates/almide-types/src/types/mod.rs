@@ -74,7 +74,9 @@ pub enum Ty {
     Unit,
     Bytes,
     Matrix,
-    /// Raw pointer for C FFI (`*mut u8`). Used only in @extern(c, ...) declarations.
+    /// The opaque foreign token `Handle` (ADR-0031 D1): `*mut u8` on native,
+    /// an address scalar on wasm. Only passed back to an `@extern` fn; no
+    /// user-reachable fn reads or writes through it or turns it into an Int.
     RawPtr,
     /// Parameterized type constructor: List[T], Option[T], Result[T,E], Map[K,V], Set[T], etc.
     /// Phase 4 of HKT Foundation — unifies all container types.
@@ -252,6 +254,48 @@ impl Ty {
         self.display_leaf_sized_numeric().or_else(|| self.display_leaf_core())
     }
 
+    /// The stdlib module that owns a built-in type's functions: `x.len()` on a
+    /// `List` is `list.len(x)`, and a protocol requirement reached through a
+    /// type variable bound to `Int8` is `int8.<requirement>`. The one table
+    /// every UFCS resolver (checker, lowering, codegen) and the monomorphizer's
+    /// protocol dispatch read, so a receiver type resolves to the same module
+    /// on every leg.
+    pub fn stdlib_module(&self) -> Option<&'static str> {
+        Some(match self {
+            Ty::Applied(TypeConstructorId::List, _) => "list",
+            Ty::Applied(TypeConstructorId::Map, _) => "map",
+            Ty::Applied(TypeConstructorId::Set, _) => "set",
+            Ty::Applied(TypeConstructorId::Result, _) => "result",
+            Ty::Applied(TypeConstructorId::Option, _) => "option",
+            Ty::String => "string",
+            Ty::Bytes => "bytes",
+            Ty::Int => "int",
+            Ty::Float => "float",
+            Ty::Int8 => "int8",
+            Ty::Int16 => "int16",
+            Ty::Int32 => "int32",
+            Ty::Int64 => "int64",
+            Ty::UInt8 => "uint8",
+            Ty::UInt16 => "uint16",
+            Ty::UInt32 => "uint32",
+            Ty::UInt64 => "uint64",
+            Ty::Float32 => "float32",
+            Ty::Float64 => "float64",
+            _ => return None,
+        })
+    }
+
+    /// The stdlib module whose functions are this type's protocol
+    /// requirements: a built-in type's (`stdlib_module`), or the module that
+    /// declares a stdlib-owned nominal type (`BigInt` → `bigint`). A user
+    /// type has none: its requirements are convention methods (`fn T.m`).
+    pub fn owning_module(&self) -> Option<&'static str> {
+        self.stdlib_module().or_else(|| match self {
+            Ty::Named(n, _) => crate::stdlib_info::stdlib_owned_type_owner(n.as_str()),
+            _ => None,
+        })
+    }
+
     /// `display_leaf` sub-case: the sized integer/float family (Int8..UInt64,
     /// Float32, Float64).
     fn display_leaf_sized_numeric(&self) -> Option<&'static str> {
@@ -281,7 +325,7 @@ impl Ty {
             Ty::Unit => "Unit",
             Ty::Bytes => "Bytes",
             Ty::Matrix => "Matrix",
-            Ty::RawPtr => "RawPtr",
+            Ty::RawPtr => "Handle",
             Ty::Never => "Never",
             Ty::Unknown => "Unknown",
             _ => return None,
@@ -627,7 +671,7 @@ impl Ty {
             Ty::Unit => Some("Unit"),
             Ty::Bytes => Some("Bytes"),
             Ty::Matrix => Some("Matrix"),
-            Ty::RawPtr => Some("RawPtr"),
+            Ty::RawPtr => Some("Handle"),
             Ty::Applied(id, _) => Some(match id {
                 TypeConstructorId::List => "List",
                 TypeConstructorId::Option => "Option",

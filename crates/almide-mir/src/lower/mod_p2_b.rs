@@ -287,7 +287,7 @@ pub(crate) struct LowerCtx {
     /// slot, then the tuple, then the list) — a flat [`Op::DropListStr`] would leak each tuple's payloads.
     /// Populated when a `List[(String,Value)]` concat is materialized via `__list_concat_rc`.
     str_value_elem_lists: HashSet<ValueId>,
-    /// MIR values that are a `List[(String, String)]` (the `map.entries` / svg render_attrs shape) —
+    /// MIR values that are a `List[(String, String)]` (the `map.to_list` / svg render_attrs shape) —
     /// element slots hold owned (String, String) TUPLE blocks. A scope-end drop emits
     /// [`Op::DropListStrStr`] (`$__drop_list_str_str`: per tuple, rc_dec BOTH String slots, then the
     /// tuple, then the list). The (String,String) counterpart of `str_value_elem_lists`.

@@ -223,7 +223,7 @@ result.to_err_option(r: Result[A, E]) -> Option[E]
 
 // (ok values, err values), each in list order.
 // @since 0.9.1 or earlier
-result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])
+result.partition(xs: List[Result[A, E]]) -> (List[A], List[E])
 
 // Inner result of ok(inner); outer err kept.
 // @since 0.15.0 or earlier
@@ -241,9 +241,9 @@ result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
 // @since 0.15.0 or earlier
 result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]
 
-// err(err_val) if pred fails on ok; err kept.
+// err(err_val) if f fails on ok; err kept.
 // @since 0.15.0 or earlier
-result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]
+result.filter(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

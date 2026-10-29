@@ -42,6 +42,7 @@
   (import "wasi_snapshot_preview1" "path_remove_directory" (func $path_remove_directory (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_unlink_file" (func $path_unlink_file (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_rename" (func $path_rename (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "random_get" (func $random_get (param i32 i32) (result i32)))
   (import "env" "memory" (memory 1))
   (import "shim" "plen" (global $plen (mut i32)))
   (import "shim" "ppos" (global $ppos (mut i32)))
@@ -218,18 +219,125 @@
     (call $stage (local.get $m) (local.get $l))
     (call $pack (i32.const 1) (local.get $l)))
 
+  ;; C-418 (#4126, #4265): is code point cp one the escaper writes as an
+  ;; escape? The ranges of almide-base's ALMIDE_RT_ERRTEXT_ESCAPED, one line
+  ;; each as (lo, hi - lo): C0, DEL and C1, Cf + Zl + Zp of Unicode 16.0, the
+  ;; Tags block. crates/almide-base/tests/err_text.rs reads them back.
+  (func $esc_cp (param $cp i32) (result i32)
+    (block $yes
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x0)) (i32.const 0x1f)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x7f)) (i32.const 0x20)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xad)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x600)) (i32.const 0x5)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x61c)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x6dd)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x70f)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x890)) (i32.const 0x1)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x8e2)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x180e)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x200b)) (i32.const 0x4)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2028)) (i32.const 0x6)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2060)) (i32.const 0x4)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x2066)) (i32.const 0x9)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xfeff)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xfff9)) (i32.const 0x2)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x110bd)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x110cd)) (i32.const 0x0)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x13430)) (i32.const 0xf)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x1bca0)) (i32.const 0x3)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0x1d173)) (i32.const 0x7)))
+      (br_if $yes (i32.le_u (i32.sub (local.get $cp) (i32.const 0xe0000)) (i32.const 0x7f)))
+      (return (i32.const 0)))
+    (i32.const 1))
+
+  ;; C-418 (#4126): copy the UTF-8 text p[0..l) to w with every character
+  ;; `$esc_cp` names escaped — almide-base's err_text.rs, byte for byte:
+  ;; written `\n` `\r` `\t` `\0`, else `\u{<lowercase hex, no leading
+  ;; zeros>}`. Every other character (quote and backslash included) is copied
+  ;; as is. Answers the new end.
+  (func $put_esc (param $w i32) (param $p i32) (param $l i32) (result i32)
+    (local $i i32) (local $b i32) (local $n i32) (local $cp i32) (local $sh i32) (local $d i32)
+    (block $done (loop $next
+      (br_if $done (i32.ge_u (local.get $i) (local.get $l)))
+      (local.set $b (i32.load8_u (i32.add (local.get $p) (local.get $i))))
+      (if (i32.lt_u (local.get $b) (i32.const 0x80))
+        (then (local.set $n (i32.const 1)) (local.set $cp (local.get $b)))
+        (else (if (i32.lt_u (local.get $b) (i32.const 0xe0))
+          (then
+            (local.set $n (i32.const 2))
+            (local.set $cp (i32.or
+              (i32.shl (i32.and (local.get $b) (i32.const 0x1f)) (i32.const 6))
+              (i32.and (i32.load8_u offset=1 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)))))
+          (else (if (i32.lt_u (local.get $b) (i32.const 0xf0))
+            (then
+              (local.set $n (i32.const 3))
+              (local.set $cp (i32.or (i32.or
+                (i32.shl (i32.and (local.get $b) (i32.const 0x0f)) (i32.const 12))
+                (i32.shl (i32.and (i32.load8_u offset=1 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)) (i32.const 6)))
+                (i32.and (i32.load8_u offset=2 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)))))
+            (else
+              (local.set $n (i32.const 4))
+              (local.set $cp (i32.or (i32.or (i32.or
+                (i32.shl (i32.and (local.get $b) (i32.const 0x07)) (i32.const 18))
+                (i32.shl (i32.and (i32.load8_u offset=1 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)) (i32.const 12)))
+                (i32.shl (i32.and (i32.load8_u offset=2 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f)) (i32.const 6)))
+                (i32.and (i32.load8_u offset=3 (i32.add (local.get $p) (local.get $i))) (i32.const 0x3f))))))))))
+      ;; A truncated tail (never in a valid string) is copied as is (0x110000
+      ;; is past every code point, so no escape names it).
+      (if (i32.gt_u (i32.add (local.get $i) (local.get $n)) (local.get $l))
+        (then (local.set $n (i32.sub (local.get $l) (local.get $i))) (local.set $cp (i32.const 0x110000))))
+      (if (call $esc_cp (local.get $cp))
+        (then
+          (i32.store8 (local.get $w) (i32.const 92))
+          (local.set $d (i32.const 0))
+          (if (i32.eq (local.get $cp) (i32.const 10)) (then (local.set $d (i32.const 110))))
+          (if (i32.eq (local.get $cp) (i32.const 13)) (then (local.set $d (i32.const 114))))
+          (if (i32.eq (local.get $cp) (i32.const 9)) (then (local.set $d (i32.const 116))))
+          (if (i32.eqz (local.get $cp)) (then (local.set $d (i32.const 48))))
+          (if (local.get $d)
+            (then
+              (i32.store8 offset=1 (local.get $w) (local.get $d))
+              (local.set $w (i32.add (local.get $w) (i32.const 2))))
+            (else
+              (i32.store8 offset=1 (local.get $w) (i32.const 117))
+              (i32.store8 offset=2 (local.get $w) (i32.const 123))
+              (local.set $w (i32.add (local.get $w) (i32.const 3)))
+              (local.set $sh (i32.const 20))
+              (block $top (loop $skip
+                (br_if $top (i32.eqz (local.get $sh)))
+                (br_if $top (i32.shr_u (local.get $cp) (local.get $sh)))
+                (local.set $sh (i32.sub (local.get $sh) (i32.const 4)))
+                (br $skip)))
+              (block $hexed (loop $digit
+                (local.set $d (i32.and (i32.shr_u (local.get $cp) (local.get $sh)) (i32.const 15)))
+                (i32.store8 (local.get $w)
+                  (i32.add (local.get $d) (select (i32.const 48) (i32.const 87) (i32.lt_u (local.get $d) (i32.const 10)))))
+                (local.set $w (i32.add (local.get $w) (i32.const 1)))
+                (br_if $hexed (i32.eqz (local.get $sh)))
+                (local.set $sh (i32.sub (local.get $sh) (i32.const 4)))
+                (br $digit)))
+              (i32.store8 (local.get $w) (i32.const 125))
+              (local.set $w (i32.add (local.get $w) (i32.const 1))))))
+        (else (local.set $w (call $put (local.get $w) (i32.add (local.get $p) (local.get $i)) (local.get $n)))))
+      (local.set $i (i32.add (local.get $i) (local.get $n)))
+      (br $next)))
+    (local.get $w))
+
   ;; The message `$fail` answers, as (ptr, len) in the arena.
   (func $fail_text (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32)
                    (param $two i32) (param $tp i32) (param $tl i32) (result i32 i32)
     (local $np i32) (local $nl i32) (local $m i32) (local $w i32)
     (call $op_name (local.get $op)) (local.set $nl) (local.set $np)
-    (local.set $m (call $alloc (i32.add (i32.add (i32.add (local.get $nl) (local.get $al))
-                                                 (i32.add (local.get $bl) (local.get $tl)))
+    ;; An escaped byte grows at most 6x (`\u{1b}` for one byte, `\u{85}` for
+    ;; two, `\u{202e}` for three, `\u{e0041}` for four).
+    (local.set $m (call $alloc (i32.add (i32.add (i32.add (local.get $nl)
+                                                          (i32.mul (i32.add (local.get $al) (local.get $bl)) (i32.const 6)))
+                                                 (local.get $tl))
                                         (i32.const 10))))
     (local.set $w (call $put (local.get $m) (local.get $np) (local.get $nl)))
     (i32.store8 (local.get $w) (i32.const 40))
     (i32.store8 offset=1 (local.get $w) (i32.const 34))
-    (local.set $w (call $put (i32.add (local.get $w) (i32.const 2)) (local.get $a) (local.get $al)))
+    (local.set $w (call $put_esc (i32.add (local.get $w) (i32.const 2)) (local.get $a) (local.get $al)))
     (i32.store8 (local.get $w) (i32.const 34))
     (local.set $w (i32.add (local.get $w) (i32.const 1)))
     (if (local.get $two)
@@ -237,7 +345,7 @@
         (i32.store8 (local.get $w) (i32.const 44))
         (i32.store8 offset=1 (local.get $w) (i32.const 32))
         (i32.store8 offset=2 (local.get $w) (i32.const 34))
-        (local.set $w (call $put (i32.add (local.get $w) (i32.const 3)) (local.get $b) (local.get $bl)))
+        (local.set $w (call $put_esc (i32.add (local.get $w) (i32.const 3)) (local.get $b) (local.get $bl)))
         (i32.store8 (local.get $w) (i32.const 34))
         (local.set $w (i32.add (local.get $w) (i32.const 1)))))
     (i32.store8 (local.get $w) (i32.const 41))
@@ -317,7 +425,7 @@
       (then (return (i32.add (global.get $fsp) (i32.const 8192)) (global.get $cwd_len))))
     (i32.const 0) (i32.const 0))
 
-  ;; `$TMPDIR`, else "/tmp" (the self-hosted env.temp_dir's answer).
+  ;; `$TMPDIR`, else "/tmp" (the self-hosted fs.temp_dir's answer).
   (func $tmp (result i32 i32)
     (local $p i32) (local $l i32)
     (call $s_tmpdir) (call $env_get) (local.set $l) (local.set $p)
@@ -457,6 +565,12 @@
     (if (call $stat (local.get $p) (local.get $l) (i32.const 1)) (then (return (i32.const 0))))
     (i32.eq (call $ftype) (i32.const 3)))
 
+  ;; A directory itself, its symlink NOT followed: walk and glob descend only
+  ;; into these, so a symlinked directory is an entry, never a level (#4143).
+  (func $is_dir_nofollow (param $p i32) (param $l i32) (result i32)
+    (if (call $stat (local.get $p) (local.get $l) (i32.const 0)) (then (return (i32.const 0))))
+    (i32.eq (call $ftype) (i32.const 3)))
+
   ;; ── reading ────────────────────────────────────────────────────────────
 
   ;; One fd_read / fd_write slice: at most 64 KiB (#3206, the p1 shims'
@@ -466,16 +580,46 @@
 
   ;; The whole file at a guest path: (bytes, len, errno). A directory is
   ;; EISDIR (31), classified from the stat, not from fd_read's host-specific
-  ;; errno (the incumbent's #1368 rule).
-  (func $read_all (param $p i32) (param $l i32) (result i32 i32 i32)
-    (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32) (local $h i32)
-    (local $sz i32) (local $buf i32) (local $got i32) (local $n i32)
+  ;; errno (the incumbent's #1368 rule). `bounded` is the `fs.read_*`
+  ;; family's reader (#4201, almide-base fs_read_bounded.rs): anything the descriptor's stat calls neither a regular file nor
+  ;; a directory answers pseudo-errno 1001 (`Not a regular file`) and a size
+  ;; past 1 GiB pseudo-errno 1002 (`File too large ...`), the texts
+  ;; `$errno_text` spells after the WASI rows.
+  (func $read_all (param $p i32) (param $l i32) (param $bounded i32) (result i32 i32 i32)
+    (local $fd i32) (local $rp i32) (local $rl i32)
     (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
-    (local.set $e (call $path_open (local.get $fd) (i32.const 1) (local.get $rp) (local.get $rl)
+    (call $read_fd (local.get $fd) (local.get $rp) (local.get $rl) (i32.const 1) (local.get $bounded)))
+
+  ;; `$read_all` of `rp` under `fd`, its last component followed when `follow`.
+  (func $read_fd (param $fd i32) (param $rp i32) (param $rl i32) (param $follow i32) (param $bounded i32) (result i32 i32 i32)
+    (local $e i32) (local $h i32)
+    (local $sz i32) (local $buf i32) (local $got i32) (local $n i32)
+    ;; A bounded read stats the PATH first: wasmtime's p1 path_open ignores
+    ;; fdflags NONBLOCK and blocks on a FIFO with no writer (and the p2
+    ;; adapter honours it on the fd_read, answering EAGAIN for a regular
+    ;; file), so no fdflag is passed and a FIFO is refused before the open. The descriptor's own stat below
+    ;; judges again, so an entry swapped in after this stat is still refused
+    ;; (a FIFO swapped in between can only block the open, not grow memory).
+    (if (local.get $bounded)
+      (then
+        (if (i32.eqz (call $stat_at (local.get $fd) (local.get $rp) (local.get $rl) (local.get $follow)))
+          (then
+            ;; 7: an unfollowed symlink (a rooted read) — its open's own err.
+            (if (i32.and (i32.and (i32.ne (call $ftype) (i32.const 3)) (i32.ne (call $ftype) (i32.const 4)))
+                         (i32.ne (call $ftype) (i32.const 7)))
+              (then (return (i32.const 0) (i32.const 0) (i32.const 1001))))))))
+    (local.set $e (call $path_open (local.get $fd) (local.get $follow) (local.get $rp) (local.get $rl)
                                    (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (global.get $fsp)))
     (if (local.get $e) (then (return (i32.const 0) (i32.const 0) (local.get $e))))
     (local.set $h (i32.load (global.get $fsp)))
     (local.set $e (call $fd_filestat_get (local.get $h) (i32.add (global.get $fsp) (i32.const 64))))
+    (if (i32.and (local.get $bounded) (i32.eqz (local.get $e)))
+      (then
+        (if (i32.and (i32.ne (call $ftype) (i32.const 3)) (i32.ne (call $ftype) (i32.const 4)))
+          (then (local.set $e (i32.const 1001)))
+          (else
+            (if (i64.gt_u (i64.load offset=96 (global.get $fsp)) (i64.const 1073741824))
+              (then (local.set $e (i32.const 1002))))))))
     (if (i32.eqz (local.get $e))
       (then
         (if (i32.eq (call $ftype) (i32.const 3))
@@ -578,7 +722,9 @@
   ;; answers ok-none on ENOENT (the *_if_exists twins, C-215).
   (func $read_text_as (param $op i32) (param $a i32) (param $al i32) (param $mode i32) (param $absent_none i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32) (local $tp i32) (local $tl i32) (local $k i32)
-    (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
+    ;; The streaming walkers (51 / 52) stream natively: not the bounded reader.
+    (call $read_all (local.get $a) (local.get $al)
+                    (i32.and (i32.ne (local.get $op) (i32.const 51)) (i32.ne (local.get $op) (i32.const 52)))) (local.set $e) (local.set $l) (local.set $p)
     (if (local.get $e)
       (then
         (if (i32.and (local.get $absent_none) (i32.eq (local.get $e) (i32.const 44))) (then (return (call $none))))
@@ -631,15 +777,16 @@
   (func $op_read_lines_if_exists (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 1) (i32.const 1)))
 
-  ;; read_text_if_exists asks Path::exists first (a path whose parent is a
-  ;; file is absent too), then reads.
+  ;; read_text_if_exists: absence is the read's own ENOENT, as native and its
+  ;; byte and line twins classify it (C-215); a symlink loop or a file parent
+  ;; is the read's err, never absent (#4154).
   (func $op_read_text_if_exists (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (if (call $stat (local.get $a) (local.get $al) (i32.const 1)) (then (return (call $none))))
-    (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)))
+    (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 1)))
 
   (func $read_bytes_as (param $op i32) (param $a i32) (param $al i32) (param $absent_none i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32)
-    (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
+    ;; 61 (fold_lines_range) reads by range natively: not the bounded reader.
+    (call $read_all (local.get $a) (local.get $al) (i32.ne (local.get $op) (i32.const 61))) (local.set $e) (local.set $l) (local.set $p)
     (if (local.get $e)
       (then
         (if (i32.and (local.get $absent_none) (i32.eq (local.get $e) (i32.const 44))) (then (return (call $none))))
@@ -683,16 +830,6 @@
     (i64.store (local.get $o) (i64.load offset=96 (global.get $fsp)))
     (call $ok (local.get $o) (i32.const 8)))
 
-  (func $op_modified_at (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (local $e i32) (local $o i32)
-    (local.set $e (call $stat (local.get $a) (local.get $al) (i32.const 1)))
-    (if (local.get $e)
-      (then (return (call $fail_e (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
-                                  (i32.const 0) (local.get $e)))))
-    (local.set $o (call $alloc (i32.const 8)))
-    (i64.store (local.get $o) (call $mtime_secs))
-    (call $ok (local.get $o) (i32.const 8)))
-
   ;; fs.stat: [size, is_dir, is_file, modified] as i64 LE (host op 38).
   (func $op_stat (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (local $e i32) (local $o i32)
@@ -712,9 +849,16 @@
   ;; Open (oflags, fdflags) and write every byte: the errno, or -1 when the
   ;; host accepted zero bytes (Rust's WriteZero).
   (func $write_at (param $p i32) (param $l i32) (param $d i32) (param $dl i32) (param $oflags i32) (param $fdflags i32) (result i32)
-    (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32) (local $h i32) (local $done i32) (local $n i32)
+    (local $fd i32) (local $rp i32) (local $rl i32)
     (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
-    (local.set $e (call $path_open (local.get $fd) (i32.const 1) (local.get $rp) (local.get $rl)
+    (call $write_fd (local.get $fd) (local.get $rp) (local.get $rl) (i32.const 1)
+                    (local.get $d) (local.get $dl) (local.get $oflags) (local.get $fdflags)))
+
+  ;; `$write_at` of `rp` under `fd`, its last component followed when `follow`.
+  (func $write_fd (param $fd i32) (param $rp i32) (param $rl i32) (param $follow i32)
+                  (param $d i32) (param $dl i32) (param $oflags i32) (param $fdflags i32) (result i32)
+    (local $e i32) (local $h i32) (local $done i32) (local $n i32)
+    (local.set $e (call $path_open (local.get $fd) (local.get $follow) (local.get $rp) (local.get $rl)
                                    (local.get $oflags) (i64.const 4194372) (i64.const 0) (local.get $fdflags)
                                    (global.get $fsp)))
     (if (local.get $e) (then (return (local.get $e))))
@@ -773,7 +917,7 @@
   ;; the message names both paths.
   (func $op_copy (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32)
-    (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
+    (call $read_all (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $l) (local.set $p)
     (if (i32.eqz (local.get $e))
       (then (local.set $e (call $write_at (local.get $b) (local.get $bl) (local.get $p) (local.get $l)
                                           (i32.const 9) (i32.const 0)))))
@@ -1013,6 +1157,192 @@
       (else (local.set $e (call $path_unlink_file (local.get $fd) (local.get $rp) (local.get $rl)))))
     (call $write_result (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0) (i32.const 0) (local.get $e)))
 
+  ;; ── the rooted family by descriptor (#4084, C-392) ───────────────────────
+  ;;
+  ;; Ops 120..=125 take `<root>\0<segments>` in a. The root is resolved and
+  ;; opened as the plain calls open a path (its own links followed); every
+  ;; segment under it is opened from the previous directory's descriptor
+  ;; with lookupflags 0, one segment at a time, so no symlink below the root
+  ;; is followed — the runtime keeps each open beneath its preopen, the walk
+  ;; keeps it beneath the root. A symlink met answers the bare
+  ;; `fs: path escapes root` (the Almide side adds the path); any other
+  ;; failure is the plain call's error on `<root>/<segments>`. A walked
+  ;; directory is opened with readdir / open / stat / create / unlink / rmdir
+  ;; rights and without FD_WRITE, which a directory refuses.
+
+  (func $root_nul (param $a i32) (param $al i32) (result i32)
+    (local $i i32)
+    (block $d (loop $l
+      (br_if $d (i32.ge_u (local.get $i) (local.get $al)))
+      (br_if $d (i32.eqz (i32.load8_u (i32.add (local.get $a) (local.get $i)))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $l)))
+    (local.get $i))
+
+  ;; `<root>/<segments>` (the root alone for no segments): what the errors name.
+  (func $root_joined (param $a i32) (param $al i32) (result i32 i32)
+    (local $k i32)
+    (local.set $k (call $root_nul (local.get $a) (local.get $al)))
+    (if (i32.ge_u (i32.add (local.get $k) (i32.const 1)) (local.get $al))
+      (then (return (local.get $a) (local.get $k))))
+    (call $join (local.get $a) (local.get $k) (i32.add (i32.add (local.get $a) (local.get $k)) (i32.const 1))
+                (i32.sub (i32.sub (local.get $al) (local.get $k)) (i32.const 1))))
+
+  (func $root_escape (result i64)
+    (local $p i32) (local $l i32)
+    (call $s_root_escape) (local.set $l) (local.set $p)
+    (call $stage (local.get $p) (local.get $l))
+    (call $pack (i32.const 1) (local.get $l)))
+
+  ;; whether `name` under fd is itself a symlink (its stat, not followed)
+  (func $root_is_link (param $fd i32) (param $p i32) (param $l i32) (result i32)
+    (if (call $stat_at (local.get $fd) (local.get $p) (local.get $l) (i32.const 0)) (then (return (i32.const 0))))
+    (i32.eq (call $ftype) (i32.const 7)))
+
+  ;; an empty, `.` or `..` segment (the Almide side never sends one)
+  (func $root_bad_seg (param $p i32) (param $l i32) (result i32)
+    (if (i32.eqz (local.get $l)) (then (return (i32.const 1))))
+    (if (i32.ne (i32.load8_u (local.get $p)) (i32.const 46)) (then (return (i32.const 0))))
+    (if (i32.eq (local.get $l) (i32.const 1)) (then (return (i32.const 1))))
+    (i32.and (i32.eq (local.get $l) (i32.const 2)) (i32.eq (i32.load8_u offset=1 (local.get $p)) (i32.const 46))))
+
+  ;; Walk a's segments from the root: (dirfd, name, name len, code). code 0:
+  ;; dirfd (owned by the caller) holds `name` — the last segment, or "." for
+  ;; the directory itself when `all` walked every segment or there are none;
+  ;; -2: a symlink (or a `.` / `..` / empty segment) on the way; else the errno.
+  (func $root_walk (param $a i32) (param $al i32) (param $all i32) (result i32 i32 i32 i32)
+    (local $k i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32)
+    (local $cur i32) (local $s i32) (local $i i32) (local $end i32) (local $sl i32)
+    (local.set $k (call $root_nul (local.get $a) (local.get $al)))
+    (call $resolve (local.get $a) (local.get $k)) (local.set $rl) (local.set $rp) (local.set $fd)
+    (local.set $e (call $path_open (local.get $fd) (i32.const 1) (local.get $rp) (local.get $rl)
+                                   (i32.const 2) (i64.const 100951554) (i64.const 536870911) (i32.const 0) (global.get $fsp)))
+    (if (local.get $e) (then (return (i32.const -1) (i32.const 0) (i32.const 0) (local.get $e))))
+    (local.set $cur (i32.load (global.get $fsp)))
+    (local.set $s (i32.add (i32.add (local.get $a) (local.get $k)) (i32.const 1)))
+    (local.set $end (i32.add (local.get $a) (local.get $al)))
+    (block $done (loop $seg
+      (br_if $done (i32.ge_u (local.get $s) (local.get $end)))
+      (local.set $i (local.get $s))
+      (block $f (loop $c
+        (br_if $f (i32.ge_u (local.get $i) (local.get $end)))
+        (br_if $f (i32.eq (i32.load8_u (local.get $i)) (i32.const 47)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $c)))
+      (local.set $sl (i32.sub (local.get $i) (local.get $s)))
+      (if (call $root_bad_seg (local.get $s) (local.get $sl))
+        (then
+          (drop (call $fd_close (local.get $cur)))
+          (return (i32.const -1) (i32.const 0) (i32.const 0) (i32.const -2))))
+      (if (i32.and (i32.ge_u (local.get $i) (local.get $end)) (i32.eqz (local.get $all)))
+        (then (return (local.get $cur) (local.get $s) (local.get $sl) (i32.const 0))))
+      (local.set $e (call $path_open (local.get $cur) (i32.const 0) (local.get $s) (local.get $sl)
+                                     (i32.const 2) (i64.const 100951554) (i64.const 536870911) (i32.const 0) (global.get $fsp)))
+      (if (local.get $e)
+        (then
+          (if (call $root_is_link (local.get $cur) (local.get $s) (local.get $sl)) (then (local.set $e (i32.const -2))))
+          (drop (call $fd_close (local.get $cur)))
+          (return (i32.const -1) (i32.const 0) (i32.const 0) (local.get $e))))
+      (drop (call $fd_close (local.get $cur)))
+      (local.set $cur (i32.load (global.get $fsp)))
+      (local.set $s (i32.add (local.get $i) (i32.const 1)))
+      (br $seg)))
+    (call $s_dot) (local.set $sl) (local.set $s)
+    (local.get $cur) (local.get $s) (local.get $sl) (i32.const 0))
+
+  ;; 120 read_text / 121 read_bytes_raw
+  (func $op_root_read (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
+    (local $fd i32) (local $np i32) (local $nl i32) (local $e i32) (local $p i32) (local $l i32)
+    (local $jp i32) (local $jl i32) (local $tp i32) (local $tl i32)
+    (call $root_joined (local.get $a) (local.get $al)) (local.set $jl) (local.set $jp)
+    (call $root_walk (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $nl) (local.set $np) (local.set $fd)
+    (if (i32.eqz (local.get $e))
+      (then
+        (call $read_fd (local.get $fd) (local.get $np) (local.get $nl) (i32.const 0) (i32.const 1)) (local.set $e) (local.set $l) (local.set $p)
+        (if (local.get $e)
+          (then (if (call $root_is_link (local.get $fd) (local.get $np) (local.get $nl)) (then (local.set $e (i32.const -2))))))
+        (drop (call $fd_close (local.get $fd)))))
+    (if (i32.eq (local.get $e) (i32.const -2)) (then (return (call $root_escape))))
+    (if (local.get $e)
+      (then (return (call $fail_e (local.get $op) (local.get $jp) (local.get $jl) (i32.const 0) (i32.const 0)
+                                  (i32.const 0) (local.get $e)))))
+    (if (i32.and (i32.eq (local.get $op) (i32.const 120)) (i32.eqz (call $utf8_ok (local.get $p) (local.get $l))))
+      (then
+        (call $s_utf8) (local.set $tl) (local.set $tp)
+        (return (call $fail (local.get $op) (local.get $jp) (local.get $jl) (i32.const 0) (i32.const 0)
+                            (i32.const 0) (local.get $tp) (local.get $tl)))))
+    (call $ok (local.get $p) (local.get $l)))
+
+  ;; 122 list_dir
+  (func $op_root_list (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
+    (local $fd i32) (local $np i32) (local $nl i32) (local $e i32) (local $head i32) (local $cnt i32)
+    (local $jp i32) (local $jl i32)
+    (call $root_joined (local.get $a) (local.get $al)) (local.set $jl) (local.set $jp)
+    (call $root_walk (local.get $a) (local.get $al) (i32.const 1)) (local.set $e) (local.set $nl) (local.set $np) (local.set $fd)
+    (if (i32.eqz (local.get $e))
+      (then
+        (call $names_at (local.get $fd) (local.get $np) (local.get $nl)) (local.set $e) (local.set $cnt) (local.set $head)
+        (drop (call $fd_close (local.get $fd)))))
+    (if (i32.eq (local.get $e) (i32.const -2)) (then (return (call $root_escape))))
+    (if (local.get $e)
+      (then (return (call $fail_e (local.get $op) (local.get $jp) (local.get $jl) (i32.const 0) (i32.const 0)
+                                  (i32.const 0) (local.get $e)))))
+    (call $sorted_frames (local.get $head) (local.get $cnt))
+    (call $ok))
+
+  ;; 123 exists: one byte when it exists, none when not; the escape for a
+  ;; symlink on the way
+  (func $op_root_exists (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
+    (local $fd i32) (local $np i32) (local $nl i32) (local $e i32) (local $v i64) (local $o i32)
+    (call $root_walk (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $nl) (local.set $np) (local.set $fd)
+    (if (i32.eq (local.get $e) (i32.const -2)) (then (return (call $root_escape))))
+    (if (i32.eqz (local.get $e))
+      (then
+        (if (i32.eqz (call $stat_at (local.get $fd) (local.get $np) (local.get $nl) (i32.const 0)))
+          (then
+            (local.set $v (i64.const 1))
+            (if (i32.eq (call $ftype) (i32.const 7)) (then (local.set $e (i32.const -2))))))
+        (drop (call $fd_close (local.get $fd)))))
+    (if (i32.eq (local.get $e) (i32.const -2)) (then (return (call $root_escape))))
+    (local.set $o (call $alloc (i32.const 1)))
+    (i32.store8 (local.get $o) (i32.const 1))
+    (call $ok (local.get $o) (i32.wrap_i64 (local.get $v))))
+
+  ;; 124 write (create + truncate, the final open not following a link)
+  (func $op_root_write (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
+    (local $fd i32) (local $np i32) (local $nl i32) (local $e i32) (local $jp i32) (local $jl i32)
+    (call $root_joined (local.get $a) (local.get $al)) (local.set $jl) (local.set $jp)
+    (call $root_walk (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $nl) (local.set $np) (local.set $fd)
+    (if (i32.eqz (local.get $e))
+      (then
+        (local.set $e (call $write_fd (local.get $fd) (local.get $np) (local.get $nl) (i32.const 0)
+                                      (local.get $b) (local.get $bl) (i32.const 9) (i32.const 0)))
+        (if (i32.gt_s (local.get $e) (i32.const 0))
+          (then (if (call $root_is_link (local.get $fd) (local.get $np) (local.get $nl)) (then (local.set $e (i32.const -2))))))
+        (drop (call $fd_close (local.get $fd)))))
+    (if (i32.eq (local.get $e) (i32.const -2)) (then (return (call $root_escape))))
+    (call $write_result (local.get $op) (local.get $jp) (local.get $jl) (i32.const 0) (i32.const 0) (i32.const 0) (local.get $e)))
+
+  ;; 125 remove: a directory is remove_dir, anything else remove_file; a
+  ;; symlink at the last segment is the escape, never removed
+  (func $op_root_remove (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
+    (local $fd i32) (local $np i32) (local $nl i32) (local $e i32) (local $jp i32) (local $jl i32) (local $t i32)
+    (call $root_joined (local.get $a) (local.get $al)) (local.set $jl) (local.set $jp)
+    (call $root_walk (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $nl) (local.set $np) (local.set $fd)
+    (if (i32.eqz (local.get $e))
+      (then
+        (if (i32.eqz (call $stat_at (local.get $fd) (local.get $np) (local.get $nl) (i32.const 0)))
+          (then (local.set $t (call $ftype))))
+        (if (i32.eq (local.get $t) (i32.const 7))
+          (then (local.set $e (i32.const -2)))
+          (else
+            (if (i32.eq (local.get $t) (i32.const 3))
+              (then (local.set $e (call $path_remove_directory (local.get $fd) (local.get $np) (local.get $nl))))
+              (else (local.set $e (call $path_unlink_file (local.get $fd) (local.get $np) (local.get $nl)))))))
+        (drop (call $fd_close (local.get $fd)))))
+    (if (i32.eq (local.get $e) (i32.const -2)) (then (return (call $root_escape))))
+    (call $write_result (local.get $op) (local.get $jp) (local.get $jl) (i32.const 0) (i32.const 0) (i32.const 0) (local.get $e)))
+
   ;; std::fs::remove_dir_all: a symlink or file is unlinked, a directory is
   ;; emptied depth-first and then removed.
   (func $rmtree (param $fd i32) (param $p i32) (param $l i32) (result i32)
@@ -1041,31 +1371,59 @@
       (else (local.set $e (call $path_unlink_file (local.get $fd) (local.get $rp) (local.get $rl)))))
     (call $write_result (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0) (i32.const 0) (local.get $e)))
 
-  ;; temp root + prefix + the wall clock's nanoseconds (the host's name)
+;; temp root + prefix + 16 hex digits of the host's entropy (#4113): never the
+  ;; clock, a name another user could predict and plant first.
   (func $temp_path (param $a i32) (param $al i32) (result i32 i32)
-    (local $tp i32) (local $tl i32) (local $np i32) (local $nl i32) (local $name i32) (local $w i32)
+    (local $tp i32) (local $tl i32) (local $name i32) (local $w i32) (local $i i32) (local $b i32)
     (call $tmp) (local.set $tl) (local.set $tp)
-    (drop (call $clock_time_get (i32.const 0) (i64.const 1) (i32.add (global.get $fsp) (i32.const 40))))
-    (call $utoa (i64.load offset=40 (global.get $fsp))) (local.set $nl) (local.set $np)
-    (local.set $name (call $alloc (i32.add (local.get $al) (local.get $nl))))
+    (drop (call $random_get (i32.add (global.get $fsp) (i32.const 40)) (i32.const 8)))
+    (local.set $name (call $alloc (i32.add (local.get $al) (i32.const 16))))
     (local.set $w (call $put (local.get $name) (local.get $a) (local.get $al)))
-    (local.set $w (call $put (local.get $w) (local.get $np) (local.get $nl)))
+    (block $d (loop $n
+      (br_if $d (i32.ge_u (local.get $i) (i32.const 8)))
+      (local.set $b (i32.load8_u (i32.add (i32.add (global.get $fsp) (i32.const 40)) (local.get $i))))
+      (i32.store8 (local.get $w) (call $hexdig (i32.shr_u (local.get $b) (i32.const 4))))
+      (i32.store8 offset=1 (local.get $w) (call $hexdig (i32.and (local.get $b) (i32.const 15))))
+      (local.set $w (i32.add (local.get $w) (i32.const 2)))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $n)))
     (call $join (local.get $tp) (local.get $tl) (local.get $name) (i32.sub (local.get $w) (local.get $name))))
 
+  (func $hexdig (param $n i32) (result i32)
+    (select (i32.add (local.get $n) (i32.const 48)) (i32.add (local.get $n) (i32.const 87))
+            (i32.lt_u (local.get $n) (i32.const 10))))
+
+  ;; A new directory, created exclusively (a plain path_create_directory, not
+  ;; mkdir_all: an existing entry is EEXIST, never reused); a taken name is
+  ;; retried under a fresh one, up to 64 times (#4113). WASI preview1 sets no
+  ;; mode: the host's defaults apply.
   (func $op_create_temp_dir (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (local $p i32) (local $l i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32)
-    (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
-    (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
-    (local.set $e (call $mkdir_all (local.get $fd) (local.get $rp) (local.get $rl)))
+    (local $p i32) (local $l i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32) (local $k i32)
+    (block $done (loop $try
+      (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
+      (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
+      (local.set $e (call $path_create_directory (local.get $fd) (local.get $rp) (local.get $rl)))
+      (br_if $done (i32.ne (local.get $e) (i32.const 20)))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br_if $try (i32.lt_u (local.get $k) (i32.const 64)))))
     (if (local.get $e)
       (then (return (call $write_result (local.get $op) (local.get $p) (local.get $l) (i32.const 0) (i32.const 0)
                                         (i32.const 0) (local.get $e)))))
     (call $ok (local.get $p) (local.get $l)))
 
+  ;; A new empty file, created exclusively and without following a symlink at
+  ;; the name (O_CREAT | O_EXCL, lookupflags 0): a taken name is retried under
+  ;; a fresh one, up to 64 times (#4113).
   (func $op_create_temp_file (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (local $p i32) (local $l i32) (local $e i32)
-    (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
-    (local.set $e (call $write_at (local.get $p) (local.get $l) (i32.const 0) (i32.const 0) (i32.const 9) (i32.const 0)))
+    (local $p i32) (local $l i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32) (local $k i32)
+    (block $done (loop $try
+      (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
+      (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
+      (local.set $e (call $write_fd (local.get $fd) (local.get $rp) (local.get $rl) (i32.const 0)
+                                    (i32.const 0) (i32.const 0) (i32.const 5) (i32.const 0)))
+      (br_if $done (i32.ne (local.get $e) (i32.const 20)))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br_if $try (i32.lt_u (local.get $k) (i32.const 64)))))
     (if (local.get $e)
       (then (return (call $write_result (local.get $op) (local.get $p) (local.get $l) (i32.const 0) (i32.const 0)
                                         (i32.const 0) (local.get $e)))))
@@ -1074,7 +1432,7 @@
   ;; ── walk / glob ────────────────────────────────────────────────────────
 
   ;; Depth-first: every entry's joined path, descending into directories
-  ;; (followed); a directory that cannot be read names itself in $ep/$el.
+  ;; (a symlinked one is an entry, never followed, #4143); a directory that cannot be read names itself in $ep/$el.
   (func $walk_rec (param $d i32) (param $dl i32) (result i32)
     (local $fd i32) (local $rp i32) (local $rl i32) (local $head i32) (local $cnt i32) (local $e i32) (local $cp i32) (local $cl i32)
     (call $resolve (local.get $d) (local.get $dl)) (local.set $rl) (local.set $rp) (local.set $fd)
@@ -1086,7 +1444,7 @@
       (call $join (local.get $d) (local.get $dl) (i32.add (local.get $head) (i32.const 8)) (i32.load offset=4 (local.get $head)))
       (local.set $cl) (local.set $cp)
       (call $push (local.get $cp) (local.get $cl))
-      (if (call $is_dir_path (local.get $cp) (local.get $cl))
+      (if (call $is_dir_nofollow (local.get $cp) (local.get $cl))
         (then
           (local.set $e (call $walk_rec (local.get $cp) (local.get $cl)))
           (if (local.get $e) (then (return (local.get $e))))))
@@ -1234,7 +1592,7 @@
       (call $push (local.get $xp) (local.get $xl))
       (if (i32.ne (local.get $depth) (i32.const 1))
         (then
-          (if (call $is_dir_path (local.get $cp) (local.get $cl))
+          (if (call $is_dir_nofollow (local.get $cp) (local.get $cl))
             (then
               (local.set $e (call $glob_walk (local.get $cp) (local.get $cl) (local.get $xp) (local.get $xl)
                                              (select (i32.const -1) (i32.sub (local.get $depth) (i32.const 1))

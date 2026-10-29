@@ -18,7 +18,7 @@ usage: almide-verify <property> <witness-file>
        almide-verify bundle <bundle-file>
        almide-verify --version
 
-properties: ownership | names | caps | caps-transitive | call-modes
+properties: ownership | names | caps | caps-transitive | call-modes | bounds | init
 
 exit: 0 accept, 1 reject (a bundle whose artifact hash differs too), 3 incomplete bundle,
       2 usage or unreadable input";

@@ -65,6 +65,12 @@ impl NanoPass for IntrinsicLoweringPass {
             /// never consumed), and ConcretizeTypes runs AFTER this pass there,
             /// so types are not yet reliable — hence the swap is Rust-only.
             route_float_ord: bool,
+            /// The module whose bodies are being rewritten (`None` for the
+            /// entry's own fns). An unqualified call to a sibling fn arrives
+            /// as a bare `Named` name — `__write_stderr(d)` inside `io` — and
+            /// must reach the same declaration as the qualified
+            /// `io.__write_stderr(d)` (#4216).
+            current_module: Option<Sym>,
         }
         impl<'a> Rewriter<'a> {
             fn fill_defaults(&self, symbol: Sym, args: &mut Vec<IrExpr>) {
@@ -123,12 +129,19 @@ impl NanoPass for IntrinsicLoweringPass {
                         //      equals the frontend's mangled name.
                         //   2. Mangled-name match — the frontend mangled
                         //      `(module, func)` doesn't equal the
-                        //      `@intrinsic` value (e.g. `int.from_hex`
-                        //      mangles to `almide_rt_int_from_hex` but the
-                        //      attribute names `almide_rt_int_parse_hex`).
+                        //      `@intrinsic` value (e.g. `m.f` mangles
+                        //      to `almide_rt_m_f` but the attribute names
+                        //      another symbol).
                         //      Decode the mangled prefix to (module, func)
                         //      and look that up in `map`, so the
                         //      attribute's symbol wins.
+                        if let Some(&symbol) = self.current_module.and_then(|m| self.map.get(&(m, *name))) {
+                            let mut args = std::mem::take(args);
+                            self.fill_defaults(symbol, &mut args);
+                            let symbol = self.route_symbol(symbol, &args);
+                            expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                            return;
+                        }
                         if self.symbols.contains(name) {
                             let symbol = *name;
                             let mut args = std::mem::take(args);
@@ -187,6 +200,7 @@ impl NanoPass for IntrinsicLoweringPass {
             defaults: &defaults,
             symbols: &symbols,
             route_float_ord: matches!(_target, Target::Rust),
+            current_module: None,
         };
         for func in &mut program.functions {
             rw.visit_expr_mut(&mut func.body);
@@ -195,6 +209,7 @@ impl NanoPass for IntrinsicLoweringPass {
             rw.visit_expr_mut(&mut tl.value);
         }
         for mi in 0..program.modules.len() {
+            rw.current_module = Some(program.modules[mi].name);
             for fi in 0..program.modules[mi].functions.len() {
                 let mut body = std::mem::replace(
                     &mut program.modules[mi].functions[fi].body,

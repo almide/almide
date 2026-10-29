@@ -6,7 +6,7 @@
 //! native moves none.
 //!
 //! The pin is RELATIVE: each shape is run once with the mutator and once
-//! with `bytes.set_u8(b, 0, 1)` — a writer already in place — in its
+//! with `bytes.put_u8(b, 0, 1)` — a writer already in place — in its
 //! position, and the two runs must allocate the same blocks and request
 //! the same bytes. A unique receiver (a var, a `mut` parameter threaded
 //! through a self tail call) is written in place; a SHARED one is still
@@ -97,7 +97,7 @@ effect fn main() -> Unit = {
   for i in 0..<100 {
     {M}
   }
-  println("${bytes.get_or(b, 5, 0)}")
+  println("${bytes.get(b, 5) ?? 0}")
 }
 "#,
     ),
@@ -120,7 +120,7 @@ fn a_unique_receiver_is_mutated_in_place() {
     let mut failures = Vec::new();
     for (name, mutator, src) in SHAPES {
         let (_, a, b) = counted(&src.replace("{M}", mutator));
-        let (_, ca, cb) = counted(&src.replace("{M}", "bytes.set_u8(b, 0, 1)"));
+        let (_, ca, cb) = counted(&src.replace("{M}", "bytes.put_u8(b, 0, 1)"));
         if (a, b) != (ca, cb) {
             failures.push(format!(
                 "{name}: {a} allocs / {b} bytes, against {ca} allocs / {cb} bytes for set_u8 in its place \

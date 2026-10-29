@@ -78,7 +78,7 @@ fn main() -> Unit = {
     var src: List[P] = []
     for i in 0..<3 {
       src = src + [
-        P { x: int.to_float(k * 10 + i), y: 0.0, on: true }
+        P { x: float.from(k * 10 + i), y: 0.0, on: true }
       ]
     }
     for i in 0..<3 {

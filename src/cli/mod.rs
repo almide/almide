@@ -3,6 +3,7 @@
 mod run;
 mod build_dir;
 pub(crate) mod build;
+mod fs_scope_twin;
 mod build_wasm;
 mod wasm_compile;
 mod bench;
@@ -26,6 +27,7 @@ mod verify;
 pub mod lsp;
 pub mod mcp;
 mod mcp_tools;
+pub(crate) mod project_scope;
 pub mod repl;
 mod ide;
 mod fix;
@@ -36,6 +38,7 @@ mod survive_edit;
 mod survive_legs;
 mod docs_gen;
 mod cargo_build;
+pub(crate) mod rustc_floor;
 mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
@@ -59,7 +62,7 @@ pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_up
 pub use test_wasm::cmd_test_wasm;
 pub use fmt_command::{cmd_fmt, FmtMode};
 pub use clean::cmd_clean;
-pub use install::cmd_install;
+pub use install::{cmd_install, InstallGrants};
 pub use selfupdate::cmd_self_update;
 pub use verify::cmd_verify;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
@@ -82,7 +85,13 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
     let ir_after = result.program;
 
     // Report in name order so the same program prints the same report on every run and route.
-    let mut functions: Vec<_> = ir_after.effect_map.functions.iter().collect();
+    // A stdlib function is judged where the program uses it: its set is
+    // charged to every caller. Judging it as a root refused a program for the
+    // `panic` inside an unused `list.range_step` (#4155: `Abort` is a leaf).
+    let is_stdlib_fn = |name: &str| {
+        name.split_once('.').is_some_and(|(m, _)| almide::stdlib::is_stdlib_module(m) || almide::stdlib::is_bundled_module(m))
+    };
+    let mut functions: Vec<_> = ir_after.effect_map.functions.iter().filter(|(n, _)| !is_stdlib_fn(n)).collect();
     functions.sort_by(|a, b| a.0.cmp(b.0));
     let mut violations = 0;
     for (name, fe) in functions {
@@ -98,6 +107,9 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
                 if let Some(path) = fe.paths.get(*e) {
                     err(&format!("  path: {path}"));
                 }
+                if let Some(note) = epoch15_category_note(**e, &allowed) {
+                    err(&format!("  note: {note}"));
+                }
             }
             violations += 1;
         }
@@ -109,19 +121,86 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
     Ok(())
 }
 
-/// The subprocess fns that START a child, with the index of the argument
-/// that names the command (#2589).
-const PROC_SPAWNING: &[(&str, usize)] = &[
-    ("exec", 0),
-    ("exec_in", 1),
-    ("exec_with_stdin", 0),
-    ("exec_status", 0),
-    ("exec_status_timeout", 0),
-    ("run", 0),
-    ("run_in", 1),
-    ("exec_attached", 0),
-    ("spawn", 0),
+/// What a manifest written before dialect epoch 15 meant by a name that now
+/// means less (#4155, ADR-0026 D2): `IO` was files and the standard streams
+/// and is the streams only, `Env` admitted starting a process and no longer
+/// does. Said once per refused leaf the old name would have covered.
+pub(crate) fn epoch15_category_note(
+    e: almide::ir::effect::Effect,
+    allowed: &std::collections::HashSet<almide::ir::effect::Effect>,
+) -> Option<&'static str> {
+    use almide::ir::effect::Effect;
+    match e {
+        Effect::FsRead | Effect::FsWrite if allowed.contains(&Effect::IoStdout) => Some(
+            "files are `FS` (`FS.read`, `FS.write`) since dialect epoch 15; `IO` is the standard streams only",
+        ),
+        Effect::Proc if allowed.contains(&Effect::EnvRead) => Some(
+            "starting a process is `Proc` since dialect epoch 15 — `Env` no longer grants it, because a started \
+             command can reach every other capability",
+        ),
+        _ => None,
+    }
+}
+
+/// `[permissions].allow` granting `Proc` with no `proc = [...]` command list
+/// (#4155): the program may start any command, and through it reach every
+/// other capability. A warning on every route; refused when `refuse` (the
+/// `--profile critical` check).
+pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> Result<(), String> {
+    let Some(allow) = &proj.permissions else { return Ok(()) };
+    let Ok(allowed) = crate::project::allowed_effects(allow) else { return Ok(()) };
+    if !allowed.contains(&almide::ir::effect::Effect::Proc) || proj.proc_allow.is_some() {
+        return Ok(());
+    }
+    let level = if refuse { "error" } else { "warning" };
+    err(&format!(
+        "{level}: [permissions].allow grants `Proc` with no `proc = [...]` command list: the program may start \
+         any command, and a started command can reach every other capability"
+    ));
+    err("  hint: list the commands it may start — `proc = [\"git\"]` under [permissions] (ADR-0025)");
+    if refuse {
+        return Err("`Proc` granted without a `proc` list under --profile critical".to_string());
+    }
+    Ok(())
+}
+
+/// The subprocess fns that START a child, with how the call names its
+/// command (#2589): `exec`'s first argument, or the `cmd` field of the
+/// `ProcessCommand` record `output` / `run` / `start` take (R-process-02).
+const PROC_SPAWNING: &[(&str, ProcCommandAt)] = &[
+    ("exec", ProcCommandAt::Arg),
+    ("output", ProcCommandAt::RecordCmd),
+    ("run", ProcCommandAt::RecordCmd),
+    ("start", ProcCommandAt::RecordCmd),
 ];
+
+/// The command a `@signals_process` stdlib fn (#4125: it starts no child but
+/// signals or probes a pid) is bounded as by `[permissions] proc` — the one
+/// it used to run. The embedded host applies the same rule at run time
+/// (host_process.rs, ops 87 / 88).
+const PROC_SIGNAL_COMMAND: &str = "kill";
+#[derive(Clone, Copy)]
+enum ProcCommandAt {
+    /// The first argument is the command.
+    Arg,
+    /// The first argument is a `ProcessCommand`; its `cmd` field is the command.
+    RecordCmd,
+}
+
+/// The command literal a spawning call names, if it names one.
+fn proc_command_literal(at: ProcCommandAt, args: &[almide::ir::IrExpr]) -> Option<&str> {
+    use almide::ir::IrExprKind;
+    let first = &args.first()?.kind;
+    let cmd = match (at, first) {
+        (ProcCommandAt::Arg, k) => k,
+        (ProcCommandAt::RecordCmd, IrExprKind::Record { fields, .. }) => &fields.iter().find(|(n, _)| n.as_str() == "cmd")?.1.kind,
+        (ProcCommandAt::RecordCmd, _) => return None,
+    };
+    match cmd {
+        IrExprKind::LitStr { value } => Some(value.as_str()),
+        _ => None,
+    }
+}
 
 /// `[permissions] proc` (#2589, ADR-0025), statically: every call that starts
 /// a child must name its command as a string literal on the list. A command
@@ -141,15 +220,24 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "process" =>
                 {
+                    if almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
+                        && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND)
+                    {
+                        let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
+                        self.bad.push(format!(
+                            "process.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                        ));
+                    }
                     if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
-                        match args.get(at).map(|a| &a.kind) {
-                            Some(IrExprKind::LitStr { value }) if self.allow.iter().any(|c| c == value) => {}
-                            Some(IrExprKind::LitStr { value }) => {
+                        match proc_command_literal(at, args) {
+                            Some(value) if self.allow.iter().any(|c| c == value) => {}
+                            Some(value) => {
                                 self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
                             }
-                            _ => self.bad.push(format!(
-                                "process.{func}{line}: the command is not a string literal, so [permissions] proc cannot check it"
+                            None => self.bad.push(format!(
+                                "process.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
+                                if matches!(at, ProcCommandAt::RecordCmd) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
                             )),
                         }
                     }
@@ -158,6 +246,13 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                     let n = name.as_str();
                     if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
                         self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
+                    }
+                    if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::is_signals_process_stdlib_fn("process", f)) {
+                        if !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND) {
+                            self.bad.push(format!(
+                                "process.{f} passed as a value: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                            ));
+                        }
                     }
                 }
                 _ => {}
@@ -188,10 +283,66 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
 /// the build routes reach it through `compile_driver::optimize_gate_and_link`,
 /// and `check` calls it directly. Each violation is printed as it is found.
 pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::project::Project) -> Result<(), String> {
-    if !proj.permissions.is_empty() {
-        check_permissions(ir, &proj.permissions)?;
+    // `[permissions] fs` (#4022): the directories the program may touch. Paths
+    // are run-time values, so the bound is enforced where they are used: the
+    // embedded wasm host checks every fs op and preopens only these roots, and
+    // the native build embeds them in `main` (`build::inject_fs_scope`).
+    almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
+    // An absent `allow` is unchecked; an explicit `allow = []` allows no
+    // capability at all (#4101).
+    if let Some(allow) = &proj.permissions {
+        check_permissions(ir, allow)?;
+        proc_grant_without_list(proj, false)?;
     }
     enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
+}
+
+/// `[permissions] native` (#4093): `Err` with the refusal when a fetched
+/// dependency of `proj` brings native code the manifest does not grant.
+/// With `announce`, a native build names each granted dependency that brings
+/// native code, once per package per process (a test run builds many files).
+pub(crate) fn enforce_native_grants(
+    proj: &crate::project::Project,
+    fetched: &[crate::project::FetchedDep],
+    announce: bool,
+) -> Result<(), String> {
+    let deps = crate::native_grant::survey(proj, fetched);
+    if let Some(refusal) = crate::native_grant::refusal(proj, &deps) {
+        return Err(refusal);
+    }
+    if announce {
+        static ANNOUNCED: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+        let mut seen = ANNOUNCED.lock().unwrap_or_else(|p| p.into_inner());
+        if !seen.contains(&proj.root) {
+            seen.push(proj.root.clone());
+            for line in crate::native_grant::granted_lines(&deps) {
+                err(&line);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve `./almide.toml`'s dependencies before a command that builds runs
+/// (#4093): a fetch error (an untrusted owner, a source changed under the
+/// lock, a `--locked` miss, a missing repository) and an ungranted native
+/// dependency ([`enforce_native_grants`]) are printed and exit 1. Several
+/// build routes read the dependencies with errors swallowed (the wasm test
+/// lane resolved against an empty set), so the refusal is made once, here,
+/// for every route. A manifest that does not parse is left to the command.
+pub(crate) fn resolve_cwd_deps_or_exit() {
+    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+    if proj.dependencies.is_empty() {
+        return;
+    }
+    let fetched = crate::project_fetch::fetch_all_deps(&proj).unwrap_or_else(|e| {
+        err(&e);
+        std::process::exit(1);
+    });
+    if let Err(refusal) = enforce_native_grants(&proj, &fetched, false) {
+        err(&refusal);
+        std::process::exit(1);
+    }
 }
 
 pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {
@@ -402,9 +553,12 @@ pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::Nativ
 }
 
 /// `collect_test_files`'s per-entry body: recurse into subdirectories, or
-/// check a `.almd` file for a `test` block. Extracted verbatim.
+/// check a `.almd` file for a `test` block. A symlinked directory is not
+/// descended (#4140): a link loop would collect the same files at every
+/// level, and a link out would run tests from outside the tree.
 fn collect_test_files_entry(path: &std::path::Path, files: &mut Vec<String>) {
-    if path.is_dir() {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    if path.is_dir() && !is_link {
         files.extend(collect_test_files(path));
     } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
         // Check if file contains a test block
@@ -421,11 +575,14 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
     let mut files = Vec::new();
     // Skip hidden directories, target/, node_modules/, etc.
     let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" {
+    if project_scope::is_skipped_dir(dir_name) {
         return files;
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
+            if entry.file_type().is_ok_and(|t| t.is_symlink()) && entry.path().is_dir() {
+                continue;
+            }
             collect_test_files_entry(&entry.path(), &mut files);
         }
     }

@@ -1,0 +1,9552 @@
+{
+"after": [
+{
+"mod": "args",
+"name": "has_flag",
+"sig": "effect fn args.has_flag(name: String) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "args",
+"name": "option",
+"sig": "effect fn args.option(name: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "args",
+"name": "positional",
+"sig": "effect fn args.positional(options: List[String]) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "base64",
+"name": "encode",
+"sig": "fn base64.encode(b: Bytes) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "base64",
+"name": "decode",
+"sig": "fn base64.decode(s: String) -> Result[Bytes, String]",
+"kind": "意味変更"
+},
+{
+"mod": "base64",
+"name": "encode_url",
+"sig": "fn base64.encode_url(b: Bytes) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "base64",
+"name": "decode_url",
+"sig": "fn base64.decode_url(s: String) -> Result[Bytes, String]",
+"kind": "意味変更"
+},
+{
+"mod": "bigint",
+"name": "parse",
+"sig": "fn bigint.parse(s: String) -> Result[BigInt, String]",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "parse_radix",
+"sig": "fn bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "to_string",
+"sig": "fn bigint.to_string(x: BigInt) -> String",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "to_string_radix",
+"sig": "fn bigint.to_string_radix(x: BigInt, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "floor_div",
+"sig": "fn bigint.floor_div(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "modulo",
+"sig": "fn bigint.modulo(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "abs",
+"sig": "fn bigint.abs(x: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "sign",
+"sig": "fn bigint.sign(x: BigInt) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "pow",
+"sig": "fn bigint.pow(base: BigInt, exp: Int) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "compare",
+"sig": "fn bigint.compare(a: BigInt, b: BigInt) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "min",
+"sig": "fn bigint.min(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "max",
+"sig": "fn bigint.max(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "is_even",
+"sig": "fn bigint.is_even(x: BigInt) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "is_odd",
+"sig": "fn bigint.is_odd(x: BigInt) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "clamp",
+"sig": "fn bigint.clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "from",
+"sig": "fn bigint.from[S: Numeric](x: S) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "from_checked",
+"sig": "fn bigint.from_checked[S: Numeric](x: S) -> BigInt?",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "bit_length",
+"sig": "fn bigint.bit_length(x: BigInt) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "band",
+"sig": "fn bigint.band(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "bor",
+"sig": "fn bigint.bor(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "bxor",
+"sig": "fn bigint.bxor(a: BigInt, b: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "bnot",
+"sig": "fn bigint.bnot(x: BigInt) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "bshl",
+"sig": "fn bigint.bshl(a: BigInt, n: Int) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bigint",
+"name": "bshr",
+"sig": "fn bigint.bshr(a: BigInt, n: Int) -> BigInt",
+"kind": "追加"
+},
+{
+"mod": "bool",
+"name": "parse",
+"sig": "fn bool.parse(s: String) -> Result[Bool, String]",
+"kind": "追加"
+},
+{
+"mod": "bool",
+"name": "compare",
+"sig": "fn bool.compare(a: Bool, b: Bool) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bool",
+"name": "to_string",
+"sig": "fn bool.to_string(b: Bool) -> String",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "append_f32_be",
+"sig": "fn bytes.append_f32_be(mut b: Bytes, x: Float) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_f32_le",
+"sig": "fn bytes.append_f32_le(mut b: Bytes, x: Float) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_f64_be",
+"sig": "fn bytes.append_f64_be(mut b: Bytes, x: Float) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_f64_le",
+"sig": "fn bytes.append_f64_le(mut b: Bytes, x: Float) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_i16_be",
+"sig": "fn bytes.append_i16_be(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_i16_le",
+"sig": "fn bytes.append_i16_le(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_i32_be",
+"sig": "fn bytes.append_i32_be(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_i32_le",
+"sig": "fn bytes.append_i32_le(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_i64_be",
+"sig": "fn bytes.append_i64_be(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_i64_le",
+"sig": "fn bytes.append_i64_le(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_u16_be",
+"sig": "fn bytes.append_u16_be(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_u16_le",
+"sig": "fn bytes.append_u16_le(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_u32_be",
+"sig": "fn bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_u32_le",
+"sig": "fn bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_u8",
+"sig": "fn bytes.append_u8(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "chunk",
+"sig": "fn bytes.chunk(b: Bytes, n: Int) -> List[Bytes]",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "clear",
+"sig": "fn bytes.clear(mut b: Bytes) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "compare",
+"sig": "fn bytes.compare(a: Bytes, b: Bytes) -> Int",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "contains",
+"sig": "fn bytes.contains(b: Bytes, needle: Bytes) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "copy_from",
+"sig": "fn bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "ends_with",
+"sig": "fn bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "is_eof",
+"sig": "fn bytes.is_eof(b: Bytes, pos: Int) -> Bool",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "fill",
+"sig": "fn bytes.fill(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "from_list",
+"sig": "fn bytes.from_list(xs: List[Int]) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "from_string",
+"sig": "fn bytes.from_string(s: String) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "get",
+"sig": "fn bytes.get(b: Bytes, i: Int) -> Int?",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "index_of",
+"sig": "fn bytes.index_of(b: Bytes, needle: Bytes) -> Int?",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "insert",
+"sig": "fn bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "bytes",
+"name": "is_empty",
+"sig": "fn bytes.is_empty(b: Bytes) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "is_valid_utf8",
+"sig": "fn bytes.is_valid_utf8(b: Bytes) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "len",
+"sig": "fn bytes.len(b: Bytes) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "map",
+"sig": "fn bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "zeros",
+"sig": "fn bytes.zeros(n: Int) -> Bytes",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "pad_start",
+"sig": "fn bytes.pad_start(b: Bytes, n: Int, fill: Int) -> Bytes",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "pad_end",
+"sig": "fn bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "push",
+"sig": "fn bytes.push(mut b: Bytes, x: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "copy_within",
+"sig": "fn bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "get_bool",
+"sig": "fn bytes.get_bool(b: Bytes, pos: Int) -> Bool?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_bool",
+"sig": "fn bytes.next_bool(b: Bytes, pos: Int) -> (Bool?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f16_le",
+"sig": "fn bytes.get_f16_le(b: Bytes, pos: Int) -> Float?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_f16_le",
+"sig": "fn bytes.next_f16_le(b: Bytes, pos: Int) -> (Float?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f16_le_array",
+"sig": "fn bytes.get_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f32_be",
+"sig": "fn bytes.get_f32_be(b: Bytes, pos: Int) -> Float?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f32_be_array",
+"sig": "fn bytes.get_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_f32_be",
+"sig": "fn bytes.next_f32_be(b: Bytes, pos: Int) -> (Float?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f32_le",
+"sig": "fn bytes.get_f32_le(b: Bytes, pos: Int) -> Float?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f32_le_array",
+"sig": "fn bytes.get_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_f32_le",
+"sig": "fn bytes.next_f32_le(b: Bytes, pos: Int) -> (Float?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f64_be",
+"sig": "fn bytes.get_f64_be(b: Bytes, pos: Int) -> Float?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f64_be_array",
+"sig": "fn bytes.get_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_f64_be",
+"sig": "fn bytes.next_f64_be(b: Bytes, pos: Int) -> (Float?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f64_le",
+"sig": "fn bytes.get_f64_le(b: Bytes, pos: Int) -> Float?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_f64_le_array",
+"sig": "fn bytes.get_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_f64_le",
+"sig": "fn bytes.next_f64_le(b: Bytes, pos: Int) -> (Float?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i16_be",
+"sig": "fn bytes.get_i16_be(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_i16_be",
+"sig": "fn bytes.next_i16_be(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i16_be_array",
+"sig": "fn bytes.get_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i16_le",
+"sig": "fn bytes.get_i16_le(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_i16_le",
+"sig": "fn bytes.next_i16_le(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i16_le_array",
+"sig": "fn bytes.get_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i32_be",
+"sig": "fn bytes.get_i32_be(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i32_be_array",
+"sig": "fn bytes.get_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_i32_be",
+"sig": "fn bytes.next_i32_be(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i32_le",
+"sig": "fn bytes.get_i32_le(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i32_le_array",
+"sig": "fn bytes.get_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_i32_le",
+"sig": "fn bytes.next_i32_le(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i64_be",
+"sig": "fn bytes.get_i64_be(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i64_be_array",
+"sig": "fn bytes.get_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_i64_be",
+"sig": "fn bytes.next_i64_be(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i64_le",
+"sig": "fn bytes.get_i64_le(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_i64_le_array",
+"sig": "fn bytes.get_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_i64_le",
+"sig": "fn bytes.next_i64_le(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u16_be",
+"sig": "fn bytes.get_u16_be(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_u16_be",
+"sig": "fn bytes.next_u16_be(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u16_be_array",
+"sig": "fn bytes.get_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u16_le",
+"sig": "fn bytes.get_u16_le(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u16_le_array",
+"sig": "fn bytes.get_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_u16_le",
+"sig": "fn bytes.next_u16_le(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u32_be",
+"sig": "fn bytes.get_u32_be(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u32_be_array",
+"sig": "fn bytes.get_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_u32_be",
+"sig": "fn bytes.next_u32_be(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u32_le",
+"sig": "fn bytes.get_u32_le(b: Bytes, pos: Int) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "get_u32_le_array",
+"sig": "fn bytes.get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_u32_le",
+"sig": "fn bytes.next_u32_le(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "next_u8",
+"sig": "fn bytes.next_u8(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "remove_at",
+"sig": "fn bytes.remove_at(b: Bytes, i: Int) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "bytes",
+"name": "repeat",
+"sig": "fn bytes.repeat(b: Bytes, n: Int) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "reverse",
+"sig": "fn bytes.reverse(b: Bytes) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "set",
+"sig": "fn bytes.set(b: Bytes, i: Int, x: Int) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "bytes",
+"name": "put_f32_be",
+"sig": "fn bytes.put_f32_be(mut b: Bytes, pos: Int, x: Float) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_f32_le",
+"sig": "fn bytes.put_f32_le(mut b: Bytes, pos: Int, x: Float) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_f64_be",
+"sig": "fn bytes.put_f64_be(mut b: Bytes, pos: Int, x: Float) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_f64_le",
+"sig": "fn bytes.put_f64_le(mut b: Bytes, pos: Int, x: Float) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_i16_be",
+"sig": "fn bytes.put_i16_be(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_i16_le",
+"sig": "fn bytes.put_i16_le(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_i32_be",
+"sig": "fn bytes.put_i32_be(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_i32_le",
+"sig": "fn bytes.put_i32_le(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_i64_be",
+"sig": "fn bytes.put_i64_be(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_i64_le",
+"sig": "fn bytes.put_i64_le(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_u16_be",
+"sig": "fn bytes.put_u16_be(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_u16_le",
+"sig": "fn bytes.put_u16_le(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_u32_be",
+"sig": "fn bytes.put_u32_be(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_u32_le",
+"sig": "fn bytes.put_u32_le(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "put_u8",
+"sig": "fn bytes.put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "skip",
+"sig": "fn bytes.skip(b: Bytes, pos: Int, n: Int) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "bytes",
+"name": "slice",
+"sig": "fn bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "bytes",
+"name": "split",
+"sig": "fn bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "starts_with",
+"sig": "fn bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "next_bytes",
+"sig": "fn bytes.next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int)",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "to_list",
+"sig": "fn bytes.to_list(b: Bytes) -> List[Int]",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "to_string",
+"sig": "fn bytes.to_string(b: Bytes) -> Result[String, String]",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "to_string_lossy",
+"sig": "fn bytes.to_string_lossy(b: Bytes) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "bytes",
+"name": "append_bool",
+"sig": "fn bytes.append_bool(mut b: Bytes, x: Bool) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "bytes",
+"name": "xor",
+"sig": "fn bytes.xor(a: Bytes, b: Bytes) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "bytes",
+"name": "put_f16_le",
+"sig": "fn bytes.put_f16_le(mut b: Bytes, pos: Int, x: Float) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "put_f16_be",
+"sig": "fn bytes.put_f16_be(mut b: Bytes, pos: Int, x: Float) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "append_f16_le",
+"sig": "fn bytes.append_f16_le(mut b: Bytes, x: Float) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "append_f16_be",
+"sig": "fn bytes.append_f16_be(mut b: Bytes, x: Float) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "get_f16_be",
+"sig": "fn bytes.get_f16_be(b: Bytes, pos: Int) -> Float?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "next_f16_be",
+"sig": "fn bytes.next_f16_be(b: Bytes, pos: Int) -> (Float?, Int)",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "get_f16_be_array",
+"sig": "fn bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "put_bool",
+"sig": "fn bytes.put_bool(mut b: Bytes, pos: Int, x: Bool) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "append_bytes",
+"sig": "fn bytes.append_bytes(mut b: Bytes, src: Bytes) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "take",
+"sig": "fn bytes.take(b: Bytes, n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "drop",
+"sig": "fn bytes.drop(b: Bytes, n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "take_end",
+"sig": "fn bytes.take_end(b: Bytes, n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "drop_end",
+"sig": "fn bytes.drop_end(b: Bytes, n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "get_i8",
+"sig": "fn bytes.get_i8(b: Bytes, pos: Int) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "next_i8",
+"sig": "fn bytes.next_i8(b: Bytes, pos: Int) -> (Int?, Int)",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "put_i8",
+"sig": "fn bytes.put_i8(mut b: Bytes, pos: Int, x: Int) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "append_i8",
+"sig": "fn bytes.append_i8(mut b: Bytes, x: Int) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "filter",
+"sig": "fn bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "fold",
+"sig": "fn bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "any",
+"sig": "fn bytes.any(b: Bytes, f: (Int) -> Bool) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "all",
+"sig": "fn bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "count",
+"sig": "fn bytes.count(b: Bytes, f: (Int) -> Bool) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "find",
+"sig": "fn bytes.find(b: Bytes, f: (Int) -> Bool) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "first",
+"sig": "fn bytes.first(b: Bytes) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "last",
+"sig": "fn bytes.last(b: Bytes) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "pop",
+"sig": "fn bytes.pop(mut b: Bytes) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "get_u8",
+"sig": "fn bytes.get_u8(b: Bytes, pos: Int) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "enumerate",
+"sig": "fn bytes.enumerate(b: Bytes) -> List[(Int, Int)]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "zip",
+"sig": "fn bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "zip_with",
+"sig": "fn bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "filter_map",
+"sig": "fn bytes.filter_map(b: Bytes, f: (Int) -> B?) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "find_map",
+"sig": "fn bytes.find_map(b: Bytes, f: (Int) -> B?) -> B?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "reduce",
+"sig": "fn bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "scan",
+"sig": "fn bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "partition",
+"sig": "fn bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "group_by",
+"sig": "fn bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "sort",
+"sig": "fn bytes.sort(b: Bytes) -> List[Int]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "sort_by",
+"sig": "fn bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "sort_with",
+"sig": "fn bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "min",
+"sig": "fn bytes.min(b: Bytes) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "max",
+"sig": "fn bytes.max(b: Bytes) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "min_by",
+"sig": "fn bytes.min_by(b: Bytes, f: (Int) -> K) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "max_by",
+"sig": "fn bytes.max_by(b: Bytes, f: (Int) -> K) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "min_with",
+"sig": "fn bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "max_with",
+"sig": "fn bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "sum",
+"sig": "fn bytes.sum(b: Bytes) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "product",
+"sig": "fn bytes.product(b: Bytes) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "find_index",
+"sig": "fn bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "take_while",
+"sig": "fn bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "drop_while",
+"sig": "fn bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "window",
+"sig": "fn bytes.window(b: Bytes, n: Int) -> List[Bytes]",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "split_at",
+"sig": "fn bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "dedup",
+"sig": "fn bytes.dedup(b: Bytes) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "intersperse",
+"sig": "fn bytes.intersperse(b: Bytes, sep: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "unique",
+"sig": "fn bytes.unique(b: Bytes) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "unique_by",
+"sig": "fn bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "last_index_of",
+"sig": "fn bytes.last_index_of(b: Bytes, needle: Bytes) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "replace",
+"sig": "fn bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "replace_first",
+"sig": "fn bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "strip_prefix",
+"sig": "fn bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Bytes?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "strip_suffix",
+"sig": "fn bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Bytes?",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "count_matches",
+"sig": "fn bytes.count_matches(b: Bytes, needle: Bytes) -> Int",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "new",
+"sig": "fn bytes.new() -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "bytes",
+"name": "is_equal_constant_time",
+"sig": "fn bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "compute",
+"name": "ns",
+"sig": "fn compute.ns(n: Int) -> Compute",
+"kind": "据え置き"
+},
+{
+"mod": "compute",
+"name": "us",
+"sig": "fn compute.us(n: Int) -> Compute",
+"kind": "据え置き"
+},
+{
+"mod": "compute",
+"name": "ms",
+"sig": "fn compute.ms(n: Int) -> Compute",
+"kind": "据え置き"
+},
+{
+"mod": "compute",
+"name": "s",
+"sig": "fn compute.s(n: Int) -> Compute",
+"kind": "据え置き"
+},
+{
+"mod": "compute",
+"name": "min",
+"sig": "fn compute.min(n: Int) -> Compute",
+"kind": "据え置き"
+},
+{
+"mod": "compute",
+"name": "h",
+"sig": "fn compute.h(n: Int) -> Compute",
+"kind": "据え置き"
+},
+{
+"mod": "compute",
+"name": "compare",
+"sig": "fn compute.compare(a: Compute, b: Compute) -> Int",
+"kind": "追加"
+},
+{
+"mod": "datetime",
+"name": "add_days",
+"sig": "fn datetime.add_days(ts: Int, n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "add_hours",
+"sig": "fn datetime.add_hours(ts: Int, n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "add_minutes",
+"sig": "fn datetime.add_minutes(ts: Int, n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "add_seconds",
+"sig": "fn datetime.add_seconds(ts: Int, n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "day",
+"sig": "fn datetime.day(ts: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "format",
+"sig": "fn datetime.format(ts: Int, pattern: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "from_parts",
+"sig": "fn datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]",
+"kind": "意味変更"
+},
+{
+"mod": "datetime",
+"name": "hour",
+"sig": "fn datetime.hour(ts: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "minute",
+"sig": "fn datetime.minute(ts: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "month",
+"sig": "fn datetime.month(ts: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "now",
+"sig": "effect fn datetime.now() -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "monotonic_ns",
+"sig": "effect fn datetime.monotonic_ns() -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "parse_iso",
+"sig": "fn datetime.parse_iso(s: String) -> Result[Int, String]",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "second",
+"sig": "fn datetime.second(ts: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "to_iso",
+"sig": "fn datetime.to_iso(ts: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "weekday",
+"sig": "fn datetime.weekday(ts: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "year",
+"sig": "fn datetime.year(ts: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "datetime",
+"name": "now_ms",
+"sig": "effect fn datetime.now_ms() -> Int",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "new",
+"sig": "fn deque.new[A]() -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "from_list",
+"sig": "fn deque.from_list[A](xs: List[A]) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "to_list",
+"sig": "fn deque.to_list[A](d: Deque[A]) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "len",
+"sig": "fn deque.len[A](d: Deque[A]) -> Int",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "is_empty",
+"sig": "fn deque.is_empty[A](d: Deque[A]) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "push",
+"sig": "fn deque.push[A](mut d: Deque[A], x: A) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "push_front",
+"sig": "fn deque.push_front[A](mut d: Deque[A], x: A) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "pop",
+"sig": "fn deque.pop[A](mut d: Deque[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "pop_front",
+"sig": "fn deque.pop_front[A](mut d: Deque[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "first",
+"sig": "fn deque.first[A](d: Deque[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "last",
+"sig": "fn deque.last[A](d: Deque[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "get",
+"sig": "fn deque.get[A](d: Deque[A], i: Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "contains",
+"sig": "fn deque.contains[A](d: Deque[A], x: A) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "map",
+"sig": "fn deque.map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "filter",
+"sig": "fn deque.filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "fold",
+"sig": "fn deque.fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "any",
+"sig": "fn deque.any[A](d: Deque[A], f: (A) -> Bool) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "all",
+"sig": "fn deque.all[A](d: Deque[A], f: (A) -> Bool) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "count",
+"sig": "fn deque.count[A](d: Deque[A], f: (A) -> Bool) -> Int",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "find",
+"sig": "fn deque.find[A](d: Deque[A], f: (A) -> Bool) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "clear",
+"sig": "fn deque.clear[A](mut d: Deque[A]) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "reverse",
+"sig": "fn deque.reverse[A](d: Deque[A]) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "take",
+"sig": "fn deque.take[A](d: Deque[A], n: Int) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "drop",
+"sig": "fn deque.drop[A](d: Deque[A], n: Int) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "take_end",
+"sig": "fn deque.take_end[A](d: Deque[A], n: Int) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "drop_end",
+"sig": "fn deque.drop_end[A](d: Deque[A], n: Int) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "slice",
+"sig": "fn deque.slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "set",
+"sig": "fn deque.set[A](d: Deque[A], i: Int, x: A) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "insert",
+"sig": "fn deque.insert[A](d: Deque[A], i: Int, x: A) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "remove_at",
+"sig": "fn deque.remove_at[A](d: Deque[A], i: Int) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "enumerate",
+"sig": "fn deque.enumerate(d: Deque[A]) -> List[(Int, A)]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "zip",
+"sig": "fn deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "zip_with",
+"sig": "fn deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "filter_map",
+"sig": "fn deque.filter_map(d: Deque[A], f: (A) -> B?) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "find_map",
+"sig": "fn deque.find_map(d: Deque[A], f: (A) -> B?) -> B?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "reduce",
+"sig": "fn deque.reduce(d: Deque[A], f: (A, A) -> A) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "scan",
+"sig": "fn deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "partition",
+"sig": "fn deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "group_by",
+"sig": "fn deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "sort",
+"sig": "fn deque.sort(d: Deque[A]) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "sort_by",
+"sig": "fn deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "sort_with",
+"sig": "fn deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "min",
+"sig": "fn deque.min(d: Deque[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "max",
+"sig": "fn deque.max(d: Deque[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "min_by",
+"sig": "fn deque.min_by(d: Deque[A], f: (A) -> K) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "max_by",
+"sig": "fn deque.max_by(d: Deque[A], f: (A) -> K) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "min_with",
+"sig": "fn deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "max_with",
+"sig": "fn deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "sum",
+"sig": "fn deque.sum[A: Numeric](d: Deque[A]) -> A",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "product",
+"sig": "fn deque.product[A: Numeric](d: Deque[A]) -> A",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "find_index",
+"sig": "fn deque.find_index(d: Deque[A], f: (A) -> Bool) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "take_while",
+"sig": "fn deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "drop_while",
+"sig": "fn deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "chunk",
+"sig": "fn deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "window",
+"sig": "fn deque.window(d: Deque[A], n: Int) -> List[Deque[A]]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "split_at",
+"sig": "fn deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "dedup",
+"sig": "fn deque.dedup(d: Deque[A]) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "intersperse",
+"sig": "fn deque.intersperse(d: Deque[A], sep: A) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "unique",
+"sig": "fn deque.unique(d: Deque[A]) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "deque",
+"name": "unique_by",
+"sig": "fn deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]",
+"kind": "追加"
+},
+{
+"mod": "duration",
+"name": "ns",
+"sig": "fn duration.ns(n: Int) -> Duration",
+"kind": "据え置き"
+},
+{
+"mod": "duration",
+"name": "us",
+"sig": "fn duration.us(n: Int) -> Duration",
+"kind": "据え置き"
+},
+{
+"mod": "duration",
+"name": "ms",
+"sig": "fn duration.ms(n: Int) -> Duration",
+"kind": "据え置き"
+},
+{
+"mod": "duration",
+"name": "s",
+"sig": "fn duration.s(n: Int) -> Duration",
+"kind": "据え置き"
+},
+{
+"mod": "duration",
+"name": "min",
+"sig": "fn duration.min(n: Int) -> Duration",
+"kind": "据え置き"
+},
+{
+"mod": "duration",
+"name": "h",
+"sig": "fn duration.h(n: Int) -> Duration",
+"kind": "据え置き"
+},
+{
+"mod": "duration",
+"name": "compare",
+"sig": "fn duration.compare(a: Duration, b: Duration) -> Int",
+"kind": "追加"
+},
+{
+"mod": "env",
+"name": "args",
+"sig": "effect fn env.args() -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "env",
+"name": "get",
+"sig": "effect fn env.get(name: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "env",
+"name": "set",
+"sig": "effect fn env.set(name: String, value: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "env",
+"name": "cwd",
+"sig": "effect fn env.cwd() -> String",
+"kind": "据え置き"
+},
+{
+"mod": "env",
+"name": "os",
+"sig": "fn env.os() -> String",
+"kind": "据え置き"
+},
+{
+"mod": "env",
+"name": "sleep_ms",
+"sig": "effect fn env.sleep_ms(ms: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "env",
+"name": "vars",
+"sig": "effect fn env.vars() -> Map[String, String]",
+"kind": "追加"
+},
+{
+"mod": "env",
+"name": "remove",
+"sig": "effect fn env.remove(name: String) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "env",
+"name": "secret",
+"sig": "effect fn env.secret(name: String) -> Secret[String]?",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "region",
+"sig": "fn ffi.region(b: Bytes) -> Region",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "alloc",
+"sig": "effect fn ffi.alloc(n: Int) -> Region",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "len",
+"sig": "fn ffi.len(r: Region) -> Int",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "is_writable",
+"sig": "fn ffi.is_writable(r: Region) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "read",
+"sig": "effect fn ffi.read(r: Region, off: Int, n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "write",
+"sig": "effect fn ffi.write(r: Region, off: Int, b: Bytes) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "ffi",
+"name": "to_bytes",
+"sig": "effect fn ffi.to_bytes(r: Region) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "to_string",
+"sig": "fn float.to_string(x: Float) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "parse",
+"sig": "fn float.parse(s: String) -> Result[Float, String]",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "to_fixed",
+"sig": "fn float.to_fixed(x: Float, decimals: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "to_bits",
+"sig": "fn float.to_bits(f: Float) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "abs",
+"sig": "fn float.abs(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "floor",
+"sig": "fn float.floor(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "ceil",
+"sig": "fn float.ceil(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "round",
+"sig": "fn float.round(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "min",
+"sig": "fn float.min(a: Float, b: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "max",
+"sig": "fn float.max(a: Float, b: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "clamp",
+"sig": "fn float.clamp(x: Float, lo: Float, hi: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "signum",
+"sig": "fn float.signum(x: Float) -> Float",
+"kind": "改名"
+},
+{
+"mod": "float",
+"name": "is_nan",
+"sig": "fn float.is_nan(x: Float) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "is_infinite",
+"sig": "fn float.is_infinite(x: Float) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "float",
+"name": "from_bits",
+"sig": "fn float.from_bits(bits: Int) -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "trunc",
+"sig": "fn float.trunc(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "is_finite",
+"sig": "fn float.is_finite(x: Float) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "pow",
+"sig": "fn float.pow(base: Float, exp: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "infinity",
+"sig": "fn float.infinity() -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "nan",
+"sig": "fn float.nan() -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "epsilon",
+"sig": "fn float.epsilon() -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "max_value",
+"sig": "fn float.max_value() -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "min_value",
+"sig": "fn float.min_value() -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "compare",
+"sig": "fn float.compare(a: Float, b: Float) -> Int",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "from",
+"sig": "fn float.from[S: Numeric](x: S) -> Float",
+"kind": "追加"
+},
+{
+"mod": "float",
+"name": "from_checked",
+"sig": "fn float.from_checked[S: Numeric](x: S) -> Float?",
+"kind": "追加"
+},
+{
+"mod": "fs",
+"name": "read_text",
+"sig": "effect fn fs.read_text(path: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "read_bytes",
+"sig": "effect fn fs.read_bytes(path: String) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "fs",
+"name": "read_lines",
+"sig": "effect fn fs.read_lines(path: String) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "read_text_if_exists",
+"sig": "effect fn fs.read_text_if_exists(path: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "read_bytes_if_exists",
+"sig": "effect fn fs.read_bytes_if_exists(path: String) -> Bytes?",
+"kind": "意味変更"
+},
+{
+"mod": "fs",
+"name": "read_lines_if_exists",
+"sig": "effect fn fs.read_lines_if_exists(path: String) -> List[String]?",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "fold_lines",
+"sig": "effect fn fs.fold_lines[A](path: String, init: A, f: (A, String) -> A) -> A",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "for_each_line",
+"sig": "effect fn fs.for_each_line(path: String, f: (String) -> Unit) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "fold_lines_range",
+"sig": "effect fn fs.fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A",
+"kind": "意味変更"
+},
+{
+"mod": "fs",
+"name": "fold_lines_chunked",
+"sig": "effect fn fs.fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "write_text",
+"sig": "effect fn fs.write_text(path: String, content: String) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "fs",
+"name": "write_bytes",
+"sig": "effect fn fs.write_bytes(path: String, data: Bytes) -> Unit",
+"kind": "意味変更"
+},
+{
+"mod": "fs",
+"name": "append_text",
+"sig": "effect fn fs.append_text(path: String, content: String) -> Unit",
+"kind": "改名"
+},
+{
+"mod": "fs",
+"name": "mkdir_p",
+"sig": "effect fn fs.mkdir_p(path: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "exists",
+"sig": "effect fn fs.exists(path: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "is_dir",
+"sig": "effect fn fs.is_dir(path: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "is_file",
+"sig": "effect fn fs.is_file(path: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "is_symlink",
+"sig": "effect fn fs.is_symlink(path: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "remove",
+"sig": "effect fn fs.remove(path: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "remove_all",
+"sig": "effect fn fs.remove_all(path: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "list_dir",
+"sig": "effect fn fs.list_dir(path: String) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "walk",
+"sig": "effect fn fs.walk(dir: String) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "glob",
+"sig": "effect fn fs.glob(pattern: String) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "copy",
+"sig": "effect fn fs.copy(src: String, dst: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "rename",
+"sig": "effect fn fs.rename(src: String, dst: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "stat",
+"sig": "effect fn fs.stat(path: String) -> FileStat",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "temp_dir",
+"sig": "effect fn fs.temp_dir() -> String",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "create_temp_file",
+"sig": "effect fn fs.create_temp_file(prefix: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "create_temp_dir",
+"sig": "effect fn fs.create_temp_dir(prefix: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "fs",
+"name": "append_bytes",
+"sig": "effect fn fs.append_bytes(path: String, data: Bytes) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "fnv1a32",
+"sig": "fn hash.fnv1a32(b: Bytes) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "hash",
+"name": "sha256",
+"sig": "fn hash.sha256(b: Bytes) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "hash",
+"name": "sha256_hex",
+"sig": "fn hash.sha256_hex(b: Bytes) -> String",
+"kind": "意味変更"
+},
+{
+"mod": "hash",
+"name": "crc32",
+"sig": "fn hash.crc32(b: Bytes) -> Int",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "adler32",
+"sig": "fn hash.adler32(b: Bytes) -> Int",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "sha512",
+"sig": "fn hash.sha512(b: Bytes) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "sha512_hex",
+"sig": "fn hash.sha512_hex(b: Bytes) -> String",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "hmac_sha256",
+"sig": "fn hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "hmac_sha512",
+"sig": "fn hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "is_valid_hmac_sha256",
+"sig": "fn hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "hash",
+"name": "is_valid_hmac_sha512",
+"sig": "fn hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "new",
+"sig": "fn heap.new[A]() -> Heap[A]",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "new_by",
+"sig": "fn heap.new_by[A, K](f: (A) -> K) -> Heap[A]",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "new_with",
+"sig": "fn heap.new_with[A](cmp: (A, A) -> Int) -> Heap[A]",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "from_list",
+"sig": "fn heap.from_list[A](xs: List[A]) -> Heap[A]",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "push",
+"sig": "fn heap.push[A](mut h: Heap[A], x: A) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "pop",
+"sig": "fn heap.pop[A](mut h: Heap[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "peek",
+"sig": "fn heap.peek[A](h: Heap[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "len",
+"sig": "fn heap.len[A](h: Heap[A]) -> Int",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "is_empty",
+"sig": "fn heap.is_empty[A](h: Heap[A]) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "to_list",
+"sig": "fn heap.to_list[A](h: Heap[A]) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "contains",
+"sig": "fn heap.contains[A](h: Heap[A], x: A) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "any",
+"sig": "fn heap.any[A](h: Heap[A], f: (A) -> Bool) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "all",
+"sig": "fn heap.all[A](h: Heap[A], f: (A) -> Bool) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "count",
+"sig": "fn heap.count[A](h: Heap[A], f: (A) -> Bool) -> Int",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "filter",
+"sig": "fn heap.filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A]",
+"kind": "追加"
+},
+{
+"mod": "heap",
+"name": "clear",
+"sig": "fn heap.clear[A](mut h: Heap[A]) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "hex",
+"name": "encode",
+"sig": "fn hex.encode(b: Bytes) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "hex",
+"name": "encode_upper",
+"sig": "fn hex.encode_upper(b: Bytes) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "hex",
+"name": "decode",
+"sig": "fn hex.decode(s: String) -> Result[Bytes, String]",
+"kind": "据え置き"
+},
+{
+"mod": "html",
+"name": "escape",
+"sig": "fn html.escape(s: String) -> SafeHtml",
+"kind": "据え置き"
+},
+{
+"mod": "html",
+"name": "raw",
+"sig": "fn html.raw(s: String) -> SafeHtml",
+"kind": "据え置き"
+},
+{
+"mod": "html",
+"name": "to_string",
+"sig": "fn html.to_string(h: SafeHtml) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "html",
+"name": "concat",
+"sig": "fn html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml",
+"kind": "据え置き"
+},
+{
+"mod": "html",
+"name": "empty",
+"sig": "fn html.empty() -> SafeHtml",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "serve",
+"sig": "effect fn http.serve(port: Int, handler: HttpHandler) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "response",
+"sig": "fn http.response(status: Int, body: String) -> HttpResponse",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "json",
+"sig": "fn http.json(status: Int, body: String) -> HttpResponse",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "with_headers",
+"sig": "fn http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "redirect",
+"sig": "fn http.redirect(url: String) -> HttpResponse",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "set_status",
+"sig": "fn http.set_status(resp: HttpResponse, code: Int) -> HttpResponse",
+"kind": "改名"
+},
+{
+"mod": "http",
+"name": "set_header",
+"sig": "fn http.set_header[M: HttpMessage](m: M, name: String, value: String) -> M",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "body",
+"sig": "fn http.body[M: HttpMessage](m: M) -> String",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "body_bytes",
+"sig": "fn http.body_bytes[M: HttpMessage](m: M) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "http",
+"name": "status",
+"sig": "fn http.status(resp: HttpResponse) -> Int",
+"kind": "改名"
+},
+{
+"mod": "http",
+"name": "header",
+"sig": "fn http.header[M: HttpMessage](m: M, name: String) -> String?",
+"kind": "改名"
+},
+{
+"mod": "http",
+"name": "header_values",
+"sig": "fn http.header_values[M: HttpMessage](m: M, name: String) -> List[String]",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "headers",
+"sig": "fn http.headers[M: HttpMessage](m: M) -> List[(String, String)]",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "method",
+"sig": "fn http.method(req: HttpRequest) -> String",
+"kind": "改名"
+},
+{
+"mod": "http",
+"name": "path",
+"sig": "fn http.path(req: HttpRequest) -> String",
+"kind": "改名"
+},
+{
+"mod": "http",
+"name": "query_params",
+"sig": "fn http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "get",
+"sig": "effect fn http.get(url: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "get_response",
+"sig": "effect fn http.get_response(url: String) -> HttpResponse",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "request",
+"sig": "effect fn http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "start",
+"sig": "effect fn http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "poll",
+"sig": "effect fn http.poll(c: HttpCall) -> Result[HttpResponse, String]?",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "read_new",
+"sig": "effect fn http.read_new(c: HttpCall) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "wait",
+"sig": "effect fn http.wait(c: HttpCall) -> HttpResponse",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "cancel",
+"sig": "effect fn http.cancel(c: HttpCall) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "new_request",
+"sig": "fn http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "param",
+"sig": "fn http.param(req: HttpRequest, name: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "route",
+"sig": "fn http.route(pattern: String, handler: HttpHandler) -> HttpRoute",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "mount",
+"sig": "fn http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "router",
+"sig": "fn http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "wrap",
+"sig": "fn http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler",
+"kind": "据え置き"
+},
+{
+"mod": "http",
+"name": "decode_json",
+"sig": "fn http.decode_json[A: Decode](req: HttpRequest) -> Result[A, HttpResponse]",
+"kind": "意味変更"
+},
+{
+"mod": "http",
+"name": "set_body",
+"sig": "fn http.set_body[M: HttpMessage](m: M, body: String) -> M",
+"kind": "追加"
+},
+{
+"mod": "http",
+"name": "set_body_bytes",
+"sig": "fn http.set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M",
+"kind": "追加"
+},
+{
+"mod": "http",
+"name": "send",
+"sig": "effect fn http.send(req: HttpRequest) -> HttpResponse",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "to_string",
+"sig": "fn int.to_string(x: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "to_hex",
+"sig": "fn int.to_hex(x: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "parse",
+"sig": "fn int.parse(s: String) -> Result[Int, String]",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "abs",
+"sig": "fn int.abs(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "min",
+"sig": "fn int.min(a: Int, b: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "max",
+"sig": "fn int.max(a: Int, b: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "clamp",
+"sig": "fn int.clamp(x: Int, lo: Int, hi: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "is_even",
+"sig": "fn int.is_even(x: Int) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "is_odd",
+"sig": "fn int.is_odd(x: Int) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "band",
+"sig": "fn int.band(a: Int, b: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "bor",
+"sig": "fn int.bor(a: Int, b: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "bxor",
+"sig": "fn int.bxor(a: Int, b: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "bnot",
+"sig": "fn int.bnot(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "bshl",
+"sig": "fn int.bshl(a: Int, n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "bshr",
+"sig": "fn int.bshr(a: Int, n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "count_leading_zeros",
+"sig": "fn int.count_leading_zeros(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "count_trailing_zeros",
+"sig": "fn int.count_trailing_zeros(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "count_ones",
+"sig": "fn int.count_ones(x: Int) -> Int",
+"kind": "改名"
+},
+{
+"mod": "int",
+"name": "bit_reverse",
+"sig": "fn int.bit_reverse(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "byte_swap",
+"sig": "fn int.byte_swap(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "bit_length",
+"sig": "fn int.bit_length(x: Int) -> Int",
+"kind": "改名"
+},
+{
+"mod": "int",
+"name": "log2_floor",
+"sig": "fn int.log2_floor(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "log2_ceil",
+"sig": "fn int.log2_ceil(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "next_power_of_two",
+"sig": "fn int.next_power_of_two(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "prev_power_of_two",
+"sig": "fn int.prev_power_of_two(x: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "wrap_add",
+"sig": "fn int.wrap_add(a: Int, b: Int) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "int",
+"name": "wrap_mul",
+"sig": "fn int.wrap_mul(a: Int, b: Int) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "int",
+"name": "rotate_right",
+"sig": "fn int.rotate_right(a: Int, n: Int) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "int",
+"name": "rotate_left",
+"sig": "fn int.rotate_left(a: Int, n: Int) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "int",
+"name": "min_value",
+"sig": "fn int.min_value() -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "max_value",
+"sig": "fn int.max_value() -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "int",
+"name": "wrap",
+"sig": "fn int.wrap(x: Int, bits: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "wrap_sub",
+"sig": "fn int.wrap_sub(a: Int, b: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "pow",
+"sig": "fn int.pow(base: Int, exp: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "sign",
+"sig": "fn int.sign(x: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "modulo",
+"sig": "fn int.modulo(a: Int, b: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "floor_div",
+"sig": "fn int.floor_div(a: Int, b: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "to_string_radix",
+"sig": "fn int.to_string_radix(x: Int, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "parse_radix",
+"sig": "fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "compare",
+"sig": "fn int.compare(a: Int, b: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "from",
+"sig": "fn int.from[S: Numeric](x: S) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "from_checked",
+"sig": "fn int.from_checked[S: Numeric](x: S) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "from_saturating",
+"sig": "fn int.from_saturating[S: Numeric](x: S) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "from_wrapping",
+"sig": "fn int.from_wrapping[S: Integer](x: S) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int",
+"name": "bshr_logical",
+"sig": "fn int.bshr_logical(a: Int, n: Int) -> Int",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "read_line",
+"sig": "effect fn io.read_line() -> String?",
+"kind": "意味変更"
+},
+{
+"mod": "io",
+"name": "read_all",
+"sig": "effect fn io.read_all() -> String",
+"kind": "据え置き"
+},
+{
+"mod": "io",
+"name": "print",
+"sig": "effect fn io.print(s: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "io",
+"name": "write",
+"sig": "effect fn io.write[H: Write](h: H, data: Bytes) -> Unit",
+"kind": "意味変更"
+},
+{
+"mod": "io",
+"name": "eprint",
+"sig": "effect fn io.eprint(s: String) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "stdin",
+"sig": "effect fn io.stdin() -> Stdin",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "stdout",
+"sig": "effect fn io.stdout() -> Stdout",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "stderr",
+"sig": "effect fn io.stderr() -> Stderr",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "read",
+"sig": "effect fn io.read[H: Read](h: H, max: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "read_exact",
+"sig": "effect fn io.read_exact[H: Read](h: H, n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "read_to_end",
+"sig": "effect fn io.read_to_end[H: Read](h: H) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "io",
+"name": "close",
+"sig": "effect fn io.close[H: Close](h: H) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "json",
+"name": "parse",
+"sig": "fn json.parse(text: String) -> Result[Value, String]",
+"kind": "意味変更"
+},
+{
+"mod": "json",
+"name": "stringify",
+"sig": "fn json.stringify(v: Value) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "json",
+"name": "stringify_pretty",
+"sig": "fn json.stringify_pretty(v: Value) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "len",
+"sig": "fn list.len(xs: List[A]) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "get",
+"sig": "fn list.get(xs: List[A], i: Int) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "set",
+"sig": "fn list.set(xs: List[A], i: Int, x: A) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "swap",
+"sig": "fn list.swap(xs: List[A], i: Int, j: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "sort",
+"sig": "fn list.sort(xs: List[A]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "reverse",
+"sig": "fn list.reverse(xs: List[A]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "contains",
+"sig": "fn list.contains(xs: List[A], x: A) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "enumerate",
+"sig": "fn list.enumerate(xs: List[A]) -> List[(Int, A)]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "zip",
+"sig": "fn list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "flatten",
+"sig": "fn list.flatten(xs: List[List[A]]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "take",
+"sig": "fn list.take(xs: List[A], n: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "drop",
+"sig": "fn list.drop(xs: List[A], n: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "unique",
+"sig": "fn list.unique(xs: List[A]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "index_of",
+"sig": "fn list.index_of(xs: List[A], x: A) -> Int?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "last",
+"sig": "fn list.last(xs: List[A]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "chunk",
+"sig": "fn list.chunk(xs: List[A], n: Int) -> List[List[A]]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "sum",
+"sig": "fn list.sum[A: Numeric](xs: List[A]) -> A",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "product",
+"sig": "fn list.product[A: Numeric](xs: List[A]) -> A",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "first",
+"sig": "fn list.first(xs: List[A]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "is_empty",
+"sig": "fn list.is_empty(xs: List[A]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "min",
+"sig": "fn list.min(xs: List[A]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "max",
+"sig": "fn list.max(xs: List[A]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "join",
+"sig": "fn list.join[T: Text](xs: List[T], sep: T) -> T",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "map",
+"sig": "fn list.map(xs: List[A], f: (A) -> B) -> List[B]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "filter",
+"sig": "fn list.filter(xs: List[A], f: (A) -> Bool) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "find",
+"sig": "fn list.find(xs: List[A], f: (A) -> Bool) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "any",
+"sig": "fn list.any(xs: List[A], f: (A) -> Bool) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "all",
+"sig": "fn list.all(xs: List[A], f: (A) -> Bool) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "count",
+"sig": "fn list.count(xs: List[A], f: (A) -> Bool) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "flat_map",
+"sig": "fn list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "filter_map",
+"sig": "fn list.filter_map(xs: List[A], f: (A) -> B?) -> List[B]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "fold",
+"sig": "fn list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "sort_by",
+"sig": "fn list.sort_by(xs: List[A], f: (A) -> B) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "take_while",
+"sig": "fn list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "drop_while",
+"sig": "fn list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "partition",
+"sig": "fn list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "reduce",
+"sig": "fn list.reduce(xs: List[A], f: (A, A) -> A) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "group_by",
+"sig": "fn list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "find_index",
+"sig": "fn list.find_index(xs: List[A], f: (A) -> Bool) -> Int?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "update",
+"sig": "fn list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "scan",
+"sig": "fn list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "zip_with",
+"sig": "fn list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "unique_by",
+"sig": "fn list.unique_by(xs: List[A], f: (A) -> K) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "range",
+"sig": "fn list.range(start: Int, end: Int) -> List[Int]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "slice",
+"sig": "fn list.slice(xs: List[A], start: Int, end: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "insert",
+"sig": "fn list.insert(xs: List[A], i: Int, x: A) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "remove_at",
+"sig": "fn list.remove_at(xs: List[A], i: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "repeat",
+"sig": "fn list.repeat(x: A, n: Int) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "intersperse",
+"sig": "fn list.intersperse(xs: List[A], sep: A) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "dedup",
+"sig": "fn list.dedup(xs: List[A]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "take_end",
+"sig": "fn list.take_end(xs: List[A], n: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "drop_end",
+"sig": "fn list.drop_end(xs: List[A], n: Int) -> List[A]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "window",
+"sig": "fn list.window(xs: List[A], n: Int) -> List[List[A]]",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "binary_search",
+"sig": "fn list.binary_search(xs: List[A], target: A) -> Int?",
+"kind": "意味変更"
+},
+{
+"mod": "list",
+"name": "push",
+"sig": "fn list.push(mut xs: List[A], x: A) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "with_capacity",
+"sig": "fn list.with_capacity(cap: Int) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "pop",
+"sig": "fn list.pop(mut xs: List[A]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "clear",
+"sig": "fn list.clear(mut xs: List[A]) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "split_at",
+"sig": "fn list.split_at(xs: List[A], n: Int) -> (List[A], List[A])",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "iterate",
+"sig": "fn list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "find_map",
+"sig": "fn list.find_map(xs: List[A], f: (A) -> B?) -> B?",
+"kind": "据え置き"
+},
+{
+"mod": "list",
+"name": "sort_with",
+"sig": "fn list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "min_by",
+"sig": "fn list.min_by(xs: List[A], f: (A) -> K) -> A?",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "max_by",
+"sig": "fn list.max_by(xs: List[A], f: (A) -> K) -> A?",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "unzip",
+"sig": "fn list.unzip(xs: List[(A, B)]) -> (List[A], List[B])",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "range_step",
+"sig": "fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "binary_search_by",
+"sig": "fn list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "binary_search_with",
+"sig": "fn list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "min_with",
+"sig": "fn list.min_with(xs: List[A], cmp: (A, A) -> Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "max_with",
+"sig": "fn list.max_with(xs: List[A], cmp: (A, A) -> Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "new",
+"sig": "fn list.new() -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "from_list",
+"sig": "fn list.from_list(xs: List[A]) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "list",
+"name": "to_list",
+"sig": "fn list.to_list(xs: List[A]) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "new",
+"sig": "fn map.new() -> Map[K, V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "get",
+"sig": "fn map.get(m: Map[K, V], key: K) -> V?",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "set",
+"sig": "fn map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "contains",
+"sig": "fn map.contains(m: Map[K, V], key: K) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "remove",
+"sig": "fn map.remove(m: Map[K, V], key: K) -> Map[K, V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "keys",
+"sig": "fn map.keys(m: Map[K, V]) -> List[K]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "values",
+"sig": "fn map.values(m: Map[K, V]) -> List[V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "len",
+"sig": "fn map.len(m: Map[K, V]) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "to_list",
+"sig": "fn map.to_list(m: Map[K, V]) -> List[(K, V)]",
+"kind": "改名"
+},
+{
+"mod": "map",
+"name": "merge",
+"sig": "fn map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "is_empty",
+"sig": "fn map.is_empty(m: Map[K, V]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "from_list",
+"sig": "fn map.from_list(xs: List[(K, V)]) -> Map[K, V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "map",
+"sig": "fn map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "filter",
+"sig": "fn map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "fold",
+"sig": "fn map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "any",
+"sig": "fn map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "all",
+"sig": "fn map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "count",
+"sig": "fn map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "find",
+"sig": "fn map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> (K, V)?",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "update",
+"sig": "fn map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]",
+"kind": "意味変更"
+},
+{
+"mod": "map",
+"name": "upsert",
+"sig": "fn map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "clear",
+"sig": "fn map.clear(mut m: Map[K, V]) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "map",
+"name": "enumerate",
+"sig": "fn map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "zip",
+"sig": "fn map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "zip_with",
+"sig": "fn map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "filter_map",
+"sig": "fn map.filter_map(m: Map[K, V], f: ((K, V)) -> B?) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "find_map",
+"sig": "fn map.find_map(m: Map[K, V], f: ((K, V)) -> B?) -> B?",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "reduce",
+"sig": "fn map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)?",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "scan",
+"sig": "fn map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "partition",
+"sig": "fn map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "group_by",
+"sig": "fn map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "sort_by",
+"sig": "fn map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "sort_with",
+"sig": "fn map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "min_by",
+"sig": "fn map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "max_by",
+"sig": "fn map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "min_with",
+"sig": "fn map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?",
+"kind": "追加"
+},
+{
+"mod": "map",
+"name": "max_with",
+"sig": "fn map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "atan",
+"sig": "fn math.atan(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "choose",
+"sig": "fn math.choose(n: Int, k: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "cos",
+"sig": "fn math.cos(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "e",
+"sig": "fn math.e() -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "exp",
+"sig": "fn math.exp(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "factorial",
+"sig": "fn math.factorial(n: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "log",
+"sig": "fn math.log(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "log10",
+"sig": "fn math.log10(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "log2",
+"sig": "fn math.log2(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "log_gamma",
+"sig": "fn math.log_gamma(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "pi",
+"sig": "fn math.pi() -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "sin",
+"sig": "fn math.sin(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "sqrt",
+"sig": "fn math.sqrt(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "tan",
+"sig": "fn math.tan(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "tanh",
+"sig": "fn math.tanh(x: Float) -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "math",
+"name": "asin",
+"sig": "fn math.asin(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "acos",
+"sig": "fn math.acos(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "atan2",
+"sig": "fn math.atan2(y: Float, x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "sinh",
+"sig": "fn math.sinh(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "cosh",
+"sig": "fn math.cosh(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "hypot",
+"sig": "fn math.hypot(a: Float, b: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "cbrt",
+"sig": "fn math.cbrt(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "expm1",
+"sig": "fn math.expm1(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "log1p",
+"sig": "fn math.log1p(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "asinh",
+"sig": "fn math.asinh(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "acosh",
+"sig": "fn math.acosh(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "math",
+"name": "atanh",
+"sig": "fn math.atanh(x: Float) -> Float",
+"kind": "追加"
+},
+{
+"mod": "matrix",
+"name": "zeros",
+"sig": "fn matrix.zeros(rows: Int, cols: Int) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "ones",
+"sig": "fn matrix.ones(rows: Int, cols: Int) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "shape",
+"sig": "fn matrix.shape(m: Matrix) -> (Int, Int)",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "transpose",
+"sig": "fn matrix.transpose(m: Matrix) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "from_lists",
+"sig": "fn matrix.from_lists(xs: List[List[Float]]) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "to_lists",
+"sig": "fn matrix.to_lists(m: Matrix) -> List[List[Float]]",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "get",
+"sig": "fn matrix.get(m: Matrix, row: Int, col: Int) -> Float?",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "rows",
+"sig": "fn matrix.rows(m: Matrix) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "cols",
+"sig": "fn matrix.cols(m: Matrix) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "scale",
+"sig": "fn matrix.scale(m: Matrix, s: Float) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "map",
+"sig": "fn matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "from_bytes_f32_le",
+"sig": "fn matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "to_bytes_f64_le",
+"sig": "fn matrix.to_bytes_f64_le(m: Matrix) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "to_bytes_f32_le",
+"sig": "fn matrix.to_bytes_f32_le(m: Matrix) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "from_bytes_f16_le",
+"sig": "fn matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "from_bytes_f64_le",
+"sig": "fn matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "broadcast_add_row",
+"sig": "fn matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "split_cols_even",
+"sig": "fn matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "concat_cols",
+"sig": "fn matrix.concat_cols(xs: List[Matrix]) -> Matrix",
+"kind": "据え置き"
+},
+{
+"mod": "matrix",
+"name": "slice_rows",
+"sig": "fn matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "gather_rows",
+"sig": "fn matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "dot_row",
+"sig": "fn matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float",
+"kind": "意味変更"
+},
+{
+"mod": "matrix",
+"name": "zip_with",
+"sig": "fn matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix",
+"kind": "追加"
+},
+{
+"mod": "matrix",
+"name": "concat_rows",
+"sig": "fn matrix.concat_rows(xs: List[Matrix]) -> Matrix",
+"kind": "追加"
+},
+{
+"mod": "matrix",
+"name": "to_bytes_f16_le",
+"sig": "fn matrix.to_bytes_f16_le(m: Matrix) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "tcp_connect",
+"sig": "effect fn net.tcp_connect(host: String, port: Int) -> TcpStream",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_is_open",
+"sig": "effect fn net.tcp_is_open(stream: TcpStream) -> Bool",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_read_timeout",
+"sig": "effect fn net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_set_timeout",
+"sig": "effect fn net.tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Unit",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_available",
+"sig": "effect fn net.tcp_available(stream: TcpStream) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_listen",
+"sig": "effect fn net.tcp_listen(host: String, port: Int) -> TcpListener",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_local_port",
+"sig": "effect fn net.tcp_local_port(listener: TcpListener) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "tcp_accept",
+"sig": "effect fn net.tcp_accept(listener: TcpListener) -> TcpStream",
+"kind": "意味変更"
+},
+{
+"mod": "net",
+"name": "udp_bind",
+"sig": "effect fn net.udp_bind(host: String, port: Int) -> UdpSocket",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "udp_local_port",
+"sig": "effect fn net.udp_local_port(sock: UdpSocket) -> Int",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "udp_send_to",
+"sig": "effect fn net.udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "udp_recv_from",
+"sig": "effect fn net.udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "lookup_host",
+"sig": "effect fn net.lookup_host(host: String) -> List[IpAddr]",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "parse_ip",
+"sig": "fn net.parse_ip(s: String) -> Result[IpAddr, String]",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "ip_to_string",
+"sig": "fn net.ip_to_string(ip: IpAddr) -> String",
+"kind": "追加"
+},
+{
+"mod": "net",
+"name": "is_loopback",
+"sig": "fn net.is_loopback(ip: IpAddr) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "option",
+"name": "map",
+"sig": "fn option.map(o: A?, f: (A) -> B) -> B?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "flat_map",
+"sig": "fn option.flat_map(o: A?, f: (A) -> B?) -> B?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "flatten",
+"sig": "fn option.flatten(o: A??) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "unwrap_or_else",
+"sig": "fn option.unwrap_or_else(o: A?, f: () -> A) -> A",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "is_some",
+"sig": "fn option.is_some(o: A?) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "is_none",
+"sig": "fn option.is_none(o: A?) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "to_result",
+"sig": "fn option.to_result(o: A?, e: E) -> Result[A, E]",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "filter",
+"sig": "fn option.filter(o: A?, f: (A) -> Bool) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "zip",
+"sig": "fn option.zip(a: A?, b: B?) -> (A, B)?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "or_else",
+"sig": "fn option.or_else(o: A?, f: () -> A?) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "to_list",
+"sig": "fn option.to_list(o: A?) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "collect",
+"sig": "fn option.collect(xs: List[A?]) -> List[A]?",
+"kind": "据え置き"
+},
+{
+"mod": "option",
+"name": "collect_map",
+"sig": "fn option.collect_map(xs: List[A], f: (A) -> B?) -> List[B]?",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "join",
+"sig": "fn path.join(base: String, child: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "dirname",
+"sig": "fn path.dirname(path: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "basename",
+"sig": "fn path.basename(path: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "extension",
+"sig": "fn path.extension(path: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "is_absolute",
+"sig": "fn path.is_absolute(path: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "stem",
+"sig": "fn path.stem(path: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "normalize",
+"sig": "fn path.normalize(path: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "path",
+"name": "components",
+"sig": "fn path.components(path: String) -> List[String]",
+"kind": "追加"
+},
+{
+"mod": "path",
+"name": "relative_to",
+"sig": "fn path.relative_to(path: String, base: String) -> String?",
+"kind": "追加"
+},
+{
+"mod": "path",
+"name": "with_extension",
+"sig": "fn path.with_extension(path: String, ext: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "exec",
+"sig": "effect fn process.exec(cmd: String, args: List[String]) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "process",
+"name": "output",
+"sig": "effect fn process.output(c: ProcessCommand) -> ProcessStatus",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "run",
+"sig": "effect fn process.run(c: ProcessCommand) -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "process",
+"name": "start",
+"sig": "effect fn process.start(c: ProcessCommand) -> ProcessChild",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "poll",
+"sig": "effect fn process.poll(c: ProcessChild) -> Result[ProcessStatus, String]?",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "wait",
+"sig": "effect fn process.wait(c: ProcessChild) -> ProcessStatus",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "stop",
+"sig": "effect fn process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "read_new_stdout",
+"sig": "effect fn process.read_new_stdout(c: ProcessChild) -> String",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "read_new_stderr",
+"sig": "effect fn process.read_new_stderr(c: ProcessChild) -> String",
+"kind": "追加"
+},
+{
+"mod": "process",
+"name": "kill",
+"sig": "effect fn process.kill(pid: Int, signal: Int) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "process",
+"name": "exit",
+"sig": "effect fn process.exit(code: Int) -> Never",
+"kind": "据え置き"
+},
+{
+"mod": "process",
+"name": "pid",
+"sig": "effect fn process.pid() -> Int",
+"kind": "意味変更"
+},
+{
+"mod": "process",
+"name": "child_pid",
+"sig": "effect fn process.child_pid(c: ProcessChild) -> Int",
+"kind": "追加"
+},
+{
+"mod": "random",
+"name": "int",
+"sig": "effect fn random.int(min: Int, max: Int) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "random",
+"name": "float",
+"sig": "effect fn random.float() -> Float",
+"kind": "据え置き"
+},
+{
+"mod": "random",
+"name": "choice",
+"sig": "effect fn random.choice(xs: List[A]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "random",
+"name": "shuffle",
+"sig": "effect fn random.shuffle(xs: List[A]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "random",
+"name": "seeded",
+"sig": "fn random.seeded(seed: Int) -> Rng",
+"kind": "追加"
+},
+{
+"mod": "random",
+"name": "next_int",
+"sig": "fn random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)",
+"kind": "追加"
+},
+{
+"mod": "random",
+"name": "next_float",
+"sig": "fn random.next_float(rng: Rng) -> (Float, Rng)",
+"kind": "追加"
+},
+{
+"mod": "random",
+"name": "next_choice",
+"sig": "fn random.next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng)",
+"kind": "追加"
+},
+{
+"mod": "random",
+"name": "next_shuffle",
+"sig": "fn random.next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng)",
+"kind": "追加"
+},
+{
+"mod": "random",
+"name": "bytes",
+"sig": "effect fn random.bytes(n: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "is_match",
+"sig": "fn regex.is_match(re: Regex, s: String) -> Bool",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "is_full_match",
+"sig": "fn regex.is_full_match(re: Regex, s: String) -> Bool",
+"kind": "改名"
+},
+{
+"mod": "regex",
+"name": "find",
+"sig": "fn regex.find(re: Regex, s: String) -> String?",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "find_all",
+"sig": "fn regex.find_all(re: Regex, s: String) -> List[String]",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "replace",
+"sig": "fn regex.replace(re: Regex, s: String, rep: String) -> String",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "replace_first",
+"sig": "fn regex.replace_first(re: Regex, s: String, rep: String) -> String",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "split",
+"sig": "fn regex.split(re: Regex, s: String) -> List[String]",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "captures",
+"sig": "fn regex.captures(re: Regex, s: String) -> List[String?]?",
+"kind": "意味変更"
+},
+{
+"mod": "regex",
+"name": "new",
+"sig": "fn regex.new(pattern: String) -> Regex",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "compile",
+"sig": "fn regex.compile(pattern: String) -> Result[Regex, String]",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "replace_with",
+"sig": "fn regex.replace_with(re: Regex, s: String, f: (List[String?]) -> String) -> String",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "escape",
+"sig": "fn regex.escape(s: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "index_of",
+"sig": "fn regex.index_of(re: Regex, s: String) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "captures_all",
+"sig": "fn regex.captures_all(re: Regex, s: String) -> List[List[String?]]",
+"kind": "追加"
+},
+{
+"mod": "regex",
+"name": "replace_first_with",
+"sig": "fn regex.replace_first_with(re: Regex, s: String, f: (List[String?]) -> String) -> String",
+"kind": "追加"
+},
+{
+"mod": "result",
+"name": "map",
+"sig": "fn result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "map_err",
+"sig": "fn result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "flat_map",
+"sig": "fn result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "unwrap_or_else",
+"sig": "fn result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "is_ok",
+"sig": "fn result.is_ok(r: Result[A, E]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "is_err",
+"sig": "fn result.is_err(r: Result[A, E]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "to_option",
+"sig": "fn result.to_option(r: Result[A, E]) -> A?",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "to_err_option",
+"sig": "fn result.to_err_option(r: Result[A, E]) -> E?",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "partition",
+"sig": "fn result.partition(xs: List[Result[A, E]]) -> (List[A], List[E])",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "flatten",
+"sig": "fn result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "to_list",
+"sig": "fn result.to_list(r: Result[A, E]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "zip",
+"sig": "fn result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "or_else",
+"sig": "fn result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]",
+"kind": "据え置き"
+},
+{
+"mod": "result",
+"name": "filter",
+"sig": "fn result.filter(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]",
+"kind": "据え置き"
+},
+{
+"mod": "secret",
+"name": "new",
+"sig": "fn secret.new[A](x: A) -> Secret[A]",
+"kind": "追加"
+},
+{
+"mod": "secret",
+"name": "reveal",
+"sig": "fn secret.reveal[A](s: Secret[A]) -> A",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "new",
+"sig": "fn set.new() -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "from_list",
+"sig": "fn set.from_list(xs: List[A]) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "insert",
+"sig": "fn set.insert(s: Set[A], x: A) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "remove",
+"sig": "fn set.remove(s: Set[A], x: A) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "contains",
+"sig": "fn set.contains(s: Set[A], x: A) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "len",
+"sig": "fn set.len(s: Set[A]) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "is_empty",
+"sig": "fn set.is_empty(s: Set[A]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "to_list",
+"sig": "fn set.to_list(s: Set[A]) -> List[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "union",
+"sig": "fn set.union(a: Set[A], b: Set[A]) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "intersection",
+"sig": "fn set.intersection(a: Set[A], b: Set[A]) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "difference",
+"sig": "fn set.difference(a: Set[A], b: Set[A]) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "symmetric_difference",
+"sig": "fn set.symmetric_difference(a: Set[A], b: Set[A]) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "is_subset",
+"sig": "fn set.is_subset(a: Set[A], b: Set[A]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "is_disjoint",
+"sig": "fn set.is_disjoint(a: Set[A], b: Set[A]) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "filter",
+"sig": "fn set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "map",
+"sig": "fn set.map(s: Set[A], f: (A) -> B) -> Set[B]",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "fold",
+"sig": "fn set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "any",
+"sig": "fn set.any(s: Set[A], f: (A) -> Bool) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "all",
+"sig": "fn set.all(s: Set[A], f: (A) -> Bool) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "set",
+"name": "count",
+"sig": "fn set.count(s: Set[A], f: (A) -> Bool) -> Int",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "find",
+"sig": "fn set.find(s: Set[A], f: (A) -> Bool) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "clear",
+"sig": "fn set.clear(mut s: Set[A]) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "enumerate",
+"sig": "fn set.enumerate(s: Set[A]) -> List[(Int, A)]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "zip",
+"sig": "fn set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "zip_with",
+"sig": "fn set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "filter_map",
+"sig": "fn set.filter_map(s: Set[A], f: (A) -> B?) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "find_map",
+"sig": "fn set.find_map(s: Set[A], f: (A) -> B?) -> B?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "reduce",
+"sig": "fn set.reduce(s: Set[A], f: (A, A) -> A) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "scan",
+"sig": "fn set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "partition",
+"sig": "fn set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "group_by",
+"sig": "fn set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "sort",
+"sig": "fn set.sort(s: Set[A]) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "sort_by",
+"sig": "fn set.sort_by(s: Set[A], f: (A) -> B) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "sort_with",
+"sig": "fn set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "min",
+"sig": "fn set.min(s: Set[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "max",
+"sig": "fn set.max(s: Set[A]) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "min_by",
+"sig": "fn set.min_by(s: Set[A], f: (A) -> K) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "max_by",
+"sig": "fn set.max_by(s: Set[A], f: (A) -> K) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "min_with",
+"sig": "fn set.min_with(s: Set[A], cmp: (A, A) -> Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "max_with",
+"sig": "fn set.max_with(s: Set[A], cmp: (A, A) -> Int) -> A?",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "sum",
+"sig": "fn set.sum[A: Numeric](s: Set[A]) -> A",
+"kind": "追加"
+},
+{
+"mod": "set",
+"name": "product",
+"sig": "fn set.product[A: Numeric](s: Set[A]) -> A",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "to_string",
+"sig": "fn int8.to_string(x: Int8) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "int8",
+"name": "min_value",
+"sig": "fn int8.min_value() -> Int8",
+"kind": "据え置き"
+},
+{
+"mod": "int8",
+"name": "max_value",
+"sig": "fn int8.max_value() -> Int8",
+"kind": "据え置き"
+},
+{
+"mod": "int8",
+"name": "parse",
+"sig": "fn int8.parse(s: String) -> Result[Int8, String]",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "compare",
+"sig": "fn int8.compare(a: Int8, b: Int8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "floor_div",
+"sig": "fn int8.floor_div(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "modulo",
+"sig": "fn int8.modulo(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "pow",
+"sig": "fn int8.pow(base: Int8, exp: Int) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "is_even",
+"sig": "fn int8.is_even(x: Int8) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "is_odd",
+"sig": "fn int8.is_odd(x: Int8) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "count_leading_zeros",
+"sig": "fn int8.count_leading_zeros(x: Int8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "count_trailing_zeros",
+"sig": "fn int8.count_trailing_zeros(x: Int8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "count_ones",
+"sig": "fn int8.count_ones(x: Int8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "byte_swap",
+"sig": "fn int8.byte_swap(x: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "abs",
+"sig": "fn int8.abs(x: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "sign",
+"sig": "fn int8.sign(x: Int8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "from",
+"sig": "fn int8.from[S: Numeric](x: S) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "from_checked",
+"sig": "fn int8.from_checked[S: Numeric](x: S) -> Int8?",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "from_saturating",
+"sig": "fn int8.from_saturating[S: Numeric](x: S) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "from_wrapping",
+"sig": "fn int8.from_wrapping[S: Integer](x: S) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "wrap_add",
+"sig": "fn int8.wrap_add(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "wrap_sub",
+"sig": "fn int8.wrap_sub(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "wrap_mul",
+"sig": "fn int8.wrap_mul(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "rotate_left",
+"sig": "fn int8.rotate_left(a: Int8, n: Int) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "rotate_right",
+"sig": "fn int8.rotate_right(a: Int8, n: Int) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "bit_length",
+"sig": "fn int8.bit_length(x: Int8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "band",
+"sig": "fn int8.band(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "bor",
+"sig": "fn int8.bor(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "bxor",
+"sig": "fn int8.bxor(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "bnot",
+"sig": "fn int8.bnot(x: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "bshl",
+"sig": "fn int8.bshl(a: Int8, n: Int) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "bshr",
+"sig": "fn int8.bshr(a: Int8, n: Int) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "to_string",
+"sig": "fn int16.to_string(x: Int16) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "int16",
+"name": "min_value",
+"sig": "fn int16.min_value() -> Int16",
+"kind": "据え置き"
+},
+{
+"mod": "int16",
+"name": "max_value",
+"sig": "fn int16.max_value() -> Int16",
+"kind": "据え置き"
+},
+{
+"mod": "int16",
+"name": "parse",
+"sig": "fn int16.parse(s: String) -> Result[Int16, String]",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "compare",
+"sig": "fn int16.compare(a: Int16, b: Int16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "floor_div",
+"sig": "fn int16.floor_div(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "modulo",
+"sig": "fn int16.modulo(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "pow",
+"sig": "fn int16.pow(base: Int16, exp: Int) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "is_even",
+"sig": "fn int16.is_even(x: Int16) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "is_odd",
+"sig": "fn int16.is_odd(x: Int16) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "count_leading_zeros",
+"sig": "fn int16.count_leading_zeros(x: Int16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "count_trailing_zeros",
+"sig": "fn int16.count_trailing_zeros(x: Int16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "count_ones",
+"sig": "fn int16.count_ones(x: Int16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "byte_swap",
+"sig": "fn int16.byte_swap(x: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "abs",
+"sig": "fn int16.abs(x: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "sign",
+"sig": "fn int16.sign(x: Int16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "from",
+"sig": "fn int16.from[S: Numeric](x: S) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "from_checked",
+"sig": "fn int16.from_checked[S: Numeric](x: S) -> Int16?",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "from_saturating",
+"sig": "fn int16.from_saturating[S: Numeric](x: S) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "from_wrapping",
+"sig": "fn int16.from_wrapping[S: Integer](x: S) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "wrap_add",
+"sig": "fn int16.wrap_add(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "wrap_sub",
+"sig": "fn int16.wrap_sub(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "wrap_mul",
+"sig": "fn int16.wrap_mul(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "rotate_left",
+"sig": "fn int16.rotate_left(a: Int16, n: Int) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "rotate_right",
+"sig": "fn int16.rotate_right(a: Int16, n: Int) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "bit_length",
+"sig": "fn int16.bit_length(x: Int16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "band",
+"sig": "fn int16.band(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "bor",
+"sig": "fn int16.bor(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "bxor",
+"sig": "fn int16.bxor(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "bnot",
+"sig": "fn int16.bnot(x: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "bshl",
+"sig": "fn int16.bshl(a: Int16, n: Int) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "bshr",
+"sig": "fn int16.bshr(a: Int16, n: Int) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "to_string",
+"sig": "fn int32.to_string(x: Int32) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "int32",
+"name": "min_value",
+"sig": "fn int32.min_value() -> Int32",
+"kind": "据え置き"
+},
+{
+"mod": "int32",
+"name": "max_value",
+"sig": "fn int32.max_value() -> Int32",
+"kind": "据え置き"
+},
+{
+"mod": "int32",
+"name": "parse",
+"sig": "fn int32.parse(s: String) -> Result[Int32, String]",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "compare",
+"sig": "fn int32.compare(a: Int32, b: Int32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "floor_div",
+"sig": "fn int32.floor_div(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "modulo",
+"sig": "fn int32.modulo(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "pow",
+"sig": "fn int32.pow(base: Int32, exp: Int) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "is_even",
+"sig": "fn int32.is_even(x: Int32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "is_odd",
+"sig": "fn int32.is_odd(x: Int32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "count_leading_zeros",
+"sig": "fn int32.count_leading_zeros(x: Int32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "count_trailing_zeros",
+"sig": "fn int32.count_trailing_zeros(x: Int32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "count_ones",
+"sig": "fn int32.count_ones(x: Int32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "byte_swap",
+"sig": "fn int32.byte_swap(x: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "abs",
+"sig": "fn int32.abs(x: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "sign",
+"sig": "fn int32.sign(x: Int32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "from",
+"sig": "fn int32.from[S: Numeric](x: S) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "from_checked",
+"sig": "fn int32.from_checked[S: Numeric](x: S) -> Int32?",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "from_saturating",
+"sig": "fn int32.from_saturating[S: Numeric](x: S) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "from_wrapping",
+"sig": "fn int32.from_wrapping[S: Integer](x: S) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "wrap_add",
+"sig": "fn int32.wrap_add(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "wrap_sub",
+"sig": "fn int32.wrap_sub(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "wrap_mul",
+"sig": "fn int32.wrap_mul(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "rotate_left",
+"sig": "fn int32.rotate_left(a: Int32, n: Int) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "rotate_right",
+"sig": "fn int32.rotate_right(a: Int32, n: Int) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "bit_length",
+"sig": "fn int32.bit_length(x: Int32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "band",
+"sig": "fn int32.band(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "bor",
+"sig": "fn int32.bor(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "bxor",
+"sig": "fn int32.bxor(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "bnot",
+"sig": "fn int32.bnot(x: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "bshl",
+"sig": "fn int32.bshl(a: Int32, n: Int) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "bshr",
+"sig": "fn int32.bshr(a: Int32, n: Int) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "to_string",
+"sig": "fn int64.to_string(x: Int64) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "int64",
+"name": "min_value",
+"sig": "fn int64.min_value() -> Int64",
+"kind": "据え置き"
+},
+{
+"mod": "int64",
+"name": "max_value",
+"sig": "fn int64.max_value() -> Int64",
+"kind": "据え置き"
+},
+{
+"mod": "int64",
+"name": "parse",
+"sig": "fn int64.parse(s: String) -> Result[Int64, String]",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "compare",
+"sig": "fn int64.compare(a: Int64, b: Int64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "floor_div",
+"sig": "fn int64.floor_div(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "modulo",
+"sig": "fn int64.modulo(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "pow",
+"sig": "fn int64.pow(base: Int64, exp: Int) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "is_even",
+"sig": "fn int64.is_even(x: Int64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "is_odd",
+"sig": "fn int64.is_odd(x: Int64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "count_leading_zeros",
+"sig": "fn int64.count_leading_zeros(x: Int64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "count_trailing_zeros",
+"sig": "fn int64.count_trailing_zeros(x: Int64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "count_ones",
+"sig": "fn int64.count_ones(x: Int64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "byte_swap",
+"sig": "fn int64.byte_swap(x: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "abs",
+"sig": "fn int64.abs(x: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "sign",
+"sig": "fn int64.sign(x: Int64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "from",
+"sig": "fn int64.from[S: Numeric](x: S) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "from_checked",
+"sig": "fn int64.from_checked[S: Numeric](x: S) -> Int64?",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "from_saturating",
+"sig": "fn int64.from_saturating[S: Numeric](x: S) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "from_wrapping",
+"sig": "fn int64.from_wrapping[S: Integer](x: S) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "wrap_add",
+"sig": "fn int64.wrap_add(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "wrap_sub",
+"sig": "fn int64.wrap_sub(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "wrap_mul",
+"sig": "fn int64.wrap_mul(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "rotate_left",
+"sig": "fn int64.rotate_left(a: Int64, n: Int) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "rotate_right",
+"sig": "fn int64.rotate_right(a: Int64, n: Int) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "bit_length",
+"sig": "fn int64.bit_length(x: Int64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "band",
+"sig": "fn int64.band(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "bor",
+"sig": "fn int64.bor(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "bxor",
+"sig": "fn int64.bxor(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "bnot",
+"sig": "fn int64.bnot(x: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "bshl",
+"sig": "fn int64.bshl(a: Int64, n: Int) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "bshr",
+"sig": "fn int64.bshr(a: Int64, n: Int) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "to_string",
+"sig": "fn uint8.to_string(x: UInt8) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "uint8",
+"name": "min_value",
+"sig": "fn uint8.min_value() -> UInt8",
+"kind": "据え置き"
+},
+{
+"mod": "uint8",
+"name": "max_value",
+"sig": "fn uint8.max_value() -> UInt8",
+"kind": "据え置き"
+},
+{
+"mod": "uint8",
+"name": "parse",
+"sig": "fn uint8.parse(s: String) -> Result[UInt8, String]",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "compare",
+"sig": "fn uint8.compare(a: UInt8, b: UInt8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "floor_div",
+"sig": "fn uint8.floor_div(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "modulo",
+"sig": "fn uint8.modulo(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "pow",
+"sig": "fn uint8.pow(base: UInt8, exp: Int) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "is_even",
+"sig": "fn uint8.is_even(x: UInt8) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "is_odd",
+"sig": "fn uint8.is_odd(x: UInt8) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "count_leading_zeros",
+"sig": "fn uint8.count_leading_zeros(x: UInt8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "count_trailing_zeros",
+"sig": "fn uint8.count_trailing_zeros(x: UInt8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "count_ones",
+"sig": "fn uint8.count_ones(x: UInt8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "byte_swap",
+"sig": "fn uint8.byte_swap(x: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "from",
+"sig": "fn uint8.from[S: Numeric](x: S) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "from_checked",
+"sig": "fn uint8.from_checked[S: Numeric](x: S) -> UInt8?",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "from_saturating",
+"sig": "fn uint8.from_saturating[S: Numeric](x: S) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "from_wrapping",
+"sig": "fn uint8.from_wrapping[S: Integer](x: S) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "wrap_add",
+"sig": "fn uint8.wrap_add(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "wrap_sub",
+"sig": "fn uint8.wrap_sub(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "wrap_mul",
+"sig": "fn uint8.wrap_mul(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "rotate_left",
+"sig": "fn uint8.rotate_left(a: UInt8, n: Int) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "rotate_right",
+"sig": "fn uint8.rotate_right(a: UInt8, n: Int) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "bit_length",
+"sig": "fn uint8.bit_length(x: UInt8) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "band",
+"sig": "fn uint8.band(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "bor",
+"sig": "fn uint8.bor(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "bxor",
+"sig": "fn uint8.bxor(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "bnot",
+"sig": "fn uint8.bnot(x: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "bshl",
+"sig": "fn uint8.bshl(a: UInt8, n: Int) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "bshr",
+"sig": "fn uint8.bshr(a: UInt8, n: Int) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "to_string",
+"sig": "fn uint16.to_string(x: UInt16) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "uint16",
+"name": "min_value",
+"sig": "fn uint16.min_value() -> UInt16",
+"kind": "据え置き"
+},
+{
+"mod": "uint16",
+"name": "max_value",
+"sig": "fn uint16.max_value() -> UInt16",
+"kind": "据え置き"
+},
+{
+"mod": "uint16",
+"name": "parse",
+"sig": "fn uint16.parse(s: String) -> Result[UInt16, String]",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "compare",
+"sig": "fn uint16.compare(a: UInt16, b: UInt16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "floor_div",
+"sig": "fn uint16.floor_div(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "modulo",
+"sig": "fn uint16.modulo(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "pow",
+"sig": "fn uint16.pow(base: UInt16, exp: Int) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "is_even",
+"sig": "fn uint16.is_even(x: UInt16) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "is_odd",
+"sig": "fn uint16.is_odd(x: UInt16) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "count_leading_zeros",
+"sig": "fn uint16.count_leading_zeros(x: UInt16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "count_trailing_zeros",
+"sig": "fn uint16.count_trailing_zeros(x: UInt16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "count_ones",
+"sig": "fn uint16.count_ones(x: UInt16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "byte_swap",
+"sig": "fn uint16.byte_swap(x: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "from",
+"sig": "fn uint16.from[S: Numeric](x: S) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "from_checked",
+"sig": "fn uint16.from_checked[S: Numeric](x: S) -> UInt16?",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "from_saturating",
+"sig": "fn uint16.from_saturating[S: Numeric](x: S) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "from_wrapping",
+"sig": "fn uint16.from_wrapping[S: Integer](x: S) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "wrap_add",
+"sig": "fn uint16.wrap_add(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "wrap_sub",
+"sig": "fn uint16.wrap_sub(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "wrap_mul",
+"sig": "fn uint16.wrap_mul(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "rotate_left",
+"sig": "fn uint16.rotate_left(a: UInt16, n: Int) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "rotate_right",
+"sig": "fn uint16.rotate_right(a: UInt16, n: Int) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "bit_length",
+"sig": "fn uint16.bit_length(x: UInt16) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "band",
+"sig": "fn uint16.band(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "bor",
+"sig": "fn uint16.bor(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "bxor",
+"sig": "fn uint16.bxor(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "bnot",
+"sig": "fn uint16.bnot(x: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "bshl",
+"sig": "fn uint16.bshl(a: UInt16, n: Int) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "bshr",
+"sig": "fn uint16.bshr(a: UInt16, n: Int) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "to_string",
+"sig": "fn uint32.to_string(x: UInt32) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "uint32",
+"name": "min_value",
+"sig": "fn uint32.min_value() -> UInt32",
+"kind": "据え置き"
+},
+{
+"mod": "uint32",
+"name": "max_value",
+"sig": "fn uint32.max_value() -> UInt32",
+"kind": "据え置き"
+},
+{
+"mod": "uint32",
+"name": "parse",
+"sig": "fn uint32.parse(s: String) -> Result[UInt32, String]",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "compare",
+"sig": "fn uint32.compare(a: UInt32, b: UInt32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "floor_div",
+"sig": "fn uint32.floor_div(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "modulo",
+"sig": "fn uint32.modulo(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "pow",
+"sig": "fn uint32.pow(base: UInt32, exp: Int) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "is_even",
+"sig": "fn uint32.is_even(x: UInt32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "is_odd",
+"sig": "fn uint32.is_odd(x: UInt32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "count_leading_zeros",
+"sig": "fn uint32.count_leading_zeros(x: UInt32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "count_trailing_zeros",
+"sig": "fn uint32.count_trailing_zeros(x: UInt32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "count_ones",
+"sig": "fn uint32.count_ones(x: UInt32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "byte_swap",
+"sig": "fn uint32.byte_swap(x: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "from",
+"sig": "fn uint32.from[S: Numeric](x: S) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "from_checked",
+"sig": "fn uint32.from_checked[S: Numeric](x: S) -> UInt32?",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "from_saturating",
+"sig": "fn uint32.from_saturating[S: Numeric](x: S) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "from_wrapping",
+"sig": "fn uint32.from_wrapping[S: Integer](x: S) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "wrap_add",
+"sig": "fn uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "wrap_sub",
+"sig": "fn uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "wrap_mul",
+"sig": "fn uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "rotate_left",
+"sig": "fn uint32.rotate_left(a: UInt32, n: Int) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "rotate_right",
+"sig": "fn uint32.rotate_right(a: UInt32, n: Int) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "bit_length",
+"sig": "fn uint32.bit_length(x: UInt32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "band",
+"sig": "fn uint32.band(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "bor",
+"sig": "fn uint32.bor(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "bxor",
+"sig": "fn uint32.bxor(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "bnot",
+"sig": "fn uint32.bnot(x: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "bshl",
+"sig": "fn uint32.bshl(a: UInt32, n: Int) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "bshr",
+"sig": "fn uint32.bshr(a: UInt32, n: Int) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "to_string",
+"sig": "fn uint64.to_string(x: UInt64) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "uint64",
+"name": "min_value",
+"sig": "fn uint64.min_value() -> UInt64",
+"kind": "据え置き"
+},
+{
+"mod": "uint64",
+"name": "max_value",
+"sig": "fn uint64.max_value() -> UInt64",
+"kind": "据え置き"
+},
+{
+"mod": "uint64",
+"name": "parse",
+"sig": "fn uint64.parse(s: String) -> Result[UInt64, String]",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "compare",
+"sig": "fn uint64.compare(a: UInt64, b: UInt64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "floor_div",
+"sig": "fn uint64.floor_div(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "modulo",
+"sig": "fn uint64.modulo(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "pow",
+"sig": "fn uint64.pow(base: UInt64, exp: Int) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "is_even",
+"sig": "fn uint64.is_even(x: UInt64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "is_odd",
+"sig": "fn uint64.is_odd(x: UInt64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "count_leading_zeros",
+"sig": "fn uint64.count_leading_zeros(x: UInt64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "count_trailing_zeros",
+"sig": "fn uint64.count_trailing_zeros(x: UInt64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "count_ones",
+"sig": "fn uint64.count_ones(x: UInt64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "byte_swap",
+"sig": "fn uint64.byte_swap(x: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "from",
+"sig": "fn uint64.from[S: Numeric](x: S) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "from_checked",
+"sig": "fn uint64.from_checked[S: Numeric](x: S) -> UInt64?",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "from_saturating",
+"sig": "fn uint64.from_saturating[S: Numeric](x: S) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "from_wrapping",
+"sig": "fn uint64.from_wrapping[S: Integer](x: S) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "wrap_add",
+"sig": "fn uint64.wrap_add(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "wrap_sub",
+"sig": "fn uint64.wrap_sub(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "wrap_mul",
+"sig": "fn uint64.wrap_mul(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "rotate_left",
+"sig": "fn uint64.rotate_left(a: UInt64, n: Int) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "rotate_right",
+"sig": "fn uint64.rotate_right(a: UInt64, n: Int) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "bit_length",
+"sig": "fn uint64.bit_length(x: UInt64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "band",
+"sig": "fn uint64.band(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "bor",
+"sig": "fn uint64.bor(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "bxor",
+"sig": "fn uint64.bxor(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "bnot",
+"sig": "fn uint64.bnot(x: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "bshl",
+"sig": "fn uint64.bshl(a: UInt64, n: Int) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "bshr",
+"sig": "fn uint64.bshr(a: UInt64, n: Int) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "to_string",
+"sig": "fn float32.to_string(x: Float32) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "float32",
+"name": "parse",
+"sig": "fn float32.parse(s: String) -> Result[Float32, String]",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "compare",
+"sig": "fn float32.compare(a: Float32, b: Float32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "to_bits",
+"sig": "fn float32.to_bits(x: Float32) -> Int",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "from_bits",
+"sig": "fn float32.from_bits(bits: Int) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "infinity",
+"sig": "fn float32.infinity() -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "nan",
+"sig": "fn float32.nan() -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "epsilon",
+"sig": "fn float32.epsilon() -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "max_value",
+"sig": "fn float32.max_value() -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "min_value",
+"sig": "fn float32.min_value() -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "abs",
+"sig": "fn float32.abs(x: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "floor",
+"sig": "fn float32.floor(x: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "ceil",
+"sig": "fn float32.ceil(x: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "round",
+"sig": "fn float32.round(x: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "trunc",
+"sig": "fn float32.trunc(x: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "signum",
+"sig": "fn float32.signum(x: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "from",
+"sig": "fn float32.from[S: Numeric](x: S) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "from_checked",
+"sig": "fn float32.from_checked[S: Numeric](x: S) -> Float32?",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "to_string",
+"sig": "fn float64.to_string(x: Float64) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "float64",
+"name": "parse",
+"sig": "fn float64.parse(s: String) -> Result[Float64, String]",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "compare",
+"sig": "fn float64.compare(a: Float64, b: Float64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "to_bits",
+"sig": "fn float64.to_bits(x: Float64) -> Int",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "from_bits",
+"sig": "fn float64.from_bits(bits: Int) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "infinity",
+"sig": "fn float64.infinity() -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "nan",
+"sig": "fn float64.nan() -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "epsilon",
+"sig": "fn float64.epsilon() -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "max_value",
+"sig": "fn float64.max_value() -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "min_value",
+"sig": "fn float64.min_value() -> Float64",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "parse_radix",
+"sig": "fn int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "to_string_radix",
+"sig": "fn int8.to_string_radix(x: Int8, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "parse_radix",
+"sig": "fn int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "to_string_radix",
+"sig": "fn int16.to_string_radix(x: Int16, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "parse_radix",
+"sig": "fn int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "to_string_radix",
+"sig": "fn int32.to_string_radix(x: Int32, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "parse_radix",
+"sig": "fn int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "to_string_radix",
+"sig": "fn int64.to_string_radix(x: Int64, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "parse_radix",
+"sig": "fn uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "to_string_radix",
+"sig": "fn uint8.to_string_radix(x: UInt8, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "parse_radix",
+"sig": "fn uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "to_string_radix",
+"sig": "fn uint16.to_string_radix(x: UInt16, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "parse_radix",
+"sig": "fn uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "to_string_radix",
+"sig": "fn uint32.to_string_radix(x: UInt32, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "parse_radix",
+"sig": "fn uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "to_string_radix",
+"sig": "fn uint64.to_string_radix(x: UInt64, radix: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "min",
+"sig": "fn int8.min(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "max",
+"sig": "fn int8.max(a: Int8, b: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int8",
+"name": "clamp",
+"sig": "fn int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "min",
+"sig": "fn int16.min(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "max",
+"sig": "fn int16.max(a: Int16, b: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int16",
+"name": "clamp",
+"sig": "fn int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "min",
+"sig": "fn int32.min(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "max",
+"sig": "fn int32.max(a: Int32, b: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int32",
+"name": "clamp",
+"sig": "fn int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "min",
+"sig": "fn int64.min(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "max",
+"sig": "fn int64.max(a: Int64, b: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "int64",
+"name": "clamp",
+"sig": "fn int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "min",
+"sig": "fn uint8.min(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "max",
+"sig": "fn uint8.max(a: UInt8, b: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint8",
+"name": "clamp",
+"sig": "fn uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "min",
+"sig": "fn uint16.min(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "max",
+"sig": "fn uint16.max(a: UInt16, b: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint16",
+"name": "clamp",
+"sig": "fn uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "min",
+"sig": "fn uint32.min(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "max",
+"sig": "fn uint32.max(a: UInt32, b: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint32",
+"name": "clamp",
+"sig": "fn uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "min",
+"sig": "fn uint64.min(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "max",
+"sig": "fn uint64.max(a: UInt64, b: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "uint64",
+"name": "clamp",
+"sig": "fn uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "min",
+"sig": "fn float32.min(a: Float32, b: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "max",
+"sig": "fn float32.max(a: Float32, b: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "clamp",
+"sig": "fn float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "is_nan",
+"sig": "fn float32.is_nan(x: Float32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "is_infinite",
+"sig": "fn float32.is_infinite(x: Float32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float32",
+"name": "is_finite",
+"sig": "fn float32.is_finite(x: Float32) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "min",
+"sig": "fn float64.min(a: Float64, b: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "max",
+"sig": "fn float64.max(a: Float64, b: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "clamp",
+"sig": "fn float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "is_nan",
+"sig": "fn float64.is_nan(x: Float64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "is_infinite",
+"sig": "fn float64.is_infinite(x: Float64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "is_finite",
+"sig": "fn float64.is_finite(x: Float64) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "abs",
+"sig": "fn float64.abs(x: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "floor",
+"sig": "fn float64.floor(x: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "ceil",
+"sig": "fn float64.ceil(x: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "round",
+"sig": "fn float64.round(x: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "trunc",
+"sig": "fn float64.trunc(x: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "signum",
+"sig": "fn float64.signum(x: Float64) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "from",
+"sig": "fn float64.from[S: Numeric](x: S) -> Float64",
+"kind": "追加"
+},
+{
+"mod": "float64",
+"name": "from_checked",
+"sig": "fn float64.from_checked[S: Numeric](x: S) -> Float64?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "trim",
+"sig": "fn string.trim(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "split",
+"sig": "fn string.split(s: String, sep: String) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "split_once",
+"sig": "fn string.split_once(s: String, sep: String) -> (String, String)?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "len",
+"sig": "fn string.len(s: String) -> Int",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "contains",
+"sig": "fn string.contains(s: String, needle: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "starts_with",
+"sig": "fn string.starts_with(s: String, prefix: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "ends_with",
+"sig": "fn string.ends_with(s: String, suffix: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "slice",
+"sig": "fn string.slice(s: String, start: Int, end: Int) -> String",
+"kind": "意味変更"
+},
+{
+"mod": "string",
+"name": "byte_slice",
+"sig": "fn string.byte_slice(s: String, start: Int, end: Int) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "pad_start",
+"sig": "fn string.pad_start(s: String, n: Int, fill: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "capitalize",
+"sig": "fn string.capitalize(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "to_upper",
+"sig": "fn string.to_upper(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "to_lower",
+"sig": "fn string.to_lower(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "replace",
+"sig": "fn string.replace(s: String, from: String, to: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "get",
+"sig": "fn string.get(s: String, i: Int) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "lines",
+"sig": "fn string.lines(s: String) -> List[String]",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "to_list",
+"sig": "fn string.to_list(s: String) -> List[String]",
+"kind": "改名"
+},
+{
+"mod": "string",
+"name": "index_of",
+"sig": "fn string.index_of(s: String, needle: String) -> Int?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "repeat",
+"sig": "fn string.repeat(s: String, n: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "is_digit",
+"sig": "fn string.is_digit(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "is_alpha",
+"sig": "fn string.is_alpha(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "is_alphanumeric",
+"sig": "fn string.is_alphanumeric(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "is_whitespace",
+"sig": "fn string.is_whitespace(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "is_upper",
+"sig": "fn string.is_upper(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "is_lower",
+"sig": "fn string.is_lower(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "to_codepoint",
+"sig": "fn string.to_codepoint(s: String) -> Int?",
+"kind": "改名"
+},
+{
+"mod": "string",
+"name": "from_codepoint",
+"sig": "fn string.from_codepoint(n: Int) -> String?",
+"kind": "意味変更"
+},
+{
+"mod": "string",
+"name": "pad_end",
+"sig": "fn string.pad_end(s: String, n: Int, fill: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "trim_start",
+"sig": "fn string.trim_start(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "trim_end",
+"sig": "fn string.trim_end(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "count_matches",
+"sig": "fn string.count_matches(s: String, needle: String) -> Int",
+"kind": "改名"
+},
+{
+"mod": "string",
+"name": "is_empty",
+"sig": "fn string.is_empty(s: String) -> Bool",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "reverse",
+"sig": "fn string.reverse(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "strip_prefix",
+"sig": "fn string.strip_prefix(s: String, prefix: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "strip_suffix",
+"sig": "fn string.strip_suffix(s: String, suffix: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "replace_first",
+"sig": "fn string.replace_first(s: String, from: String, to: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "last_index_of",
+"sig": "fn string.last_index_of(s: String, needle: String) -> Int?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "first",
+"sig": "fn string.first(s: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "last",
+"sig": "fn string.last(s: String) -> String?",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "take",
+"sig": "fn string.take(s: String, n: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "take_end",
+"sig": "fn string.take_end(s: String, n: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "drop",
+"sig": "fn string.drop(s: String, n: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "drop_end",
+"sig": "fn string.drop_end(s: String, n: Int) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "push",
+"sig": "fn string.push(mut s: String, x: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "clear",
+"sig": "fn string.clear(mut s: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "string",
+"name": "compare",
+"sig": "fn string.compare(a: String, b: String) -> Int",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "byte_len",
+"sig": "fn string.byte_len(s: String) -> Int",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "to_utf16",
+"sig": "fn string.to_utf16(s: String) -> List[Int]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "from_utf16",
+"sig": "fn string.from_utf16(xs: List[Int]) -> Result[String, String]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "filter",
+"sig": "fn string.filter(s: String, f: (String) -> Bool) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "fold",
+"sig": "fn string.fold(s: String, init: B, f: (B, String) -> B) -> B",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "pop",
+"sig": "fn string.pop(mut s: String) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "insert",
+"sig": "fn string.insert(s: String, i: Int, x: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "remove_at",
+"sig": "fn string.remove_at(s: String, i: Int) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "new",
+"sig": "fn string.new() -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "from_list",
+"sig": "fn string.from_list(xs: List[String]) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "enumerate",
+"sig": "fn string.enumerate(s: String) -> List[(Int, String)]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "zip",
+"sig": "fn string.zip(s: String, ys: List[B]) -> List[(String, B)]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "zip_with",
+"sig": "fn string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "filter_map",
+"sig": "fn string.filter_map(s: String, f: (String) -> B?) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "find_map",
+"sig": "fn string.find_map(s: String, f: (String) -> B?) -> B?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "reduce",
+"sig": "fn string.reduce(s: String, f: (String, String) -> String) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "scan",
+"sig": "fn string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "partition",
+"sig": "fn string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "group_by",
+"sig": "fn string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "sort",
+"sig": "fn string.sort(s: String) -> List[String]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "sort_by",
+"sig": "fn string.sort_by(s: String, f: (String) -> B) -> List[String]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "sort_with",
+"sig": "fn string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "min",
+"sig": "fn string.min(s: String) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "max",
+"sig": "fn string.max(s: String) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "min_by",
+"sig": "fn string.min_by(s: String, f: (String) -> K) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "max_by",
+"sig": "fn string.max_by(s: String, f: (String) -> K) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "min_with",
+"sig": "fn string.min_with(s: String, cmp: (String, String) -> Int) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "max_with",
+"sig": "fn string.max_with(s: String, cmp: (String, String) -> Int) -> String?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "find_index",
+"sig": "fn string.find_index(s: String, f: (String) -> Bool) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "take_while",
+"sig": "fn string.take_while(s: String, f: (String) -> Bool) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "drop_while",
+"sig": "fn string.drop_while(s: String, f: (String) -> Bool) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "chunk",
+"sig": "fn string.chunk(s: String, n: Int) -> List[String]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "window",
+"sig": "fn string.window(s: String, n: Int) -> List[String]",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "split_at",
+"sig": "fn string.split_at(s: String, n: Int) -> (String, String)",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "dedup",
+"sig": "fn string.dedup(s: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "intersperse",
+"sig": "fn string.intersperse(s: String, sep: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "unique",
+"sig": "fn string.unique(s: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "unique_by",
+"sig": "fn string.unique_by(s: String, f: (String) -> K) -> String",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "count",
+"sig": "fn string.count(s: String, f: (String) -> Bool) -> Int",
+"kind": "追加"
+},
+{
+"mod": "string",
+"name": "is_equal_constant_time",
+"sig": "fn string.is_equal_constant_time(a: String, b: String) -> Bool",
+"kind": "追加"
+},
+{
+"mod": "testing",
+"name": "assert_aborts",
+"sig": "fn testing.assert_aborts[A](expected: String, f: () -> A) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_contains",
+"sig": "fn testing.assert_contains(haystack: String, needle: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_approx",
+"sig": "fn testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_gt",
+"sig": "fn testing.assert_gt[A](a: A, b: A) -> Unit",
+"kind": "意味変更"
+},
+{
+"mod": "testing",
+"name": "assert_lt",
+"sig": "fn testing.assert_lt[A](a: A, b: A) -> Unit",
+"kind": "意味変更"
+},
+{
+"mod": "testing",
+"name": "assert_some",
+"sig": "fn testing.assert_some[A](o: A?) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_none",
+"sig": "fn testing.assert_none[A](o: A?) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_ok",
+"sig": "fn testing.assert_ok[A, B](r: Result[A, B]) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_err",
+"sig": "fn testing.assert_err[A, B](r: Result[A, B]) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "testing",
+"name": "assert_snapshot",
+"sig": "fn testing.assert_snapshot(actual: String, expected: String) -> Unit",
+"kind": "据え置き"
+},
+{
+"mod": "unix",
+"name": "connect",
+"sig": "effect fn unix.connect(path: String) -> Fd",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "listen",
+"sig": "effect fn unix.listen(path: String) -> Fd",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "accept",
+"sig": "effect fn unix.accept(listener: Fd) -> Fd",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "write_fds",
+"sig": "effect fn unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "take_fds",
+"sig": "effect fn unix.take_fds(sock: Fd) -> List[Fd]",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "select",
+"sig": "effect fn unix.select(xs: List[Fd], timeout_ms: Int) -> List[Fd]",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "shm_create",
+"sig": "effect fn unix.shm_create(size: Int) -> Fd",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "shm_resize",
+"sig": "effect fn unix.shm_resize(fd: Fd, size: Int) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "shm_write",
+"sig": "effect fn unix.shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit",
+"kind": "追加"
+},
+{
+"mod": "unix",
+"name": "shm_read",
+"sig": "effect fn unix.shm_read(fd: Fd, offset: Int, len: Int) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "url",
+"name": "encode_component",
+"sig": "fn url.encode_component(s: String) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "url",
+"name": "decode_component",
+"sig": "fn url.decode_component(s: String) -> Result[String, String]",
+"kind": "据え置き"
+},
+{
+"mod": "url",
+"name": "parse",
+"sig": "fn url.parse(s: String) -> Result[Url, String]",
+"kind": "意味変更"
+},
+{
+"mod": "url",
+"name": "to_string",
+"sig": "fn url.to_string(u: Url) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "url",
+"name": "build_query",
+"sig": "fn url.build_query(xs: List[(String, String)]) -> String",
+"kind": "据え置き"
+},
+{
+"mod": "url",
+"name": "encode_form",
+"sig": "fn url.encode_form(s: String) -> String",
+"kind": "追加"
+},
+{
+"mod": "url",
+"name": "decode_form",
+"sig": "fn url.decode_form(s: String) -> Result[String, String]",
+"kind": "追加"
+},
+{
+"mod": "url",
+"name": "parse_query",
+"sig": "fn url.parse_query(query: String) -> Result[List[(String, String)], String]",
+"kind": "追加"
+},
+{
+"mod": "url",
+"name": "resolve",
+"sig": "fn url.resolve(base: Url, ref: String) -> Result[Url, String]",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "v4",
+"sig": "effect fn uuid.v4() -> Uuid",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "v7",
+"sig": "effect fn uuid.v7() -> Uuid",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "parse",
+"sig": "fn uuid.parse(s: String) -> Result[Uuid, String]",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "to_string",
+"sig": "fn uuid.to_string(u: Uuid) -> String",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "from_bytes",
+"sig": "fn uuid.from_bytes(b: Bytes) -> Result[Uuid, String]",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "to_bytes",
+"sig": "fn uuid.to_bytes(u: Uuid) -> Bytes",
+"kind": "追加"
+},
+{
+"mod": "uuid",
+"name": "compare",
+"sig": "fn uuid.compare(a: Uuid, b: Uuid) -> Int",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "array",
+"sig": "fn value.array(xs: List[Value]) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "as_array",
+"sig": "fn value.as_array(v: Value) -> Result[List[Value], String]",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "as_bool",
+"sig": "fn value.as_bool(v: Value) -> Result[Bool, String]",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "as_float",
+"sig": "fn value.as_float(v: Value) -> Result[Float, String]",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "as_int",
+"sig": "fn value.as_int(v: Value) -> Result[Int, String]",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "as_string",
+"sig": "fn value.as_string(v: Value) -> Result[String, String]",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "bool",
+"sig": "fn value.bool(b: Bool) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "float",
+"sig": "fn value.float(f: Float) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "int",
+"sig": "fn value.int(n: Int) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "merge",
+"sig": "fn value.merge(a: Value, b: Value) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "null",
+"sig": "fn value.null() -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "object",
+"sig": "fn value.object(xs: List[(String, Value)]) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "omit",
+"sig": "fn value.omit(v: Value, keys: List[String]) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "pick",
+"sig": "fn value.pick(v: Value, keys: List[String]) -> Value",
+"kind": "据え置き"
+},
+{
+"mod": "value",
+"name": "string",
+"sig": "fn value.string(s: String) -> Value",
+"kind": "改名"
+},
+{
+"mod": "value",
+"name": "as_object",
+"sig": "fn value.as_object(v: Value) -> Result[List[(String, Value)], String]",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_string",
+"sig": "fn value.get_string(v: Value, key: String) -> String?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_int",
+"sig": "fn value.get_int(v: Value, key: String) -> Int?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_float",
+"sig": "fn value.get_float(v: Value, key: String) -> Float?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_bool",
+"sig": "fn value.get_bool(v: Value, key: String) -> Bool?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_array",
+"sig": "fn value.get_array(v: Value, key: String) -> List[Value]?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_object",
+"sig": "fn value.get_object(v: Value, key: String) -> List[(String, Value)]?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "root",
+"sig": "fn value.root() -> Path",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "key",
+"sig": "fn value.key(p: Path, name: String) -> Path",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "index",
+"sig": "fn value.index(p: Path, i: Int) -> Path",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get_path",
+"sig": "fn value.get_path(v: Value, p: Path) -> Value?",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "set_path",
+"sig": "fn value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "remove_path",
+"sig": "fn value.remove_path(v: Value, p: Path) -> Value",
+"kind": "追加"
+},
+{
+"mod": "value",
+"name": "get",
+"sig": "fn value.get(v: Value, key: String) -> Value?",
+"kind": "追加"
+},
+{
+"mod": "zlib",
+"name": "compress",
+"sig": "effect fn zlib.compress(b: Bytes) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "zlib",
+"name": "compress_level",
+"sig": "effect fn zlib.compress_level(b: Bytes, level: Int) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "zlib",
+"name": "decompress",
+"sig": "fn zlib.decompress(b: Bytes) -> Result[Bytes, String]",
+"kind": "意味変更"
+},
+{
+"mod": "zlib",
+"name": "deflate",
+"sig": "effect fn zlib.deflate(b: Bytes) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "zlib",
+"name": "deflate_level",
+"sig": "effect fn zlib.deflate_level(b: Bytes, level: Int) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "zlib",
+"name": "inflate",
+"sig": "fn zlib.inflate(b: Bytes) -> Result[Bytes, String]",
+"kind": "意味変更"
+},
+{
+"mod": "zlib",
+"name": "gzip",
+"sig": "effect fn zlib.gzip(b: Bytes) -> Bytes",
+"kind": "据え置き"
+},
+{
+"mod": "zlib",
+"name": "gunzip",
+"sig": "fn zlib.gunzip(b: Bytes) -> Result[Bytes, String]",
+"kind": "意味変更"
+},
+{
+"mod": "zlib",
+"name": "decompress_max",
+"sig": "fn zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]",
+"kind": "追加"
+},
+{
+"mod": "zlib",
+"name": "inflate_max",
+"sig": "fn zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]",
+"kind": "追加"
+},
+{
+"mod": "zlib",
+"name": "gunzip_max",
+"sig": "fn zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]",
+"kind": "追加"
+}
+],
+"removed": {
+"args": [
+{
+"name": "raw",
+"to": "`env.args`"
+},
+{
+"name": "flag",
+"to": "`has_flag`"
+},
+{
+"name": "option_or",
+"to": "`option(n)! ?? d`"
+},
+{
+"name": "positional_at",
+"to": "`list.get(args.positional(options)!, i)`"
+}
+],
+"bytes": [
+{
+"name": "as_mut_ptr",
+"to": "`ffi.alloc`"
+},
+{
+"name": "as_ptr",
+"to": "`ffi.region`"
+},
+{
+"name": "concat",
+"to": "`+`"
+},
+{
+"name": "copy_to_ptr",
+"to": "`ffi.write`"
+},
+{
+"name": "data_ptr",
+"to": "`ffi.region`"
+},
+{
+"name": "from_raw_ptr",
+"to": "`ffi.read`"
+},
+{
+"name": "get_or",
+"to": "`get(b, i) ?? d`"
+},
+{
+"name": "lines",
+"to": "`string.lines(bytes.to_string(b)!)` か `bytes.split`"
+},
+{
+"name": "set_at",
+"to": "`put_u8`（範囲外は abort）"
+},
+{
+"name": "read_length_prefixed_strings_le",
+"to": "`get_u32_le` と `slice` の組み合わせ"
+},
+{
+"name": "read_string_at",
+"to": "`slice` ＋ `to_string_lossy`"
+},
+{
+"name": "read_string_be",
+"to": "`get_u32_be` と `slice` の組み合わせ"
+},
+{
+"name": "read_string_be_at",
+"to": "`next_u32_be` と `next_bytes` の組み合わせ"
+},
+{
+"name": "read_u8",
+"to": "`get`（同じ役割。範囲外は none）"
+},
+{
+"name": "skip_length_prefixed_le",
+"to": "`get_u32_le` と `slice` の組み合わせ"
+},
+{
+"name": "write_f64_be",
+"to": "`append_f64_be`"
+},
+{
+"name": "write_i64_be",
+"to": "`append_i64_be`"
+},
+{
+"name": "write_string_be",
+"to": "`append_u32_be` ＋ `append_bytes`"
+},
+{
+"name": "write_u32_be",
+"to": "`append_u32_be`"
+},
+{
+"name": "write_u8",
+"to": "`push`"
+},
+{
+"name": "read_uint16",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "read_uint32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "read_int32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "read_float32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "write_uint16",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "write_uint32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "write_int32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "write_float32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "set_uint16",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "set_uint32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "set_int32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "set_float32",
+"to": "接尾辞の系統 `get_`/`append_`/`put_`"
+},
+{
+"name": "heap_save",
+"to": "内部の名前にする"
+},
+{
+"name": "heap_restore",
+"to": "内部の名前にする"
+}
+],
+"datetime": [
+{
+"name": "diff_seconds",
+"to": "`a - b`"
+},
+{
+"name": "from_unix",
+"to": "引数そのもの"
+},
+{
+"name": "is_after",
+"to": "`a > b`"
+},
+{
+"name": "is_before",
+"to": "`a < b`"
+},
+{
+"name": "to_unix",
+"to": "引数そのもの"
+}
+],
+"env": [
+{
+"name": "temp_dir",
+"to": "`fs.temp_dir`"
+},
+{
+"name": "unix_timestamp",
+"to": "`datetime.now`"
+},
+{
+"name": "millis",
+"to": "`datetime.now_ms` へ移動"
+}
+],
+"error": [
+{
+"name": "chain",
+"to": "`\"${a}: ${b}\"`（文字列の埋め込み）"
+},
+{
+"name": "context",
+"to": "`result.map_err(r, (e) => \"${msg}: ${e}\")`"
+},
+{
+"name": "message",
+"to": "`match`、または `result.to_err_option(r) ?? \"\"`"
+}
+],
+"float": [
+{
+"name": "to_int",
+"to": "`int.from`"
+},
+{
+"name": "to_int_checked",
+"to": "`int.from_checked`"
+},
+{
+"name": "to_int_saturating",
+"to": "`int.from_saturating`"
+},
+{
+"name": "from_int",
+"to": "`int.to_float` と同じ"
+},
+{
+"name": "sqrt",
+"to": "`math.sqrt`"
+},
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "from_float32",
+"to": "`float32.to_float`"
+},
+{
+"name": "from_float64",
+"to": "`float64.to_float`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int32_checked",
+"to": "`int32.from_checked`"
+},
+{
+"name": "to_int64_checked",
+"to": "`int64.from_checked`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint64_checked",
+"to": "`uint64.from_checked`"
+},
+{
+"name": "to_float32_checked",
+"to": "`float32.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_int32_saturating",
+"to": "`int32.from_saturating`"
+},
+{
+"name": "to_int64_saturating",
+"to": "`int64.from_saturating`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+},
+{
+"name": "to_uint64_saturating",
+"to": "`uint64.from_saturating`"
+}
+],
+"fs": [
+{
+"name": "read_bytes_raw",
+"to": "`read_bytes`"
+},
+{
+"name": "read_bytes_raw_if_exists",
+"to": "`read_bytes_if_exists`"
+},
+{
+"name": "write_bytes_raw",
+"to": "`write_bytes`"
+},
+{
+"name": "file_size",
+"to": "`stat(p)!.size`"
+},
+{
+"name": "modified_at",
+"to": "`stat(p)!.modified`"
+}
+],
+"hash": [
+{
+"name": "fnv1a32_bytes",
+"to": "`fnv1a32`"
+}
+],
+"http": [
+{
+"name": "req_body",
+"to": "`http.body`"
+},
+{
+"name": "req_header",
+"to": "`http.header`"
+},
+{
+"name": "url_decode",
+"to": "`url.decode_form(s) ?? s`"
+},
+{
+"name": "request_response",
+"to": "`send(new_request(method, url, body, headers))`"
+},
+{
+"name": "post",
+"to": "`request(\"POST\", …)`"
+},
+{
+"name": "put",
+"to": "`request(\"PUT\", …)`"
+},
+{
+"name": "patch",
+"to": "`request(\"PATCH\", …)`"
+},
+{
+"name": "delete",
+"to": "`request(\"DELETE\", …)`"
+},
+{
+"name": "get_status",
+"to": "`get_response`"
+},
+{
+"name": "request_status",
+"to": "`send`"
+},
+{
+"name": "post_response",
+"to": "`send(new_request(\"POST\", …))`"
+},
+{
+"name": "put_response",
+"to": "`send(new_request(\"PUT\", …))`"
+},
+{
+"name": "patch_response",
+"to": "`send(new_request(\"PATCH\", …))`"
+},
+{
+"name": "delete_response",
+"to": "`send(new_request(\"DELETE\", …))`"
+},
+{
+"name": "get_bytes",
+"to": "`body_bytes(get_response(u)!)`"
+},
+{
+"name": "request_bytes",
+"to": "`body_bytes(send(new_request(…))!)`"
+},
+{
+"name": "request_stream",
+"to": "ハンドル"
+},
+{
+"name": "request_stream_with_limits",
+"to": "ハンドル"
+}
+],
+"int": [
+{
+"name": "from_hex",
+"to": "`int.parse_radix(s, 16)` に一本化"
+},
+{
+"name": "to_float",
+"to": "`float.from`"
+},
+{
+"name": "bits_to_float",
+"to": "`float.from_bits`"
+},
+{
+"name": "bits_to_f32",
+"to": "`float32.from_bits` → `float32.to_float`"
+},
+{
+"name": "to_u32",
+"to": "`int.wrap(x, 32)`"
+},
+{
+"name": "to_u8",
+"to": "`int.wrap(x, 8)`"
+},
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "from_int8",
+"to": "`int8.to_int` に移す"
+},
+{
+"name": "from_int16",
+"to": "`int16.to_int` に移す"
+},
+{
+"name": "from_int32",
+"to": "`int32.to_int` に移す"
+},
+{
+"name": "from_int64",
+"to": "`int64.to_int` に移す"
+},
+{
+"name": "from_uint8",
+"to": "`uint8.to_int` に移す"
+},
+{
+"name": "from_uint16",
+"to": "`uint16.to_int` に移す"
+},
+{
+"name": "from_uint32",
+"to": "`uint32.to_int` に移す"
+},
+{
+"name": "from_uint64",
+"to": "`uint64.to_int` に移す"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int32_checked",
+"to": "`int32.from_checked`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint64_checked",
+"to": "`uint64.from_checked`"
+},
+{
+"name": "to_float32_checked",
+"to": "`float32.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_int32_saturating",
+"to": "`int32.from_saturating`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+},
+{
+"name": "to_uint64_saturating",
+"to": "`uint64.from_saturating`"
+},
+{
+"name": "from_uint64_checked",
+"to": "`uint64.to_int_checked`"
+},
+{
+"name": "from_uint64_saturating",
+"to": "`uint64.to_int_saturating`"
+}
+],
+"io": [
+{
+"name": "read_line_opt",
+"to": "`read_line`"
+},
+{
+"name": "read_byte",
+"to": "`io.read(io.stdin(), 1)`"
+},
+{
+"name": "read_n_bytes",
+"to": "`io.read(io.stdin(), n)`"
+},
+{
+"name": "write_bytes",
+"to": "`io.write(io.stdout(), data)`"
+}
+],
+"json": [
+{
+"name": "get_string",
+"to": "`value.get_string`"
+},
+{
+"name": "get_int",
+"to": "`value.get_int`"
+},
+{
+"name": "get_float",
+"to": "`value.get_float`"
+},
+{
+"name": "get_bool",
+"to": "`value.get_bool`"
+},
+{
+"name": "get_array",
+"to": "`value.get_array`"
+},
+{
+"name": "root",
+"to": "`value.root`"
+},
+{
+"name": "field",
+"to": "`value.key`"
+},
+{
+"name": "index",
+"to": "`value.index`（負の添字は範囲外）"
+},
+{
+"name": "get_path",
+"to": "`value.get_path`"
+},
+{
+"name": "set_path",
+"to": "`value.set_path`"
+},
+{
+"name": "remove_path",
+"to": "`value.remove_path`"
+},
+{
+"name": "to_map",
+"to": "`value.as_object(v) \\|> result.map(map.from_list)`"
+}
+],
+"list": [
+{
+"name": "length",
+"to": "`list.len`"
+},
+{
+"name": "get_or",
+"to": "`list.get(xs, i) ?? d`"
+},
+{
+"name": "tail",
+"to": "`list.drop(xs, 1)`"
+},
+{
+"name": "windows",
+"to": "`list.window`"
+},
+{
+"name": "shuffle",
+"to": "`random.shuffle`"
+},
+{
+"name": "bundled_probe",
+"to": "`n + 1`"
+}
+],
+"map": [
+{
+"name": "get_or",
+"to": "`map.get(m, k) ?? d`"
+},
+{
+"name": "insert",
+"to": "`m[k] = v`、または `m = map.set(m, k, v)`"
+},
+{
+"name": "delete",
+"to": "`m = map.remove(m, k)`"
+}
+],
+"math": [
+{
+"name": "abs",
+"to": "`int.abs`"
+},
+{
+"name": "fmax",
+"to": "`float.max`"
+},
+{
+"name": "fmin",
+"to": "`float.min`"
+},
+{
+"name": "fpow",
+"to": "`float.pow`"
+},
+{
+"name": "max",
+"to": "`int.max`"
+},
+{
+"name": "min",
+"to": "`int.min`"
+},
+{
+"name": "pow",
+"to": "`int.pow`"
+},
+{
+"name": "sign",
+"to": "`int.sign`"
+}
+],
+"matrix": [
+{
+"name": "select_rows",
+"to": "`matrix.gather_rows`"
+},
+{
+"name": "append_rows",
+"to": "`concat_rows([a, b])`"
+},
+{
+"name": "linear_f32_row_no_bias",
+"to": "nn.kernels"
+},
+{
+"name": "select_rows_f32",
+"to": "nn.kernels"
+},
+{
+"name": "add",
+"to": "`a + b`"
+},
+{
+"name": "mul",
+"to": "`a * b`"
+},
+{
+"name": "fma",
+"to": "内部の `__fma`"
+},
+{
+"name": "fma3",
+"to": "内部の `__fma3`"
+},
+{
+"name": "sub",
+"to": "`a - b`"
+},
+{
+"name": "div",
+"to": "`a / b`"
+},
+{
+"name": "neg",
+"to": "`-m`"
+},
+{
+"name": "pow",
+"to": "`matrix.map(m, (x) => float.pow(x, e))`"
+},
+{
+"name": "concat_cols_many",
+"to": "`matrix.concat_cols`"
+},
+{
+"name": "linear_row",
+"to": "nn.kernels"
+},
+{
+"name": "linear_row_no_bias",
+"to": "nn.kernels"
+},
+{
+"name": "conv1d",
+"to": "nn.kernels"
+},
+{
+"name": "row_dot",
+"to": "`matrix.dot_row`"
+},
+{
+"name": "zeros_f32",
+"to": "`matrix.zeros`（f32 のデータは from_bytes_f32_le で読む）"
+},
+{
+"name": "ones_f32",
+"to": "`matrix.ones`"
+},
+{
+"name": "mul_f32",
+"to": "`a * b`"
+},
+{
+"name": "mul_f32_scaled",
+"to": "`matrix.scale(a * b, s)`"
+},
+{
+"name": "mul_f32_t",
+"to": "`a * matrix.transpose(b)`"
+},
+{
+"name": "mul_f32_t_scaled",
+"to": "`matrix.scale(a * matrix.transpose(b), s)`"
+},
+{
+"name": "mul_scaled",
+"to": "内部の `__mul_scaled`"
+}
+],
+"net": [
+{
+"name": "tcp_read",
+"to": "`io.read`"
+},
+{
+"name": "tcp_write",
+"to": "`io.write`"
+},
+{
+"name": "tcp_read_exact",
+"to": "`io.read_exact`"
+},
+{
+"name": "tcp_close",
+"to": "`io.close`"
+},
+{
+"name": "tcp_close_listener",
+"to": "`io.close`"
+},
+{
+"name": "unix_connect",
+"to": "`unix.connect`"
+},
+{
+"name": "unix_listen",
+"to": "`unix.listen`"
+},
+{
+"name": "unix_accept",
+"to": "`unix.accept`"
+},
+{
+"name": "unix_send",
+"to": "`unix.write_fds`"
+},
+{
+"name": "unix_recv",
+"to": "`io.read`"
+},
+{
+"name": "unix_take_fds",
+"to": "`unix.take_fds`"
+},
+{
+"name": "unix_poll",
+"to": "`unix.select([fd], t)`"
+},
+{
+"name": "unix_wait",
+"to": "`unix.select`"
+},
+{
+"name": "unix_close",
+"to": "`io.close`"
+},
+{
+"name": "shm_create",
+"to": "`unix.shm_create`"
+},
+{
+"name": "shm_resize",
+"to": "`unix.shm_resize`"
+},
+{
+"name": "shm_write",
+"to": "`unix.shm_write`"
+},
+{
+"name": "shm_read",
+"to": "`unix.shm_read`"
+}
+],
+"option": [
+{
+"name": "unwrap_or",
+"to": "`o ?? d`"
+}
+],
+"path": [
+{
+"name": "from_string",
+"to": "`SafePath` ごと"
+},
+{
+"name": "trusted",
+"to": "`SafePath` ごと"
+},
+{
+"name": "to_string",
+"to": "`SafePath` ごと"
+}
+],
+"process": [
+{
+"name": "exec_in",
+"to": "`output`"
+},
+{
+"name": "exec_with_stdin",
+"to": "`output`"
+},
+{
+"name": "exec_status",
+"to": "`output`"
+},
+{
+"name": "exec_status_timeout",
+"to": "`output` の `timeout_ms`"
+},
+{
+"name": "run_in",
+"to": "`run(ProcessCommand { dir: … })`"
+},
+{
+"name": "exec_attached",
+"to": "`run`"
+},
+{
+"name": "spawn",
+"to": "`start`"
+},
+{
+"name": "is_alive",
+"to": "`poll`"
+},
+{
+"name": "args",
+"to": "`env.args`"
+},
+{
+"name": "env",
+"to": "`env.get`"
+},
+{
+"name": "sleep",
+"to": "`env.sleep_ms`"
+},
+{
+"name": "stdin_lines",
+"to": "`string.lines(io.read_all()!)`"
+}
+],
+"result": [
+{
+"name": "unwrap_or",
+"to": "`r ?? d`"
+}
+],
+"int8": [
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+},
+{
+"name": "to_uint64_checked",
+"to": "`uint64.from_checked`"
+},
+{
+"name": "to_uint64_saturating",
+"to": "`uint64.from_saturating`"
+}
+],
+"int16": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+},
+{
+"name": "to_uint64_checked",
+"to": "`uint64.from_checked`"
+},
+{
+"name": "to_uint64_saturating",
+"to": "`uint64.from_saturating`"
+}
+],
+"int32": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+},
+{
+"name": "to_uint64_checked",
+"to": "`uint64.from_checked`"
+},
+{
+"name": "to_uint64_saturating",
+"to": "`uint64.from_saturating`"
+}
+],
+"int64": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_int32_checked",
+"to": "`int32.from_checked`"
+},
+{
+"name": "to_int32_saturating",
+"to": "`int32.from_saturating`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+},
+{
+"name": "to_uint64_checked",
+"to": "`uint64.from_checked`"
+},
+{
+"name": "to_uint64_saturating",
+"to": "`uint64.from_saturating`"
+}
+],
+"uint8": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+}
+],
+"uint16": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+}
+],
+"uint32": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_int32_checked",
+"to": "`int32.from_checked`"
+},
+{
+"name": "to_int32_saturating",
+"to": "`int32.from_saturating`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+}
+],
+"uint64": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+},
+{
+"name": "to_int8_checked",
+"to": "`int8.from_checked`"
+},
+{
+"name": "to_int8_saturating",
+"to": "`int8.from_saturating`"
+},
+{
+"name": "to_int16_checked",
+"to": "`int16.from_checked`"
+},
+{
+"name": "to_int16_saturating",
+"to": "`int16.from_saturating`"
+},
+{
+"name": "to_int32_checked",
+"to": "`int32.from_checked`"
+},
+{
+"name": "to_int32_saturating",
+"to": "`int32.from_saturating`"
+},
+{
+"name": "to_int64_checked",
+"to": "`int64.from_checked`"
+},
+{
+"name": "to_int64_saturating",
+"to": "`int64.from_saturating`"
+},
+{
+"name": "to_uint8_checked",
+"to": "`uint8.from_checked`"
+},
+{
+"name": "to_uint8_saturating",
+"to": "`uint8.from_saturating`"
+},
+{
+"name": "to_uint16_checked",
+"to": "`uint16.from_checked`"
+},
+{
+"name": "to_uint16_saturating",
+"to": "`uint16.from_saturating`"
+},
+{
+"name": "to_uint32_checked",
+"to": "`uint32.from_checked`"
+},
+{
+"name": "to_uint32_saturating",
+"to": "`uint32.from_saturating`"
+}
+],
+"float32": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float64",
+"to": "`float64.from`"
+}
+],
+"float64": [
+{
+"name": "to_int8",
+"to": "`int8.from`"
+},
+{
+"name": "to_int16",
+"to": "`int16.from`"
+},
+{
+"name": "to_int32",
+"to": "`int32.from`"
+},
+{
+"name": "to_int64",
+"to": "`int64.from`"
+},
+{
+"name": "to_uint8",
+"to": "`uint8.from`"
+},
+{
+"name": "to_uint16",
+"to": "`uint16.from`"
+},
+{
+"name": "to_uint32",
+"to": "`uint32.from`"
+},
+{
+"name": "to_uint64",
+"to": "`uint64.from`"
+},
+{
+"name": "to_float32",
+"to": "`float32.from`"
+}
+],
+"string": [
+{
+"name": "join",
+"to": "`list.join`"
+},
+{
+"name": "length",
+"to": "`string.len`"
+},
+{
+"name": "to_bytes",
+"to": "`bytes.from_string`"
+},
+{
+"name": "from_bytes",
+"to": "`bytes.from_list(xs) \\|> bytes.to_string_lossy`"
+},
+{
+"name": "run_length_encode",
+"to": "`string.chars` と `list.fold`"
+}
+],
+"url": [
+{
+"name": "query_pairs",
+"to": "`parse_query`"
+}
+],
+"value": [
+{
+"name": "stringify",
+"to": "`json.stringify`"
+},
+{
+"name": "to_camel_case",
+"to": "代わりなし（利用者が書く）"
+},
+{
+"name": "to_snake_case",
+"to": "代わりなし（利用者が書く）"
+},
+{
+"name": "field",
+"to": "`value.get`（Option）"
+},
+{
+"name": "keys",
+"to": "`as_object`"
+}
+],
+"zlib": [
+{
+"name": "crc32",
+"to": "`hash.crc32`"
+},
+{
+"name": "adler32",
+"to": "`hash.adler32`"
+}
+]
+}
+}

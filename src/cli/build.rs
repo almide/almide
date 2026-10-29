@@ -52,27 +52,43 @@ fn reject_removed_target(target: Option<&str>) {
 /// Compute the build's output path: `file`/`almide.toml`-derived default
 /// unless `-o` was given, plus the Windows `.exe` auto-suffix for native
 /// builds. Extracted verbatim from `cmd_build`.
-fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> String {
-    let default_output = if is_wasm {
+///
+/// The manifest's name becomes a file name in the working directory only
+/// when it is a plain name (#4193): a cloned repo's `name = "../x"` or an
+/// absolute path would otherwise make `almide build` write — and mark
+/// executable — any file the user can write. Such a name is refused, not
+/// replaced, so the build never lands somewhere unexpected.
+fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> Result<String, String> {
+    let default_output = if output.is_some() {
+        String::new()
+    } else if is_wasm {
         format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
     } else if std::path::Path::new("almide.toml").exists() {
         // `[package].name` as TOML reads it — not the first line that starts
         // with `name`, which could be a key in any table (#3253).
-        project::manifest_package_name(std::path::Path::new("almide.toml"))
-            .unwrap_or_else(|| file.strip_suffix(".almd").unwrap_or("a.out").to_string())
+        match project::manifest_package_name(std::path::Path::new("almide.toml")) {
+            Some(name) => {
+                project::check_plain_name(&name).map_err(|e| {
+                    format!("refusing to name the build output after almide.toml's [package] name: {e}
+  hint: fix the name, or pass `-o <path>`")
+                })?;
+                name
+            }
+            None => file.strip_suffix(".almd").unwrap_or("a.out").to_string(),
+        }
     } else {
         file.strip_suffix(".almd").unwrap_or("a.out").to_string()
     };
     let output_raw = output.unwrap_or(&default_output);
 
     // On Windows, auto-append .exe for native builds
-    if cfg!(target_os = "windows") && !is_wasm
+    Ok(if cfg!(target_os = "windows") && !is_wasm
         && !output_raw.ends_with(".exe") && !output_raw.ends_with(".wasm")
     {
         format!("{}.exe", output_raw)
     } else {
         output_raw.to_string()
-    }
+    })
 }
 
 /// The generated crate's Cargo name for a native build of `file` (#3349):
@@ -143,8 +159,8 @@ fn install_artifact(built: &std::path::Path, dest: &std::path::Path) -> std::io:
 /// `cmd_build`'s cdylib target: build a shared library (.dylib/.so/.dll) and
 /// write it to `dest`. Exits the process on a compile error, otherwise prints
 /// the written path and returns.
-fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
-    let project_dir = std::env::temp_dir().join("almide-build-cdylib");
+fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
+    let project_dir = super::build_dir::cache_base().join("build-cdylib");
     // Strip fn main() from the code — cdylib has no entry point
     let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
     // Serialize across processes: the shared scratch dir's src + target would
@@ -164,7 +180,7 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
                 err(&format!("Failed to copy library to {}: {}", dest.display(), e));
                 std::process::exit(1);
             }
-            err(&format!("Built {}", dest.display()));
+            err(&format!("Built {}{}", dest.display(), note));
         }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
@@ -179,14 +195,14 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
 /// entirely. Locking and atomic binary staging live inside
 /// `build_native_cached`; the copy-out below reads a content-named,
 /// atomically-renamed file, so it needs no lock.
-fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
     match super::run::build_native_cached(rs_code, false, use_release, None, native_deps, source_root) {
         Ok(bin_path) => {
             if let Err(e) = install_artifact(&bin_path, std::path::Path::new(output)) {
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
-            err(&format!("Built {}", output));
+            err(&format!("Built {}{}", output, note));
         }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
@@ -265,10 +281,13 @@ pub fn cmd_build(args: BuildArgs) {
     }
 
     let requested_output = output;
-    let output = compute_output_path(file, output, is_wasm);
+    let output = compute_output_path(file, output, is_wasm).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1)
+    });
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false, meter_in_codegen: false };
-    let (rs_code, metered) = crate::try_compile_with_ir(file, no_check, &opts)
+    let (rs_code, metered, outside_guarantee) = crate::try_compile_reporting(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
@@ -277,7 +296,7 @@ pub fn cmd_build(args: BuildArgs) {
             Some(n) => inject_heap_cap(&rs_code, n),
             None => rs_code,
         };
-        cmd_build_wasi_rustc(&rs_code, &output);
+        cmd_build_wasi_rustc(&rs_code, &output, &guarantee_note(&outside_guarantee));
         return;
     }
 
@@ -305,12 +324,13 @@ pub fn cmd_build(args: BuildArgs) {
             // SAFETY: the whole CLI runs sequentially on the one `almide-main`
             // worker thread and no other thread is alive to read the
             // environment concurrently.
-            unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+            unsafe { almide_base::env::arm("ALMIDE_NO_RTLIB", "1") };
             inject_heap_cap(&rs_code, n)
         }
         None => rs_code,
     };
     let rs_code = arm_alloc_count(rs_code);
+    let rs_code = inject_fs_scope(rs_code);
 
     // Load native deps from almide.toml (search in input file's directory, then
     // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
@@ -327,11 +347,11 @@ pub fn cmd_build(args: BuildArgs) {
         let crate_name = native_crate_name(file);
         let triple = super::native_target::cross_target();
         let dest = cdylib_output_path(requested_output, &crate_name, triple.as_deref());
-        cmd_build_cdylib(&rs_code, &crate_name, &dest, use_release, &native_deps, source_root.as_deref());
+        cmd_build_cdylib(&rs_code, &crate_name, &dest, use_release, &native_deps, source_root.as_deref(), &guarantee_note(&outside_guarantee));
         return;
     }
 
-    cmd_build_native(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
+    cmd_build_native(&rs_code, &output, use_release, &native_deps, source_root.as_deref(), &guarantee_note(&outside_guarantee));
 }
 
 /// `--heap-cap` (#1530): wrap the generated program's allocator in a counting
@@ -420,13 +440,214 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// `ALMIDE_ALLOC_COUNT` (#2228): inject the counting allocator when the lane is
 /// armed, taking the self-contained cargo path the same way `--heap-cap` does
 /// (see the comment there for why the rlib fast path cannot carry it).
+/// `[permissions] fs` (#4022) on native: the granted roots, baked into the
+/// program as a constant and resolved on the first fs call (a `OnceLock`), so
+/// every fs call asks the scope before it touches a path. Nothing hangs on
+/// `main`: a test harness build (`almide test`, which has none) is bounded
+/// exactly like `almide run` (#4084). Only a program that reaches the fs
+/// runtime carries the check. The roots are absolute: the manifest anchored
+/// the relative ones to its own directory.
+///
+/// The check wraps the program's CALLS, not the runtime's fns: each
+/// `almide_rt_fs_<f>(..)` call of the user code becomes a guard macro around
+/// the scoped twin of the same fn, so the runtime source — and every
+/// inspection fingerprint over it — is the same with and without a scope.
+/// Which guard a fn takes is read off its runtime signature (a `bool` return
+/// answers false; `src, dst` checks both; `pattern` checks the glob's literal
+/// base; `prefix` checks the temp dir; `at` checks a rooted call's root),
+/// never from a list of fn names. A program without the key is emitted
+/// unchanged.
+///
+/// The check decides; the call is made beneath the root (#4084). The twin
+/// (fs_scope_twin.rs) is the runtime's fs functions with their `std::fs`
+/// calls spelled through `almide_sfs`, which walks from the granted root's
+/// held descriptor without following a symlink; the rooted calls open their
+/// root the same way. A symlink swapped in after the check is refused by the
+/// call, and the guard answers it with the check's own refusal text.
+pub(crate) fn inject_fs_scope(rs_code: String) -> String {
+    let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
+    if !rs_code.contains("almide_rt_fs_") {
+        return rs_code;
+    }
+    let guards = fs_runtime_guards();
+    let entries: std::collections::BTreeSet<String> =
+        guards.iter().filter(|(_, g)| **g != "__almide_fs_root").map(|(n, _)| n.clone()).collect();
+    let (twin, twinned) = super::fs_scope_twin::scoped_twin(fs_runtime_source(), &entries);
+    // Only the user code is rewritten: with the runtime inlined, its own
+    // definitions and internal calls sit before the boundary marker.
+    let marker = almide::codegen::RT_BOUNDARY_MARKER;
+    let (head, user) = match rs_code.find(marker) {
+        Some(i) => rs_code.split_at(i + marker.len()),
+        None => ("", rs_code.as_str()),
+    };
+    let user = wrap_fs_calls(user, &guards, &twinned);
+    let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
+    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}{twin}", list.join(", "));
+    if head.is_empty() {
+        splice_after_inner_attrs(&user, &prelude)
+    } else {
+        format!("{head}{prelude}{user}")
+    }
+}
+
+/// The guard macros and the scope cell `inject_fs_scope` splices in. The
+/// scope's own items (`fs_scope_*`, `fs_scoped_*`, `almide_sfs`) are the
+/// runtime's: fs.rs includes them through almide-rt-core fs_beneath_core.rs.
+const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+fn __almide_fs_scope_check(path: &str) -> Result<(), String> {
+    __ALMIDE_FS_SCOPE.get_or_init(|| {
+        let raw: Vec<String> = __ALMIDE_FS_SCOPE_ROOTS.iter().map(|r| r.to_string()).collect();
+        fs_scoped_install(Some(&raw));
+    });
+    if fs_scoped_admits(path) { Ok(()) } else { Err(fs_scope_refusal(path)) }
+}
+fn __almide_fs_fix<T, E: std::ops::Deref<Target = str> + From<String>>(r: Result<T, E>, path: &str) -> Result<T, E> {
+    match r { Err(e) if fs_scoped_refused_in(&e) => Err(E::from(fs_scope_refusal(path))), r => r }
+}
+macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }
+macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => __almide_fs_fix(($f)(__almide_p, __almide_q), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_root { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from((&*__almide_p).split('\0').next().unwrap_or("")); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = std::env::temp_dir().to_string_lossy().into_owned(); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
+"#;
+
+/// The fs runtime module's embedded source (includes inlined).
+pub(crate) fn fs_runtime_source() -> &'static str {
+    almide::codegen::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().find(|(m, _)| *m == "fs").map_or("", |(_, s)| *s)
+}
+
+/// Each public `almide_rt_fs_*` fn of the runtime with the guard macro its
+/// signature calls for (`None`: it takes no path).
+pub(crate) fn fs_runtime_guards() -> std::collections::HashMap<String, &'static str> {
+    let src = fs_runtime_source();
+    let mut out = std::collections::HashMap::new();
+    for line in src.lines() {
+        let Some(rest) = line.strip_prefix("pub fn almide_rt_fs_") else { continue };
+        let name_len = rest.find(['<', '(']).unwrap_or(rest.len());
+        let name = format!("almide_rt_fs_{}", &rest[..name_len]);
+        let Some((params, ret)) = fs_signature(&rest[name_len..]) else { continue };
+        let guard = match params.as_slice() {
+            [] => continue,
+            [p, ..] if ret.starts_with("bool") && (p == "path" || p == "dir") => "__almide_fs_bool",
+            [s, d] if s == "src" && d == "dst" => "__almide_fs_two",
+            [p] if p == "pattern" => "__almide_fs_glob",
+            [p] if p == "prefix" => "__almide_fs_temp",
+            // The rooted calls' `<root>\0<segments>` operand (#4084): the
+            // root is judged; the descriptor walk keeps the rest under it.
+            [p, ..] if p == "at" => "__almide_fs_root",
+            [p, ..] if p == "path" || p == "dir" => "__almide_fs_path",
+            _ => continue,
+        };
+        out.insert(name, guard);
+    }
+    out
+}
+
+/// The parameter names and the return text of a signature tail
+/// `<generics>(params) -> Ret {`.
+fn fs_signature(tail: &str) -> Option<(Vec<String>, String)> {
+    let mut depth = 0i32;
+    let mut start = None;
+    for (i, c) in tail.char_indices() {
+        match c {
+            '<' | '(' | '[' => {
+                if c == '(' && depth == 0 && start.is_none() {
+                    start = Some(i + 1);
+                }
+                depth += 1;
+            }
+            '>' if i > 0 && tail.as_bytes()[i - 1] == b'-' => {}
+            '>' | ')' | ']' => {
+                depth -= 1;
+                if c == ')' && depth == 0 && start.is_some() {
+                    let params = &tail[start?..i];
+                    let ret = tail[i + 1..].trim_start().strip_prefix("->").unwrap_or("").trim_start().to_string();
+                    let mut names = Vec::new();
+                    let (mut d, mut seg) = (0i32, String::new());
+                    for ch in params.chars() {
+                        match ch {
+                            '<' | '(' | '[' => d += 1,
+                            '>' | ')' | ']' => d -= 1,
+                            _ => {}
+                        }
+                        if ch == ',' && d == 0 {
+                            names.push(std::mem::take(&mut seg));
+                        } else {
+                            seg.push(ch);
+                        }
+                    }
+                    names.push(seg);
+                    let names = names
+                        .iter()
+                        .filter_map(|p| p.split(':').next().map(str::trim))
+                        .filter(|n| !n.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    return Some((names, ret));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `code` with every call `almide_rt_fs_<f>[::<..>](` whose fn has a guard
+/// rewritten to `<guard>!(almide_rt_fs_<f>[::<..>], ` — the twin's
+/// `__almide_scoped_fs::almide_rt_fs_<f>` when `twinned` holds it.
+fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static str>, twinned: &std::collections::BTreeSet<String>) -> String {
+    const PREFIX: &str = "almide_rt_fs_";
+    let mut out = String::with_capacity(code.len() + 256);
+    let mut rest = code;
+    while let Some(i) = rest.find(PREFIX) {
+        let before = &rest[..i];
+        let after = &rest[i..];
+        let ident_len = after.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(after.len());
+        let ident = &after[..ident_len];
+        let preceded_by_ident = before.chars().last().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        // An optional turbofish, then the call's `(`.
+        let mut j = ident_len;
+        if after[j..].starts_with("::<") {
+            let mut depth = 0i32;
+            for (k, c) in after[j + 2..].char_indices() {
+                match c {
+                    '<' => depth += 1,
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            j = j + 2 + k + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out.push_str(before);
+        match guards.get(ident) {
+            Some(g) if !preceded_by_ident && !before.ends_with("fn ") && after[j..].starts_with('(') => {
+                let twin = if twinned.contains(ident) { format!("{}::", super::fs_scope_twin::TWIN_MOD) } else { String::new() };
+                out.push_str(&format!("{g}!({twin}{}, ", &after[..j]));
+                rest = &after[j + 1..];
+            }
+            _ => {
+                out.push_str(ident);
+                rest = &after[ident_len..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 pub(crate) fn arm_alloc_count(rs_code: String) -> String {
     if !alloc_count_armed() {
         return rs_code;
     }
     // SAFETY: the whole CLI runs sequentially on the one `almide-main` worker
     // thread and no other thread is alive to read the environment concurrently.
-    unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+    unsafe { almide_base::env::arm("ALMIDE_NO_RTLIB", "1") };
     inject_alloc_count(&rs_code)
 }
 
@@ -529,7 +750,7 @@ impl Drop for __AlmideAllocGuard {
 }
 
 /// Build for WASI target using bare rustc (no external crate deps).
-fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
+fn cmd_build_wasi_rustc(rs_code: &str, output: &str, note: &str) {
     let stem = output.strip_suffix(".wasm").unwrap_or(output);
     let tmp_rs = format!("{}.rs", stem);
     if let Err(e) = std::fs::write(&tmp_rs, rs_code) {
@@ -559,9 +780,23 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
         std::process::exit(1);
     }
 
-    err(&format!("Built {}", output));
+    err(&format!("Built {}{}", output, note));
 }
 
+
+/// #4008: the `Built` line's tail for a build that leaves the memory-safety
+/// guarantee — empty for one that does not. Names up to three places, the
+/// first an author reading the line would look at, and counts the rest.
+pub(super) fn guarantee_note(sites: &[String]) -> String {
+    match sites {
+        [] => String::new(),
+        _ => {
+            let shown = sites.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+            let more = if sites.len() > 3 { format!("; and {} more", sites.len() - 3) } else { String::new() };
+            format!(" — outside the memory-safety guarantee: {shown}{more}")
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

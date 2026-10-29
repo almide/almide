@@ -17,54 +17,54 @@
 // must keep the pre-write bytes. Eliding the COW would print the post-write value here
 // and diverge silently; COWing unconditionally would lose every write in `fill_slot`,
 // where the slot's block is unshared and the mutation must land in place.
-var arena = bytes.new(32)
+var arena = bytes.zeros(32)
 
 var log: List[Int] = []
 
 // Cross-function writes: `main` never touches the receiver, so the write has to reach
 // the module's storage slot rather than a callee-local copy.
 fn fill_slot(base: Int, a: Float, b: Float) -> Unit = {
-  bytes.set_f32_le(arena, base, a)
-  bytes.set_f32_le(arena, base + 4, b)
+  bytes.put_f32_le(arena, base, a)
+  bytes.put_f32_le(arena, base + 4, b)
 }
 
-fn show(pos: Int) -> String = float.to_string(bytes.read_f32_le(arena, pos))
+fn show(pos: Int) -> String = float.to_string(bytes.get_f32_le(arena, pos) ?? 0.0)
 
 fn main() -> Unit = {
   fill_slot(0, 1.5, 2.25)
   fill_slot(8, -3.0, 0.5)
   // A byte-granular mutator over the same slot, at the far end of the block.
-  bytes.set_at(arena, 31, 200)
-  bytes.set_at(arena, 30, 7)
+  bytes.put_u8(arena, 31, 200)
+  bytes.put_u8(arena, 30, 7)
   println(show(0))
   println(show(4))
   println(show(8))
   println(show(12))
-  println(int.to_string(bytes.get_or(arena, 31, -1)))
-  println(int.to_string(bytes.get_or(arena, 30, -1)))
+  println(int.to_string(bytes.get(arena, 31) ?? -1))
+  println(int.to_string(bytes.get(arena, 30) ?? -1))
   println(int.to_string(bytes.len(arena)))
   // THE ALIASING PROBE: `snap` co-owns the slot's block, so the next write must COW
   // and leave `snap` holding the pre-write bytes — the native RcCow semantics.
   let snap = arena
-  bytes.set_f32_le(arena, 0, 99.5)
-  println(float.to_string(bytes.read_f32_le(snap, 0)))
+  bytes.put_f32_le(arena, 0, 99.5)
+  println(float.to_string(bytes.get_f32_le(snap, 0) ?? 0.0))
   println(show(0))
   // The earlier slots survive the COW: it copies the whole block, not just the word
   // being written.
   println(show(8))
-  println(int.to_string(bytes.get_or(snap, 31, -1)))
+  println(int.to_string(bytes.get(snap, 31) ?? -1))
   // A write in a LOOP, so the slot round-trip (load, make-unique, store) runs many
   // times against a block that is unshared after the first COW — a spurious copy per
   // iteration would still print the right answer, but a lost store would not.
   var i = 0
   while i < 8 {
-    bytes.set_at(arena, i, i * 3)
+    bytes.put_u8(arena, i, i * 3)
     i = i + 1
   }
   var sum = 0
   var j = 0
   while j < 8 {
-    sum = sum + bytes.get_or(arena, j, 0)
+    sum = sum + bytes.get(arena, j) ?? 0
     j = j + 1
   }
   println(int.to_string(sum))

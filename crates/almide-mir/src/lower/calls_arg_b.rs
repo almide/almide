@@ -755,7 +755,7 @@ impl LowerCtx {
                 .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
                 .is_some();
         // Beyond the flat classes: a ROUTABLE-MAP element (#1527's List-argument
-        // top family — `list.get_or([m0, m1], i, d)` over Map values). The view
+        // top family — `list.get([m0, m1], i) ?? d` over Map values). The view
         // itself never reads element bytes (slots are borrowed handles) and the
         // hshare accessor family the router sends these callees to is likewise
         // handle-level; what must be EXACT is the scope-end drop story of any
@@ -782,7 +782,7 @@ impl LowerCtx {
                 Ty::Applied(TypeConstructorId::Map, a)
                     if a.len() == 2 && one_exact(&a[0]) && one_exact(&a[1]))
             // A `Result[<one-level-exact payload>, String]` element
-            // (`list.get_or([acc0, n1], 5, x2)` over Result[Option[Float],
+            // (`list.get([acc0, n1], 5) ?? x2` over Result[Option[Float],
             // String] — the #1527 List-argument Result bucket's flat half):
             // the element and the shared-out result both ride the DynListStr
             // family's per-slot sweep (`is_heap_elem_list_ty` -> flat_elems),

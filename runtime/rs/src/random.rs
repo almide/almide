@@ -1,13 +1,25 @@
 // random extern — Rust native implementations (no external crate)
-// Uses simple xorshift for deterministic-free randomness seeded from time
+// int/float/choice/shuffle use a per-thread xorshift seeded from OS entropy
+// (#4122; not for secrets); random.bytes reads the OS CSPRNG (getrandom / getentropy /
+// BCryptGenRandom).
 
-use std::cell::Cell;
+
+// The seed (#4122): std's `RandomState` draws its SipHash keys from the OS
+// CSPRNG (getrandom / getentropy / BCryptGenRandom) once per THREAD, and that
+// is the only std-only OS-entropy door without `unsafe` or a crate dependency
+// (the generated program has neither). Hashing the thread's id through those
+// keys keeps two threads apart even if their keys ever coincided. The former
+// seed — SystemTime nanos — handed every `fan` arm started in the same clock
+// tick the SAME stream. xorshift's all-zero state is a fixed point: `| 1`.
+fn almide_rng_seed() -> u64 {
+    use std::hash::{BuildHasher, Hash, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    std::thread::current().id().hash(&mut h);
+    h.finish() | 1
+}
 
 thread_local! {
-    static ALMIDE_RNG_STATE: Cell<u64> = Cell::new({
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        t.as_nanos() as u64 ^ 0x517cc1b727220a95
-    });
+    static ALMIDE_RNG_STATE: std::cell::Cell<u64> = std::cell::Cell::new(almide_rng_seed());
 }
 
 fn next_u64() -> u64 {
@@ -60,9 +72,84 @@ pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
     xs
 }
 
+// `random.bytes(n)` (C-394): the one CSPRNG — n bytes from the operating
+// system's cryptographic source, never the xorshift above. Linux reads the
+// getrandom(2) syscall through libc; every other unix reads getentropy(3),
+// which serves at most 256 bytes a call, so the fill goes in 256-byte chunks
+// on every OS. A negative n is a contract violation (the ALS-T6 abort, the
+// text the wasm self-host `random_bytes` dies with). A source that fails is
+// an abort too: handing back fewer or predictable bytes would be silent.
+#[cfg(target_os = "linux")]
+fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+    unsafe extern "C" {
+        fn getrandom(buf: *mut u8, buflen: usize, flags: u32) -> isize;
+    }
+    let mut filled = 0;
+    while filled < chunk.len() {
+        let rest = &mut chunk[filled..];
+        let r = unsafe { getrandom(rest.as_mut_ptr(), rest.len(), 0) };
+        if r > 0 {
+            filled += r as usize;
+        } else if r < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+    unsafe extern "C" {
+        fn getentropy(buf: *mut u8, buflen: usize) -> i32;
+    }
+    unsafe { getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
+}
+
+// Windows reads BCryptGenRandom with the system-preferred RNG (no algorithm
+// handle to open or close): the CSPRNG the getrandom crate reads there too.
+// Until this arm existed every Windows `random.bytes` call aborted with the
+// "OS random source failed" text below (uuid.v4 / v7 with it).
+#[cfg(windows)]
+fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+    #[link(name = "bcrypt")]
+    unsafe extern "system" {
+        fn BCryptGenRandom(alg: *mut std::ffi::c_void, buf: *mut u8, len: u32, flags: u32) -> i32;
+    }
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+    // A chunk is at most 256 bytes, so its length fits the u32 the call takes.
+    unsafe { BCryptGenRandom(std::ptr::null_mut(), chunk.as_mut_ptr(), chunk.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 }
+}
+
+// No OS source known for this target: every draw aborts rather than return
+// predictable bytes. tests/runtime_random_float_construction_test.rs runs the
+// fill on each CI OS, so a host that lands here is a red test, not a silent one.
+#[cfg(not(any(unix, windows)))]
+fn almide_os_entropy(_chunk: &mut [u8]) -> bool {
+    false
+}
+
+pub fn almide_rt_random_bytes(n: i64) -> Vec<u8> {
+    if n < 0 {
+        almide_abort(format!("random.bytes: negative length {n}"));
+    }
+    let mut v: Vec<u8> = Vec::new();
+    if v.try_reserve_exact(n as usize).is_err() {
+        almide_abort_oom();
+    }
+    v.resize(n as usize, 0);
+    for chunk in v.chunks_mut(256) {
+        if !almide_os_entropy(chunk) {
+            almide_abort("random.bytes: the OS random source failed");
+        }
+    }
+    v
+}
+
 // The 53-bit construction's boundary cells are EXECUTED, but not from here:
 // tests/runtime_random_float_construction_test.rs `include!`s this file and
 // asserts them under `cargo test --workspace`. That works because this module
-// is self-contained (std::cell::Cell and nothing else); most of runtime/rs is
+// is self-contained (std alone); most of runtime/rs is
 // not, which is why the general rule stays "the oracle is spec/" — see
 // runtime/rs/README.md.

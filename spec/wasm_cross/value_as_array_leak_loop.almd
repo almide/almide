@@ -10,7 +10,7 @@ fn drain(v: Value) -> Int = match value.as_array(v) {
 fn main() -> Unit = {
   var i = 0
   while i < 20000 {
-    let n = drain(value.array([value.int(i), value.str("x"), value.int(i)]))
+    let n = drain(value.array([value.int(i), value.string("x"), value.int(i)]))
     i = i + 1
   }
   println("done")

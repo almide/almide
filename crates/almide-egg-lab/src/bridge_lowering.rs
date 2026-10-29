@@ -94,16 +94,14 @@ impl Bridge {
             )),
 
             AlmideExpr::MatrixMul([a, b]) =>
-                self.lower_matrix_call(rec, "mul", &[*a, *b], vt),
+                self.lower_matrix_call(rec, "__mul", &[*a, *b], vt),
             AlmideExpr::MatrixAdd([a, b]) =>
-                self.lower_matrix_call(rec, "add", &[*a, *b], vt),
+                self.lower_matrix_call(rec, "__add", &[*a, *b], vt),
             AlmideExpr::MatrixScale([m, s]) =>
                 self.lower_matrix_call(rec, "scale", &[*m, *s], vt),
-            AlmideExpr::MatrixLinearRow([x, w, b]) =>
-                self.lower_matrix_call(rec, "linear_row", &[*x, *w, *b], vt),
 
             AlmideExpr::MatrixMulScaled([a, s, b]) =>
-                self.lower_matrix_call(rec, "mul_scaled", &[*a, *s, *b], vt),
+                self.lower_matrix_call(rec, "__mul_scaled", &[*a, *s, *b], vt),
 
             AlmideExpr::FlatMap([xs_id, f_id]) => {
                 let xs = self.lower_expr(rec, *xs_id, vt)?;
@@ -336,7 +334,7 @@ impl Bridge {
                 compose_filter_map_into_fold_fresh(&fm, &g, vt)
             }
             AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
-            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixLinearRow(_)
+            | AlmideExpr::MatrixScale(_)
             | AlmideExpr::MatrixMulScaled(_) => Err(LowerError::UnexpectedNode(
                 "matrix node in lambda position".into(),
             )),

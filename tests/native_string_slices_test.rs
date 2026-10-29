@@ -111,7 +111,7 @@ effect fn main() -> Unit = {
   let lengths = lines |> list.fold(map.new(), (acc, l) => lens(acc, l))
   for name in ["Lima", "Oslo", "Rome"] {
     let s = map.get(stats, name) ?? Stats { min: 0, max: 0, count: 0 }
-    println("${name} ${s.min} ${s.max} ${s.count} ${map.get_or(lengths, name, 0)}")
+    println("${name} ${s.min} ${s.max} ${s.count} ${map.get(lengths, name) ?? 0}")
   }
   println("${tagged("x;y")} ${tagged("a;b")} ${tagged("plain")} ${suffix_len("notes.txt")} ${suffix_len("notes")}")
 }
@@ -175,7 +175,7 @@ effect fn main() -> Unit = {
     let name = names[i % 3]
     out = out + [name + "!"]
   }
-  println(string.join(out, ","))
+  println(list.join(out, ","))
 }
 "#;
     let rust = emitted(src, "index");

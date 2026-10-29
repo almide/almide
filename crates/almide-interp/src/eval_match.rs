@@ -271,6 +271,12 @@ impl<'a> Interpreter<'a> {
 
         let l = val!(self.eval_expr(left, scope));
         let r = val!(self.eval_expr(right, scope));
+        // A Matrix operand: the operator IS a `matrix.*` call (`a + b` →
+        // `matrix.__add`, `m * k` → `matrix.scale`), the rewrite both
+        // backends' lowering applies, answered by the same registry bodies.
+        if let Some(f) = self.eval_matrix_binop(op, &left.ty, &right.ty, &l, &r) {
+            return f;
+        }
         // The UNSIGNED 64-bit lane (#872, C-179): a `UInt64` operand's `i64`
         // slot is a u64 BIT PATTERN, so division, remainder and ordering must
         // read it unsigned — the signed reading made `u64::MAX / 3` come out
@@ -290,7 +296,7 @@ impl<'a> Interpreter<'a> {
         // is that i32.div_s in disguise: it computed 128 and voted `exit=0
         // stdout=128` against a correct two-target abort consensus, the first
         // dissent the stdlib-pool coverage surfaced (int8_div_overflow began
-        // voting the moment `int.from_int8` gained a body).
+        // voting the moment `int.__from_int8` gained a body).
         if let Some(flow) = Self::narrow_div_overflow(op, &l, &r, &left.ty, &right.ty) {
             return flow;
         }
@@ -349,7 +355,7 @@ impl<'a> Interpreter<'a> {
     /// from this gate exactly as it was missing from the renderers' (C-180's
     /// pow amendment): `Int32 999997 ^ 2` had the interpreter dissenting from
     /// a correct two-target consensus with the un-narrowed 999994000009.
-    fn narrow_wrap_flow(flow: Flow, op: BinOp, lt: &Ty, rt: &Ty) -> Flow {
+    pub(crate) fn narrow_wrap_flow(flow: Flow, op: BinOp, lt: &Ty, rt: &Ty) -> Flow {
         use BinOp::*;
         if !matches!(op, AddInt | SubInt | MulInt | PowInt) {
             return flow;
@@ -533,7 +539,7 @@ fn float2(l: Value, r: Value, f: impl FnOnce(f64, f64) -> f64) -> Flow {
 }
 
 /// Integer `^`, step for step with `almide_pow!` (native) and the wasm
-/// `math.pow` loop: exponentiation by squaring with wrapping multiply over the
+/// `math.__pow` loop: exponentiation by squaring with wrapping multiply over the
 /// full i64 exponent. `None` means a NEGATIVE exponent, which has no integer
 /// result and aborts on every target (#895).
 fn int_pow(base: i64, exp: i64) -> Option<i64> {
@@ -597,7 +603,7 @@ fn apply_binop_int(op: BinOp, l: Value, r: Value) -> Flow {
 /// The f64 operators.
 ///
 /// The float `**` / `^` OPERATOR is the same vendored-musl-libm transcendental
-/// the MODULE path (`math.pow`, bridge.rs) already abstains on: both backends
+/// the MODULE path (`math.__pow`, bridge.rs) already abstains on: both backends
 /// route it through the vendored pow, Rust's `f64::powf` calls the PLATFORM
 /// libm, and the two differ in the last ULP. The module path returned
 /// `Unsupported` (an honest skip) while this operator arm silently voted with

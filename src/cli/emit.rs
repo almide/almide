@@ -198,6 +198,20 @@ pub fn cmd_emit(args: EmitArgs) {
     // a program the product never built (no branch-lift helpers, no DCE,
     // no folding), and a byte-diff over its output could not judge them.
     if let Some(ref mut ir) = ir_program {
+        // E109 (#4151): emitted source is a build the user runs; the same
+        // gate the build routes apply. The IR/AST/dialect views stay
+        // available for inspecting a refused program.
+        if !(emit_ir || emit_ast || emit_dialect) {
+            if crate::compile_driver::enforce_effect_values(ir, (file, &source_text)).is_err() {
+                std::process::exit(1);
+            }
+            // `[permissions]` of the entry file's project, as the build applies them.
+            if let Some(proj) = crate::project::permissions_project_for(file)
+                && super::enforce_project_permissions(ir, &proj).is_err()
+            {
+                std::process::exit(1);
+            }
+        }
         almide_driver::link_ir(ir);
     }
 

@@ -5,7 +5,7 @@
 //!
 //! The native call site takes `&mut r.buf`; a sibling `pos(&r)` evaluated
 //! after it is rustc E0502, so the borrow-conflict hoist moves each such
-//! sibling into a temporary first (`bytes.set_u8(s.buf, pos(s), 7)` was
+//! sibling into a temporary first (`bytes.put_u8(s.buf, pos(s), 7)` was
 //! E0502 on 0.64.0). With two or more hoisted siblings every temporary also
 //! needs its own name — a shared `__hoist` handed every argument the last
 //! one's value (#3049), which the ORACLE here catches: the same statements
@@ -88,14 +88,9 @@ fn arg_for(module: &str, ty: &str) -> String {
     match (module, ty) {
         (_, "Int") | ("list", "A") | ("map", "V") => "pos(r)".into(),
         (_, "Float") => "flt(r)".into(),
-        (_, "Float32") => "f32_of(r)".into(),
-        (_, "Int32") => "i32_of(r)".into(),
-        (_, "UInt16") => "u16_of(r)".into(),
-        (_, "UInt32") => "u32_of(r)".into(),
         (_, "String") | ("map", "K") => "key(r)".into(),
         (_, "Bool") => "flag(r)".into(),
         (_, "Bytes") => "src(r)".into(),
-        (_, "Endian") => "endian_of(r)".into(),
         (m, t) => panic!("no sibling-read argument for {m}.* parameter type {t} — extend arg_for"),
     }
 }
@@ -128,15 +123,10 @@ fn program(ms: &[Mutator], hoisted: bool) -> String {
         r#"type R = {{ buf: Bytes, s: String, xs: List[Int], m: Map[String, Int], n: Int }}
 
 fn pos(r: R) -> Int = r.n + 1
-fn flt(r: R) -> Float = float.from_int(r.n) + 0.5
-fn f32_of(r: R) -> Float32 = float.to_float32(float.from_int(r.n) + 1.5)
-fn i32_of(r: R) -> Int32 = int.to_int32(r.n * 3 - 4)
-fn u16_of(r: R) -> UInt16 = int.to_uint16(r.n * 100 + 9)
-fn u32_of(r: R) -> UInt32 = int.to_uint32(r.n * 65536 + 11)
+fn flt(r: R) -> Float = float.from(r.n) + 0.5
 fn key(r: R) -> String = "k${{int.to_string(r.n)}}"
 fn flag(r: R) -> Bool = r.n % 2 == 0
 fn src(r: R) -> Bytes = bytes.from_list([r.n, 2, 3, 4])
-fn endian_of(r: R) -> Endian = if r.n % 2 == 0 then LittleEndian else BigEndian
 
 fn show(r: R) -> String = "${{bytes.to_list(r.buf)}} ${{r.s}} ${{r.xs}} ${{r.m}} ${{r.n}}"
 
@@ -144,7 +134,7 @@ fn drive(mut r: R) -> Unit = {{
 {in_param}}}
 
 effect fn main() -> Unit = {{
-  var r = R {{ buf: bytes.new(40), s: "s", xs: [0], m: [:], n: 0 }}
+  var r = R {{ buf: bytes.zeros(40), s: "s", xs: [0], m: [:], n: 0 }}
 {in_var}  println(show(r))
   drive(r)
   println(show(r))
@@ -175,9 +165,11 @@ fn run_native(src: &str, dir: &Path, label: &str) -> String {
 fn every_in_place_mutator_with_a_field_receiver_evaluates_sibling_reads_before_the_borrow() {
     let ms = mutators();
     // The matrix is only as good as its row count: the byte writers alone are
-    // ~50 fns, and push/insert anchor the list/map/string rows.
+    // ~50 fns, and push anchors the list/string rows. Map has no in-place
+    // mutator with a sibling argument any more (`map.insert` became the
+    // `m[key] = value` index write, R-map-01); its rows join by existing.
     assert!(ms.len() >= 50, "found only {} mutators — the signature scan broke", ms.len());
-    for (m, f) in [("bytes", "set_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push"), ("map", "insert")] {
+    for (m, f) in [("bytes", "put_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push")] {
         assert!(ms.iter().any(|x| x.module == m && x.name == f), "{m}.{f} missing from the matrix");
     }
     let dir = tempfile::tempdir().expect("tempdir");

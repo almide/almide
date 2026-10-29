@@ -80,7 +80,7 @@ fn reduce_expr(
                 ..e.clone()
             })
         }
-        // A PURE stdlib module call (`float.from_int(x)`) stays a call — its
+        // A PURE stdlib module call (`float.__from_int(x)`) stays a call — its
         // arguments substitute. The counting sees the same node on both sides.
         IrExprKind::Call { target: CallTarget::Module { module, func, def_id }, args, type_args } => {
             if !crate::purity::is_pure(module.as_str(), func.as_str()) {

@@ -9,7 +9,7 @@
 // hoisting call (nested), a caller holding the root as a `mut` parameter and
 // as a local `var`, a module-level `var` root, and the in-place stdlib
 // mutators whose `mut` argument is a FIELD while another argument reads the
-// same record through a call (#3050: `bytes.set_u8(s.buf, pos(s), 7)` failed
+// same record through a call (#3050: `bytes.put_u8(s.buf, pos(s), 7)` failed
 // rustc E0502 before the sibling was hoisted).
 type S = { a: Int, b: Int, c: Int, params: List[Int] }
 
@@ -48,7 +48,7 @@ fn encode(row: Int) -> String = "row${int.to_string(row)}"
 fn push_row(mut sb: List[String], line: String) -> Unit = list.push(sb, line)
 
 fn drive(mut r: R) -> Unit = {
-  map.insert(r.m, key_of(r), pos(r) + 10)
+  r.m = map.set(r.m, key_of(r), pos(r) + 10)
   list.push(r.xs, row_of(r))
   push_row(r.sb, encode(row_of(r)))
   string.push(r.t, key_of(r))
@@ -67,8 +67,8 @@ fn main() -> Unit = {
   assign(g, arg(g, 2), arg(g, 0))
   println("global root: ${show(g)}")
   var r = R { buf: bytes.from_list([1, 2, 3, 4, 5]), n: 2, m: [:], xs: [9], sb: [], t: "t" }
-  bytes.set_u8(r.buf, pos(r), 7)
-  map.insert(r.m, key_of(r), pos(r))
+  bytes.put_u8(r.buf, pos(r), 7)
+  r.m = map.set(r.m, key_of(r), pos(r))
   list.push(r.xs, row_of(r))
   push_row(r.sb, encode(row_of(r)))
   string.push(r.t, key_of(r))

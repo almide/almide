@@ -1,0 +1,4 @@
+// The rule holds on any record, Codec or not: a skipped field needs a value to take.
+type Cache = { key: String, @skip hits: Int }
+
+fn main() -> Unit = println("ok")

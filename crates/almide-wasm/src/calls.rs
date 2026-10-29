@@ -192,6 +192,30 @@ impl Emitter<'_> {
                 // module-fn simple-name index (intra-module calls arrive
                 // as Named after lower_module) — see `resolve_named_fn`.
                 let Some(i) = self.resolve_named_fn(name) else {
+                    // Inside a stdlib module's own Almide bodies (fs's rooted
+                    // family, #4022; `env.set` over `__set`, #4200) a sibling
+                    // host-op fn arrives as Named: the same lowering
+                    // `<module>.<name>` takes from outside.
+                    // The call is re-dispatched as that module call on a pinned
+                    // node; its ownership mark moves back to this node.
+                    if let Some(module) = self.cur_module.filter(|m| almide_types::stdlib_info::is_bundled_module(m)) {
+                        let pinned = self.owned_call_marks.pin(IrExpr {
+                            kind: IrExprKind::Call {
+                                target: CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(name), def_id: None },
+                                args: Vec::new(),
+                                type_args: Vec::new(),
+                            },
+                            ty: almide_types::types::Ty::Unit,
+                            span: None,
+                            def_id: None,
+                        });
+                        let IrExprKind::Call { target: fs_target, .. } = &pinned.kind else { unreachable!("pinned call") };
+                        let out = self.lower_module_call(fs_target, args, tail, ret_hint)?;
+                        if self.owned_call_marks.is_target_marked(fs_target) {
+                            self.mark_owned_call(target);
+                        }
+                        return Ok(out);
+                    }
                     return unsup(&format!("call:{name}"));
                 };
                 let info = &self.table.infos[i];
@@ -543,7 +567,6 @@ impl Emitter<'_> {
                 // own string buffer, and builds Option via typed constructors.
                 "string_byte_slice",
                 "string_to_int",
-                "int_from_hex",
                 "float_parse",
                 // The JSON parser: raw ops build its OWN string buffers
                 // (layout-shared); every Value comes through the public
@@ -588,7 +611,7 @@ impl Emitter<'_> {
                     // The incumbent packs EVERY list element into an
                     // 8-byte slot; ours are 4 for the i32 word class —
                     // List[Int]/List[Float] agree, List[String]/List[Bool]
-                    // do not (string.join through a linked impl trapped).
+                    // do not (list.join through a linked impl trapped).
                     SliceTy::List(h) => self.types.el(*h).slot_size() == 4,
                     _ => false,
                 }
@@ -646,7 +669,7 @@ impl Emitter<'_> {
     /// caller's own copy-on-write. The callee writes this buffer in place
     /// and the C-132 move-mode rewrite hands it back for the site to store,
     /// so the site is a mutation of THIS frame's var — and takes the same
-    /// rc-gated `$cow` a direct `bytes.set_u8(b, …)` here would: a shared
+    /// rc-gated `$cow` a direct `bytes.put_u8(b, …)` here would: a shared
     /// block copies and the var is repointed at the unique copy, so an alias
     /// bound BEFORE the call keeps its pre-write value (C-033), while an
     /// unaliased buffer (rc == 1, the ordinary case) is not copied at all.
@@ -711,7 +734,7 @@ impl Emitter<'_> {
         let mut no_transfer = false;
         let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
         // The same move-in as the Named arm (#3337 / #3406): `x =
-        // http.status(x, c)` hands the dying `x` to the self-hosted
+        // http.set_status(x, c)` hands the dying `x` to the self-hosted
         // implementation's owned param, so its `@reuse` op meets rc 1.
         let move_in = self.take_move_in(args, true, tail && Some(index) != self.self_index);
         let mut moved_in = Vec::new();

@@ -212,7 +212,7 @@ fn render_verdict_call(
     subst: &HashMap<String, GenType>,
 ) -> Option<String> {
     let mut bound: Vec<(String, String)> = Vec::new();
-    for ((name, p), a) in sig.param_names.iter().zip(&sig.params).zip(args) {
+    for (i, ((name, p), a)) in sig.param_names.iter().zip(&sig.params).zip(args).enumerate() {
         let ty = p.instantiate(subst)?;
         let a = match v.domain.iter().find(|(d, _)| d == name) {
             Some((_, tmpl)) => super::verdicts::fill(tmpl, &[(name, &a)]),
@@ -220,8 +220,10 @@ fn render_verdict_call(
         };
         // Out of scope like the raw result: a domain operand can be a host
         // choice too (`process.kill`'s pid is a fresh child's).
+        // The written operand is a `var` (E032): a `mut` / `@mutating` receiver.
+        let kw = if Some(i) == sig.mut_param { "var" } else { "let" };
         let v = b.fresh_name();
-        b.stmts.push(format!("let {v}: {} = {a}", ty.render()));
+        b.stmts.push(format!("{kw} {v}: {} = {a}", ty.render()));
         bound.push((name.clone(), v));
     }
     let names: Vec<(&str, &str)> = bound.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
@@ -267,7 +269,7 @@ fn net_int_arg(sig: &Signature, name: &str) -> Option<String> {
     // listener with a connection already pending: a read or an accept
     // against nothing would wait forever.
     let stream = format!(
-        "(match net.tcp_connect(\"127.0.0.1\", {tcp_port}) {{ ok(s) => {{ let _w: Result[Unit, String] = net.tcp_write(s, bytes.from_string(\"hello world\"))\n s }}, err(_) => -1 }})"
+        "(match net.tcp_connect(\"127.0.0.1\", {tcp_port}) {{ ok(s) => {{ let _w: Result[Unit, String] = io.write(s, bytes.from_string(\"hello world\"))\n s }}, err(_) => -1 }})"
     );
     let listener = "(match net.tcp_listen(\"127.0.0.1\", 0) { ok(l) => { let _c: Result[Int, String] = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l) ?? 0)\n l }, err(_) => -1 })".to_string();
     match (sig.module, sig.func.as_str(), name) {
@@ -292,10 +294,6 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
     // ADR-0027 D4: a fixed command set, present at these paths on linux and
     // macos, and no shell: a generated argument list is data, never code.
     const COMMANDS: &[&str] = &["/bin/echo", "/bin/cat", "/usr/bin/true", "/usr/bin/false", "/no/such/command"];
-    // A spawned child shares the program's stdout and runs beside it: what it
-    // prints lands wherever the scheduler puts it, so spawn draws commands
-    // that print nothing.
-    const SILENT: &[&str] = &["/usr/bin/true", "/usr/bin/false", "/no/such/command"];
     const DIRS: &[&str] = &["sub", "empty_dir", ".", "missing_dir"];
     if !sig.effect || *param != SigType::String {
         return None;
@@ -304,7 +302,6 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
         ("fs", _) => PATHS,
         ("env", _) => ENV_NAMES,
         ("args", _) => ARG_NAMES,
-        ("process", "cmd") if sig.func == "spawn" => SILENT,
         // A child that exits before reading its input races the write
         // (EPIPE or not, by timing, on every leg): the input goes to one that
         // reads it all.
@@ -401,8 +398,8 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
-        GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
         GenType::Nominal(k) => nominal_literal(b, k),
+        GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -415,7 +412,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
     }
 }
 
-/// A fixed-width number through its `int.to_<width>` conversion (from a
+/// A fixed-width number through its `<width>.from` conversion (from a
 /// non-negative Int, so every width holds it), or `Bytes` from a short list.
 fn sized_or_bytes(b: &mut Builder, goal: &GenType) -> String {
     const SMALL: &[i64] = &[0, 1, 2, 7, 100];
@@ -456,7 +453,7 @@ fn value_literal(b: &mut Builder, depth: u32) -> String {
     match *b.rng.pick(kinds) {
         0 => format!("value.int({})", b.rng.pick(pools::INT_POOL)),
         1 => format!("value.float({})", render_float_literal(*b.rng.pick(pools::FLOAT_POOL))),
-        2 => format!("value.str({})", render_string_literal(b.rng.pick(pools::STRING_POOL))),
+        2 => format!("value.string({})", render_string_literal(b.rng.pick(pools::STRING_POOL))),
         3 => format!("value.bool({})", b.rng.pick(pools::BOOL_POOL)),
         4 => "value.null()".to_string(),
         5 => {
@@ -492,8 +489,8 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Bytes
         | GenType::Matrix
         | GenType::Value => gen_leaf(b, goal),
-        | GenType::Endian
-        | GenType::Nominal(_) => gen_leaf(b, goal),
+        | GenType::Nominal(_)
+        | GenType::Secret(_) => gen_leaf(b, goal),
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -813,8 +810,8 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
-        GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
         GenType::Nominal(k) => nominal_literal(b, k),
+        GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }
 }

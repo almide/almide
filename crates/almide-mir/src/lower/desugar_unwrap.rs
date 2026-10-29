@@ -64,7 +64,11 @@ fn desugar_effect_unwrap_inner(
         // confirmed wrong-value bug the Block-tail case has). The body IS the tail: delegate the
         // bare-Unwrap case directly. Gated to exactly that shape — any other non-Block body
         // keeps today's behavior untouched.
-        if matches!(&body.kind, IrExprKind::Unwrap { .. }) {
+        // The void `main` navigates EVERY blockless body the same way: a body that IS a
+        // `!`-bearing loop, or the `match` an earlier let-`!` rewrite left as the whole body
+        // (its Ok arm holding a `!`-bearing loop) — `desugar_tail_effect_unwrap` reaches
+        // each arm's block / loop.
+        if unit_main || matches!(&body.kind, IrExprKind::Unwrap { .. }) {
             return desugar_tail_effect_unwrap(body, next_var, unit_main, ret_is_result);
         }
         return None;
@@ -134,6 +138,13 @@ fn desugar_effect_unwrap_inner(
             span: body.span.clone(),
             def_id: body.def_id,
         });
+    }
+    // The void `main`'s `!`-bearing LOOP statement: its `!` aborts, so the loop body
+    // takes the same die continuation (`desugar_unit_main_loop`, desugar_loop_b.rs).
+    if unit_main {
+        if let Some(r) = desugar_unit_main_block_loops(body, next_var, ret_is_result) {
+            return Some(r);
+        }
     }
     // No TOP-LEVEL stmt-`!` in this block — RECURSE INTO THE TAIL. A tail `if`/`match`/block is a
     // RETURN position whose arm bodies may carry a stmt-`!` (porta_init's `else { … fs.write(p,c)!;
@@ -332,7 +343,7 @@ fn normalize_unit_discard(
 /// exits 1 — main is declared `-> Unit` (the void convention: an `err(…)` arm value would be
 /// silently DISCARDED), so the arm aborts through the prim floor instead:
 /// `prim.die(prim.handle(<full line>))` ($__die = STDERR write + proc_exit(1), the
-/// int_rotate/math_int precedent). `msg` is either the static line (Option-`!`: "Error:
+/// math_int precedent). `msg` is either the static line (Option-`!`: "Error:
 /// none\n") or a bound payload Var (Result-`!`: a `let $m = "Error: " + e + "\n"` bind
 /// precedes the die and the die consumes $m's handle — the arm's scope-end drop after the
 /// never-returning die balances the cert, exactly the checked-overflow abort shape).
@@ -491,7 +502,7 @@ fn build_main_die(msg: IrExpr, body: &IrExpr) -> IrExpr {
 }
 
 /// The OPTION-subject fail/continue match of [`build_unwrap_match`]
-/// (`int.to_int8_checked(v)!` — the sized_conversion family): the fail arm is
+/// (`int8.from_checked(v)!` — the sized_conversion family): the fail arm is
 /// `none => err("none")` (v0's unwrap-of-none message, oracle: `Error: none`,
 /// exit 1) — or the propagated `none` itself in an Option-returning pure fn
 /// (#1067), or main's die line — and the continuation binds under the SOME
@@ -610,7 +621,7 @@ fn build_unwrap_match(
             kind: IrExprKind::Call {
                 target: almide_ir::CallTarget::Module {
                     module: almide_lang::intern::sym("list"),
-                    func: almide_lang::intern::sym("join"),
+                    func: almide_lang::intern::sym("__join_string"),
                     def_id: None,
                 },
                 args: vec![
@@ -754,6 +765,10 @@ fn desugar_tail_effect_unwrap(
                 span: tail.span.clone(),
                 def_id: tail.def_id,
             })
+        }
+        // The void `main`'s TAIL loop (`{ let v = f()!; for … { let x = g()!; … } }`).
+        IrExprKind::ForIn { .. } | IrExprKind::While { .. } if unit_main => {
+            desugar_unit_main_loop(tail, next_var, ret_is_result)
         }
         IrExprKind::If { cond, then, else_ } => {
             let nt = desugar_tail_effect_unwrap(then, next_var, unit_main, ret_is_result);

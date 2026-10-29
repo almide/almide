@@ -1,10 +1,11 @@
 //! A self-hosted body the interp's pool tier runs builds a `Map[String, _]`
-//! the way user code does — `map.set(acc, k, v)` with a repeated key — and
-//! must keep ONE entry per key, last value winning, as both backends do.
-//! `http.query_params` (`__qp_fill` in stdlib/http_url_decode.almd) handed
-//! the third oracle `["q": "a", "q": "c"]` for `?q=a&q=c` where native and
-//! wasm print `["q": "c"]`: every fuzz program that printed a request's
-//! query map read as "both targets disagree with the reference interpreter".
+//! the way user code does — `seen[k] = v` with a repeated key — and
+//! must keep ONE entry per key, as both backends do. The body that first
+//! exposed it was `http.query_params`'s old `__qp_fill`, which handed the third
+//! oracle `["q": "a", "q": "c"]` for `?q=a&q=c`. That decoder is gone
+//! (`http.query_params` is `url.parse_query`, C-404); the same pool-tier path
+//! now runs in `value.object`'s fold of a repeated key (C-401, first position,
+//! last value) and in `json.parse`'s duplicate-key check.
 
 fn run(source: &str) -> almide_interp::RunOutcome {
     let ir = almide::wasm_leg::lower_to_ir("spec/wasm_cross/probe.almd", source).expect("front failed");
@@ -24,22 +25,33 @@ fn assert_agrees_or_abstains(source: &str, expected: &str) {
 #[test]
 fn a_pool_body_keeps_one_entry_per_repeated_string_key() {
     assert_agrees_or_abstains(
-        "import http\n\
-         fn main() -> Unit = {\n\
-         \x20 let m = http.query_params(http.new_request(\"GET\", \"/s?q=a&q=c\", \"\", map.new()))\n\
-         \x20 println(\"${map.len(m)} ${map.get(m, \"q\")} ${map.keys(m)}\")\n\
+        "import json\n\nfn main() -> Unit = {\n\
+         \x20 let v = value.object([(\"q\", value.string(\"a\")), (\"q\", value.string(\"c\"))])\n\
+         \x20 println(\"${list.map(value.as_object(v) ?? [], (kv) => kv.0)} ${json.stringify(v)}\")\n\
          }\n",
-        "1 some(\"c\") [\"q\"]\n",
+        "[\"q\"] {\"q\":\"c\"}\n",
     );
 }
 
 #[test]
 fn a_pool_body_keeps_distinct_string_keys_apart() {
     assert_agrees_or_abstains(
+        "import json\n\nfn main() -> Unit = {\n\
+         \x20 let w = value.object([(\"a\", value.int(1)), (\"b\", value.string(\"a b\")), (\"a\", value.int(3))])\n\
+         \x20 println(\"${list.map(value.as_object(w) ?? [], (kv) => kv.0)} ${json.stringify(w)}\")\n\
+         }\n",
+        "[\"a\", \"b\"] {\"a\":3,\"b\":\"a b\"}\n",
+    );
+}
+
+#[test]
+fn query_params_keeps_every_pair_in_order() {
+    assert_agrees_or_abstains(
         "import http\n\
          fn main() -> Unit = {\n\
-         \x20 println(\"${http.query_params(http.new_request(\"GET\", \"/s?a=1&b=a%20b&a=3\", \"\", map.new()))}\")\n\
+         \x20 let ps = http.query_params(http.new_request(\"GET\", \"/s?a=1&b=a%20b&a=3\", \"\", [])) ?? []\n\
+         \x20 println(\"${ps}\")\n\
          }\n",
-        "[\"a\": \"3\", \"b\": \"a b\"]\n",
+        "[(\"a\", \"1\"), (\"b\", \"a b\"), (\"a\", \"3\")]\n",
     );
 }

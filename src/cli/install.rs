@@ -26,7 +26,20 @@ pub fn cmd_install(
     name_override: Option<&str>,
     bin_dir: Option<&Path>,
     target: Option<&str>,
+    grants: InstallGrants<'_>,
 ) {
+    let InstallGrants { force, trust, allow_native } = grants;
+    // #4184: the owner of a remote spec must be trusted BEFORE anything is
+    // fetched, as `almide add` requires of a dependency.
+    if let Err(e) = check_install_trust(spec, trust) {
+        err(&e);
+        std::process::exit(1);
+    }
+    // A `--name` is checked before anything is fetched (#4183).
+    if let Some(Err(e)) = name_override.map(check_bin_name) {
+        err(&format!("error: --name {e}"));
+        std::process::exit(1);
+    }
     let src_dir = match resolve_source(spec, tag, branch) {
         Ok(p) => p,
         Err(e) => {
@@ -34,6 +47,22 @@ pub fn cmd_install(
             std::process::exit(1);
         }
     };
+
+    // #4184: the package is built as the root project, so its own native
+    // code (which `[permissions] native` does not cover: it gates
+    // dependencies) is compiled with the user's rights. Say what it is, and
+    // build it only when asked.
+    let native = crate::native_grant::native_code_of(&src_dir, &src_dir.join("src"));
+    if !native.is_empty() {
+        if !allow_native {
+            err(&format!(
+                "error: refusing to install {spec}: it compiles native code, which runs with your rights at build time\n  native code: {}\n  hint: read it, then rerun with --allow-native if you trust it",
+                native.describe()
+            ));
+            std::process::exit(1);
+        }
+        err(&format!("note: --allow-native: building its native code: {}", native.describe()));
+    }
 
     let almide_toml = src_dir.join("almide.toml");
     if !almide_toml.is_file() {
@@ -60,6 +89,13 @@ pub fn cmd_install(
         ));
         std::process::exit(1);
     }
+    // #4183: the name becomes a file name in the bin dir, so it must be one
+    // plain identifier. `name = "../x"` used to install outside the bin dir,
+    // and an absolute name replaced the bin dir in the join.
+    if let Err(e) = check_bin_name(&bin_name) {
+        err(&format!("error: the package name {e}; pass --name with a plain name"));
+        std::process::exit(1);
+    }
 
     let install_dir = bin_dir
         .map(|p| p.to_path_buf())
@@ -73,6 +109,15 @@ pub fn cmd_install(
         std::process::exit(1);
     }
     let install_path = install_dir.join(&bin_name);
+    // #4183: never replace a file `almide install` did not put here unless
+    // asked, and never write through a symlink.
+    if let Err(e) = check_destination(&install_dir, &install_path, &bin_name, force) {
+        err(&format!("error: {e}"));
+        std::process::exit(1);
+    }
+    // Build to a staging name in the same dir, then rename over the
+    // destination: a symlink there is replaced, never written through.
+    let staged_path = install_dir.join(format!(".{}.almide-install-{}", bin_name, std::process::id()));
 
     let entry_rel = "src/main.almd";
     let entry = src_dir.join(entry_rel);
@@ -105,7 +150,7 @@ pub fn cmd_install(
         std::process::exit(1);
     }
 
-    let install_path_str = install_path.to_string_lossy().to_string();
+    let install_path_str = staged_path.to_string_lossy().to_string();
     crate::cli::cmd_build(crate::cli::BuildArgs {
         file: entry_rel,
         output: Some(&install_path_str),
@@ -129,6 +174,18 @@ pub fn cmd_install(
     });
 
     let _ = std::env::set_current_dir(&prev_cwd);
+
+    if staged_path.is_file() {
+        if install_path.exists() || install_path.symlink_metadata().is_ok() {
+            err(&format!("replacing {}", install_path.display()));
+        }
+        if let Err(e) = std::fs::rename(&staged_path, &install_path) {
+            let _ = std::fs::remove_file(&staged_path);
+            err(&format!("error: cannot install {}: {}", install_path.display(), e));
+            std::process::exit(1);
+        }
+        record_installed(&install_dir, &bin_name);
+    }
 
     if install_path.is_file() {
         err("");
@@ -195,6 +252,96 @@ fn resolve_source(
     project_fetch::fetch_dep(&dep)
 }
 
+/// The installed binary's name must be one plain identifier (#4183): it is
+/// joined onto the bin dir, so a `/`, `\\`, `..` or an absolute path would
+/// put the file somewhere else.
+fn check_bin_name(name: &str) -> Result<(), String> {
+    crate::project::check_plain_name(name)
+}
+
+/// The record of what `almide install` put in a bin dir (#4183), one name
+/// per line.
+const INSTALL_RECEIPT: &str = ".almide-installed";
+
+fn installed_names(install_dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(install_dir.join(INSTALL_RECEIPT))
+        .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+fn record_installed(install_dir: &Path, name: &str) {
+    let mut names = installed_names(install_dir);
+    if !names.iter().any(|n| n == name) {
+        names.push(name.to_string());
+        let _ = std::fs::write(install_dir.join(INSTALL_RECEIPT), names.join("\n") + "\n");
+    }
+}
+
+/// May `almide install` put `name` at `path`? A free name, or a file this
+/// bin dir's receipt says almide installed. Anything else — a tool the user
+/// put there, `almide` itself, a symlink — needs `--force`.
+fn check_destination(install_dir: &Path, path: &Path, name: &str, force: bool) -> Result<(), String> {
+    let Ok(md) = path.symlink_metadata() else { return Ok(()) };
+    if force {
+        return Ok(());
+    }
+    if md.file_type().is_symlink() {
+        return Err(format!("{} is a symlink; pass --force to replace the link (its target is never written)", path.display()));
+    }
+    if installed_names(install_dir).iter().any(|n| n == name) {
+        return Ok(());
+    }
+    Err(format!(
+        "{} already exists and was not installed by almide; pass --force to replace it",
+        path.display()
+    ))
+}
+
+/// What the caller granted an install (#4183, #4184).
+pub struct InstallGrants<'a> {
+    /// Replace a file almide did not install.
+    pub force: bool,
+    /// The owner the caller trusts for this spec (`--trust`).
+    pub trust: Option<&'a str>,
+    /// Compile the package's own native code.
+    pub allow_native: bool,
+}
+
+/// The git URL a spec resolves to, or `None` for a local directory.
+fn spec_url(spec: &str) -> Option<String> {
+    let p = Path::new(spec);
+    if p.is_dir() {
+        return None;
+    }
+    if spec.starts_with("https://") || spec.starts_with("git@") || spec.starts_with("ssh://") || spec.starts_with("file://") {
+        return Some(spec.to_string());
+    }
+    Some(project_fetch::resolve_package_spec(spec).1)
+}
+
+/// #4184: a remote spec's owner is trusted by default (github.com/almide) or
+/// named by `--trust`; anything else is refused before it is fetched.
+fn check_install_trust(spec: &str, trust: Option<&str>) -> Result<(), String> {
+    let Some(url) = spec_url(spec) else {
+        return match trust {
+            Some(t) => Err(format!("error: --trust {t}: {spec} is a local directory, which needs no trust")),
+            None => Ok(()),
+        };
+    };
+    let owner = crate::trust::source_owner(&url).map_err(|e| format!("error: {e}"))?;
+    let Some(owner) = owner else { return Ok(()) };
+    match trust.map(crate::trust::owner_arg) {
+        Some(t) if t == owner => Ok(()),
+        Some(t) => Err(format!(
+            "error: --trust {t} does not match the owner of {url} ({owner})\n  hint: --trust must name the owner the source belongs to"
+        )),
+        None if owner == crate::trust::DEFAULT_TRUSTED_OWNER => Ok(()),
+        None => Err(format!(
+            "error: refusing to install {spec}: its owner is not trusted\n  source: {url}\n  owner: {owner}\n  hint: if you asked for this exact repository, rerun with --trust {owner}"
+        )),
+    }
+}
+
 fn default_install_dir() -> PathBuf {
     if let Some(env_dir) = almide_base::env::var("ALMIDE_INSTALL") {
         return PathBuf::from(env_dir);
@@ -203,4 +350,22 @@ fn default_install_dir() -> PathBuf {
         return PathBuf::from(home).join(".local").join("bin");
     }
     PathBuf::from(".")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #4184: only github.com/almide is trusted without --trust, and
+    /// --trust must name the spec's own owner.
+    #[test]
+    fn install_trust_follows_the_add_rule() {
+        assert!(check_install_trust("github.com/almide/almide-bindgen", None).is_ok());
+        let e = check_install_trust("github.com/someone/tool", None).unwrap_err();
+        assert!(e.contains("its owner is not trusted") && e.contains("--trust github.com/someone"), "{e}");
+        assert!(check_install_trust("github.com/someone/tool", Some("someone")).is_ok());
+        assert!(check_install_trust("https://github.com/someone/tool", Some("github.com/someone")).is_ok());
+        let e = check_install_trust("github.com/someone/tool", Some("other")).unwrap_err();
+        assert!(e.contains("does not match"), "{e}");
+    }
 }

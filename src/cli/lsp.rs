@@ -16,7 +16,7 @@ struct AnalyzedDoc {
 }
 
 /// Dependency source dirs cached per almide.toml, so a keystroke never
-/// re-runs the fetcher (which shells out to git and writes almide.lock).
+/// re-resolves them. Resolution is cache-only and never fetches (#4128).
 /// Each entry carries the manifest + lock fingerprint it was resolved from
 /// ([`manifest_fingerprint`]), and an entry whose fingerprint no longer
 /// matches the files is stale (#3097).
@@ -467,25 +467,37 @@ fn lsp_server_capabilities() -> ServerCapabilities {
     }
 }
 
-/// `run_lsp`'s workspace-root derivation from `initialize`'s `root_uri`,
-/// falling back to CWD. Extracted verbatim.
+/// `run_lsp`'s workspace root: `initialize`'s `root_uri`, else the first of
+/// its `workspace_folders`, else the CWD — canonicalized, so it is the one
+/// absolute directory every URI-taking request is confined to (#4185).
 /// `root_uri` is deprecated upstream in favor of `workspace_folders`, but VS
-/// Code still sends it and the single-root fallback is exactly this field —
-/// keep reading it deliberately until multi-root support is a real need.
+/// Code still sends it.
+///
+/// The URI's path goes through [`uri_to_path`], which keeps it absolute. The
+/// old derivation stripped its leading `/`, so `file:///Users/x/ws` became
+/// `Users/x/ws` under the CWD: the index read a tree a repository could
+/// plant there instead of the workspace (#4185).
 #[allow(deprecated)]
 fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> {
-    init.root_uri.as_ref()
-        .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))
+    let from_client = init
+        .root_uri
+        .as_ref()
+        .or_else(|| init.workspace_folders.as_ref().and_then(|f| f.first()).map(|f| &f.uri))
+        .and_then(uri_to_path)
+        .map(std::path::PathBuf::from);
+    from_client
         .or_else(|| std::env::current_dir().ok())
+        .map(|r| r.canonicalize().unwrap_or(r))
 }
 
 /// `run_lsp`'s notification dispatch (`didOpen`/`didChange`/`didClose`).
 ///
-/// Dep fetching (git shell-out, almide.lock write) is allowed only on
-/// didOpen — opening a file is a deliberate user action. didChange runs on
-/// every keystroke and serves the dep list cached at open time; a project
-/// never opened in this session analyzes against no deps rather than
-/// touching the network (#927).
+/// The server never fetches dependencies: opening a file of an untrusted
+/// project must not contact the hosts its manifest names or write
+/// almide.lock into its tree (#4128). didOpen resolves the dep list from
+/// what is already on disk; didChange runs on every keystroke and serves the
+/// list resolved at open time, and a project never opened in this session
+/// analyzes against no deps (#927).
 // `Uri` keys trip clippy::mutable_key_type across this server — a false
 // positive (Uri hashes by its string form; no key is mutated in place), and
 // the same shape the pre-existing documents/analyzed maps already carry.
@@ -771,7 +783,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let result = serde_json::to_value(actions).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
-        "almide/survive" => Some(handle_survive(req, documents)),
+        "almide/survive" => Some(handle_survive(req, documents, workspace_root)),
         _ => None,
     }
 }

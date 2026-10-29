@@ -35,11 +35,11 @@ effect fn bench(key: String, n: Int, pre: List[String], cmd: String, cmd_args: L
   var total = 0
   for _i in 0..<n {
     if list.len(pre) > 0 then {
-      let _ = process.exec_status(list.get_or(pre, 0, "true"), list.drop(pre, 1))
+      let _ = process.output(process.ProcessCommand { cmd: list.get(pre, 0) ?? "true", args: list.drop(pre, 1) })
       ()
     } else ()
     let t0 = datetime.monotonic_ns()
-    let _ = process.exec_status(cmd, cmd_args)
+    let _ = process.output(process.ProcessCommand { cmd: cmd, args: cmd_args })
     total = total + (datetime.monotonic_ns() - t0)
   }
   Row { key: key, ms: ns_to_ms_x10(total / n), n: n }
@@ -67,10 +67,10 @@ fn baseline_of(lines: List[String], key: String) -> Int = {
   let hit = lines |> list.find((l) => string.starts_with(string.trim(l), key + " "))
   match hit {
     some(l) => {
-      let after = list.get_or(string.split(l, "="), 1, "")
-      let num = string.trim(list.get_or(string.split(string.trim(after), " "), 0, "0"))
+      let after = list.get(string.split(l, "="), 1) ?? ""
+      let num = string.trim(list.get(string.split(string.trim(after), " "), 0) ?? "0")
       let parts = string.split(num, ".")
-      (int.parse(list.get_or(parts, 0, "0")) ?? 0) * 10 + (int.parse(list.get_or(parts, 1, "0")) ?? 0)
+      (int.parse(list.get(parts, 0) ?? "0") ?? 0) * 10 + (int.parse(list.get(parts, 1) ?? "0") ?? 0)
     },
     none => -1,
   }
@@ -163,7 +163,7 @@ effect fn machine_class() -> String = sh("bash", ["scripts/lib/machine-class.sh"
 effect fn machine_key() -> String = sh("bash", ["scripts/lib/machine-class.sh", "--key"])!
 
 effect fn same_class(recorded: String) -> Bool = {
-  let st = process.exec_status("bash", ["scripts/lib/machine-class.sh", "--same", recorded])!
+  let st = process.output(process.ProcessCommand { cmd: "bash", args: ["scripts/lib/machine-class.sh", "--same", recorded] })!
   st.code == 0
 }
 
@@ -217,11 +217,11 @@ fn readme_block(lines: List[String]) -> List[String] = {
   let field = (k: String) => {
     let hit = lines |> list.find((l) => string.starts_with(string.trim(l), k + " "))
     match hit {
-      some(l) => string.trim(list.get_or(string.split(l, "="), 1, "")),
+      some(l) => string.trim(list.get(string.split(l, "="), 1) ?? ""),
       none => "?",
     }
   }
-  let ms = (k: String) => list.get_or(string.split(field(k), " "), 0, "?")
+  let ms = (k: String) => list.get(string.split(field(k), " "), 0) ?? "?"
   [
     "Measured on " + field("version") + ", " + field("machine") + ", `" + field("target") + "` (" + field("lines") + " lines), " + field("date") + ". Every row is an N-run MEAN —",
     "a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`",
@@ -257,7 +257,7 @@ test "another machine class skips the ratchet and names both classes" {
     150,
   )
   assert_eq(v.1, true)
-  let said = list.get_or(v.0, 0, "")
+  let said = list.get(v.0, 0) ?? ""
   assert_eq(string.contains(said, "SKIPPED"), true)
   assert_eq(string.contains(said, "arm64 Darwin, Apple M4 Pro"), true)
   assert_eq(string.contains(said, "x86_64 Linux, Intel Xeon 8581C"), true)
@@ -282,7 +282,7 @@ test "the recorded machine class still fails a regressed row and passes a held o
   )
   assert_eq(bad.1, false)
   assert_eq(
-    string.starts_with(list.get_or(bad.0, 0, ""), "::error::build-speed REGRESSION: check_ms"),
+    string.starts_with(list.get(bad.0, 0) ?? "", "::error::build-speed REGRESSION: check_ms"),
     true,
   )
   let held = gate(
@@ -317,12 +317,12 @@ test "the README block is rendered from the baseline, values and provenance both
     "wasm_ms   = 299.1   n=3"
   ]
   let b = readme_block(base)
-  assert_eq(list.get_or(b, 8, ""), "| `almide check` | **22.7 ms** | 20 |")
-  assert_eq(list.get_or(b, 10, ""), "| build, cold | **643.9 ms** | 3 |")
+  assert_eq(list.get(b, 8) ?? "", "| `almide check` | **22.7 ms** | 20 |")
+  assert_eq(list.get(b, 10) ?? "", "| build, cold | **643.9 ms** | 3 |")
   // The provenance line carries the binary, the machine and the date — a figure without them
   // is not reproducible and therefore not a claim.
-  assert_eq(string.contains(list.get_or(b, 0, ""), "almide 0.46.0, arm64 Darwin"), true)
-  assert_eq(string.contains(list.get_or(b, 0, ""), "2026-08-01"), true)
+  assert_eq(string.contains(list.get(b, 0) ?? "", "almide 0.46.0, arm64 Darwin"), true)
+  assert_eq(string.contains(list.get(b, 0) ?? "", "2026-08-01"), true)
 }
 
 // Rewrite everything between the markers, leaving both markers in place. Same discipline as

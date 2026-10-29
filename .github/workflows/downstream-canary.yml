@@ -43,6 +43,10 @@ env:
   CARGO_INCREMENTAL: "0"
   GIT_TERMINAL_PROMPT: "0"
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   plan:
     name: Resolve refs and roster
@@ -52,9 +56,10 @@ jobs:
       candidate_sha: ${{ steps.refs.outputs.candidate_sha }}
       matrix: ${{ steps.roster.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       - id: refs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,14 +97,15 @@ jobs:
           - side: candidate
             ref: ${{ needs.plan.outputs.candidate_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ matrix.ref }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       # Read-only: dependencies from the ring's develop-written cache.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ring-build-${{ env.RUST_TOOLCHAIN }}
           save-if: false
@@ -107,7 +113,7 @@ jobs:
       - name: Identify the binary
         run: |
           echo "${{ matrix.side }}: $(git rev-parse HEAD) — $(target/release/almide --version)" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: almide-${{ matrix.side }}
           path: target/release/almide
@@ -122,15 +128,16 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: canary
+      - uses: ./canary/.github/actions/root-tmpdir
       # `almide build` compiles through Rust; `almide test` runs its wasm leg
       # on the wasmtime CLI (same pins as the ring).
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -138,7 +145,7 @@ jobs:
           key: canary-${{ matrix.slug }}-${{ env.RUST_TOOLCHAIN }}-${{ github.run_id }}
           restore-keys: canary-${{ matrix.slug }}-${{ env.RUST_TOOLCHAIN }}-
       - name: Cache wasmtime tarball
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: wasmtime-v49.0.1-x86_64-linux.tar.xz
           key: wasmtime-v49.0.1-x86_64-linux
@@ -155,7 +162,7 @@ jobs:
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: almide-*
           path: bin
@@ -169,7 +176,7 @@ jobs:
           CANARY_TIMEOUT: ${{ matrix.timeout }}
           CANARY_BASELINE_TAG: ${{ needs.plan.outputs.baseline_tag }}
         run: bash canary/scripts/downstream-canary.sh "${{ matrix.repo }}" "results/${{ matrix.slug }}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: canary-${{ matrix.slug }}
@@ -182,8 +189,9 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: canary-*
           path: results

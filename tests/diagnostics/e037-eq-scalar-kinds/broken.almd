@@ -1,0 +1,7 @@
+// E037: == between two scalars of different kinds (#4018) can never compare.
+// It used to pass check and die as rustc E0308 / a ty-mismatch wall on wasm.
+fn main() -> Unit = {
+  let a = 1
+  let b = "1"
+  println("${a == b}")
+}

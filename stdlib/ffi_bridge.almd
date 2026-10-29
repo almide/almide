@@ -1,0 +1,47 @@
+// ffi_bridge — SELF-HOSTED raw operations under `ffi` (R-ffi-01, ADR-0031).
+//
+// The three `local` intrinsics of stdlib/ffi.almd on wasm: the address of a
+// Bytes data region (handle + 12, an i32 linear-memory offset carried in the
+// i64 scalar), a copy out of memory at base + off, and a copy into it. They
+// run only after `ffi.read` / `ffi.write` checked the region's bounds and
+// permission, so nothing here checks a length against an owner; they mirror
+// runtime/rs/src/ffi.rs byte for byte. Address arithmetic runs on Int via the
+// identity prim casts, which no user file can name (E085).
+//
+// An EMPTY buffer has no data region, so its address is NULL (0) on both
+// targets, and a copy through null moves nothing — the C-062 doctrine: the
+// native `Vec::as_ptr` of an empty Vec is a dangling sentinel, and this
+// self-host once handed out `handle + 12` of a 0-len block and wrote over the
+// next allocation (differential fuzz, 2026-08-10 night).
+@implements("ffi.__address")
+fn ffi_address(b: Bytes) -> Handle = {
+  let h = prim.handle(b)
+  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
+
+fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __ffi_copy(dst, src, n, i + 1)
+}
+
+@implements("ffi.__load")
+fn ffi_load(base: Handle, off: Int, n: Int) -> Bytes = {
+  let src = prim.ptr_to_int(base)
+  if src == 0 or n <= 0 then prim.alloc_bytes(0)
+  else {
+    let out = prim.alloc_bytes(n)
+    let oh = prim.handle(out)
+    let _c = __ffi_copy(oh + 12, src + off, n, 0)
+    out
+  }
+}
+
+@implements("ffi.__store")
+fn ffi_store(base: Handle, off: Int, b: Bytes) -> Unit = {
+  let dst = prim.ptr_to_int(base)
+  let h = prim.handle(b)
+  let n = if dst == 0 then 0 else prim.load32(h + 4)
+  let _c = __ffi_copy(dst + off, h + 12, n, 0)
+  ()
+}

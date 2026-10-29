@@ -1,0 +1,3 @@
+expects_code = "E114"
+expects_error = "`depth` calls itself at a growing type: its `T` is `(T, T)` at this call"
+hint_substring = "collect the values in a `List[T]`"

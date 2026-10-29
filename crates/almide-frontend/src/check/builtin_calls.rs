@@ -4,31 +4,9 @@ use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_ty;
 use super::Checker;
 
-/// Map a built-in type to its stdlib UFCS module name.
+/// Map a built-in type to its stdlib UFCS module name — the one table on `Ty`.
 pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
-    match ty {
-        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
-        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
-        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
-        Ty::String => Some("string"),
-        Ty::Int => Some("int"),
-        Ty::Float => Some("float"),
-        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-        // Each has its own bundled module for UFCS conversion methods.
-        Ty::Int8 => Some("int8"),
-        Ty::Int16 => Some("int16"),
-        Ty::Int32 => Some("int32"),
-        Ty::Int64 => Some("int64"),
-        Ty::UInt8 => Some("uint8"),
-        Ty::UInt16 => Some("uint16"),
-        Ty::UInt32 => Some("uint32"),
-        Ty::UInt64 => Some("uint64"),
-        Ty::Float32 => Some("float32"),
-        Ty::Float64 => Some("float64"),
-        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
-        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
-        _ => None,
-    }
+    ty.stdlib_module()
 }
 
 /// Check if an argument type mismatches a parameter slot.
@@ -42,6 +20,28 @@ pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
 pub(crate) fn types_mismatch(expected: &Ty, actual: &Ty) -> bool {
     *expected != Ty::Unknown && *actual != Ty::Unknown
         && !expected.compatible(actual)
+}
+
+/// The output and abort builtins — the names a bare call resolves to BEFORE any
+/// user declaration (`check_builtin_call` runs first), with what each does.
+///
+/// The ONE table of these names (#4253). ADR-0022's `@pure` check reads it
+/// (the writes and aborts a plain `fn` may make and a `@pure` fn may not), and
+/// declaration registration refuses a top-level `fn` / `let` spelled with one
+/// of them: the builtin would answer every call to it, so the declaration
+/// could only ever be dead code — a redacting `fn println` that never runs.
+pub const OUTPUT_ABORT_BUILTINS: &[(&str, &str)] = &[
+    ("println", "writes to stdout"),
+    ("eprintln", "writes to stderr"),
+    ("panic", "aborts the program"),
+    ("assert", "aborts the program when it fails"),
+    ("assert_eq", "aborts the program when it fails"),
+    ("assert_ne", "aborts the program when it fails"),
+];
+
+/// Is `name` one of [`OUTPUT_ABORT_BUILTINS`]?
+pub fn is_output_abort_builtin(name: &str) -> bool {
+    OUTPUT_ABORT_BUILTINS.iter().any(|(b, _)| *b == name)
 }
 
 impl Checker {
@@ -75,7 +75,18 @@ impl Checker {
                 }
                 Some(Ty::Never)
             }
-            "assert" => Some(Ty::Unit),
+            "assert" => {
+                // #4283: the condition is a Bool and the message a String.
+                // With no constraint at all, `assert(a.here())` (a Result
+                // condition) passed check and died at rustc (E0600).
+                if let Some(cond) = arg_tys.first() {
+                    self.constrain(Ty::Bool, cond.clone(), "call to assert()".to_string());
+                }
+                if let Some(msg) = arg_tys.get(1) {
+                    self.constrain(Ty::String, msg.clone(), "call to assert()".to_string());
+                }
+                Some(Ty::Unit)
+            }
             "assert_eq" | "assert_ne" => {
                 if arg_tys.len() >= 2 {
                     self.constrain(arg_tys[0].clone(), arg_tys[1].clone(), format!("call to {}()", name));
@@ -83,6 +94,52 @@ impl Checker {
                 Some(Ty::Unit)
             }
             _ => return None,
+        }
+    }
+
+    /// #4283: a fallible CALL as the argument of an output / assertion
+    /// builtin (`println`, `eprintln`, `panic`, `assert`, `assert_eq`,
+    /// `assert_ne`) is the same implicit propagation as a binary operand
+    /// (#2196) or an interpolated call: the slot wants the OK value, and only
+    /// a `!` gets it there. Queue the call for the post-solve E041 at its own
+    /// span (where the `!` goes) and hand the builtin the OK type, so the
+    /// report stands alone instead of cascading into an E005.
+    ///
+    /// The context is wherever `!` is legal — an effect fn body (or a lambda
+    /// in one) and a test block. A test block never set `auto_unwrap`, so the
+    /// strip never ran there, and `assert` had no slot type at all: the
+    /// Result condition reached rustc as `!Result<bool, _>` (E0600).
+    ///
+    /// `assert_eq` / `assert_ne` compare PEERS: a Result is a legitimate
+    /// operand when the other side is a Result too (`assert_eq(int.parse(s),
+    /// ok(3))`), so a call is stripped only when its peer is known not to be one.
+    pub(super) fn strip_builtin_effect_args(&mut self, name: &str, args: &[almide_lang::ast::Expr], arg_tys: &mut [Ty]) {
+        if !(self.implicit_prop_reportable() || self.env.in_test_block) {
+            return;
+        }
+        let peer_pair = match name {
+            "println" | "eprintln" | "panic" | "assert" => false,
+            "assert_eq" | "assert_ne" => true,
+            _ => return,
+        };
+        let resolved: Vec<Ty> = arg_tys.iter().map(|t| resolve_ty(t, &self.uf)).collect();
+        for (i, (arg, ty)) in args.iter().zip(arg_tys.iter_mut()).enumerate() {
+            if !matches!(arg.kind, almide_lang::ast::ExprKind::Call { .. }) {
+                continue;
+            }
+            let Some(ok) = resolved[i].result_ok_ty() else { continue };
+            if peer_pair {
+                if i > 1 {
+                    continue;
+                }
+                let peer = &resolved[1 - i];
+                if peer.is_result() || matches!(peer, Ty::TypeVar(_) | Ty::Unknown) {
+                    continue;
+                }
+            }
+            let mechanical = self.env.lambda_depth == 0;
+            self.deferred_implicit_prop_checks.push((ty.clone(), arg.span, "of this builtin argument", mechanical, false));
+            *ty = ok;
         }
     }
 
@@ -190,6 +247,20 @@ mod tests {
     fn builtin_module_option() { assert_eq!(builtin_module_for_type(&Ty::option(Ty::Int)), Some("option")); }
     #[test]
     fn builtin_module_none() { assert_eq!(builtin_module_for_type(&Ty::Bool), None); }
+
+    /// Every name the table lists is one `check_builtin_output` answers, and
+    /// the arms answer no name outside it (#4253): the declaration refusal and
+    /// the call resolution read the same set.
+    #[test]
+    fn the_builtin_table_is_the_set_the_call_check_answers() {
+        let mut c = Checker::from_env(crate::types::TypeEnv::new());
+        for (name, _) in OUTPUT_ABORT_BUILTINS {
+            assert!(c.check_builtin_output(name, &[]).is_some(), "{name} is in the table but not answered");
+        }
+        for other in ["print", "to_string", "len", "debug", "assert_some"] {
+            assert!(c.check_builtin_output(other, &[]).is_none(), "{other} is answered but not in the table");
+        }
+    }
 
     #[test]
     fn mismatch_same_type() { assert!(!types_mismatch(&Ty::Int, &Ty::Int)); }

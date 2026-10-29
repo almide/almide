@@ -9,7 +9,7 @@ fn bin_rec(cs: List[String], acc: Int) -> Result[Int, String] = match list.first
   else if ch == "1" then bin_rec(list.drop(cs, 1), acc * 2 + 1) else err("bad"),
 }
 
-fn parse_bin(s: String) -> Int = match bin_rec(string.chars(s), 0) {
+fn parse_bin(s: String) -> Int = match bin_rec(string.to_list(s), 0) {
   ok(n) => n,
   err(_) => 0 - 1,
 }
@@ -22,7 +22,7 @@ fn cnt(cs: List[String], acc: Int) -> Result[Int, String] = match list.first(cs)
   },
 }
 
-fn len_of(s: String) -> Int = match cnt(string.chars(s), 0) {
+fn len_of(s: String) -> Int = match cnt(string.to_list(s), 0) {
   ok(n) => n,
   err(_) => 0 - 1,
 }

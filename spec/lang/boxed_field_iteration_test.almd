@@ -1,0 +1,227 @@
+// #4321: a `for` loop over a recursive type's boxed list — a record field
+// that closes the cycle (`n.kids`) or a variant binder of a boxed position
+// (`Struct(items)`) — iterates a borrow of it, so it reads the place behind
+// the box. It rendered `almide_box_take(n.kids).iter()` (E0507: a move out of
+// a borrowed record) and `almide_box_take(items)` on a `&AlmideBox` (E0277).
+type Node = { v: Int, kids: List[Node], next: Node? }
+
+type Arg = | Leaf(Int) | Text(String) | Struct(List[Arg]) | Array(String, List[Arg])
+
+type K = { v: Int, kids: Map[String, K], opts: List[K?] }
+
+fn leaf(v: Int) -> Node = { v: v, kids: [], next: none }
+
+fn sample() -> Node = {
+  v: 1,
+  kids: [
+    leaf(2),
+    { v: 3, kids: [leaf(4)], next: none }
+  ],
+  next: some({ v: 9, kids: [leaf(5)], next: none }),
+}
+
+fn sample_arg() -> Arg = Struct([
+  Leaf(1),
+  Text("x"),
+  Array("ab", [
+    Leaf(2),
+    Struct([Leaf(3)])
+  ])
+])
+
+// A loop over a borrowed record's boxed field.
+fn total(n: Node) -> Int = {
+  var s = n.v
+  for k in n.kids {
+    s = s + total(k)
+  }
+  s
+}
+
+// A loop over a box binder.
+fn put(a: Arg, out: String) -> String = match a {
+  Leaf(n) => out + "${n}",
+  Text(s) => out + s,
+  Struct(items) => {
+    var o = out + "("
+    for it in items {
+      o = put(it, o) + ","
+    }
+    o + ")"
+  },
+  Array(elem, items) => {
+    var o = out + elem + "["
+    for it in items {
+      o = put(it, o)
+    }
+    o + "]"
+  },
+}
+
+// The loop's binders kept in an owned list (the loop may consume its head).
+fn flatten(n: Node) -> List[Node] = {
+  var out: List[Node] = [n]
+  for k in n.kids {
+    out = out + flatten(k)
+  }
+  out
+}
+
+fn leaves(a: Arg) -> List[Arg] = match a {
+  Struct(items) => {
+    var acc: List[Arg] = []
+    for it in items {
+      acc = acc + leaves(it)
+    }
+    acc
+  },
+  Array(_, items) => {
+    var acc: List[Arg] = []
+    for it in items {
+      acc = acc + [it]
+    }
+    acc
+  },
+  other => [other],
+}
+
+// The same head read again after the loop, and twice in a row.
+fn twice(a: Arg) -> Int = match a {
+  Struct(items) => {
+    var s = 0
+    for it in items {
+      s = s + twice(it)
+    }
+    for _ in items {
+      s = s + 1
+    }
+    s + list.len(items)
+  },
+  _ => 1,
+}
+
+fn rebuilt(n: Node) -> Node = {
+  var s = 0
+  for k in n.kids {
+    s = s + k.v
+  }
+  { v: s, kids: n.kids, next: none }
+}
+
+// Tuple binders, a nested path, an Option-bound record, a closure body.
+fn weighted(n: Node) -> Int = {
+  var s = 0
+  for (i, k) in list.enumerate(n.kids) {
+    s = s + i * k.v
+  }
+  s
+}
+
+fn nested(t: { root: Node }) -> Int = {
+  var s = 0
+  for k in t.root.kids {
+    s = s + k.v
+  }
+  s
+}
+
+fn via_next(n: Node) -> Int = match n.next {
+  some(x) => {
+    var s = 0
+    for k in x.kids {
+      s = s + k.v
+    }
+    s
+  },
+  none => -1,
+}
+
+fn scaled(n: Node, fs: List[Int]) -> List[Int] = fs |> list.map((f) => {
+  var s = 0
+  for k in n.kids {
+    s = s + f * k.v
+  }
+  s
+})
+
+fn in_while(n: Node) -> Int = {
+  var i = 0
+  var s = 0
+  while i < list.len(n.kids) {
+    for k in n.kids {
+      s = s + k.v
+    }
+    i = i + 1
+  }
+  s
+}
+
+// A Map field and a list of options that close the cycle.
+fn sum_k(k: K) -> Int = {
+  var s = k.v
+  for (name, c) in k.kids {
+    s = s + sum_k(c) + string.len(name)
+  }
+  for o in k.opts {
+    s = s + (match o {
+      some(c) => sum_k(c),
+      none => 0,
+    })
+  }
+  s
+}
+
+// The pipe / call forms over the same heads.
+fn total_fold(n: Node) -> Int = list.fold(n.kids, n.v, (acc, k) => acc + total_fold(k))
+
+fn put_fold(a: Arg) -> String = match a {
+  Leaf(n) => "${n}",
+  Text(s) => s,
+  Struct(items) => list.fold(items, "", (acc, it) => acc + put_fold(it)),
+  Array(_, items) => items |> list.map((it) => put_fold(it)) |> list.join("."),
+}
+
+fn depth(n: Node) -> Int = 1 + (n.kids |> list.map((k) => depth(k)) |> list.fold(
+  0,
+  (a, b) => if a > b then a else b,
+))
+
+test "a loop over a borrowed record's boxed field" {
+  assert_eq(total(sample()), 10)
+  assert_eq(list.len(flatten(sample())), 4)
+  assert_eq(rebuilt(sample()).v, 5)
+  assert_eq(list.len(rebuilt(sample()).kids), 2)
+}
+
+test "a loop over a box binder" {
+  assert_eq(put(sample_arg(), ""), "(1,x,ab[2(3,)],)")
+  assert_eq(list.len(leaves(sample_arg())), 4)
+  assert_eq(twice(sample_arg()), 9)
+}
+
+test "tuple binders, nested paths, option-bound records, closures and while bodies" {
+  let n = sample()
+  assert_eq(weighted(n), 3)
+  assert_eq(nested({ root: n }), 5)
+  assert_eq(via_next(n), 5)
+  assert_eq(scaled(n, [1, 10]), [5, 50])
+  assert_eq(in_while(n), 10)
+}
+
+test "a Map field and a list of options closing the cycle" {
+  let k = {
+    v: 1,
+    kids: map.set(map.new(), "ab", { v: 2, kids: map.new(), opts: [] }),
+    opts: [
+      some({ v: 5, kids: map.new(), opts: [] }),
+      none
+    ],
+  }
+  assert_eq(sum_k(k), 10)
+}
+
+test "fold, map and pipe over the same heads" {
+  assert_eq(total_fold(sample()), 10)
+  assert_eq(put_fold(sample_arg()), "1x2.3")
+  assert_eq(depth(sample()), 3)
+}

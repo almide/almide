@@ -308,7 +308,7 @@ fn prim_floor_capability(kind: &crate::PrimKind) -> Option<Capability> {
         // random.int's floor.
         P::RandomGet => Capability::Entropy,
         // env.args / env.get.
-        P::ArgsGetList | P::ArgsGetListFull | P::EnvGet => Capability::CliArgs,
+        P::ArgsGetList | P::EnvGet => Capability::CliArgs,
         // fs.read_text / fs.list_dir / fs.exists / fs.stat / fs.is_symlink.
         P::ReadTextFile | P::ReadBytesFile | P::ReadDir | P::PathExists | P::PathFilestat
         | P::PathFilestatNoFollow => Capability::FsRead,
@@ -487,22 +487,25 @@ pub fn program_cap_graph_witness(
 /// ops reach (`crate::host_ops`). Effects with no modeled MIR capability yet
 /// (`Fan`) project to nothing: they cannot silently widen the bound.
 pub fn manifest_caps(allow: &[String]) -> Vec<Capability> {
+    use almide_ir::effect::Effect;
+    // Each name grants ADR-0026 D2 leaves (a parent its leaves, #4155); each
+    // leaf projects to the registry capability its host ops reach.
     let mut caps: Vec<Capability> = Vec::new();
-    for p in allow {
-        match p.as_str() {
-            "IO" => caps.extend([
-                Capability::Stdout,
-                Capability::Stdin,
-                Capability::FsRead,
-                Capability::FsWrite,
-            ]),
-            "Rand" => caps.push(Capability::Entropy),
-            // The frontend classifies the `process` module as Env, so starting a
-            // child (Process, #3792) rides the same manifest name.
-            "Env" => caps.extend([Capability::CliArgs, Capability::Process]),
-            "Time" => caps.push(Capability::Clock),
-            "Net" => caps.push(Capability::Net),
-            _ => {}
+    for leaf in allow.iter().filter_map(|p| Effect::granted_by(p)).flatten() {
+        let cap = match leaf {
+            Effect::FsRead => Some(Capability::FsRead),
+            Effect::FsWrite => Some(Capability::FsWrite),
+            Effect::IoStdin => Some(Capability::Stdin),
+            Effect::IoStdout => Some(Capability::Stdout),
+            Effect::EnvRead => Some(Capability::CliArgs),
+            Effect::Proc => Some(Capability::Process),
+            Effect::Time => Some(Capability::Clock),
+            Effect::Rand => Some(Capability::Entropy),
+            Effect::NetFetch | Effect::NetListen => Some(Capability::Net),
+            Effect::IoStderr | Effect::EnvWrite | Effect::Fan | Effect::Abort => None,
+        };
+        if let Some(c) = cap.filter(|c| !caps.contains(c)) {
+            caps.push(c);
         }
     }
     caps

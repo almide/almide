@@ -1,37 +1,135 @@
-// regex — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+// regex — a compiled pattern, `Regex`, and the operations that take it
+// (stdlib redesign L2-regex: R-regex-01, 02, 04, 05, 07, 08, 11, #3942).
 //
-// Migrated mechanically from `stdlib/defs/regex.toml` (8 fns). All fns
-// are pure. Note the runtime prefix is `almide_regex_*` (not the
-// `almide_rt_*` used by most other modules) — this mirrors the
-// existing TOML templates verbatim.
-/// pat matches somewhere in s (unanchored).
-@intrinsic("almide_regex_is_match")
-fn is_match(pat: String, s: String) -> Bool = _
+// A `Regex` is made by `regex.new` (a pattern known to be valid: a literal is
+// checked by `almide check`, E102, and a refused one aborts with `Error:
+// invalid regex: <reason>`) or by `regex.compile` (a pattern built at run
+// time: err(reason)). Every operation takes the Regex first, so a pattern and
+// a subject can no longer swap places in a pipe: `s |> regex.find(re)` is a
+// type error, where `s |> regex.find("[0-9]+")` silently searched the pattern.
+//
+// The engines sit behind the `__` functions: runtime/rs/src/regex.rs on
+// native and stdlib/regex_engine.almd on wasm, which answer byte for byte the
+// same (C-032) and refuse the same patterns with the same reason (C-395).
+/// A pattern accepted by `regex.new` or `regex.compile`.
+type Regex = { pattern: String }
 
-/// pat matches the whole of s.
-@intrinsic("almide_regex_full_match")
-fn full_match(pat: String, s: String) -> Bool = _
+/// The Regex for `pattern`; aborts with `Error: invalid regex: <reason>` when it is refused.
+fn new(pattern: String) -> Regex = { pattern: regex.__new(pattern) }
 
-/// Leftmost match of pat in s, or none.
-@intrinsic("almide_regex_find")
-fn find(pat: String, s: String) -> String? = _
+/// The Regex for `pattern`, or err(reason) when it is refused.
+fn compile(pattern: String) -> Result[Regex, String] = {
+  let reason = regex.__check(pattern)
+  if reason == "" then ok({ pattern: pattern })
+  else err(reason)
+}
+
+/// re matches somewhere in s.
+fn is_match(re: Regex, s: String) -> Bool = regex.__is_match(re.pattern, s)
+
+/// re matches the whole of s.
+fn is_full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
+
+/// re matches the whole of s (renamed regex.is_full_match).
+@deprecated(since=15, use="regex.is_full_match")
+fn full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
+
+/// Leftmost match of re in s, or none.
+fn find(re: Regex, s: String) -> String? = regex.__find(re.pattern, s)
 
 /// All non-overlapping matches, in order.
-@intrinsic("almide_regex_find_all")
-fn find_all(pat: String, s: String) -> List[String] = _
+fn find_all(re: Regex, s: String) -> List[String] = regex.__find_all(re.pattern, s)
 
-/// All matches replaced by literal rep (no $1).
-@intrinsic("almide_regex_replace")
-fn replace(pat: String, s: String, rep: String) -> String = _
+/// Code-point index where the leftmost match starts, or none.
+fn index_of(re: Regex, s: String) -> Int? = {
+  let i = regex.__index_of(re.pattern, s)
+  if i < 0 then none else some(i)
+}
+
+/// All matches replaced by literal rep (`$1` is not read).
+fn replace(re: Regex, s: String, rep: String) -> String = regex.__replace(re.pattern, s, rep)
 
 /// First match replaced by literal rep.
-@intrinsic("almide_regex_replace_first")
-fn replace_first(pat: String, s: String, rep: String) -> String = _
+fn replace_first(re: Regex, s: String, rep: String) -> String = regex.__replace_first(
+  re.pattern,
+  s,
+  rep,
+)
+
+/// All matches replaced by f([whole, group1, ...]).
+fn replace_with(re: Regex, s: String, f: (List[String?]) -> String) -> String = __splice(
+  regex.__scan(re.pattern, s, false),
+  f,
+)
+
+/// First match replaced by f([whole, group1, ...]).
+fn replace_first_with(re: Regex, s: String, f: (List[String?]) -> String) -> String = __splice(
+  regex.__scan(re.pattern, s, true),
+  f,
+)
 
 /// Text between matches; [s] if no match.
-@intrinsic("almide_regex_split")
-fn split(pat: String, s: String) -> List[String] = _
+fn split(re: Regex, s: String) -> List[String] = regex.__split(re.pattern, s)
 
-/// [whole, group1, ...] of first match, or none.
+/// [whole, group1, ...] of the first match, or none; a group that took no part is none.
+fn captures(re: Regex, s: String) -> List[String?]? = regex.__captures(re.pattern, s) |> option.map((cs) => cs |> list.map((c) => __unmark(c)))
+
+/// [whole, group1, ...] of every match, in order.
+fn captures_all(re: Regex, s: String) -> List[List[String?]] = __matches(regex.__scan(re.pattern, s, false)) |> list.map((m) => m |> list.drop(1) |> list.map((c) => __unmark(c)))
+
+/// s with every regex metacharacter escaped, so it matches itself.
+fn escape(s: String) -> String = string.to_list(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> list.join("")
+
+// A capture as the engines mark it: "1" and its text, or "0" (no part).
+fn __unmark(c: String) -> String? = if string.starts_with(c, "1") then some(string.drop(c, 1)) else none
+
+// The engines' scan [k, field, k marks, field, k marks, ..., tail] as one
+// [field, marks...] list per match.
+fn __matches(scan: List[String]) -> List[List[String]] = {
+  let k = int.parse(list.get(scan, 0) ?? "1") ?? 1
+  let body = scan |> list.drop(1)
+  let n = (list.len(body) - 1) / (k + 1)
+  body |> list.take(n * (k + 1)) |> list.chunk(k + 1)
+}
+
+// The scan with each match replaced by f of its groups.
+fn __splice(scan: List[String], f: (List[String?]) -> String) -> String = {
+  let parts = __matches(scan) |> list.map((m) => list.get(m, 0) ?? "" + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
+  list.join(parts, "") + list.get(scan, list.len(scan) - 1) ?? ""
+}
+
+@intrinsic("almide_regex_check")
+fn __check(pat: String) -> String = _
+
+@intrinsic("almide_regex_new")
+fn __new(pat: String) -> String = _
+
+@intrinsic("almide_regex_is_match")
+fn __is_match(pat: String, s: String) -> Bool = _
+
+@intrinsic("almide_regex_full_match")
+fn __full_match(pat: String, s: String) -> Bool = _
+
+@intrinsic("almide_regex_find")
+fn __find(pat: String, s: String) -> String? = _
+
+@intrinsic("almide_regex_find_all")
+fn __find_all(pat: String, s: String) -> List[String] = _
+
+@intrinsic("almide_regex_index_of")
+fn __index_of(pat: String, s: String) -> Int = _
+
+@intrinsic("almide_regex_replace")
+fn __replace(pat: String, s: String, rep: String) -> String = _
+
+@intrinsic("almide_regex_replace_first")
+fn __replace_first(pat: String, s: String, rep: String) -> String = _
+
+@intrinsic("almide_regex_split")
+fn __split(pat: String, s: String) -> List[String] = _
+
 @intrinsic("almide_regex_captures")
-fn captures(pat: String, s: String) -> List[String]? = _
+fn __captures(pat: String, s: String) -> List[String]? = _
+
+@intrinsic("almide_regex_scan")
+fn __scan(pat: String, s: String, first: Bool) -> List[String] = _

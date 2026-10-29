@@ -79,17 +79,42 @@ pub(crate) fn case_field_is_boxed(ctx: &RenderContext, ty: Option<&Ty>, ctor: &s
     }
 }
 
+/// Is field `field` of a record typed `ty` an `AlmideBox` — a field closing a
+/// cycle of a recursive record (#4251)? (`CodegenAnnotations::record_field_is_boxed`)
+pub(crate) fn record_field_is_boxed(ctx: &RenderContext, ty: &Ty, field: &str) -> bool {
+    ctx.ann.record_field_is_boxed(ty, field)
+}
+
 /// The enum the variant case `ctor` of a value typed `ty` belongs to (#3176).
 /// The value's own type answers first when it is an enum with that case:
 /// `ctor_to_enum` is keyed by the bare case name program-wide, so of two
 /// modules' `| Pair` it holds only the last registered, and a construction of
 /// the other one — typed by the checker with its own enum — was spelled
 /// against the wrong enum (rustc E0061/E0308).
+///
+/// A value typed by an opaque NEWTYPE whose constructor is `ctor` is that
+/// newtype's own tuple struct, never an enum case: the bare-name fallback
+/// handed the stdlib's `Path(steps)` (`value.Path`) to a user's `| Path(..)`
+/// case, and the stdlib's own match was spelled `Arg::Path(steps)` (#4275).
 pub(crate) fn ctor_enum_for(ctx: &RenderContext, ctor: &str, ty: Option<&Ty>) -> Option<String> {
     match ty {
         Some(Ty::Named(n, _)) if ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)) => Some(n.to_string()),
+        Some(Ty::Named(n, _)) if is_newtype_ctor_of(ctx, ctor, n.as_str()) => None,
         _ => ctx.ann.ctor_to_enum.get(ctor).cloned(),
     }
+}
+
+/// Is `ctor` the constructor of the opaque newtype `ty_name` — the type the
+/// program declares as a tuple struct under that name?
+pub(crate) fn is_newtype_ctor_of(ctx: &RenderContext, ctor: &str, ty_name: &str) -> bool {
+    ctor == ty_name && ctx.newtype_ctors.contains_key(&almide_base::intern::sym(ty_name))
+}
+
+/// Is a value typed `ty` a case `ctor` of an enum the program renders — the
+/// checker's own answer for a construction, which no same-spelled newtype or
+/// other enum's case overrides (#3176, #4275)?
+pub(crate) fn is_enum_case_of(ctx: &RenderContext, ctor: &str, ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(n, _) if ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)))
 }
 
 /// Prefix that renames the four keywords rustc refuses to raw-escape.
@@ -403,6 +428,7 @@ fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| terminate_stmt(fn_ctx, render_stmt_fn(fn_ctx, s)))
+                .filter(|s| !s.is_empty())
                 .collect();
             if let Some(e) = expr {
                 let mut expr_str = render_expr_fn(fn_ctx, e);
@@ -553,8 +579,10 @@ fn render_fn_safe_name(
 /// "failed printing to stdout: Broken pipe" and exit 101; with the default
 /// disposition the process stops quietly the way `yes | head` does.
 /// Self-contained (no runtime symbol) so it renders the same in the
-/// single-file and module layouts. A no-op off unix.
-const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
+/// single-file and module layouts. A no-op off unix, and under Miri, which
+/// cannot call `signal` and runs the generated crate to find UB in the
+/// runtime's `unsafe` (#4009).
+const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
 /// Call-stack exhaustion as the defined abort (C-196): replace std's
 /// guard-page handler with the one that prints `Error: stack overflow` and

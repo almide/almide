@@ -72,70 +72,91 @@ fn base64_encode_url(b: Bytes) -> String = {
 }
 
 // ── base64.decode / decode_url ── Result[Bytes, String], byte-matching native
-// runtime/rs/src/base64.rs decode_str: strip trailing '=' padding; a stripped body
-// with len%4 == 1 → "invalid base64 length: {ORIGINAL len}"; any non-alphabet body
-// char (a mid-body '=' too) → "invalid base64 character". The decoder is liberal:
-// both '+'/'-' → 62 and '/'/'_' → 63, so decode and decode_url share one body.
-// 0..63 value of byte c, or -1.
-fn __b64d_val(c: Int) -> Int = if c >= 65 and c <= 90 then c - 65
+// runtime/rs/src/base64.rs decode_str: the CANONICAL padded form only (#4119),
+// checked in this order, the first failure wins:
+//   1. byte length % 4 != 0              → "invalid base64 length: {len}"
+//   2. more than two trailing '='        → "invalid base64 padding"
+//   3. a body byte outside THIS alphabet → "invalid base64 character"
+//      (a '=' before the trailing run, or the other alphabet's 62/63 pair)
+//   4. nonzero bits under the padding    → "invalid base64 trailing bits"
+// c62/c63 name the alphabet: 43/47 ('+' '/') for decode, 45/95 ('-' '_') for
+// decode_url. Before #4119 both read both alphabets, '=' was stripped without
+// bound and the dropped bits were ignored, so QQ==, QR==, QQ and QQ========
+// all decoded to "A".
+// 0..63 value of byte c under the alphabet (c62, c63), or -1.
+fn __b64d_val(c: Int, c62: Int, c63: Int) -> Int = if c >= 65 and c <= 90 then c - 65
 else if c >= 97 and c <= 122 then c - 71
 else if c >= 48 and c <= 57 then c + 4
-else if c == 43 or c == 45 then 62
-else if c == 47 or c == 95 then 63 else 0 - 1
+else if c == c62 then 62
+else if c == c63 then 63 else 0 - 1
 
-fn __b64d_strip(p: Int, end: Int) -> Int =
-  if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_strip(
-    p,
-    end - 1,
-  )
-  else end
+// Number of trailing '=' (61) bytes before `end`.
+fn __b64d_pads(p: Int, end: Int, acc: Int) -> Int =
+  if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_pads(p, end - 1, acc + 1)
+  else acc
 
-fn __b64d_scan(p: Int, n: Int, i: Int) -> Bool = if i >= n then true
-else if __b64d_val(prim.load8(p + i)) < 0 then false
-else __b64d_scan(p, n, i + 1)
+fn __b64d_scan(p: Int, n: Int, i: Int, c62: Int, c63: Int) -> Bool = if i >= n then true
+else if __b64d_val(prim.load8(p + i), c62, c63) < 0 then false
+else __b64d_scan(p, n, i + 1, c62, c63)
 
-fn __b64d_chunks(dst: Int, src: Int, chunks: Int, i: Int) -> Int = if i >= chunks then 0
-else {
-  let a = __b64d_val(prim.load8(src + i * 4))
-  let b = __b64d_val(prim.load8(src + i * 4 + 1))
-  let c = __b64d_val(prim.load8(src + i * 4 + 2))
-  let d = __b64d_val(prim.load8(src + i * 4 + 3))
-  prim.store8(dst + i * 3, a * 4 + b / 16)
-  prim.store8(dst + i * 3 + 1, prim.band(b * 16, 255) + c / 4)
-  prim.store8(dst + i * 3 + 2, prim.band(c * 64, 255) + d)
-  __b64d_chunks(dst, src, chunks, i + 1)
-}
+fn __b64d_chunks(dst: Int, src: Int, chunks: Int, i: Int, c62: Int, c63: Int) -> Int =
+  if i >= chunks then 0
+  else {
+    let a = __b64d_val(prim.load8(src + i * 4), c62, c63)
+    let b = __b64d_val(prim.load8(src + i * 4 + 1), c62, c63)
+    let c = __b64d_val(prim.load8(src + i * 4 + 2), c62, c63)
+    let d = __b64d_val(prim.load8(src + i * 4 + 3), c62, c63)
+    prim.store8(dst + i * 3, a * 4 + b / 16)
+    prim.store8(dst + i * 3 + 1, prim.band(b * 16, 255) + c / 4)
+    prim.store8(dst + i * 3 + 2, prim.band(c * 64, 255) + d)
+    __b64d_chunks(dst, src, chunks, i + 1, c62, c63)
+  }
 
-fn __b64d_rem(dst: Int, src: Int, rem: Int) -> Int = if rem == 2 then {
-  let a = __b64d_val(prim.load8(src))
-  let b = __b64d_val(prim.load8(src + 1))
+fn __b64d_rem(dst: Int, src: Int, rem: Int, c62: Int, c63: Int) -> Int = if rem == 2 then {
+  let a = __b64d_val(prim.load8(src), c62, c63)
+  let b = __b64d_val(prim.load8(src + 1), c62, c63)
   prim.store8(dst, a * 4 + b / 16)
   0
 } else if rem == 3 then {
-  let a = __b64d_val(prim.load8(src))
-  let b = __b64d_val(prim.load8(src + 1))
-  let c = __b64d_val(prim.load8(src + 2))
+  let a = __b64d_val(prim.load8(src), c62, c63)
+  let b = __b64d_val(prim.load8(src + 1), c62, c63)
+  let c = __b64d_val(prim.load8(src + 2), c62, c63)
   prim.store8(dst, a * 4 + b / 16)
   prim.store8(dst + 1, prim.band(b * 16, 255) + c / 4)
   0
 } else 0
 
-fn base64_decode(s: String) -> Result[Bytes, String] = {
+// The bits one '=' drops (low 2) or two drop (low 4) of the last symbol.
+fn __b64d_dropped(pads: Int) -> Int = match pads {
+  1 => 3,
+  2 => 15,
+  _ => 0,
+}
+
+fn __b64d_decode(s: String, c62: Int, c63: Int) -> Result[Bytes, String] = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
-  let end = __b64d_strip(sh + 12, n)
-  if end % 4 == 1 then err("invalid base64 length: " + int.to_string(n))
-  else if __b64d_scan(sh + 12, end, 0) == false then err("invalid base64 character")
+  let pads = __b64d_pads(sh + 12, n, 0)
+  let end = n - pads
+  if n % 4 != 0 then err("invalid base64 length: " + int.to_string(n))
+  else if pads > 2 then err("invalid base64 padding")
+  else if __b64d_scan(sh + 12, end, 0, c62, c63) == false then err("invalid base64 character")
+  else if end > 0 and prim.band(
+    __b64d_val(prim.load8(sh + 12 + end - 1), c62, c63),
+    __b64d_dropped(pads),
+  ) != 0 then err("invalid base64 trailing bits")
   else {
     let chunks = end / 4
     let rem = end % 4
     let extra = if rem == 2 then 1
     else if rem == 3 then 2 else 0
     let out = prim.alloc_bytes(chunks * 3 + extra)
-    let _c = __b64d_chunks(prim.handle(out) + 12, sh + 12, chunks, 0)
-    let _r = __b64d_rem(prim.handle(out) + 12 + chunks * 3, sh + 12 + chunks * 4, rem)
+    let _c = __b64d_chunks(prim.handle(out) + 12, sh + 12, chunks, 0, c62, c63)
+    let _r = __b64d_rem(prim.handle(out) + 12 + chunks * 3, sh + 12 + chunks * 4, rem, c62, c63)
     ok(out)
   }
 }
 
-fn base64_decode_url(s: String) -> Result[Bytes, String] = base64_decode(s)
+fn base64_decode(s: String) -> Result[Bytes, String] = __b64d_decode(s, 43, 47)
+
+fn base64_decode_url(s: String) -> Result[Bytes, String] = __b64d_decode(s, 45, 95)

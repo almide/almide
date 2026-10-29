@@ -1,0 +1,925 @@
+// The typed byte IO matrix (R-bytes-01/03/09/11/13/15/25): every cell of
+// get_ / next_ / get_<t>_array / put_ / append_ over every type row and byte
+// order, on both legs. Each row checks the byte layout of the write, the read
+// back through every reader, the out-of-range answers (none, the position
+// kept) and the abort of an out-of-range position write.
+import testing
+
+fn b(xs: List[Int]) -> Bytes = bytes.from_list(xs)
+
+fn l(x: Bytes) -> List[Int] = bytes.to_list(x)
+
+test "u16_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_u16_le(a, 48879)
+  assert_eq(l(a), [239, 190])
+  var p = bytes.zeros(4)
+  bytes.put_u16_le(p, 1, 48879)
+  assert_eq(l(p), [0, 239, 190, 0])
+  assert_eq(bytes.get_u16_le(p, 1), some(48879))
+  assert_eq(bytes.get_u16_le(p, 2), some(190))
+  assert_eq(bytes.get_u16_le(p, 3), none)
+  assert_eq(bytes.get_u16_le(p, -1), none)
+  assert_eq(bytes.get_u16_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_u16_le(p, 1), (some(48879), 3))
+  assert_eq(bytes.next_u16_le(p, 3), (none, 3))
+  assert_eq(bytes.next_u16_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_u16_le(two, 48879)
+  bytes.append_u16_le(two, 48879)
+  assert_eq(bytes.get_u16_le_array(two, 0, 2), some([48879, 48879]))
+  assert_eq(bytes.get_u16_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_u16_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_u16_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_u16_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_u16_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_u16_le(q, 3, 48879)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_u16_le(q, -1, 48879)
+    },
+  )
+}
+
+test "u16_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_u16_be(a, 48879)
+  assert_eq(l(a), [190, 239])
+  var p = bytes.zeros(4)
+  bytes.put_u16_be(p, 1, 48879)
+  assert_eq(l(p), [0, 190, 239, 0])
+  assert_eq(bytes.get_u16_be(p, 1), some(48879))
+  assert_eq(bytes.get_u16_be(p, 2), some(61184))
+  assert_eq(bytes.get_u16_be(p, 3), none)
+  assert_eq(bytes.get_u16_be(p, -1), none)
+  assert_eq(bytes.get_u16_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_u16_be(p, 1), (some(48879), 3))
+  assert_eq(bytes.next_u16_be(p, 3), (none, 3))
+  assert_eq(bytes.next_u16_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_u16_be(two, 48879)
+  bytes.append_u16_be(two, 48879)
+  assert_eq(bytes.get_u16_be_array(two, 0, 2), some([48879, 48879]))
+  assert_eq(bytes.get_u16_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_u16_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_u16_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_u16_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_u16_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_u16_be(q, 3, 48879)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_u16_be(q, -1, 48879)
+    },
+  )
+}
+
+test "i16_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_i16_le(a, -2)
+  assert_eq(l(a), [254, 255])
+  var p = bytes.zeros(4)
+  bytes.put_i16_le(p, 1, -2)
+  assert_eq(l(p), [0, 254, 255, 0])
+  assert_eq(bytes.get_i16_le(p, 1), some(-2))
+  assert_eq(bytes.get_i16_le(p, 2), some(255))
+  assert_eq(bytes.get_i16_le(p, 3), none)
+  assert_eq(bytes.get_i16_le(p, -1), none)
+  assert_eq(bytes.get_i16_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_i16_le(p, 1), (some(-2), 3))
+  assert_eq(bytes.next_i16_le(p, 3), (none, 3))
+  assert_eq(bytes.next_i16_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_i16_le(two, -2)
+  bytes.append_i16_le(two, -2)
+  assert_eq(bytes.get_i16_le_array(two, 0, 2), some([-2, -2]))
+  assert_eq(bytes.get_i16_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_i16_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_i16_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_i16_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_i16_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_i16_le(q, 3, -2)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_i16_le(q, -1, -2)
+    },
+  )
+}
+
+test "i16_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_i16_be(a, -2)
+  assert_eq(l(a), [255, 254])
+  var p = bytes.zeros(4)
+  bytes.put_i16_be(p, 1, -2)
+  assert_eq(l(p), [0, 255, 254, 0])
+  assert_eq(bytes.get_i16_be(p, 1), some(-2))
+  assert_eq(bytes.get_i16_be(p, 2), some(-512))
+  assert_eq(bytes.get_i16_be(p, 3), none)
+  assert_eq(bytes.get_i16_be(p, -1), none)
+  assert_eq(bytes.get_i16_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_i16_be(p, 1), (some(-2), 3))
+  assert_eq(bytes.next_i16_be(p, 3), (none, 3))
+  assert_eq(bytes.next_i16_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_i16_be(two, -2)
+  bytes.append_i16_be(two, -2)
+  assert_eq(bytes.get_i16_be_array(two, 0, 2), some([-2, -2]))
+  assert_eq(bytes.get_i16_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_i16_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_i16_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_i16_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_i16_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_i16_be(q, 3, -2)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_i16_be(q, -1, -2)
+    },
+  )
+}
+
+test "u32_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_u32_le(a, 3735928559)
+  assert_eq(l(a), [239, 190, 173, 222])
+  var p = bytes.zeros(6)
+  bytes.put_u32_le(p, 1, 3735928559)
+  assert_eq(l(p), [
+    0,
+    239,
+    190,
+    173,
+    222,
+    0
+  ])
+  assert_eq(bytes.get_u32_le(p, 1), some(3735928559))
+  assert_eq(bytes.get_u32_le(p, 2), some(14593470))
+  assert_eq(bytes.get_u32_le(p, 3), none)
+  assert_eq(bytes.get_u32_le(p, -1), none)
+  assert_eq(bytes.get_u32_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_u32_le(p, 1), (some(3735928559), 5))
+  assert_eq(bytes.next_u32_le(p, 3), (none, 3))
+  assert_eq(bytes.next_u32_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_u32_le(two, 3735928559)
+  bytes.append_u32_le(two, 3735928559)
+  assert_eq(bytes.get_u32_le_array(two, 0, 2), some([3735928559, 3735928559]))
+  assert_eq(bytes.get_u32_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_u32_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_u32_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_u32_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_u32_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_u32_le(q, 3, 3735928559)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_u32_le(q, -1, 3735928559)
+    },
+  )
+}
+
+test "u32_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_u32_be(a, 3735928559)
+  assert_eq(l(a), [222, 173, 190, 239])
+  var p = bytes.zeros(6)
+  bytes.put_u32_be(p, 1, 3735928559)
+  assert_eq(l(p), [
+    0,
+    222,
+    173,
+    190,
+    239,
+    0
+  ])
+  assert_eq(bytes.get_u32_be(p, 1), some(3735928559))
+  assert_eq(bytes.get_u32_be(p, 2), some(2914971392))
+  assert_eq(bytes.get_u32_be(p, 3), none)
+  assert_eq(bytes.get_u32_be(p, -1), none)
+  assert_eq(bytes.get_u32_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_u32_be(p, 1), (some(3735928559), 5))
+  assert_eq(bytes.next_u32_be(p, 3), (none, 3))
+  assert_eq(bytes.next_u32_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_u32_be(two, 3735928559)
+  bytes.append_u32_be(two, 3735928559)
+  assert_eq(bytes.get_u32_be_array(two, 0, 2), some([3735928559, 3735928559]))
+  assert_eq(bytes.get_u32_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_u32_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_u32_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_u32_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_u32_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_u32_be(q, 3, 3735928559)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_u32_be(q, -1, 3735928559)
+    },
+  )
+}
+
+test "i32_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_i32_le(a, -123456789)
+  assert_eq(l(a), [235, 50, 164, 248])
+  var p = bytes.zeros(6)
+  bytes.put_i32_le(p, 1, -123456789)
+  assert_eq(l(p), [
+    0,
+    235,
+    50,
+    164,
+    248,
+    0
+  ])
+  assert_eq(bytes.get_i32_le(p, 1), some(-123456789))
+  assert_eq(bytes.get_i32_le(p, 2), some(16294962))
+  assert_eq(bytes.get_i32_le(p, 3), none)
+  assert_eq(bytes.get_i32_le(p, -1), none)
+  assert_eq(bytes.get_i32_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_i32_le(p, 1), (some(-123456789), 5))
+  assert_eq(bytes.next_i32_le(p, 3), (none, 3))
+  assert_eq(bytes.next_i32_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_i32_le(two, -123456789)
+  bytes.append_i32_le(two, -123456789)
+  assert_eq(bytes.get_i32_le_array(two, 0, 2), some([-123456789, -123456789]))
+  assert_eq(bytes.get_i32_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_i32_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_i32_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_i32_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_i32_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_i32_le(q, 3, -123456789)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_i32_le(q, -1, -123456789)
+    },
+  )
+}
+
+test "i32_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_i32_be(a, -123456789)
+  assert_eq(l(a), [248, 164, 50, 235])
+  var p = bytes.zeros(6)
+  bytes.put_i32_be(p, 1, -123456789)
+  assert_eq(l(p), [
+    0,
+    248,
+    164,
+    50,
+    235,
+    0
+  ])
+  assert_eq(bytes.get_i32_be(p, 1), some(-123456789))
+  assert_eq(bytes.get_i32_be(p, 2), some(-1540166912))
+  assert_eq(bytes.get_i32_be(p, 3), none)
+  assert_eq(bytes.get_i32_be(p, -1), none)
+  assert_eq(bytes.get_i32_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_i32_be(p, 1), (some(-123456789), 5))
+  assert_eq(bytes.next_i32_be(p, 3), (none, 3))
+  assert_eq(bytes.next_i32_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_i32_be(two, -123456789)
+  bytes.append_i32_be(two, -123456789)
+  assert_eq(bytes.get_i32_be_array(two, 0, 2), some([-123456789, -123456789]))
+  assert_eq(bytes.get_i32_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_i32_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_i32_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_i32_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_i32_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_i32_be(q, 3, -123456789)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_i32_be(q, -1, -123456789)
+    },
+  )
+}
+
+test "i64_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_i64_le(a, -4611686018427387909)
+  assert_eq(l(a), [
+    251,
+    255,
+    255,
+    255,
+    255,
+    255,
+    255,
+    191
+  ])
+  var p = bytes.zeros(10)
+  bytes.put_i64_le(p, 1, -4611686018427387909)
+  assert_eq(
+    l(p),
+    [
+      0,
+      251,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      191,
+      0
+    ],
+  )
+  assert_eq(bytes.get_i64_le(p, 1), some(-4611686018427387909))
+  assert_eq(bytes.get_i64_le(p, 2), some(54043195528445951))
+  assert_eq(bytes.get_i64_le(p, 3), none)
+  assert_eq(bytes.get_i64_le(p, -1), none)
+  assert_eq(bytes.get_i64_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_i64_le(p, 1), (some(-4611686018427387909), 9))
+  assert_eq(bytes.next_i64_le(p, 3), (none, 3))
+  assert_eq(bytes.next_i64_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_i64_le(two, -4611686018427387909)
+  bytes.append_i64_le(two, -4611686018427387909)
+  assert_eq(bytes.get_i64_le_array(two, 0, 2), some([-4611686018427387909, -4611686018427387909]))
+  assert_eq(bytes.get_i64_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_i64_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_i64_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_i64_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_i64_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_i64_le(q, 3, -4611686018427387909)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_i64_le(q, -1, -4611686018427387909)
+    },
+  )
+}
+
+test "i64_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_i64_be(a, -4611686018427387909)
+  assert_eq(l(a), [
+    191,
+    255,
+    255,
+    255,
+    255,
+    255,
+    255,
+    251
+  ])
+  var p = bytes.zeros(10)
+  bytes.put_i64_be(p, 1, -4611686018427387909)
+  assert_eq(
+    l(p),
+    [
+      0,
+      191,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      251,
+      0
+    ],
+  )
+  assert_eq(bytes.get_i64_be(p, 1), some(-4611686018427387909))
+  assert_eq(bytes.get_i64_be(p, 2), some(-1280))
+  assert_eq(bytes.get_i64_be(p, 3), none)
+  assert_eq(bytes.get_i64_be(p, -1), none)
+  assert_eq(bytes.get_i64_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_i64_be(p, 1), (some(-4611686018427387909), 9))
+  assert_eq(bytes.next_i64_be(p, 3), (none, 3))
+  assert_eq(bytes.next_i64_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_i64_be(two, -4611686018427387909)
+  bytes.append_i64_be(two, -4611686018427387909)
+  assert_eq(bytes.get_i64_be_array(two, 0, 2), some([-4611686018427387909, -4611686018427387909]))
+  assert_eq(bytes.get_i64_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_i64_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_i64_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_i64_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_i64_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_i64_be(q, 3, -4611686018427387909)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_i64_be(q, -1, -4611686018427387909)
+    },
+  )
+}
+
+test "f32_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_f32_le(a, 1.5)
+  assert_eq(l(a), [0, 0, 192, 63])
+  var p = bytes.zeros(6)
+  bytes.put_f32_le(p, 1, 1.5)
+  assert_eq(l(p), [
+    0,
+    0,
+    0,
+    192,
+    63,
+    0
+  ])
+  assert_eq(bytes.get_f32_le(p, 1), some(1.5))
+  assert_eq(bytes.get_f32_le(p, 2), some(5.85451288007194e-39))
+  assert_eq(bytes.get_f32_le(p, 3), none)
+  assert_eq(bytes.get_f32_le(p, -1), none)
+  assert_eq(bytes.get_f32_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_f32_le(p, 1), (some(1.5), 5))
+  assert_eq(bytes.next_f32_le(p, 3), (none, 3))
+  assert_eq(bytes.next_f32_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_f32_le(two, 1.5)
+  bytes.append_f32_le(two, 1.5)
+  assert_eq(bytes.get_f32_le_array(two, 0, 2), some([1.5, 1.5]))
+  assert_eq(bytes.get_f32_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_f32_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_f32_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_f32_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_f32_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_f32_le(q, 3, 1.5)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_f32_le(q, -1, 1.5)
+    },
+  )
+}
+
+test "f32_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_f32_be(a, 1.5)
+  assert_eq(l(a), [63, 192, 0, 0])
+  var p = bytes.zeros(6)
+  bytes.put_f32_be(p, 1, 1.5)
+  assert_eq(l(p), [
+    0,
+    63,
+    192,
+    0,
+    0,
+    0
+  ])
+  assert_eq(bytes.get_f32_be(p, 1), some(1.5))
+  assert_eq(bytes.get_f32_be(p, 2), some(-2.0))
+  assert_eq(bytes.get_f32_be(p, 3), none)
+  assert_eq(bytes.get_f32_be(p, -1), none)
+  assert_eq(bytes.get_f32_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_f32_be(p, 1), (some(1.5), 5))
+  assert_eq(bytes.next_f32_be(p, 3), (none, 3))
+  assert_eq(bytes.next_f32_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_f32_be(two, 1.5)
+  bytes.append_f32_be(two, 1.5)
+  assert_eq(bytes.get_f32_be_array(two, 0, 2), some([1.5, 1.5]))
+  assert_eq(bytes.get_f32_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_f32_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_f32_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_f32_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_f32_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_f32_be(q, 3, 1.5)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(6)
+      bytes.put_f32_be(q, -1, 1.5)
+    },
+  )
+}
+
+test "f64_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_f64_le(a, -2.25)
+  assert_eq(l(a), [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    192
+  ])
+  var p = bytes.zeros(10)
+  bytes.put_f64_le(p, 1, -2.25)
+  assert_eq(l(p), [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    192,
+    0
+  ])
+  assert_eq(bytes.get_f64_le(p, 1), some(-2.25))
+  assert_eq(bytes.get_f64_le(p, 2), some(4.559176336081256e-305))
+  assert_eq(bytes.get_f64_le(p, 3), none)
+  assert_eq(bytes.get_f64_le(p, -1), none)
+  assert_eq(bytes.get_f64_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_f64_le(p, 1), (some(-2.25), 9))
+  assert_eq(bytes.next_f64_le(p, 3), (none, 3))
+  assert_eq(bytes.next_f64_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_f64_le(two, -2.25)
+  bytes.append_f64_le(two, -2.25)
+  assert_eq(bytes.get_f64_le_array(two, 0, 2), some([-2.25, -2.25]))
+  assert_eq(bytes.get_f64_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_f64_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_f64_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_f64_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_f64_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_f64_le(q, 3, -2.25)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_f64_le(q, -1, -2.25)
+    },
+  )
+}
+
+test "f64_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_f64_be(a, -2.25)
+  assert_eq(l(a), [
+    192,
+    2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ])
+  var p = bytes.zeros(10)
+  bytes.put_f64_be(p, 1, -2.25)
+  assert_eq(l(p), [
+    0,
+    192,
+    2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ])
+  assert_eq(bytes.get_f64_be(p, 1), some(-2.25))
+  assert_eq(bytes.get_f64_be(p, 2), some(4.778309726736481e-299))
+  assert_eq(bytes.get_f64_be(p, 3), none)
+  assert_eq(bytes.get_f64_be(p, -1), none)
+  assert_eq(bytes.get_f64_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_f64_be(p, 1), (some(-2.25), 9))
+  assert_eq(bytes.next_f64_be(p, 3), (none, 3))
+  assert_eq(bytes.next_f64_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_f64_be(two, -2.25)
+  bytes.append_f64_be(two, -2.25)
+  assert_eq(bytes.get_f64_be_array(two, 0, 2), some([-2.25, -2.25]))
+  assert_eq(bytes.get_f64_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_f64_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_f64_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_f64_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_f64_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_f64_be(q, 3, -2.25)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(10)
+      bytes.put_f64_be(q, -1, -2.25)
+    },
+  )
+}
+
+test "f16_le: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_f16_le(a, 0.333251953125)
+  assert_eq(l(a), [85, 53])
+  var p = bytes.zeros(4)
+  bytes.put_f16_le(p, 1, 0.333251953125)
+  assert_eq(l(p), [0, 85, 53, 0])
+  assert_eq(bytes.get_f16_le(p, 1), some(0.333251953125))
+  assert_eq(bytes.get_f16_le(p, 2), some(3.159046173095703e-06))
+  assert_eq(bytes.get_f16_le(p, 3), none)
+  assert_eq(bytes.get_f16_le(p, -1), none)
+  assert_eq(bytes.get_f16_le(p, 9223372036854775807), none)
+  assert_eq(bytes.next_f16_le(p, 1), (some(0.333251953125), 3))
+  assert_eq(bytes.next_f16_le(p, 3), (none, 3))
+  assert_eq(bytes.next_f16_le(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_f16_le(two, 0.333251953125)
+  bytes.append_f16_le(two, 0.333251953125)
+  assert_eq(bytes.get_f16_le_array(two, 0, 2), some([0.333251953125, 0.333251953125]))
+  assert_eq(bytes.get_f16_le_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_f16_le_array(two, 1, 2), none)
+  assert_eq(bytes.get_f16_le_array(two, 0, 3), none)
+  assert_eq(bytes.get_f16_le_array(two, 0, -1), none)
+  assert_eq(bytes.get_f16_le_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_f16_le(q, 3, 0.333251953125)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_f16_le(q, -1, 0.333251953125)
+    },
+  )
+}
+
+test "f16_be: append, put, get, next, array" {
+  var a = bytes.new()
+  bytes.append_f16_be(a, 0.333251953125)
+  assert_eq(l(a), [53, 85])
+  var p = bytes.zeros(4)
+  bytes.put_f16_be(p, 1, 0.333251953125)
+  assert_eq(l(p), [0, 53, 85, 0])
+  assert_eq(bytes.get_f16_be(p, 1), some(0.333251953125))
+  assert_eq(bytes.get_f16_be(p, 2), some(80.0))
+  assert_eq(bytes.get_f16_be(p, 3), none)
+  assert_eq(bytes.get_f16_be(p, -1), none)
+  assert_eq(bytes.get_f16_be(p, 9223372036854775807), none)
+  assert_eq(bytes.next_f16_be(p, 1), (some(0.333251953125), 3))
+  assert_eq(bytes.next_f16_be(p, 3), (none, 3))
+  assert_eq(bytes.next_f16_be(p, -1), (none, -1))
+  var two = bytes.new()
+  bytes.append_f16_be(two, 0.333251953125)
+  bytes.append_f16_be(two, 0.333251953125)
+  assert_eq(bytes.get_f16_be_array(two, 0, 2), some([0.333251953125, 0.333251953125]))
+  assert_eq(bytes.get_f16_be_array(two, 0, 0), some([]))
+  assert_eq(bytes.get_f16_be_array(two, 1, 2), none)
+  assert_eq(bytes.get_f16_be_array(two, 0, 3), none)
+  assert_eq(bytes.get_f16_be_array(two, 0, -1), none)
+  assert_eq(bytes.get_f16_be_array(two, 0, 9223372036854775807), none)
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_f16_be(q, 3, 0.333251953125)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(4)
+      bytes.put_f16_be(q, -1, 0.333251953125)
+    },
+  )
+}
+
+test "u8, i8 and bool rows" {
+  var a = bytes.new()
+  bytes.append_u8(a, 300)
+  bytes.append_i8(a, -2)
+  bytes.append_bool(a, true)
+  bytes.append_bool(a, false)
+  assert_eq(l(a), [44, 254, 1, 0])
+  assert_eq(bytes.get_u8(a, 1), some(254))
+  assert_eq(bytes.get_i8(a, 1), some(-2))
+  assert_eq(bytes.get_i8(a, 0), some(44))
+  assert_eq(bytes.get_bool(a, 2), some(true))
+  assert_eq(bytes.get_bool(a, 3), some(false))
+  assert_eq(bytes.get_bool(b([7]), 0), some(true))
+  assert_eq(bytes.next_u8(a, 3), (some(0), 4))
+  assert_eq(bytes.next_i8(a, 1), (some(-2), 2))
+  assert_eq(bytes.next_bool(a, 2), (some(true), 3))
+  for pos in [4, -1, 9223372036854775807] {
+    assert_eq(bytes.get_u8(a, pos), none)
+    assert_eq(bytes.get_i8(a, pos), none)
+    assert_eq(bytes.get_bool(a, pos), none)
+    assert_eq(bytes.next_u8(a, pos), (none, pos))
+    assert_eq(bytes.next_i8(a, pos), (none, pos))
+    assert_eq(bytes.next_bool(a, pos), (none, pos))
+  }
+  var p = bytes.zeros(3)
+  bytes.put_u8(p, 0, 511)
+  bytes.put_i8(p, 1, -128)
+  bytes.put_bool(p, 2, true)
+  assert_eq(l(p), [255, 128, 1])
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(3)
+      bytes.put_u8(q, 3, 1)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.zeros(3)
+      bytes.put_i8(q, -1, 1)
+    },
+  )
+  testing.assert_aborts(
+    "out of range",
+    () => {
+      var q = bytes.new()
+      bytes.put_bool(q, 0, true)
+    },
+  )
+}
+
+test "the u8 cells agree with get and push" {
+  let x = b([0, 9, 255])
+  for pos in [-1, 0, 1, 2, 3] {
+    assert_eq(bytes.get_u8(x, pos), bytes.get(x, pos))
+  }
+  var a = bytes.new()
+  var c = bytes.new()
+  for v in [0, 255, 256, -1] {
+    bytes.append_u8(a, v)
+    bytes.push(c, v)
+  }
+  assert_eq(l(a), l(c))
+}
+
+test "float cells: signed zero, infinities and NaN" {
+  var a = bytes.new()
+  bytes.append_f64_le(a, -0.0)
+  bytes.append_f32_be(a, -0.0)
+  bytes.append_f16_le(a, -0.0)
+  assert_eq(
+    l(a),
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      128,
+      128,
+      0,
+      0,
+      0,
+      0,
+      128
+    ],
+  )
+  assert_eq(
+    bytes.get_f64_le(a, 0) |> option.map((x) => float.to_bits(x)),
+    some(float.to_bits(-0.0)),
+  )
+  var n = bytes.new()
+  bytes.append_f64_be(n, 0.0 / 0.0)
+  bytes.append_f32_le(n, 0.0 / 0.0)
+  bytes.append_f16_be(n, 0.0 / 0.0)
+  assert_eq(
+    l(n),
+    [
+      127,
+      248,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      192,
+      127,
+      126,
+      0
+    ],
+  )
+  assert_eq(bytes.get_f64_be(n, 0) |> option.map((x) => float.is_nan(x)), some(true))
+  assert_eq(bytes.get_f16_be(n, 12) |> option.map((x) => float.is_nan(x)), some(true))
+  var i = bytes.new()
+  bytes.append_f16_le(i, 1.0 / 0.0)
+  bytes.append_f16_be(i, -1.0 / 0.0)
+  assert_eq(l(i), [0, 124, 252, 0])
+  assert_eq(bytes.get_f16_le(i, 0), some(1.0 / 0.0))
+  assert_eq(bytes.get_f16_be(i, 2), some(-1.0 / 0.0))
+}
+
+test "f16 writes round to nearest even" {
+  let h = (x) => {
+    var a = bytes.new()
+    bytes.append_f16_le(a, x)
+    l(a)
+  }
+  assert_eq(h(1.00048828125), [0, 60])
+  assert_eq(h(1.000732421875), [1, 60])
+  assert_eq(h(65504.0), [255, 123])
+  assert_eq(h(65519.99), [255, 123])
+  assert_eq(h(65520.0), [0, 124])
+  assert_eq(h(5.960464477539063e-8), [1, 0])
+  assert_eq(h(2.98e-8), [0, 0])
+  assert_eq(h(2.99e-8), [1, 0])
+  var p = bytes.zeros(2)
+  bytes.put_f16_be(p, 0, 1.000732421875)
+  assert_eq(l(p), [60, 1])
+  assert_eq(bytes.get_f16_be(p, 0), some(1.0009765625))
+}

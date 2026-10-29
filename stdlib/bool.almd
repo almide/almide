@@ -1,12 +1,18 @@
-// bool — SELF-HOSTED `bool.to_string` for v1, the one new `to_string` the uniform
-// string-interpolation desugar needs (`"flag=${b}"` → `"" ++ bool.to_string(b)`).
-//
-// Pure scalar `if` — NO heap, NO prim floor. The two String literals it returns are
-// the SAME bytes v0 emits for a Bool interpolation part (`emit_string_part`'s
-// select between the interned "true"/"false"), so a `${b}` interp byte-matches v0.
-//
-// The v1 runtime linker auto-includes this when a program's desugared interp calls
-// `bool.to_string` (registered in `self_host_runtime()`, renamed bool_to_string →
-// bool.to_string). It is NOT a frontend-bundled module (absent from BUNDLED_MODULES),
-// so `bool` stays an internal v1 self-host module name — user source never sees it.
-fn bool_to_string(b: Bool) -> String = if b then "true" else "false"
+// bool — the Bool module (R-bool-01..03): parse, compare, to_string.
+// Auto-imported. The v1 self-host of `bool.to_string` (the body the string
+// interpolation desugar `"${b}"` links on the self-host legs) lives in
+// stdlib/option_to_string_b.almd, so this module source is not spliced into
+// the registry's one flat namespace, where its public names would collide.
+/// "true" or "false"; bool.parse reads it back.
+fn to_string(b: Bool) -> String = if b then "true" else "false"
+
+/// ok(true) for "true", ok(false) for "false", err for anything else.
+fn parse(s: String) -> Result[Bool, String] = match s {
+  "true" => ok(true),
+  "false" => ok(false),
+  _ => err("provided string was not `true` or `false`"),
+}
+
+/// Negative if a < b, 0 if equal, positive if a > b; false < true.
+fn compare(a: Bool, b: Bool) -> Int = if a == b then 0
+else if b then -1 else 1

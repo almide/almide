@@ -106,7 +106,7 @@ test "string trim" {
 test "string split and join" {
   let parts = string.split("a,b,c", ",")
   assert_eq(parts, ["a", "b", "c"])
-  assert_eq(string.join(parts, "-"), "a-b-c")
+  assert_eq(list.join(parts, "-"), "a-b-c")
 }
 
 test "string replace" {
@@ -162,9 +162,9 @@ test "string trim_start and trim_end" {
 }
 
 test "string count" {
-  assert_eq(string.count("banana", "a"), 3)
-  assert_eq(string.count("hello", "l"), 2)
-  assert_eq(string.count("hello", "z"), 0)
+  assert_eq(string.count_matches("banana", "a"), 3)
+  assert_eq(string.count_matches("hello", "l"), 2)
+  assert_eq(string.count_matches("hello", "z"), 0)
 }
 
 test "string lines" {
@@ -173,8 +173,8 @@ test "string lines" {
 }
 
 test "string chars" {
-  assert_eq(string.chars("abc"), ["a", "b", "c"])
-  assert_eq(string.chars(""), [])
+  assert_eq(string.to_list("abc"), ["a", "b", "c"])
+  assert_eq(string.to_list(""), [])
 }
 
 test "string replace multiple occurrences" {
@@ -199,9 +199,9 @@ test "string last_index_of" {
 }
 
 test "string to_bytes and from_bytes" {
-  let bytes = string.to_bytes("ABC")
-  assert_eq(bytes, [65, 66, 67])
-  let s = string.from_bytes([72, 105])
+  let bs = bytes.to_list(bytes.from_string("ABC"))
+  assert_eq(bs, [65, 66, 67])
+  let s = bytes.to_string_lossy(bytes.from_list([72, 105]))
   assert_eq(s, "Hi")
 }
 
@@ -255,8 +255,8 @@ test "string split with multiple separators" {
 
 test "string join empty" {
   let empty: List[String] = []
-  assert_eq(string.join(empty, ","), "")
-  assert_eq(string.join(["a"], ","), "a")
+  assert_eq(list.join(empty, ","), "")
+  assert_eq(list.join(["a"], ","), "a")
 }
 
 test "string repeat one" {

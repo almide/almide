@@ -25,6 +25,12 @@ impl Checker {
         if s.as_str() == "Value" || self.env.types.contains_key(s) {
             return None;
         }
+        // The ADR-0001 clock types exist only in the checker; the E029 walk
+        // skips them, so a consequence held on one was never released and
+        // `duration.ms(5).cmp(..)` passed check as `Unknown` (#3960).
+        if almide_lang::time_units::TIME_MODULES.iter().any(|(_, t)| *t == s.as_str()) {
+            return None;
+        }
         if almide_lang::stdlib_info::runtime_backed_type_owner(s.as_str()).is_some() {
             return None;
         }
@@ -102,6 +108,25 @@ impl Checker {
     /// The plain E029 for an undeclared `name`, located at its annotation
     /// (searched from `span`) and naming the nearest declared type.
     fn unknown_type_diag(&self, name: &str, span: Option<crate::ast::Span>, ctx: String) -> Diagnostic {
+        // A type spelling a dialect epoch removed (`RawPtr` → `Handle`,
+        // ADR-0031): the ledger names the new spelling, and renaming the
+        // token is the whole edit, so `almide fix` applies it.
+        if let Some((epoch, to, repair)) = crate::removed_spellings::removed_type(name) {
+            let hint = format!("the type `{name}` was removed at dialect epoch {epoch}: {repair}");
+            let mut diag = err(format!("unknown type '{}'", name), hint, ctx).with_code("E029");
+            let Some(sp) = span else { return diag };
+            diag.file = self.source_file.clone();
+            diag.line = Some(sp.line);
+            diag.col = Some(sp.col);
+            if let Some((line, col)) = self.locate_type_name(sp.line, sp.col, name) {
+                let end_col = col + name.chars().count();
+                diag.line = Some(line);
+                diag.col = Some(col);
+                diag.end_col = Some(end_col);
+                diag = diag.with_machine_fix(line, col, end_col, to);
+            }
+            return diag;
+        }
         let near = self.nearest_declared_type(name);
         let hint = match &near {
             Some(t) => format!(
@@ -134,7 +159,9 @@ impl Checker {
     /// it names. A generic alias applied to its own count was already
     /// expanded by the resolver; one applied to another count stays `Named`
     /// under its key, and so does a generic record or variant. A bare
-    /// spelling (no brackets) is not an application and is never reported.
+    /// spelling (no brackets) of a declared generic is applied to 0 (#4085):
+    /// `fn keep(x: Box) -> Box` passed check with `type Box[A]` and then
+    /// failed the native build, while wasm ran it.
     ///
     /// A BUILTIN head applied to another count than its table entry declares
     /// (`List[Int, Int]`, `Map[String]`, `Int[String]`, #3408) is not that
@@ -146,14 +173,13 @@ impl Checker {
         let mut out = Vec::new();
         let mut stack = vec![ty];
         while let Some(t) = stack.pop() {
-            if let Ty::Named(s, args) = t
-                && !args.is_empty()
-            {
+            if let Ty::Named(s, args) = t {
                 if let Some(params) = declared_type_params(s.as_str(), &self.env.types) {
                     if params.len() != args.len() && seen.insert((*s, args.len())) {
                         out.push(self.type_arity_diag(s.as_str(), params, args.len(), span, ctx));
                     }
-                } else if !self.env.types.contains_key(s)
+                } else if !args.is_empty()
+                    && !self.env.types.contains_key(s)
                     && let Some(letters) = builtin_type_params(s.as_str())
                     && letters.len() != args.len()
                 {
@@ -193,6 +219,12 @@ impl Checker {
             (
                 format!("type '{}' takes no type arguments, but is applied to {}", name, given),
                 format!("Drop the brackets: write `{}` — only a type declared with parameters (`type {}[T] = ...`) takes arguments", name, name),
+            )
+        } else if given == 0 {
+            let spelled = format!("{}[{}]", name, letters.join(", "));
+            (
+                format!("type '{}' is written without its {}", spelled, if letters.len() == 1 { "type argument".to_string() } else { format!("{} type arguments", letters.len()) }),
+                format!("Write one type per parameter, e.g. `{}`; a bare `{}` names no concrete type", spelled, name),
             )
         } else {
             let spelled = format!("{}[{}]", name, letters.join(", "));

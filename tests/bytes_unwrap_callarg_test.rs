@@ -47,12 +47,12 @@ fn fs_bytes_unwrap_in_call_arg_matches_bind_first() {
     let inline = run(
         dir.path(),
         "a.almd",
-        &format!("import fs\n\neffect fn main() -> Unit = {{\n  fs.write(\"{path_str}\", \"hello\")!\n  let n = bytes.len(fs.read_bytes_raw(\"{path_str}\")!)\n  println(\"${{n}}\")\n}}\n"),
+        &format!("import fs\n\neffect fn main() -> Unit = {{\n  fs.write_text(\"{path_str}\", \"hello\")!\n  let n = bytes.len(fs.read_bytes(\"{path_str}\")!)\n  println(\"${{n}}\")\n}}\n"),
     );
     let bound = run(
         dir.path(),
         "b.almd",
-        &format!("import fs\n\neffect fn main() -> Unit = {{\n  fs.write(\"{path_str}\", \"hello\")!\n  let raw = fs.read_bytes_raw(\"{path_str}\")!\n  let n = bytes.len(raw)\n  println(\"${{n}}\")\n}}\n"),
+        &format!("import fs\n\neffect fn main() -> Unit = {{\n  fs.write_text(\"{path_str}\", \"hello\")!\n  let raw = fs.read_bytes(\"{path_str}\")!\n  let n = bytes.len(raw)\n  println(\"${{n}}\")\n}}\n"),
     );
     assert!(inline.2, "in-arg unwrap must run, stderr:\n{}", inline.1);
     assert!(bound.2, "bind-first control must run, stderr:\n{}", bound.1);

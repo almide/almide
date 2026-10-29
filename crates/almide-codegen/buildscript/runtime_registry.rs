@@ -21,6 +21,42 @@ fn reject_unterminated_test_block(path: &Path, content: &str) -> io::Result<()> 
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
+/// Refuse a crate-root `use` that BINDS a name (#4282). Every runtime module is spliced
+/// flat into the generated crate, so `use std::path::Path;` put `Path` beside the
+/// stdlib's own `pub struct Path` (value.Path) and rustc rejected the program (E0255).
+/// A runtime source names an outside item by its full path instead; the only top-level
+/// `use` forms allowed are the ones that bind nothing a later item can collide with:
+/// a trait brought in anonymously (`use std::io::Write as _;`) and a glob
+/// (`pub use almide_libm::*;`, which any crate item legally shadows). A `use` inside a
+/// function or a nested `mod` is local and unaffected.
+fn reject_name_binding_use(path: &Path, content: &str) -> io::Result<()> {
+    for (n, line) in content.lines().enumerate() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let t = line.trim();
+        let rest = match t.strip_prefix("pub use ").or_else(|| t.strip_prefix("use ")) {
+            Some(r) => r,
+            None => continue,
+        };
+        let r = rest.trim_end_matches(';').trim();
+        if r.ends_with("as _") || r.ends_with("::*") {
+            continue;
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{}:{}: `{t}` binds a name in the generated crate's root, where it can collide \
+                 with an Almide type of the same name (#4282). Spell the item by its full path \
+                 (`std::path::Path`), or import a trait as `use … as _;`.",
+                path.display(),
+                n + 1
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Read a runtime source file, INLINING any `include!("X.rs")` directive with the
 /// referenced file's content (resolved relative to this file's directory), recursively.
 /// The runtime is embedded as ONE source string per module and assembled by
@@ -76,7 +112,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
     let mut rust_entries: Vec<_> = fs::read_dir(&rust_dir)?
         .collect::<io::Result<Vec<_>>>()?
         .into_iter()
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
         .filter(|e| e.file_name() != "lib.rs")
         .collect();
     rust_entries.sort_by_key(|e| e.file_name());
@@ -92,6 +128,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         let stem = module_name(&entry.path())?;
         let content = read_with_includes(&entry.path())?;
         reject_unterminated_test_block(&entry.path(), &content)?;
+        reject_name_binding_use(&entry.path(), &content)?;
         rust_out.push_str(&format!("    (\"{stem}\", {content:?}),\n"));
     }
     rust_out.push_str("];\n\n");
@@ -102,8 +139,20 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         module_name(&e.path())
     }).collect::<io::Result<_>>()?;
 
+    // The `Almide*` types each module defines at top level: a module that
+    // names another module's (e.g. map.rs's `AlmideMap`) depends on its
+    // definer as surely as on an `almide_rt_` fn. Before #4071 `map` was in
+    // every program, so the type edge never had to be stated.
+    let mut defined_types: Vec<(String, Vec<String>)> = Vec::new();
+    for entry in &rust_entries {
+        let stem = module_name(&entry.path())?;
+        let content = read_with_includes(&entry.path())?;
+        defined_types.push((stem, top_level_almide_types(&content)));
+    }
+
     rust_out.push_str("/// Inter-module runtime dependencies, auto-extracted from source.\n");
-    rust_out.push_str("/// If module A's source references `almide_rt_B_*`, A depends on B.\n");
+    rust_out.push_str("/// If module A's source references `almide_rt_B_*`, or names an `Almide*`\n");
+    rust_out.push_str("/// type B defines at top level, A depends on B.\n");
     rust_out.push_str("pub const RUNTIME_DEPS: &[(&str, &[&str])] = &[\n");
     for entry in &rust_entries {
         let stem = module_name(&entry.path())?;
@@ -112,7 +161,11 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         for other in &module_names {
             if *other == stem { continue; }
             let prefix = format!("almide_rt_{}_", other);
-            if content.contains(&prefix) {
+            let names_a_type = defined_types
+                .iter()
+                .find(|(m, _)| m == other)
+                .is_some_and(|(_, tys)| tys.iter().any(|t| contains_ident(&content, t)));
+            if content.contains(&prefix) || names_a_type {
                 deps.push(other);
             }
         }
@@ -146,6 +199,11 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         "cargo:rerun-if-changed={}",
         workspace_root.join("crates/almide-base/src/fs_errno_classified.rs").display()
     );
+    // ... and, through rt-core's fs_scoped_core.rs, its bounded reader (#4201).
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("crates/almide-base/src/fs_read_bounded.rs").display()
+    );
     Ok(())
 }
 
@@ -164,6 +222,54 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
 /// stripped — the runtime is built with `--test`, so the kernel's own
 /// `#[cfg(test)]` would otherwise run inside every spec. Extracted from
 /// `generate` (cog>25 decomposition).
+/// The `Almide*` names a runtime source defines at the start of a line
+/// (`pub struct` / `pub enum` / `pub type` / `pub trait`).
+fn top_level_almide_types(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let rest = ["pub struct ", "pub enum ", "pub type ", "pub trait "]
+                .iter()
+                .find_map(|kw| line.strip_prefix(kw))?;
+            let end = rest.find(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).unwrap_or(rest.len());
+            let name = &rest[..end];
+            name.starts_with("Almide").then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// Whether `content`'s CODE (`//` comments dropped — a doc line mentioning
+/// another module's type is not a use of it) contains `name` as a whole
+/// identifier (not a prefix of a longer one: `AlmideMapKey` is not
+/// `AlmideMap`).
+fn contains_ident(content: &str, name: &str) -> bool {
+    let is_ident = |c: char| c == '_' || c.is_ascii_alphanumeric();
+    content.lines().map(strip_line_comment).any(|line| {
+        line.match_indices(name).any(|(i, _)| {
+            let before = line[..i].chars().next_back();
+            let after = line[i + name.len()..].chars().next();
+            !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+        })
+    })
+}
+
+/// `line` up to its `//` comment, a `//` inside a `"…"` literal kept.
+fn strip_line_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if in_str => i += 1,
+            b'"' => in_str = !in_str,
+            b'/' if !in_str && bytes.get(i + 1) == Some(&b'/') => return &line[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    line
+}
+
 fn build_kernel_inline(workspace_root: &Path) -> io::Result<String> {
     let kernel_dir = workspace_root.join("crates/almide-kernel/src");
     if !kernel_dir.exists() {
@@ -292,7 +398,7 @@ fn write_runtime_fn_modes(rust_entries: &[fs::DirEntry], out_dir: &Path) -> io::
 /// This is the GROUND TRUTH for `BorrowInferencePass`'s intrinsic seeding.
 /// Before it existed, an `@intrinsic` fn returning `Unit` was ASSUMED to
 /// mutate its first heap argument in place, which emitted `&mut x` against
-/// read-only helpers like `almide_rt_io_write(data: &Vec<u8>)` → E0596 in
+/// read-only helpers like `almide_rt_io___write_stdout(data: &Vec<u8>)` → E0596 in
 /// generated Rust (#803). A generic parameter (`x: T`) is not a reference at
 /// all, so it records `false`.
 fn extract_runtime_param_mutability(content: &str) -> Vec<(String, Vec<bool>)> {
@@ -442,12 +548,12 @@ fn try_raw_fn_last_arg_helper_at(content: &str, cursor: usize, rel: usize) -> (u
     }
 
     // Last param's type is exactly one of those Fn generics.
-    if let Some(last) = split_top_level(params).last() {
-        if let Some(colon) = last.rfind(':') {
-            let ty = last[colon + 1..].trim();
-            if fn_generics.contains(&ty) {
-                return (new_cursor, Some(name));
-            }
+    if let Some(last) = split_top_level(params).last()
+        && let Some(colon) = last.rfind(':')
+    {
+        let ty = last[colon + 1..].trim();
+        if fn_generics.contains(&ty) {
+            return (new_cursor, Some(name));
         }
     }
     (new_cursor, None)

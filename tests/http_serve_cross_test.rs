@@ -58,14 +58,15 @@ fn fixture() -> PathBuf {
 const SCRIPT: &[&[u8]] = &[
     b"GET /hello HTTP/1.1\r\nHost: t\r\n\r\n",
     "POST /echo HTTP/1.1\r\nHost: t\r\nX-Token: abc\r\nContent-Length: 12\r\n\r\n日本語 ok".as_bytes(),
-    b"GET /echo HTTP/1.1\r\n\r\n",
-    b"GET /query?b=2&a=%E7%8C%AB&c=x+y&nokey&d=1=2 HTTP/1.1\r\n\r\n",
-    b"GET /teapot HTTP/1.1\r\n\r\n",
-    b"GET /redirect HTTP/1.1\r\n\r\n",
-    b"GET /missing HTTP/1.1\r\n\r\n",
-    b"GET /fail HTTP/1.1\r\n\r\n",
-    b"DELETE /hello HTTP/1.1\r\n\r\n",
-    b"GET /clock HTTP/1.1\r\n\r\n",
+    b"GET /echo HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /query?b=2&a=%E7%8C%AB&c=x+y&nokey&d=1=2 HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /teapot HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /redirect HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /missing HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /fail HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"DELETE /hello HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /clock HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /fail-bidi HTTP/1.1\r\nHost: a\r\n\r\n",
 ];
 
 fn free_port() -> u16 {
@@ -96,20 +97,26 @@ fn kill_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// One request on a fresh connection; the answer is everything up to the
-/// server's close. Connection attempts retry while the server binds (its
-/// "ready" line is printed just before `http.serve`).
-fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
+/// A connection to `port`, retried while the server binds (its "ready" line
+/// is printed just before `http.serve`).
+fn connect_when_bound(port: u16) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(60);
-    let mut conn = loop {
+    loop {
         match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(c) => break c,
+            Ok(c) => return c,
             Err(e) => {
                 assert!(Instant::now() < deadline, "server on {port} never accepted: {e}");
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-    };
+    }
+}
+
+/// One request on a fresh connection; the answer is everything up to the
+/// server's close. Connection attempts retry while the server binds (its
+/// "ready" line is printed just before `http.serve`).
+fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = connect_when_bound(port);
     conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     conn.write_all(raw).expect("send request");
     let mut out = Vec::new();
@@ -229,7 +236,7 @@ fn replay(wasm: bool) -> Run {
     let responses: Vec<Vec<u8>> = SCRIPT.iter().map(|r| ask(port, r)).collect();
     let boots: Vec<Vec<u8>> = (0..2)
         .map(|_| {
-            let r = ask(port, b"GET /boot HTTP/1.1\r\n\r\n");
+            let r = ask(port, b"GET /boot HTTP/1.1\r\nHost: a\r\n\r\n");
             let cut = r.windows(4).position(|w| w == b"\r\n\r\n").expect("a response head") + 4;
             r[cut..].to_vec()
         })
@@ -247,13 +254,33 @@ fn http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedde
     let wasm = replay(true);
     // The script's own shape, so an empty answer on both legs cannot pass.
     assert!(native.responses[0].ends_with(b"\r\n\r\nhello"), "{:?}", String::from_utf8_lossy(&native.responses[0]));
-    assert!(
-        native.responses[7].starts_with(b"HTTP/1.1 500 Internal Server Error\r\n")
-            && native.responses[7].ends_with(b"Internal error: denied /fail"),
-        "{:?}",
-        String::from_utf8_lossy(&native.responses[7])
-    );
+    // C-409 (#4150): a handler err reaches the client as a fixed body naming
+    // the request's number, never its text; stderr has the text, quoted.
+    for run in [&native, &wasm] {
+        let r = &run.responses[7];
+        assert!(
+            r.starts_with(b"HTTP/1.1 500 Internal Server Error\r\n") && r.ends_with(b"\r\n\r\nInternal Server Error (request 0fc93fcc)"),
+            "{:?}",
+            String::from_utf8_lossy(r)
+        );
+        assert!(!String::from_utf8_lossy(r).contains("denied"), "{:?}", String::from_utf8_lossy(r));
+        assert!(
+            run.stderr.lines().any(|l| l == "http.serve: request 0fc93fcc: handler error: \"denied /fail\""),
+            "{:?}",
+            run.stderr
+        );
+    }
     assert!(native.responses[9].ends_with(b"\r\n\r\ntrue true"), "{:?}", String::from_utf8_lossy(&native.responses[9]));
+    // #4126: the stderr quoting escapes C-418's set, the bidi controls
+    // included, on both legs; no raw U+202E reaches the log.
+    for run in [&native, &wasm] {
+        assert!(
+            run.stderr.lines().any(|l| l.ends_with(": handler error: \"denied \\u{202e}\\u{85}x\"")),
+            "{:?}",
+            run.stderr
+        );
+        assert!(!run.stderr.contains('\u{202e}'), "{:?}", run.stderr);
+    }
     assert_eq!(native.responses.len(), wasm.responses.len());
     for (i, (n, w)) in native.responses.iter().zip(&wasm.responses).enumerate() {
         if let Err(diff) = same_answer(n, w) {
@@ -352,13 +379,22 @@ struct Leg {
 }
 
 fn boot_limits(wasm: bool) -> Leg {
+    boot_at(&limits_fixture(), wasm)
+}
+
+fn boot_at(fixture: &Path, wasm: bool) -> Leg {
+    boot_with(fixture, wasm, &[])
+}
+
+/// [`boot_at`] with program arguments after the port.
+fn boot_with(fixture: &Path, wasm: bool, extra: &[String]) -> Leg {
     let port = free_port();
     let mut c = Command::new(almide_bin());
-    c.arg("run").arg(limits_fixture());
+    c.arg("run").arg(fixture);
     if wasm {
         c.args(["--target", "wasm"]);
     }
-    c.arg("--").arg(port.to_string());
+    c.arg("--").arg(port.to_string()).args(extra);
     c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = c.spawn().expect("almide runs");
     let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
@@ -385,7 +421,7 @@ impl Leg {
 
 /// Sends `raw`, half-closes, and reads the answer to the server's close.
 fn ask_then_close(port: u16, raw: &[u8]) -> Vec<u8> {
-    let mut conn = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    let mut conn = connect_when_bound(port);
     conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     conn.write_all(raw).expect("send request");
     conn.shutdown(std::net::Shutdown::Write).expect("half-close");
@@ -437,11 +473,11 @@ fn a_huge_or_cut_content_length_is_refused_before_the_handler_and_a_chunked_body
         let huge = ask(leg.port, b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 99999999999\r\n\r\nabc");
         assert!(started.elapsed() < Duration::from_secs(10), "wasm={}: the 413 took {:?}", leg.wasm, started.elapsed());
         // The server keeps answering after it.
-        let after = ask(leg.port, b"GET /after HTTP/1.1\r\n\r\n");
+        let after = ask(leg.port, b"GET /after HTTP/1.1\r\nHost: a\r\n\r\n");
         // Fewer bytes than Content-Length, then the client's close.
-        let cut = ask_then_close(leg.port, b"POST /cut HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc");
+        let cut = ask_then_close(leg.port, b"POST /cut HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc");
         // A chunked request body, with a chunk extension and a trailer.
-        let chunked = ask(leg.port, b"POST /chunked HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2;x=y\r\nhe\r\n3\r\nllo\r\n0\r\nX-T: 1\r\n\r\n");
+        let chunked = ask(leg.port, b"POST /chunked HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n2;x=y\r\nhe\r\n3\r\nllo\r\n0\r\nX-T: 1\r\n\r\n");
         vec![huge, after, cut, chunked]
     });
     for (leg, answers) in [("native", &native), ("wasm", &wasm)] {
@@ -456,14 +492,39 @@ fn a_huge_or_cut_content_length_is_refused_before_the_handler_and_a_chunked_body
     }
 }
 
+/// C-405 (#4112): the header field lines RFC 9112 refuses are 400 on both
+/// legs before the handler runs, and a well-formed request after them is
+/// still served.
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn whitespace_before_a_header_colon_a_colon_less_line_and_obs_fold_are_400_on_native_and_the_embedded_lane() {
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| {
+        vec![
+            ask(leg.port, b"POST /space HTTP/1.1\r\nHost: a\r\nTransfer-Encoding : chunked\r\n\r\n0\r\n\r\n"),
+            ask(leg.port, b"GET /nocolon HTTP/1.1\r\nHost: a\r\nno colon here\r\n\r\n"),
+            ask(leg.port, b"GET /fold HTTP/1.1\r\nHost: a\r\nX-A: 1\r\n folded: 2\r\n\r\n"),
+            ask(leg.port, b"GET /after HTTP/1.1\r\nHost: a\r\nX-A:\t1 \r\n\r\n"),
+        ]
+    });
+    for (leg, answers) in [("native", &native), ("wasm", &wasm)] {
+        for (i, a) in answers[..3].iter().enumerate() {
+            assert!(head_of(a).starts_with("HTTP/1.1 400 "), "{leg} answer {i}: {:?}", head_of(a));
+        }
+        assert!(answers[3].ends_with(b"\r\n\r\nGET /after "), "{leg}: {:?}", String::from_utf8_lossy(&answers[3]));
+    }
+    for err in [&n_err, &w_err] {
+        assert_eq!(line_multiset(err), vec!["GET /after"], "{err:?}");
+    }
+}
+
 #[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
 #[test]
 fn head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meets_connection_close_on_native_and_the_embedded_lane() {
     let (native, wasm, _, _) = on_both_legs(&[0], |leg| {
         vec![
             ask(leg.port, b"HEAD /x HTTP/1.1\r\nHost: a\r\n\r\n"),
-            ask(leg.port, b"GET /429 HTTP/1.1\r\n\r\n"),
-            ask(leg.port, b"GET /503 HTTP/1.1\r\n\r\n"),
+            ask(leg.port, b"GET /429 HTTP/1.1\r\nHost: a\r\n\r\n"),
+            ask(leg.port, b"GET /503 HTTP/1.1\r\nHost: a\r\n\r\n"),
             ask(leg.port, b"GET /a HTTP/1.1\r\nHost: a\r\n\r\nGET /b HTTP/1.1\r\nHost: a\r\n\r\n"),
         ]
     });
@@ -488,7 +549,7 @@ fn head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meet
 #[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
 #[test]
 fn a_response_header_holding_crlf_is_refused_with_500_on_native_and_the_embedded_lane() {
-    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| vec![ask(leg.port, b"GET /split HTTP/1.1\r\n\r\n"), ask(leg.port, b"GET /fine HTTP/1.1\r\n\r\n")]);
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| vec![ask(leg.port, b"GET /split HTTP/1.1\r\nHost: a\r\n\r\n"), ask(leg.port, b"GET /fine HTTP/1.1\r\nHost: a\r\n\r\n")]);
     for (leg, a, err) in [("native", &native, &n_err), ("wasm", &wasm, &w_err)] {
         let resp = String::from_utf8_lossy(&a[0]);
         assert!(resp.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "{leg}: {resp:?}");
@@ -511,28 +572,100 @@ fn a_response_header_holding_crlf_is_refused_with_500_on_native_and_the_embedded
 #[test]
 fn a_bad_status_or_field_is_refused_and_the_handlers_framing_fields_are_dropped_on_native_and_the_embedded_lane() {
     const REFUSED: &[(&[u8], &str)] = &[
-        (b"GET /s42 HTTP/1.1\r\n\r\n", "response status 42 is not a final status code"),
-        (b"GET /s103 HTTP/1.1\r\n\r\n", "response status 103 is not a final status code"),
-        (b"GET /s600 HTTP/1.1\r\n\r\n", "response status 600 is not a final status code"),
-        (b"GET /hname HTTP/1.1\r\n\r\n", "response header name \"a b\" is not a token"),
-        (b"GET /hctl HTTP/1.1\r\n\r\n", "response header X-C has a control character in its value"),
+        (b"GET /s42 HTTP/1.1\r\nHost: a\r\n\r\n", "response status 42 is not a final status code"),
+        (b"GET /s103 HTTP/1.1\r\nHost: a\r\n\r\n", "response status 103 is not a final status code"),
+        (b"GET /s600 HTTP/1.1\r\nHost: a\r\n\r\n", "response status 600 is not a final status code"),
+        (b"GET /hname HTTP/1.1\r\nHost: a\r\n\r\n", "response header name \"a b\" is not a token"),
+        (b"GET /hctl HTTP/1.1\r\nHost: a\r\n\r\n", "response header X-C has a control character in its value"),
     ];
     let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| {
         let mut out: Vec<Vec<u8>> = REFUSED.iter().map(|(r, _)| ask(leg.port, r)).collect();
-        out.push(ask(leg.port, b"GET /hframe HTTP/1.1\r\n\r\n"));
+        out.push(ask(leg.port, b"GET /hframe HTTP/1.1\r\nHost: a\r\n\r\n"));
         out
     });
     for (leg, a, err) in [("native", &native, &n_err), ("wasm", &wasm, &w_err)] {
         for (i, (_, why)) in REFUSED.iter().enumerate() {
             let resp = String::from_utf8_lossy(&a[i]);
             assert!(resp.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "{leg} {i}: {resp:?}");
-            assert!(resp.ends_with(&format!("\r\n\r\nInternal error: {why}")), "{leg} {i}: {resp:?}");
+            assert!(resp.ends_with("\r\n\r\nInternal Server Error"), "{leg} {i}: {resp:?}");
             assert!(err.lines().any(|l| l == format!("http.serve: refused the response: {why}")), "{leg} {i}: no stderr line: {err:?}");
         }
         let framed = String::from_utf8_lossy(&a[REFUSED.len()]);
-        assert_eq!(framed, "HTTP/1.1 200 OK\r\nX-Kept: 1\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello", "{leg}");
+        assert_eq!(framed, "HTTP/1.1 200 OK\r\nX-Kept: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello", "{leg}");
     }
     assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
+}
+
+/// A client that sends `head` one byte every `gap` (stopping once the server
+/// has answered or after `give_up`), then reads the answer to the close.
+/// Answers the answer and how long after connecting it was whole. The
+/// client stops writing as soon as bytes arrive, so its own late bytes never
+/// turn the server's close into a reset that would discard the answer.
+fn trickle_head(port: u16, head: &[u8], gap: Duration, give_up: Duration) -> (Vec<u8>, Duration) {
+    let mut conn = connect_when_bound(port);
+    let started = Instant::now();
+    for b in head {
+        if started.elapsed() > give_up || conn.write_all(&[*b]).is_err() {
+            break;
+        }
+        std::thread::sleep(gap);
+        conn.set_nonblocking(true).expect("nonblocking");
+        let answered = !matches!(conn.peek(&mut [0u8; 1]), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock);
+        conn.set_nonblocking(false).expect("blocking");
+        if answered {
+            break;
+        }
+    }
+    conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
+    let mut out = Vec::new();
+    let _ = conn.read_to_end(&mut out);
+    (out, started.elapsed())
+}
+
+/// The slowloris shape (#4021): one client sends its request head one byte
+/// every 100 ms and never finishes it. A second client's request is answered
+/// at once, not after the slow one; the slow one is answered `408` once the
+/// 10 s request-head deadline has passed, and the handler never sees it.
+/// The two legs run at the same time (each takes the deadline's 10 s).
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_client_trickling_its_head_does_not_stall_the_next_client_and_is_answered_408_at_the_header_deadline_on_native_and_the_embedded_lane() {
+    let runs: Vec<_> = [false, true]
+        .into_iter()
+        .map(|wasm| {
+            std::thread::spawn(move || {
+                let leg = boot_limits(wasm);
+                let port = leg.port;
+                let head: Vec<u8> = b"GET /slow HTTP/1.1\r\nHost: a\r\nX-Pad: ".iter().copied().chain(std::iter::repeat_n(b'a', 400)).collect();
+                let slow = std::thread::spawn(move || trickle_head(port, &head, Duration::from_millis(100), Duration::from_secs(20)));
+                std::thread::sleep(Duration::from_millis(500));
+                let t = Instant::now();
+                let fast = ask(port, b"GET /fast HTTP/1.1\r\nHost: a\r\n\r\n");
+                let fast_took = t.elapsed();
+                let (slow, slow_took) = slow.join().expect("the slow client finished");
+                (fast, fast_took, slow, slow_took, leg.stop())
+            })
+        })
+        .collect();
+    let mut answers = Vec::new();
+    for (run, leg) in runs.into_iter().zip(["native", "wasm"]) {
+        let (fast, fast_took, slow, slow_took, err) = run.join().expect("the leg finished");
+        assert!(fast.ends_with(b"\r\n\r\nGET /fast "), "{leg}: {:?}", String::from_utf8_lossy(&fast));
+        assert!(fast_took < Duration::from_secs(2), "{leg}: the second client waited {fast_took:?} behind the slow one");
+        assert!(head_of(&slow).starts_with("HTTP/1.1 408 Request Timeout\r\n"), "{leg}: {:?}", String::from_utf8_lossy(&slow));
+        assert!(
+            slow_took >= Duration::from_millis(9_900) && slow_took < Duration::from_secs(15),
+            "{leg}: the slow client was answered after {slow_took:?}, not at the 10 s header deadline"
+        );
+        assert_eq!(line_multiset(&err), vec!["GET /fast"], "{leg}: {err:?}");
+        answers.push((fast, slow));
+    }
+    for i in 0..2 {
+        let (a, b) = if i == 0 { (&answers[0].0, &answers[1].0) } else { (&answers[0].1, &answers[1].1) };
+        if let Err(diff) = same_answer(a, b) {
+            panic!("answer {i} differs across the legs:\n{diff}");
+        }
+    }
 }
 
 /// The comparator itself, on constructed responses: it must reject every
@@ -628,7 +761,33 @@ fn serve_to_file(wasm: bool, what: &str) -> Served {
 fn launch_to_file(what: &str) -> Served {
     let mut c = Command::new(almide_bin());
     c.arg("run").arg(shutdown_fixture()).arg("--");
+    // The launch a terminal makes: SIGINT at its default disposition. An
+    // ignored SIGINT is inherited across fork and exec, and `http.serve`
+    // keeps a signal it was started with ignored (a non-interactive `&`, a
+    // `nohup`) ignored — so a test process started with SIGINT ignored
+    // (#4213: under `cargo test` on a Linux CI runner) handed that to the
+    // server, and the group's Ctrl-C below was never seen.
+    // SAFETY: `signal` is async-signal-safe and touches no Rust state.
+    unsafe {
+        c.pre_exec(|| {
+            sig_default(SIGINT);
+            Ok(())
+        });
+    }
     serve_cmd_to_file(c, false, what)
+}
+
+const SIGINT: i32 = 2;
+
+/// Reset `sig` to its default disposition (`SIG_DFL` is 0 on every Unix).
+fn sig_default(sig: i32) {
+    unsafe extern "C" {
+        fn signal(sig: i32, handler: usize) -> usize;
+    }
+    // SAFETY: SIG_DFL is a valid disposition for every catchable signal.
+    unsafe {
+        signal(sig, 0);
+    }
 }
 
 fn serve_cmd_to_file(mut c: Command, wasm: bool, what: &str) -> Served {
@@ -647,7 +806,7 @@ fn serve_cmd_to_file(mut c: Command, wasm: bool, what: &str) -> Served {
         kill_group(&mut child);
         panic!("wasm={wasm}: expected the ready line, got {first:?}");
     }
-    let hello = ask(port, b"GET /hello HTTP/1.1\r\n\r\n");
+    let hello = ask(port, b"GET /hello HTTP/1.1\r\nHost: a\r\n\r\n");
     assert!(hello.ends_with(b"\r\n\r\nok /hello"), "wasm={wasm}: {:?}", String::from_utf8_lossy(&hello));
     Served { child, out, port }
 }
@@ -693,7 +852,7 @@ fn a_sigterm_drains_the_request_in_flight_flushes_stdout_and_returns_from_serve_
     for wasm in [false, true] {
         let mut served = serve_to_file(wasm, "drain");
         // `/nap` sleeps 1 s in the handler; the signal lands inside it.
-        let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+        let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\nHost: a\r\n\r\n");
         std::thread::sleep(Duration::from_millis(300));
         sigterm(&served.child);
         let code = exit_code_within(&mut served, 20);
@@ -714,7 +873,7 @@ fn a_second_sigterm_during_the_drain_flushes_stdout_and_exits_1_on_native_and_th
     for wasm in [false, true] {
         let mut served = serve_to_file(wasm, "force");
         // `/stall` sleeps 60 s: only the second signal ends the run.
-        let stall = ask_in_background(served.port, b"GET /stall HTTP/1.1\r\n\r\n");
+        let stall = ask_in_background(served.port, b"GET /stall HTTP/1.1\r\nHost: a\r\n\r\n");
         std::thread::sleep(Duration::from_millis(300));
         sigterm(&served.child);
         std::thread::sleep(Duration::from_millis(300));
@@ -753,7 +912,7 @@ fn a_sigterm_to_the_almide_run_pid_alone_drains_the_program_and_leaves_no_proces
     let pgid = served.child.id();
     // The control: the orphan probe below sees a live group.
     assert!(group_alive(pgid), "the orphan probe does not see the running server's group");
-    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\nHost: a\r\n\r\n");
     std::thread::sleep(Duration::from_millis(300));
     // The launcher's pid ONLY, as a supervisor holding it sends it.
     assert!(signal(&pgid.to_string(), "-TERM"), "could not signal the launcher");
@@ -777,7 +936,7 @@ fn a_sigterm_to_the_almide_run_pid_alone_drains_the_program_and_leaves_no_proces
 fn a_sigint_to_the_almide_run_group_drains_once_and_is_not_a_forced_stop() {
     let mut served = launch_to_file("launcher-int");
     let pgid = served.child.id();
-    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\nHost: a\r\n\r\n");
     std::thread::sleep(Duration::from_millis(300));
     assert!(signal(&format!("-{pgid}"), "-INT"), "could not signal the run's group");
     let code = exit_code_within(&mut served, 20);
@@ -787,4 +946,303 @@ fn a_sigint_to_the_almide_run_group_drains_once_and_is_not_a_forced_stop() {
     assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n");
     assert_eq!(code, Some(0), "almide run's exit code");
     assert!(!group_alive(pgid), "a process of the run outlived `almide run`");
+}
+
+// ── A runtime abort inside the handler (#4203) ──
+//
+// `spec/serve_cross/http_serve_abort.almd` indexes a 3-element list by the
+// request body's length and panics on the body `P`. An abort fails only its
+// request on both legs: the fixed C-409 500, one stderr line naming the
+// request and the abort, and the next request is served.
+
+fn abort_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_abort.almd")
+}
+
+fn post(body: &str) -> Vec<u8> {
+    format!("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: {}\r\n\r\n{}", body.len(), body).into_bytes()
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn an_abort_in_the_handler_fails_only_its_request_on_native_and_the_embedded_lane() {
+    const BODIES: [&str; 5] = ["X", "XXXXX", "X", "P", "X"];
+    let run = |wasm: bool| {
+        let mut leg = boot_at(&abort_fixture(), wasm);
+        let answers: Vec<Vec<u8>> = BODIES.iter().map(|b| ask(leg.port, &post(b))).collect();
+        let alive = leg.child.try_wait().expect("try_wait").is_none();
+        (answers, alive, leg.stop())
+    };
+    let (native, n_alive, n_err) = run(false);
+    let (wasm, w_alive, w_err) = run(true);
+    for (leg, answers, alive, err) in [("native", &native, n_alive, &n_err), ("wasm", &wasm, w_alive, &w_err)] {
+        let text: Vec<String> = answers.iter().map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        for i in [0, 2, 4] {
+            assert!(text[i].starts_with("HTTP/1.1 200 ") && text[i].ends_with("\r\n\r\nval=20"), "{leg} answer {i}: {:?}", text[i]);
+        }
+        for (i, id) in [(1, "254cfecc"), (3, "b533f7a4")] {
+            assert!(
+                text[i].starts_with("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n")
+                    && text[i].ends_with(&format!("\r\n\r\nInternal Server Error (request {id})")),
+                "{leg} answer {i}: {:?}",
+                text[i]
+            );
+            assert!(!text[i].contains("bounds") && !text[i].contains("boom"), "{leg}: the abort text reached the client: {:?}", text[i]);
+        }
+        assert!(alive, "{leg}: the server ended");
+        assert_eq!(
+            err.lines().collect::<Vec<_>>(),
+            [
+                "http.serve: request 254cfecc: handler aborted: \"index out of bounds\"",
+                "http.serve: request b533f7a4: handler aborted: \"PANIC: boom \\\"quoted\\\"\"",
+            ],
+            "{leg}: stderr after the ready line"
+        );
+    }
+    for (i, (n, w)) in native.iter().zip(&wasm).enumerate() {
+        assert_eq!(n, w, "answer {i} differs byte for byte across the legs");
+    }
+    assert_eq!(n_err, w_err, "the stderr transcripts differ");
+}
+
+/// A request whose server may end while answering: whatever arrived, an
+/// empty answer when the connection failed or was reset.
+fn ask_lossy(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = connect_when_bound(port);
+    let _ = conn.set_read_timeout(Some(Duration::from_secs(60)));
+    let _ = conn.write_all(raw);
+    let mut out = Vec::new();
+    let _ = conn.read_to_end(&mut out);
+    out
+}
+
+/// The leg's exit code within `secs`, or a failed test.
+fn leg_exit_within(leg: &mut Leg, secs: u64) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(status) = leg.child.try_wait().expect("poll the server") {
+            return status.code();
+        }
+        if Instant::now() >= deadline {
+            kill_group(&mut leg.child);
+            panic!("wasm={}: the server was still running {secs} s after the request that ends it", leg.wasm);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_program_that_prints_an_error_line_and_exits_1_in_its_handler_is_not_contained_on_native_and_the_embedded_lane() {
+    // `E` prints `Error: x` itself and calls `process.exit(1)`: the bytes of
+    // an abort, but the program's own exit, so it ends the server on both legs.
+    let run = |wasm: bool| {
+        let mut leg = boot_at(&abort_fixture(), wasm);
+        let served = ask(leg.port, &post("X"));
+        let _ = ask_lossy(leg.port, &post("E"));
+        let code = leg_exit_within(&mut leg, 20);
+        let mut rest = String::new();
+        let _ = leg.err.read_to_string(&mut rest);
+        (served, code, rest)
+    };
+    let (n_served, n_code, n_err) = run(false);
+    let (w_served, w_code, w_err) = run(true);
+    for (leg, served, code, err) in [("native", &n_served, n_code, &n_err), ("wasm", &w_served, w_code, &w_err)] {
+        assert!(served.ends_with(b"\r\n\r\nval=20"), "{leg}: {:?}", String::from_utf8_lossy(served));
+        assert_eq!(code, Some(1), "{leg}: the exit code");
+        assert_eq!(err.as_str(), "Error: x\n", "{leg}: stderr after the ready line");
+    }
+    assert_eq!(n_err, w_err);
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn an_abort_closes_the_socket_its_handler_opened_on_native_and_the_embedded_lane() {
+    // `L` listens on one fixed port and then aborts. Each abort must close
+    // that listener, or the next `L` cannot listen there again (its handler
+    // would answer an err instead of aborting) — a leaked descriptor per
+    // abort, which a client could repeat until the server ran out of them.
+    const N: usize = 8;
+    let run = |wasm: bool| {
+        let held = free_port();
+        let leg = boot_with(&abort_fixture(), wasm, &[held.to_string()]);
+        let answers: Vec<Vec<u8>> = (0..N).map(|_| ask(leg.port, &post("L"))).collect();
+        let served = ask(leg.port, &post("X"));
+        (answers, served, leg.stop())
+    };
+    let (native, n_served, n_err) = run(false);
+    let (wasm, w_served, w_err) = run(true);
+    for (leg, answers, served, err) in [("native", &native, &n_served, &n_err), ("wasm", &wasm, &w_served, &w_err)] {
+        for a in answers.iter() {
+            assert!(a.ends_with(b"\r\n\r\nInternal Server Error (request b933fdf0)"), "{leg}: {:?}", String::from_utf8_lossy(a));
+        }
+        assert!(served.ends_with(b"\r\n\r\nval=20"), "{leg}: {:?}", String::from_utf8_lossy(served));
+        let aborted = err.lines().filter(|l| *l == "http.serve: request b933fdf0: handler aborted: \"index out of bounds\"").count();
+        assert_eq!(aborted, N, "{leg}: every `L` must abort, none may fail to listen:\n{err}");
+    }
+    for (i, (n, w)) in native.iter().zip(&wasm).enumerate() {
+        assert_eq!(n, w, "answer {i} differs across the legs");
+    }
+    assert_eq!(n_err, w_err, "the stderr transcripts differ");
+}
+
+/// Peak RSS in bytes of an embedded-lane server that answers `aborts`
+/// requests of `B` (each builds a 50 000-element list and then aborts) and
+/// then stops on SIGTERM; None when no `time` can report it.
+fn serve_peak_rss(aborts: usize) -> Option<u64> {
+    let (flag, key, scale) = if cfg!(target_os = "macos") {
+        ("-l", "maximum resident set size", 1)
+    } else {
+        ("-v", "Maximum resident set size (kbytes):", 1024)
+    };
+    if !Path::new("/usr/bin/time").exists() {
+        return None;
+    }
+    let port = free_port();
+    let time = Command::new("/usr/bin/time")
+        .arg(flag)
+        .arg(almide_bin())
+        .arg("run")
+        .arg(abort_fixture())
+        .args(["--target", "wasm", "--"])
+        .arg(port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run /usr/bin/time");
+    for _ in 0..aborts {
+        let a = ask(port, &post("B"));
+        assert!(a.starts_with(b"HTTP/1.1 500 "), "{:?}", String::from_utf8_lossy(&a));
+    }
+    // SIGTERM to the server (time's child): it drains and returns from serve.
+    let kids = Command::new("pgrep").arg("-P").arg(time.id().to_string()).output().expect("pgrep");
+    let server = String::from_utf8_lossy(&kids.stdout).trim().to_string();
+    assert!(signal(&server, "-TERM"), "could not signal the server {server:?}");
+    let out = time.wait_with_output().expect("wait for /usr/bin/time");
+    let err = String::from_utf8_lossy(&out.stderr);
+    let line = err.lines().find(|l| l.contains(key))?;
+    let n: u64 = line.split_whitespace().find_map(|w| w.parse().ok())?;
+    Some(n * scale)
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_run_of_handler_aborts_does_not_grow_the_embedded_servers_memory() {
+    // A contained abort puts the instance back to its state when serving
+    // began, so what the aborted handler allocated is taken back: six times
+    // the aborts must not cost anything like six times the memory.
+    let Some(small) = serve_peak_rss(40) else {
+        eprintln!("no /usr/bin/time that reports peak RSS here; nothing measured");
+        return;
+    };
+    let large = serve_peak_rss(240).expect("the second measurement");
+    eprintln!("peak RSS: {} MB at 40 aborts, {} MB at 240", small >> 20, large >> 20);
+    assert!(large < small * 2, "6x the aborts took {} MB of peak RSS against {} MB", large >> 20, small >> 20);
+}
+
+// ── Out of memory inside the handler is never contained (row 1) ──
+//
+// `spec/serve_cross/http_serve_oom.almd` serves `X`, contains the
+// out-of-bounds abort of `XXXXX`, and on `O` builds lists until an allocation
+// is refused. An allocation that fails part-way through a handler leaves what
+// it was building half made, so it is never contained (row 1 of the security
+// table, C-434): the run ends with C-197's line and exit 1 on both legs, and
+// `O` gets no answer. Natively the built binary runs under `ulimit -v` — 1 GiB
+// of address space, glibc held to two arenas so the limit is spent on the
+// lists, not on per-thread arenas — where the first 1.6 GB list is refused;
+// the embedded lane's store refuses the growth past its 4 GiB.
+//
+// Negative control: with the native out-of-memory sites back on the
+// containable `almide_abort` (or the embedded host's `!oom` dropped from
+// `serve_contained`'s `ended`), `O` is answered with the fixed 500 and the
+// server keeps running, and this test fails on that leg.
+
+#[cfg(target_os = "linux")]
+fn oom_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_oom.almd")
+}
+
+/// The native binary of the out-of-memory fixture, built once per test process.
+#[cfg(target_os = "linux")]
+fn oom_binary() -> PathBuf {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let bin = scratch("oom-bin").join("http_serve_oom");
+        let out = Command::new(almide_bin())
+            .arg("build")
+            .arg(oom_fixture())
+            .arg("-o")
+            .arg(&bin)
+            .stdin(Stdio::null())
+            .output()
+            .expect("almide build runs");
+        assert!(out.status.success(), "almide build failed: {}", String::from_utf8_lossy(&out.stderr));
+        bin
+    })
+    .clone()
+}
+
+/// A leg of the out-of-memory fixture: natively the built binary under a
+/// 1 GiB address-space limit, on the embedded lane `almide run --target wasm`.
+#[cfg(target_os = "linux")]
+fn boot_oom(wasm: bool) -> Leg {
+    let port = free_port();
+    let mut c = if wasm {
+        let mut c = Command::new(almide_bin());
+        c.arg("run").arg(oom_fixture()).args(["--target", "wasm", "--"]).arg(port.to_string());
+        c
+    } else {
+        // bash, as tests/fan_spawn_failure_test.rs runs its `ulimit -u`.
+        let mut c = Command::new("bash");
+        c.arg("-c").arg("ulimit -v 1048576 && exec \"$0\" \"$1\"").arg(oom_binary()).arg(port.to_string());
+        c.env("MALLOC_ARENA_MAX", "2");
+        c
+    };
+    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = c.spawn().expect("the server runs");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    if first != "ready\n" {
+        let mut rest = String::new();
+        let _ = err.read_to_string(&mut rest);
+        kill_group(&mut child);
+        panic!("wasm={wasm}: expected the ready line, got {first:?}{rest}");
+    }
+    Leg { child, port, err, wasm }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn out_of_memory_in_the_handler_ends_the_run_on_native_and_the_embedded_lane() {
+    let run = |wasm: bool| {
+        let mut leg = boot_oom(wasm);
+        let served = ask(leg.port, &post("X"));
+        let aborted = ask(leg.port, &post("XXXXX"));
+        let oom = ask_lossy(leg.port, &post("O"));
+        let code = leg_exit_within(&mut leg, 120);
+        let mut rest = String::new();
+        let _ = leg.err.read_to_string(&mut rest);
+        (served, aborted, oom, code, rest)
+    };
+    let (n_served, n_aborted, n_oom, n_code, n_err) = run(false);
+    let (w_served, w_aborted, w_oom, w_code, w_err) = run(true);
+    for (leg, served, aborted, oom, code, err) in [
+        ("native", &n_served, &n_aborted, &n_oom, n_code, &n_err),
+        ("wasm", &w_served, &w_aborted, &w_oom, w_code, &w_err),
+    ] {
+        assert!(served.ends_with(b"\r\n\r\nval=20"), "{leg}: {:?}", String::from_utf8_lossy(served));
+        // Control: an abort that is not out of memory is still contained.
+        assert!(aborted.starts_with(b"HTTP/1.1 500 "), "{leg}: {:?}", String::from_utf8_lossy(aborted));
+        assert!(oom.is_empty(), "{leg}: the out-of-memory request was answered: {:?}", String::from_utf8_lossy(oom));
+        assert_eq!(code, Some(1), "{leg}: the exit code");
+        assert_eq!(
+            err.lines().collect::<Vec<_>>(),
+            ["http.serve: request 254cfecc: handler aborted: \"index out of bounds\"", "Error: out of memory"],
+            "{leg}: stderr after the ready line"
+        );
+    }
+    assert_eq!(n_err, w_err, "the stderr transcripts differ");
 }

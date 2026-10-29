@@ -34,7 +34,7 @@ set.from_list([1, 2, 3])
 3
 ```
 
-### `set.insert(s: Set[A], value: A) -> Set[A]`
+### `set.insert(s: Set[A], x: A) -> Set[A]`
 
 Add a value to the set. Returns a new set.
 
@@ -51,7 +51,7 @@ set.from_list([1, 2, 3])
 set.from_list([1, 2, 3, 42])
 ```
 
-### `set.remove(s: Set[A], value: A) -> Set[A]`
+### `set.remove(s: Set[A], x: A) -> Set[A]`
 
 Remove a value from the set. Returns a new set.
 
@@ -68,7 +68,7 @@ set.from_list([1, 42])
 set.from_list([1])
 ```
 
-### `set.contains(s: Set[A], value: A) -> Bool`
+### `set.contains(s: Set[A], x: A) -> Bool`
 
 Check if a value is in the set.
 
@@ -298,7 +298,7 @@ false
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (19 functions)
+## Signature index (42 functions)
 
 ```
 // An empty Set[A].
@@ -309,17 +309,17 @@ set.new() -> Set[A]
 // @since 0.8.0 or earlier
 set.from_list(xs: List[A]) -> Set[A]
 
-// Copy with value appended; unchanged if present.
+// Copy with x appended; unchanged if present.
 // @since 0.8.0 or earlier
-set.insert(s: Set[A], value: A) -> Set[A]
+set.insert(s: Set[A], x: A) -> Set[A]
 
-// Copy without value; unchanged if absent.
+// Copy without x; unchanged if absent.
 // @since 0.8.0 or earlier
-set.remove(s: Set[A], value: A) -> Set[A]
+set.remove(s: Set[A], x: A) -> Set[A]
 
-// true when value is a member.
+// true when x is a member.
 // @since 0.8.0 or earlier
-set.contains(s: Set[A], value: A) -> Bool
+set.contains(s: Set[A], x: A) -> Bool
 
 // Member count; 0 for an empty set.
 // @since 0.8.0 or earlier
@@ -376,6 +376,98 @@ set.any(s: Set[A], f: (A) -> Bool) -> Bool
 // true if f holds for every member; true if empty.
 // @since 0.9.0 or earlier
 set.all(s: Set[A], f: (A) -> Bool) -> Bool
+
+// Number of members where f holds.
+// @since unreleased
+set.count(s: Set[A], f: (A) -> Bool) -> Int
+
+// First member, in insertion order, where f holds, or none.
+// @since unreleased
+set.find(s: Set[A], f: (A) -> Bool) -> Option[A]
+
+// Removes every member of s in place.
+// @since unreleased
+set.clear(mut s: Set[A]) -> Unit
+
+// (index, member) pairs in insertion order, index from 0.
+// @since unreleased
+set.enumerate(s: Set[A]) -> List[(Int, A)]
+
+// Members paired with ys by position; stops at the shorter.
+// @since unreleased
+set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]
+
+// f over (member, ys element) pairs; stops at the shorter.
+// @since unreleased
+set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]
+
+// The somes f gives, in insertion order.
+// @since unreleased
+set.filter_map(s: Set[A], f: (A) -> Option[B]) -> List[B]
+
+// The first some f gives, or none; f is not called after the hit.
+// @since unreleased
+set.find_map(s: Set[A], f: (A) -> Option[B]) -> Option[B]
+
+// Left fold seeded by the first member; none when empty.
+// @since unreleased
+set.reduce(s: Set[A], f: (A, A) -> A) -> Option[A]
+
+// Running fold values in insertion order, init excluded.
+// @since unreleased
+set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]
+
+// (members where f holds, the rest), insertion order kept.
+// @since unreleased
+set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])
+
+// Key f(x) -> members; keys in first-seen order.
+// @since unreleased
+set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]
+
+// Members in ascending order; Floats in IEEE totalOrder.
+// @since unreleased
+set.sort(s: Set[A]) -> List[A]
+
+// Members sorted by key f(x), stable; f runs once per member.
+// @since unreleased
+set.sort_by(s: Set[A], f: (A) -> B) -> List[A]
+
+// Members sorted by cmp, stable: negative puts a first.
+// @since unreleased
+set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]
+
+// Least member, or none when empty.
+// @since unreleased
+set.min(s: Set[A]) -> Option[A]
+
+// Greatest member, or none when empty.
+// @since unreleased
+set.max(s: Set[A]) -> Option[A]
+
+// Member with the least key f(x); the first on ties.
+// @since unreleased
+set.min_by(s: Set[A], f: (A) -> K) -> Option[A]
+
+// Member with the greatest key f(x); the first on ties.
+// @since unreleased
+set.max_by(s: Set[A], f: (A) -> K) -> Option[A]
+
+// Least member by cmp; the first on ties.
+// @since unreleased
+set.min_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Greatest member by cmp; the first on ties.
+// @since unreleased
+set.max_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Sum of the elements; 0 when empty; integers wrap on overflow.
+// @since unreleased
+set.sum(s: Set[A]) -> A
+
+// Product of the elements; 1 when empty; integers wrap on overflow.
+// @since unreleased
+set.product(s: Set[A]) -> A
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -1,0 +1,60 @@
+// @contract: C-400
+// json.parse refuses a string that RFC 8259 or I-JSON (RFC 7493 §2.1) does
+// not allow, with one err text per case on every leg (almide/almide#4111).
+// The parser used to DELETE a lone surrogate and an unknown escape, so
+// `ad\ud800min` and `ad\qmin` decoded to `admin`: a filter that reads the raw
+// text and the program that reads the decoded value saw two different
+// strings. Each refusal names the CHAR index where the bad part starts (the
+// backslash of an escape, the opening quote of an unterminated string).
+import json
+
+fn s(text: String) -> String = match json.parse(text) {
+  ok(v) => "ok " + json.stringify(v),
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  // The bypass shapes from #4111: nothing is ever deleted.
+  println(s('{"user":"ad\\ud800min"}'))
+  println(s('{"user":"ad\\udc00min"}'))
+  println(s('{"user":"ad\\qmin"}'))
+  println(s('"abc'))
+  // A high surrogate followed by something other than a low one.
+  println(s('"\\ud800\\u0041"'))
+  println(s('"\\ud800\\ud800"'))
+  println(s('"\\udbff"'))
+  // The pair joins; a low surrogate first does not.
+  println(s('"\\ud83d\\ude00"'))
+  println(s('"\\ude00\\ud83d"'))
+  // \u needs four hex digits.
+  println(s('"\\u12"'))
+  println(s('"\\u12G4"'))
+  println(s('"\\U0041"'))
+  // Every escape RFC 8259 lists, and three it does not.
+  println(s('"\\"\\\\\\/\\b\\f\\n\\r\\t\\u00e9"'))
+  println(s('"\\a"'))
+  println(s('"\\x41"'))
+  println(s('"\\\'"'))
+  // A raw control character must be escaped; DEL need not be.
+  println(s('"a\u{1}b"'))
+  println(s('"a\nb"'))
+  println(s('"a\tb"'))
+  println(s('"a\u{7F}b"'))
+  // A backslash or nothing at the end of the input.
+  println(s('"abc\\'))
+  println(s('"abc\\u'))
+  println(s('"'))
+  // I-JSON noncharacters, escaped or raw, and their neighbours.
+  println(s('"\\ufdd0"'))
+  println(s('"\\ufffe"'))
+  println(s('"\\uffff"'))
+  println(s('"\\ud83f\\udffe"'))
+  println(s('"x\u{FDEF}"'))
+  println(s('"\u{10FFFF}"'))
+  println(s('"\\ufdcf\\ufdf0\\ufffd"'))
+  // Keys are strings: the same rules, the same texts.
+  println(s('{"k\\ud800":1}'))
+  println(s('{"k\\q":1}'))
+  // Positions count chars, not bytes.
+  println(s('["日本語","\\ud800"]'))
+}

@@ -164,3 +164,65 @@ fn call_modes_examples() {
         ],
     );
 }
+
+#[test]
+fn bounds_examples() {
+    verdicts(
+        Property::Bounds,
+        &[
+            // BoundsCert.v
+            ("c0 a0 c1 a1 w0 w1", true),
+            ("L{ s0 c0 a0 } ; B{ c3 | c3 a3 } a3", true),
+            ("c0 s0 a0", false),
+            ("c0 ; a0", false),
+            ("B{ c0 | } a0", false),
+            ("c0 a0 x", false),
+            ("c a0", false),
+            ("L{ c0 a0", false),
+            ("c0 a0 }", false),
+            ("c007 a7", true),
+            ("c0a0", true),
+            ("", true),
+            (";", true),
+            ("L {c0}", false),
+            ("c0 | a0", false),
+            // #4005: what the structural emitter writes, and its lost-check drills
+            ("c0 a0 c1 a1 w0 w1 s0 s1;c0 a0 c1 a1", true),
+            ("a0", false),
+            ("c0 a0 s0 a0", false),
+            ("w0 w1 c2 a2", false),
+        ],
+    );
+}
+
+#[test]
+fn init_examples() {
+    verdicts(
+        Property::Init,
+        &[
+            // InitCert.v
+            ("h12 w8 n2 r0 s0 s1 ; h12w4n1r3s0", true),
+            ("h12 w8 n3 r0 s0 s1 s2", true),
+            ("", true),
+            ("h12 w8 n0 r0", true),
+            ("h12 w8 n3 r0 s0 s2", false),
+            ("h12 w8 n2 r0 s0 s1 s2", false),
+            ("h12 w0 n0 r0", false),
+            ("h12 w8 n1 r0 s0 x", false),
+            ("h12 n1 w8 r0 s0", false),
+            ("h12 w8 n1 r0 s", false),
+            ("h0 w8 n0 r0", false),
+            ("h 12 w8 n0 r0", false),
+            ("h12 w8 n1 r0 s0 ;", true),
+            ("h012 w8 n01 r0 s000", true),
+            (";", false),
+            // loop fills (fill_bytes)
+            ("h12 w8 v4 r0 f4 t8", true),
+            ("h12 w8 v4 r0 f4 t8 ; h12 w8 n1 r0 s0", true),
+            ("h12 w8 v4 r0 f5 t8", false),
+            ("h12 w8 v4 r0 f4 t16", false),
+            ("h12 w8 v4 r0 f4 t8 s0", false),
+            ("h12 w8 v4 r0 f4", false),
+        ],
+    );
+}

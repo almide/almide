@@ -243,13 +243,21 @@ def clock_iface(module: str, units: list[str], clock_type: str) -> dict:
     missing = [u for u in units if u not in UNIT_WORDS] + ([module] if module not in CLOCK_WORDS else [])
     if missing:
         raise SystemExit(f"error: no doc words for {', '.join(missing)} — extend UNIT_WORDS / CLOCK_WORDS")
+    # The function form of the clock's Ord (R-duration-01 / R-compute-01), the
+    # one checker-resolved name beside the unit constructors.
+    compare = {
+        "name": "compare",
+        "params": [{"name": p, "type": {"kind": "named", "name": clock_type}} for p in ("a", "b")],
+        "return": {"kind": "int"},
+        "doc": "Negative if a < b, 0 if equal, positive if a > b.",
+    }
     return {
         "functions": [{
             "name": u,
             "params": [{"name": "n", "type": {"kind": "int"}}],
             "return": {"kind": "named", "name": clock_type},
             "doc": f"n {UNIT_WORDS[u]} of {CLOCK_WORDS[module]}; negative n aborts.",
-        } for u in units],
+        } for u in units] + [compare],
         "types": [],
     }
 

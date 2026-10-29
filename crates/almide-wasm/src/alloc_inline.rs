@@ -78,7 +78,9 @@ impl Emitter<'_> {
     /// through the inline bump when it applies and `$alloc` otherwise.
     /// `scratch` is a caller-held i32 local the fast arm may clobber.
     pub(crate) fn emit_alloc_fixed(&mut self, len: u32, scratch: u32) {
-        let inline = if self.in_region_pure_fn() { fixed_class(len) } else { None };
+        // Under the checked allocator every block takes `$alloc`, which
+        // lays its canary (checked_alloc.rs).
+        let inline = if self.in_region_pure_fn() && !crate::checked_alloc::armed() { fixed_class(len) } else { None };
         let Some((class, cap)) = inline else {
             self.f.instructions().i32_const(len as i32).call(F_ALLOC);
             return;

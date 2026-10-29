@@ -16,6 +16,14 @@ pub use almide_lang::stdlib_info::{
 /// user-facing doc page is user-facing.
 const NOT_USER_IMPORTABLE: &[&str] = &["prim"];
 
+/// Whether a user file may name `module` at all (E085 refuses the rest).
+/// The raw-pointer surface gate (`tests/raw_ptr_surface_test.rs`) reads the
+/// user-callable stdlib through this, so the floor `prim` — which mints a
+/// `RawPtr` from an `Int` — is excluded by the same declaration E085 uses.
+pub fn is_user_nameable_module(module: &str) -> bool {
+    !NOT_USER_IMPORTABLE.contains(&module)
+}
+
 /// Whether "Add `import X`" is the right hint for an unresolved `X`.
 ///
 /// This used to be a hand-written list of twelve names, and it had drifted
@@ -38,7 +46,7 @@ pub fn is_import_suggestable(name: &str) -> bool {
 }
 
 /// The whole auto-import surface: the resolver's Tier-1 set plus the bundled
-/// modules it loads eagerly. Kept as one predicate so callers cannot consult
+/// modules it loads on reach. Kept as one predicate so callers cannot consult
 /// half of it.
 fn is_auto_imported(name: &str) -> bool {
     crate::import_table::TIER1_ALWAYS_ACCESSIBLE.contains(&name)
@@ -56,6 +64,8 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("list", "list operations"),
     ("int", "integer utilities"),
     ("float", "floating-point utilities"),
+    ("bigint", "arbitrary-precision integers"),
+    ("bool", "boolean parsing and comparison"),
     ("bytes", "byte buffer operations"),
     ("matrix", "matrix operations"),
     ("fs", "file system operations"),
@@ -70,20 +80,25 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("io", "input/output"),
     ("result", "Result type utilities"),
     ("option", "Option type utilities"),
-    ("error", "error handling"),
     ("datetime", "date and time operations"),
     ("testing", "test assertion utilities"),
     ("value", "dynamic value operations"),
     ("set", "hash set operations"),
+    ("deque", "double-ended queue"),
+    ("heap", "priority queue (least first)"),
+    ("secret", "a value every renderer prints as Secret(***)"),
     ("args", "command-line arguments"),
     ("path", "file path manipulation"),
     ("base64", "Base64 encoding and decoding"),
     ("hex", "hexadecimal encoding and decoding"),
     ("hash", "non-cryptographic digests and SHA-256"),
     ("html", "HTML escaping and construction"),
-    ("net", "TCP sockets"),
+    ("net", "TCP and UDP sockets, name lookup and IP addresses"),
+    ("unix", "Unix-domain sockets and shared memory"),
+    ("uuid", "RFC 9562 identifiers (v4 random, v7 time-ordered)"),
     ("url", "URL parsing, building, and percent-encoding (RFC 3986-lite)"),
     ("zlib", "zlib compression and decompression"),
+    ("ffi", "bounds-checked memory regions shared with foreign functions"),
     ("prim", "primitive memory and file-descriptor operations"),
     ("int8", "8-bit signed integer conversions"),
     ("int16", "16-bit signed integer conversions"),
@@ -179,11 +194,11 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("float", "from_string", "float.parse"),
     ("float", "from_str", "float.parse"),
     // char code
-    ("string", "char_code", "string.codepoint"),
-    ("string", "char_code_at", "string.codepoint"),
-    ("string", "code_at", "string.codepoint"),
-    ("string", "char_at_code", "string.codepoint"),
-    ("string", "ord", "string.codepoint"),
+    ("string", "char_code", "string.to_codepoint"),
+    ("string", "char_code_at", "string.to_codepoint"),
+    ("string", "code_at", "string.to_codepoint"),
+    ("string", "char_at_code", "string.to_codepoint"),
+    ("string", "ord", "string.to_codepoint"),
     // case conversion
     ("string", "to_lowercase", "string.to_lower"),
     ("string", "lowercase", "string.to_lower"),
@@ -204,7 +219,7 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("string", "includes", "string.contains"),
     ("string", "has", "string.contains"),
     ("string", "index", "string.index_of"),
-    ("string", "all", "string.chars + list.all"),
+    ("string", "all", "string.to_list + list.all"),
     // Common LLM hallucinations from MSR testing
     ("string", "get_char", "string.get"),
     ("string", "charAt", "string.get"),
@@ -219,15 +234,14 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("list", "empty", "[] (empty list literal)"),
     ("list", "new", "[] (empty list literal)"),
     ("list", "head", "list.first"),
-    ("list", "tail", "list.drop(xs, 1)"),
     ("map", "new", "[:] (empty map literal)"),
     ("map", "empty", "[:] (empty map literal)"),
     ("map", "has_key", "map.contains"),
     ("map", "has", "map.contains"),
     ("map", "includes", "map.contains"),
-    // Almide has only `float.sqrt`. Most LLMs reach for `int.sqrt(n)` in
-    // is-prime / perfect-square style tasks.
-    ("int", "sqrt", "float.sqrt(int.to_float(n))"),
+    // Almide has only `math.sqrt` (Float). Most LLMs reach for `int.sqrt(n)`
+    // in is-prime / perfect-square style tasks.
+    ("int", "sqrt", "math.sqrt(float.from(n))"),
 ];
 
 /// Suggest the correct stdlib function for a commonly hallucinated name.
@@ -278,11 +292,11 @@ pub fn comparison_operator_of(module: &str, func: &str) -> Option<&'static str> 
 pub fn try_snippet_for_alias(module: &str, func: &str) -> Option<&'static str> {
     if (module, func) == ("int", "sqrt") {
         return Some(
-            "// Almide has float.sqrt; int.sqrt doesn't exist.\n\
+            "// Almide has math.sqrt; int.sqrt doesn't exist.\n\
              // Convert → sqrt → (optionally) convert back:\n\
-             let root_f = float.sqrt(int.to_float(n))       // Float\n\
-             let root_i = float.to_int(root_f)              // Int (truncates)\n\
-             // — or inline: float.to_int(float.sqrt(int.to_float(n)))"
+             let root_f = math.sqrt(float.from(n))          // Float\n\
+             let root_i = int.from_saturating(root_f)       // Int (truncates)\n\
+             // — or inline: int.from_saturating(math.sqrt(float.from(n)))"
         );
     }
     if comparison_operator_of(module, func).is_some() {
@@ -330,12 +344,15 @@ pub fn module_functions_all(module: &str) -> Vec<&'static str> {
     module_functions(module)
 }
 
-/// The module's surface minus its `@deprecated` fns: what a suggestion may
-/// name. A "did you mean" that steers a writer onto a deprecated spelling
-/// (`list.lengt` → `list.length`, #3085) hands them the next warning.
+/// The module's surface minus its `@deprecated` fns and its `__` internal
+/// carriers: what a suggestion may name. A "did you mean" that steers a
+/// writer onto a deprecated spelling (`list.lengt` → `list.length`, #3085)
+/// hands them the next warning; one onto `int.__to_uint16` names a fn the
+/// writer is not meant to call.
 pub fn module_functions_current(module: &str) -> Vec<&'static str> {
     module_functions(module)
         .into_iter()
+        .filter(|f| !f.starts_with("__"))
         .filter(|f| crate::bundled_sigs::lookup_deprecation(module, f).is_none())
         .collect()
 }

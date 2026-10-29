@@ -162,15 +162,28 @@ impl crate::emitter::Emitter<'_> {
                 }
                 self.emit_error_frame_abort();
                 self.witness_abort_site();
+                // #4013: a loop fill — the block is sized from `hd`, and the
+                // countdown loop on `hd` stores one `SLOT`-byte slot per step
+                // (witness_init.rs records both where they are emitted).
+                const SLOT: u32 = 8;
+                const STEP: i32 = 8;
+                let list_ty = match hty {
+                    SliceTy::List(h) => h.index() as u32,
+                    _ => u32::MAX,
+                };
                 {
                     let mut i = self.f.instructions();
                     i.end();
                     i.local_get(hd)
-                        .i64_const(8)
+                        .i64_const(i64::from(SLOT))
                         .i64_mul()
                         .i32_wrap_i64()
                         .call(F_ALLOC)
                         .local_set(hb);
+                }
+                let site = crate::witness::init::fill_site(almide_layout::PAYLOAD, SLOT, hd, list_ty, self.f);
+                {
+                    let mut i = self.f.instructions();
                     // fill ascending: payload[k] = start + k
                     i.local_get(hb)
                         .i32_const(almide_layout::PAYLOAD as i32)
@@ -184,13 +197,14 @@ impl crate::emitter::Emitter<'_> {
                         memory_index: 0,
                     });
                     i.local_get(hs).i64_const(1).i64_add().local_set(hs);
-                    i.local_get(hc).i32_const(8).i32_add().local_set(hc);
+                    i.local_get(hc).i32_const(STEP).i32_add().local_set(hc);
                     i.local_get(hd).i64_const(1).i64_sub().local_set(hd);
                     i.br(0);
                     i.end();
                     i.end();
                     i.local_get(hb);
                 }
+                crate::witness::init::fill(site, hd, STEP as u32, self.f);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();

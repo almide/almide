@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'matrix.multi_head_attention'"
+hint_substring = "kernels.multi_head_attention"

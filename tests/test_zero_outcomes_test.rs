@@ -5,9 +5,9 @@
 //! a `.almd` file that lost its `test` block during a refactor kept reporting as
 //! a passing test file, forever.
 //!
-//! The zeroes are not one case. A `--run` pattern that excluded everything is
-//! the caller's own narrowing and stays green; "there was nothing to run" is a
-//! mistake and exits 5, distinct from 1 so a script can tell it from a real
+//! The zeroes are not one case. A `--run` pattern that excluded everything
+//! says so (`N filtered out`, "the --run pattern matched no test") and, since
+//! #4264, exits 5 like "there was nothing to run" — a mistake that exits 5, distinct from 1 so a script can tell it from a real
 //! failure without parsing prose (pytest's precedent; `.github/workflows/
 //! almide-pkg-ci.yml` used to grep the message for exactly this).
 
@@ -72,14 +72,18 @@ fn a_real_pass_reports_the_tests_it_ran() {
     assert!(!out.contains("filtered out"), "nothing was filtered:\n{out}");
 }
 
-/// Green, because the operator asked for a narrowing and got it — but the count
-/// says so out loud, which is the whole point.
+/// A filter that selects nothing ran nothing, and exits 5 (#4264): a green
+/// zero-test run is how a mistyped CI filter hid. The count still says what
+/// the pattern excluded, and the message says the PATTERN matched nothing.
 #[test]
-fn a_filter_matching_nothing_is_green_and_says_what_it_excluded() {
+fn a_filter_matching_nothing_exits_5_and_says_what_it_excluded() {
     let dir = case_dir("filtered", &[("a_test.almd", TWO_TESTS)]);
     let (code, out) = run(dir.path(), &["test", "a_test.almd", "--run", "zzz-no-such-test"]);
-    assert_eq!(code, 0, "{out}");
+    assert_eq!(code, 5, "{out}");
     assert!(out.contains("0 tests in 1 file (2 filtered out)"), "{out}");
+    assert!(out.contains("--run pattern matched no test"), "{out}");
+    let (code, out) = run(dir.path(), &["test", "a_test.almd", "--run", "zzz-no-such-test", "--allow-no-tests"]);
+    assert_eq!(code, 0, "--allow-no-tests opts out:\n{out}");
 }
 
 /// The shape that used to report "All 1 test file(s) passed" with exit 0.

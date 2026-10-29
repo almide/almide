@@ -5,7 +5,7 @@
 fn probe(x: UInt64) -> String = {
   let d: UInt64 = x / 3
   let m: UInt64 = x % 7
-  "${uint64.to_string(x)} d=${uint64.to_string(d)} m=${uint64.to_string(m)} f=${float.to_string(float.from_float64(uint64.to_float64(x)))}"
+  "${uint64.to_string(x)} d=${uint64.to_string(d)} m=${uint64.to_string(m)} f=${float.to_string(float.from(float64.from(x)))}"
 }
 
 fn main() -> Unit = {

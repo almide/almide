@@ -188,7 +188,7 @@ type T = | Leaf | Node(Int, String)
 fn ints(i: Int, n: Int, acc: List[Int]) -> List[Int] =
   if i >= n then acc else ints(i + 1, n, [i * 3] + acc)
 fn floats(i: Int, n: Int, acc: List[Float]) -> List[Float] =
-  if i >= n then acc else floats(i + 1, n, [int.to_float(i) / 2.0] + acc)
+  if i >= n then acc else floats(i + 1, n, [float.from(i) / 2.0] + acc)
 fn strs(i: Int, n: Int, acc: List[String]) -> List[String] =
   if i >= n then acc else strs(i + 1, n, ["s${i}"] + acc)
 fn bools(i: Int, n: Int, acc: List[Bool]) -> List[Bool] =
@@ -296,7 +296,7 @@ effect fn main() -> Unit = {
   }
   println("${inner} ${ls}")
   var fs: List[Float] = []
-  for k in 0..<4 { fs = [int.to_float(k) + 0.5] + fs }
+  for k in 0..<4 { fs = [float.from(k) + 0.5] + fs }
   println("${fs}")
 }
 "#,
@@ -372,7 +372,7 @@ effect fn main() -> Unit = {
   let shared = ["s"]
   let ss = xs |> list.fold([], (a, i) => [shared] + a)
   println("${shared} ${list.len(ss)} ${ss}")
-  let fs = xs |> list.fold([], (a, i) => a + [int.to_float(i) * 0.5])
+  let fs = xs |> list.fold([], (a, i) => a + [float.from(i) * 0.5])
   println("${fs}")
 }
 "#,

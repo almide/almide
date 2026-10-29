@@ -20,14 +20,14 @@ const PROBE: &str = r#"import fs
 
 effect fn main() -> Unit = {
   println(match fs.read_text("f.txt/x") { ok(v) => "ok(${v})", err(m) => m })
-  println(match fs.write("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.write_text("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("adir") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt/sub") { ok(_) => "ok", err(m) => m })
   println(match fs.read_text("nope.txt") { ok(v) => "ok(${v})", err(m) => m })
   println(match fs.read_text("adir") { ok(v) => "ok(${v})", err(m) => m })
-  println(match fs.write("adir", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.write_text("adir", "z") { ok(_) => "ok", err(m) => m })
   println(match fs.copy("adir", "copied") { ok(_) => "ok", err(m) => m })
 }
 "#;
@@ -95,14 +95,14 @@ fn every_leg_spells_the_table_byte_for_byte() {
     let dir = probe_dir();
     let expected = [
         format!("fs.read_text(\"f.txt/x\"): {}", ENOTDIR.text),
-        format!("fs.write(\"f.txt/y\"): {}", ENOTDIR.text),
+        format!("fs.write_text(\"f.txt/y\"): {}", ENOTDIR.text),
         format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
         format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
         "ok".to_string(),
         format!("fs.mkdir_p(\"f.txt/sub\"): {}", ENOTDIR.text),
         format!("fs.read_text(\"nope.txt\"): {}", ENOENT.text),
         format!("fs.read_text(\"adir\"): {}", EISDIR.text),
-        format!("fs.write(\"adir\"): {}", EISDIR.text),
+        format!("fs.write_text(\"adir\"): {}", EISDIR.text),
         // A directory source fails as reading it does (the stock leg's
         // self-hosted copy reads first), not with std::fs::copy's own
         // errno-less InvalidInput text.

@@ -52,14 +52,27 @@ fn spec_corpus_ast_matches_oracle_hashes() {
     // Coverage: every corpus file is gated or excluded-with-reason, never both.
     // Both roots of the corpus partition: this tree (spec/churn, spec/pass_isolated)
     // and the almide/als mount (everything the judge owns) — one walker.
+    // Under the CI slice (crates/almide-corpus/src/ci_slice.rs) the partition
+    // is asked of the sliced files only, staleness waits for the full run, and
+    // the parity loop compares the sliced rows.
     let files = almide_corpus::walk_spec(&root);
     assert!(!files.is_empty());
+    let slice = almide_corpus::ci_slice();
     for (rel, _) in &files {
+        if slice.is_some_and(|s| !s.keeps(rel)) {
+            continue;
+        }
         let in_m = manifest.contains_key(rel);
         let in_e = exclusions.contains_key(rel);
         assert!(in_m ^ in_e, "{rel}: must be in exactly one of manifest/exclusions (manifest={in_m}, excluded={in_e})");
     }
-    assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale manifest entries for files no longer in spec/");
+    if slice.is_none() {
+        assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale manifest entries for files no longer in spec/");
+    }
+    let keep: std::collections::BTreeSet<String> =
+        almide_corpus::select(manifest.keys().cloned().collect(), "ast_parity", |k| k.clone()).into_iter().collect();
+    let manifest: BTreeMap<String, String> = manifest.into_iter().filter(|(k, _)| keep.contains(k)).collect();
+    assert!(!manifest.is_empty(), "ast_parity: no manifest row selected");
 
     // Parity: parse each manifest file with the ported syntax crate and match
     // the oracle hash. The file path handed to the parser is the same
