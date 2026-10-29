@@ -48,7 +48,6 @@
 66672	spec/wasm_cross/bytes_copy_from_negative_len.almd
 66176	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 72208	spec/wasm_cross/bytes_cursor_read_domain.almd
-65824	spec/wasm_cross/bytes_data_ptr_identity.almd
 65776	spec/wasm_cross/bytes_equality_call_operands.almd
 67120	spec/wasm_cross/bytes_f16.almd
 68512	spec/wasm_cross/bytes_f16_offset_overflow.almd
