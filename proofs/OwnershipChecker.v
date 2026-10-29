@@ -57,7 +57,20 @@ Inductive Op : Type :=
   | Dec : Op
   | MoveOut : Op
   | Reuse : Op
-  | Borrow : Op.
+  | Borrow : Op
+  (* ShareOut = +0 on ITS line, the SHARE-OUT of an arm (#4278): a stdlib arm
+     returns its argument block as its owned result on some path, after an
+     `rc_inc` on it. The +1 is the arm result's credit — the result's own line
+     is born by `i` at the consumer — so on the ARGUMENT's line the share is
+     the pair "share +1, credit moved into the result −1" (`am`), net 0. It is
+     its own constructor (not a recorded `am`) because it names a different
+     instruction: the RC byte check (almide-anchor-check rc.rs) holds it to
+     the `rc_inc` inside the arm's own window, read through the argument's
+     local. `expand` below is that reading, and `exec_expand` proves the fold
+     agrees with it; `share_handover_sound` proves the two accounts on the one
+     block (the argument's and the result's) never fault together and return
+     the block to the count it had. *)
+  | ShareOut : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
@@ -85,6 +98,9 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
      all gone — and FAULTS, exactly like verify_ownership's live-check on
      `Op::Borrow`/`MakeUnique`. *)
   | Borrow :: rest => if rc <=? 0 then None else exec rest rc
+  (* ShareOut: the share +1 moves straight into the arm's result (the result's
+     line holds it), so this line's count is unchanged. *)
+  | ShareOut :: rest => exec rest rc
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -178,6 +194,7 @@ Definition parse_byte (a : ascii) : option Op :=
   else if orb (Ascii.eqb a "m"%char) (Ascii.eqb a "M"%char) then Some MoveOut
   else if orb (Ascii.eqb a "r"%char) (Ascii.eqb a "R"%char) then Some Reuse
   else if orb (Ascii.eqb a "b"%char) (Ascii.eqb a "B"%char) then Some Borrow
+  else if orb (Ascii.eqb a "s"%char) (Ascii.eqb a "S"%char) then Some ShareOut
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -253,6 +270,7 @@ Fixpoint reuses_unique (ops : list Op) (rc : Z) : bool :=
   (* Borrow mirrors exec: a fault (rc = 0) ends the run (vacuously true), a live
      borrow changes nothing. *)
   | Borrow :: rest => if rc <=? 0 then true else reuses_unique rest rc
+  | ShareOut :: rest => reuses_unique rest rc
   end.
 
 (* The bridge: a run that does NOT fault has every Reuse at rc = 1. This holds
@@ -270,6 +288,7 @@ Proof.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + destruct (Z.eqb rc 1) eqn:E. { apply IH. exact H. } exfalso. apply H. reflexivity.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
+    + apply IH. exact H.
 Qed.
 
 (* REUSE SOUNDNESS: an accepted certificate has every Reuse acting on a UNIQUELY
@@ -470,6 +489,7 @@ Proof.
     + destruct (rc <=? 0). reflexivity. apply IH.
     + destruct (Z.eqb rc 1). apply IH. reflexivity.
     + destruct (rc <=? 0). reflexivity. apply IH.
+    + apply IH.
 Qed.
 
 (* exec over a cons = single-op step then the rest. *)
@@ -572,6 +592,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + destruct (Z.eqb rc 1); [apply IHHU; exact Hexec | discriminate].
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
+    + apply IHHU; exact Hexec.
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
     destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
@@ -688,6 +709,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + destruct (Z.eqb rc 1); [eapply IHHA; exact Hexec | discriminate].
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
+    + eapply IHHA; exact Hexec.
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
     destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
@@ -1245,6 +1267,8 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
 Definition guard_op (o : Op) : list Op :=
   match o with
   | Alias => [Borrow; Alias]
+  (* a share-out of an owned object is a share of it: it must be live too. *)
+  | ShareOut => [Borrow; ShareOut]
   | _ => [o]
   end.
 
@@ -1562,6 +1586,162 @@ Proof. reflexivity. Qed.
 Example cert_xc_param_slot_accepts : check_xc "(id)am"%string = true.
 Proof. reflexivity. Qed.
 
+(* ─── THE ARM SHARE-OUT (#4278, format v7: the `s` byte) ───────────────────
+   A stdlib arm may answer, on one path, with its ARGUMENT block as its owned
+   result: `if c { rc_inc(p); p } else { fresh block }`. The result's line is
+   born by the consumer's `i` on every path; on the share path that credit is
+   the arm's `rc_inc` on `p`, which the argument's line records as `s`. *)
+
+From Stdlib Require Import Lia.
+
+(* What `s` stands for on the argument's line: the share +1 (`a`) and the
+   credit moved into the arm's result (`m`). *)
+Definition expand_op (o : Op) : list Op :=
+  match o with
+  | ShareOut => [Alias; MoveOut]
+  | _ => [o]
+  end.
+
+Definition expand (ops : list Op) : list Op := flat_map expand_op ops.
+
+(* THE SHARE IS COUNTED: from any count the fold reaches (never below 0), the
+   line with its share-outs runs exactly as the line with each one spelled as
+   the share and the move it is. So every soundness theorem about `check`
+   holds of the spelled-out run, and `s` adds no new kind of step. *)
+Lemma exec_expand :
+  forall ops rc, 0 <= rc -> exec (expand ops) rc = exec ops rc.
+Proof.
+  unfold expand.
+  induction ops as [| o rest IH]; intros rc Hrc; [reflexivity |].
+  destruct o; simpl.
+  - apply IH. lia.
+  - apply IH. lia.
+  - destruct (rc <=? 0) eqn:E; [reflexivity |]. apply Z.leb_gt in E. apply IH. lia.
+  - destruct (rc <=? 0) eqn:E; [reflexivity |]. apply Z.leb_gt in E. apply IH. lia.
+  - destruct (Z.eqb rc 1); [apply IH; lia | reflexivity].
+  - destruct (rc <=? 0); [reflexivity | apply IH; exact Hrc].
+  - assert (E : (rc + 1 <=? 0) = false) by (apply Z.leb_gt; lia).
+    rewrite E. replace (rc + 1 - 1) with rc by lia. apply IH. exact Hrc.
+Qed.
+
+Theorem check_expand : forall ops, check (expand ops) = check ops.
+Proof.
+  intro ops. unfold check, run. rewrite exec_expand; [reflexivity | lia].
+Qed.
+
+(* THE ARGUMENT'S BALANCE IS UNCHANGED: a share-out moves no count on the
+   argument's own line. *)
+Theorem share_out_neutral : forall rc, exec [ShareOut] rc = Some rc.
+Proof. reflexivity. Qed.
+
+Theorem share_out_sound :
+  forall ops, check ops = true ->
+    no_double_free (expand ops) /\ no_leak (expand ops).
+Proof. intros ops H. apply check_sound. rewrite check_expand. exact H. Qed.
+
+(* THE HAND-OVER. After a share-out, one block is held by two accounts: the
+   argument's line `p` and the arm result's line `res` (its `i` is the +1 the
+   share made). The block's count is the caller's `base` plus both accounts,
+   and the runtime performs their events in SOME interleaving. Accepted (and
+   free of `Reuse`, a uniqueness claim no shared block can make), every
+   interleaving never faults and returns the block to `base`: the result owns
+   the shared credit and releases it exactly once, and the argument's credit
+   is what it was. *)
+Fixpoint no_reuse_ops (ops : list Op) : bool :=
+  match ops with
+  | [] => true
+  | Reuse :: _ => false
+  | _ :: rest => no_reuse_ops rest
+  end.
+
+Inductive Interleave : list Op -> list Op -> list Op -> Prop :=
+  | IL_nil : Interleave [] [] []
+  | IL_l : forall o a b w, Interleave a b w -> Interleave (o :: a) b (o :: w)
+  | IL_r : forall o a b w, Interleave a b w -> Interleave a (o :: b) (o :: w).
+
+Lemma interleave_exec :
+  forall a b w, Interleave a b w ->
+    forall r1 r2 k x y, 0 <= r1 -> 0 <= r2 -> 0 <= k ->
+      no_reuse_ops a = true -> no_reuse_ops b = true ->
+      exec a r1 = Some x -> exec b r2 = Some y ->
+      exec w (r1 + r2 + k) = Some (x + y + k).
+Proof.
+  intros a b w HI. induction HI; intros r1 r2 k x y H1 H2 Hk Na Nb Ea Eb.
+  - simpl in *. injection Ea as <-. injection Eb as <-. reflexivity.
+  - destruct o; simpl in Ea, Na |- *.
+    + replace (r1 + r2 + k + 1) with (r1 + 1 + r2 + k) by lia. apply IHHI; auto; lia.
+    + replace (r1 + r2 + k + 1) with (r1 + 1 + r2 + k) by lia. apply IHHI; auto; lia.
+    + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 - 1 + r2 + k) by lia. apply IHHI; auto; lia.
+    + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 - 1 + r2 + k) by lia. apply IHHI; auto; lia.
+    + discriminate Na.
+    + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      apply IHHI; auto.
+    + apply IHHI; auto.
+  - destruct o; simpl in Eb, Nb |- *.
+    + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
+    + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
+    + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 + (r2 - 1) + k) by lia. apply IHHI; auto; lia.
+    + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 + (r2 - 1) + k) by lia. apply IHHI; auto; lia.
+    + discriminate Nb.
+    + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      apply IHHI; auto.
+    + apply IHHI; auto.
+Qed.
+
+Theorem share_handover_sound :
+  forall p res w base,
+    check p = true -> check res = true ->
+    no_reuse_ops p = true -> no_reuse_ops res = true ->
+    Interleave p res w -> 0 <= base ->
+    exec w base = Some base.
+Proof.
+  intros p res w base Hp Hr Np Nr HI Hb.
+  unfold check, run in Hp, Hr.
+  destruct (exec p 0) as [x |] eqn:Ep; [| discriminate].
+  destruct (exec res 0) as [y |] eqn:Er; [| discriminate].
+  apply Z.eqb_eq in Hp. apply Z.eqb_eq in Hr. subst x y.
+  pose proof (interleave_exec p res w HI 0 0 base 0 0) as H.
+  replace (0 + 0 + base) with base in H by lia.
+  apply H; auto; lia.
+Qed.
+
+(* The kernel's own verdicts on the new byte, over real certificate bytes. *)
+(* a borrowed argument's share-out, and the result's line releasing it. *)
+Example cert_xc_share_out_accepts : check_xc "s
+id"%string = true.
+Proof. reflexivity. Qed.
+(* an owned argument shares out while live, then releases its own credit. *)
+Example cert_xc_share_out_owned_accepts : check_xc "isd
+id"%string = true.
+Proof. reflexivity. Qed.
+(* NEGATIVE: the share is the RESULT's credit, never the argument's — a line
+   that releases what it shared out releases a credit it does not hold. *)
+Example cert_xc_share_out_no_credit_rejects : check_xc "sd"%string = false.
+Proof. reflexivity. Qed.
+(* NEGATIVE: a share-out of an owned object after its last release is a
+   use-after-free (the #3229 probe guards `s` as it guards `a`). *)
+Example cert_xc_share_out_dead_rejects : check_xc "ids"%string = false.
+Proof. reflexivity. Qed.
+(* NEGATIVE: the result that received the share must release it. *)
+Example cert_xc_share_out_result_leak_rejects : check_xc "s
+i"%string = false.
+Proof. reflexivity. Qed.
+(* The hand-over, concretely: the argument held at 1 by the caller, the share
+   (the result's `i`) released inside the argument's own window. *)
+Example share_handover_example :
+  exec [Borrow; Inc; ShareOut; Dec] 1 = Some 1.
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
@@ -1580,4 +1760,6 @@ Print Assumptions check_cert_sound.
 Print Assumptions check_reuse_sound.
 Print Assumptions check_all_reuse_sound.
 Print Assumptions check_cert_reuse_sound.
-
+Print Assumptions exec_expand.
+Print Assumptions share_out_sound.
+Print Assumptions share_handover_sound.

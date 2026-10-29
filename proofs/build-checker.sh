@@ -51,6 +51,10 @@ printf 'I{I|}D\n'  > $GATE_TMP/branch_disagree.cert  # 5a: arms DISAGREE (+1 vs 
 printf '{I|D}\n'   > $GATE_TMP/branch_cross.cert     # 5a: cross-arm compensation (flat-balanced, runtime-unsafe) → REJECT
 printf 'IDAM\n'    > $GATE_TMP/resurrect.cert        # #3229: an OWNED object freed, then aliased + moved out (balanced, use-after-free) → REJECT
 printf 'AMAM\n'    > $GATE_TMP/param_realias.cert    # #3229: a borrowed param's line re-aliased at 0 (the caller holds it) → ACCEPT
+printf 'S\nID\n'   > $GATE_TMP/share_out.cert        # #4278: an arm's share-out of a borrowed argument; the result's line releases the share → ACCEPT
+printf 'SD\n'      > $GATE_TMP/share_out_credit.cert # #4278: the argument's line releases the share it handed out (not its credit) → REJECT
+printf 'IDS\n'     > $GATE_TMP/share_out_dead.cert   # #4278: share-out of an OWNED object after its release (use-after-free) → REJECT
+printf 'S\nI\n'   > $GATE_TMP/share_out_leak.cert   # #4278: the result that received the share never releases it → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
@@ -79,6 +83,10 @@ run $GATE_TMP/branch_disagree.cert 1
 run $GATE_TMP/branch_cross.cert 1
 run $GATE_TMP/resurrect.cert 1
 run $GATE_TMP/param_realias.cert 0
+run $GATE_TMP/share_out.cert 0
+run $GATE_TMP/share_out_credit.cert 1
+run $GATE_TMP/share_out_dead.cert 1
+run $GATE_TMP/share_out_leak.cert 1
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.
