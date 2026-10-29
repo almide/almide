@@ -158,7 +158,7 @@ fn wrap_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
         w.params = f.params.iter().map(|p| param(vars, p.name.as_str().to_string(), p.ty.clone())).collect();
         let args = w.params.iter().map(|p| expr(IrExprKind::Var { id: p.var }, p.ty.clone())).collect();
         let call_ty = if f.is_effect {
-            Ty::Applied(almide_types::types::TypeConstructorId::Result, vec![f.ret_ty.clone(), Ty::String])
+            Ty::Applied(almide_types::types::TypeConstructorId::Result, vec![f.ret_ty.clone(), Ty::String].into())
         } else {
             f.ret_ty.clone()
         };
