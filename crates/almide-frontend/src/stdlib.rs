@@ -93,7 +93,6 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("hex", "hexadecimal encoding and decoding"),
     ("hash", "non-cryptographic digests and SHA-256"),
     ("html", "HTML escaping and construction"),
-    ("svg", "SVG escaping and construction"),
     ("net", "TCP and UDP sockets, name lookup and IP addresses"),
     ("unix", "Unix-domain sockets and shared memory"),
     ("uuid", "RFC 9562 identifiers (v4 random, v7 time-ordered)"),

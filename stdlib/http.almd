@@ -35,7 +35,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 // ── Response builders ──
 //
 // ADR-0032 (row 11e): a response's Content-Type is its body's TYPE. A `Body`
-// (String, Bytes, Value, SafeHtml, SafeSvg, TypedBody) states its own media
+// (String, Bytes, Value, SafeHtml, TypedBody, a package's granted type) states its own media
 // type; no header string can relabel it. Content-Type is the header the body
 // owns: `set_header` and `with_headers` refuse it (E116 when the name is a
 // literal, an abort otherwise), read off `@header_write`, which names the
@@ -73,7 +73,7 @@ fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http
   body.__self_media_type(),
 )
 
-/// A body of media type media_type; a literal, never one a safe module owns (html, svg).
+/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
 @literal_media(media_type)
 fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
   media_type: media_type,
