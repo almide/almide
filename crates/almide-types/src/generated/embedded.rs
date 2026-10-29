@@ -40773,9 +40773,42 @@ local fn __unwrapped(s: String) -> String =
 
 
 
+
 @intrinsic("almide_rt_uuid___v7_stamp")
 @category("Time")
 effect fn __v7_stamp(ms: Int) -> Int = _
+"#;
+pub const SRC_UUID_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+var v7_last: Int = -1
+
+@implements("uuid.__v7_stamp")
+fn uuid_v7_stamp(ms: Int) -> Int = {
+  let fresh = int.clamp(ms, 0, 281474976710655) * 4096
+  let next = if fresh > v7_last then fresh else v7_last + 1
+  v7_last = next
+  next
+}
 "#;
 pub const SRC_VALUE: &str = r#"/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
@@ -44067,6 +44100,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "unix_wasm" => Some(SRC_UNIX_WASM),
         "url" => Some(SRC_URL),
         "uuid" => Some(SRC_UUID),
+        "uuid_wasm" => Some(SRC_UUID_WASM),
         "value" => Some(SRC_VALUE),
         "value_core" => Some(SRC_VALUE_CORE),
         "value_utils" => Some(SRC_VALUE_UTILS),
