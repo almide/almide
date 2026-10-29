@@ -4944,11 +4944,12 @@ evidence  = [
 id        = "C-374"
 spec      = "ALS-R5"
 title     = "process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined"
-statement = "ALS-R5 (almide#2589, ADR-0025): on the embedded wasm host (`almide run --target wasm` and the wasm leg of `almide test`) the subprocess family — `process.exec`, `exec_in`, `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `run`, `run_in`, `spawn`, `kill`, `is_alive` and `pid` — answers what the native leg answers: the captured stdout and stderr text, the exit code (-1 for a child ended by a signal) and every err string are byte-identical. Pids are host values and are not compared across legs. A stand-alone artifact (`almide build --target wasm`) whose program names a subprocess operation imports `call` from the private interface `almide:process/spawn`, and an artifact whose program names none does not carry that import; a runtime that does not define the import refuses the module at load, before `_start` runs, so no subprocess call is ever answered wrongly at run time. A component build (`--component`) of such a program is refused with E081."
+statement = "ALS-R5 (almide#2589, almide#4308, ADR-0025): on the embedded wasm host (`almide run --target wasm` and the wasm leg of `almide test`) the subprocess family — `process.exec`, `output`, `run`, `kill` and `pid`, and a `process.start` child with `poll`, `wait`, `stop`, `read_new_stdout`, `read_new_stderr` and `child_pid` — answers what the native leg answers: the captured stdout and stderr text, the text each incremental read returns, the exit code (-1 for a child ended by a signal), the deadline's err and every other err string are byte-identical. Pids are host values and are not compared across legs. A stand-alone artifact (`almide build --target wasm`) whose program names a subprocess operation imports `call` from the private interface `almide:process/spawn`, and an artifact whose program names none does not carry that import; a runtime that does not define the import refuses the module at load, before `_start` runs, so no subprocess call is ever answered wrongly at run time. A component build (`--component`) of such a program is refused with E081."
 since     = "0.67.0"
 status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/process_spawn_family.almd", class = "fixture" },
+  { path = "spec/embedded_cross/process_start_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-375"
@@ -5734,7 +5735,7 @@ evidence  = [
 id        = "C-437"
 spec      = "ALS-R5"
 title     = "A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error"
-statement = "ALS-R5 (almide#4214): when a program exits because main returns, because `process.exit` is called, or because an effect error ends main, every child it started with `process.start` and has neither waited on nor stopped is stopped the way `process.stop(child, 500)` stops it — SIGTERM to the child's process group, 500 ms to end, then SIGKILL — before the program's exit status is reported, so no child the program started outlives it through those exits. A child already waited on or stopped is left as it is, and the exit neither waits for a running child's own end nor changes the exit status. `process.start` is native-only (E081 on every wasm leg), and an exit by a runtime abort or a signal is outside this contract."
+statement = "ALS-R5 (almide#4214): when a program exits because main returns, because `process.exit` is called, or because an effect error ends main, every child it started with `process.start` and has neither waited on nor stopped is stopped the way `process.stop(child, 500)` stops it — SIGTERM to the child's process group, 500 ms to end, then SIGKILL — before the program's exit status is reported, so no child the program started outlives it through those exits. A child already waited on or stopped is left as it is, and the exit neither waits for a running child's own end nor changes the exit status. This contract is the native target's (the embedded wasm host's `process.start` child is C-374's), and an exit by a runtime abort or a signal is outside it."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
