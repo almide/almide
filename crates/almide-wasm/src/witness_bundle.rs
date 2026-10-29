@@ -197,6 +197,7 @@ fn rc_lines(
         .filter_map(|(k, ev)| {
             let ev: Vec<String> = ev
                 .split_whitespace()
+                .map(|t| locate.shipped_holder(t))
                 .filter_map(|t| match t.split_once('#') {
                     // A move into a window this body does not ship (pruned)
                     // is dropped with it.
@@ -238,12 +239,14 @@ struct Locator {
     /// body (`to_wasi` puts `i32.const 1; call $exit` before every
     /// `unreachable`).
     ords: std::collections::HashMap<usize, Vec<usize>>,
+    /// Emitted global index -> shipped, read off the paired bodies.
+    globals: std::collections::HashMap<u32, u32>,
 }
 
 /// Each emitted instruction's index in the shipped body: the two walk in
 /// step, the shipped one allowed to run ahead only into an `unreachable`
 /// (the exit `to_wasi` injects before it).
-fn align(emitted: &[u8], shipped: &[u8]) -> Result<Vec<usize>, String> {
+fn align(emitted: &[u8], shipped: &[u8], globals: &mut std::collections::HashMap<u32, u32>) -> Result<Vec<usize>, String> {
     use std::mem::discriminant;
     fn ops(b: &[u8]) -> Result<Vec<wasmparser::Operator<'_>>, String> {
         let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(b, 0));
@@ -259,6 +262,15 @@ fn align(emitted: &[u8], shipped: &[u8]) -> Result<Vec<usize>, String> {
         }
         if j >= sh.len() || discriminant(&sh[j]) != discriminant(op) {
             return Err(format!("anchors: an emitted instruction ({op:?}) has no counterpart in the shipped body"));
+        }
+        // The prune renumbers globals: a global read or written here names
+        // its shipped index at the paired instruction.
+        use wasmparser::Operator::{GlobalGet, GlobalSet};
+        match (op, &sh[j]) {
+            (GlobalGet { global_index: a }, GlobalGet { global_index: b }) | (GlobalSet { global_index: a }, GlobalSet { global_index: b }) => {
+                globals.insert(*a, *b);
+            }
+            _ => {}
         }
         out.push(j);
         j += 1;
@@ -309,16 +321,17 @@ impl Locator {
             return Err(format!("anchors: the function map has {} rows for {} emitted bodies", fmap.len(), em.len()));
         }
         let mut ords = std::collections::HashMap::new();
+        let mut globals = std::collections::HashMap::new();
         for &i in pos.values() {
             if ords.contains_key(&i) {
                 continue;
             }
             if let Some(j) = fmap[i] {
                 let (sraw, _) = sh.get(j as usize).ok_or_else(|| format!("anchors: emitted body {i} ships at {j}, past the shipped bodies"))?;
-                ords.insert(i, align(&em[i].0, sraw)?);
+                ords.insert(i, align(&em[i].0, sraw, &mut globals)?);
             }
         }
-        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords })
+        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords, globals })
     }
 
     /// Body `serial`'s instructions between byte offsets `from` and `to`, as
@@ -332,6 +345,22 @@ impl Locator {
         let last = ends.iter().rposition(|&e| e <= to)?;
         let ords = self.ords.get(&i)?;
         (first <= last).then(|| (j, ords[first], ords[last]))
+    }
+
+    /// An rc event token whose variable is an outer global holder
+    /// (`0xC000_0000 | g`, the recorder's emitted global index) renamed to
+    /// the global's shipped index.
+    fn shipped_holder(&self, t: &str) -> String {
+        const GLOBAL_HOLDER: u32 = 0xC000_0000;
+        let kind = &t[..1];
+        let (num, rest) = t[1..].split_at(t[1..].find(['#', '@']).unwrap_or(t.len() - 1));
+        match num.parse::<u32>() {
+            Ok(v) if v & 0xF000_0000 == GLOBAL_HOLDER => match self.globals.get(&(v & !GLOBAL_HOLDER)) {
+                Some(g) => format!("{kind}{}{rest}", GLOBAL_HOLDER | g),
+                None => t.to_string(),
+            },
+            _ => t.to_string(),
+        }
     }
 
     /// The shipped position of body `serial`, when it shipped.
