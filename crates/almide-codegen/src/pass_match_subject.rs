@@ -76,7 +76,9 @@ impl IrMutVisitor for MatchSubjectVisitor {
 /// reads the same predicate (`use_kind`'s `Match` case, #4294), so the borrow
 /// verdict — which runs before this pass rewrites the subject — sees the
 /// subject read through that view exactly as the ownership certifier sees
-/// the rewritten `Borrow` afterwards.
+/// the rewritten `Borrow` afterwards. An arm that binds the subject binds a
+/// `&str` into it; `StrViewRebind` gives that arm its own owned copy where the
+/// binder is wanted as a value (#4296), so binding arms read it too.
 pub(crate) fn matches_through_str_view(ty: &Ty, arms: &[IrMatchArm]) -> bool {
     matches!(ty, Ty::String) && arms.iter().any(|a| {
         matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
@@ -86,7 +88,11 @@ pub(crate) fn matches_through_str_view(ty: &Ty, arms: &[IrMatchArm]) -> bool {
 /// Insert `.as_str()` or `.as_deref()` on match subjects when needed.
 fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
     // String subject with string literal patterns → wrap with Borrow { as_str: true }
-    if matches_through_str_view(&subject.ty, arms) {
+    // A stable place is already spelled that view by `CloneInsertion` (#4296:
+    // it borrows the subject there instead of cloning it for a later read).
+    if matches_through_str_view(&subject.ty, arms)
+        && !matches!(subject.kind, IrExprKind::Borrow { as_str: true, mutable: false, .. })
+    {
         let inner = std::mem::replace(
             subject.as_mut(),
             IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },

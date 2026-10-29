@@ -6,6 +6,7 @@
 #
 # rustc builds the native leg; the LLVM inside it is trusted with it.
 rustc 1.96.0 — RUST_TOOLCHAIN in every workflow env: builds the compiler and the native leg in CI and in release
+rustc 1.99.1 — RUST_STABLE_TOOLCHAIN in ci.yml: the stable rustc that perf-ratchet and perf-profile-arm measure the native/Rust ratio with; moving it moves the baseline
 rustc 1.95.0 — ferrocene-lane.yml: the Ferrocene-pinned (ISO 26262 qualified) rustc that builds the generated Rust of the run-manifest corpus (#573)
 rustc nightly-2026-08-01 — fuzz-nightly.yml: the dated nightly for per-condition branch coverage (nightly-gated flag), under the stable job's floors; ci.yml miri-almide-str: Miri over almide-str's raw heap block; miri-nightly.yml (MIRI_TOOLCHAIN): Miri and ASan over the runtime's unsafe and the fuzz corpus
 rustc nightly-2025-06-01 — mcdc-probe.yml: the workflow_dispatch default, the last nightly with MC/DC instrumentation

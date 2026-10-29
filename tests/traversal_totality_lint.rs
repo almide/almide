@@ -206,7 +206,7 @@ fn enclosing_fn(src: &str, b: &[u8], pos: usize) -> Option<(String, usize)> {
     while let Some(rel) = src[search..].find("fn ") {
         let f = search + rel;
         search = f + 3;
-        if !(f == 0 || !is_ident_byte(b[f - 1])) { continue; }
+        if f != 0 && is_ident_byte(b[f - 1]) { continue; }
         // Capture the function name (identifier right after `fn `).
         let mut n = f + 3;
         while n < b.len() && b[n] == b' ' { n += 1; }

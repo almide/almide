@@ -11,7 +11,7 @@ fn can_borrow(op: BinOp, left: &IrExpr, right: &IrExpr) -> bool {
 
 // Keep snapshot semantics when evaluating either operand can mutate the other.
 // Indexing, calls, blocks, and owned temporaries retain the existing value path.
-fn stable(expr: &IrExpr) -> bool {
+pub(super) fn stable(expr: &IrExpr) -> bool {
     match &expr.kind {
         IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => true,
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => stable(object),

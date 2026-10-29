@@ -748,9 +748,14 @@ impl IrMutVisitor for Lower<'_> {
                 // walker learns "this subject is borrowed" from the one
                 // annotation and never reads a param's borrow mode.
                 self.ref_binders.insert(id);
-                let mut bound = Vec::new();
-                for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
-                self.ref_binders.extend(bound);
+                // A match over a `&str` view (#4296) binds a `&str` the arm
+                // copies out itself where it is wanted as a value (the
+                // `StrViewRebind` copy): not a reference binder.
+                if !crate::pass_match_subject::matches_through_str_view(&subject.ty, arms) {
+                    let mut bound = Vec::new();
+                    for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
+                    self.ref_binders.extend(bound);
+                }
             }
             // A head read the clone pass borrowed (`almide_list_get_ref!`)
             // is an `Option<&T>`: its arms bind `&T` as well. Left out, a
