@@ -1,0 +1,8 @@
+// #4277 drill: a stdlib arm's window gains an extra release of a frame-owned
+// local. The ownership witness is unchanged; the extra release sits inside
+// the arm's window but names a variable the frame's events account, so the
+// RC byte check must refuse it rather than count it as the arm's own.
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(int.to_string(list.len(xs)))
+}

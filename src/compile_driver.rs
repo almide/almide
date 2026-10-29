@@ -266,6 +266,12 @@ pub(crate) fn optimize_gate_and_link(
         almide_wasm_run::set_fs_scope(None);
     }
     almide_driver::link_half(ir);
+    // E112 (ADR-0030): linking stopped at the `generic_instances` budget.
+    if let Some(d) = almide_driver::budget_refusal() {
+        err(&format!("{}", diagnostic_render::display_with_source(&d, entry.1)));
+        err("\n1 error(s) found");
+        return Err("1 error(s) found".to_string());
+    }
     Ok(())
 }
 

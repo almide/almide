@@ -204,6 +204,18 @@ pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
 /// requirement's own name (`bigint.add`, `int8.__trunc`).
 pub const PER_TYPE_REQUIREMENT_PREFIX: &str = "__self_";
 
+/// The name a type declared OUTSIDE the stdlib writes for the protocol
+/// requirement `method`: the requirement with its internal per-type marker
+/// dropped (`__self_media_type` → `media_type`, `__self_close` → `close`), so
+/// a package or an application meets `Body`, `Close` or `HttpMessage` with
+/// plain names (`fn SafeSvg.media_type(self)`) and never writes `__self_`
+/// (ADR-0032 Q24). The marker stays internal to the stdlib's own per-type
+/// functions ([`requirement_fn_name`]). The one place the public spelling is
+/// derived: the checker's conformance lookup and monomorphization call it.
+pub fn requirement_public_name(method: &str) -> &str {
+    method.strip_prefix(PER_TYPE_REQUIREMENT_PREFIX).unwrap_or(method)
+}
+
 /// The function of a stdlib type's module that satisfies the protocol
 /// requirement `method` for `type_name` (bare or module-qualified): for a
 /// per-type requirement `__<snake type>_<verb>` (`TcpStream` and `__self_read`

@@ -23,7 +23,7 @@ fn e(kind: IrExprKind, ty: Ty) -> IrExpr {
 }
 
 fn list_ty() -> Ty {
-    Ty::Applied(TypeConstructorId::List, vec![Ty::Int])
+    Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into())
 }
 
 fn var(id: VarId, ty: Ty) -> IrExpr {
@@ -115,7 +115,7 @@ fn a_clone_of_a_str_param_is_to_string_and_a_map_key_owns_itself() {
     let mut vt = VarTable::new();
     let s = param(&mut vt, "s", Ty::String, ParamBorrow::RefStr);
     let ps = s.var;
-    let map_ty = Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int]);
+    let map_ty = Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int].into());
     let m = vt.alloc(sym("m"), map_ty.clone(), Mutability::Let, None);
     let body = e(IrExprKind::Tuple { elements: vec![
         clone(var(ps, Ty::String)),
@@ -133,18 +133,18 @@ fn a_stored_by_reference_param_owns_by_type_and_a_carried_borrow_stays() {
     let mut vt = VarTable::new();
     let xs = param(&mut vt, "xs", list_ty(), ParamBorrow::RefSlice);
     let s = param(&mut vt, "s", Ty::String, ParamBorrow::RefStr);
-    let t = param(&mut vt, "t", Ty::Named(sym("Tok"), vec![]), ParamBorrow::Ref);
+    let t = param(&mut vt, "t", Ty::Named(sym("Tok"), Default::default()), ParamBorrow::Ref);
     let b = param(&mut vt, "b", Ty::Bytes, ParamBorrow::Ref);
     let (pxs, ps, pt, pb) = (xs.var, s.var, t.var, b.var);
     let a = vt.alloc(sym("a"), list_ty(), Mutability::Let, None);
     let c = vt.alloc(sym("c"), Ty::String, Mutability::Let, None);
-    let d = vt.alloc(sym("d"), Ty::Named(sym("Tok"), vec![]), Mutability::Let, None);
+    let d = vt.alloc(sym("d"), Ty::Named(sym("Tok"), Default::default()), Mutability::Let, None);
     let tmp = vt.alloc(sym("__tco_tmp_b"), Ty::Bytes, Mutability::Let, None);
     let bind = |v: VarId, value: IrExpr| IrStmt { kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: value.ty.clone(), value }, span: None };
     let body = e(IrExprKind::Block { stmts: vec![
         bind(a, var(pxs, list_ty())),
         bind(c, clone(var(ps, Ty::String))),
-        bind(d, var(pt, Ty::Named(sym("Tok"), vec![]))),
+        bind(d, var(pt, Ty::Named(sym("Tok"), Default::default()))),
         // The TCO rotation binds the BORROW into a `_`-typed temp on purpose.
         bind(tmp, borrow(var(pb, Ty::Bytes), false, false)),
     ], expr: None }, Ty::Unit);
@@ -160,7 +160,7 @@ fn a_stored_by_reference_param_owns_by_type_and_a_carried_borrow_stays() {
 #[test]
 fn a_spread_over_a_borrowed_or_lazy_base_clones_it_first() {
     let mut vt = VarTable::new();
-    let rec = Ty::Named(sym("St"), vec![]);
+    let rec = Ty::Named(sym("St"), Default::default());
     let st = param(&mut vt, "st", rec.clone(), ParamBorrow::RefMut);
     let g = vt.alloc(sym("g"), rec.clone(), Mutability::Let, None);
     let local = vt.alloc(sym("l"), rec.clone(), Mutability::Let, None);
@@ -207,7 +207,7 @@ fn an_indexed_borrow_reaches_into_a_local_list_but_not_into_a_snapshot() {
 #[test]
 fn a_borrowed_field_lookup_takes_the_ref_twin_and_a_propagating_rvalue_derefs() {
     let mut vt = VarTable::new();
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let v = param(&mut vt, "_v", value_ty.clone(), ParamBorrow::Ref);
     let pv = v.var;
     let key = e(IrExprKind::LitStr { value: "k".into() }, Ty::String);

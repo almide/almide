@@ -10,7 +10,7 @@ use crate::*;
 /// the caller (the entry layout varies per key/value class, the growth
 /// does not). Class slack covers the entry → the same block; else the
 /// doubled block (min four entries) with the live entries copied and
-/// the outgrown block freed iff uniquely held. `len` stays at the OLD
+/// the outgrown block released. `len` stays at the OLD
 /// length: the caller writes the pair at `payload + len` and bumps it.
 /// (#1219 stage 1 — the in-place `map.set` window.)
 pub(crate) fn emit_map_reserve() -> Function {
@@ -38,11 +38,19 @@ pub(crate) fn emit_map_reserve() -> Function {
     i.call(F_COPY);
     // live len = the old len (the caller appends and bumps)
     i.local_get(base).local_get(la).i32_store(word(almide_layout::LEN.offset));
-    // the outgrown block is garbage iff this map is uniquely held —
-    // the window only reserves at rc == 1, so the chain never leaks.
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
-    i.local_get(block).call(F_FREE);
+    // The window only reserves at rc == 1 (behind `$cow`), so the
+    // outgrown block is released on every grow path through `$dec_flat`
+    // — freed, or left alone when static (#4305: the old `rc == 1 →
+    // $free` judge was no release on the other paths). A shared heap
+    // block here would hand its entries' handles to `base` uncounted, so
+    // that broken precondition is the defined abort, never a decrement.
+    // Precondition: a heap block reaches this grow path only uniquely held (rc == 1).
+    i.local_get(block).global_get(G_LINE_END).i32_ge_u();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_gt_u();
+    i.i32_and().if_(BlockType::Empty);
+    i.unreachable();
     i.end();
+    i.local_get(block).call(F_DEC_FLAT);
     i.local_get(base);
     i.end();
     f
@@ -67,9 +75,12 @@ pub(crate) fn emit_cow() -> Function {
     i.local_get(block).return_();
     i.end();
     i.local_get(block).call(F_BLOCK_COPY).local_set(copy);
-    i.local_get(block);
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub();
-    i.i32_store(word(almide_layout::RC.offset));
+    // The original releases the caller's ref through `$dec_flat` (rc > 1
+    // here, so it only decrements): the judge takes its argument on every
+    // path — handed back, or released — which is what the RC byte check's
+    // every-path rule reads (#4278, #4304). An inline `rc - 1` store was
+    // the same arithmetic but no release the check can see.
+    i.local_get(block).call(F_DEC_FLAT);
     i.local_get(copy);
     i.end();
     f

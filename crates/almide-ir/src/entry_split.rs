@@ -156,7 +156,7 @@ impl Split<'_> {
             .iter()
             .zip(mask)
             .flat_map(|(t, &spread)| match t {
-                Ty::Tuple(es) if spread => es.clone(),
+                Ty::Tuple(es) if spread => es.to_vec(),
                 other => vec![other.clone()],
             })
             .collect();

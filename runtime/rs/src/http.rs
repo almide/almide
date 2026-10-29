@@ -110,13 +110,8 @@ pub fn almide_rt_http_not_found(body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::new(404, body.to_string())
 }
 
-pub fn almide_rt_http_redirect(url: &str) -> AlmideHttpResponse {
-    almide_http_redirect(url, 302)
-}
-
-pub fn almide_rt_http_response(status: i64, body: &str) -> AlmideHttpResponse {
-    AlmideHttpResponse::new(status, body.to_string())
-}
+// `http.response` and `http.redirect` are Almide (ADR-0032): a response's
+// Content-Type is its body's type, written through `__with_headers`.
 
 pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::json(status, body.to_string())

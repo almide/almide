@@ -334,6 +334,7 @@ fn push_escaped_char(out: &mut String, chars: &[char], i: usize, quote: char, us
         '\r' => out.push_str("\\r"),
         '\\' => out.push_str("\\\\"),
         c if c == quote => { out.push('\\'); out.push(c); }
+        c if crate::fmt::push_hidden_escape(out, c) => {}
         c => out.push(c),
     }
     1
@@ -787,6 +788,7 @@ fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
         match ch {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
             '\\' => out.push_str("\\\\"),
             // A literal `${` in a double-quoted string must not round-trip
             // into a live interpolation hole (#1076). Single quotes never
@@ -794,6 +796,7 @@ fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
             // the escape is double-quote-only.
             '$' if quote == '"' && it.peek() == Some(&'{') => out.push_str("\\$"),
             c if c == quote => { out.push('\\'); out.push(c); }
+            c if crate::fmt::push_hidden_escape(out, c) => {}
             c => out.push(c),
         }
     }

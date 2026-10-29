@@ -108,7 +108,7 @@ pub const NOMINALS: &[Nominal] = &[
         sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
         leaves: &[
             "http.response(200, \"ok\")",
-            "http.with_headers(404, \"aé\", [(\"content-type\", \"text/plain\")])",
+            "http.with_headers(404, \"aé\", [(\"x-kind\", \"text/plain\")])",
             "http.with_headers(201, \"\", [(\"x-a\", \"1\"), (\"X-B\", \"two\")])",
             "http.json(500, \"{\\\"e\\\": 1}\")",
             "http.redirect(\"/next?a=1\")",

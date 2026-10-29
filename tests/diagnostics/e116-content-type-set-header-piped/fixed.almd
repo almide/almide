@@ -1,0 +1,13 @@
+// A request is not a response body: it may carry any Content-Type. The page
+// is built as SafeHtml, whose type serves text/html.
+import html
+import http
+
+fn page(name: String) -> HttpResponse = http.response(200, html.escape(name)) |> http.set_header("X-Frame-Options", "DENY")
+
+fn upload(body: String) -> HttpRequest = http.new_request("POST", "/pages", body, []) |> http.set_header("Content-Type", "text/html")
+
+fn main() -> Unit = {
+  println(http.body(page("guest")))
+  println(http.body(upload("<p>draft</p>")))
+}

@@ -1,0 +1,10 @@
+// Each type a program serves is written where it is chosen.
+import http
+
+fn asset(ext: String, data: Bytes) -> HttpResponse = match ext {
+  "css" => http.response(200, http.typed("text/css", data)),
+  "csv" => http.response(200, http.typed("text/csv", data)),
+  _ => http.response(200, data),
+}
+
+fn main() -> Unit = println(http.body(asset("css", bytes.from_string("a{}"))))

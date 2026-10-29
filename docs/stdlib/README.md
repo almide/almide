@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 51 stdlib modules, 1323 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1324 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -27,7 +27,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [heap](#heap) | 16 | 0 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 8 | 0 |
-| [http](#http) | 35 | 4 |
+| [http](#http) | 36 | 4 |
 | [int](#int) | 47 | 0 |
 | [int16](#int16) | 37 | 0 |
 | [int32](#int32) | 37 | 0 |
@@ -631,11 +631,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [http.md](http.md)
 
 - `effect http.serve(port: Int, handler: HttpHandler) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
-- `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
-- `http.html(status: Int, body: SafeHtml) -> HttpResponse` — Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-- `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
-- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-- `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.
+- `http.response(status: Int, body: B) -> HttpResponse` — Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+- `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json; body is JSON text.
+- `http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` — Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+- `http.with_body(resp: HttpResponse, body: B) -> HttpResponse` — resp with its body replaced by body and its Content-Type by body's type.
+- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+- `http.redirect(url: String) -> HttpResponse` — 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 - `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
 - `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
 - `http.header(m: M, name: String) -> Option[String]` — First value of header name, any case; none if absent.
@@ -643,9 +644,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
 - `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
 - `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
-- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
-- `http.set_body(m: M, body: String) -> M` — m with its body replaced.
-- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
+- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
+- `http.set_body(m: M, body: String) -> M` — m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
+- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 - `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
 - `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
 - `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.

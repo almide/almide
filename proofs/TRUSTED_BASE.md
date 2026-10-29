@@ -45,6 +45,34 @@ but not listed fails, and so does a version listed but no longer used.
 | almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
 | OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
 
+**What CI fetches (security row 16).** Every binary or archive a workflow
+or CI script downloads is checked against a sha256 stated in
+`.github/pinned-downloads.txt` (`scripts/fetch-pinned.sh`). This covers
+wasmtime, cargo-nextest, wasm-pack, elan, the Lean toolchain and Node. A
+first-party `latest` almide release is checked against its release
+attestation instead. Every `git clone` checks out a 40-hex commit (codopsy),
+the opam repository is pinned to a commit whose opam files carry each source
+archive's checksum, and every third-party action is declared there with what
+it fetches. `scripts/check-action-pins.sh` refuses anything else. Four
+channels are trusted rather than pinned here:
+- **rustup.** `dtolnay/rust-toolchain` runs it for an exact toolchain. rustup
+  checks every component against the sha256 in that release's channel
+  manifest, which static.rust-lang.org serves. The Rust release
+  infrastructure is trusted, as rustc itself is.
+- **apt and Homebrew packages** (binaryen, musl-tools, opam, wabt, valgrind,
+  Vulkan drivers). These are checked against the distribution's signed
+  package index, not against a digest stated here.
+- **`actions/cache` entries.** Only this repository's own runs write them; a
+  pull request's cache is scoped to its own ref. A cached release tarball is
+  re-hashed by `fetch-pinned.sh` before use. An unpacked tree (the Lean
+  toolchain under `~/.elan`, the codopsy binary keyed by its pinned commit,
+  the opam root) is not.
+- **Clones marked `# supply: head-tracked`.** In these the moving head is the
+  thing being measured. The downstream canary tests each project at its
+  default-branch HEAD: it is dispatch-only, its token is read-only, and the
+  leg holds no secrets. The grammar drift check reads `almide-grammar` as
+  data and never builds or runs it.
+
 **Two engines.** wasm execution does not rest on wasmtime alone.
 `almide-wasm-vm` shares no code with wasmtime, and REQ-VM-9 diffs it against
 the stock runtime on the whole `spec/wasm_cross` corpus. Its scope is the
@@ -229,7 +257,7 @@ arm and reassigned i64 index, is `Spatial` — with the emitter's one unsigned
 compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
 puts the certificate's byte parser inside the proof and extracts
 `check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
-the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with 18 accept/refuse unit modules and three byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. TRUSTED: the compare's operands (that a hoisted count is the list's count, len_hoist.rs), the kills' placement, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator, which no witness records. And
+the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with 18 accept/refuse unit modules and three byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. Since sec-rows-2-3-4 (2026-10-27) the compare's OPERANDS are checked too (crates/almide-anchor-check/src/operands.rs): each located access is held to its slot's check over the shipped instructions — same index, `len / S` of the block it addresses in its own slot size, within one slot, the check dominating, and no change of the index or the list between (a write only by the list's own copy-on-write judge, whose calls the anchor file's `judges` line locates; no other call handed the list; no store of its count word) — the hoisted count and the payload pointer included, which also checks what the kills stood for; 578 of 578 located accesses on the 995-fixture corpus, and three operand drills in `scripts/witness-reinject.sh anchors`. TRUSTED: that a located judge call is a copy-on-write judge (returns a block of its argument's count), that only a call handed a block shrinks it in place, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator, which no witness records. And
 at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
 `if`, `while`, indexing with its bounds check, `if` expressions and

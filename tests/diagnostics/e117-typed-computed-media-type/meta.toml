@@ -1,0 +1,3 @@
+expects_code = "E117"
+expects_error = "its media type must be a string literal"
+hint_substring = "with the type written as a literal"

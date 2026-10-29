@@ -1,0 +1,18 @@
+diff --git a/crates/almide-wasm/src/bounds_facts.rs b/crates/almide-wasm/src/bounds_facts.rs
+index 9e5b3b5df..177935034 100644
+--- a/crates/almide-wasm/src/bounds_facts.rs
++++ b/crates/almide-wasm/src/bounds_facts.rs
+@@ -89,10 +89,9 @@ impl Emitter<'_> {
+         self.lower_stmt(st)?;
+         if let IrStmtKind::Bind { var, .. } | IrStmtKind::Assign { var, .. } = &st.kind {
+             // #4005: the bounds witness sees the same kill (witness_bounds.rs).
+-            crate::witness::bounds::kill(var.0);
+-            if let Some(facts) = self.bounds_facts.as_mut() {
+-                facts.retain(|&(xs, i, _)| xs != *var && i != *var);
+-            }
++            // RE-INJECTED (#4005 operands drill): the assignment neither
++            // drops the facts naming it nor records the kill.
++            let _ = (&self.bounds_facts, var);
+         }
+         Ok(())
+     }

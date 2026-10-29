@@ -1,0 +1,13 @@
+// #4277 drill: an exit release of the frame below is changed in the emitter
+// while its recorded event stays — the ownership witness is unchanged and
+// accepted; only the shipped calls show the release is missing, doubled or
+// on another local.
+fn total() -> Int = {
+  let a = [1, 2, 3]
+  let b = [4, 5]
+  list.len(a) + list.len(b)
+}
+
+effect fn main() -> Unit = {
+  println("${total()}")
+}

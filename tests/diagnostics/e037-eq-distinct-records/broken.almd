@@ -1,0 +1,10 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// Two record types with different fields are two types.
+type Point = { x: Int, y: Int }
+type Size = { w: Int, h: Int }
+
+fn main() -> Unit = {
+  let p = Point { x: 1, y: 2 }
+  let s = Size { w: 1, h: 2 }
+  println("${p == s}")
+}

@@ -343,6 +343,40 @@ depth. Field attributes are only `@skip` /
 `@skip_decode` (and WGSL's `@builtin` / `@location`), for two-way types;
 `@serde(skip)`, `@json_ignore`, `@redact` are E053.
 
+### A response's Content-Type is its body's type
+
+`http.response(status, body)` takes a `Body`: a String is
+`text/plain; charset=utf-8`, Bytes `application/octet-stream`, a `Value`
+`application/json`, `html.*` builds `text/html`
+(`html.escape` / `html.attr` / `html.url_attr` / `html.script_json`, or
+`html.raw(s)` for trusted markup). Any other media type is
+`http.typed("text/csv", bytes)` with a literal type (E117 for a computed one,
+or for HTML / XML / SVG). SVG comes from a package such as almide/svg, which
+the application grants in `almide.toml`: `[trust]` `media = { "almide/svg" =
+["image/svg+xml"] }` (E118 without it). Content-Type is never written by name: `set_header` /
+`with_headers` refuse it (E116); `set_body` / `http.with_body(resp, body)`
+replace the body and its type together. `http.html` is gone (`almide fix`
+rewrites it to `http.response`).
+
+Your own type meets a built-in protocol with plain method names, never a `__`
+prefix: `Read` / `Write` / `Close` (`effect fn T.read(self, max: Int)`,
+`T.write(self, data: Bytes)`, `T.close(self)`), `HttpMessage` (`T.header`,
+`header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`,
+`set_body_bytes`) and `Body` (`fn T.media_type(self) -> String` as a literal,
+`fn T.to_text(self) -> String`).
+
+```almide check
+import html
+import http
+
+fn greet(req: HttpRequest) -> HttpResponse = {
+  let name = http.param(req, "name") ?? "guest"
+  http.response(200, html.escape("Hello, ${name}"))
+}
+
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Rows", "1")])
+```
+
 ```almide check
 import http
 import secret
@@ -375,9 +409,15 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
 | E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
-| E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), an input type holding a `Codec` record (a field or a variant payload), or a forwarded type parameter | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
+| E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), an input type holding a `Codec` record (a field or a variant payload), or a forwarded type parameter; also request data decoded by hand (`User.decode(json.parse(http.body(req))!)`) into such a type | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
+| E111 | Type too large: an inferred type passed the `type_size` budget (a value whose type doubles each step) | Name the intermediate type, or collect the values in a list |
+| E112 | Too many generic instances, or an instance type past `type_size` (generic fns passing ever-larger type arguments on) | Pass the same type on: collect the values in a list, or count the steps in an `Int` |
+| E113 | Match too complex to check for exhaustiveness (`exhaustiveness_steps` budget) | Split the match, or add a `_ =>` arm for the remaining cases |
 | E119 | A Region parameter of an `@export(c)` fn is stored in a top-level `var`, returned, or captured by a closure | Copy the bytes out with `ffi.read(buf, 0, ffi.len(buf))!` and keep the Bytes; a lent Region lives only for the call |
 | E114 | Generic fn calls itself (directly or through other generic fns) at a growing type, e.g. `depth((x, x), n - 1)` inside `depth[T]` | Recurse at the type the fn was called with: collect values in a `List[T]`, or count levels in an `Int` |
+| E116 | `http.set_header` / `http.with_headers` writes `Content-Type` on a response | Pass the body as its type: String, Bytes, a `Value`, `html.*`, a package's safe type, or `http.typed("text/csv", bytes)` |
+| E117 | `http.typed`'s media type is computed, malformed, or HTML / XML / SVG | Write the type as a literal; build HTML with `html.*`, and SVG with a package such as almide/svg granted in `[trust] media` |
+| E118 | A dependency owns a script-capable media type (`@media_owns`) without the root's `[trust] media` grant, a grant names an undeclared type, two owners overlap, or a body type's media type is not a literal | Grant it — `[trust]` `media = { "almide/svg" = ["image/svg+xml"] }` — only if you trust it; write the media type as a literal |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |
@@ -447,7 +487,7 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E085 | `@intrinsic` / `@wasm_intrinsic` on a fn, or a `prim.*` reference / `import prim`, outside the stdlib (a user file binding a runtime symbol or calling the primitive floor directly bypasses the capability profile; `prim` is not user surface) | Intrinsics live in the stdlib; wrap in an effect fn — import the stdlib module that owns the operation (`fs`, `http`, `process`, …) and call it from an `effect fn` of your own. For `prim.*`, call the public function the hint names (`prim.read_text_file` → `fs.read_text`) |
 | E081 | The called stdlib fn is not available on `--target wasm` (the declared wasm wall set, `proofs/target-availability.toml`) | Run natively, use the named portable alternative from the `try:` line, or wait for the port the reason names |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.get(v, k)`), or run `almide fix <file>` |
-| E089 | A `${…}` segment whose value has no defined string form — Bytes, Unit, Matrix, a raw pointer, a function value, or a container/record/variant holding one; also reported at the CALL that instantiates a generic fn whose body interpolates its type parameter | Interpolate what you mean: `${bytes.to_list(b)}` / `${bytes.to_string_lossy(b)}`, `${matrix.to_lists(m)}`, the result of calling the function (`${f(x)}`); a Unit carries nothing, so drop the segment |
+| E089 | A `${…}` segment whose value has no defined string form — Bytes, Unit, Matrix, a raw pointer, a function value, or a container/record/variant holding one (a type that declares `fn T.repr` prints through it whatever it holds); also reported at the CALL that instantiates a generic fn whose body interpolates its type parameter | Interpolate what you mean: `${bytes.to_list(b)}` / `${bytes.to_string_lossy(b)}`, `${matrix.to_lists(m)}`, the result of calling the function (`${f(x)}`), or declare `fn T.repr` on your type; a Unit carries nothing, so drop the segment |
 | E086 | A value built inside a `scoped { … }` block would outlive it (the block's value, or a write to an outer binding) — the rows name where it was allocated and where the scope ends (ALS-E31) | Compute the scalar summary inside the scope and let that cross the boundary |
 | E087 | An operation not permitted in a scoped region: a callee that is not `scoped fn`, a global, host output or an `effect fn`, an unknown indirect call, a heap value captured from outside, a type outside the fragment, or `!` / `?` / `guard` (ALS-E31) | Declare the callee `scoped fn`, pass the value in as a parameter, or move the effect outside the scope |
 | E088 | A recursive call in a `scoped fn` retains the current activation — a single non-tail self-call, or mutual recursion between scoped workers (ALS-E31) | Carry the pending work in an accumulator and return the recursive call, or fold the mutual pair into one worker |

@@ -33,7 +33,9 @@
 # decoder, no compiler code) holds every located event to the instruction
 # there — a site's allocation size and its stores' width, offset and address
 # local, a fill loop's exact shape, a check's compare-and-abort, an access's
-# load or store. Every fixture must read ANCHORS OK: the events the proven
+# load or store — and each access's guard's OPERANDS (operands.rs): the
+# compare tests this access's index against the count of the list it
+# addresses. Every fixture must read ANCHORS OK: the events the proven
 # checkers judge are the instructions the artifact contains.
 #
 # Every witness is judged by THREE independent verdicts, and all three must
@@ -126,17 +128,19 @@ echo "  $N fixture bundle(s); artifact digests in proofs/structural-artifacts.sh
 python3 - "$OUT" <<'PYEOF'
 import os, re, sys
 out = sys.argv[1]
-keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated"]
+keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated", "operands"]
 tot = dict.fromkeys(keys, 0)
-pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated")
+pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated, (\d+) operand pair\(s\)")
 for f in os.listdir(out):
     if f.endswith(".anchor"):
         m = pat.search(open(os.path.join(out, f)).read())
         if m:
             for k, v in zip(keys, m.groups()):
                 tot[k] += int(v)
+if tot["operands"] != tot["accesses"]:
+    sys.exit(f"STRUCTURAL WALL FAIL: {tot['accesses']} located access(es) but {tot['operands']} held to their guard's operands")
 print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
-      f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes; unlocated (dead bodies): "
+      f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes, every access's guard operands to it; unlocated (dead bodies): "
       f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")
 PYEOF
 

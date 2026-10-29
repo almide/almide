@@ -991,6 +991,12 @@ class = "legacy"
 names = 2
 
 [[site]]
+id = "crates/almide-wasm/src/value.rs::VALUE_SELFHOST_HELPERS::table"
+class = "justified"
+names = 8
+why = "Which self-host helper the wasm emitter's native lowering of a value surface calls (value.merge -> __vu_merge_pairs, ...) is a fact about that emitter, not about the functions: no IR names the helper, so the wasm link must be told to load and walk it (#4317, reach-only linking). The helper names were literals at each emitter call site plus a separate value.object -> value.pick rule in the link; this one table both read replaces the copy the link would otherwise keep."
+
+[[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
 names = 71

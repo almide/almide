@@ -108,6 +108,8 @@ NOMINAL = {
     # A capability root over the probe's own working directory.
     "FsRoot": ('fs.open_root(".")!', "fs.open_root", "fs"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
+    # A typed response body (ADR-0032): only `http.typed` makes one.
+    "TypedBody": ('http.typed("text/csv", bytes.from_string("x"))', "http.typed", "http"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
     # The call handle (#2631): only `http.start` makes one.
     "HttpCall": ('http.start(http.new_request("GET", "http://127.0.0.1:1/", "", []), { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),

@@ -14,17 +14,10 @@
 // round-trips. #1352: get_header used to compare with `==` here while v0 used
 // `eq_ignore_ascii_case`, so a wasm-target program reading back a header it had
 // just written under a different spelling silently got `none`.
-fn http_response(status: Int, body: String) -> List[String] = {
-  let st = int.to_string(status)
-  [st, body, "Content-Type", "text/plain"]
-}
-
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
   [st, body, "Content-Type", "application/json"]
 }
-
-fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 
 // ASCII-only case fold of ONE character — RFC 9110 field names are `token`s
 // (ASCII), and v0 compares with `eq_ignore_ascii_case`, so reaching for the

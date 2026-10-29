@@ -670,7 +670,7 @@ impl Emitter<'_> {
 
 impl Emitter<'_> {
     /// MUT push (native b.push): the `$bytes_push` helper — cap fast
-    /// path, geometric growth, outgrown block freed at rc==1 (#1689) —
+    /// path, geometric growth, outgrown block released (#1689) —
     /// then write back, exactly the `list.push` convention.
     fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("push", b)?;

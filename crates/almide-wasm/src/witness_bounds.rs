@@ -39,9 +39,15 @@
 //! unsigned compare (or a Bytes room test) opening an `if` that aborts, an
 //! `a` a load, a `w` a store, and a slot's events lie in byte order.
 //!
-//! TRUSTED: that the compare's operands are the access's index and its
-//! list's count — the hoisted count among them (len_hoist.rs) — and that
-//! an `s` sits at every change of a variable a key names.
+//! The compare's OPERANDS are checked on the bytes too: almide-anchor-check
+//! (operands.rs) rebuilds the compare's index and count and the access's
+//! address from the shipped instructions and holds them to each other, so a
+//! wrong index, a wrong list, a wrong stride or a variable changed between
+//! the check and the access rejects — the hoisted count (len_hoist.rs) and
+//! the payload pointer (payload_ptr.rs) included. For that it needs to know
+//! which calls are copy-on-write JUDGES (a judge returns a block of its
+//! argument's count): every judge call on a list or Bytes local, global or
+//! cell records its anchor with [`judge`].
 //! Element accesses that do not go through the index operator (a `for`
 //! loop's element reads, stdlib `list.get`, the runtime's own routines) are
 //! not recorded.
@@ -69,6 +75,9 @@ struct State {
     stretch_anchors: Vec<String>,
     done: Vec<(usize, String)>,
     done_anchors: Vec<(usize, String)>,
+    /// The pass's copy-on-write judge calls, one anchor each.
+    judges: String,
+    done_judges: Vec<(usize, String)>,
     /// A site outlived its stretch: the witness is made unparseable, so it
     /// is rejected rather than read short.
     broken: bool,
@@ -128,6 +137,10 @@ impl State {
         if std::mem::take(&mut self.broken) {
             self.stretches.push("x".to_string());
             self.stretch_anchors.push("-".to_string());
+        }
+        let judges = std::mem::take(&mut self.judges);
+        if !judges.is_empty() {
+            self.done_judges.push((self.pass, judges.trim_end().to_string()));
         }
         let stretches = std::mem::take(&mut self.stretches);
         let anchors = std::mem::take(&mut self.stretch_anchors);
@@ -224,6 +237,16 @@ pub(crate) fn access(site: Option<Site>, write: bool, at: &wasm_encoder::Functio
     }
 }
 
+/// A copy-on-write judge call (one argument, the block; it returns a block
+/// of the same count) was just emitted.
+pub(crate) fn judge(at: &wasm_encoder::Function) {
+    let a = crate::witness::anchor::at(at);
+    with(|s| {
+        s.judges.push_str(&a);
+        s.judges.push(' ');
+    });
+}
+
 /// Variable `v` changed: every slot of every open stretch that names it.
 pub(crate) fn kill(v: u32) {
     with(|s| s.kill(v));
@@ -235,7 +258,19 @@ pub fn take() -> Vec<(usize, String)> {
     let Some(mut s) = g.take() else { return Vec::new() };
     s.flush();
     *taken_anchors().lock().expect("bounds anchors") = std::mem::take(&mut s.done_anchors);
+    *taken_judges().lock().expect("bounds judges") = std::mem::take(&mut s.done_judges);
     s.done
+}
+
+fn taken_judges() -> &'static Mutex<Vec<(usize, String)>> {
+    use std::sync::OnceLock;
+    static J: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+    J.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// The judge-call anchors of the passes the last [`take`] flushed.
+pub fn take_judges() -> Vec<(usize, String)> {
+    std::mem::take(&mut *taken_judges().lock().expect("bounds judges"))
 }
 
 fn taken_anchors() -> &'static Mutex<Vec<(usize, String)>> {

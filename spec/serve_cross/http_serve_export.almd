@@ -28,8 +28,7 @@ effect fn app(req: HttpRequest) -> HttpResponse = {
       201,
       "${http.method(req)} ${http.body(req)}",
       [
-        ("X-Echo", http.header(req, "x-token") ?? "none"),
-        ("Content-Type", "text/plain; charset=utf-8")
+        ("X-Echo", http.header(req, "x-token") ?? "none")
       ],
     ),
     "/teapot" => http.response(200, "short and stout") |> http.set_status(418),

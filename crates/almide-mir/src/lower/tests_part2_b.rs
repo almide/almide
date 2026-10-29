@@ -207,7 +207,7 @@
         // free fn `Person.encode(p)` — the receiver becomes the first argument. Mirrors the v0
         // emitter's Method catch-all (emit_wasm/calls_p2.rs). A NON-Named receiver (the test
         // above) stays an unresolved Method and walls.
-        let person = Ty::Named(sym("Person"), vec![]);
+        let person = Ty::Named(sym("Person"), Default::default());
         let mcall = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Method {
@@ -217,7 +217,7 @@
                 args: vec![],
                 type_args: vec![],
             },
-            Ty::Named(sym("Value"), vec![]),
+            Ty::Named(sym("Value"), Default::default()),
         );
         let rewritten =
             crate::lower::desugar_method_calls(&mcall, &Default::default()).expect("a Named-receiver method resolves");
@@ -497,7 +497,7 @@
                             Ty::String,
                         )),
                     },
-                    Ty::Applied(TypeConstructorId::Result, vec![Ty::String, Ty::String]),
+                    Ty::Applied(TypeConstructorId::Result, vec![Ty::String, Ty::String].into()),
                 ),
             }),
         ]);
@@ -533,7 +533,7 @@
         let rec_ty = Ty::Record {
             fields: vec![(almide_lang::intern::sym("name"), Ty::String)],
         };
-        let opt_rec = Ty::Applied(TypeConstructorId::Option, vec![rec_ty.clone()]);
+        let opt_rec = Ty::Applied(TypeConstructorId::Option, vec![rec_ty.clone()].into());
         let b = body(vec![
             bind(0, opt_rec.clone(), ir_expr(IrExprKind::OptionNone, opt_rec.clone())),
             bind(

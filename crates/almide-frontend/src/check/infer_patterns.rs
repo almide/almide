@@ -161,7 +161,7 @@ impl Checker {
         self.reject_foreign_opaque_record(&resolve_ty(ty, &self.uf), "destructure");
         if self.env.lookup_ctor_written(name.as_str(), self.current_module_prefix.as_deref()).is_none() {
             let head = self.record_type_canon(name);
-            self.reject_foreign_opaque_record(&Ty::Named(head, vec![]), "destructure");
+            self.reject_foreign_opaque_record(&Ty::Named(head, Default::default()), "destructure");
         }
         let resolved = self.env.resolve_named(ty);
         // Normalize module-qualified names: "varlib.Circle" → "Circle" (mirrors
@@ -216,7 +216,7 @@ impl Checker {
             // When the outer call context later resolves ?N, the element vars
             // get their correct types through the constraint chain.
             let elem_vars: Vec<Ty> = elements.iter().map(|_| self.fresh_var()).collect();
-            self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
+            self.constrain(resolved, Ty::Tuple(elem_vars.clone().into()), "tuple destructure");
             for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
         } else {
             // A CONCRETE non-tuple value under a tuple pattern is a type

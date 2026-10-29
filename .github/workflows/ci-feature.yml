@@ -67,11 +67,7 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version

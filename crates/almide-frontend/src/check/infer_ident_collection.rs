@@ -270,45 +270,26 @@ fn if_arm_fix_hint(then: &ast::Expr, else_: &ast::Expr) -> Option<FixHint> {
 /// True if `ty` mentions a function type anywhere (directly or nested in a
 /// container/tuple/record). Such a type can't be hashed or compared.
 fn ty_mentions_fn(ty: &Ty) -> bool {
-    match ty {
-        Ty::Fn { .. } => true,
-        Ty::Tuple(ts) => ts.iter().any(ty_mentions_fn),
-        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_mentions_fn(t)),
-        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().any(ty_mentions_fn),
-        _ => false,
-    }
+    // Shared structure is searched once (ADR-0030 D5).
+    ty.any_node(&mut |t| matches!(t, Ty::Fn { .. }))
 }
 
 /// `Some((message, hint))` if `ty` (or a nested type) uses a function where a
 /// comparable/hashable type is required: a `Set` element or a `Map` key.
 /// Closures are allowed as `Map` values, so only the key (arg 0) is checked.
 fn invalid_collection_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
-    match ty {
-        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 && ty_mentions_fn(&args[0]) => {
-            return Some((
-                "a `Set` element type cannot contain a function — closures have no equality or hashing",
-                "Closures can't be deduplicated. Keep them in a `List`, or build the set from a comparable key.",
-            ));
-        }
-        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 && ty_mentions_fn(&args[0]) => {
-            return Some((
-                "a `Map` key type cannot contain a function — closures have no equality or hashing",
-                "Closures are fine as `Map` values; only the key must be comparable.",
-            ));
-        }
-        _ => {}
-    }
-    let children: Vec<&Ty> = match ty {
-        Ty::Tuple(ts) => ts.iter().collect(),
-        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().map(|(_, t)| t).collect(),
-        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().collect(),
-        Ty::Fn { params, ret, is_effect: _ } => params.iter().chain(std::iter::once(ret.as_ref())).collect(),
-        _ => Vec::new(),
-    };
-    for c in children {
-        if let Some(e) = invalid_collection_type(c) { return Some(e); }
-    }
-    None
+    // Every nested type, each shared list once (ADR-0030 D5).
+    ty.find_map_node(&mut |t| match t {
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 && ty_mentions_fn(&args[0]) => Some((
+            "a `Set` element type cannot contain a function — closures have no equality or hashing",
+            "Closures can't be deduplicated. Keep them in a `List`, or build the set from a comparable key.",
+        )),
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 && ty_mentions_fn(&args[0]) => Some((
+            "a `Map` key type cannot contain a function — closures have no equality or hashing",
+            "Closures are fine as `Map` values; only the key must be comparable.",
+        )),
+        _ => None,
+    })
 }
 
 /// If `callee` names a generic collection constructor whose element type NO

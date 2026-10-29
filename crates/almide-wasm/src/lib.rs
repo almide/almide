@@ -225,6 +225,7 @@ mod testing;
 mod tco;
 mod types_table;
 mod value;
+pub use value::{VALUE_HELPER_ANCHOR, VALUE_SELFHOST_HELPERS};
 mod utf8_helpers;
 pub use utf8_helpers::emit_errtext_multibyte;
 mod json_helpers;
@@ -330,7 +331,7 @@ const F_COW: u32 = 36;
 const F_STR_APPEND: u32 = 37;
 /// `$bytes_push(b, v) -> i32`: byte append with the list-push growth
 /// discipline — cap fast path in place, geometric grow on overflow, the
-/// outgrown block freed at rc==1. The old per-push `emit_copy_grow(b, 1)`
+/// outgrown block released. The old per-push `emit_copy_grow(b, 1)`
 /// reallocated len+1 EVERY push and never freed the outgrown block, so n
 /// pushes retained Σn ≈ n²/2 bytes — `bytes.zeros(0)` + 69k pushes OOM'd
 /// where native and the incumbent complete (#1689).

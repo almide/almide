@@ -624,13 +624,17 @@ the operation then runs beneath a descriptor of the granted directory it
 lands under, opened once on first use (`crates/almide-rt-core/src/fs_scoped_core.rs`,
 #4084): the decided segments are walked from that descriptor without
 following a symlink (openat2 `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` on Linux,
-an `O_NOFOLLOW` openat walk on macOS) and the last one is opened, created,
-listed, removed or renamed from its parent's descriptor. A tree rewritten
-between the check and the call (a directory swapped for a symlink) is refused
-by the call with the same `err`, never followed. What remains path-based: an
-operation on a granted directory itself, the metadata of an entry the process
-may not open, and every call on a platform other than 64-bit Linux and macOS,
-where the check still runs before a plain call and a rewrite can race it. The
+64- and 32-bit, an `O_NOFOLLOW` openat walk on macOS, `NtCreateFile` relative
+to the held directory handle with `FILE_OPEN_REPARSE_POINT` on Windows, where
+any reparse point — a symlink, a junction — is refused as a symlink is, #4293)
+and the last one is opened, created, listed, removed or renamed from its
+parent's descriptor. A tree rewritten between the check and the call (a
+directory swapped for a symlink) is refused by the call with the same `err`,
+never followed. An operation on a granted directory itself runs on its held
+descriptor, or from its parent's after the entry there is checked to be the
+held directory, and the metadata of an entry the process may not open is taken
+by descriptor. On a platform other than Linux, macOS and Windows every scoped
+call is refused and the toolchain refuses the key before building. The
 p3 component's bound is its preopens, which the runtime (wasmtime-wasi over
 cap-std) resolves beneath the preopened descriptor at the call itself. Within a program, `fs.open_root`
 (`docs/stdlib/fs.md`) bounds the paths built from untrusted input to one

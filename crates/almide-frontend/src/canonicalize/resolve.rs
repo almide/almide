@@ -66,7 +66,7 @@ pub fn register_builtin_named_type_keys(env: &mut crate::types::TypeEnv, decls: 
         if let ast::Decl::Type { name, .. } = decl
             && builtin_type_head(name.as_str(), TypeSpelling::Bare).is_some()
         {
-            env.types.insert(builtin_named_type_key(scope, name.as_str()), Ty::Named(*name, vec![]));
+            env.types.insert(builtin_named_type_key(scope, name.as_str()), Ty::Named(*name, Default::default()));
         }
     }
 }
@@ -107,7 +107,7 @@ pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Op
     }
     for (name, ks) in owners {
         if let [only] = ks.as_slice() {
-            env.types.insert(scoped_bare_type_key(scope, &name), Ty::Named(*only, vec![]));
+            env.types.insert(scoped_bare_type_key(scope, &name), Ty::Named(*only, Default::default()));
         }
     }
     // The file's ALIAS spellings too (#2877): `import self.boxes as bx` makes
@@ -132,7 +132,7 @@ pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Op
                 continue;
             }
             let spelled = format!("{}.{}", alias.as_str(), rest);
-            alias_adds.push((scoped_bare_type_key(scope, &spelled), Ty::Named(*k, vec![])));
+            alias_adds.push((scoped_bare_type_key(scope, &spelled), Ty::Named(*k, Default::default())));
         }
     }
     for (k, v) in alias_adds {
@@ -163,7 +163,7 @@ pub fn register_alias_type_keys(env: &mut crate::types::TypeEnv) {
             if rest.contains('.') {
                 continue;
             }
-            adds.push((sym(&format!("{}.{}", alias.as_str(), rest)), Ty::Named(*k, vec![])));
+            adds.push((sym(&format!("{}.{}", alias.as_str(), rest)), Ty::Named(*k, Default::default())));
         }
     }
     for (k, v) in adds {
@@ -606,7 +606,7 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
     // `Matrix[Float32]` / `Matrix[Float64]`.
     BuiltinTypeHead {
         name: "Matrix", arity: BuiltinArity::Params(&["T"]),
-        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec()),
+        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec().into()),
     },
 ];
 
@@ -761,7 +761,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     // #433: a user module's (qualified) reference to a namespaced
     // type resolves to its canonical `mod.Type` name; falls through
     // to the existing bare resolution for stdlib / local types.
-    if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, vec![])) {
+    if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, Default::default())) {
         return qualified;
     }
     if let Some((_, alias)) = known_types.and_then(|types| scoped_alias_entry(other, types, cur_mod)) {
@@ -788,7 +788,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
                 Ty::Record { .. } | Ty::Variant { .. } => {
                     // nominal — keep as Named, but use the canonical name
                     if let Some((_, bare)) = other.rsplit_once('.') {
-                        return Ty::Named(sym(bare), vec![]);
+                        return Ty::Named(sym(bare), Default::default());
                     }
                 }
                 other_ty => return other_ty.clone(),
@@ -797,9 +797,9 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     }
     // For module-qualified names, use the bare name for Ty::Named
     if let Some((_, bare)) = other.rsplit_once('.') {
-        Ty::Named(sym(bare), vec![])
+        Ty::Named(sym(bare), Default::default())
     } else {
-        Ty::Named(sym(other), vec![])
+        Ty::Named(sym(other), Default::default())
     }
 }
 
@@ -845,7 +845,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     // name; stdlib / local generics stay bare.
     let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
     if let Some(qn) = qualified {
-        return Ty::Named(qn, ra);
+        return Ty::Named(qn, ra.into());
     }
     // A generic TRANSPARENT alias applied to its arguments (#3403) is its
     // body with each declared letter replaced by its argument, as a
@@ -856,7 +856,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     if let Some((key, body)) = known_types.and_then(|types| transparent_alias_entry(name.as_str(), types, cur_mod)) {
         let params = known_types.and_then(|types| declared_type_params(key.as_str(), types)).unwrap_or(&[]);
         if params.len() != ra.len() {
-            return Ty::Named(key, ra);
+            return Ty::Named(key, ra.into());
         }
         let bindings: HashMap<Sym, Ty> = params.iter().zip(ra)
             .filter_map(|(p, a)| match p { Ty::TypeVar(v) => Some((*v, a)), _ => None })
@@ -864,7 +864,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
         return almide_lang::types::substitute(body, &bindings);
     }
     let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-    Ty::Named(resolved_name, ra)
+    Ty::Named(resolved_name, ra.into())
 }
 
 // `TypeExpr::Variant { cases, .. }` resolution: lower each AST variant case form

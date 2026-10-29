@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
+index 33469c12c..32009a89d 100644
+--- a/crates/almide-wasm/src/exit_plan.rs
++++ b/crates/almide-wasm/src/exit_plan.rs
+@@ -152,7 +152,8 @@ impl Emitter<'_> {
+                 continue;
+             }
+             let dec = self.dec_fn_of_local(idx);
+-            self.f.instructions().local_get(idx).call(dec);
++            // RE-INJECTED (#4277 drill): every release is emitted twice; one event stays.
++            self.f.instructions().local_get(idx).call(dec).local_get(idx).call(dec);
+         }
+         match plan.continuation {
+             Continuation::ReturnSuccess => {

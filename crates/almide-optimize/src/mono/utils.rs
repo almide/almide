@@ -110,7 +110,7 @@ mod tests {
     }
 
     fn result_of(payload: Ty) -> Ty {
-        Ty::Applied(TypeConstructorId::Result, vec![payload, Ty::String])
+        Ty::Applied(TypeConstructorId::Result, vec![payload, Ty::String].into())
     }
 
     /// The two `result.filter` call sites from #905. They differ ONLY in the
@@ -121,7 +121,7 @@ mod tests {
         let b = bounds(&["A", "E"]);
         let tuple_site = module_mono_suffix(
             &b,
-            &bind(&[("A", Ty::Tuple(vec![Ty::Bool, Ty::String])), ("E", Ty::String)]),
+            &bind(&[("A", Ty::Tuple(vec![Ty::Bool, Ty::String].into())), ("E", Ty::String)]),
         );
         let nested_site = module_mono_suffix(
             &b,

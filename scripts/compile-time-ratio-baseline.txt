@@ -19,5 +19,21 @@
 #
 # The rows read lower than the first VM's, so anchor on the second VM's
 # reading of this tree; release-fix's 6.65 / 27.3 stays far over the ceiling.
+#
+# Re-anchored for #4317 (2026-10-29) on a third n2-standard-16
+# (asia-northeast2-b), same corpus, min of 3, every binary run back to back
+# pinned to one core, the fixed tree twice (agreeing to 0.6%):
+#
+#   tree                                     check   wasm
+#   before #4182, e853bea68                  2.63    13.8
+#   #4182's merge, 926542089                 4.66    22.4   <- the #4317 slowdown
+#   develop before the fix, ab7c28b74        4.18    18.9
+#   this tree (the wasm link scans only reached fns)  4.13    7.2
+#
+# The wasm link used to scan every fn of every module it loaded for demands,
+# so a module's unused fns linked their callees' self-host bodies and
+# modules, transitively. The check row keeps its anchor: the front end still
+# loads a reached module whole (the native leg emits a loaded module whole,
+# so its closure must be too), and this tree reads inside its band.
 check 4.63
-wasm 20.6
+wasm 7.2

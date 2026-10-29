@@ -23,10 +23,26 @@ pub(crate) fn escape_dquoted(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
+            c if push_hidden_escape(&mut out, c) => {}
             _ => out.push(ch),
         }
     }
     out
+}
+
+/// #4320: a character E101 refuses raw in a source file
+/// (`almide_lang::lexer::is_hidden_source_char` — C0 / DEL / C1 controls,
+/// format characters, line / paragraph separators, the Tags block) is
+/// written as its `\u{..}` escape, in C-418's spelling (lowercase hex, no
+/// leading zeros). Every value-rendering path of a quoted literal calls
+/// this, so a re-rendered literal decodes to the same characters and never
+/// holds one the next parse refuses. Returns whether it wrote the escape.
+pub(crate) fn push_hidden_escape(out: &mut String, c: char) -> bool {
+    if !almide_lang::lexer::is_hidden_source_char(c) {
+        return false;
+    }
+    let _ = write!(out, "\\u{{{:x}}}", c as u32);
+    true
 }
 
 fn join_syms(syms: &[Sym], sep: &str) -> String {

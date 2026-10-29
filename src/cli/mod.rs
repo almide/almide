@@ -287,6 +287,10 @@ pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::pro
     // are run-time values, so the bound is enforced where they are used: the
     // embedded wasm host checks every fs op and preopens only these roots, and
     // the native build embeds them in `main` (`build::inject_fs_scope`).
+    // A platform whose build has no descriptor-relative fs calls cannot hold
+    // the bound against a concurrent rewrite: the key is refused here, before
+    // anything is built or run, rather than enforced by a racy path check.
+    almide_rt_core::fs_beneath_core::fs_scope_platform_check(proj.fs_allow.is_some())?;
     almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
     // An absent `allow` is unchecked; an explicit `allow = []` allows no
     // capability at all (#4101).
@@ -332,7 +336,7 @@ pub(crate) fn enforce_native_grants(
 /// for every route. A manifest that does not parse is left to the command.
 pub(crate) fn resolve_cwd_deps_or_exit() {
     let Some(proj) = crate::compile_driver::cwd_project() else { return };
-    if proj.dependencies.is_empty() {
+    if proj.dependencies.is_empty() && proj.media_grants.is_empty() {
         return;
     }
     let fetched = crate::project_fetch::fetch_all_deps(&proj).unwrap_or_else(|e| {
@@ -343,6 +347,30 @@ pub(crate) fn resolve_cwd_deps_or_exit() {
         err(&refusal);
         std::process::exit(1);
     }
+    enforce_media_grants_or_exit(&proj, &fetched);
+}
+
+/// `[trust] media` (ADR-0032 D7): exit 1 with the E118 refusal when a
+/// dependency owns a script-capable media type the root manifest does not
+/// grant, a grant names a type its package does not declare, or two owners
+/// overlap.
+fn enforce_media_grants_or_exit(proj: &crate::project::Project, fetched: &[crate::project::FetchedDep]) {
+    let deps = crate::media_grant::survey(proj, fetched);
+    if let Some(refusal) = crate::media_grant::refusal(proj, &deps) {
+        err(&refusal);
+        std::process::exit(1);
+    }
+}
+
+/// `almide check`'s share of the dependency gate: the media grant only, as
+/// it is a check-time rule (ADR-0032 D7). Fetch errors are left to the check.
+pub(crate) fn check_cwd_media_grants_or_exit() {
+    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+    if proj.dependencies.is_empty() && proj.media_grants.is_empty() {
+        return;
+    }
+    let Ok(fetched) = crate::project_fetch::fetch_all_deps(&proj) else { return };
+    enforce_media_grants_or_exit(&proj, &fetched);
 }
 
 pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {

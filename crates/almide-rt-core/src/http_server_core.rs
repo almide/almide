@@ -457,11 +457,11 @@ fn http_server_timeout(deadline: std::time::Instant) -> Option<std::time::Durati
 }
 
 /// Buffered bytes, refilled under the deadline. `Ok(&[])` is the peer's EOF.
-fn http_server_fill<'a>(
-    reader: &'a mut std::io::BufReader<std::net::TcpStream>,
+fn http_server_fill(
+    reader: &mut std::io::BufReader<std::net::TcpStream>,
     clock: HttpServerClock,
     started: bool,
-) -> Result<&'a [u8], HttpServerReject> {
+) -> Result<&[u8], HttpServerReject> {
     // Nothing read yet: a silent or vanished connection is dropped. Past the
     // first byte, running out of time is the clock's answer: the header
     // deadline's 408 while the head is read, the request timeout's 503 after.

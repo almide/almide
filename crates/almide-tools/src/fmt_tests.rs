@@ -171,6 +171,46 @@ mod literal_spelling_tests {
         let out = format_program(&program);
         assert!(out.contains("let v = 10000000000.0"), "expected value rendering:\n{out}");
     }
+
+    /// #4320: the value-rendering path writes every character E101 refuses
+    /// raw as its C-418 `\u{..}` escape — plain, interpolated, single-quoted
+    /// and test-name literals alike — so the re-render decodes to the same
+    /// value and holds no raw hidden character. Before the fix a stripped
+    /// `"\x1b[1m"` came back with a raw ESC, which the next parse refuses.
+    #[test]
+    fn value_rendering_escapes_every_hidden_character() {
+        let hidden = ["\\x1b", "\\u{7f}", "\\u{85}", "\\u{200b}", "\\u{202e}", "\\u{2028}", "\\u{e0041}", "\\r"];
+        let body = hidden.join("|");
+        let src = format!(
+            "fn f(x: Int) -> String = {{\n  let a = \"{body}\"\n  let b = \"{body}${{x}}{body}\"\n  let c = '{body}'\n  a + b + c\n}}\n\ntest \"t{body}\" {{\n  assert(true)\n}}\n"
+        );
+        let values = |text: &str| -> Vec<String> {
+            let mut program = Parser::new(Lexer::tokenize(text)).parse().expect("parse succeeds");
+            let mut out = Vec::new();
+            almide_lang::ast::visit_exprs_mut(&mut program, &mut |e: &mut Expr| match &e.kind {
+                ExprKind::String { value, .. } => out.push(value.clone()),
+                ExprKind::InterpolatedString { parts, .. } => out.extend(parts.iter().filter_map(|p| match p {
+                    StringPart::Lit { value } => Some(value.clone()),
+                    StringPart::Expr { .. } => None,
+                })),
+                _ => {}
+            });
+            out
+        };
+        let mut program = Parser::new(Lexer::tokenize(&src)).parse().expect("parse succeeds");
+        almide_lang::ast::strip_literal_raw(&mut program);
+        let out = format_program(&program);
+        assert!(
+            !out.chars().any(almide_lang::lexer::is_hidden_source_char),
+            "a raw hidden character was written:\n{}",
+            out.escape_debug()
+        );
+        assert!(out.contains("\\u{1b}"), "C-418 spelling expected:\n{out}");
+        let mut reparsed = Parser::new(Lexer::tokenize(&out));
+        reparsed.parse().expect("re-parse succeeds");
+        assert!(reparsed.errors.is_empty(), "{:?}\n{out}", reparsed.errors);
+        assert_eq!(values(&src), values(&out), "a literal changed value:\n{out}");
+    }
 }
 
 #[cfg(test)]

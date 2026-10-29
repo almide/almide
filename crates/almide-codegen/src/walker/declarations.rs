@@ -396,7 +396,7 @@ fn render_repr_parts_body(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             let arms = cases.iter().map(|v| {
-                let boxed = |field: &str| super::case_field_is_boxed(ctx, Some(&Ty::Named(td.name.clone(), vec![])), v.name.as_str(), field)
+                let boxed = |field: &str| super::case_field_is_boxed(ctx, Some(&Ty::Named(td.name.clone(), Default::default())), v.name.as_str(), field)
                     || ctx.ann.boxed_case_fields.contains(&(td.name.to_string(), v.name.to_string(), field.to_string()));
                 match &v.kind {
                     IrVariantKind::Unit => format!("{}::{} => {{ {} }}", td.name, v.name, lit(v.name.as_str())),
