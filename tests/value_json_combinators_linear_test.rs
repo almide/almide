@@ -232,6 +232,28 @@ fn value_pick_and_omit_are_linear_on_wasm() {
     wasm_doubling(PICK_OMIT, 40_000, 750_000_000);
 }
 
+/// #4315: the wasm `set_path` rebuilt every Object it passed (pairs copied,
+/// mapped, folded again by `value.object`), so the object fold was O(n²) —
+/// 4.04 s at 8,000 keys, four times per doubling — and the array fold
+/// super-linear. The structural leg now walks the path in place where the
+/// document is the op's alone, and finds a key through the Object's index
+/// (crates/almide-wasm/src/value_set_path.rs). Budgets: about three times
+/// what the in-place walk spends at n (measured, 20,000: 54M for the object
+/// fold, 20M for the array fold; 114M / 41M at 40,000). The copying body
+/// spent 45G on the object fold at 20,000.
+const OBJ_FOLD_FUEL: u64 = 165_000_000;
+const ARR_FOLD_FUEL: u64 = 60_000_000;
+
+#[test]
+fn value_set_path_object_fold_is_linear_on_wasm() {
+    wasm_doubling(SET_OBJ, 20_000, OBJ_FOLD_FUEL);
+}
+
+#[test]
+fn value_set_path_array_fold_is_linear_on_wasm() {
+    wasm_doubling(SET_ARR, 20_000, ARR_FOLD_FUEL);
+}
+
 #[test]
 fn native_bodies_stay_fast_at_the_issue_sizes() {
     let dir = tempfile::tempdir().expect("scratch");
