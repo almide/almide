@@ -765,9 +765,10 @@ pub fn check_rc(
             let arg = fl.arg(calls[c].0, 0, FUEL);
             let crate::operands::T::Opaque(p) = crate::operands::pl(&arg) else { continue };
             let Some((s, e, vals)) = fl.if_arms(*p, FUEL) else { continue };
-            let Some((&site, _)) = site_at.iter().find(|(_, &at)| at == (s, e)) else { continue };
             let arm_names: Vec<Vec<u32>> = vals.iter().map(|v| names_through(bodies, imports, b, &judged, v, 2)).collect();
-            let pick = |arm: usize| {
+            // Every recorder site anchored to this `if` (the arms' own site
+            // and a select site recorded over it later) is a candidate.
+            let pick = |site: usize, arm: usize| {
                 (0..evs.len()).find(|&x| {
                     !got[x]
                         && evs[x].0 == calls[c].1
@@ -775,7 +776,9 @@ pub fn check_rc(
                         && evs[x].1.is_some_and(|l| arm_names[arm].contains(&l))
                 })
             };
-            if let (Some(e0), Some(e1)) = (pick(0), pick(1)) {
+            let mut sites: Vec<usize> = site_at.iter().filter(|(_, &at)| at == (s, e)).map(|(&k, _)| k).collect();
+            sites.sort_unstable();
+            if let Some((e0, e1)) = sites.iter().find_map(|&site| Some((pick(site, 0)?, pick(site, 1)?))) {
                 owner[c] = Some(e0);
                 co[c].push(e1);
                 got[e0] = true;

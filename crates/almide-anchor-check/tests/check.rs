@@ -852,3 +852,16 @@ fn an_anchored_if_pairs_each_arm_event_with_its_arm_value() -> Result<(), String
     assert!(run("(@1-3 ( d0 | ) |@1-3 d1 )").is_err(), "an event on some of the arm's paths only");
     Ok(())
 }
+
+/// Two recorder sites anchored to one `if` (its arms' own, then a select
+/// site over it): the pairing reads the one whose arms carry the events.
+#[test]
+fn a_select_site_over_an_anchored_if_pairs_too() -> Result<(), String> {
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, None, &releases, &[], &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-3 |@1-3 ) (@1-3 d0 |@1-3 d1 )")?;
+    assert!(run("(@1-3 |@1-3 ) (@1-3 d1 |@1-3 d0 )").is_err());
+    Ok(())
+}
