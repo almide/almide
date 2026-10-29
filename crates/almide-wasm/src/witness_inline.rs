@@ -337,11 +337,20 @@ impl Emitter<'_> {
 
     /// `r?` over a Result (data.rs): an OWNED carrier is released on both
     /// arms — with its err payload, or as a spine whose ok payload moved into
-    /// the fresh some-cell — so it is born and released here (`id`); over a
-    /// BORROWED carrier the ok arm shares the payload into the cell.
+    /// the fresh some-cell — so it is born here and released on each arm
+    /// (`id` on both paths: one release call per arm, each its own event for
+    /// the byte check, #4277); over a BORROWED carrier the ok arm shares the
+    /// payload into the cell.
     pub(crate) fn witness_to_option(&mut self, owned_carrier: bool, payload: SliceTy) {
         if owned_carrier {
-            self.witness_discard();
+            let Some(w) = self.witness.as_mut() else { return };
+            let o = w.temp_born();
+            w.branch_open();
+            w.branch_arm();
+            w.temp_ops(o, "d");
+            w.branch_arm();
+            w.temp_ops(o, "d");
+            w.branch_close();
             return;
         }
         self.witness_branch_open();
