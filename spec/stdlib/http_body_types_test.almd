@@ -2,17 +2,25 @@
 // ADR-0032, security row 11e: a response's Content-Type is its body's type.
 // Each Body states its own media type; `set_header` and `with_headers` refuse
 // the Content-Type name, `set_body` / `with_body` replace the body and its
-// type together, and `http.typed` builds any other media type a safe module
-// does not own. Header names here are computed (`name`) where a literal would
+// type together, `http.typed` builds any other media type that runs no
+// script and the stdlib does not own, and the application's own body type
+// serves its literal. Header names here are computed (`name`) where a literal would
 // be E116 at check time, so the run-time refusal is what runs. Every
 // assertion holds on native and on wasm alike.
 import html
 import http
-import svg
 import testing
 
 // A header name the checker cannot read as a literal.
 fn name(s: String) -> String = s
+
+// An application's own body type (ADR-0032 D7): it serves the literal its
+// media fn states. text/csv runs no script, so it needs no grant.
+type Csv: Body = { rows: String }
+
+fn Csv.__self_media_type(self) -> String = "text/csv"
+
+fn Csv.__self_to_text(self) -> String = self.rows
 
 test "each body type gives the response its Content-Type" {
   assert_eq(
@@ -28,7 +36,6 @@ test "each body type gives the response its Content-Type" {
     http.header(http.response(200, html.escape("x")), "Content-Type"),
     some("text/html; charset=utf-8"),
   )
-  assert_eq(http.header(http.response(200, svg.escape("x")), "Content-Type"), some("image/svg+xml"))
   assert_eq(
     http.header(
       http.response(200, http.typed("text/csv", bytes.from_string("a,b"))),
@@ -75,8 +82,8 @@ test "set_body and with_body replace the body and its type together" {
   assert_eq(http.body(text), "<script>alert(1)</script>")
   let raw = http.set_body_bytes(page, bytes.from_string("<b>"))
   assert_eq(http.header(raw, "Content-Type"), some("application/octet-stream"))
-  let back = http.with_body(text, svg.escape("<b>"))
-  assert_eq(http.header(back, "Content-Type"), some("image/svg+xml"))
+  let back = http.with_body(text, html.escape("<b>"))
+  assert_eq(http.header(back, "Content-Type"), some("text/html; charset=utf-8"))
   assert_eq(http.body(back), "&lt;b&gt;")
 }
 
@@ -103,35 +110,9 @@ test "a request is not a response body, so it may carry any Content-Type" {
   assert_eq(http.header(http.set_body(req, "<p>v2</p>"), "Content-Type"), some("text/html"))
 }
 
-test "svg builds only safe markup" {
-  let s = svg.element(
-    "svg",
-    [svg.attr("width", "10\" onload=\"alert(1)"), svg.url_attr("href", "javascript:alert(1)")],
-    [svg.escape("<t>")],
-  )
-  assert_eq(
-    svg.to_string(s),
-    "<svg width=\"10&quot; onload=&quot;alert(1)\" href=\"about:invalid#almide-blocked\">&lt;t&gt;</svg>",
-  )
-  testing.assert_aborts(
-    "svg.element: `script` runs script or rewrites attributes",
-    () => svg.element("script", [], []),
-  )
-  testing.assert_aborts(
-    "svg.element: `animate` runs script or rewrites attributes",
-    () => svg.element("animate", [], []),
-  )
-  testing.assert_aborts(
-    "svg.element: `foreignObject` runs script or rewrites attributes",
-    () => svg.element("foreignObject", [], []),
-  )
-  testing.assert_aborts("svg.attr: `onload` runs script or styles", () => svg.attr("onload", "x"))
-  testing.assert_aborts(
-    "svg.attr: `href` takes a URL; use svg.url_attr",
-    () => svg.attr("href", "x"),
-  )
-  testing.assert_aborts(
-    "svg.element: `a b` is not an element name",
-    () => svg.element("a b", [], []),
-  )
+test "an application's own body type serves its literal media type" {
+  let r = http.response(200, Csv { rows: "a,b" })
+  assert_eq(http.header(r, "Content-Type"), some("text/csv"))
+  assert_eq(http.body(r), "a,b")
+  assert_eq(http.header(http.with_body(r, "x"), "Content-Type"), some("text/plain; charset=utf-8"))
 }
