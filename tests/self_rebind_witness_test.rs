@@ -52,8 +52,36 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// The stdlib inspection's calibration probe for `ffi.read` at k = 1024
+/// (`xtarget-fuzz inspect ffi.read --emit`, its `while i < 3` raised): the
+/// same self-rebind over a `Region`. The probes for ffi.region / len /
+/// is_writable / write / slice share the shape and were refused alike.
+const FFI_READ_1024: &str = r#"import ffi
+effect fn main() -> Unit = {
+  var x: Region = (match ffi.alloc(200000) { ok(r) => r, err(e) => panic(e) })
+  let a1: Int = 2
+  let a2: Int = 2
+  var acc = 0
+  var i = 0
+  while i < 1024 {
+    x = x
+    let r: Result[Bytes, String] = ffi.read(x, a1, a2)
+    acc = acc + (if result.is_ok(r) then 1 else 0)
+    match r {
+      ok(_) => (),
+      err(e) => panic("inspect: the probed call returned err: ${e}"),
+    }
+    acc = acc + 1
+    i = i + 1
+  }
+  acc = acc + ffi.len(x)
+  println("${acc}")
+}
+"#;
+
 const PROBES: &[Probe] = &[
     Probe { label: "dead TypedBody from a self-rebound var, 1024 iterations", src: TYPED_1024, stdout: "202048\n" },
+    Probe { label: "ffi.read over a self-rebound Region, 1024 iterations", src: FFI_READ_1024, stdout: "202048\n" },
     Probe {
         label: "bare self-rebind, 1024 iterations",
         src: r#"effect fn main() -> Unit = {
