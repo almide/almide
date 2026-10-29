@@ -1,8 +1,11 @@
 // E117 (ADR-0032): every `+xml` subtype (RFC 6839) can carry the XHTML
-// namespace and run script, so `html` owns them; an Atom feed has no builder
-// yet (#4310), so it is not served from a String.
+// namespace and run script, so they are script-capable (`@script_capable` in
+// html); an Atom feed has no owner yet (#4310), so it is not served from a String.
 import http
 
-fn feed(xml: String) -> HttpResponse = http.response(200, http.typed("application/atom+xml", bytes.from_string(xml)))
+fn feed(xml: String) -> HttpResponse = http.response(
+  200,
+  http.typed("application/atom+xml", bytes.from_string(xml)),
+)
 
 fn main() -> Unit = println(http.body(feed("<feed/>")))

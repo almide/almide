@@ -1,0 +1,64 @@
+// ADR-0032 Q24: a type declared outside the stdlib meets a per-type protocol
+// (Read, Write, Close, HttpMessage, Body) with its requirements' plain names.
+// The stdlib's own per-type functions keep an internal `__self_` marker; no
+// user type ever writes it. Every assertion holds on native and on wasm.
+import http
+import io
+
+type Tape: Read, Write, Close = { data: Bytes }
+
+effect fn Tape.read(self, max: Int) -> Result[Bytes, String] = ok(self.data)
+
+effect fn Tape.write(self, data: Bytes) -> Result[Unit, String] = ok(())
+
+effect fn Tape.close(self) -> Result[Unit, String] = ok(())
+
+type Note: HttpMessage = { text: String }
+
+fn Note.header(self, name: String) -> String? = if name == "X-Note" then some(self.text)
+else none
+
+fn Note.header_values(self, name: String) -> List[String] = if name == "X-Note" then [
+  self.text
+]
+else []
+
+fn Note.headers(self) -> List[(String, String)] = [
+  ("X-Note", self.text)
+]
+
+fn Note.body(self) -> String = self.text
+
+fn Note.body_bytes(self) -> Bytes = bytes.from_string(self.text)
+
+fn Note.set_header(self, name: String, value: String) -> Note = Note { text: value }
+
+fn Note.set_body(self, body: String) -> Note = Note { text: body }
+
+fn Note.set_body_bytes(self, body: Bytes) -> Note = Note { text: bytes.to_string_lossy(body) }
+
+type Csv: Body = { rows: String }
+
+fn Csv.media_type(self) -> String = "text/csv"
+
+fn Csv.to_text(self) -> String = self.rows
+
+test "a user type meets Read, Write and Close with plain names" {
+  let t = Tape { data: bytes.from_string("abc") }
+  assert_eq(io.read(t, 3), ok(bytes.from_string("abc")))
+  assert_eq(io.write(t, bytes.from_string("x")), ok(()))
+  assert_eq(io.close(t), ok(()))
+}
+
+test "a user type meets HttpMessage with plain names" {
+  let n = Note { text: "hi" }
+  assert_eq(http.header(n, "X-Note"), some("hi"))
+  assert_eq(http.headers(n), [("X-Note", "hi")])
+  assert_eq(http.body(http.set_body(n, "v2")), "v2")
+}
+
+test "a user type meets Body with plain names" {
+  let r = http.response(200, Csv { rows: "a,b" })
+  assert_eq(http.header(r, "Content-Type"), some("text/csv"))
+  assert_eq(http.body(r), "a,b")
+}

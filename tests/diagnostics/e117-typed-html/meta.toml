@@ -1,3 +1,3 @@
 expects_code = "E117"
 expects_error = "`text/html` runs script in a browser and is owned by `html`"
-hint_substring = "HTML is `html.*` and SVG is `svg.*`"
+hint_substring = "HTML is `html.*`, and SVG or another script-capable type is the safe type of the package that owns it"

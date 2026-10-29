@@ -378,6 +378,22 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
+Your own type can meet the built-in handle and message protocols the same
+way, with plain method names (never a `__` prefix):
+
+| Protocol | Methods your type writes |
+|---|---|
+| `Read` | `effect fn T.read(self, max: Int) -> Result[Bytes, String]` |
+| `Write` | `effect fn T.write(self, data: Bytes) -> Result[Unit, String]` |
+| `Close` | `effect fn T.close(self) -> Result[Unit, String]` |
+| `HttpMessage` | `header`, `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`, `set_body_bytes` |
+| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_text(self) -> String` |
+
+`io.read` / `io.write` / `io.close`, `http.header` / `http.body` and
+`http.response` then take your type. A `Body` whose media type runs script
+(HTML, SVG, XML) also declares `@media_owns(...)` on `media_type`, and a
+dependency owning one needs the application's `[trust] media` grant (E118).
+
 The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration. A mutating receiver is `mut self` (sugar for `mut self: Self`).
 
 ### Generic protocols (explicit conformance)
@@ -1124,11 +1140,13 @@ error E053, never silently ignored.
 **Rule 6 — a response's Content-Type is its body's type.** `http.response(status, body)`
 takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
 `application/octet-stream`, a `Value` `application/json`, `html.*` builds
-`text/html` and `svg.*` `image/svg+xml`. Build HTML with `html.escape` (text),
+`text/html`. Build HTML with `html.escape` (text),
 `html.attr` / `html.url_attr` (attributes) and `html.script_json` (data in
 `<script>`), and `html.raw(s)` only for trusted markup. Any other media type is
 `http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
-computed one, or for HTML / XML / SVG). Content-Type is never written by name:
+computed one, or for HTML / XML / SVG: SVG comes from a package such as
+almide/svg, which the application grants in `almide.toml` with `[trust]
+media = { "almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
 `set_header` / `with_headers` refuse it (E116), and `set_body` /
 `http.with_body(resp, body)` replace the body and its type together. A
 fetched response keeps the type it arrived with:

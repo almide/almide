@@ -1,4 +1,0 @@
-// E118 (ADR-0032 Q15): `Body` among other protocols is still a conformance.
-type Csv: Eq, Repr, Body = { rows: List[String] }
-
-fn main() -> Unit = println("${Csv { rows: ["a"] } == Csv { rows: ["a"] }}")

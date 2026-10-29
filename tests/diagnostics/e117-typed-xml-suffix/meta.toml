@@ -1,3 +1,3 @@
 expects_code = "E117"
-expects_error = "`application/atom+xml` runs script in a browser and is owned by `html`"
-hint_substring = "served by `http.response(status, body)`"
+expects_error = "`application/atom+xml` runs script in a browser, so only a type that owns it may serve it"
+hint_substring = "serve either with `http.response(status, body)`"

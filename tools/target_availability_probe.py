@@ -108,7 +108,6 @@ NOMINAL = {
     # A capability root over the probe's own working directory.
     "FsRoot": ('fs.open_root(".")!', "fs.open_root", "fs"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
-    "SafeSvg": ("svg.empty()", "svg.empty", "svg"),
     # A typed response body (ADR-0032): only `http.typed` makes one.
     "TypedBody": ('http.typed("text/csv", bytes.from_string("x"))', "http.typed", "http"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),

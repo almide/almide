@@ -28,12 +28,6 @@ pub struct BuiltinProtocol {
     /// (Eq, Repr, Ord, Hash, Codec). A type declaring a non-derivable
     /// protocol must define every requirement.
     pub derivable: bool,
-    /// Whether only the stdlib may declare a type conforming to it (E118).
-    /// `Body` is sealed (ADR-0032 Q15): a body type states the Content-Type a
-    /// browser obeys, so a user type claiming `text/html` would serve any
-    /// String as a page. User code reaches other media types through
-    /// `http.typed`.
-    pub sealed: bool,
 }
 
 impl BuiltinProtocol {
@@ -88,7 +82,10 @@ pub fn is_builtin_conformer(type_name: &str, proto: &str) -> bool {
 /// `type BigInt: Numeric` in `bigint`) — the form a built-in type's
 /// requirements take in its stdlib module. `None` when neither exists.
 pub fn requirement_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<String> {
-    if let Some(k) = super::registration::convention_fn_key(env, type_name, method) {
+    // A declared type meets a requirement under its public name
+    // (`fn Chart.media_type`, never `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method);
+    if let Some(k) = super::registration::convention_fn_key(env, type_name, public) {
         return Some(k.to_string());
     }
     let module = declaring_module(env, type_name)?;
@@ -222,11 +219,11 @@ fn effect_method(name: &str, params: &[(&str, &Ty)], ret: Ty) -> ProtocolMethodS
 /// nowhere.
 pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
     // Eq: fn eq(a: Self, b: Self) -> Bool
-    BuiltinProtocol { name: "Eq", methods: |s, _| vec![method("eq", &[("a", s), ("b", s)], Ty::Bool)], conformers: &[], named_conformers: &[], derivable: true, sealed: false },
+    BuiltinProtocol { name: "Eq", methods: |s, _| vec![method("eq", &[("a", s), ("b", s)], Ty::Bool)], conformers: &[], named_conformers: &[], derivable: true },
     // Repr: fn repr(v: Self) -> String
-    BuiltinProtocol { name: "Repr", methods: |s, _| vec![method("repr", &[("v", s)], Ty::String)], conformers: &[], named_conformers: &[], derivable: true, sealed: false },
+    BuiltinProtocol { name: "Repr", methods: |s, _| vec![method("repr", &[("v", s)], Ty::String)], conformers: &[], named_conformers: &[], derivable: true },
     // Ord: fn cmp(a: Self, b: Self) -> Int
-    BuiltinProtocol { name: "Ord", methods: |s, _| vec![method("cmp", &[("a", s), ("b", s)], Ty::Int)], conformers: &[], named_conformers: &[], derivable: true, sealed: false },
+    BuiltinProtocol { name: "Ord", methods: |s, _| vec![method("cmp", &[("a", s), ("b", s)], Ty::Int)], conformers: &[], named_conformers: &[], derivable: true },
     // Hash: fn hash(v: Self) -> Int
     // Float, Fn, and Map are not Hash (NaN, identity, and nested mutability).
     BuiltinProtocol {
@@ -238,7 +235,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         ],
         named_conformers: &[],
         derivable: true,
-        sealed: false,
     },
     // Codec = Encode + Decode (Swift's `Codable`): its requirements are the
     // union of its parts', and a `: Codec` type conforms to both parts.
@@ -252,10 +248,9 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         named_conformers: &[],
         derivable: true,
-        sealed: false,
     },
     // Encode: fn encode(v: Self) -> Value — the type is written out.
-    BuiltinProtocol { name: "Encode", methods: |s, v| vec![method("encode", &[("v", s)], v.clone())], conformers: &[], named_conformers: &[], derivable: true, sealed: false },
+    BuiltinProtocol { name: "Encode", methods: |s, v| vec![method("encode", &[("v", s)], v.clone())], conformers: &[], named_conformers: &[], derivable: true },
     // Decode: fn decode(v: Value) -> Result[Self, String] — the type is read
     // from input — and its strict twin, which refuses a key outside the type
     // at every depth. A `: Decode` type that is not also `Encode` is an INPUT
@@ -269,13 +264,12 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         named_conformers: &[],
         derivable: true,
-        sealed: false,
     },
     // Numeric: the numeric types. The operator requirements match the
     // `BinOp` dispatch pairs so `fn f[T: Numeric](x: T, y: T) = x + y`
     // flows through without a separate hand-impl; monomorph repairs the
     // `BinOp` kind once `T` resolves to a concrete width.
-    BuiltinProtocol { name: "Numeric", methods: |s, _| numeric_methods(s), conformers: NUMERIC_PRIMITIVES, named_conformers: &[], derivable: false, sealed: false },
+    BuiltinProtocol { name: "Numeric", methods: |s, _| numeric_methods(s), conformers: NUMERIC_PRIMITIVES, named_conformers: &[], derivable: false },
     // Integer: the integer types; `__bits64` is the low 64 bits in two's
     // complement, which `<T>.from_wrapping` narrows (R-L0-34).
     BuiltinProtocol {
@@ -287,7 +281,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: INTEGER_PRIMITIVES,
         named_conformers: &[],
         derivable: false,
-        sealed: false,
     },
     // Text: the text-like sequences (`list.join[T: Text]`, R-L0-42).
     BuiltinProtocol {
@@ -296,7 +289,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[Ty::String, Ty::Bytes],
         named_conformers: &[],
         derivable: false,
-        sealed: false,
     },
     // The I/O protocols (R-L0-44): a handle that can be read, written or
     // closed. `io.read` / `io.write` / `io.close` and the default
@@ -311,7 +303,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         named_conformers: &[],
         derivable: false,
-        sealed: false,
     },
     BuiltinProtocol {
         name: "Write",
@@ -319,7 +310,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         named_conformers: &[],
         derivable: false,
-        sealed: false,
     },
     BuiltinProtocol {
         name: "Close",
@@ -327,7 +317,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         named_conformers: &[],
         derivable: false,
-        sealed: false,
     },
     // An HTTP message (R-http-12): the request and the response read and
     // replace their headers and body through one generic function each
@@ -338,7 +327,7 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
     // an exact bytes slot; a Bytes body decodes as lossy UTF-8). `http.response` / `with_headers` / `with_body` take a `Body`, so
     // a response's Content-Type is its body's type, never a header string.
     // The stdlib-declared conformers name it at their declarations
-    // (`html.SafeHtml`, `svg.SafeSvg`, `http.TypedBody`).
+    // (`html.SafeHtml`, `http.TypedBody`; a package's type under the application's grant, ADR-0032 D7).
     BuiltinProtocol {
         name: "Body",
         methods: |s, _| vec![
@@ -348,7 +337,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[Ty::String, Ty::Bytes],
         named_conformers: &["Value"],
         derivable: false,
-        sealed: true,
     },
     BuiltinProtocol {
         name: "HttpMessage",
@@ -356,7 +344,6 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         named_conformers: &["HttpRequest", "HttpResponse"],
         derivable: false,
-        sealed: false,
     },
 ];
 

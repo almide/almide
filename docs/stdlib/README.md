@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 52 stdlib modules, 1331 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1323 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -49,7 +49,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [secret](#secret) | 2 | 0 |
 | [set](#set) | 42 | 0 |
 | [string](#string) | 87 | 0 |
-| [svg](#svg) | 8 | 0 |
 | [testing](#testing) | 10 | 0 |
 | [uint16](#uint16) | 35 | 0 |
 | [uint32](#uint32) | 35 | 0 |
@@ -635,7 +634,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json; body is JSON text.
 - `http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` — Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
 - `http.with_body(resp: HttpResponse, body: B) -> HttpResponse` — resp with its body replaced by body and its Content-Type by body's type.
-- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never one a safe module owns (html, svg).
+- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
 - `http.redirect(url: String) -> HttpResponse` — 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 - `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
 - `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
@@ -1372,19 +1371,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.intersperse(s: String, sep: String) -> String` — The characters of s with sep between each pair.
 - `string.unique(s: String) -> String` — The first occurrence of each character, in order.
 - `string.unique_by(s: String, f: (String) -> K) -> String` — The first character of each key f gives, in order.
-
-## svg
-
-[svg.md](svg.md)
-
-- `svg.escape(s: String) -> SafeSvg` — s with & < > " ' turned into entities; text context only.
-- `svg.raw(s: String) -> SafeSvg` — s as SafeSvg, unescaped; trusted input only.
-- `svg.to_string(h: SafeSvg) -> String` — SVG text inside h, as-is.
-- `svg.concat(a: SafeSvg, b: SafeSvg) -> SafeSvg` — a then b as one SafeSvg; nothing re-escaped.
-- `svg.empty() -> SafeSvg` — SafeSvg of the empty string.
-- `svg.attr(name: String, value: String) -> SafeSvg` — name="value" with value escaped; aborts on a URL, event-handler, style or malformed name.
-- `svg.url_attr(name: String, url: String) -> SafeSvg` — name="url" escaped, url kept only if relative or http / https; else about:invalid#almide-blocked.
-- `svg.element(name: String, attrs: List[SafeSvg], children: List[SafeSvg]) -> SafeSvg` — <name attrs…>children…</name>; aborts on a malformed name or an element that runs script (script, foreignObject, set, animate…).
 
 ## testing
 

@@ -225,10 +225,12 @@ effect fn main() -> Unit = {
 
 Create a response whose `Content-Type` is its body's type (ADR-0032): a
 String is `text/plain; charset=utf-8`, Bytes `application/octet-stream`, a
-`Value` `application/json`, an `html.*` page `text/html; charset=utf-8`, an
-`svg.*` image `image/svg+xml`, and `http.typed(t, bytes)` the literal type `t`.
+`Value` `application/json`, an `html.*` page `text/html; charset=utf-8`, a
+package's safe type its own literal type (granted in `[trust] media` when it
+runs script, ADR-0032 D7), and `http.typed(t, bytes)` the literal type `t`.
 No header string can relabel a body: Content-Type is never written by name
-(E116). `Body` is sealed to these types (E118).
+(E116). Owning a script-capable media type outside the stdlib needs the
+application's grant (E118).
 
 ```almd run
 import html
@@ -254,9 +256,9 @@ text/html; charset=utf-8
 
 A body of any other media type. The type is written as a literal and read at
 check time (E117): a computed one, a malformed one, or one a browser runs
-script in — HTML, XML and `+xml` types (owned by `html`), SVG (owned by
-`svg`) — is refused, so a String never reaches a browser as markup except
-through its safe module. A built body is held as text today, so bytes that
+script in — HTML and XHTML (owned by `html`), SVG (a granted package's), XML
+and `+xml` types — is refused, so a String never reaches a browser as markup
+except through a safe type. A built body is held as text today, so bytes that
 are not UTF-8 are decoded lossily (#4311).
 
 ```almd run
@@ -1154,7 +1156,7 @@ http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> Http
 // @since unreleased
 http.with_body(resp: HttpResponse, body: B) -> HttpResponse
 
-// A body of media type media_type; a literal, never one a safe module owns (html, svg).
+// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
 // @since unreleased
 http.typed(media_type: String, body: Bytes) -> TypedBody
 

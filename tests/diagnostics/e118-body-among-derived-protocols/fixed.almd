@@ -1,4 +1,0 @@
-// The derivable protocols stay; the body is built where the response is.
-type Csv: Eq, Repr = { rows: List[String] }
-
-fn main() -> Unit = println("${Csv { rows: ["a"] } == Csv { rows: ["a"] }}")

@@ -1,3 +1,0 @@
-expects_code = "E118"
-expects_error = "type `Csv` declares `Body`"
-hint_substring = "send a String, Bytes, a Value"

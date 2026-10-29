@@ -41,7 +41,7 @@ impl Checker {
         self.check_abort_sites(program);
         self.check_regex_literals(program);
         self.check_body_rules(program);
-        self.reject_user_sealed_conformance(program);
+        self.check_media_ownership(program);
         self.check_scoped(program);
         self.check_pure_attrs(program);
         self.record_outside_guarantee(program);

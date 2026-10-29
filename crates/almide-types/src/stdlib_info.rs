@@ -27,8 +27,6 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "map", "set", "string", "deque", "heap",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
-    // Safe SVG construction, a response Body (ADR-0032). `import svg`.
-    "svg",
     // Raw addresses at the foreign-function boundary (R-ffi-01). Never
     // auto-imported: `import ffi` is the opt-in.
     "ffi",
@@ -206,6 +204,18 @@ pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
 /// requirement's own name (`bigint.add`, `int8.__trunc`).
 pub const PER_TYPE_REQUIREMENT_PREFIX: &str = "__self_";
 
+/// The name a type declared OUTSIDE the stdlib writes for the protocol
+/// requirement `method`: the requirement with its internal per-type marker
+/// dropped (`__self_media_type` → `media_type`, `__self_close` → `close`), so
+/// a package or an application meets `Body`, `Close` or `HttpMessage` with
+/// plain names (`fn SafeSvg.media_type(self)`) and never writes `__self_`
+/// (ADR-0032 Q24). The marker stays internal to the stdlib's own per-type
+/// functions ([`requirement_fn_name`]). The one place the public spelling is
+/// derived: the checker's conformance lookup and monomorphization call it.
+pub fn requirement_public_name(method: &str) -> &str {
+    method.strip_prefix(PER_TYPE_REQUIREMENT_PREFIX).unwrap_or(method)
+}
+
 /// The function of a stdlib type's module that satisfies the protocol
 /// requirement `method` for `type_name` (bare or module-qualified): for a
 /// per-type requirement `__<snake type>_<verb>` (`TcpStream` and `__self_read`
@@ -347,7 +357,6 @@ fn bundled_source_io(name: &str) -> Option<&'static str> {
         "fs" => Some(crate::embedded::SRC_FS),
         "http" => Some(crate::embedded::SRC_HTTP),
         "html" => Some(crate::embedded::SRC_HTML),
-        "svg" => Some(crate::embedded::SRC_SVG),
         "json" => Some(crate::embedded::SRC_JSON),
         "matrix" => Some(crate::embedded::SRC_MATRIX),
         "math" => Some(crate::embedded::SRC_MATH),
