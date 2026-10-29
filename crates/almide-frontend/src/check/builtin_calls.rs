@@ -75,7 +75,18 @@ impl Checker {
                 }
                 Some(Ty::Never)
             }
-            "assert" => Some(Ty::Unit),
+            "assert" => {
+                // #4283: the condition is a Bool and the message a String.
+                // With no constraint at all, `assert(a.here())` (a Result
+                // condition) passed check and died at rustc (E0600).
+                if let Some(cond) = arg_tys.first() {
+                    self.constrain(Ty::Bool, cond.clone(), "call to assert()".to_string());
+                }
+                if let Some(msg) = arg_tys.get(1) {
+                    self.constrain(Ty::String, msg.clone(), "call to assert()".to_string());
+                }
+                Some(Ty::Unit)
+            }
             "assert_eq" | "assert_ne" => {
                 if arg_tys.len() >= 2 {
                     self.constrain(arg_tys[0].clone(), arg_tys[1].clone(), format!("call to {}()", name));
@@ -83,6 +94,52 @@ impl Checker {
                 Some(Ty::Unit)
             }
             _ => return None,
+        }
+    }
+
+    /// #4283: a fallible CALL as the argument of an output / assertion
+    /// builtin (`println`, `eprintln`, `panic`, `assert`, `assert_eq`,
+    /// `assert_ne`) is the same implicit propagation as a binary operand
+    /// (#2196) or an interpolated call: the slot wants the OK value, and only
+    /// a `!` gets it there. Queue the call for the post-solve E041 at its own
+    /// span (where the `!` goes) and hand the builtin the OK type, so the
+    /// report stands alone instead of cascading into an E005.
+    ///
+    /// The context is wherever `!` is legal — an effect fn body (or a lambda
+    /// in one) and a test block. A test block never set `auto_unwrap`, so the
+    /// strip never ran there, and `assert` had no slot type at all: the
+    /// Result condition reached rustc as `!Result<bool, _>` (E0600).
+    ///
+    /// `assert_eq` / `assert_ne` compare PEERS: a Result is a legitimate
+    /// operand when the other side is a Result too (`assert_eq(int.parse(s),
+    /// ok(3))`), so a call is stripped only when its peer is known not to be one.
+    pub(super) fn strip_builtin_effect_args(&mut self, name: &str, args: &[almide_lang::ast::Expr], arg_tys: &mut [Ty]) {
+        if !(self.implicit_prop_reportable() || self.env.in_test_block) {
+            return;
+        }
+        let peer_pair = match name {
+            "println" | "eprintln" | "panic" | "assert" => false,
+            "assert_eq" | "assert_ne" => true,
+            _ => return,
+        };
+        let resolved: Vec<Ty> = arg_tys.iter().map(|t| resolve_ty(t, &self.uf)).collect();
+        for (i, (arg, ty)) in args.iter().zip(arg_tys.iter_mut()).enumerate() {
+            if !matches!(arg.kind, almide_lang::ast::ExprKind::Call { .. }) {
+                continue;
+            }
+            let Some(ok) = resolved[i].result_ok_ty() else { continue };
+            if peer_pair {
+                if i > 1 {
+                    continue;
+                }
+                let peer = &resolved[1 - i];
+                if peer.is_result() || matches!(peer, Ty::TypeVar(_) | Ty::Unknown) {
+                    continue;
+                }
+            }
+            let mechanical = self.env.lambda_depth == 0;
+            self.deferred_implicit_prop_checks.push((ty.clone(), arg.span, "of this builtin argument", mechanical, false));
+            *ty = ok;
         }
     }
 

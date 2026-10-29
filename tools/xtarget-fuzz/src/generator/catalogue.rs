@@ -80,6 +80,61 @@ pub struct Signature {
     /// A host-decided result ([`super::verdicts`]): each call is checked
     /// against its properties and stands for a fixed value after.
     pub verdict: Option<&'static super::verdicts::Verdict>,
+    /// Each bounded type variable (`[B: Body]`) with the types it may take:
+    /// every type the grammar builds that conforms to all of its bounds
+    /// ([`conformers`]). An unbounded variable is not listed.
+    pub bounds: Vec<(String, Vec<GenType>)>,
+    /// Parameters the checker takes only as a literal (`@literal_media(p)`,
+    /// E117), with the literals the grammar writes there ([`LITERAL_ATTRS`]).
+    pub literal_params: Vec<(usize, &'static [&'static str])>,
+}
+
+/// The attributes that make a parameter literal-only, with the literals a
+/// generated call writes there: well-formed media types no stdlib `Body`
+/// type owns and no browser runs script in (ADR-0032, E117).
+pub const LITERAL_ATTRS: &[(&str, &[&str])] = &[(
+    "literal_media",
+    &["\"text/csv\"", "\"text/csv; charset=utf-8\"", "\"application/octet-stream\"", "\"image/png\"", "\"application/pdf\""],
+)];
+
+/// The types the grammar builds that conform to `protocol`, read off the
+/// declarations: the compiler's builtin-protocol table (its conformers and
+/// named conformers), then every stdlib type that names the protocol where it
+/// is declared (`mod type SafeHtml: Body = String`), in module order.
+pub fn conformers(protocol: &str) -> Vec<GenType> {
+    let mut names: Vec<String> = Vec::new();
+    if let Some(p) = almide::canonicalize::protocols::builtin_protocol(protocol) {
+        names.extend(p.conformers.iter().map(|t| t.display()));
+        names.extend(p.named_conformers.iter().map(|n| n.to_string()));
+    }
+    names.extend(declared_conformances().iter().filter(|(_, ps)| ps.iter().any(|p| p == protocol)).map(|(t, _)| t.clone()));
+    let none = HashMap::new();
+    let mut out: Vec<GenType> = Vec::new();
+    for n in names {
+        let t = almide::ast::TypeExpr::Simple { name: almide::intern::sym(&n) };
+        let g = SigType::from_type_expr(&t).filter(|s| !matches!(s, SigType::Var(_))).and_then(|s| s.instantiate(&none));
+        if let Some(g) = g.filter(|g| !out.contains(g)) {
+            out.push(g);
+        }
+    }
+    out
+}
+
+/// Every stdlib type declaration with the protocols it declares.
+fn declared_conformances() -> &'static [(String, Vec<String>)] {
+    static TABLE: std::sync::OnceLock<Vec<(String, Vec<String>)>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = Vec::new();
+        for &(_, source, _) in BUNDLED_MODULES {
+            let Some(program) = parse(source) else { continue };
+            for d in &program.decls {
+                if let Decl::Type { name, deriving: Some(ps), .. } = d {
+                    out.push((sym_str(*name).to_string(), ps.iter().map(|p| sym_str(*p).to_string()).collect()));
+                }
+            }
+        }
+        out
+    })
 }
 
 /// Effect modules whose functions are reproducible inside the fuzzer's
@@ -120,8 +175,17 @@ pub fn ends_without_unwinding(src: &str) -> bool {
 
 /// Effect modules that reach no host: a computation that can fail, the same
 /// on every run and every leg, so their effect functions are catalogued with
-/// no sandbox (`zlib`: its codecs return `err` on a corrupt stream).
-pub const HOSTLESS_EFFECT_MODULES: &[&str] = &["zlib"];
+/// no sandbox (`zlib`: its codecs return `err` on a corrupt stream; `ffi`:
+/// an access outside a Region is an `err`, ADR-0031 D5). The flag says the
+/// module's effect functions encode bytes that differ by leg by contract:
+/// each is then an encoder of [`LEG_DEPENDENT_ENCODERS`] or the decoder of
+/// one (`every_hostless_effect_function_is_an_encoder_or_its_decoder`).
+pub const HOSTLESS_EFFECT_MODULES: &[(&str, bool)] = &[("zlib", true), ("ffi", false)];
+
+/// `module` is a [`HOSTLESS_EFFECT_MODULES`] row.
+fn hostless(module: &str) -> bool {
+    HOSTLESS_EFFECT_MODULES.iter().any(|(m, _)| *m == module)
+}
 
 /// Encoders whose output bytes differ by leg BY CONTRACT, each with the
 /// decoder that undoes it: C-331 keeps flate2's LZ77 on native and emits
@@ -160,6 +224,21 @@ impl Signature {
     /// substitution before goal unification keeps the generator from
     /// binding a pinned variable to a non-`String` type it cannot
     /// actually construct a value of (see `gen_call`).
+    /// Every bounded type variable `subst` binds is bound to a conforming type.
+    pub fn admits(&self, subst: &HashMap<String, GenType>) -> bool {
+        self.bounds.iter().all(|(v, allowed)| subst.get(v).is_none_or(|t| allowed.contains(t)))
+    }
+
+    /// The types bounded variable `v` may take; `None` when it is unbounded.
+    pub fn bound_of(&self, v: &str) -> Option<&[GenType]> {
+        self.bounds.iter().find(|(n, _)| n == v).map(|(_, a)| a.as_slice())
+    }
+
+    /// The literals parameter `i` is written as, when it is literal-only.
+    pub fn literal_at(&self, i: usize) -> Option<&'static [&'static str]> {
+        self.literal_params.iter().find(|(j, _)| *j == i).map(|(_, l)| *l)
+    }
+
     pub fn forced_bindings(&self) -> HashMap<String, GenType> {
         let mut forced = HashMap::new();
         for p in &self.params {
@@ -208,7 +287,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("float32", include_str!("../../../../stdlib/float32.almd"), false),
     ("float64", include_str!("../../../../stdlib/float64.almd"), false),
     ("bytes", include_str!("../../../../stdlib/bytes.almd"), false),
-    // Host addresses over a live buffer (`effect_recipes.rs`, `verdicts.rs`).
+    // Bounds-checked Regions (ADR-0031), built by the `Region` nominal
+    // (`nominal.rs`); hostless, so its effect fns are drawn too.
     ("ffi", include_str!("../../../../stdlib/ffi.almd"), true),
     ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
     ("value", include_str!("../../../../stdlib/value.almd"), false),
@@ -262,6 +342,8 @@ fn clock_constructors() -> Vec<Signature> {
                 lifted: false,
                 observed_through: None,
                 verdict: None,
+                bounds: Vec::new(),
+                literal_params: Vec::new(),
             });
         }
     }
@@ -498,7 +580,7 @@ mod availability_tests {
         let cat = build();
         let effects: Vec<String> = cat
             .iter()
-            .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&s.module))
+            .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&(s.module, true)))
             .map(|s| format!("{}.{}", s.module, s.func))
             .collect();
         // Five since wave 4A made zlib's decoders (decompress / inflate /
@@ -514,6 +596,64 @@ mod availability_tests {
             let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
             assert_eq!(s.observed_through, Some(*d));
         }
+    }
+
+    /// Every public fn of `ffi` is drawn once the grammar builds a `Region`
+    /// (#4298): a pure one, and an effect one through the hostless row.
+    /// A bounded type variable takes only its conformers, read off the
+    /// declarations: `[B: Body]` is String, Bytes, Value and the stdlib types
+    /// that declare `Body` (SafeHtml, TypedBody), never Int.
+    #[test]
+    fn a_bounded_type_variable_takes_only_its_conformers() {
+        let cat = build();
+        for f in ["response", "with_headers", "with_body"] {
+            let sig = cat.iter().find(|s| s.module == "http" && s.func == f).unwrap_or_else(|| panic!("http.{f} is not in the catalogue"));
+            let b = sig.bound_of("B").unwrap_or_else(|| panic!("http.{f}: B is unbounded"));
+            for t in [GenType::String, GenType::Bytes, GenType::Value, GenType::Nominal("SafeHtml"), GenType::Nominal("TypedBody")] {
+                assert!(b.contains(&t), "http.{f}: {t:?} is not a Body conformer in {b:?}");
+            }
+            assert!(!b.contains(&GenType::Int), "http.{f}: Int is not a Body");
+            let mut subst = HashMap::new();
+            subst.insert("B".to_string(), GenType::Int);
+            assert!(!sig.admits(&subst));
+        }
+        let join = cat.iter().find(|s| s.module == "list" && s.func == "join").expect("list.join");
+        assert_eq!(join.bound_of("T"), Some(&[GenType::String, GenType::Bytes][..]));
+    }
+
+    /// `@literal_media(media_type)` makes `http.typed`'s first parameter
+    /// literal-only, and every literal written there passes E117's rule.
+    #[test]
+    fn a_literal_only_parameter_is_read_off_its_attribute() {
+        let cat = build();
+        let typed = cat.iter().find(|s| s.module == "http" && s.func == "typed").expect("http.typed");
+        let lits = typed.literal_at(0).expect("media_type is literal-only");
+        assert!(typed.literal_at(1).is_none());
+        for l in lits {
+            let t = l.trim_matches('"').split(';').next().unwrap().trim().to_ascii_lowercase();
+            assert!(!almide::media_owners::script_capable().iter().any(|p| almide::media_owners::matches(&t, p)), "{l} is script-capable");
+            assert!(!almide::media_owners::stdlib_owners().iter().any(|(p, _)| almide::media_owners::matches(&t, p)), "{l} is owned");
+        }
+    }
+
+    #[test]
+    fn every_public_ffi_function_is_catalogued() {
+        let src = BUNDLED_MODULES.iter().find(|(m, _, _)| *m == "ffi").unwrap().1;
+        let public: Vec<String> = parse(src)
+            .unwrap()
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Fn { name, visibility: almide::ast::Visibility::Public, .. } if !sym_str(*name).starts_with("__") => Some(sym_str(*name).to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(public.len(), 7, "{public:?}");
+        let cat = build();
+        for f in &public {
+            assert!(cat.iter().any(|s| s.module == "ffi" && s.func == *f), "ffi.{f} is not in the catalogue");
+        }
+        assert!(cat.iter().any(|s| s.module == "ffi" && s.effect), "no ffi effect fn is drawn");
     }
 
     #[test]
@@ -560,6 +700,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         return_type,
         attrs,
         visibility,
+        generics,
         ..
     } = decl
     else {
@@ -577,7 +718,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // A host-decided result is admitted past both filters below: its calls
     // are checked and replaced by a fixed value (`verdicts.rs`).
     let verdict = super::verdicts::verdict_for(module, &func);
-    if verdict.is_none() && effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !HOSTLESS_EFFECT_MODULES.contains(&module) {
+    if verdict.is_none() && effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !hostless(module) {
         return None;
     }
 
@@ -606,7 +747,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // A `mut` parameter needs a `var` at the call: the generator hoists one
     // (term.rs). Two `mut` parameters are left to the mutation path. The
     // positions are the compiler's own answer (`mut p` and `@mutating`), so a
-    // `@mutating` receiver (`bytes.as_mut_ptr`) gets its `var` too (E032).
+    // `@mutating` receiver gets its `var` too (E032).
     let muts: Vec<usize> = almide::ir::mut_args::declared_mut_positions(params, attrs);
     if muts.len() > 1 {
         return None;
@@ -623,6 +764,37 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         param_names.push(sym_str(p.name).to_string());
     }
     let ret = SigType::from_type_expr(return_type)?;
+    // A bounded type variable the signature uses takes only the types that
+    // conform to its bounds; one with no buildable conformer has no call the
+    // grammar could write.
+    let mut used = Vec::new();
+    for p in &param_types {
+        p.collect_vars(&mut used);
+    }
+    ret.collect_vars(&mut used);
+    let mut bounds = Vec::new();
+    for g in generics.iter().flatten().filter(|g| used.contains(&sym_str(g.name).to_string())) {
+        let Some(bs) = g.bounds.as_ref().filter(|bs| !bs.is_empty()) else { continue };
+        let mut allowed = conformers(sym_str(bs[0]));
+        for b in &bs[1..] {
+            let more = conformers(sym_str(*b));
+            allowed.retain(|t| more.contains(t));
+        }
+        if allowed.is_empty() {
+            return None;
+        }
+        bounds.push((sym_str(g.name).to_string(), allowed));
+    }
+    let literal_params: Vec<(usize, &'static [&'static str])> = attrs
+        .iter()
+        .filter_map(|a| LITERAL_ATTRS.iter().find(|(n, _)| *n == sym_str(a.name)).map(|(_, l)| (a, *l)))
+        .flat_map(|(a, l)| {
+            a.args.iter().filter(|x| x.name.is_none()).filter_map(move |x| match &x.value {
+                almide::ast::AttrValue::Ident { name } => params.iter().position(|p| p.name == *name).map(|i| (i, l)),
+                _ => None,
+            })
+        })
+        .collect();
 
     // Weight 0: only a campaign focused on it draws a host-decided call.
     let weight = if verdict.is_some() { 0 } else { weight_for(module, &func) };
@@ -640,6 +812,8 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         lifted: effect && !matches!(body.as_ref().map(|b| &b.kind), None | Some(ExprKind::Hole)),
         observed_through,
         verdict,
+        bounds,
+        literal_params,
     })
 }
 

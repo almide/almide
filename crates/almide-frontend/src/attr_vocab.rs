@@ -51,6 +51,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // Outside the memory-safety guarantee (#4008): `--profile critical`
     // refuses a call (E100); crates/almide-types `memory_unsafe_stdlib_fns`
     "memory_unsafe",
+    // A foreign Region's length and release function on its `@extern`
+    // declaration (ADR-0031 D2, D6): check/extern_abi_check.rs validates it,
+    // the native @extern(c) glue builds the Region from it
+    "region",
     // Signals or probes a pid (#4125): `[permissions] proc` bounds it as the
     // `kill` command; crates/almide-types `signals_process_stdlib_fns`
     "signals_process",
@@ -59,6 +63,16 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // that is not also `Encode` — or the call is E110 (crates/almide-frontend
     // check/input_sink.rs)
     "input_sink",
+    // ADR-0032 (row 11e), read by crates/almide-frontend check/body_rules.rs:
+    // a header writer and the list of names the body owns (E116); a
+    // parameter taken only as a literal media type (E117); the media-type
+    // patterns a body type's media fn owns, so no other way builds them; the
+    // script-capable patterns, declared once in html (owning one outside the
+    // stdlib needs the application's `[trust] media` grant, D7)
+    "header_write",
+    "literal_media",
+    "media_owns",
+    "script_capable",
     // Scheduling and placement
     "schedule",
     "location",

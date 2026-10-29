@@ -12,10 +12,13 @@
 // root is the program's choice, made at `fs.open_root`); everything under it
 // is reached segment by segment from that descriptor, never following a
 // symlink: on Linux one openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS) for the
-// parent directory (a per-segment walk when the kernel has no openat2),
-// elsewhere a per-segment `openat(dir, seg, O_NOFOLLOW | O_DIRECTORY)` walk,
-// then the last segment opened, removed or listed from its parent's
-// descriptor with O_NOFOLLOW. A symlink met anywhere answers `Escape`; a
+// parent directory (a per-segment walk when the kernel has no openat2), on
+// macOS a per-segment `openat(dir, seg, O_NOFOLLOW | O_DIRECTORY)` walk, on
+// Windows a per-segment NtCreateFile relative to the held directory handle
+// with FILE_OPEN_REPARSE_POINT and the opened entry's reparse attribute
+// refused (#4293), then the last segment opened, removed or listed from its
+// parent's descriptor the same way. A symlink (on Windows any reparse point:
+// a symlink, a junction) met anywhere answers `Escape`; a
 // directory swapped for a symlink after the walk passed it is not followed,
 // because the walk already holds the directory itself, not its name.
 //
@@ -26,10 +29,12 @@
 // with its `io_err` over [`fs_beneath_joined`] — the bytes the plain call on
 // `<root>/<rel>` answers.
 //
-// On a platform without the descriptor calls (fs_beneath_sys.rs: 64-bit
-// Linux and macOS have them) the same functions check every prefix for a
-// symlink and then make the plain call — the pre-#4084 check, which a
-// concurrent rewrite can race.
+// On a platform without the descriptor calls (fs_beneath_sys.rs: Linux,
+// 64- and 32-bit, macOS and Windows have them) the same functions refuse
+// every call below the root ([`fs_beneath_unsupported`]) instead of checking
+// every prefix and then making the plain call — the pre-#4084 check, which a
+// concurrent rewrite could race. Fail-closed: a program there gets an err,
+// never an unbounded path.
 //
 // Under `[permissions] fs` (fs_scoped_core.rs, included below) the root
 // itself is opened beneath the granted directory it falls under, so a rooted
@@ -45,6 +50,37 @@ include!("fs_scoped_core.rs");
 /// side completes it with the path the program wrote (`fs: path escapes
 /// root: <path>`).
 pub const FS_BENEATH_ESCAPE: &str = "fs: path escapes root";
+
+/// Whether this build has the descriptor calls a rooted or scoped fs call
+/// is made with (fs_beneath_sys.rs): Linux (64- and 32-bit), macOS and
+/// Windows (#4293). Where it is
+/// false those calls are refused, and the toolchain refuses
+/// `[permissions] fs` before a build ([`fs_scope_platform_check`]).
+pub const FS_BENEATH_SUPPORTED: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));
+
+/// The refusal's text where [`FS_BENEATH_SUPPORTED`] is false.
+pub const FS_BENEATH_UNSUPPORTED: &str = "fs: a rooted or [permissions] fs call needs descriptor-relative opens (Linux, macOS, Windows), which this platform's build does not have, so it is refused rather than checked by path";
+
+/// The refusal a rooted or scoped call answers where the platform has no
+/// descriptor calls: `Unsupported`, with [`FS_BENEATH_UNSUPPORTED`].
+pub fn fs_beneath_unsupported() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Unsupported, FS_BENEATH_UNSUPPORTED)
+}
+
+/// The toolchain's build-time half (#4022 on such a platform): `Err` with
+/// the reason when `[permissions] fs` is set and this build has no
+/// descriptor calls, so the scope is refused before anything runs.
+pub fn fs_scope_platform_check(scoped: bool) -> Result<(), String> {
+    if scoped && !FS_BENEATH_SUPPORTED {
+        return Err(format!(
+            "`[permissions] fs` cannot be enforced on this platform ({}-bit {}): {}. Remove the key to run unbounded, or build on Linux, macOS or Windows.",
+            usize::BITS,
+            std::env::consts::OS,
+            FS_BENEATH_UNSUPPORTED,
+        ));
+    }
+    Ok(())
+}
 
 /// Why a rooted call failed.
 #[derive(Debug)]
@@ -62,16 +98,43 @@ pub fn fs_beneath_joined(dir: &str, rel: &str) -> String {
 }
 
 /// `rel`'s segments, or `Escape` for an absolute path or a `.` / `..` / empty
-/// segment (the Almide side never sends one).
+/// segment (the Almide side never sends one), or a segment that is not ONE
+/// plain name on this OS.
+///
+/// Two guards hold on a platform such as Windows, and both stay:
+/// - #4301: a segment must be exactly one `Component::Normal`. On Windows
+///   `C:` is a prefix and `\` a separator, and `PathBuf::push` of a prefixed
+///   or rooted segment REPLACES the path, so `C:/elsewhere` would leave the
+///   root (the Almide side only knows `/`). The check runs here, before any
+///   platform half, so it holds wherever this file is built — including a
+///   descriptor-relative Windows half. On Windows a segment holding `:` (a
+///   drive or an alternate data stream: `a.txt:s` is one `Normal`
+///   component), a control character or a Win32 wildcard is refused too,
+///   the same names the Windows half's `nt_name` refuses (#4293).
+/// - Where the build has no descriptor calls (neither Linux, macOS nor
+///   Windows), the platform half refuses every call below the root
+///   ([`fs_beneath_unsupported`]) instead of checking and then calling.
 fn fs_beneath_segments(rel: &str) -> Result<Vec<&str>, FsBeneathError> {
     if rel.is_empty() {
         return Ok(Vec::new());
     }
     let segs: Vec<&str> = rel.split('/').collect();
-    if segs.iter().any(|s| s.is_empty() || *s == "." || *s == "..") {
+    if segs.iter().any(|s| s.is_empty() || *s == "." || *s == ".." || !fs_beneath_segment_is_one_name(s)) {
         return Err(FsBeneathError::Escape);
     }
     Ok(segs)
+}
+
+/// #4301: `seg` is exactly one `Component::Normal` equal to itself on this
+/// OS — no drive prefix, no root, no separator other than `/`, and on
+/// Windows no stream colon, control character or wildcard.
+fn fs_beneath_segment_is_one_name(seg: &str) -> bool {
+    let mut cs = std::path::Path::new(seg).components();
+    let one = matches!(
+        (cs.next(), cs.next()),
+        (Some(std::path::Component::Normal(n)), None) if n == std::ffi::OsStr::new(seg)
+    );
+    one && !(cfg!(windows) && seg.chars().any(|c| c < ' ' || ":*?\"<>|".contains(c)))
 }
 
 /// The whole file `<root>/<rel>`.
@@ -137,15 +200,15 @@ pub fn fs_beneath_read_with(dir: &str, rel: &str, walk_only: bool, hook: &mut dy
     fs_beneath_imp::read(dir, parents, last, walk_only, hook)
 }
 
-#[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod fs_beneath_imp {
-    type OwnedFd = std::os::fd::OwnedFd;
+    type OwnedFd = super::almide_fs_beneath_sys::Handle;
     type FsBeneathError = super::FsBeneathError;
 
     /// A failed open of `name` under `dir`: `Escape` when `name` is a
     /// symlink, the open's own error otherwise.
     pub fn classify(dir: &OwnedFd, name: &str, e: std::io::Error) -> FsBeneathError {
-        match super::almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&dir), name) {
+        match super::almide_fs_beneath_sys::symlink_at(dir, name) {
             Ok(true) => FsBeneathError::Escape,
             _ => FsBeneathError::Io(e),
         }
@@ -172,7 +235,7 @@ mod fs_beneath_imp {
         }
         #[cfg(target_os = "linux")]
         if !walk_only {
-            match super::almide_fs_beneath_sys::openat2_dir(std::os::fd::AsFd::as_fd(root), &parents.join("/")) {
+            match super::almide_fs_beneath_sys::openat2_dir(root, &parents.join("/")) {
                 Some(Ok(fd)) => {
                     hook(parents.len());
                     return Ok(fd);
@@ -193,7 +256,7 @@ mod fs_beneath_imp {
         for (i, seg) in parents.iter().enumerate() {
             hook(i);
             let at = cur.as_ref().unwrap_or(root);
-            cur = Some(match super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(at), seg, super::almide_fs_beneath_sys::Open::Dir) {
+            cur = Some(match super::almide_fs_beneath_sys::open_at(at, seg, super::almide_fs_beneath_sys::Open::Dir) {
                 Ok(next) => next,
                 Err(e) => return Err(classify(at, seg, e)),
             });
@@ -206,13 +269,13 @@ mod fs_beneath_imp {
         let p = parent(dir, parents, walk_only, hook)?;
         // `Meta` is the O_NONBLOCK read-only open: a FIFO does not block it,
         // and the bounded read refuses it by its descriptor (#4201).
-        let fd = super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::Meta).map_err(|e| classify(&p, last, e))?;
+        let fd = super::almide_fs_beneath_sys::open_at(&p, last, super::almide_fs_beneath_sys::Open::Meta).map_err(|e| classify(&p, last, e))?;
         super::fs_read_bounded_file(&mut std::fs::File::from(fd), super::FS_READ_MAX_BYTES).map_err(FsBeneathError::Io)
     }
 
     pub fn write(dir: &str, parents: &[&str], last: &str, data: &[u8]) -> Result<(), FsBeneathError> {
         let p = parent(dir, parents, false, &mut |_| {})?;
-        let fd = super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::WriteTrunc).map_err(|e| classify(&p, last, e))?;
+        let fd = super::almide_fs_beneath_sys::open_at(&p, last, super::almide_fs_beneath_sys::Open::WriteTrunc).map_err(|e| classify(&p, last, e))?;
         std::io::Write::write_all(&mut std::fs::File::from(fd), data).map_err(FsBeneathError::Io)
     }
 
@@ -221,11 +284,11 @@ mod fs_beneath_imp {
             None => super::almide_sfs::open_dir(dir).map_err(FsBeneathError::Io)?,
             Some((last, parents)) => {
                 let p = parent(dir, parents, false, &mut |_| {})?;
-                super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::Dir).map_err(|e| classify(&p, last, e))?
+                super::almide_fs_beneath_sys::open_at(&p, last, super::almide_fs_beneath_sys::Open::Dir).map_err(|e| classify(&p, last, e))?
             }
         };
         let names = super::almide_fs_beneath_sys::list_fd(fd).map_err(FsBeneathError::Io)?;
-        Ok(names.iter().map(|n| String::from_utf8_lossy(n).to_string()).collect())
+        Ok(names.iter().map(|n| n.to_string_lossy().into_owned()).collect())
     }
 
     pub fn exists(dir: &str, parents: &[&str], last: &str) -> Result<bool, FsBeneathError> {
@@ -234,7 +297,7 @@ mod fs_beneath_imp {
             Err(FsBeneathError::Escape) => return Err(FsBeneathError::Escape),
             Err(FsBeneathError::Io(_)) => return Ok(false),
         };
-        match super::almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&p), last) {
+        match super::almide_fs_beneath_sys::symlink_at(&p, last) {
             Ok(true) => Err(FsBeneathError::Escape),
             Ok(false) => Ok(true),
             Err(_) => Ok(false),
@@ -243,61 +306,41 @@ mod fs_beneath_imp {
 
     pub fn remove(dir: &str, parents: &[&str], last: &str) -> Result<(), FsBeneathError> {
         let p = parent(dir, parents, false, &mut |_| {})?;
-        if let Ok(true) = super::almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&p), last) {
+        if let Ok(true) = super::almide_fs_beneath_sys::symlink_at(&p, last) {
             return Err(FsBeneathError::Escape);
         }
-        let is_dir = super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::Dir).is_ok();
-        super::almide_fs_beneath_sys::unlink_at(std::os::fd::AsFd::as_fd(&p), last, is_dir).map_err(FsBeneathError::Io)
+        let is_dir = super::almide_fs_beneath_sys::open_at(&p, last, super::almide_fs_beneath_sys::Open::Dir).is_ok();
+        super::almide_fs_beneath_sys::unlink_at(&p, last, is_dir).map_err(FsBeneathError::Io)
     }
 }
 
-/// The path-based fallback: every prefix checked for a symlink, then the
-/// plain call (racy — see the file header).
-#[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
+/// Elsewhere: no descriptor calls, so every call below the root is refused
+/// (fail-closed; see the file header).
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod fs_beneath_imp {
     type FsBeneathError = super::FsBeneathError;
 
-    fn checked(dir: &str, segs: &[&str]) -> Result<std::path::PathBuf, FsBeneathError> {
-        let mut p = std::path::PathBuf::from(dir);
-        for seg in segs {
-            p.push(seg);
-            if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
-                return Err(FsBeneathError::Escape);
-            }
-        }
-        Ok(p)
+    fn refused<T>() -> Result<T, FsBeneathError> {
+        Err(FsBeneathError::Io(super::fs_beneath_unsupported()))
     }
 
-    fn all<'a>(parents: &[&'a str], last: &'a str) -> Vec<&'a str> {
-        parents.iter().copied().chain(std::iter::once(last)).collect()
+    pub fn read(_dir: &str, _parents: &[&str], _last: &str, _walk_only: bool, _hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
+        refused()
     }
 
-    pub fn read(dir: &str, parents: &[&str], last: &str, _walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
-        let p = checked(dir, &all(parents, last))?;
-        hook(parents.len());
-        super::fs_read_bounded_path(&p, super::FS_READ_MAX_BYTES).map_err(FsBeneathError::Io)
+    pub fn write(_dir: &str, _parents: &[&str], _last: &str, _data: &[u8]) -> Result<(), FsBeneathError> {
+        refused()
     }
 
-    pub fn write(dir: &str, parents: &[&str], last: &str, data: &[u8]) -> Result<(), FsBeneathError> {
-        std::fs::write(checked(dir, &all(parents, last))?, data).map_err(FsBeneathError::Io)
+    pub fn list(_dir: &str, _segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
+        refused()
     }
 
-    pub fn list(dir: &str, segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
-        let p = checked(dir, segs)?;
-        let mut names = Vec::new();
-        for e in std::fs::read_dir(p).map_err(FsBeneathError::Io)? {
-            names.push(e.map_err(FsBeneathError::Io)?.file_name().to_string_lossy().to_string());
-        }
-        Ok(names)
+    pub fn exists(_dir: &str, _parents: &[&str], _last: &str) -> Result<bool, FsBeneathError> {
+        refused()
     }
 
-    pub fn exists(dir: &str, parents: &[&str], last: &str) -> Result<bool, FsBeneathError> {
-        Ok(checked(dir, &all(parents, last))?.exists())
-    }
-
-    pub fn remove(dir: &str, parents: &[&str], last: &str) -> Result<(), FsBeneathError> {
-        let p = checked(dir, &all(parents, last))?;
-        let r = if p.is_dir() { std::fs::remove_dir(&p) } else { std::fs::remove_file(&p) };
-        r.map_err(FsBeneathError::Io)
+    pub fn remove(_dir: &str, _parents: &[&str], _last: &str) -> Result<(), FsBeneathError> {
+        refused()
     }
 }

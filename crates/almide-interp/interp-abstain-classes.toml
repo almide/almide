@@ -38,6 +38,9 @@ patterns = [
   "capability: prim.alloc_bytes",
   # Raw pointer conversion — pointer work by definition, same class as handle.
   "capability: prim.int_to_ptr",
+  # A Region (ADR-0031): the bounds-checked view the ffi bridge reads and
+  # writes raw memory through, so the same pointer work one level up.
+  "capability: ffi.region",
   # An access the #1226 slice-1 arena does not own. The flat String/Bytes
   # family is modeled; a load/store landing outside it is still the heap
   # boundary, one level in from `prim.handle`.

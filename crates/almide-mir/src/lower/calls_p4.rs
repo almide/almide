@@ -359,7 +359,11 @@ impl LowerCtx {
                 // A VARIANT (Option/Result) subject — execute via the tag-read value-match
                 // (ctor patterns are not `subj == lit`, so `desugar_match_to_if` can't reach
                 // them; the result would stay an unset 0 = a silent miscompile).
-                if is_heap_ty(&subject.ty) {
+                // A `String` subject is no variant: its literal arms desugar to the
+                // `subj == "lit"` chain below, the same string compare a scalar `if`
+                // lowers (a `match t.name { "heavy" => .. }` operand inside a real
+                // per-element `for` loop walled the whole loop on this route).
+                if is_heap_ty(&subject.ty) && !matches!(subject.ty, Ty::String) {
                     return self.try_lower_variant_value_match(subject, arms, &expr.ty);
                 }
                 // The desugared chain may be an `If` (literal arms) OR a `Block` (`{ let x =

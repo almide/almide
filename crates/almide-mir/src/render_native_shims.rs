@@ -147,9 +147,16 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}"),
 ];
 
+/// C-418's escaper (#4126, #4262), the one shim whose source is not a
+/// literal here: the assert desugar shows its operands through it, and its
+/// Rust body is almide-base's err_text.rs, so the range table stays one copy.
+const ERR_TEXT_SHIM: (&str, &[NTy], Option<NTy>, &str) =
+    ("string.__err_text", &[NTy::Str], Some(NTy::Str), almide_base::ERR_TEXT_NATIVE_SHIM);
+
 pub(crate) fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
     SHIMS
         .iter()
+        .chain(std::iter::once(&ERR_TEXT_SHIM))
         .find(|(n, ..)| *n == name)
         .map(|(_, p, r, src)| (*p, *r, *src))
 }

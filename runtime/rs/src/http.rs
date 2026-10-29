@@ -110,13 +110,8 @@ pub fn almide_rt_http_not_found(body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::new(404, body.to_string())
 }
 
-pub fn almide_rt_http_redirect(url: &str) -> AlmideHttpResponse {
-    almide_http_redirect(url, 302)
-}
-
-pub fn almide_rt_http_response(status: i64, body: &str) -> AlmideHttpResponse {
-    AlmideHttpResponse::new(status, body.to_string())
-}
+// `http.response` and `http.redirect` are Almide (ADR-0032): a response's
+// Content-Type is its body's type, written through `__with_headers`.
 
 pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::json(status, body.to_string())
@@ -124,6 +119,13 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
 
 pub fn almide_rt_http___with_headers(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
     AlmideHttpResponse::from_headers(status, body.to_string(), &header_pairs(flat))
+}
+
+/// `http.__http_response_flat`: the pairs as given, each name written once by its
+/// caller (`response`, `redirect`), so it is `__with_headers` without a merge
+/// to do.
+pub fn almide_rt_http___http_response_flat(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
+    almide_rt_http___with_headers(status, body, flat)
 }
 
 pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> AlmideHttpResponse {

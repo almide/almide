@@ -42,9 +42,21 @@ impl std::fmt::Display for PkgId {
     }
 }
 
+/// One `[trust] media` entry: the package's source key, the media types it
+/// is granted, and the manifest line the entry is written on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaGrant {
+    pub key: String,
+    pub media: Vec<String>,
+    pub line: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct FetchedDep {
     pub pkg_id: PkgId,
+    /// The git URL it was fetched from; empty for a path dependency. Read by
+    /// the media grant, which names a package by its source (ADR-0032 Q17).
+    pub source: String,
     /// The requested version this entry currently holds — MVS keeps the
     /// maximum requested version per `PkgId` (#1458).
     pub version: String,
@@ -121,6 +133,11 @@ pub struct Project {
     /// trusted by default. Only the root manifest's list is read. See
     /// `crate::trust`.
     pub trust_owners: Vec<String>,
+    /// `[trust] media = { "owner/repo" = ["image/svg+xml"] }` (ADR-0032 D7):
+    /// the dependencies this project lets own a script-capable media type,
+    /// keyed by source. Only the root manifest's table is read. See
+    /// `crate::media_grant`.
+    pub media_grants: Vec<MediaGrant>,
     /// Native Rust crate dependencies added to generated Cargo.toml.
     /// e.g., [("wasmtime", "42.0.0")]
     pub native_deps: Vec<NativeDep>,
@@ -185,7 +202,14 @@ impl LineStarts {
 /// about 200 bytes, so 1 MiB holds a lock of several thousand dependencies —
 /// far past any real project — while a file linked to `/dev/zero` or a
 /// generated multi-gigabyte one stops here instead of exhausting memory.
+/// The default of the `manifest_bytes` compile-cost budget (ADR-0030), which
+/// is what [`read_project_file_bytes`] reads; `--budget manifest_bytes=N`
+/// moves it, nothing in a project does.
 pub const PROJECT_FILE_MAX_BYTES: u64 = 1 << 20;
+
+fn project_file_max_bytes() -> u64 {
+    almide_base::budget::limit(almide_base::budget::BudgetId::ManifestBytes)
+}
 
 /// The bytes of `almide.toml` / `almide.lock` at `path`, refused unless it is
 /// a regular file (a symlink to one is followed) of at most
@@ -196,11 +220,12 @@ pub const PROJECT_FILE_MAX_BYTES: u64 = 1 << 20;
 pub fn read_project_file_bytes(path: &Path) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let failed = |e: std::io::Error| format!("Failed to read {}: {}", path.display(), e);
+    let max = project_file_max_bytes();
     let too_big = || {
         format!(
             "{} is larger than {} bytes, which no manifest or lock file is\n  hint: replace it with the real file",
             path.display(),
-            PROJECT_FILE_MAX_BYTES
+            max
         )
     };
     let meta = std::fs::metadata(path).map_err(failed)?;
@@ -210,12 +235,13 @@ pub fn read_project_file_bytes(path: &Path) -> Result<Vec<u8>, String> {
             path.display()
         ));
     }
-    if meta.len() > PROJECT_FILE_MAX_BYTES {
+    if meta.len() > max {
         return Err(too_big());
     }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
-    std::fs::File::open(path).map_err(failed)?.take(PROJECT_FILE_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(failed)?;
-    if bytes.len() as u64 > PROJECT_FILE_MAX_BYTES {
+    std::fs::File::open(path).map_err(failed)?.take(max.saturating_add(1)).read_to_end(&mut bytes).map_err(failed)?;
+    almide_base::budget::observe(almide_base::budget::BudgetId::ManifestBytes, bytes.len() as u64);
+    if bytes.len() as u64 > max {
         return Err(too_big());
     }
     Ok(bytes)
@@ -418,6 +444,28 @@ impl Manifest<'_> {
         owners
             .into_iter()
             .map(|(o, at)| crate::trust::validate_owner_entry(&o).map(|()| o).map_err(|e| located(path, content, at, &e)))
+            .collect()
+    }
+
+    /// `[trust].media` (ADR-0032 D7): a table from a package source to the
+    /// media types it is granted. Anything else is refused on its line.
+    fn media_grants(&self, path: &Path, content: &str) -> Result<Vec<MediaGrant>, String> {
+        let Some(trust) = spanned_entry(&self.spans, "trust") else { return Ok(Vec::new()) };
+        let Some(trust) = trust.get_ref().as_table() else { return Ok(Vec::new()) };
+        let Some(media) = spanned_entry(trust, "media") else { return Ok(Vec::new()) };
+        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"almide/svg\" = [\"image/svg+xml\"] }`";
+        let table = media.get_ref().as_table().ok_or_else(|| located(path, content, media.span().start, shape))?;
+        table
+            .iter()
+            .map(|(k, v)| {
+                let at = v.span().start;
+                let items = v.get_ref().as_array().ok_or_else(|| located(path, content, at, shape))?;
+                let media = items
+                    .iter()
+                    .map(|i| i.get_ref().as_str().map(str::to_ascii_lowercase).ok_or_else(|| located(path, content, i.span().start, shape)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(MediaGrant { key: k.get_ref().as_ref().to_ascii_lowercase(), media, line: line_of(content, at) })
+            })
             .collect()
     }
 
@@ -857,7 +905,7 @@ pub const DEPENDENCY_KEYS: &[&str] = &["git", "tag", "branch", "version", "path"
 /// The keys `[permissions]` has.
 pub const PERMISSION_KEYS: &[&str] = &["allow", "proc", "fs", "native"];
 /// The keys `[trust]` has (#4093).
-pub const TRUST_KEYS: &[&str] = &["owners"];
+pub const TRUST_KEYS: &[&str] = &["owners", "media"];
 /// The tables a `[target.<platform>]` table may hold (anything else is an
 /// error, not a warning — it was refused before #3382).
 pub const TARGET_PLATFORM_KEYS: &[&str] = &["native-deps"];
@@ -1001,6 +1049,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let proc_allow = names("proc")?;
     let native_grants = names("native")?.unwrap_or_default();
     let trust_owners = manifest.trust_owners(path, &content)?;
+    let media_grants = manifest.media_grants(path, &content)?;
 
     let root = project_root_from_toml_path(path);
     // Relative roots are the project's own directories: anchored to the
@@ -1021,6 +1070,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         fs_allow,
         native_grants,
         trust_owners,
+        media_grants,
         native_deps,
         root,
     })

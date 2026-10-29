@@ -10,17 +10,18 @@
 //!
 //! The outputs pin both legs to what they printed before the change
 //! (codepoint counting through combining sequences, n = 0, n < 0, n past the
-//! end, the empty string).
+//! end, the empty string). The program writes its zero-width joiners as
+//! `\u{200D}` escapes: a raw one in source is E101 (#4266).
 use std::process::Command;
 
 const SOURCE: &str = r#"fn main() -> Unit = {
-  let s = "héllo wörld 👨‍👩‍👧!"
+  let s = "héllo wörld 👨\u{200D}👩\u{200D}👧!"
   for n in [0, 1, 3, 7, 30, -1] {
     println("${n}: [${string.take_end(s, n)}] [${string.drop_end(s, n)}]")
   }
   let e = ""
   println("[${string.take_end(e, 2)}] [${string.drop_end(e, 2)}] [${string.take_end(e, -1)}]")
-  for p in ["", "!", "👧!", "wörld 👨‍👩‍👧!", "x!", "héllo wörld 👨‍👩‍👧!", "_héllo wörld 👨‍👩‍👧!", "rld"] {
+  for p in ["", "!", "👧!", "wörld 👨\u{200D}👩\u{200D}👧!", "x!", "héllo wörld 👨\u{200D}👩\u{200D}👧!", "_héllo wörld 👨\u{200D}👩\u{200D}👧!", "rld"] {
     println("${p}: ${string.ends_with(s, p)} ${string.starts_with(s, p)}")
   }
   println("${string.ends_with("", "")} ${string.ends_with("a", "")} ${string.ends_with("", "a")}")

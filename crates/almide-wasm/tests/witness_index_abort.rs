@@ -46,10 +46,10 @@ fn index_views_and_main_aborts_witness_exactly() {
     // The element view is shared out on the returning path; the abort path
     // has nothing of it.
     assert_eq!(get("elem_at"), "\n{|am}\n");
-    // `t` is born after the first index's abort; the second index aborts
-    // holding it (`ib` — the index reads it, #3259 — a prefix of the
-    // returning `ibd`, so no arm of its own): one path empty, the other `ibd`.
-    assert!(get("tagged_at").contains("{|ibd}\n"), "{:?}", get("tagged_at"));
+    // `t` is born after the first index's abort and is dying at `t + xs[i]`,
+    // so it moves into the in-place append (#4261: `im`, never `ibd`); the
+    // append's result moves out: one path empty, the other `im`.
+    assert!(get("tagged_at").contains("{|im}\n{|im}\n"), "{:?}", get("tagged_at"));
     // main's `!` aborts holding `keep` (born before it): nothing is released
     // on the abort path, and its prefix of the returning `id` is what the
     // line carries — a flat `id`, never `{i|id}` (which would reject).

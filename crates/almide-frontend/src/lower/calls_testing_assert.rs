@@ -46,6 +46,31 @@ fn bind_assert_operands(
     (stmts, vars)
 }
 
+/// An assert operand as its failure text shows it (#4262): the ALS-R2
+/// rendering (through a declared repr where one exists) passed through C-418's
+/// escaper `string.__err_text`, so a control or bidi character of the
+/// program's data reads `\n` / `\u{1b}` / `\u{202e}` and a newline cannot
+/// forge a line of the block. One rule on every lane and route: the program's
+/// own abort, both test lanes, both legs.
+fn assert_shown(ctx: &mut LowerCtx, operand: IrExpr, span: Option<ast::Span>) -> IrExpr {
+    let rendered = ctx.render_declared(operand);
+    let text = if matches!(rendered.ty, Ty::String) {
+        rendered
+    } else {
+        ctx.mk(IrExprKind::StringInterp { parts: vec![IrStringPart::Expr { expr: rendered }] }, Ty::String, span)
+    };
+    let call = IrExprKind::Call {
+        target: CallTarget::Module {
+            module: sym("string"),
+            func: sym("__err_text"),
+            def_id: ctx.def_map.get(&sym("string.__err_text")).copied(),
+        },
+        args: vec![text],
+        type_args: vec![],
+    };
+    ctx.mk(call, Ty::String, span)
+}
+
 /// `{ eprintln("<parts>"); process.exit(1) }` — the failure arm every T18
 /// desugar shares, so every consumer (native, both wasm legs, the interp)
 /// inherits the same bytes.
@@ -141,7 +166,7 @@ fn desugar_testing_assert_outside_test(
     let at = span.as_ref().map(|s| format!("\n  at: line {}", s.line)).unwrap_or_default();
     let head = |rel: &str| IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: {rel}") };
     let lit = |s: &str| IrStringPart::Lit { value: s.to_string() };
-    let shown: Vec<IrExpr> = v.iter().map(|e| ctx.render_declared(e.clone())).collect();
+    let shown: Vec<IrExpr> = v.iter().map(|e| assert_shown(ctx, e.clone(), span)).collect();
     let val = |i: usize| IrStringPart::Expr { expr: shown[i].clone() };
     let found = || lit("\n  found: ");
     let (parts, verdict) = match f {

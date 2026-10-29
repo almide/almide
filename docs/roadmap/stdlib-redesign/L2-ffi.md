@@ -5,6 +5,8 @@
 > 前提: [L0](L0-conventions.md)・[L1](L1-categories.md)（R-L1-26: 生ポインタを `ffi` に移す、#3853）
 > 出典: Rust https://doc.rust-lang.org/std/primitive.slice.html#method.as_ptr ・ https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html ・ Go https://pkg.go.dev/unsafe ・ Python https://docs.python.org/3/library/ctypes.html ・ TS/JS https://nodejs.org/api/n-api.html （JS 側は `WebAssembly.Memory.buffer`）・ Gleam —（無い。外部関数は `@external`）・ Elixir —（NIF は C 側）・ OCaml https://ocaml.org/manual/latest/intfc.html ・ Kotlin https://kotlinlang.org/api/core/kotlin-stdlib/kotlinx.cinterop/ （Native）・ Swift https://developer.apple.com/documentation/swift/unsafemutablerawpointer
 
+> **2026-10-27 追記**: この文書が述べる `RawPtr` の面（`ffi.address`・`ffi.to_int`・番地と長さを渡す `ffi.read` / `ffi.write`、`bytes.as_ptr` などの旧綴り）は [ADR-0031](../../adr/0031-raw-pointers-carry-provenance.md)（Accepted 2026-10-27、dialect epoch 15）で置き換わりました。いまの面: `RawPtr` は不透明な外部トークン `Handle` に改名（stdlib の関数は受け取りも返しもしない）。読み書きは長さつきの `Region` を通す — `ffi.region(b)`（読み取り専用）・`ffi.alloc(n)`（effect fn、書き込み可、ゼロ埋め）・`ffi.len`・`ffi.is_writable`・`ffi.read(r, off, n)`・`ffi.write(r, off, b)`・`ffi.to_bytes(r)`。範囲外は `err`。`ffi.address`・`ffi.to_int`・`bytes.as_ptr`・`as_mut_ptr`・`data_ptr`・`from_raw_ptr`・`copy_to_ptr` は削除。`@extern(c)` の `Region` 引数は (ptr, size_t len) の 2 引数で渡り、`Region` を返すには `@region(len = …, release = "…")` が要ります（無ければ E090）。以下は 2026-10-21 時点の記録として残します。
+
 ## L2: 役割の比較
 
 | 役割 | Almide（いま → 案） | Rust | Go | Python | TS/JS | Gleam | Elixir | OCaml | Kotlin | Swift |

@@ -68,8 +68,34 @@ fn infer_field_defaults(checker: &mut Checker, fields: &mut [ast::FieldType]) {
 
 impl Checker {
 
+    /// E113 when the last exhaustiveness / reachability check passed the
+    /// `exhaustiveness_steps` budget.
+    fn over_exhaustiveness_budget(&mut self, arms: usize) -> bool {
+        let (steps, over) = exhaustiveness::steps_taken();
+        if !over {
+            return false;
+        }
+        let max = almide_base::budget::limit(almide_base::budget::BudgetId::ExhaustivenessSteps);
+        self.emit(Diagnostic::error(
+            format!("match too complex to check for exhaustiveness ({steps}+ steps, max {max})"),
+            format!(
+                "The {arms} arms of this match make the coverage check branch on every column. Split the match: \
+                 match on the first component, then on the rest inside each arm, or add a `_ =>` arm that \
+                 handles the remaining cases together. The budget is the compiler's, not the program's: the \
+                 source cannot raise it (ADR-0030); `--budget exhaustiveness_steps=N` on the command line can."
+            ),
+            "match",
+        ).with_code("E113"));
+        true
+    }
+
     pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
         let missing = exhaustiveness::check_exhaustiveness(subject_ty, arms, &self.env);
+        // ADR-0030: the check stopped at `exhaustiveness_steps` — its
+        // verdict is unknown, so the match is E113, not "exhaustive".
+        if self.over_exhaustiveness_budget(arms.len()) {
+            return;
+        }
         if !missing.is_empty() {
             let list = missing
                 .iter()
@@ -133,6 +159,9 @@ impl Checker {
         // Code: E014 (E011 is the pre-existing "mutable var mutated
         // inside closure" diagnostic in `infer.rs`).
         let dead = exhaustiveness::find_unreachable_arms(subject_ty, arms, &self.env);
+        if self.over_exhaustiveness_budget(arms.len()) {
+            return;
+        }
         for idx in dead {
             let arm = &arms[idx];
             let mut diag = Diagnostic::error(
@@ -235,7 +264,7 @@ impl Checker {
         // the binding together, so the two cannot drift apart.
         if let [(type_name, field_ty)] = candidates.as_slice() {
             let (type_name, field_ty) = (*type_name, field_ty.clone());
-            let named = Ty::Named(type_name, vec![]);
+            let named = Ty::Named(type_name, Default::default());
             self.unify_infer(ty, &named);
             field_ty
         } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {

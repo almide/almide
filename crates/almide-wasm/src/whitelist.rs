@@ -131,11 +131,10 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     // payload (handle+12 = OUR PAYLOAD, load32(h+4) = the byte length on
     // both legs), the editors (insert / remove_at / reverse / xor /
     // map_each) store into their own prim.alloc_bytes buffer only, the
-    // predicates and cmp/skip/eof are scalar results, data_ptr is the
-    // payload address (never printed cross-leg). map_each's callback is
+    // predicates and cmp/skip/eof are scalar results. map_each's callback is
     // a language-level closure call this emitter lowers itself. Parity
     // evidence: spec/wasm_cross/bytes_search_edit_family.almd.
-    "bytes_cmp", "bytes_contains", "bytes_data_ptr", "bytes_ends_with", "bytes_eof",
+    "bytes_cmp", "bytes_contains", "bytes_ends_with", "bytes_eof",
     "bytes_insert", "bytes_is_empty", "bytes_is_valid_utf8", "bytes_map_each",
     "bytes_remove_at", "bytes_reverse", "bytes_skip", "bytes_starts_with", "bytes_xor",
 ];
@@ -165,19 +164,17 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // (prim.die, as float clamp), the scan captures_all and replace_with
     // read, index_of's code-point count — the same byte walks and scratch.
     "regex_check", "regex_new", "regex_index_of", "regex_scan",
-    // bytes_rawptr.almd / bytes_skip.almd (audited 2026-08-25):
-    // raw-address bridge over load8/store8 on Bytes data regions
-    // (len = bytes both legs), handle+12 = OUR PAYLOAD; the empty-buffer
-    // NULL guard is the 2026-08-10 fuzz doctrine.
-    "bytes_as_ptr", "bytes_as_mut_ptr", "bytes_from_raw_ptr", "bytes_copy_to_ptr",
-    // ffi.to_int (R-ffi-01): the identity ptr_to_int cast. The other ffi
-    // bodies are prim-free calls to the bridge above (ffi_bridge.almd).
-    "ffi_to_int",
+    // ffi_bridge.almd (ADR-0031): the three `local` raw operations under
+    // `ffi`'s Region checks — the address of a Bytes data region
+    // (handle+12 = OUR PAYLOAD, NULL for an empty buffer, the 2026-08-10 fuzz
+    // doctrine) and load8/store8 copies at base + off. They run only after
+    // `ffi.read` / `ffi.write` checked the region's bounds and permission.
+    "ffi_address", "ffi_load", "ffi_store",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
     // (Option ret) sits in the SUM tier below.
-    "http_response", "http_json", "http_redirect", "http_with_headers",
+    "http_json", "http_with_headers",
     "http_status", "http_body", "http_body_bytes", "http_set_header",
     // The #1791 read side (audited 2026-09-03): the same list/string
     // surface plus int.parse / map.new / map.contains / map.set.
@@ -200,13 +197,14 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "random_bytes",
     // json_path.almd, READ side only (audited 2026-08-25): the value.Path
     // rep is a plain List[String]; get walks value.__field / value.as_array /
-    // list.get — all native arms here, no raw layout reads. set/remove
-    // are REJECTED: their pair walks read the incumbent's inline-pairs
-    // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
+    // list.get — all native arms here, no raw layout reads. remove is
+    // REJECTED: its pair walk reads the incumbent's inline-pairs Value
+    // layout (tag@h+4, count@h+8) — see PORT-MATRIX. set goes through
+    // value.__set_path_steps, which this emitter lowers itself (#4315).
     "json_path_index",
-    // value.__set_path_steps (the wasm body of value.set_path's walk): pure
-    // Almide over value.as_object / as_array and the constructors, no layout
-    // reads — unlike json_path_set_go below the REJECTED line.
+    // value.__set_path_steps' self-hosted body: pure Almide over
+    // value.as_object / as_array and the constructors, no layout reads. The
+    // emitter's own lowering (value_set_path.rs) answers the call first.
     "value_set_path_steps",
     "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).

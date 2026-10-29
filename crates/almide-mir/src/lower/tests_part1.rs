@@ -9,7 +9,7 @@
     fn list_int() -> Ty {
         // Any Applied/heap type works for the ownership logic; List[Int] is the
         // value-semantics shape under test.
-        Ty::Applied(TypeConstructorId::List, vec![Ty::Int])
+        Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into())
     }
     fn bind(var: u32, ty: Ty, value: IrExpr) -> IrStmt {
         stmt(IrStmtKind::Bind {

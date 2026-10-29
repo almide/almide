@@ -1,35 +1,120 @@
-// ffi — raw addresses at the foreign-function boundary (R-ffi-01, #3853).
+// ffi — memory at the foreign-function boundary (R-ffi-01, #3853, ADR-0031).
 //
-// The only stdlib surface that reaches memory outside an Almide value:
-// `read` and `write` (R-L0-45). `address` and `to_int` only build an address
-// as a value and touch no memory. Requires `import ffi`; `bytes` is visible
-// from every file without an import, so it carries none of this.
+// Two kinds of pointer, never one (ADR-0031 D1):
 //
-// `read` and `write` are effect fns (R-ffi-02): `write` changes memory outside
-// Almide's values and `read` reads memory foreign code wrote. Nothing checks
-// that an address and a length describe memory the program owns — the caller
-// promises it, and `import ffi` is where the file says so: outside the stdlib,
-// a call to any `@memory_unsafe` fn (these four and the deprecated `bytes`
-// raw-pointer spellings) in a file without `import ffi` is E100 (#4043).
+// - `Handle` is an opaque foreign token (`FILE*`, `sqlite3*`). It is only
+//   passed back to an `@extern` fn; nothing here reads or writes through it,
+//   and it has no `Int` form.
+// - `Region` is a view that can be read or written: base, length,
+//   permission and owner. `read` and `write` check `0 <= off` and
+//   `off + n <= len` before they touch memory, on both targets, and refuse a
+//   write through a read-only region. An access outside the region is an
+//   `err`, never a read or write of other memory (ADR-0031 D5).
+//
+// A `Region` is minted at exactly three places, each knowing the length
+// (ADR-0031 D2): `region(b)` (read-only, the length of `b`, which it keeps
+// alive), `alloc(n)` (writable, fresh, aliasing no Almide value — so a write
+// can never change a `let`, the #3966 class), and an `@extern` whose
+// declaration states the length with `@region(len = …, release = "…")`.
+// `slice(r, off, n)` narrows one inside its parent's bounds: read-only, and
+// holding the parent's owner, so the memory outlives the view.
+// There is no conversion between `Int` and any pointer a user file can name.
+//
+// `import ffi` is the opt-in: outside the stdlib, a call to a
+// `@memory_unsafe` fn in a file without it is E100 (#4043), and
 // `--profile critical` refuses every `ffi.*` call even with it (#4008).
 //
-// wasm: the self-hosted bodies live in stdlib/bytes_rawptr.almd (`@implements`).
-/// Address of b's first byte; null if b is empty.
+// The three raw operations the checks guard are `local`: nothing outside
+// this file reaches memory without passing a bounds check first. Native
+// implements them in runtime/rs/src/ffi.rs; wasm in stdlib/ffi_bridge.almd
+// (`@implements`).
+/// A view of memory: base, length, permission and owner (ADR-0031 D1). The
+/// view starts `off` bytes past `base`: 0 for every mint, the slice's offset
+/// for `slice`, so narrowing a region needs no address arithmetic.
+mod type Region = { owner: Bytes, base: Handle, off: Int, len: Int, writable: Bool, keep: () -> Unit }
+
+/// A read-only view of b; b lives as long as the view.
+@memory_unsafe
+fn region(b: Bytes) -> Region = {
+  let base = __address(b)
+  { owner: b, base: base, off: 0, len: bytes.len(b), writable: false, keep: () => () }
+}
+
+/// A fresh writable region of n zero bytes; err if n is negative.
+@memory_unsafe
+effect fn alloc(n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.alloc: negative length ${n}")
+  else {
+    let buf = bytes.zeros(n)
+    let base = __address(buf)
+    ok({ owner: buf, base: base, off: 0, len: n, writable: true, keep: () => () })
+  }
+
+/// The region's length in bytes.
+@memory_unsafe
+fn len(r: Region) -> Int = r.len
+
+/// True if write may change the region (ffi.alloc and writable foreign regions).
+@memory_unsafe
+fn is_writable(r: Region) -> Bool = r.writable
+
+/// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("ffi.read: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok(__load(r.base, r.off + off, n))
+
+/// Writes b at off; err if the region is read-only or b does not fit.
+@memory_unsafe
+effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
+  if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
+  else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else {
+    __store(r.base, r.off + off, b)
+    ok(())
+  }
+
+/// A copy of the whole region as Bytes.
+@memory_unsafe
+effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, r.off, r.len))
+
+/// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.slice: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok({ ...r, off: r.off + off, len: n, writable: false })
+
+/// `Region(<len> bytes)`: the base address differs per target and is never shown.
+mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
+
+// The address of b's first byte; null if b is empty. Reached only by the
+// mints above, which keep b alive in the region they build.
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
-fn address(b: Bytes) -> RawPtr = _
+local fn __address(b: Bytes) -> Handle = _
 
-/// The address as an Int; null is 0.
+// The block an `@export(wasm)` fn returning a Region hands its host
+// (ADR-0031 amendment A1). The host is given the block's data address and
+// length, and one share of the block, which it gives back through the
+// `__region_release` export. Only a whole view of its owner crosses: a
+// sub-region of a larger block (`ffi.slice`) has no block of its own, so the
+// export aborts instead of handing out an address it cannot take back.
+// Reached only by the compiler-made wrapper of such an export.
 @memory_unsafe
-@intrinsic("almide_rt_ffi_to_int")
-fn to_int(p: RawPtr) -> Int = _
+local fn __export_owner(r: Region) -> Bytes =
+  if r.len == bytes.len(r.owner) then r.owner
+  else panic("ffi: an @export(wasm) fn returned a sub-region of ${r.len} bytes; return the whole region and pass the offset")
 
-/// Copy of len bytes at ptr; empty if null or len <= 0.
+// A copy of the n bytes at base + off. Reached only by `read` / `to_bytes`,
+// after the bounds check.
 @memory_unsafe
-@intrinsic("almide_rt_ffi_read")
-effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
+@intrinsic("almide_rt_ffi_load")
+local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
 
-/// Writes up to cap bytes of b to ptr; the count, 0 if null.
+// Writes b at base + off. Reached only by `write`, after the permission and
+// bounds checks.
 @memory_unsafe
-@intrinsic("almide_rt_ffi_write")
-effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+@intrinsic("almide_rt_ffi_store")
+local effect fn __store(base: Handle, off: Int, b: Bytes) -> Unit = _

@@ -144,15 +144,33 @@ impl PackageNatives {
         }
         if self.mod_stems.is_empty() { return Ok(()); }
         let mod_decls: String = self.mod_stems.iter().map(|s| format!("mod {};\n", s)).collect();
-        if let Some(pos) = code.find("\nuse ") {
-            code.insert_str(pos, &format!("\n{}", mod_decls));
-        } else if let Some(pos) = code.find("\nfn ") {
-            code.insert_str(pos, &format!("\n{}", mod_decls));
-        } else {
-            *code = format!("{}\n{}", mod_decls, code);
-        }
+        // At the crate root, right after the leading inner attributes
+        // (`#![allow(..)]`), which must stay first. The first `\nuse ` used to
+        // be the anchor — the preamble's crate-level `use std::collections::…`
+        // — and with that import gone (#4284) it lands inside a nested module.
+        let pos = crate_root_insert_pos(code);
+        code.insert_str(pos, &mod_decls);
         Ok(())
     }
+}
+
+/// The byte offset just past the crate's leading inner attributes: the leading
+/// run of blank lines, `//` comments and `#![..]` lines, cut after its last
+/// `#![..]` line (offset 0 when there is none). An item declared there sits at
+/// the crate root, never inside a module the emitted code opens later.
+fn crate_root_insert_pos(code: &str) -> usize {
+    let mut offset = 0;
+    let mut after_attr = 0;
+    for line in code.split_inclusive('\n') {
+        let t = line.trim();
+        if t.starts_with("#![") {
+            after_attr = offset + line.len();
+        } else if !(t.is_empty() || t.starts_with("//")) {
+            break;
+        }
+        offset += line.len();
+    }
+    after_attr
 }
 
 /// The entry names of `dir`, sorted, so the collected inputs (and the key

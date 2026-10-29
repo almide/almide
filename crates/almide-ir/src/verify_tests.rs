@@ -16,7 +16,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(), declared_reprs: Default::default(),
         }
     }
 
@@ -236,7 +236,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(), declared_reprs: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -291,7 +291,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(), declared_reprs: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -328,7 +328,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(), declared_reprs: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn detects_index_access_on_map() {
         let vt = VarTable::new();
-        let map_ty = Ty::Applied(almide_lang::types::TypeConstructorId::Map, vec![Ty::String, Ty::Int]);
+        let map_ty = Ty::Applied(almide_lang::types::TypeConstructorId::Map, vec![Ty::String, Ty::Int].into());
         let body = IrExpr {
             kind: IrExprKind::IndexAccess {
                 object: Box::new(IrExpr { kind: IrExprKind::EmptyMap, ty: map_ty, span: None, def_id: None }),
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn detects_map_access_on_non_map() {
         let vt = VarTable::new();
-        let list_ty = Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![Ty::Int]);
+        let list_ty = Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![Ty::Int].into());
         let body = IrExpr {
             kind: IrExprKind::MapAccess {
                 object: Box::new(IrExpr { kind: IrExprKind::List { elements: vec![] }, ty: list_ty, span: None, def_id: None }),
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn allows_map_access_on_map() {
         let vt = VarTable::new();
-        let map_ty = Ty::Applied(almide_lang::types::TypeConstructorId::Map, vec![Ty::String, Ty::Int]);
+        let map_ty = Ty::Applied(almide_lang::types::TypeConstructorId::Map, vec![Ty::String, Ty::Int].into());
         let body = IrExpr {
             kind: IrExprKind::MapAccess {
                 object: Box::new(IrExpr { kind: IrExprKind::EmptyMap, ty: map_ty, span: None, def_id: None }),
@@ -483,7 +483,7 @@ mod tests {
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
             def_table: Default::default(),
-            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(), declared_reprs: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -522,7 +522,7 @@ mod tests {
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
             def_table: Default::default(),
-            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements: Default::default(), declared_reprs: Default::default(),
         };
         assert!(verify_program(&prog).is_empty());
     }

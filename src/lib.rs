@@ -30,6 +30,7 @@ pub use almide_frontend::lower;
 pub use almide_frontend::ir_link;
 pub use almide_frontend::import_table;
 pub use almide_frontend::stdlib;
+pub use almide_frontend::media_owners;
 pub use almide_frontend::lint_shebang;
 
 // ── Optimizer (almide-optimize) ──
@@ -63,6 +64,7 @@ pub mod wasm_route;
 pub mod serve_export;
 pub mod project_fetch;
 pub mod native_grant;
+pub mod media_grant;
 pub mod trust;
 pub mod resolve;
 pub mod source_overlay;

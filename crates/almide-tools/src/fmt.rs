@@ -23,10 +23,26 @@ pub(crate) fn escape_dquoted(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
+            c if push_hidden_escape(&mut out, c) => {}
             _ => out.push(ch),
         }
     }
     out
+}
+
+/// #4320: a character E101 refuses raw in a source file
+/// (`almide_lang::lexer::is_hidden_source_char` — C0 / DEL / C1 controls,
+/// format characters, line / paragraph separators, the Tags block) is
+/// written as its `\u{..}` escape, in C-418's spelling (lowercase hex, no
+/// leading zeros). Every value-rendering path of a quoted literal calls
+/// this, so a re-rendered literal decodes to the same characters and never
+/// holds one the next parse refuses. Returns whether it wrote the escape.
+pub(crate) fn push_hidden_escape(out: &mut String, c: char) -> bool {
+    if !almide_lang::lexer::is_hidden_source_char(c) {
+        return false;
+    }
+    let _ = write!(out, "\\u{{{:x}}}", c as u32);
+    true
 }
 
 fn join_syms(syms: &[Sym], sep: &str) -> String {
@@ -179,7 +195,7 @@ fn stdlib_owned_ctor_owners() -> &'static std::collections::HashMap<String, &'st
     static OWNERS: std::sync::OnceLock<std::collections::HashMap<String, &'static str>> = std::sync::OnceLock::new();
     OWNERS.get_or_init(|| {
         let mut out = std::collections::HashMap::new();
-        for (module, ty) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES.iter().copied() {
+        for (module, ty) in almide_lang::stdlib_info::stdlib_owned_types().iter().copied() {
             let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { continue };
             let Some(program) = almide_lang::parse_cached(source) else { continue };
             for decl in &program.decls {

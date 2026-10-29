@@ -57,6 +57,12 @@ pub struct CodegenAnnotations {
     /// pattern binds and the guard reads (#3414) — a binder is scoped to its
     /// own arm, so membership here means its arm's guard reads it.
     pub guard_read_vars: HashSet<VarId>,
+    /// Binders of a str-view match's binding arms (#4296: `match &*x { "a"
+    /// => .., other => .. }` binds `other: &str`) whose arm wants the binder
+    /// as a value, or touches the subject's variable: the arm opens with its
+    /// own owned copy, `let other: AlmideString = other.to_almide();`.
+    /// Decided by `StrViewRebindPass` on the final IR; the walker spells it.
+    pub str_view_owned_binders: HashSet<VarId>,
     /// Pattern binders of a recursive enum's boxed field: the Almide type is
     /// `T`, the Rust binding is `Box<T>`, and every read is a `Deref`.
     /// Decided by `BoxDerefPass`; `CaptureClonePass` reads it so a closure's

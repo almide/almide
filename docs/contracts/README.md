@@ -97,7 +97,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-059 | Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile | 0.25.0 | active | fixture | 1 |
 | C-060 | A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field | 0.26.7 | active | fixture | 2 |
 | C-061 | A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical | 0.26.9 | active | fixture | 1 |
-| C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
+| C-062 | A Region moves bytes byte-identically on both targets, and an access outside it is an err | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 3 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
@@ -188,7 +188,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-150 | Ctors over a heap var are value copies — the var stays live | 0.31.0 | active | fixture | 1 |
 | C-151 | Result combinators with a heap-Ok RESULT never link the scalar impl | 0.31.0 | active | fixture | 1 |
 | C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
-| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 5 |
+| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 6 |
 | C-154 | clamp with an invalid range aborts in the T6 form | 0.31.0 | active | fixture | 2 |
 | C-155 | to_fixed with out-of-domain decimals aborts in the T6 form | 0.31.0 | active | fixture | 3 |
 | C-156 | An if-merged some((String, String)) ctor is a real tracked Option | 0.32.0 | active | fixture | 1 |
@@ -372,7 +372,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 4 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 2 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
-| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 3 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 2 |
 | C-338 | The int bit family, float32.from_bits and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
 | C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
 | C-340 | The eager *_or family — option/result.unwrap_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |
@@ -411,7 +411,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-373 | var destructures with the let patterns and every bound name is mutable, identically on both targets | 0.67.0 | active | fixture | 1 |
 | C-374 | process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined | 0.67.0 | active | fixture | 0 |
 | C-375 | a serve-shaped program built for stock wasm is a wasi:http/handler@0.3.0 export that wasmtime serve runs with no flags and that answers what native answers | 0.67.0 | active | fixture | 0 |
-| C-376 | A raw address taken from a Bytes block stays valid until the call it is handed to returns | 0.67.0 | active | fixture | 1 |
+| C-376 | A Region holds the Bytes it views, so the block outlives every use of the view | 0.67.0 | active | fixture | 1 |
 | C-377 | net tcp: loopback, handle numbering, EOF, close, is_open and tcp_local_port agree on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-378 | net tcp: every failure reads as errno-free classified text from one table, identical on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-379 | net tcp: timeouts and tcp_available are guest-enforced on the stock WASI 0.3 component and answer what native and the embedded wasm lane answer | 0.68.0 | active | fixture | 0 |
@@ -453,7 +453,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-415 | random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams | 0.69.0 | active | fixture | 0 |
 | C-416 | net reads and received descriptors are bounded: a read never pre-allocates its length, and at most 28 untaken descriptors wait per Unix socket | 0.69.0 | active | fixture | 0 |
 | C-417 | process.kill asks the kernel with kill(2), refuses a pid outside 1..=2147483647, answers fixed err texts, and is bounded by [permissions] proc as the kill command | 0.69.0 | active | fixture | 0 |
-| C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 2 |
+| C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 4 |
 | C-419 | bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing | 0.69.0 | active | fixture | 1 |
 | C-420 | list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int | 0.69.0 | active | fixture | 1 |
 | C-421 | env.set refuses an empty name, `=` or NUL in the name and NUL in the value with the same err on every leg, and stores nothing | 0.69.0 | active | fixture | 1 |
@@ -464,15 +464,16 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-426 | == on Secret[String] and Secret[Bytes] compares the revealed values; any other Secret, and a variant or map holding one, is E103 | 0.69.0 | active | fixture | 1 |
 | C-427 | A Codec record decodes a Secret field from its value's wire form and derives no encode (E023) | 0.69.0 | active | fixture | 1 |
 | C-428 | A `@skip` record field is neither decoded nor encoded and a `@skip_decode` field is never decoded but still encoded; both need a default | 0.69.0 | active | fixture | 1 |
-| C-429 | A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient | 0.69.0 | active | fixture | 1 |
+| C-429 | A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient | 0.69.0 | active | fixture | 2 |
 | C-430 | An attribute on a record field that the compiler does not read is a check error (E053); the field vocabulary is @builtin, @location, @skip, @skip_decode | 0.69.0 | active | fixture | 0 |
 | C-431 | the fs whole-file readers read a regular file of at most 1 GiB: a device, FIFO or socket errs Not a regular file without blocking, a larger file errs File too large, on every leg | 0.69.0 | active | fixture | 1 |
 | C-432 | A runtime-backed value (HttpRequest, HttpResponse, HttpCall) interpolates as its declared repr, bare and nested, on every leg; the http reprs count the headers and never show a header value | 0.69.0 | active | fixture | 2 |
 | C-433 | value.set_path refuses to build a value nested deeper than json.parse accepts, with parse's err text, on every leg | 0.69.0 | active | fixture | 1 |
 | C-434 | a runtime abort inside an http.serve handler fails only that request: the fixed C-409 500, one stderr line, and the server keeps serving | 0.69.0 | active | fixture | 0 |
 | C-435 | `Codec` is `Encode + Decode`: a `: Decode` type derives only `decode` (+ a record's `decode_strict`), a `: Encode` type only `encode`, and an input type skips no field | 0.69.0 | active | fixture | 1 |
-| C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 1 |
+| C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 2 |
 | C-437 | A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error | 0.69.0 | active | fixture | 0 |
 | C-438 | env.secret(name) reads an environment variable as Option[Secret[String]]: env.get's value, rendered Secret(***), compared in constant time | 0.69.0 | active | fixture | 1 |
 | C-439 | env.vars lists the environment keyed and ordered by name with the program's own set and remove applied, and env.remove unsets a name or refuses it as env.set does, with the same bytes on every leg | 0.69.0 | active | fixture | 1 |
+| C-440 | every compile-cost budget in the table holds: a counted limit the source cannot raise, ending in its defined diagnostic | 0.69.0 | active | fixture | 0 |
 

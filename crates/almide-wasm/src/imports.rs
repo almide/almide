@@ -19,6 +19,11 @@ use std::collections::BTreeMap;
 use wasm_encoder::reencode::{Error, Reencode};
 use wasm_encoder::{CodeSection, EntityType, FunctionSection, ImportSection, Module};
 
+use almide_ir::{IrExprKind, IrFunction};
+
+use crate::types_table::TypeTable;
+use crate::SliceTy;
+
 /// One import to declare: the stub's original function index and the
 /// `(module, name)` the host serves it under.
 pub(crate) struct Declared {
@@ -148,4 +153,42 @@ impl Reencode for Declare<'_> {
         }
         Ok(())
     }
+}
+
+/// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
+/// `Ok(Some((module, name)))` when its signature has the scalar host ABI
+/// (`Int`/sized ints → i64, `Float` → f64, `Bool` → i32, `String` → i32
+/// block, `Unit` → no result), or — a fallible import (#3356: an `effect fn`
+/// extern, or one declaring `Result[T, String]`) — an i32 `Result` block the
+/// host builds, ok a scalar or Unit, err a String; `Ok(None)` for a fn with
+/// a body; `Err` for a native (`rs`/`rust`) extern — there is no wasm host
+/// for it, so an import would be a hollow lie — and for a param or return
+/// outside the ABI.
+pub(crate) fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>, types: &TypeTable) -> Result<Option<(String, String)>, String> {
+    if f.extern_attrs.is_empty() {
+        return Ok(None);
+    }
+    let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else {
+        return Err(format!("extern-native:{}", f.name));
+    };
+    if !matches!(f.body.kind, IrExprKind::Hole) {
+        return Ok(None);
+    }
+    for (p, t) in f.params.iter().zip(params) {
+        if !matches!(t, SliceTy::Scalar(_)) {
+            return Err(format!("extern-ty:{}:{}", f.name, p.name));
+        }
+    }
+    let fallible = |ok: crate::ETy, err: crate::ETy| {
+        matches!(types.el(ok), SliceTy::Scalar(_) | SliceTy::Unit) && types.el(err) == crate::STR
+    };
+    let host_ret = match ret {
+        None | Some(SliceTy::Scalar(_)) => true,
+        Some(SliceTy::Result(ok, err)) => fallible(ok, err),
+        _ => false,
+    };
+    if !host_ret {
+        return Err(format!("extern-ret:{}", f.name));
+    }
+    Ok(Some((a.module.as_str().to_string(), a.function.as_str().to_string())))
 }

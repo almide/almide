@@ -90,6 +90,68 @@ impl Checker {
         Some(in_stdlib_dir && embedded_identity)
     }
 
+    /// E118 (ADR-0032 D7): media-type ownership outside the stdlib. A
+    /// package or the application may declare a `Body` type and own media
+    /// types with `@media_owns`; the grant of a script-capable one is the
+    /// driver's (`[trust] media`, `crate::media_grant`). Here, per module:
+    /// - an owned pattern is well formed and overlaps no stdlib owner's, nor
+    ///   another pattern of this module's (one owner per media type, Q22);
+    /// - a `Body` type's media fn is a string literal (Q19), and a
+    ///   script-capable one is covered by that fn's own `@media_owns`, so a
+    ///   type cannot serve a type it was never granted.
+    /// Read off the declarations; the stdlib's own sources are exempt.
+    pub(super) fn check_media_ownership(&mut self, program: &crate::ast::Program) {
+        use crate::media_owners as mo;
+        if self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let mut found: Vec<(String, String, Option<Span>)> = Vec::new();
+        let fn_span = |func: &str| program.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, span, .. } if name.as_str() == func => *span,
+            _ => None,
+        });
+        let owns = mo::owns_in(program);
+        for (i, o) in owns.iter().enumerate() {
+            let span = fn_span(&o.func);
+            if !mo::well_formed_pattern(&o.pattern) {
+                found.push((format!("`@media_owns(\"{}\")` on `{}` is not a media-type pattern", o.pattern, o.func), "write `type/subtype`, `*` as the type, or `*<suffix>` as the subtype (`*/*+xml`)".to_string(), span));
+                continue;
+            }
+            if let Some((p, owner)) = mo::stdlib_owners().iter().find(|(p, _)| mo::overlap(&o.pattern, p)) {
+                found.push((format!("`{}` owns `{}`, which `{owner}` already owns as `{p}`", o.func, o.pattern), "a media type has one owner, so `http.typed` refuses it in one name: build that type with its owner's builders".to_string(), span));
+            }
+            if let Some(other) = owns[..i].iter().find(|e| mo::overlap(&o.pattern, &e.pattern)) {
+                found.push((format!("`{}` owns `{}`, which overlaps `{}` owned by `{}`", o.func, o.pattern, other.pattern, other.func), "a media type has one owner: declare each type once".to_string(), span));
+            }
+        }
+        for d in &program.decls {
+            let Decl::Type { name, deriving: Some(protos), span, .. } = d else { continue };
+            if !protos.iter().any(|p| p.as_str() == mo::BODY_PROTOCOL) {
+                continue;
+            }
+            let func = format!("{name}.{}", mo::MEDIA_REQUIREMENT);
+            let Some(Decl::Fn { body: Some(body), span: fspan, .. }) = program.decls.iter().find(|d| matches!(d, Decl::Fn { name: n, .. } if n.as_str() == func)) else { continue };
+            let crate::ast::ExprKind::String { value, .. } = &body.kind else {
+                found.push((format!("`{func}` computes its media type"), "a body type's media type is a string literal the checker reads, so what it serves is what it was granted: write it as `= \"text/csv\"`".to_string(), body.span.or(*fspan).or(*span)));
+                continue;
+            };
+            let essence = value.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+            if mo::is_script_capable(&essence) && !owns.iter().any(|o| o.func == func && mo::matches(&essence, &o.pattern)) {
+                found.push((format!("`{func}` serves `{essence}`, which runs script in a browser, without owning it"), format!("declare `@media_owns(\"{essence}\")` on `{func}`; the application grants it in almide.toml `[trust] media` (ADR-0032 D7)"), body.span.or(*fspan).or(*span)));
+            }
+        }
+        for (msg, hint, span) in found {
+            let mut diagnostic = err(msg, hint, "media-type ownership".to_string()).with_code("E118");
+            if let Some(span) = span {
+                diagnostic.file = self.source_file.clone();
+                diagnostic.line = Some(span.line);
+                diagnostic.col = Some(span.col);
+                diagnostic.end_col = Some(span.end_col);
+            }
+            self.emit(diagnostic);
+        }
+    }
+
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
         let Some(attr) = attrs
             .iter()
@@ -167,11 +229,13 @@ impl Checker {
     }
 
     /// #4008: record where this user file leaves the memory-safety guarantee
-    /// (`outside_guarantee`). An `@extern` fn's body is foreign code. A raw
-    /// pointer is the one value the `ffi` functions and the deprecated
-    /// `bytes` raw-pointer spellings take or give, so judging by TYPE finds
-    /// every spelling of them (call, method call, alias, fn value, a helper's
-    /// parameter). The stdlib's own sources, and a source whose origin is
+    /// (`outside_guarantee`). An `@extern` fn's body is foreign code, and a
+    /// `@region(len = …)` clause on one is the binding's unchecked word for a
+    /// foreign buffer's length (ADR-0031). A `Handle` is the opaque foreign
+    /// token only foreign code reads through, so judging by TYPE finds every
+    /// spelling of one (call, alias, fn value, a helper's parameter). A
+    /// `Region` access is bounds-checked against the length its mint knew,
+    /// so `ffi.read` / `ffi.write` alone are not recorded. The stdlib's own sources, and a source whose origin is
     /// unknown (the language server), are not recorded.
     pub(super) fn record_outside_guarantee(&mut self, program: &crate::ast::Program) {
         if self.stdlib_authority() != Some(false) {
@@ -181,10 +245,26 @@ impl Checker {
         let at = |span: Option<Span>| span.map(|s| format!("{file}:{}", s.line)).unwrap_or_else(|| file.clone());
         let mut found = Vec::new();
         for decl in &program.decls {
-            if let Decl::Fn { name, extern_attrs, span, .. } = decl
+            if let Decl::Fn { name, extern_attrs, attrs, span, .. } = decl
                 && !extern_attrs.is_empty()
             {
                 found.push(format!("@extern fn `{name}` ({})", at(*span)));
+                // ADR-0031 D2: a `@region(len = …)` clause is the binding's
+                // word for a foreign buffer's length — trusted, so counted.
+                if attrs.iter().any(|a| a.name.as_str() == almide_lang::stdlib_info::REGION_ATTR) {
+                    found.push(format!("@region length of `{name}` ({})", at(*span)));
+                }
+            }
+            // ADR-0031 amendment A2: a Region an `@export(c)` fn is lent
+            // carries its C caller's length — the caller's word, so counted.
+            if let Decl::Fn { name, export_attrs, params, span, .. } = decl
+                && export_attrs.iter().any(|a| a.target.as_str() == "c")
+            {
+                for p in params {
+                    if almide_lang::types::extern_abi::is_region(&self.resolve_type_expr(&p.ty)) {
+                        found.push(format!("@export(c) Region `{}` of `{name}` ({})", p.name, at(*span)));
+                    }
+                }
             }
             let (label, body) = match decl {
                 Decl::Fn { name, body: Some(b), .. } => (format!("fn `{name}`"), b),
@@ -205,7 +285,7 @@ impl Checker {
                 }
             });
             if let Some(span) = first {
-                found.push(format!("a raw pointer in {label} ({})", at(span)));
+                found.push(format!("a Handle in {label} ({})", at(span)));
             }
         }
         self.outside_guarantee.extend(found);
@@ -219,7 +299,16 @@ impl Checker {
         if self.env.lookup_var(module.as_str()).is_some() {
             return;
         }
-        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else { return };
+        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else {
+            // A stdlib module the file never imported (`b |> ffi.region`
+            // without `import ffi`): a spelling that reaches it anyway — a
+            // pipe stage resolves the stage by name — is still the module's
+            // fn, and still needs the opt-in.
+            if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) || almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                self.reject_unopted_memory_unsafe(module.as_str(), field.as_str(), span);
+            }
+            return;
+        };
         if !self.env.import_table.resolves_to_stdlib(module.as_str(), canonical.as_str()) {
             return;
         }
@@ -253,8 +342,8 @@ impl Checker {
         }
     }
 
-    /// E100 (#4043): a `@memory_unsafe` stdlib fn (`ffi.*`, the deprecated
-    /// `bytes` raw-pointer spellings) called from a file that did not write
+    /// E100 (#4043): a `@memory_unsafe` stdlib fn (the `ffi` surface) called
+    /// from a file that did not write
     /// `import ffi`. The import is the opt-in, the one line a reader looks at
     /// to learn that a file reads or writes memory outside its values, so a
     /// file with neither `import ffi` nor `@extern` stays inside the
@@ -293,7 +382,7 @@ impl Checker {
             None => format!("add `import {MEMORY_UNSAFE_OPT_IN}` to this file"),
         };
         let hint = format!(
-            "`{key}` reads or writes memory at a raw address with a length nothing checks; `import {MEMORY_UNSAFE_OPT_IN}` is the opt-in that marks a file as leaving the memory-safety guarantee — {rewrite}. Without raw memory, use the bounded `bytes` functions (`bytes.slice`, `bytes.get`, `bytes.copy_from`)"
+            "`{key}` reaches memory outside Almide's values — a Region over memory foreign code can also reach; `import {MEMORY_UNSAFE_OPT_IN}` is the opt-in that marks a file as leaving the memory-safety guarantee — {rewrite}. Without raw memory, use the bounded `bytes` functions (`bytes.slice`, `bytes.get`, `bytes.copy_from`)"
         );
         let mut diagnostic = err(
             format!("`{key}` is outside the memory-safety guarantee and needs `import {MEMORY_UNSAFE_OPT_IN}` in this file"),

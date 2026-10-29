@@ -1,0 +1,8 @@
+// E041 (#4283): a fallible call as a BUILTIN's argument. `assert` gave its
+// condition no slot type, so in a test block the Result passed check and
+// reached rustc as `!Result<bool, _>` (E0600). The report lands on the call.
+effect fn here() -> Bool = int.parse("1")! == 1
+
+test "here holds" {
+  assert(here())
+}

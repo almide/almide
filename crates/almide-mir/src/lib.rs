@@ -28,6 +28,7 @@
 /// The compiler's debug-trace channels.
 pub(crate) mod trace;
 
+pub mod affine_shape;
 pub mod alias_safety;
 pub(crate) mod borrow_join;
 pub mod certificate;

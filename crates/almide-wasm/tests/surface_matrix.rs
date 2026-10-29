@@ -29,8 +29,32 @@ fn head(dbg: String) -> String {
     dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
 }
 
+/// `head(format!("{v:?}"))` without formatting the whole value: the writer
+/// refuses everything after the variant name, so `Debug` stops there. A full
+/// `{:?}` of every node printed each subtree once per ancestor (#4289).
+fn head_of(v: &impl std::fmt::Debug) -> String {
+    struct Head(String);
+    impl std::fmt::Write for Head {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            match s.find(&[' ', '(', '{'][..]) {
+                Some(i) => {
+                    self.0.push_str(&s[..i]);
+                    Err(std::fmt::Error)
+                }
+                None => {
+                    self.0.push_str(s);
+                    Ok(())
+                }
+            }
+        }
+    }
+    let mut h = Head(String::new());
+    let _ = std::fmt::write(&mut h, format_args!("{v:?}"));
+    head(h.0)
+}
+
 fn record_pattern(p: &IrPattern, out: &mut BTreeSet<String>) {
-    out.insert(format!("pattern:{}", head(format!("{p:?}"))));
+    out.insert(format!("pattern:{}", head_of(p)));
     match p {
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             record_pattern(inner, out)
@@ -45,7 +69,15 @@ fn record_pattern(p: &IrPattern, out: &mut BTreeSet<String>) {
 }
 
 fn walk(e: &IrExpr, out: &mut BTreeSet<String>) {
-    out.insert(format!("expr:{}", head(format!("{:?}", e.kind))));
+    walk_node(e, out);
+    // Child recursion via the IR's own traversal (covers statement-held
+    // expressions too), identity-mapped over ONE owned copy: cloning at
+    // every level copied each subtree once per ancestor (#4289).
+    let _ = e.clone().map_children(&mut |c| walk_owned(c, out));
+}
+
+fn walk_node(e: &IrExpr, out: &mut BTreeSet<String>) {
+    out.insert(format!("expr:{}", head_of(&e.kind)));
     match &e.kind {
         IrExprKind::BinOp { op, .. } => {
             out.insert(format!("binop:{op:?}"));
@@ -76,22 +108,21 @@ fn walk(e: &IrExpr, out: &mut BTreeSet<String>) {
         }
         IrExprKind::Block { stmts, .. } => {
             for s in stmts {
-                out.insert(format!("stmt:{}", head(format!("{:?}", s.kind))));
+                out.insert(format!("stmt:{}", head_of(&s.kind)));
             }
         }
         IrExprKind::While { body, .. } | IrExprKind::ForIn { body, .. } => {
             for s in body {
-                out.insert(format!("stmt:{}", head(format!("{:?}", s.kind))));
+                out.insert(format!("stmt:{}", head_of(&s.kind)));
             }
         }
         _ => {}
     }
-    // Child recursion via the IR's own traversal (covers statement-held
-    // expressions too), identity-mapped.
-    e.clone().map_children(&mut |c| {
-        walk(&c, out);
-        c
-    });
+}
+
+fn walk_owned(e: IrExpr, out: &mut BTreeSet<String>) -> IrExpr {
+    walk_node(&e, out);
+    e.map_children(&mut |c| walk_owned(c, out))
 }
 
 fn measure(ir: &IrProgram, out: &mut BTreeSet<String>) {

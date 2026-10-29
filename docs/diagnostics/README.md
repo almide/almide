@@ -57,7 +57,7 @@ equal to the set of codes the compiler emits.
 | [E086](E086.md) | `scoped`: a value would outlive its scoped allocation (ALS-E31) |
 | [E087](E087.md) | `scoped`: an operation not permitted in a scoped region (ALS-E31) |
 | [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
-| [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
+| [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one, unless its type declares `fn T.repr`) — including through a generic instantiation |
 | [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
 | [E092](E092.md) | A `@pure` fn is not pure: it is an `effect fn` or an `@extern`, or it reaches output, a `panic` / `assert*`, a stdlib call with an effect category, or an `@extern` |
 | [E093](E093.md) | A type written with brackets is applied to a different number of type arguments than its declaration has parameters (a generic alias, record or variant, a type declared without parameters, or a builtin: `List[Int, Int]`, `Map[String]`) |
@@ -68,10 +68,17 @@ equal to the set of codes the compiler emits.
 | [E098](E098.md) | The closure passed to `testing.assert_aborts` captures a local of the test, or is a fn value rather than a lambda written in the call: it runs in a child process or instance, where the test's locals do not exist |
 | [E099](E099.md) | `testing.assert_aborts` called outside a test block, used as a value, or called inside another `assert_aborts` closure |
 | [E100](E100.md) | Outside the memory-safety guarantee: a `@memory_unsafe` call (`ffi.*`, a deprecated `bytes` raw-pointer call) in a file without `import ffi` (#4043); under `--profile critical`, any of those or an `@extern` fn (#4008) |
-| [E101](E101.md) | A raw bidirectional control character (U+202A–U+202E, U+2066–U+2069) in a comment, string literal or heredoc — Trojan Source; write `\u{202E}` in a literal (#4092) |
+| [E101](E101.md) | Source that reads differently from what compiles: a raw hidden character (a bidi control, U+2028/U+2029, a zero-width or other Cf character, a tag character, a raw control) anywhere in the file — write `\u{202E}` in a literal (#4092, #4266) — or a homoglyph identifier: mixed scripts beyond UTS #39 Moderately Restrictive, or a UTS #39 confusable of another name (#4266) |
 | [E104](E104.md) | A record field marked `@skip` or `@skip_decode` has no default, so `T.decode` has no value for it (#4108) |
 | [E109](E109.md) | A pure fn runs an `effect fn` it reached through a function value — a record field, a list element, a callback handed down through pure helpers (#4151) |
-| [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22) |
+| [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22); request data decoded by hand into such a type (#4232) |
+| [E111](E111.md) | An inferred type passed the `type_size` compile-cost budget — a doubling chain such as `let t1 = (t0, t0)` (ADR-0030, #4114) |
+| [E112](E112.md) | Monomorphization passed the `generic_instances` budget — polymorphic recursion that needs an instance per call depth (ADR-0030) |
+| [E113](E113.md) | A `match` whose exhaustiveness check passed the `exhaustiveness_steps` compile-cost budget (ADR-0030) |
+| [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
+| [E116](E116.md) | A response's `Content-Type` written by name through `http.set_header` / `http.with_headers`: it is written from the body's type (ADR-0032, row 11e) |
+| [E117](E117.md) | `http.typed`'s media type is not a literal, is malformed, or is owned by a safe module (`text/html`, XML, SVG) |
+| [E118](E118.md) | A media type's owner is not granted (`[trust] media`), not unique, or not a literal |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

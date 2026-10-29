@@ -23,8 +23,9 @@
 #   timeout      past MIRI_TIMEOUT seconds (default 600); reported, not judged
 #   no-build     the program does not build natively (a negative fixture)
 #
-# Before the corpus, a control: a program reading 64 bytes through the
-# address of a 4-byte buffer (the #4043 shape) MUST come back UB, so a Miri
+# Before the corpus, a control: a program reading 64 bytes of a 4-byte malloc
+# block through a Region whose `@region(len = 64)` clause lies (ADR-0031: the
+# length clause is the trusted line, so a wrong one is the one way left) MUST come back UB, so a Miri
 # that stopped checking cannot pass the gate.
 set -uo pipefail
 export LC_ALL=C
@@ -73,18 +74,21 @@ export WORK ALMIDE_BIN MIRI_TOOLCHAIN
 ctl="$WORK/control.almd"
 cat > "$ctl" <<'EOF'
 import ffi
+@extern(c, "c", "malloc")
+@region(len = 64, release = "free")
+fn c_malloc(n: UInt64) -> Region
 effect fn main() -> Unit = {
-  let small = bytes.from_list([1, 2, 3, 4])
-  let leaked = ffi.read(ffi.address(small), 64)
+  let small = c_malloc(4)
+  let leaked = ffi.read(small, 0, 64)!
   println(int.to_string(bytes.len(leaked)))
 }
 EOF
 v="$(one "$ctl" 2>/dev/null)"
 if [ "${v%% *}" != UB ]; then
-  echo "::error::miri-generated: the control (a 64-byte read through a 4-byte buffer's address) came back '${v%% *}', not UB — Miri is not checking, so no verdict below would mean anything."
+  echo "::error::miri-generated: the control (a 64-byte read of a 4-byte block through a lying @region length) came back '${v%% *}', not UB — Miri is not checking, so no verdict below would mean anything."
   exit 1
 fi
-echo "control: a 64-byte read past a 4-byte buffer is UB under Miri, as it must be"
+echo "control: a 64-byte read past a 4-byte block through a lying @region length is UB under Miri, as it must be"
 
 if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; else ls spec/wasm_cross/*.almd; fi > "$WORK/list"
 xargs -P "$MIRI_JOBS" -I{} bash -c 'one "$1"' _ {} < "$WORK/list" > "$WORK/verdicts"

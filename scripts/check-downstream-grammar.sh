@@ -29,6 +29,7 @@ cd "$(dirname "$0")/.."
 
 if [ -z "${GRAMMAR_DIR:-}" ]; then
   GRAMMAR_DIR=$(mktemp -d)/almide-grammar
+  # supply: head-tracked — the measurement IS the grammar repo's current head (does it lag the lexer?); the clone is data read by tomllib, never built or run
   git clone --quiet --depth 1 https://github.com/almide/almide-grammar.git "$GRAMMAR_DIR"
 fi
 

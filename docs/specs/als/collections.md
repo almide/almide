@@ -1,6 +1,6 @@
 # ALS — コレクション（Collections）
 
-> Last updated: 2026-10-24
+> Last updated: 2026-10-27
 
 コレクション型（List / Map / Set / タプル / レコード）の観測規範。参照方法は
 [strings.md](strings.md) 冒頭と同じ（契約台帳の `spec` キーから参照される）。
@@ -76,9 +76,9 @@ Contracts: C-038。
 ## ALS-C9 順序系コンビネータの全域性
 
 `list.min/max/sort/sort_by/unique_by` は**要素型指向**で全域: Int/String は
-全順序、**Float は IEEE-754 totalOrder**（+NaN は最大・-NaN は -inf より
-下の最小、-0 < +0）で比較し、NaN 混入でも決定的に完走する（パニック・
-未定義順は不適合）。String キーの `sort_by` は要素が heap でも安定順序で
+全順序、**Float は IEEE-754 totalOrder**（NaN は符号・生成元によらず唯一の
++qNaN 0x7FF8000000000000 として +inf の後の最大、-0 < +0）で比較し、
+NaN 混入でも決定的に完走する（パニック・未定義順は不適合）。String キーの `sort_by` は要素が heap でも安定順序で
 全域（結果は各要素を co-own する）。
 Contracts: C-053, C-055, C-276。
 

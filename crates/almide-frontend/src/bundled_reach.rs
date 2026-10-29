@@ -61,6 +61,14 @@ struct Spelled {
     /// `a.f` read as a call into module `a`, classified by the binders of the
     /// source that spells it (`absorb`).
     module_calls: HashSet<(String, String)>,
+    /// The declaration's type parameters bounded by a built-in protocol, with
+    /// those protocols (`T` -> `[Text]` in `fn join[T: Text]`). Local to one
+    /// declaration: `absorb` reads it to classify `T.f`.
+    protocol_params: std::collections::HashMap<String, Vec<String>>,
+    /// `T.f` on a type parameter bounded by built-in protocol `P`, as
+    /// `(P, f)`: a requirement call that dispatches to the module of
+    /// whichever conforming type `T` is bound to (#4289).
+    protocol_members: HashSet<(String, String)>,
 }
 
 impl Spelled {
@@ -68,7 +76,11 @@ impl Spelled {
     /// UFCS members by THAT source's binders.
     fn absorb(&mut self, local: Spelled) {
         for (a, m) in &local.qualified {
-            if local.is_module_qualifier(a) {
+            if let Some(protocols) = local.protocol_params.get(a) {
+                for p in protocols {
+                    self.protocol_members.insert((p.clone(), m.clone()));
+                }
+            } else if local.is_module_qualifier(a) {
                 self.module_calls.insert((a.clone(), m.clone()));
             } else {
                 self.members.insert(m.clone());
@@ -81,6 +93,7 @@ impl Spelled {
         let binders = local.binders;
         self.idents.extend(local.idents.into_iter().filter(|i| !binders.contains(i)));
         self.members.extend(local.members);
+        self.protocol_members.extend(local.protocol_members);
     }
 
     /// Is `a` in `a.f` (certainly) a module rather than a binding?
@@ -200,6 +213,35 @@ fn reaches(spelled: &Spelled, name: &str, surface: &Surface) -> bool {
         || spelled.idents.contains(name)
         || surface.fns.iter().any(ufcs)
         || surface.types.iter().any(|t| spelled.idents.contains(t))
+        || spelled.protocol_members.iter().any(|(p, f)| surface.fns.contains(f) && conformer_live(spelled, p, name))
+}
+
+/// Can a value of a type that conforms to built-in protocol `protocol`
+/// through module `module` exist in the program? A requirement call on a
+/// protocol-bounded type parameter (`T.__join` in `list.join[T: Text]`)
+/// dispatches only into the module of the type `T` is bound to, and `T` is
+/// bound to a type some value of the program has. A type with a literal
+/// (`Int`, `Float`, `String`, `Bool`, the collections) has values nobody
+/// spells; every other conformer (`Bytes`, the sized numbers, a
+/// runtime-backed stdlib type) gets a value only through a signature, an
+/// annotation or a declaration that spells its name — or through its own
+/// module, which then reaches by the other rules. Before this, naming
+/// `list.join` from `string` loaded `bytes` and, through it, `int`, `float`,
+/// `math` and five collection modules into every program that used a string
+/// function, doubling `check` (#4289).
+fn conformer_live(spelled: &Spelled, protocol: &str, module: &str) -> bool {
+    use crate::types::Ty;
+    let Some(p) = crate::canonicalize::protocols::builtin_protocol(protocol) else { return true };
+    let spelled_only = |ty: &Ty| matches!(
+        ty,
+        Ty::Bytes | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
+    );
+    p.conformers.iter().filter(|ty| ty.stdlib_module() == Some(module))
+        .any(|ty| !spelled_only(ty) || spelled.idents.contains(&ty.display()))
+        || p.named_conformers.iter()
+            .filter(|n| almide_lang::stdlib_info::stdlib_owned_type_owner(n) == Some(module))
+            .any(|n| spelled.idents.contains(*n))
 }
 
 fn variant_case_name(c: &VariantCase) -> &str {
@@ -230,6 +272,15 @@ fn spell_unit<'d>(p: &Program, decls: impl Iterator<Item = &'d Decl>, out: &mut 
 fn spell_decl(d: &Decl, out: &mut Spelled) {
     match d {
         Decl::Fn { generics, params, return_type, body, .. } => {
+            for g in generics.iter().flatten() {
+                let protocols: Vec<String> = g.bounds.iter().flatten()
+                    .filter(|b| crate::canonicalize::protocols::builtin_protocol(b.as_str()).is_some())
+                    .map(|b| b.to_string())
+                    .collect();
+                if !protocols.is_empty() {
+                    out.protocol_params.insert(g.name.to_string(), protocols);
+                }
+            }
             spell_generics(generics, out);
             spell_params(params, out);
             spell_type(return_type, out);
@@ -439,7 +490,11 @@ fn spell_node(x: &Expr, out: &mut Spelled) {
     match &x.kind {
         ExprKind::Ident { name } | ExprKind::TypeName { name } => spell_type_name(name.as_str(), out),
         ExprKind::Member { object, field } => match &object.kind {
-            ExprKind::Ident { name } => {
+            // A type name receiver (`T.__join(xs, sep)` on a type parameter)
+            // classifies like a bare name: `absorb` reads it as a protocol
+            // requirement call when `T` is a protocol-bounded parameter, and
+            // as a UFCS member otherwise, as before.
+            ExprKind::Ident { name } | ExprKind::TypeName { name } => {
                 out.qualified.insert((name.to_string(), field.to_string()));
             }
             _ => {
@@ -529,11 +584,41 @@ mod tests {
     #[test]
     fn a_protocol_generic_body_loads_its_conformers_only_when_named() {
         // `int.from[S: Numeric]` dispatches into whichever number module `S`
-        // is, so naming it reaches them all; `int.to_string` names none of it.
+        // is, so naming it reaches every conformer a value of the program
+        // can have: `float` for the literal, `int8` once `Int8` is spelled;
+        // `int.to_string` names none of it.
         let r = reached("fn main() -> Unit = println(int.to_string(int.from(2.5)))\n");
-        assert!(r.contains(&"int8") && r.contains(&"float64"), "{r:?}");
+        assert!(r.contains(&"float"), "{r:?}");
+        let r = reached("fn f(x: Int8) -> Int = int.from(x)\n");
+        assert!(r.contains(&"int8"), "{r:?}");
         let r = reached("fn main() -> Unit = println(int.to_string(list.len([1])))\n");
         assert!(!r.contains(&"int8"), "{r:?}");
+    }
+
+    #[test]
+    fn a_requirement_call_reaches_a_spelled_only_conformer_only_when_spelled() {
+        // `list.join[T: Text]` answers through `T.__join`: String has
+        // literals, so `string` is reached; `bytes` only when `Bytes` is
+        // spelled, since no value of it can exist otherwise (#4289: every
+        // string function used to load bytes, int, float, math and five
+        // collection modules through this edge).
+        let r = reached("fn f(xs: List[String]) -> String = list.join(xs, \",\")\n");
+        assert!(r.contains(&"string") && !r.contains(&"bytes"), "{r:?}");
+        let r = reached("fn f(xs: List[Bytes], sep: Bytes) -> Bytes = list.join(xs, sep)\n");
+        assert!(r.contains(&"bytes"), "{r:?}");
+        let r = reached("fn f(s: String) -> Int = string.len(s)\n");
+        assert!(!r.contains(&"bytes") && !r.contains(&"deque"), "{r:?}");
+    }
+
+    #[test]
+    fn a_binding_spelled_like_a_module_in_the_stdlib_does_not_fan_out() {
+        // `int.parse_radix` once bound its code list as `bytes`, so its
+        // `bytes.to_list(..)` read as a UFCS `to_list` and reached every
+        // module declaring one (#4289). Pinned on the closure of one call.
+        let r = reached("fn f(x: Int) -> String = int.to_string(x)\n");
+        for m in ["option", "result", "set", "deque", "heap"] {
+            assert!(!r.contains(&m), "{m} reached: {r:?}");
+        }
     }
 
     #[test]

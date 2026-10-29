@@ -950,23 +950,6 @@ probe = "bytes.to_list(dst)"
 expect = "[0, 7, 6, 0]"
 
 [[bytes.fn]]
-name = "copy_to_ptr"
-index_unit = "byte-count"
-setup = [
-  "var dst = bytes.zeros(4)",
-  "let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), ffi.address(dst), 2)",
-  'let sm_out = "${n} ${bytes.to_list(dst)}"',
-]
-probe = "sm_out"
-expect = "2 [9, 8, 0, 0]"
-
-[[bytes.fn]]
-name = "data_ptr"
-index_unit = "address"
-probe = "bytes.data_ptr(bytes.from_list([1])) != 0"
-expect = "true"
-
-[[bytes.fn]]
 name = "is_eof"
 index_unit = "byte-offset"
 setup = [
@@ -991,15 +974,6 @@ name = "from_list"
 index_unit = "byte-value"
 probe = "bytes.to_list(bytes.from_list([0, 128, 255]))"
 expect = "[0, 128, 255]"
-
-[[bytes.fn]]
-name = "from_raw_ptr"
-index_unit = "byte-count"
-setup = [
-  "let src = bytes.from_list([1, 2, 3, 4])",
-]
-probe = "bytes.to_list(bytes.from_raw_ptr(ffi.address(src), 3))"
-expect = "[1, 2, 3]"
 
 [[bytes.fn]]
 name = "get"
@@ -3368,11 +3342,11 @@ setup = [
   'let r = http.response(200, "hi")',
 ]
 probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")'
-expect = "hi text/plain"
+expect = "hi text/plain; charset=utf-8"
 note = """
 Pins the ARGUMENT ORDER, which is the whole trap: status first, body second.
-A swapped implementation could not produce the body "hi", and the seeded
-"text/plain" separates response from json below.
+A swapped implementation could not produce the body "hi", and the String
+body's Content-Type (ADR-0032) separates response from json below.
 """
 
 [[http.fn]]
@@ -3411,7 +3385,7 @@ setup = [
   'let r = http.set_status(http.response(200, "sb"), 404)',
 ]
 probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none") + " " + int.to_string(http.status(r))'
-expect = "sb text/plain 404"
+expect = "sb text/plain; charset=utf-8 404"
 note = """
 The order INVERTS here — set_status(resp, code), response first — and the Int
 is still a status code; overwriting it leaves body and headers untouched. The

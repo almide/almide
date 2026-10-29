@@ -56,7 +56,15 @@ impl LowerCtx {
             let is_closure_arg = matches!(
                 &a.kind,
                 IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
-            ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
+            ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id))
+                // A Fn-typed var bound to a tracked closure BLOCK (`let triple =
+                // make_multiplier(3)`) is passed as the combinator's closure, as
+                // the value position already passes it (`lower_pure_module_value_call`
+                // has no data-arg guard) — the in-test assert binds `list.map(xs,
+                // triple)` before comparing it (#4262).
+                || (matches!(a.ty, Ty::Fn { .. })
+                    && matches!(&a.kind, IrExprKind::Var { id }
+                        if self.value_of.get(id).is_some_and(|v| self.closure_values.contains(v))));
             // `List[<Fn>]` (B36) and `Map[String, <Fn>]` (the mclo family — the
             // hval handle-level twins + `$__drop_map_mclo`) are representable
             // closure CONTAINERS — excluded from the wall.
@@ -128,6 +136,22 @@ impl LowerCtx {
         }
     }
 
+    /// Seed only the READ shape of a real Option/Result block bound at `dst`
+    /// (no drop route: whoever produced the block owns that), so `x == y`,
+    /// `match x` and `x ?? d` over the let-bound value read its tag.
+    pub(crate) fn seed_variant_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let shape = match ty {
+            Ty::Applied(TC::Option, a) if a.len() == 1 => crate::lower::VariantShape::Option,
+            Ty::Applied(TC::Result, a) if a.len() == 2 => match crate::lower::result_family(ty) {
+                crate::lower::ResultFamily::HeapOk => crate::lower::VariantShape::ResultHeapOk,
+                crate::lower::ResultFamily::Scalar => crate::lower::VariantShape::ResultScalar,
+            },
+            _ => return,
+        };
+        self.value_shapes.entry(dst).or_insert(shape);
+    }
+
     fn seed_call_module_heap_read_shape(
         &mut self,
         dst: ValueId,
@@ -148,6 +172,13 @@ impl LowerCtx {
         // track the bound result so a later `match` over the var EXECUTES.
         if is_self_host_option_module_fn(module, func) {
             self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
+        } else if faithful {
+            // Any FAITHFUL module call's Option/Result result is a real block of
+            // the v1 variant layout — the self-host body built it through the
+            // same ctor rails a user fn's does (`seed_call_named_heap_read_shape`).
+            // The in-test assert binds its operands first (#4262) and must compare
+            // them as the direct call operands did.
+            self.seed_variant_read_shape(dst, ty);
         }
         // A FUNCTION-valued module-call result (`let f = map.get(m, k) ?? d` —
         // the closure-valued map read): the result IS a closure block — track it
@@ -692,7 +723,7 @@ impl LowerCtx {
         // Without the pattern fallback the seed misses and the destructure container-grains
         // (reads slot 0 as the whole handle + slot 1 as Const 0 — the `8212 / 0` garbage).
         let elem_tys: Option<Vec<Ty>> = if let Ty::Tuple(tys) = &value.ty {
-            Some(tys.clone())
+            Some(tys.clone().into_vec())
         } else if matches!(&value.kind, IrExprKind::Unwrap { .. } | IrExprKind::Call { .. }) {
             Some(
                 elements

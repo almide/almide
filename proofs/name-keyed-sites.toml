@@ -117,7 +117,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_licm.rs::is_inplace_mutator::or-pattern"
 class = "legacy"
-names = 13
+names = 12
 
 [[site]]
 id = "crates/almide-codegen/src/pass_matrix_shape_spec.rs::infer_shape::or-pattern"
@@ -268,7 +268,7 @@ names = 2
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::ALIASES::table"
 class = "legacy"
-names = 39
+names = 38
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
@@ -683,7 +683,7 @@ names = 9
 [[site]]
 id = "crates/almide-mir/src/purity.rs::PURE_MODULES::table"
 class = "legacy"
-names = 139
+names = 138
 
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
@@ -713,7 +713,7 @@ names = 9
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_CORE_FNS::table"
 class = "legacy"
-names = 90
+names = 88
 
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_MUTATE_FNS::table"
@@ -728,7 +728,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1230
+names = 1222
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
@@ -749,11 +749,6 @@ names = 1
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
 class = "legacy"
 names = 43
-
-[[site]]
-id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
-class = "legacy"
-names = 16
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
@@ -996,14 +991,20 @@ class = "legacy"
 names = 2
 
 [[site]]
+id = "crates/almide-wasm/src/value.rs::VALUE_SELFHOST_HELPERS::table"
+class = "justified"
+names = 8
+why = "Which self-host helper the wasm emitter's native lowering of a value surface calls (value.merge -> __vu_merge_pairs, ...) is a fact about that emitter, not about the functions: no IR names the helper, so the wasm link must be told to load and walk it (#4317, reach-only linking). The helper names were literals at each emitter call site plus a separate value.object -> value.pick rule in the link; this one table both read replaces the copy the link would otherwise keep."
+
+[[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 73
+names = 71
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
 class = "legacy"
-names = 44
+names = 43
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::CODEC_ENCODE_VERIFIED::table"

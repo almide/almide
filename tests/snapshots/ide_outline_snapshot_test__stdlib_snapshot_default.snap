@@ -6,6 +6,8 @@ expression: text
 fn string.__err_text(s: String) -> String
 fn string.__from_codepoint(n: Int) -> String
 fn string.__join(xs: List[String], sep: String) -> String
+fn string.__string_media_type(s: String) -> String
+fn string.__string_to_text(s: String) -> String
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 fn string.capitalize(s: String) -> String
@@ -286,7 +288,7 @@ fn int.compare(a: Int, b: Int) -> Int
 fn int.count_leading_zeros(x: Int) -> Int
 fn int.count_ones(x: Int) -> Int
 fn int.count_trailing_zeros(x: Int) -> Int
-fn int.digit_byte(d: Int) -> Int
+fn int.digit_char(d: Int) -> String
 fn int.digit_value(b: Int) -> Int
 fn int.floor_div(a: Int, b: Int) -> Int
 fn int.from[S](x: S) -> Int
@@ -309,12 +311,12 @@ fn int.pop_count(n: Int) -> Int
 fn int.pow(base: Int, exp: Int) -> Int
 fn int.prefix_radix(b: Int) -> Int
 fn int.prev_power_of_two(x: Int) -> Int
-fn int.radix_digits(n: Int, radix: Int, acc: List[Int]) -> List[Int]
+fn int.radix_digits(n: Int, radix: Int, acc: String) -> String
 fn int.rotate_left(a: Int, n: Int) -> Int
 fn int.rotate_right(a: Int, n: Int) -> Int
 fn int.shift_count(n: Int) -> Int
 fn int.sign(x: Int) -> Int
-fn int.strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int]
+fn int.strip_radix_prefix(codes: List[Int], radix: Int) -> List[Int]
 fn int.to_hex(x: Int) -> String
 fn int.to_string(x: Int) -> String
 fn int.to_string_radix(x: Int, radix: Int) -> String

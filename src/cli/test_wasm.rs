@@ -521,6 +521,10 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     // migration FLIPPED (ir_link first → last), so its acceptance check is byte-identity of
     // spec/wasm_cross against the pre-migration capture, not merely a green suite.
     almide_driver::link_ir(&mut ir_program);
+    // E112 (ADR-0030): linking stopped at the `generic_instances` budget.
+    if let Some(d) = almide_driver::budget_refusal() {
+        return compile_error(render_error_summary(std::iter::once(&d)));
+    }
     mark(prof, &mut marks, "opt_mono");
     // Native-only matrix ops (none today) have no WASM lowering;
     // skip with a clear reason instead of reaching the emitter (whose panic would

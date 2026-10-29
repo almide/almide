@@ -144,7 +144,7 @@ pub fn cmd_inspect(args: &[String]) {
     let per_inst = |f: &dyn Fn(&Target) -> String| -> String {
         match &heap {
             None => f(&target),
-            Some(Ok(h)) => both_instantiations(&f(&target), &f(h)),
+            Some(Ok(h)) => both_labelled(&target.vars, &f(&target), &h.vars, &f(h)),
             Some(Err(e)) => format!("FAIL: [vars=String] the heap instantiation does not build: {e}"),
         }
     };
@@ -187,9 +187,16 @@ fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
 /// One criterion's verdict at both instantiations: PASS only when both
 /// pass, each half labelled with what the type variables were.
 fn both_instantiations(int: &str, heap: &str) -> String {
+    both_labelled("Int", int, "String", heap)
+}
+
+/// [`both_instantiations`] labelled with what each target's variables were
+/// bound to: a bounded variable takes a conformer, not the fill
+/// (`[B: Body]` is measured at Bytes and at String).
+fn both_labelled(a_vars: &str, a: &str, b_vars: &str, b: &str) -> String {
     let body = |v: &str| v.split_once(": ").map_or(v, |(_, r)| r).to_string();
-    let ok = int.starts_with("PASS") && heap.starts_with("PASS");
-    format!("{}: [vars=Int] {} || [vars=String] {}", if ok { "PASS" } else { "FAIL" }, body(int), body(heap))
+    let ok = a.starts_with("PASS") && b.starts_with("PASS");
+    format!("{}: [vars={a_vars}] {} || [vars={b_vars}] {}", if ok { "PASS" } else { "FAIL" }, body(a), body(b))
 }
 
 fn toml_str(s: &str) -> String {

@@ -34,12 +34,10 @@
 # process.* rows left — the subprocess family builds over almide:process/spawn,
 # ADR-0025, and process.env / process.sleep over host ops 26 / 36):
 #
-# UNPROBEABLE (113) — the sweep's OWN coverage hole, not a compiler
+# UNPROBEABLE (111) — the sweep's OWN coverage hole, not a compiler
 # verdict: the argument synthesizer has no literal for these parameter types
 # (Matrix, Value, Json, RawPtr, closures). Shrinking this list widens what
 # the ratchet can see, so it is listed and ratcheted too.
-bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
-bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
 fs.root_exists :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 fs.root_list_dir :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)

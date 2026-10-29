@@ -1,0 +1,4 @@
+expects_code = "E100"
+expects_error = "outside the memory-safety guarantee"
+hint_substring = "--profile critical"
+check_profile = "critical"

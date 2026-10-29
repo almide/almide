@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "looks the same as `ace`"
+hint_substring = "Rename one of them"
+expects_line_col = "5:4"

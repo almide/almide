@@ -1,0 +1,11 @@
+diff --git a/stdlib/ffi.almd b/stdlib/ffi.almd
+--- a/stdlib/ffi.almd
++++ b/stdlib/ffi.almd
+@@ -66,7 +66,6 @@
+ @memory_unsafe
+ effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
+   if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
+-  else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
+   else {
+     __store(r.base, off, b)
+     ok(())

@@ -1,8 +1,0 @@
-// E100 (#4043): a 4096-byte read off a 4-byte buffer, in a file with no
-// `import ffi`. It checked with two E052 warnings and read past the block on
-// both targets; a `@memory_unsafe` call now needs the file's `import ffi`.
-fn main() -> Unit = {
-  let small = bytes.from_list([1, 2, 3, 4])
-  let leaked = bytes.from_raw_ptr(bytes.as_ptr(small), 4096)
-  println(int.to_string(bytes.len(leaked)))
-}

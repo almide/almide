@@ -1,0 +1,3 @@
+expects_code = "E116"
+expects_error = "`http.with_headers` writes `CONTENT-TYPE` by name"
+hint_substring = "a String is text/plain; charset=utf-8"

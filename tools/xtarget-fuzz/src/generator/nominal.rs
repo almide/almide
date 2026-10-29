@@ -72,22 +72,6 @@ macro_rules! http_call {
 /// Sized values use fixed-width keys (`k100000000`…), so a series is
 /// linear in n.
 pub const NOMINALS: &[Nominal] = &[
-    // A host address (ADR-0027 D3). The grammar builds only null (an empty
-    // buffer's address): a pointer to a dropped buffer read or written later
-    // is undefined on either leg, not a divergence. It is never printed.
-    Nominal {
-        name: "RawPtr",
-        module: "bytes",
-        small: "bytes.as_ptr(bytes.from_list([]))",
-        sized: "bytes.as_ptr(bytes.from_list([]))",
-        leaves: &["bytes.as_ptr(bytes.from_list([]))"],
-        observe: "\"ptr\"",
-        observed: string,
-        digest: "1",
-        observe_calls_effect: false,
-        refuses_var: false,
-        in_flight: false,
-    },
     // `fs.stat`'s record. Its mtime is the host's clock (`verdicts.rs`
     // checks it), so it is observed through the other three fields.
     Nominal {
@@ -124,7 +108,7 @@ pub const NOMINALS: &[Nominal] = &[
         sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
         leaves: &[
             "http.response(200, \"ok\")",
-            "http.with_headers(404, \"aé\", [(\"content-type\", \"text/plain\")])",
+            "http.with_headers(404, \"aé\", [(\"x-kind\", \"text/plain\")])",
             "http.with_headers(201, \"\", [(\"x-a\", \"1\"), (\"X-B\", \"two\")])",
             "http.json(500, \"{\\\"e\\\": 1}\")",
             "http.redirect(\"/next?a=1\")",
@@ -294,6 +278,56 @@ pub const NOMINALS: &[Nominal] = &[
         observe_calls_effect: true,
         refuses_var: false,
         in_flight: true,
+    },
+    // A response body of a declared media type (ADR-0032), from its one
+    // constructor `http.typed`, whose media type is a literal (E117). It has
+    // no reader of its own: observed as the response it makes, through the
+    // Content-Type and body that response carries.
+    Nominal {
+        name: "TypedBody",
+        module: "http",
+        small: "http.typed(\"text/csv\", bytes.from_string(\"a,é\"))",
+        sized: "http.typed(\"application/octet-stream\", bytes.from_string(string.repeat(\"aé\", {n})))",
+        leaves: &[
+            "http.typed(\"text/csv\", bytes.new())",
+            "http.typed(\"text/csv; charset=utf-8\", bytes.from_string(\"a,b\\n1,é\"))",
+            "http.typed(\"image/png\", bytes.from_list([137, 80, 78, 71]))",
+            "http.typed(\"application/octet-stream\", bytes.from_list([0, 255, 128]))",
+        ],
+        observe: "(http.header(http.response(200, {v}), \"Content-Type\") ?? \"-\", http.body(http.response(200, {v})))",
+        observed: || pair(GenType::String, GenType::String),
+        digest: "string.len(http.body(http.response(200, {v})))",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A bounds-checked view of memory (ADR-0031), from the two mints the
+    // language has (an `@extern` with `@region(len = …)` is the third, and
+    // needs a foreign library): `ffi.region(b)`, read-only and the length of
+    // `b`, and `ffi.alloc(n)`, writable and n zero bytes — each at length 0
+    // as well. The sized value is writable, so a probe of `ffi.write` takes
+    // the success path. Observed through the module's readers, its bytes
+    // included (`to_bytes` is an effect fn: an error there is an `err`).
+    Nominal {
+        name: "Region",
+        module: "ffi",
+        small: "ffi.region(bytes.from_list([1, 2, 3, 4]))",
+        sized: "(match ffi.alloc({n}) { ok(r) => r, err(e) => panic(e) })",
+        leaves: &[
+            "ffi.region(bytes.new())",
+            "ffi.region(bytes.from_list([1, 2, 3, 4]))",
+            "ffi.region(bytes.from_string(\"aé\"))",
+            "(match ffi.alloc(0) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(1) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(4) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(16) { ok(r) => r, err(e) => panic(e) })",
+        ],
+        observe: "(ffi.len({v}), (ffi.is_writable({v}), bytes.to_list(ffi.to_bytes({v})!)))",
+        observed: || pair(GenType::Int, pair(GenType::Bool, GenType::List(Box::new(GenType::Int)))),
+        digest: "ffi.len({v})",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
     },
     // The ADR-0001 clocks: an i64 of nanoseconds behind the checker's
     // firewall, observed through Repr (S7 keeps accessors omitted). A

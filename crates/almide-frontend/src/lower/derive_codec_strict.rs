@@ -18,7 +18,10 @@
 // Every worker is a dotted per-type fn (`T.__strict…`), built only from the
 // calls the decode derive already uses on every leg (`value.__keys`,
 // `value.omit`, `value.__field`, `value.as_array`, `list.get`, `list.len`,
-// `__err_at`, `__err_at_index`), so no leg needs a new helper. A value of the
+// `__err_at`, `__err_at_index`) plus C-418's escaper `string.__err_text`,
+// which every leg already links, for the one operand the input supplies (the
+// unknown key), so no leg needs a new helper.
+// The path segments are the type's own field and case names. A value of the
 // wrong shape walks clean: `T.decode` reports the shape error itself.
 
 fn s_lit(s: &str) -> IrExpr {
@@ -30,7 +33,7 @@ fn s_var(id: VarId) -> IrExpr {
 }
 
 fn v_var(id: VarId) -> IrExpr {
-    e_(IrExprKind::Var { id }, Ty::Named(sym("Value"), vec![]))
+    e_(IrExprKind::Var { id }, Ty::Named(sym("Value"), Default::default()))
 }
 
 fn is_empty_str(e: IrExpr) -> IrExpr {
@@ -56,7 +59,7 @@ fn first_nonempty(wk: &mut CodecWk, msgs: Vec<IrExpr>) -> IrExpr {
 
 /// The first key of `v` outside `allowed` (`list.get(value.__keys(value.omit(v, allowed)), 0)`).
 fn first_unknown_key(v: IrExpr, allowed: Vec<IrExpr>) -> IrExpr {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let omitted = call_mod_("value", "omit", vec![v, e_(IrExprKind::List { elements: allowed }, Ty::list(Ty::String))], value_ty);
     let keys = call_mod_("value", "__keys", vec![omitted], Ty::list(Ty::String));
     call_mod_("list", "get", vec![keys, e_(IrExprKind::LitInt { value: 0 }, Ty::Int)], Ty::option(Ty::String))
@@ -121,7 +124,7 @@ fn strict_list_worker(wk: &mut CodecWk, list_ty: &Ty, elem: &Ty) -> String {
     if !wk.seen.insert(name.clone()) {
         return name;
     }
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let lv = Ty::list(value_ty.clone());
     let go = format!("{}_go", name);
     let next = format!("{}_next", name);
@@ -180,12 +183,17 @@ fn strict_list_worker(wk: &mut CodecWk, list_ty: &Ty, elem: &Ty) -> String {
 }
 
 /// `unknown key '<k>'` for the first key of `v` outside `allowed`, else "".
+/// The key is the input's, so it goes through C-418's escaper
+/// (`string.__err_text`) like every runtime error text's operand (#4263): a
+/// key carrying ESC, a bidi control or a newline reaches the error, and
+/// `http.decode_json`'s 400 body, escaped.
 fn unknown_key_expr(wk: &mut CodecWk, v: IrExpr, allowed: Vec<IrExpr>) -> IrExpr {
     let first = first_unknown_key(v, allowed);
     let k = wk.vt.alloc(sym("_k"), Ty::String, Mutability::Let, None);
+    let shown = call_mod_("string", "__err_text", vec![s_var(k)], Ty::String);
     let msg = e_(IrExprKind::BinOp {
         op: BinOp::ConcatStr,
-        left: Box::new(e_(IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(s_lit("unknown key '")), right: Box::new(s_var(k)) }, Ty::String)),
+        left: Box::new(e_(IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(s_lit("unknown key '")), right: Box::new(shown) }, Ty::String)),
         right: Box::new(s_lit("'")),
     }, Ty::String);
     e_(IrExprKind::Match {
@@ -200,7 +208,7 @@ fn unknown_key_expr(wk: &mut CodecWk, v: IrExpr, allowed: Vec<IrExpr>) -> IrExpr
 /// A worker `T.__strict_<tag>(v) -> String` whose body is
 /// `match value.__field(v, "<key>") { ok(x) => at(<walk x>, "<key>"), err(_) => "" }`.
 fn strict_field_worker(wk: &mut CodecWk, tag: &str, key: &str, walk_ty: &Ty) -> Option<String> {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let name = format!("{}.__strict_f_{}", wk.type_name, tag);
     if wk.seen.contains(&name) {
         return Some(name);
@@ -245,7 +253,7 @@ fn strict_record_body(wk: &mut CodecWk, v: VarId, scope: &str, fields: &[IrField
 
 /// `T.__strict(v)` for a record type.
 pub(super) fn auto_derive_record_strict(wk: &mut CodecWk, fields: &[IrFieldDecl]) -> IrFunction {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
     let body = strict_record_body(wk, v, "r", fields);
     mk_worker_fn(&format!("{}.__strict", wk.type_name), vec![(v, "_v", value_ty)], Ty::String, body)
@@ -255,7 +263,7 @@ pub(super) fn auto_derive_record_strict(wk: &mut CodecWk, fields: &[IrFieldDecl]
 /// `T.decode` reads it); a key after it is unknown, and the tagged case's
 /// payload is walked under the case's path.
 pub(super) fn auto_derive_variant_strict(wk: &mut CodecWk, cases: &[IrVariantDecl]) -> IrFunction {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let at = strict_at_worker(wk);
     // One payload worker per case that needs a walk: `T.__strict_c_<Case>(v)`.
     let mut case_workers: Vec<(String, String)> = Vec::new();
@@ -356,7 +364,7 @@ pub(super) fn auto_derive_variant_strict(wk: &mut CodecWk, cases: &[IrVariantDec
 /// `if T.__strict(v) == "" then T.decode(v) else err(T.__strict(v))` — the
 /// walk runs twice only on the refusing path.
 pub(super) fn auto_derive_decode_strict(wk: &mut CodecWk, type_ty: &Ty) -> IrFunction {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
     let type_name = wk.type_name.to_string();
     let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);

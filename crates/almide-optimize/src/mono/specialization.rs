@@ -72,8 +72,13 @@ pub(super) fn specialize_function(
     // definition, the module-call rewriter, top-level mono's rewrite_calls —
     // agrees on the identifier spelling. The instance is named in the
     // compiler's `__almd_mono` space, which no user fn can spell (#3492).
+    // Only a self-call at THIS instance's types is this instance: `alt(b, a)`
+    // inside `alt[A, B]` asks for `alt[B, A]`, which discovery finds and
+    // specializes once the call keeps its generic name (#4287). Renaming it
+    // too kept an ill-typed call (wasm E082, rustc E0308).
     let spec_name = almide_ir::mono_instance_name(orig.name.as_str(), suffix);
-    rename_named_calls(&mut body, orig.name.as_str(), &spec_name);
+    let param_tys: Vec<Ty> = params.iter().map(|p| p.ty.clone()).collect();
+    rename_named_calls(&mut body, orig.name.as_str(), &spec_name, &param_tys);
 
     IrFunction {
         name: spec_name.into(),
@@ -175,23 +180,33 @@ fn lower_requirement_operators(
 
 // ── Self-recursive Named rename ────────────────────────────────
 
-fn rename_named_calls(expr: &mut IrExpr, from: &str, to: &str) {
+fn rename_named_calls(expr: &mut IrExpr, from: &str, to: &str, param_tys: &[Ty]) {
     use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
     use almide_base::intern::sym;
 
-    struct Renamer<'a> { from: &'a str, to: &'a str }
+    struct Renamer<'a> { from: &'a str, to: &'a str, param_tys: &'a [Ty] }
     impl<'a> IrMutVisitor for Renamer<'a> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
-            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &mut expr.kind {
-                if name.as_str() == self.from {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind {
+                if name.as_str() == self.from && !at_other_types(args, self.param_tys) {
                     *name = sym(self.to);
                 }
             }
         }
     }
 
-    Renamer { from, to }.visit_expr_mut(expr);
+    Renamer { from, to, param_tys }.visit_expr_mut(expr);
+}
+
+/// A self-call whose concrete argument types differ from the instance's
+/// parameter types: a call to ANOTHER instance of the same generic. An
+/// argument type still open (a type variable, `Unknown`) proves nothing and
+/// keeps the call on this instance, as before.
+fn at_other_types(args: &[IrExpr], param_tys: &[Ty]) -> bool {
+    let open = |t: &Ty| t.any_child_recursive(&|c| matches!(c, Ty::TypeVar(_) | Ty::Unknown));
+    args.len() == param_tys.len()
+        && args.iter().zip(param_tys).any(|(a, p)| !open(&a.ty) && !open(p) && a.ty != *p)
 }
 
 /// Re-dispatch a type-dispatched `BinOp` when a generic binding
@@ -484,7 +499,10 @@ fn requirement_target(key: &str, bindings: &HashMap<String, Ty>) -> Option<CallT
     }
     let concrete_name = ty_to_name(concrete_ty)?;
     let bare = concrete_name.rsplit_once('.').map_or(concrete_name.as_str(), |(_, t)| t);
-    Some(CallTarget::Named { name: almide_base::intern::sym(&format!("{}.{}", bare, method_name)) })
+    // Its convention method carries the requirement's public name
+    // (`Chart.media_type` for `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method_name);
+    Some(CallTarget::Named { name: almide_base::intern::sym(&format!("{}.{}", bare, public)) })
 }
 
 fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {

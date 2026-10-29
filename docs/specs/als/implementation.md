@@ -1,6 +1,6 @@
 # ALS — 実装不変量（Implementation Invariants）
 
-> Last updated: 2026-08-27
+> Last updated: 2026-10-27
 
 観測（stdout/stderr/exit）に直接は現れないが、メモリ安全・資源・決定性を
 支える実装規範。契約台帳から `spec` キーで参照される。
@@ -36,3 +36,36 @@ self-host モジュールを 2 つ以上リンクする際、`__` 始まりの�
 test モードでは、各 `test` ブロックは MUTABLE なモジュール top-let を宣言時の
 初期化子から観測する（native はスレッド分離、wasm はテスト毎の再初期化）。
 Contracts: C-075, C-107, C-109, C-116, C-120, C-138, C-139, C-143, C-144, C-152, C-212, C-321。
+
+## ALS-I4 コンパイルコストの予算
+
+コンパイラは信頼できない入力（PR の CI、ファイルを開いた瞬間の LSP、採点器、
+playground）を処理する。入力に比例して仕事が増えるフェーズは、それぞれ
+名前付きの**予算**に縛られる。一覧は `almide budgets` が出す表（`docs/specs/cli.md`
+に埋め込まれる）で、行は `nesting`（1 つの式の入れ子の段数）・`type_size`（1 つの
+推論型のノード数）・`generic_instances`（有界ジェネリック関数の特殊化インスタンス
+数。各インスタンスの型引数も `type_size` に縛られる）・`exhaustiveness_steps`
+（1 つの `match` の網羅性検査の手数）・`manifest_bytes`（`almide.toml` /
+`almide.lock` 1 つの大きさ）・`dependency_count`・`dependency_depth` である。
+
+- 予算は**数える**もので、時間や空きメモリでは測らない。同じ入力は、どの機械でも
+  同じ判定になる。
+- 属性・マニフェストのキー・ロックの項目・環境変数のどれも予算を変えない。
+  変えられるのはコマンドラインの `--budget NAME=N` だけで、
+  `almide check --profile critical` はこのフラグを拒否する。
+- 予算を超えた入力は、その予算の診断と非ゼロの終了コードで終わる。クラッシュ・
+  メモリ不足による強制終了・ハングにはならない。`type_size` は E111
+  `type too large (N+ nodes, max M)`（型が予算を超えた式または制約の位置）、
+  `generic_instances` は E112、`exhaustiveness_steps` は E113
+  `match too complex to check for exhaustiveness`、`nesting` は構文エラー
+  `expression nesting too deep (max N)`、プロジェクト側の 3 つはファイル・数値・
+  予算を名指すエラーで終わる。予算を超えた型を推定で通すことはなく、検査を
+  終えられなかった `match` を網羅的とみなすこともない。
+- 型は構造を共有する。`type_size` を外しても、`let t(i) = (t(i-1), t(i-1))` を
+  n 回（直接、または `fn dup[T](x: T) -> (T, T)` を通して）重ねたプログラムは、
+  n に線形な時間とメモリで検査を通る。
+
+テスト: `tests/diagnostics/e111-type-doubling-chain/`,
+`tests/diagnostics/e111-type-doubling-through-a-generic/`,
+`tests/diagnostics/e113-bool-matrix-too-complex/`, `tests/compile_budget_test.rs`。
+Contracts: C-440。

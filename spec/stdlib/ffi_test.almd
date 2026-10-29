@@ -1,67 +1,92 @@
-// ffi — raw addresses at the foreign-function boundary (R-ffi-01, R-ffi-02,
-// R-ffi-03). The address VALUE differs per target and is never printed; only
-// null-ness and the bytes moved through an address are observed.
+// ffi — Regions at the foreign-function boundary (R-ffi-01, ADR-0031). A
+// Region carries its own length: every read and write is checked against it,
+// and an access outside it is an err, never a read or write of other memory.
+// The base address differs per target and is never observed.
 import ffi
 
-test "address of an empty buffer is null on every target" {
-  assert_eq(ffi.to_int(ffi.address(bytes.new())), 0)
-  assert_eq(ffi.to_int(ffi.address(bytes.from_string(""))), 0)
+fn bytes_of(r: Result[Bytes, String]) -> List[Int] = match r {
+  ok(b) => bytes.to_list(b),
+  err(_) => [-1],
 }
 
-test "address of a non-empty buffer is not null" {
-  let b = bytes.from_string("abc")
-  assert(ffi.to_int(ffi.address(b)) != 0)
+fn failed[T](r: Result[T, String]) -> Bool = match r {
+  ok(_) => false,
+  err(_) => true,
 }
 
-test "read copies len bytes from an address" {
-  let b = bytes.from_list([65, 66, 67, 68])
-  let c = ffi.read(ffi.address(b), 4)
-  assert_eq(bytes.to_list(c), [65, 66, 67, 68])
-  let head = ffi.read(ffi.address(b), 2)
-  assert_eq(bytes.to_list(head), [65, 66])
+test "a region of a Bytes value has its length and is read-only" {
+  let r = ffi.region(bytes.from_list([65, 66, 67, 68]))
+  assert_eq(ffi.len(r), 4)
+  assert(not ffi.is_writable(r))
+  assert_eq(ffi.len(ffi.region(bytes.new())), 0)
 }
 
-test "read through null or with len <= 0 is empty" {
-  let b = bytes.from_string("abc")
-  assert_eq(bytes.len(ffi.read(ffi.address(bytes.new()), 3)), 0)
-  assert_eq(bytes.len(ffi.read(ffi.address(b), 0)), 0)
-  assert_eq(bytes.len(ffi.read(ffi.address(b), -1)), 0)
+test "read copies n bytes at an offset inside the region" {
+  let r = ffi.region(bytes.from_list([65, 66, 67, 68]))
+  assert_eq(bytes_of(ffi.read(r, 0, 4)), [65, 66, 67, 68])
+  assert_eq(bytes_of(ffi.read(r, 1, 2)), [66, 67])
+  assert_eq(bytes_of(ffi.read(r, 4, 0)), [])
 }
 
-test "write puts up to cap bytes at the address, address first" {
-  var dst = bytes.zeros(4)
-  let n = ffi.write(ffi.address(dst), bytes.from_list([1, 2, 3, 4]), 4)
-  assert_eq(n, 4)
-  assert_eq(bytes.to_list(dst), [1, 2, 3, 4])
+test "read outside the region is err" {
+  let r = ffi.region(bytes.from_list([1, 2, 3]))
+  assert(failed(ffi.read(r, 0, 4)))
+  assert(failed(ffi.read(r, 3, 1)))
+  assert(failed(ffi.read(r, -1, 1)))
+  assert(failed(ffi.read(r, 0, -1)))
+  assert(failed(ffi.read(r, 9223372036854775807, 1)))
+  assert(failed(ffi.read(ffi.region(bytes.new()), 0, 1)))
 }
 
-test "write clamps to cap" {
-  var dst = bytes.zeros(4)
-  let n = ffi.write(ffi.address(dst), bytes.from_list([9, 9, 9, 9]), 2)
-  assert_eq(n, 2)
-  assert_eq(bytes.to_list(dst), [9, 9, 0, 0])
+test "a region of a Bytes value refuses every write" {
+  let b = bytes.from_list([1, 2, 3])
+  let r = ffi.region(b)
+  assert(failed(ffi.write(r, 0, bytes.from_list([9]))))
+  assert_eq(bytes.to_list(b), [1, 2, 3])
 }
 
-test "write clamps to the source length" {
-  var dst = bytes.zeros(4)
-  let n = ffi.write(ffi.address(dst), bytes.from_list([7]), 4)
-  assert_eq(n, 1)
-  assert_eq(bytes.to_list(dst), [7, 0, 0, 0])
+test "alloc gives a fresh zeroed writable region" {
+  let r = ffi.alloc(4) ?? ffi.region(bytes.new())
+  assert_eq(ffi.len(r), 4)
+  assert(ffi.is_writable(r))
+  assert_eq(bytes_of(ffi.read(r, 0, 4)), [0, 0, 0, 0])
+  assert(failed(ffi.alloc(-1)))
 }
 
-test "write through null writes nothing" {
-  assert_eq(ffi.write(ffi.address(bytes.new()), bytes.from_string("abc"), 3), 0)
+test "write puts bytes at an offset inside an allocated region" {
+  let r = ffi.alloc(5) ?? ffi.region(bytes.new())
+  assert(not failed(ffi.write(r, 0, bytes.from_string("hello"))))
+  assert_eq(bytes.to_string(ffi.to_bytes(r) ?? bytes.new()) ?? "", "hello")
+  assert(not failed(ffi.write(r, 4, bytes.from_list([33]))))
+  assert_eq(bytes.to_string(ffi.to_bytes(r) ?? bytes.new()) ?? "", "hell!")
 }
 
-test "a negative cap is an unsigned capacity: the whole source" {
-  var dst = bytes.zeros(3)
-  let n = ffi.write(ffi.address(dst), bytes.from_list([5, 6, 7]), -1)
-  assert_eq(n, 3)
-  assert_eq(bytes.to_list(dst), [5, 6, 7])
+test "write outside an allocated region is err and changes nothing" {
+  let r = ffi.alloc(3) ?? ffi.region(bytes.new())
+  assert(failed(ffi.write(r, 2, bytes.from_list([1, 2]))))
+  assert(failed(ffi.write(r, -1, bytes.from_list([1]))))
+  assert(failed(ffi.write(r, 9223372036854775807, bytes.from_list([1]))))
+  assert_eq(bytes_of(ffi.read(r, 0, 3)), [0, 0, 0])
 }
 
-test "read of a written region round-trips" {
-  var dst = bytes.zeros(5)
-  let _n = ffi.write(ffi.address(dst), bytes.from_string("hello"), 5)
-  assert_eq(bytes.to_string(ffi.read(ffi.address(dst), 5)) ?? "", "hello")
+test "two allocations never share memory" {
+  let a = ffi.alloc(2) ?? ffi.region(bytes.new())
+  let b = ffi.alloc(2) ?? ffi.region(bytes.new())
+  assert(not failed(ffi.write(a, 0, bytes.from_list([5, 6]))))
+  assert_eq(bytes_of(ffi.read(b, 0, 2)), [0, 0])
+}
+
+test "slice is a read-only view inside the parent's bounds" {
+  let r = ffi.alloc(4) ?? ffi.region(bytes.new())
+  let v = ffi.slice(r, 1, 2) ?? ffi.region(bytes.new())
+  assert_eq(ffi.len(v), 2)
+  assert(not ffi.is_writable(v))
+  assert(failed(ffi.write(v, 0, bytes.from_list([1]))))
+  assert(not failed(ffi.write(r, 1, bytes.from_list([7, 8]))))
+  assert_eq(bytes_of(ffi.read(v, 0, 2)), [7, 8])
+  assert(failed(ffi.slice(r, 3, 2)))
+  assert(failed(ffi.slice(r, -1, 1)))
+  assert(failed(ffi.slice(r, 0, -1)))
+  assert(failed(ffi.slice(v, 1, 2)))
+  assert_eq(ffi.len(ffi.slice(r, 4, 0) ?? r), 0)
 }

@@ -141,7 +141,7 @@ fn collect_workspace_symbols_from_file(file_path: &std::path::Path, query: &str,
     let tokens = crate::lexer::Lexer::tokenize(&source);
     let mut parser = crate::parser::Parser::new(tokens);
     let prog = match parser.parse() { Ok(p) => p, Err(_) => return };
-    let file_uri = match Uri::from_str(&format!("file://{}", file_path.display())) { Ok(u) => u, Err(_) => return };
+    let file_uri = match path_to_uri(file_path) { Some(u) => u, None => return };
     for decl in &prog.decls {
         let (name, kind, span) = match decl {
             crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), SymbolKind::FUNCTION, span),
@@ -213,6 +213,40 @@ fn uri_to_path(uri: &Uri) -> Option<String> {
     Some(decoded)
 }
 
+/// Filesystem path → `file://` URI, the inverse of [`uri_to_path`]. A
+/// Windows path keeps forward slashes and gets the third slash before its
+/// drive letter; the `\\?\` prefix `canonicalize` adds on Windows is dropped
+/// (`\\?\UNC\srv\share` becomes `//srv/share`); every byte outside the
+/// unreserved set, `/` and `:` is percent-encoded. The old inline
+/// `format!("file://{}", path.display())` built `file://\\?\C:\…` from the
+/// canonical workspace root, the URI parse failed, and the workspace index
+/// silently returned no symbol on Windows.
+fn path_to_uri(path: &std::path::Path) -> Option<Uri> {
+    let raw = path.display().to_string();
+    let s = if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
+        format!("//{}", unc)
+    } else {
+        raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
+    }
+    .replace('\\', "/");
+    let mut enc = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':') {
+            enc.push(b as char);
+        } else {
+            enc.push_str(&format!("%{:02X}", b));
+        }
+    }
+    let uri = if enc.starts_with("//") {
+        format!("file:{}", enc)
+    } else if enc.starts_with('/') {
+        format!("file://{}", enc)
+    } else {
+        format!("file:///{}", enc)
+    };
+    Uri::from_str(&uri).ok()
+}
+
 /// Minimal RFC 3986 percent-decoding (multi-byte UTF-8 sequences decode
 /// byte-wise, then re-validate as a string). Invalid escapes pass through
 /// literally rather than erroring — a path lookup on the raw text then fails
@@ -269,6 +303,29 @@ mod uri_to_path_tests {
     #[test]
     fn non_file_scheme_is_none() {
         assert_eq!(conv("untitled:Untitled-1"), None);
+    }
+
+    fn to_uri(p: &str) -> String {
+        path_to_uri(std::path::Path::new(p)).map(|u| u.as_str().to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn path_to_uri_shapes() {
+        assert_eq!(to_uri("/tmp/x.almd"), "file:///tmp/x.almd");
+        assert_eq!(to_uri("/tmp/a b/あ.almd"), "file:///tmp/a%20b/%E3%81%82.almd");
+        // The Windows shapes are plain strings, so they are checked on every
+        // host: `Path::display` passes the backslashes through unchanged.
+        assert_eq!(to_uri(r"C:\Users\x.almd"), "file:///C:/Users/x.almd");
+        assert_eq!(to_uri(r"\\?\C:\Users\x.almd"), "file:///C:/Users/x.almd");
+        assert_eq!(to_uri(r"\\?\UNC\srv\share\x.almd"), "file://srv/share/x.almd");
+    }
+
+    #[test]
+    fn path_to_uri_round_trips_through_uri_to_path() {
+        for p in ["/tmp/x.almd", "/tmp/a b/あ.almd", "C:/Users/x.almd"] {
+            let u = path_to_uri(std::path::Path::new(p)).unwrap();
+            assert_eq!(uri_to_path(&u).as_deref(), Some(p));
+        }
     }
 }
 

@@ -132,6 +132,11 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
         .map(|r| (r, *b.rng.pick(&[100u64, 300, 1000, 2000, 5000])));
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        // A literal-only parameter (E117) is written as one of its literals.
+        if let Some(lits) = sig.literal_at(i) {
+            args.push(b.rng.pick(lits).to_string());
+            continue;
+        }
         // net's descriptors, socket paths and bounded sizes (#3620).
         if sig.module == "net" {
             if let Some(a) = super::net_unix_args::arg(b, &sig.func, name) {
@@ -220,7 +225,7 @@ fn render_verdict_call(
         };
         // Out of scope like the raw result: a domain operand can be a host
         // choice too (`process.kill`'s pid is a fresh child's).
-        // The written operand is a `var` (E032): `bytes.as_mut_ptr`'s receiver.
+        // The written operand is a `var` (E032): a `mut` / `@mutating` receiver.
         let kw = if Some(i) == sig.mut_param { "var" } else { "let" };
         let v = b.fresh_name();
         b.stmts.push(format!("{kw} {v}: {} = {a}", ty.render()));
@@ -427,10 +432,34 @@ fn sized_or_bytes(b: &mut Builder, goal: &GenType) -> String {
 }
 
 /// A small non-empty rectangular `Matrix` from Float literals.
-/// A random leaf of a nominal type, from its declared constructors.
+/// A random leaf of a nominal type, from its declared constructors. A leaf
+/// that calls one of the catalogue's effect functions (`ffi.alloc`) makes
+/// `main` an `effect fn`.
 fn nominal_literal(b: &mut Builder, k: &str) -> String {
     let leaves = super::nominal::get(k).map_or(&[][..], |n| n.leaves);
-    b.rng.pick(leaves).to_string()
+    let leaf = b.rng.pick(leaves).to_string();
+    if calls_effect(b.catalogue, &leaf) {
+        b.effect = true;
+    }
+    leaf
+}
+
+/// [`nominal_literal`] in a lambda body: a callback is not an effect
+/// context, so only the leaves that call no effect function, when the
+/// nominal has one.
+fn pure_nominal_literal(b: &mut Builder, k: &str) -> String {
+    let leaves = super::nominal::get(k).map_or(&[][..], |n| n.leaves);
+    let pure: Vec<&str> = leaves.iter().copied().filter(|l| !calls_effect(b.catalogue, l)).collect();
+    if pure.is_empty() {
+        return nominal_literal(b, k);
+    }
+    b.rng.pick(&pure).to_string()
+}
+
+/// `src` calls an effect function of the catalogue (`module.func(`), read
+/// off each signature's own `effect` flag.
+fn calls_effect(catalogue: &[Signature], src: &str) -> bool {
+    catalogue.iter().any(|s| s.effect && src.contains(&format!("{}.{}(", s.module, s.func)))
 }
 
 fn matrix_literal(b: &mut Builder) -> String {
@@ -589,7 +618,8 @@ fn gen_call(b: &mut Builder, goal: &GenType) -> Option<String> {
     let mut candidates: Vec<(usize, HashMap<String, GenType>, u32)> = Vec::new();
     for (i, sig) in b.catalogue.iter().enumerate() {
         let mut subst = sig.forced_bindings();
-        if sig.effective_ret().unify_with_goal(goal, &mut subst) {
+        // A bounded variable the goal binds must conform to its bounds.
+        if sig.effective_ret().unify_with_goal(goal, &mut subst) && sig.admits(&subst) {
             candidates.push((i, subst, sig.weight));
         }
     }
@@ -688,12 +718,13 @@ fn bind_free_vars(
     sig.ret.collect_vars(&mut vars);
     for v in vars {
         if !subst.contains_key(&v) {
-            let chosen =
-                FREE_VAR_CHOICES[b.rng.below(FREE_VAR_CHOICES.len() as u32) as usize].clone();
+            // A bounded variable takes one of its conformers (`[B: Body]`).
+            let choices = sig.bound_of(&v).unwrap_or(FREE_VAR_CHOICES);
+            let chosen = choices[b.rng.below(choices.len() as u32) as usize].clone();
             subst.insert(v, chosen);
         }
     }
-    Some(())
+    sig.admits(subst).then_some(())
 }
 
 /// Generate an argument expression for a (possibly generic) parameter,
@@ -810,7 +841,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
-        GenType::Nominal(k) => nominal_literal(b, k),
+        GenType::Nominal(k) => pure_nominal_literal(b, k),
         GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }

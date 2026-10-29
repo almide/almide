@@ -1,0 +1,8 @@
+// E116 (ADR-0032): set_header on a response, through a pipe. The generic
+// `http.set_header[M: HttpMessage]` dispatches to the response's own
+// requirement, whose declaration says the body owns Content-Type.
+import http
+
+fn page(name: String) -> HttpResponse = http.response(200, name) |> http.set_header("content-type", "text/html")
+
+fn main() -> Unit = println(http.body(page("guest")))

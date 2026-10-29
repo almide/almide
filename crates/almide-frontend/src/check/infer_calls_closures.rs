@@ -465,7 +465,7 @@ impl Checker {
         let elem = self.fresh_var();
         self.constrain(
             list_ty,
-            Ty::Applied(TypeConstructorId::List, vec![elem.clone()]),
+            Ty::Applied(TypeConstructorId::List, vec![elem.clone()].into()),
             "fan.min mapper list",
         );
         // The mapper body is a metered PURE region, exactly like a block arm.
@@ -568,7 +568,7 @@ impl Checker {
             });
         }
         self.env.auto_unwrap = saved_unwrap;
-        Ty::Tuple(elems)
+        Ty::Tuple(elems.into())
     }
 
     /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
@@ -612,7 +612,8 @@ impl Checker {
             self.join_sized_peers(&peers, "assert argument");
             // #2606: the comparison needs an Eq operand type (post-solve E016).
             if let ExprKind::Ident { name, .. } = &callee.kind {
-                self.deferred_eq_checks.push((peers[0].0.clone(), span, format!("{}()", name)));
+                let in_fn = self.generic_fn_key();
+                self.deferred_eq_checks.push(super::EqSite { ty: peers[0].0.clone(), span, what: format!("{}()", name), in_fn, generic_compare: false });
             }
         }
         ty
@@ -854,10 +855,10 @@ impl Checker {
             match &p.tuple_names {
                 Some(names) if names.len() > 1 => {
                     let elems: Vec<Ty> = match &concrete {
-                        Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                        Ty::Tuple(es) if es.len() == names.len() => es.clone().into_vec(),
                         _ => {
                             let fresh: Vec<Ty> = names.iter().map(|_| self.fresh_var()).collect();
-                            self.constrain(ty.clone(), Ty::Tuple(fresh.clone()), "tuple lambda parameter");
+                            self.constrain(ty.clone(), Ty::Tuple(fresh.clone().into()), "tuple lambda parameter");
                             fresh
                         }
                     };
@@ -1553,8 +1554,8 @@ impl Checker {
                 let inner_ty = self.infer_pipe(left, inner);
                 match &inner_ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 =>
-                        Ty::Applied(TypeConstructorId::Option, vec![args[0].clone()]),
-                    _ => Ty::Applied(TypeConstructorId::Option, vec![inner_ty]),
+                        Ty::Applied(TypeConstructorId::Option, vec![args[0].clone()].into()),
+                    _ => Ty::Applied(TypeConstructorId::Option, vec![inner_ty].into()),
                 }
             }
             _ => self.infer_pipe_direct(left, right),

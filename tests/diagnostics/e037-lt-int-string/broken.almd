@@ -1,0 +1,7 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// Ordering relates two values of one type too.
+fn main() -> Unit = {
+  let n = 1
+  let s = "2"
+  println("${n < s}")
+}

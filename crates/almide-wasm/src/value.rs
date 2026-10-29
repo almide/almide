@@ -24,6 +24,41 @@ pub(crate) const VT_FLOAT: i32 = 3;
 pub(crate) const VT_STR: i32 = 4;
 pub(crate) const VT_ARRAY: i32 = 5;
 pub(crate) const VT_OBJECT: i32 = 6;
+/// An Object box's key-index word (value_set_path.rs): the pad word beside
+/// the tag — 0, or an index block. An Object's tag and this word are written
+/// together, one i64 store of the tag (`store_object_tag`), so a box is born
+/// with no index for no more bytes than the tag alone took.
+pub(crate) const OBJECT_INDEX: u32 = almide_layout::SUM_TAG + 4;
+
+/// Write the Object tag and a zero key-index word at the box on the stack.
+pub(crate) fn store_object_tag(i: &mut wasm_encoder::InstructionSink<'_>) {
+    i.i64_const(i64::from(VT_OBJECT)).i64_store(slot_memarg(almide_layout::SUM_TAG));
+}
+
+/// The self-host helpers this emitter calls DIRECTLY when it lowers a
+/// `value.*` surface natively: (surface, helper). No IR names a helper — the
+/// emitter reaches it by name — so the wasm link reads this table to load the
+/// helper's source and walk its body (#4317's reach-only link scans only what
+/// something names). Every helper lives in stdlib/value_utils.almd, loaded
+/// through its registered surface [`VALUE_HELPER_ANCHOR`].
+pub const VALUE_SELFHOST_HELPERS: &[(&str, &str)] = &[
+    ("value.object", "__vu_fold_pairs"),
+    ("value.merge", "__vu_merge_pairs"),
+    ("value.pick", "__vu_pick_pairs"),
+    ("value.omit", "__vu_omit_pairs"),
+];
+
+/// The registered surface whose self-host source holds every helper of
+/// [`VALUE_SELFHOST_HELPERS`].
+pub const VALUE_HELPER_ANCHOR: &str = "value.pick";
+
+fn value_helper(surface: &str) -> &'static str {
+    VALUE_SELFHOST_HELPERS
+        .iter()
+        .find(|(s, _)| *s == surface)
+        .map(|(_, h)| *h)
+        .expect("a natively lowered value surface declares its helper in VALUE_SELFHOST_HELPERS")
+}
 
 impl Emitter<'_> {
     /// `value.*` module calls. Returns Ok(None) for unhandled names so the
@@ -120,7 +155,7 @@ impl Emitter<'_> {
     /// where the emitted scan per key of b was O(|a|·|b|)); any non-Object
     /// operand yields b itself. Both operands are only READ (#2010 item 5).
     fn lower_value_merge(&mut self, va: &IrExpr, vb: &IrExpr) -> Result<SliceTy, EmitError> {
-        let (merge, owned) = self.pairs_helper("__vu_merge_pairs", 2)?;
+        let (merge, owned) = self.pairs_helper(value_helper("value.merge"), 2)?;
         self.lower_arg(va, Some(SliceTy::Value), ArgMode::Borrow)?;
         let ha = self.hold_i32()?;
         self.f.instructions().local_set(ha);
@@ -160,7 +195,7 @@ impl Emitter<'_> {
     /// Non-object: pick answers `{}` (C-401), omit passes it through.
     fn lower_value_pick_omit(&mut self, func: &str, v: &IrExpr, keys: &IrExpr) -> Result<SliceTy, EmitError> {
         let pick = func == "pick";
-        let (sel, owned) = self.pairs_helper(if pick { "__vu_pick_pairs" } else { "__vu_omit_pairs" }, 2)?;
+        let (sel, owned) = self.pairs_helper(value_helper(if pick { "value.pick" } else { "value.omit" }), 2)?;
         // #2010 item 5: the source is only READ — every block the result
         // shares with it (a passed-through non-object) takes its own credit.
         self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
@@ -229,11 +264,12 @@ impl Emitter<'_> {
     /// `__vu_fold_pairs` (stdlib/value_utils.almd): the duplicate-key fold
     /// every Object construction goes through (C-401).
     fn value_fold_helper(&mut self) -> Result<u32, EmitError> {
-        let Some(hi) = self.selfhost_helper("__vu_fold_pairs") else {
-            return Err(EmitError::Unsupported("value.object:unlinked:__vu_fold_pairs".into()));
+        let name = value_helper("value.object");
+        let Some(hi) = self.selfhost_helper(name) else {
+            return Err(EmitError::Unsupported(format!("value.object:unlinked:{name}")));
         };
         if let Some(r) = &self.table.infos[hi].refuse {
-            return Err(EmitError::Unsupported(format!("call-fn:__vu_fold_pairs:{r}")));
+            return Err(EmitError::Unsupported(format!("call-fn:{name}:{r}")));
         }
         self.calls.insert(hi);
         Ok(self.table.infos[hi].wasm_index)
@@ -380,9 +416,13 @@ impl Emitter<'_> {
             .instructions()
             .i32_const(16)
             .call(F_ALLOC)
-            .local_tee(hb)
-            .i32_const(tag)
-            .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            .local_tee(hb);
+        // An Object is born with no key index (value_set_path.rs).
+        if tag == VT_OBJECT {
+            store_object_tag(&mut self.f.instructions());
+        } else {
+            self.f.instructions().i32_const(tag).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        }
         if let (Some(h), Some(k)) = (hv, payload_kind) {
             self.f.instructions().local_get(hb).local_get(h);
             self.store_ty_slot(k, almide_layout::SUM_FIELD);
@@ -626,6 +666,11 @@ impl Emitter<'_> {
                 self.release_i32();
                 Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
+            // #4315: the set_path walk, in place where the document is the
+            // op's alone (value_set_path.rs).
+            ("__set_path_steps", [v, steps, x]) => {
+                Some(Lowered::owned(self.lower_value_set_path_steps(v, steps, x)?))
+            }
             ("__stringify", [v]) => {
                 self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
@@ -641,7 +686,8 @@ impl Emitter<'_> {
 /// the stack (`scratch` holds the box).
 fn box_object(i: &mut wasm_encoder::InstructionSink, pairs: u32, scratch: u32) {
     i.i32_const(16).call(F_ALLOC).local_set(scratch);
-    i.local_get(scratch).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+    i.local_get(scratch);
+    store_object_tag(i);
     i.local_get(scratch).local_get(pairs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
     i.local_get(scratch);
 }

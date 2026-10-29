@@ -1,0 +1,8 @@
+// The recursion stays at the type it was called with: the values it would
+// have paired up are collected in a `List[T]`.
+fn depth[T: Hash](xs: List[T], n: Int) -> Int =
+  if n <= 0 then 0 else 1 + depth(xs + xs, n - 1)
+
+effect fn main() -> Unit = {
+  println(int.to_string(depth([1], 3)))
+}

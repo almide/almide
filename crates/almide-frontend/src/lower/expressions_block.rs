@@ -166,7 +166,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let inner_ty = if is_wrapper {
                 inner_checked_ty
             } else {
-                Ty::Applied(TypeConstructorId::Option, vec![ty.clone()])
+                Ty::Applied(TypeConstructorId::Option, vec![ty.clone()].into())
             };
             let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
             let ir_fallback = lower_expr(ctx, fallback);
@@ -271,7 +271,7 @@ fn lower_pipe_lambda_bind(ctx: &mut LowerCtx, p: &ast::LambdaParam, param_ty: Ty
         // (#1873: check green, invalid Rust and invalid wasm).
         Some(names) if names.len() > 1 => {
             let elem_tys: Vec<Ty> = match &param_ty {
-                Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                Ty::Tuple(es) if es.len() == names.len() => es.to_vec(),
                 _ => vec![Ty::Unknown; names.len()],
             };
             let elements: Vec<IrPattern> = names.iter().zip(elem_tys.iter())

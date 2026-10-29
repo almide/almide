@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 51 stdlib modules, 1320 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1324 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -12,13 +12,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [base64](#base64) | 4 | 0 |
 | [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 183 | 0 |
+| [bytes](#bytes) | 178 | 0 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 18 | 0 |
 | [deque](#deque) | 60 | 0 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
-| [ffi](#ffi) | 4 | 0 |
+| [ffi](#ffi) | 8 | 0 |
 | [float](#float) | 27 | 0 |
 | [float32](#float32) | 24 | 0 |
 | [float64](#float64) | 24 | 0 |
@@ -26,8 +26,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [hash](#hash) | 11 | 0 |
 | [heap](#heap) | 16 | 0 |
 | [hex](#hex) | 3 | 0 |
-| [html](#html) | 5 | 0 |
-| [http](#http) | 34 | 4 |
+| [html](#html) | 8 | 0 |
+| [http](#http) | 36 | 4 |
 | [int](#int) | 47 | 0 |
 | [int16](#int16) | 37 | 0 |
 | [int32](#int32) | 37 | 0 |
@@ -133,19 +133,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, BE.
 - `bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, LE.
 - `bytes.append_u8(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits; 256 becomes 0.
-- `bytes.as_mut_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Mutable address of the data; null if empty.
-- `bytes.as_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Address of the data; null if empty.
 - `bytes.clear(mut b: Bytes) -> Unit` — Truncates b to length 0 in place.
 - `bytes.compare(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
 - `bytes.contains(b: Bytes, needle: Bytes) -> Bool` — True if needle occurs in b, or needle is empty.
 - `bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into b; clamped to fit.
-- `bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int   (deprecated — use ffi.write)` — Writes up to cap bytes to ptr; count, 0 if null.
-- `bytes.data_ptr(b: Bytes) -> Int   (deprecated — use ffi.address)` — Address of the data as an Int; target-specific.
 - `bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` — True if b ends with suffix, or suffix is empty.
 - `bytes.is_eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
 - `bytes.fill(mut b: Bytes, x: Int) -> Unit` — Sets every byte to x's low 8 bits in place.
 - `bytes.from_list(xs: List[Int]) -> Bytes` — xs as bytes, low 8 bits each; -1 becomes 255.
-- `bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes   (deprecated — use ffi.read)` — Copy of len bytes at ptr; empty if null or len <= 0.
 - `bytes.from_string(s: String) -> Bytes` — UTF-8 encoding of s.
 - `bytes.get(b: Bytes, i: Int) -> Option[Int]` — Byte at index i, or none when out of range.
 - `bytes.index_of(b: Bytes, needle: Bytes) -> Option[Int]` — First offset of needle, or none; some(0) if empty.
@@ -432,10 +427,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [ffi.md](ffi.md)
 
-- `ffi.address(b: Bytes) -> RawPtr` — Address of b's first byte; null if b is empty.
-- `ffi.to_int(p: RawPtr) -> Int` — The address as an Int; null is 0.
-- `effect ffi.read(ptr: RawPtr, len: Int) -> Bytes` — Copy of len bytes at ptr; empty if null or len <= 0.
-- `effect ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int` — Writes up to cap bytes of b to ptr; the count, 0 if null.
+- `ffi.region(b: Bytes) -> Region` — A read-only view of b; b lives as long as the view.
+- `effect ffi.alloc(n: Int) -> Region` — A fresh writable region of n zero bytes; err if n is negative.
+- `ffi.len(r: Region) -> Int` — The region's length in bytes.
+- `ffi.is_writable(r: Region) -> Bool` — True if write may change the region (ffi.alloc and writable foreign regions).
+- `effect ffi.read(r: Region, off: Int, n: Int) -> Bytes` — Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+- `effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit` — Writes b at off; err if the region is read-only or b does not fit.
+- `effect ffi.to_bytes(r: Region) -> Bytes` — A copy of the whole region as Bytes.
+- `ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]` — A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 
 ## float
 
@@ -618,21 +617,26 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [html.md](html.md)
 
-- `html.escape(s: String) -> SafeHtml` — s with & < > " ' turned into HTML entities.
+- `html.escape(s: String) -> SafeHtml` — s with & < > " ' turned into HTML entities; text context only.
 - `html.raw(s: String) -> SafeHtml` — s as SafeHtml, unescaped; trusted input only.
 - `html.to_string(h: SafeHtml) -> String` — HTML text inside h, as-is.
 - `html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml` — a then b as one SafeHtml; nothing re-escaped.
 - `html.empty() -> SafeHtml` — SafeHtml of the empty string.
+- `html.attr(name: String, value: String) -> SafeHtml` — name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+- `html.url_attr(name: String, url: String) -> SafeHtml` — name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+- `html.script_json(v: Value) -> SafeHtml` — json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
 
 ## http
 
 [http.md](http.md)
 
 - `effect http.serve(port: Int, handler: HttpHandler) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
-- `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
-- `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
-- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-- `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.
+- `http.response(status: Int, body: B) -> HttpResponse` — Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+- `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json; body is JSON text.
+- `http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` — Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+- `http.with_body(resp: HttpResponse, body: B) -> HttpResponse` — resp with its body replaced by body and its Content-Type by body's type.
+- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+- `http.redirect(url: String) -> HttpResponse` — 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 - `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
 - `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
 - `http.header(m: M, name: String) -> Option[String]` — First value of header name, any case; none if absent.
@@ -640,9 +644,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
 - `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
 - `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
-- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
-- `http.set_body(m: M, body: String) -> M` — m with its body replaced.
-- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
+- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
+- `http.set_body(m: M, body: String) -> M` — m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
+- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 - `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
 - `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
 - `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.

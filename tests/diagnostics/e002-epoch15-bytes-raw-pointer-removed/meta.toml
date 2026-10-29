@@ -1,0 +1,4 @@
+expects_code = "E002"
+expects_error = "undefined function 'bytes.as_ptr'"
+hint_substring = "was removed at dialect epoch 15"
+contract = "C-062"

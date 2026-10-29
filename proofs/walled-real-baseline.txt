@@ -320,17 +320,9 @@
 # Listed so the batch could land; #4189 owns burning them back down to EMPTY.
 spec/stdlib/bigint_operators_test.almd :: b  # #4189
 spec/stdlib/bigint_test.almd :: b  # #4189
-spec/stdlib/http_router_test.almd :: __test_almd_0000_a request built in code answers every reader  # #4189
 spec/stdlib/http_router_test.almd :: __test_almd_0017_a path the guard reads differently from the router is a 400 (C-406)  # #4189
 spec/stdlib/http_router_test.almd :: __test_almd_0018_a parameter that decodes to a traversal, a slash or NUL is a 400 (C-406)  # #4189
 spec/stdlib/int_radix_floor_test.almd :: ok_int  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0015_regex.captures contents per lexical group  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0016_regex.captures optional-miss is none  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0017_regex.captures none only when nothing matched  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0022_regex.empty alternation arms  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0024_regex brace quantifiers  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0026_regex group backtracking  # #4189
-spec/stdlib/regex_test.almd :: __test_almd_0029_regex non-capturing group  # #4189
-spec/stdlib/value_readers_test.almd :: __test_almd_0000_value.get and the get_<kind> family answer an Option  # #4189
-# #4230 / C-432: v1 refuses a user variant carrying a runtime-backed payload by design; the structural leg renders it.
-spec/wasm_cross/runtime_backed_variant_repr.almd :: main  # #4230
+# C-432: v1 refuses a user variant carrying a runtime-backed payload; the structural leg renders it.
+# Found under #4230 (closed by the integration merge); #4189 owns the MIR rung walls that batch added.
+spec/wasm_cross/runtime_backed_variant_repr.almd :: main  # #4189

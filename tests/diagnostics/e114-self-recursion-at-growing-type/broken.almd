@@ -1,0 +1,8 @@
+// E114 (#4287): `depth` calls itself with `(x, x)`, so each level asks for
+// an instance at a larger type — `depth[Int]`, `depth[(Int, Int)]`, ...
+fn depth[T: Hash](x: T, n: Int) -> Int =
+  if n <= 0 then 0 else 1 + depth((x, x), n - 1)
+
+effect fn main() -> Unit = {
+  println(int.to_string(depth(1, 3)))
+}

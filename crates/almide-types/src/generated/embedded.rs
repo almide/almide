@@ -333,12 +333,12 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
-  let bytes = bytes.to_list(bytes.from_string(string.trim(s)))
-  match bytes {
+  let codes = bytes.to_list(bytes.from_string(string.trim(s)))
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
     [43, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, false),
-    _ => read_digits(strip_radix_prefix(bytes, radix), radix, false),
+    _ => read_digits(strip_radix_prefix(codes, radix), radix, false),
   }
 }
 
@@ -970,19 +970,6 @@ fn append_u32_le(mut b: Bytes, x: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_append_u8")
 fn append_u8(mut b: Bytes, x: Int) -> Unit = _
 
-/// Mutable address of the data; null if empty.
-@deprecated(since=15, use="ffi.address")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_as_mut_ptr")
-@mutating
-fn as_mut_ptr(b: Bytes) -> RawPtr = _
-
-/// Address of the data; null if empty.
-@deprecated(since=15, use="ffi.address")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_as_ptr")
-fn as_ptr(b: Bytes) -> RawPtr = _
-
 /// size-byte pieces, last may be short; [] if size <= 0.
 @intrinsic("almide_rt_bytes_chunks")
 fn __chunks(b: Bytes, size: Int) -> List[Bytes] = _
@@ -1007,18 +994,6 @@ fn contains(b: Bytes, needle: Bytes) -> Bool = _
 @intrinsic("almide_rt_bytes_copy_from")
 fn copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
-/// Writes up to cap bytes to ptr; count, 0 if null.
-@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_copy_to_ptr")
-fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
-
-/// Address of the data as an Int; target-specific.
-@deprecated(since=15, use="ffi.address", note="write `ffi.to_int(ffi.address(b))`, which is 0 for an empty b")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_data_ptr")
-fn data_ptr(b: Bytes) -> Int = _
-
 /// True if b ends with suffix, or suffix is empty.
 @intrinsic("almide_rt_bytes_ends_with")
 fn ends_with(b: Bytes, suffix: Bytes) -> Bool = _
@@ -1034,12 +1009,6 @@ fn fill(mut b: Bytes, x: Int) -> Unit = _
 /// xs as bytes, low 8 bits each; -1 becomes 255.
 @intrinsic("almide_rt_bytes_from_list")
 fn from_list(xs: List[Int]) -> Bytes = _
-
-/// Copy of len bytes at ptr; empty if null or len <= 0.
-@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_from_raw_ptr")
-fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
 /// UTF-8 encoding of s.
 @intrinsic("almide_rt_bytes_from_string")
@@ -2165,6 +2134,12 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
 else list.len(bytes.split(b, needle)) - 1
+
+
+
+fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
+
+fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -2487,11 +2462,6 @@ fn bytes_from_string(s: String) -> Bytes = {
 }
 
 fn bytes_len(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
-
-
-
-
-fn bytes_data_ptr(b: Bytes) -> Int = prim.handle(b) + 12
 
 fn bytes_is_empty(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -4029,71 +3999,6 @@ fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int)
   else 0)
   else 0
 }
-"#;
-pub const SRC_BYTES_RAWPTR: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn bytes_as_ptr(b: Bytes) -> RawPtr = {
-  let h = prim.handle(b)
-  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = {
-  let h = prim.handle(b)
-  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dst + i, prim.load8(src + i))
-  __brp_copy(dst, src, n, i + 1)
-}
-
-
-
-fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
-  let src = prim.ptr_to_int(p)
-  if src == 0 or n <= 0 then prim.alloc_bytes(0)
-  else {
-    let out = prim.alloc_bytes(n)
-    let oh = prim.handle(out)
-    let _c = __brp_copy(oh + 12, src, n, 0)
-    out
-  }
-}
-
-fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
-  let dst = prim.ptr_to_int(ptr)
-  let h = prim.handle(b)
-  let len = if dst == 0 then 0 else prim.load32(h + 4)
-
-
-
-
-
-  let capped = if cap < 0 then len else cap
-  let n = if len < capped then len else capped
-  let _c = __brp_copy(dst, h + 12, n, 0)
-  n
-}
-
-
-@implements("ffi.to_int")
-fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)
 "#;
 pub const SRC_BYTES_SPLIT: &str = r#"
 
@@ -5727,25 +5632,110 @@ pub const SRC_FFI: &str = r#"
 
 
 
-/// Address of b's first byte; null if b is empty.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A view of memory: base, length, permission and owner (ADR-0031 D1). The
+/// view starts `off` bytes past `base`: 0 for every mint, the slice's offset
+/// for `slice`, so narrowing a region needs no address arithmetic.
+mod type Region = { owner: Bytes, base: Handle, off: Int, len: Int, writable: Bool, keep: () -> Unit }
+
+/// A read-only view of b; b lives as long as the view.
+@memory_unsafe
+fn region(b: Bytes) -> Region = {
+  let base = __address(b)
+  { owner: b, base: base, off: 0, len: bytes.len(b), writable: false, keep: () => () }
+}
+
+/// A fresh writable region of n zero bytes; err if n is negative.
+@memory_unsafe
+effect fn alloc(n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.alloc: negative length ${n}")
+  else {
+    let buf = bytes.zeros(n)
+    let base = __address(buf)
+    ok({ owner: buf, base: base, off: 0, len: n, writable: true, keep: () => () })
+  }
+
+/// The region's length in bytes.
+@memory_unsafe
+fn len(r: Region) -> Int = r.len
+
+/// True if write may change the region (ffi.alloc and writable foreign regions).
+@memory_unsafe
+fn is_writable(r: Region) -> Bool = r.writable
+
+/// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("ffi.read: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok(__load(r.base, r.off + off, n))
+
+/// Writes b at off; err if the region is read-only or b does not fit.
+@memory_unsafe
+effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
+  if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
+  else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else {
+    __store(r.base, r.off + off, b)
+    ok(())
+  }
+
+/// A copy of the whole region as Bytes.
+@memory_unsafe
+effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, r.off, r.len))
+
+/// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.slice: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok({ ...r, off: r.off + off, len: n, writable: false })
+
+/// `Region(<len> bytes)`: the base address differs per target and is never shown.
+mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
+
+
+
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
-fn address(b: Bytes) -> RawPtr = _
+local fn __address(b: Bytes) -> Handle = _
 
-/// The address as an Int; null is 0.
-@memory_unsafe
-@intrinsic("almide_rt_ffi_to_int")
-fn to_int(p: RawPtr) -> Int = _
 
-/// Copy of len bytes at ptr; empty if null or len <= 0.
-@memory_unsafe
-@intrinsic("almide_rt_ffi_read")
-effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
 
-/// Writes up to cap bytes of b to ptr; the count, 0 if null.
+
+
+
+
+
 @memory_unsafe
-@intrinsic("almide_rt_ffi_write")
-effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+local fn __export_owner(r: Region) -> Bytes =
+  if r.len == bytes.len(r.owner) then r.owner
+  else panic("ffi: an @export(wasm) fn returned a sub-region of ${r.len} bytes; return the whole region and pass the offset")
+
+
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_load")
+local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
+
+
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_store")
+local effect fn __store(base: Handle, off: Int, b: Bytes) -> Unit = _
 "#;
 pub const SRC_FFI_BRIDGE: &str = r#"
 
@@ -5755,14 +5745,45 @@ pub const SRC_FFI_BRIDGE: &str = r#"
 
 
 
-@implements("ffi.address")
-fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
 
-@implements("ffi.read")
-fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
 
-@implements("ffi.write")
-fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
+
+
+
+
+
+@implements("ffi.__address")
+fn ffi_address(b: Bytes) -> Handle = {
+  let h = prim.handle(b)
+  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
+
+fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __ffi_copy(dst, src, n, i + 1)
+}
+
+@implements("ffi.__load")
+fn ffi_load(base: Handle, off: Int, n: Int) -> Bytes = {
+  let src = prim.ptr_to_int(base)
+  if src == 0 or n <= 0 then prim.alloc_bytes(0)
+  else {
+    let out = prim.alloc_bytes(n)
+    let oh = prim.handle(out)
+    let _c = __ffi_copy(oh + 12, src + off, n, 0)
+    out
+  }
+}
+
+@implements("ffi.__store")
+fn ffi_store(base: Handle, off: Int, b: Bytes) -> Unit = {
+  let dst = prim.ptr_to_int(base)
+  let h = prim.handle(b)
+  let n = if dst == 0 then 0 else prim.load32(h + 4)
+  let _c = __ffi_copy(dst + off, h + 12, n, 0)
+  ()
+}
 "#;
 pub const SRC_FLOAT: &str = r#"
 
@@ -9824,15 +9845,21 @@ fn hex_decode(s: String) -> Result[Bytes, String] = {
   }
 }
 "#;
-pub const SRC_HTML: &str = r#"
+pub const SRC_HTML: &str = r##"
 
 
 
 
-mod type SafeHtml = String
 
 
-/// s with & < > " ' turned into HTML entities.
+import json
+
+mod type SafeHtml: Body = String
+
+
+
+
+/// s with & < > " ' turned into HTML entities; text context only.
 fn escape(s: String) -> SafeHtml = {
   let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(
     ">",
@@ -9863,7 +9890,132 @@ fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
 
 /// SafeHtml of the empty string.
 fn empty() -> SafeHtml = SafeHtml("")
-"#;
+
+
+
+
+
+fn __html_ascii(c: String) -> Bool = (string.to_codepoint(c) ?? 128) < 128
+
+
+
+fn __html_blank(c: String) -> Bool = (string.to_codepoint(c) ?? 0) <= 32
+
+
+
+
+fn __html_name_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "-" or c == "_" or c == ":" or c == ".")
+
+fn __html_name_ok(name: String) -> Bool = match list.first(string.to_list(name)) {
+  some(c) => __html_ascii(c) and string.is_alpha(c) and list.all(
+    string.to_list(name),
+    (x) => __html_name_char(x),
+  ),
+  none => false,
+}
+
+
+
+
+fn __html_url_attr_name(n: String) -> Bool = match n {
+  "href" => true,
+  "src" => true,
+  "action" => true,
+  "formaction" => true,
+  "srcset" => true,
+  "xlink:href" => true,
+  "poster" => true,
+  "cite" => true,
+  "data" => true,
+  "background" => true,
+  "ping" => true,
+  "manifest" => true,
+  "codebase" => true,
+  "longdesc" => true,
+  "usemap" => true,
+  "icon" => true,
+  _ => false,
+}
+
+fn __html_active_attr_name(n: String) -> Bool = string.starts_with(n, "on") or n == "style" or n == "srcdoc"
+
+
+
+fn __html_attr_value(v: String) -> String = to_string(escape(v))
+
+/// name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+fn attr(name: String, value: String) -> SafeHtml = {
+  let n = string.to_lower(name)
+  if not __html_name_ok(name) then panic("html.attr: `${name}` is not an attribute name")
+  else if __html_url_attr_name(n) then panic("html.attr: `${name}` takes a URL; use html.url_attr")
+  else if __html_active_attr_name(n) then panic("html.attr: `${name}` runs script or styles; no builder writes it")
+  else SafeHtml("${name}=\"${__html_attr_value(value)}\"")
+}
+
+fn __html_scheme_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == ".")
+
+
+
+
+
+
+
+fn __html_scheme(url: String) -> String? = {
+  let cs = string.to_list(url)
+  let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
+  let head = list.take(cs, i)
+  let colon = list.get(cs, i) == some(":")
+  if colon and not list.is_empty(head) and list.all(head, (c) => __html_scheme_char(c)) then some(string.to_lower(list.join(head, "")))
+  else if colon or list.any(head, (c) => __html_blank(c)) then some("")
+  else none
+}
+
+
+
+fn __html_blocked_url() -> String = "about:invalid#almide-blocked"
+
+/// name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+fn url_attr(name: String, url: String) -> SafeHtml = {
+  if not __html_name_ok(name) then panic("html.url_attr: `${name}` is not an attribute name")
+  else if __html_active_attr_name(string.to_lower(name)) then panic("html.url_attr: `${name}` runs script or styles; no builder writes it")
+  else {
+    let kept = match __html_scheme(url) {
+      none => url,
+      some(s) => match s {
+        "http" => url,
+        "https" => url,
+        "mailto" => url,
+        _ => __html_blocked_url(),
+      },
+    }
+    SafeHtml("${name}=\"${__html_attr_value(kept)}\"")
+  }
+}
+
+/// json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
+fn script_json(v: Value) -> SafeHtml = {
+  let s = json.stringify(v) |> string.replace("<", "\\u003c") |> string.replace(">", "\\u003e") |> string.replace(
+    "&",
+    "\\u0026",
+  ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
+  SafeHtml(s)
+}
+
+
+
+
+
+
+
+
+
+
+@media_owns("text/html", "application/xhtml+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
+fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
+
+fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)
+"##;
 pub const SRC_HTTP: &str = r#"
 
 
@@ -9899,30 +10051,77 @@ import url
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
-/// Reply with Content-Type text/plain.
-@intrinsic("almide_rt_http_response")
-fn response(status: Int, body: String) -> HttpResponse = _
 
 
 
 
-/// Reply with Content-Type application/json.
+
+
+
+
+
+/// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
+  status,
+  body.__self_to_text(),
+  ["Content-Type", body.__self_media_type()],
+)
+
+/// Reply with Content-Type application/json; body is JSON text.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
-  let flat = __flat(headers)
-  http.__with_headers(status, body, flat)
+/// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+@header_write(headers, owned="__http_response_body_headers")
+fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse = {
+  for h in headers {
+    __http_response_owned_refusal("http.with_headers", h.0)
+  }
+  http.__with_headers(
+    status,
+    body.__self_to_text(),
+    ["Content-Type", body.__self_media_type()] + __flat(headers),
+  )
 }
+
+/// resp with its body replaced by body and its Content-Type by body's type.
+fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http_response_put_header(
+  http.__http_response_put_body(resp, body.__self_to_text()),
+  "Content-Type",
+  body.__self_media_type(),
+)
+
+/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+@literal_media(media_type)
+fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
+  media_type: media_type,
+  bytes: body,
+}
+
+/// A body of a declared media type, built only by `http.typed`.
+mod type TypedBody: Body = { media_type: String, bytes: Bytes }
+
+fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
+
+fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
-fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
-/// 302 with Location url and empty body.
-@intrinsic("almide_rt_http_redirect")
-fn redirect(url: String) -> HttpResponse = _
+
+
+
+@intrinsic("almide_rt_http___http_response_flat")
+@borrow_ref(flat)
+local fn __http_response_flat(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+
+/// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
+fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
+  302,
+  "",
+  ["Location", url, "Content-Type", string.__string_media_type("")],
+)
 
 
 /// resp with code set; not range-checked.
@@ -9951,16 +10150,16 @@ fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 /// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
-/// m with header name set, any case: the first match replaced in place, else appended.
+/// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
 fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
   name,
   value,
 )
 
-/// m with its body replaced.
+/// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8.
+/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -9986,18 +10185,54 @@ fn __http_response_body(m: HttpResponse) -> String = _
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
 
+@header_write(name, value, owned="__http_response_body_headers")
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = {
+  __http_response_owned_refusal("http.set_header", name)
+  http.__http_response_put_header(m, name, value)
+}
+
+
+
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = with_body(m, body)
+
+
 @intrinsic("almide_http_set_header")
 @consume(m)
-fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+local fn __http_response_put_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
 
 @intrinsic("almide_http_set_body")
 @consume(m)
-fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
-fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
-  m,
-  bytes.to_string_lossy(body),
+
+local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
+
+
+
+local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
+  string.to_list(a),
+  string.to_list(b),
+  0,
 )
+
+local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
+  if i >= list.len(a) then true
+  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
+  else __http_response_ci_at(a, b, i + 1)
+
+local fn __http_response_fold(c: String) -> String = match string.index_of(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+) {
+  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
+  none => c,
+}
+
+local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
+  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  else ()
+
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
 
 @intrinsic("almide_http_req_header")
@@ -10473,7 +10708,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
       )
       else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__http_response_set_body(res, "") else res
+        if via_get then http.__http_response_put_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -10856,17 +11091,15 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
-fn http_response(status: Int, body: String) -> List[String] = {
-  let st = int.to_string(status)
-  [st, body, "Content-Type", "text/plain"]
-}
+
+
+@implements("http.__http_response_flat")
+fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
 
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
   [st, body, "Content-Type", "application/json"]
 }
-
-fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 
 
 
@@ -11040,13 +11273,12 @@ fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 
 
+
 fn __hs_quote_char(c: String) -> String = match c {
   "\\" => "\\\\",
   "\"" => "\\\"",
-  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) or __hs_bidi(__hs_cp(c)) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+  _ => if string.__err_text(c) != c then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
-
-fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
 
 fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
@@ -11537,9 +11769,8 @@ local fn shift_count(n: Int) -> Int = {
 fn to_string_radix(x: Int, radix: Int) -> String = {
   check_radix(radix)
 
-  let digits = radix_digits(if x < 0 then x else 0 - x, radix, [])
-  bytes.to_string_lossy(bytes.from_list(if x < 0 then [45] + digits
-  else digits))
+  let digits = radix_digits(if x < 0 then x else 0 - x, radix, "")
+  if x < 0 then "-" + digits else digits
 }
 
 /// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
@@ -11547,12 +11778,14 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)
-  let bytes = bytes.to_list(bytes.from_string(t))
-  match bytes {
+
+
+  let codes = string.to_list(t) |> list.map((c) => string.to_codepoint(c) ?? 0)
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
     [43, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, false),
-    _ => accumulate_negative(strip_radix_prefix(bytes, radix), radix, 0, false),
+    _ => accumulate_negative(strip_radix_prefix(codes, radix), radix, 0, false),
   }
 }
 
@@ -11560,14 +11793,20 @@ local fn check_radix(radix: Int) -> Unit =
   if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
 
 
-local fn radix_digits(n: Int, radix: Int, acc: List[Int]) -> List[Int] = {
+
+
+local fn radix_digits(n: Int, radix: Int, acc: String) -> String = {
   let q = n / radix
-  let digits = [digit_byte(0 - n % radix)] + acc
+  let digits = digit_char(0 - n % radix) + acc
   if q == 0 then digits
   else radix_digits(q, radix, digits)
 }
 
-local fn digit_byte(d: Int) -> Int = if d < 10 then 48 + d else 87 + d
+local fn digit_char(d: Int) -> String = string.slice(
+  "0123456789abcdefghijklmnopqrstuvwxyz",
+  d,
+  d + 1,
+)
 
 
 local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
@@ -11576,10 +11815,10 @@ else if b >= 65 and b <= 90 then b - 55
 else 99
 
 
-local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+local fn strip_radix_prefix(codes: List[Int], radix: Int) -> List[Int] = match codes {
   [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
-  else bytes,
-  _ => bytes,
+  else codes,
+  _ => codes,
 }
 
 local fn prefix_radix(b: Int) -> Int = match b {
@@ -13996,12 +14235,22 @@ fn value_path_index(p: List[String], i: Int) -> List[String] =
 @implements("value.get_path")
 fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
 
+
+
+
+
 @implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
-  let steps = list.len(p)
-  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(v, p, 0, x))
-}
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = value.__set_path_steps(
+  v,
+  __jpath_steps(p),
+  x,
+)
+
+
+fn __jpath_steps(p: List[String]) -> List[(Bool, String, Int)] = p |> list.map((seg) => match string.take(seg, 1) {
+  "f" => (true, string.drop(seg, 1), 0),
+  _ => (false, "", int.parse(string.drop(seg, 1)) ?? 0),
+})
 
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
@@ -14011,118 +14260,6 @@ fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p,
 
 
 
-
-
-
-
-
-
-
-
-
-
-fn __jp_empty_obj() -> Value = {
-  let v = prim.alloc_value(0)
-  let h = prim.handle(v)
-  prim.store32(h + 4, 6)
-  prim.store32(h + 8, 0)
-  v
-}
-
-
-
-fn __jp_has(j: Value, key: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let ek: String = prim.load_handle(prim.handle(j) + 12 + (2 * i) * 8)
-  if ek == key then true
-  else __jp_has(j, key, i + 1, n)
-}
-
-
-
-
-
-
-
-
-
-fn __jpath_max_depth() -> Int = 1000
-
-
-fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
-
-
-
-fn __json_nests_past(v: Value, budget: Int) -> Bool = {
-  let tag = prim.load32(prim.handle(v) + 4)
-  if tag != 5 and tag != 6 then false
-  else if budget == 0 then true
-  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
-  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
-}
-
-
-
-fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
-else {
-  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
-  if __json_nests_past(ev, budget) then true
-  else __jnp_items(v, budget, i + 1, n, stride)
-}
-
-fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
-  if k >= list.len(path) then nv
-  else {
-    let seg = list.get(path, k) ?? ""
-    let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
-    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
-  }
-
-fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 6 then {
-    let n = prim.load32(prim.handle(j) + 8) / 2
-    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
-    if __jp_has(j, key, 0, n) then value.object(pairs)
-    else {
-      let seed = __jp_empty_obj()
-      let sv = json_path_set_go(seed, path, k + 1, nv)
-      value.object(pairs + [(key, sv)])
-    }
-  } else {
-    let seed = __jp_empty_obj()
-    let sv = json_path_set_go(seed, path, k + 1, nv)
-    value.object([(key, sv)])
-  }
-
-fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(j)
-    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    if ek == key then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
-    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
-  }
-
-fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 5 then {
-    let n = prim.load32(prim.handle(j) + 8)
-    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
-    else j
-  } else j
-
-fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
-  if i >= n then acc
-  else {
-    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-    if i == tgt then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
-    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
-  }
 
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
@@ -16315,7 +16452,10 @@ pub const SRC_LIST_FOLD_FLOAT: &str = r#"
 
 
 
-fn __ftotal_ff(b: Int) -> Int = {
+
+
+fn __ftotal_ff(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
@@ -18714,7 +18854,10 @@ pub const SRC_LIST_SORT_FLOAT: &str = r#"
 
 
 
-fn __ftotal_sf(b: Int) -> Int = {
+
+
+fn __ftotal_sf(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
@@ -18997,7 +19140,10 @@ pub const SRC_LIST_SORTBY_FLOAT: &str = r#"
 
 
 
-fn __ftotal_sb(b: Int) -> Int = {
+
+
+fn __ftotal_sb(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
@@ -30007,11 +30153,13 @@ fn path_exists(path: String) -> Bool = _
 
 
 
+
+
 @intrinsic("almide_rt_prim_ptr_to_int")
-fn ptr_to_int(p: RawPtr) -> Int = _
+fn ptr_to_int(p: Handle) -> Int = _
 
 @intrinsic("almide_rt_prim_int_to_ptr")
-fn int_to_ptr(a: Int) -> RawPtr = _
+fn int_to_ptr(a: Int) -> Handle = _
 
 
 
@@ -36558,6 +36706,12 @@ fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 @intrinsic("almide_rt_string___err_text")
 fn __err_text(s: String) -> String = _
+
+
+
+fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
+
+fn __string_to_text(s: String) -> String = s
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -36890,7 +37044,32 @@ pub const SRC_STRING_ERR_TEXT: &str = r#"
 
 
 
-fn __et_escaped(n: Int) -> Bool = n <= 31 or (n >= 127 and n <= 159) or n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
+
+
+
+fn __et_in(n: Int, lo: Int, hi: Int) -> Bool = n >= lo and n <= hi
+
+fn __et_escaped(n: Int) -> Bool = __et_in(n, 0, 31) or __et_in(n, 127, 159) or __et_in(n, 173, 173) or __et_in(
+  n,
+  1536,
+  1541,
+) or __et_in(n, 1564, 1564) or __et_in(n, 1757, 1757) or __et_in(n, 1807, 1807) or __et_in(
+  n,
+  2192,
+  2193,
+) or __et_in(n, 2274, 2274) or __et_in(n, 6158, 6158) or __et_in(n, 8203, 8207) or __et_in(
+  n,
+  8232,
+  8238,
+) or __et_in(n, 8288, 8292) or __et_in(n, 8294, 8303) or __et_in(n, 65279, 65279) or __et_in(
+  n,
+  65529,
+  65531,
+) or __et_in(n, 69821, 69821) or __et_in(n, 69837, 69837) or __et_in(n, 78896, 78911) or __et_in(
+  n,
+  113824,
+  113827,
+) or __et_in(n, 119155, 119162) or __et_in(n, 917504, 917631)
 
 fn __et_char(c: String, n: Int) -> String = match n {
   10 => "\\n",
@@ -36901,7 +37080,7 @@ fn __et_char(c: String, n: Int) -> String = match n {
 }
 
 @implements("string.__err_text")
-fn string_err_text(s: String) -> String =
+fn err_text_escape(s: String) -> String =
   if string.to_list(s) |> list.any((c) => __et_escaped(string.to_codepoint(c) ?? 0)) then string.to_list(s) |> list.map((c) => __et_char(c, string.to_codepoint(c) ?? 0)) |> list.join("")
   else s
 "#;
@@ -40792,7 +40971,11 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 
 
 
+
+
+
 @intrinsic("almide_rt_value_set_path_steps")
+@reuse(v)
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 
@@ -40891,6 +41074,12 @@ local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> V
     err(_) => v,
   },
 }
+
+
+
+fn __value_media_type(v: Value) -> String = "application/json"
+
+fn __value_to_text(v: Value) -> String = __stringify(v)
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 
@@ -43630,7 +43819,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "bytes_cursor" => Some(SRC_BYTES_CURSOR),
         "bytes_f16" => Some(SRC_BYTES_F16),
         "bytes_mutate" => Some(SRC_BYTES_MUTATE),
-        "bytes_rawptr" => Some(SRC_BYTES_RAWPTR),
         "bytes_split" => Some(SRC_BYTES_SPLIT),
         "bytes_string" => Some(SRC_BYTES_STRING),
         "clock_now" => Some(SRC_CLOCK_NOW),

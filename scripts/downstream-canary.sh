@@ -54,6 +54,7 @@ emit() { printf '%s\n' "$(IFS=$'\t'; echo "$*")" >> "$result"; }
 fetched=""
 for i in 1 2 3; do
   rm -rf "$work/src"
+  # supply: head-tracked — the project is the subject under test at its default-branch HEAD (#2839); dispatch-only, read-only token, no secrets in the leg
   if git clone -q --filter=blob:none "https://github.com/$repo" "$work/src" 2>"$out/clone.log"; then
     if [ -z "$ref" ] || git -C "$work/src" checkout -q "$ref" 2>>"$out/clone.log"; then
       fetched=yes; break

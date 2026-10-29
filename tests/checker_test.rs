@@ -1241,3 +1241,42 @@ fn a_builtin_name_cannot_be_declared_at_top_level() {
         );
     }
 }
+
+// #4283: a fallible call as a builtin's argument is E041 in every builtin
+// and in both contexts where `!` is legal (an effect fn body, a test block).
+// `assert` had no slot type, so `assert(here())` in a test passed check and
+// died at rustc (E0600). A Result compared against a Result peer in
+// `assert_eq` stays a legitimate comparison.
+#[test]
+fn check_builtin_argument_fallible_call_is_e041() {
+    let prelude = "effect fn b() -> Bool = int.parse(\"1\")! == 1\neffect fn s() -> String = int.to_string(int.parse(\"1\")!)\neffect fn n() -> Int = int.parse(\"1\")!\n";
+    let sites = [
+        "assert(b())",
+        "assert(true, s())",
+        "assert_eq(n(), 1)",
+        "assert_ne(1, n())",
+        "println(s())",
+        "eprintln(s())",
+    ];
+    for site in sites {
+        for wrap in [
+            format!("test \"t\" {{\n  {site}\n}}\n"),
+            format!("effect fn main() -> Unit = {{\n  {site}\n}}\n"),
+        ] {
+            let src = format!("{prelude}{wrap}");
+            let errs = errors(&src);
+            assert!(
+                errs.iter().any(|e| e.contains("implicit propagation")),
+                "expected E041 for `{site}`, got: {errs:?}\n{src}"
+            );
+            let fixed = src.replace("b()", "b()!").replace("s()", "s()!").replace("n()", "n()!");
+            let fixed = fixed.replace("fn b()!", "fn b()").replace("fn s()!", "fn s()").replace("fn n()!", "fn n()");
+            has_no_errors(&fixed);
+        }
+    }
+    // A Result peer keeps `assert_eq` a comparison of Results.
+    has_no_errors("test \"t\" {\n  assert_eq(int.parse(\"3\"), ok(3))\n}\n");
+    // A non-Bool condition is a type error, not a rustc failure.
+    let errs = errors("test \"t\" {\n  assert(1)\n}\n");
+    assert!(!errs.is_empty(), "assert(1) must not pass check");
+}

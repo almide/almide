@@ -13,9 +13,8 @@
 //! keyed Map; the interp's prim bodies: a sorted index). Native `set_path`
 //! updates a document at its last use in place (`@consume(v, x)` on the
 //! `almide_rt_value_set_path_steps` intrinsic): only the path is walked, so the array
-//! fold is linear; the object fold still compares each new key against the
-//! fields so far (an Object is a pair vector with no index), but no longer
-//! copies them.
+//! fold is linear; the object fold finds each key through the Object's key
+//! index (#4297), so it is linear too.
 //!
 //! The wasm leg is pinned by wasmtime's FUEL at n and 2n (the 2n budget is
 //! twice the n budget, so a super-linear body fails the larger cell first):
@@ -131,6 +130,15 @@ effect fn main() -> Unit = {{
     )
 }
 
+/// The object fold spelled with a fallback instead of `!` (#4315): the same
+/// answer, the same walk.
+fn set_obj_or_src(n: usize) -> String {
+    set_obj_src(n).replace(
+        "value.int(i))!\n",
+        "value.int(i)) ?? value.null()\n",
+    )
+}
+
 fn set_obj_want(n: usize) -> String {
     format!("{n} k0 k{} {{\"k0\":\"again\",\"k1\":1}}\n", n - 1)
 }
@@ -200,6 +208,7 @@ const MERGE_SELF: Cell = ("value.merge (v, v)", merge_self_src, merge_self_want)
 const PICK_OMIT: Cell = ("value.pick / value.omit", pick_src, pick_want);
 const SET_OBJ: Cell = ("value.set_path (object fold)", set_obj_src, set_obj_want);
 const SET_ARR: Cell = ("value.set_path (array fold)", set_arr_src, set_arr_want);
+const SET_OBJ_OR: Cell = ("value.set_path (object fold, `?? fallback`)", set_obj_or_src, set_obj_want);
 
 /// The wasm cells at n and 2n, each under its budget, each equal to native.
 fn wasm_doubling((name, src, want): Cell, n: usize, fuel_n: u64) {
@@ -233,23 +242,162 @@ fn value_pick_and_omit_are_linear_on_wasm() {
     wasm_doubling(PICK_OMIT, 40_000, 750_000_000);
 }
 
+/// #4315: the wasm `set_path` rebuilt every Object it passed (pairs copied,
+/// mapped, folded again by `value.object`), so the object fold was O(n²) —
+/// 4.04 s at 8,000 keys, four times per doubling — and the array fold
+/// super-linear. The structural leg now walks the path in place where the
+/// document is the op's alone, and finds a key through the Object's index
+/// (crates/almide-wasm/src/value_set_path.rs). Budgets: about three times
+/// what the in-place walk spends at n (measured, 20,000: 54M for the object
+/// fold, 20M for the array fold; 114M / 41M at 40,000). The copying body
+/// spent 45G on the object fold at 20,000.
+const OBJ_FOLD_FUEL: u64 = 165_000_000;
+const ARR_FOLD_FUEL: u64 = 60_000_000;
+
+#[test]
+fn value_set_path_object_fold_is_linear_on_wasm() {
+    wasm_doubling(SET_OBJ, 20_000, OBJ_FOLD_FUEL);
+}
+
+#[test]
+fn value_set_path_array_fold_is_linear_on_wasm() {
+    wasm_doubling(SET_ARR, 20_000, ARR_FOLD_FUEL);
+}
+
+/// The fold step is linear whichever extraction it is spelled with: `??`
+/// leaves its carrier unparked as `!` does (arg_temps.rs `fold_step_call`).
+#[test]
+fn value_set_path_fallback_fold_is_linear_on_wasm() {
+    let src = set_obj_or_src(4);
+    assert!(src.contains("?? value.null()") && !src.contains(")!\n  }"), "the fallback spelling:\n{src}");
+    wasm_doubling(SET_OBJ_OR, 20_000, OBJ_FOLD_FUEL);
+}
+
 #[test]
 fn native_bodies_stay_fast_at_the_issue_sizes() {
     let dir = tempfile::tempdir().expect("scratch");
     // Old native times at these sizes: merge 13.7 s, merge-self ~20 s at
     // 160,000 (4.6 s at 80,000), pick/omit 11.8 s, the object fold 18 s, the
     // array fold ~14 s at 80,000 (3.4 s at 40,000).
-    for ((name, src, want), size) in [
-        (MERGE, 80_000),
-        (MERGE_SELF, 160_000),
-        (PICK_OMIT, 80_000),
-        (SET_OBJ, 40_000),
-        (SET_ARR, 80_000),
+    // `growth` is the full/quarter bound: 8 for a linear body (linear ~4x,
+    // quadratic ~16x). The object fold had 32 while set_path found its key by
+    // a scan of the pairs — n^2/2 key compares, 14.6x at 40,000 against
+    // 10,000 (#4289); the Object's key index makes it linear (#4297).
+    for ((name, src, want), size, growth) in [
+        (MERGE, 80_000, 8),
+        (MERGE_SELF, 160_000, 8),
+        (PICK_OMIT, 80_000, 8),
+        (SET_OBJ, 40_000, 8),
+        (SET_ARR, 80_000, 8),
     ] {
-        let (got, took) = native(dir.path(), &src(size));
-        assert_eq!(got, want(size), "{name} native answer");
-        assert!(took < Duration::from_secs(8), "{name} took {took:?} on native at {size} — quadratic again?");
+        // The bound is RELATIVE, the way set_map_wasm_linear_test and
+        // list_unique_wasm_linear_test do it: the same cell at a quarter of the
+        // size, built once and timed interleaved on the same runner. Linear
+        // work grows ~4x, quadratic ~16x. An absolute 8 s bound failed CI at
+        // 8.5 s (the object fold, develop and #4295 alike) with the bodies
+        // unchanged — a loaded runner, not a regression (#4289).
+        let quarter = size / 4;
+        let full_bin = built(dir.path(), "full", &src(size));
+        let small_bin = built(dir.path(), "quarter", &src(quarter));
+        let (mut full, mut small) = (Duration::MAX, Duration::MAX);
+        for _ in 0..2 {
+            let (got, took) = run_bin(&small_bin);
+            assert_eq!(got, want(quarter), "{name} native answer at {quarter}");
+            small = small.min(took);
+            let (got, took) = run_bin(&full_bin);
+            assert_eq!(got, want(size), "{name} native answer at {size}");
+            full = full.min(took);
+        }
+        assert!(
+            full < small * growth,
+            "{name} took {full:?} on native at {size} against {small:?} at {quarter} — quadratic again?"
+        );
     }
+}
+
+/// The key index (#4297) changes no answer: objects on both sides of its
+/// 16-entry threshold — set_path inserts, overwrites and nested steps, a
+/// pair list repeating keys, merge, pick, a parsed document repeating a key
+/// past the threshold, field lookups — print the same bytes natively and on
+/// wasm, and in insertion order (C-401).
+#[test]
+fn indexed_objects_answer_like_the_pair_scan_on_both_legs() {
+    let src = r#"import json
+
+effect fn fold(n: Int) -> Value = {
+  var acc = value.object([])
+  for i in 0..<n {
+    acc = value.set_path(acc, value.key(value.root(), "k${(i * 7) % n}"), value.int(i))!
+  }
+  acc = value.set_path(acc, value.key(value.root(), "k3"), value.string("again"))!
+  acc = value.set_path(acc, value.key(value.key(value.root(), "k5"), "in"), value.int(5))!
+  acc = value.set_path(acc, value.key(value.root(), "z"), value.null())!
+  acc
+}
+
+fn dups(n: Int) -> Value =
+  value.object(list.range(0, n) |> list.map((i) => ("d${i % 5}", value.int(i))))
+
+effect fn main() -> Unit = {
+  for n in [3, 15, 16, 17, 40] {
+    let v = fold(n)!
+    println(json.stringify(v))
+    println("${json.stringify(value.get(v, "k3") ?? value.null())} ${json.stringify(value.get(v, "k${n - 1}") ?? value.null())} ${json.stringify(value.get(v, "nope") ?? value.null())}")
+    let d = dups(n)
+    println(json.stringify(d))
+    let m = value.merge(v, value.object([("k0", value.bool(true)), ("new", value.int(1)), ("k1", value.int(9))]))
+    println(json.stringify(value.merge(m, d)))
+    println(json.stringify(value.pick(m, ["new", "k1", "k0", "zz"])))
+    let text = json.stringify(v)
+    let back = json.parse(text)!
+    println(json.stringify(value.set_path(back, value.key(value.root(), "k1"), value.int(-1))!))
+    let rep = "${string.drop_end(text, 1)},\"k1\":0}"
+    match json.parse(rep) {
+      ok(_) => println("accepted"),
+      err(e) => println(e),
+    }
+  }
+}
+"#;
+    let dir = tempfile::tempdir().expect("scratch");
+    let (native_out, _) = native(dir.path(), src);
+    assert_eq!(native_out.lines().count(), 35, "native answer:\n{native_out}");
+    assert_eq!(
+        native_out.lines().next(),
+        Some(r#"{"k0":0,"k1":1,"k2":2,"k3":"again","k5":{"in":5},"z":null}"#),
+        "native answer:\n{native_out}"
+    );
+    assert!(
+        native_out.lines().nth(28).is_some_and(|l| l.starts_with(r#"{"k0":0,"k7":1,"k14":2,"k21":3,"#)),
+        "the 40-key fold lost insertion order:\n{native_out}"
+    );
+    assert!(native_out.contains("json: duplicate key"), "a repeated key past 16 was accepted:\n{native_out}");
+    if !has_wasmtime() {
+        return;
+    }
+    match stock_fueled(dir.path(), src, 50_000_000_000) {
+        Ok(got) => assert_eq!(got, native_out, "wasm differs from native"),
+        Err(e) => panic!("wasm run failed: {e}"),
+    }
+}
+
+/// Build `src` natively to `<dir>/<stem>.bin`.
+fn built(dir: &Path, stem: &str, src: &str) -> std::path::PathBuf {
+    let file = format!("{stem}.almd");
+    let bin = format!("{stem}.bin");
+    std::fs::write(dir.join(&file), src).expect("write");
+    let b = almide(dir, &["build", &file, "-o", &bin]);
+    assert!(b.status.success(), "native build failed:\n{}", String::from_utf8_lossy(&b.stderr));
+    dir.join(bin)
+}
+
+/// Run a built binary: its stdout and wall time.
+fn run_bin(bin: &Path) -> (String, Duration) {
+    let t = Instant::now();
+    let o = Command::new(bin).output().expect("spawn native");
+    let took = t.elapsed();
+    assert!(o.status.success(), "native run failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    (String::from_utf8(o.stdout).expect("utf8"), took)
 }
 
 /// The interp runs the self-host prim bodies (stdlib/value_core.almd

@@ -689,6 +689,30 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
         return Ok(());
     }
     visited.insert(visit_key);
+    // ADR-0030: the dependency graph a manifest can ask for is bounded
+    // (`dependency_count`, `dependency_depth`), before anything is fetched.
+    {
+        use almide_base::budget::{self, BudgetId};
+        let (count, depth) = (visited.len() as u64, chain.len() as u64);
+        budget::observe(BudgetId::DependencyCount, count);
+        budget::observe(BudgetId::DependencyDepth, depth);
+        if count > budget::limit(BudgetId::DependencyCount) {
+            return Err(format!(
+                "error: too many dependencies ({count}, max {}): the dependency graph reached `{}` through {}\n  \
+                 hint: a real project needs far fewer; a manifest that asks for more is refused before it is fetched \
+                 (`--budget dependency_count=N` on the command line raises the budget)",
+                budget::limit(BudgetId::DependencyCount), dep.name, chain.join(" → "),
+            ));
+        }
+        if depth > budget::limit(BudgetId::DependencyDepth) {
+            return Err(format!(
+                "error: dependency chain too deep ({depth}, max {}): {}\n  \
+                 hint: a manifest that nests dependencies this deep is refused before it is fetched \
+                 (`--budget dependency_depth=N` on the command line raises the budget)",
+                budget::limit(BudgetId::DependencyDepth), chain.join(" → "),
+            ));
+        }
+    }
 
     // Detect different major versions of the same package (diamond with version split)
     if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
@@ -758,10 +782,12 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
                 existing.version = version_str;
                 existing.source_dir = source_dir;
                 existing.package_dir = path;
+                existing.source = dep.git.clone();
             }
         }
         None => fetched.push(FetchedDep {
             pkg_id: actual_pkg_id,
+            source: dep.git.clone(),
             version: version_str,
             source_dir,
             package_dir: path,

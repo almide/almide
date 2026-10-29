@@ -1,0 +1,9 @@
+// A spread copies the base's fields: `{ ...s }` of a `Secret` outside the
+// `secret` module is refused, with or without an override.
+import secret
+
+fn main() -> Unit = {
+  let s = secret.new("pw")
+  let copy = s
+  println("${copy}")
+}

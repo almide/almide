@@ -378,6 +378,22 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
+Your own type can meet the built-in handle and message protocols the same
+way, with plain method names (never a `__` prefix):
+
+| Protocol | Methods your type writes |
+|---|---|
+| `Read` | `effect fn T.read(self, max: Int) -> Result[Bytes, String]` |
+| `Write` | `effect fn T.write(self, data: Bytes) -> Result[Unit, String]` |
+| `Close` | `effect fn T.close(self) -> Result[Unit, String]` |
+| `HttpMessage` | `header`, `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`, `set_body_bytes` |
+| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_text(self) -> String` |
+
+`io.read` / `io.write` / `io.close`, `http.header` / `http.body` and
+`http.response` then take your type. A `Body` whose media type runs script
+(HTML, SVG, XML) also declares `@media_owns(...)` on `media_type`, and a
+dependency owning one needs the application's `[trust] media` grant (E118).
+
 The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration. A mutating receiver is `mut self` (sugar for `mut self: Self`).
 
 ### Generic protocols (explicit conformance)
@@ -609,9 +625,11 @@ m["key"] = value           // index write (var only)
 Numbers, `Bool` and `String` print their value; a `List`, `Map`, `Set`,
 `Option`, `Result`, tuple, record or variant prints its Almide-literal form
 (`[1, 2]`, `["a": 1]`, `some(3)`, `P { n: 1 }`). A value with no string form —
-`Bytes`, `Unit`, `Matrix`, a raw pointer, a function value, or a container
+`Bytes`, `Unit`, `Matrix`, a Handle, a function value, or a container
 holding one — is [E089](diagnostics/E089.md): interpolate what you mean
-(`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`).
+(`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`). A type that
+declares `fn T.repr` prints through it whatever it holds, so a record with a
+function field interpolates once it declares one.
 
 ### String escapes
 ```
@@ -1120,6 +1138,32 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 exactly `@skip`, `@skip_decode` (and WGSL's `@builtin`/`@location`); serde- or
 pydantic-style spellings (`@serde(skip)`, `@json_ignore`, `@redact`) are the
 error E053, never silently ignored.
+
+**Rule 6 — a response's Content-Type is its body's type.** `http.response(status, body)`
+takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
+`application/octet-stream`, a `Value` `application/json`, `html.*` builds
+`text/html`. Build HTML with `html.escape` (text),
+`html.attr` / `html.url_attr` (attributes) and `html.script_json` (data in
+`<script>`), and `html.raw(s)` only for trusted markup. Any other media type is
+`http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
+computed one, or for HTML / XML / SVG: SVG comes from a package such as
+almide/svg, which the application grants in `almide.toml` with `[trust]
+media = { "almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
+`set_header` / `with_headers` refuse it (E116), and `set_body` /
+`http.with_body(resp, body)` replace the body and its type together. A
+fetched response keeps the type it arrived with:
+
+```almide check
+import html
+import http
+
+fn greet(req: HttpRequest) -> HttpResponse = {
+  let name = http.param(req, "name") ?? "guest"
+  http.response(200, html.escape("Hello, ${name}"))
+}
+
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Rows", "1")])
+```
 
 Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
 types, and any nesting of `Option`/`List` over those (`List[Option[Int]]`

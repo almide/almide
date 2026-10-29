@@ -7,7 +7,10 @@ import http
 // semantic dimension (#419 class).
 test "http.response unit=status-code" {
   let r = http.response(200, "hi")
-  assert_eq("${http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")}", "hi text/plain")
+  assert_eq(
+    "${http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")}",
+    "hi text/plain; charset=utf-8",
+  )
 }
 
 test "http.json unit=status-code" {
@@ -27,7 +30,7 @@ test "http.set_status unit=status-code" {
   let r = http.set_status(http.response(200, "sb"), 404)
   assert_eq(
     "${http.body(r) + " " + (http.header(r, "Content-Type") ?? "none") + " " + int.to_string(http.status(r))}",
-    "sb text/plain 404",
+    "sb text/plain; charset=utf-8 404",
   )
 }
 

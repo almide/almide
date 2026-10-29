@@ -23,6 +23,7 @@
 use std::collections::HashSet;
 use almide_ir::*;
 use almide_ir::annotations::CodegenAnnotations;
+use almide_lang::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -174,6 +175,19 @@ impl Cx<'_> {
                 steps: steps.into_iter().map(|s| s.map_exprs(&mut |c| self.lower(c, false))).collect(),
                 collector: collector.map_exprs(&mut |c| self.lower(c, false)),
             },
+            // A loop over a list head iterates a borrow of it (`.iter()`), unless
+            // the loop consumes its binder (`consumed_loop_vars`: `.into_iter()`)
+            // — the walker's two spellings of a list head (#4321).
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                let borrowed = matches!(&iterable.ty, Ty::Applied(TypeConstructorId::List, _))
+                    && !self.ann.consumed_loop_vars.contains(&var);
+                IrExprKind::ForIn {
+                    var,
+                    var_tuple,
+                    iterable: Box::new(self.lower(*iterable, borrowed)),
+                    body: body.into_iter().map(|s| s.map_exprs(&mut |c| self.lower(c, false))).collect(),
+                }
+            }
             IrExprKind::Match { subject, arms } => {
                 // A match MOVES its subject when an arm binds out of it; a
                 // binder the arms still read keeps the place (a by-value

@@ -8,7 +8,7 @@
 #[test]
 fn result_family_is_a_total_function_of_the_type() {
     use crate::lower::{result_family, ResultFamily};
-    let res = |ok: Ty, err: Ty| Ty::Applied(TypeConstructorId::Result, vec![ok, err]);
+    let res = |ok: Ty, err: Ty| Ty::Applied(TypeConstructorId::Result, vec![ok, err].into());
     // The one historical COLLISION type: Result[Unit, String] had two physical
     // layouts (ctor len-as-tag vs prim cap-as-tag) until Phase 1 unified the
     // ctor blocks onto the prim bytes. Its family is HeapOk (tag @16).
@@ -16,11 +16,11 @@ fn result_family_is_a_total_function_of_the_type() {
     // Heap-Ok classes — cap-as-tag: both arms own heap.
     assert_eq!(result_family(&res(Ty::String, Ty::String)), ResultFamily::HeapOk);
     assert_eq!(
-        result_family(&res(Ty::Applied(TypeConstructorId::List, vec![Ty::Int]), Ty::String)),
+        result_family(&res(Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into()), Ty::String)),
         ResultFamily::HeapOk
     );
     assert_eq!(
-        result_family(&res(Ty::Applied(TypeConstructorId::List, vec![Ty::String]), Ty::String)),
+        result_family(&res(Ty::Applied(TypeConstructorId::List, vec![Ty::String].into()), Ty::String)),
         ResultFamily::HeapOk
     );
     // Scalar classes — len-as-tag: scalar Ok payload (the int.parse /
@@ -42,7 +42,7 @@ fn one_mapper_name_covers_all_nine_pairings_and_the_type_splits_them() {
     // rows this bug class once grew (keyed on names no classify site ever
     // sees) were dead code by construction.
     assert!(is_self_host_materialized_result_fn("fan", "any_map"));
-    let res = |ok: Ty| Ty::Applied(TypeConstructorId::Result, vec![ok, Ty::String]);
+    let res = |ok: Ty| Ty::Applied(TypeConstructorId::Result, vec![ok, Ty::String].into());
     // Scalar-output pairings (ii/si/if/fi/ff/sf) — len-as-tag.
     assert_eq!(result_family(&res(Ty::Int)), ResultFamily::Scalar);
     assert_eq!(result_family(&res(Ty::Float)), ResultFamily::Scalar);
@@ -126,6 +126,6 @@ fn caseless_type_names_spell_distinct_helper_idents() {
     assert_ne!(sanitize_ty_ident("色"), sanitize_ty_ident("形"));
     assert_eq!(sanitize_ty_ident("varlib.Pigment"), "varlib_Pigment");
     assert!(sanitize_ty_ident("住所").chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
-    let named = |n: &str| Ty::Named(almide_base::intern::sym(n), vec![]);
+    let named = |n: &str| Ty::Named(almide_base::intern::sym(n), Default::default());
     assert_ne!(repr_inst_ident("R", &[named("住所")]), repr_inst_ident("R", &[named("場所")]));
 }

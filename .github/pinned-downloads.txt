@@ -1,0 +1,32 @@
+# Pinned downloads (security row 16): every binary or archive CI fetches by URL.
+#
+# One line per asset: `<sha256>  <url>`. scripts/fetch-pinned.sh reads this file,
+# refuses a URL that is not listed here, and aborts the step when the bytes it
+# got (downloaded, or restored from actions/cache) hash to anything else.
+# scripts/check-action-pins.sh refuses a CI download that bypasses it.
+#
+# Bumping a version = add the new line (digest from the exact release asset:
+# `curl -fsSL -o f <url> && shasum -a 256 f`) in the same commit that changes
+# the version, and drop the old line once nothing names it.
+c71f7e0d30a92e418f0d17db7c6d8f6664c1ad764340a1278678f4209deab534  https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz
+7607529c40fed69c0f5d2a6fafa8c560b9e3c18ded31d8f1b13098afe49b7480  https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-aarch64-linux.tar.xz
+93dde14d4efb20046e5af75517ac6a7f2246f6c2370fecff8f68839d4a9028f7  https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-aarch64-macos.tar.xz
+db0dd3dd77696fa189b08e256a50ddbe46d10a4d1e6c862d8d268ad0abc8c2c1  https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-windows.zip
+c539d91ccab2591a7e975bcf82c82e1911b03335c80aa83d67ad25ed2ad06539  https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz
+32aa82416099eb12fffae9cf1a279ad201fecbd3f74826c613e32e9006b29867  https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz
+42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63  https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz
+bf062d29556d655685fb287563c249ad6a8fde34352c18b5e32568a595c1aec1  https://github.com/leanprover/lean4/releases/download/v4.29.1/lean-4.29.1-linux.tar.zst
+df770b2a6f130ed8627c9782c988fda9669fa23898329a61a871e32f965e007d  https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-x64.tar.xz
+6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6  https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz
+
+# Third-party actions (each pinned to a commit by check-action-pins.sh) and what
+# each FETCHES when it runs — the part a commit pin cannot freeze. The gate
+# refuses an action that is not declared here, so a new one lands saying it.
+#   action <owner/repo> <what it fetches at run time>
+action actions/checkout  this repository's own git objects (an acceptance-ring project only at a 40-hex `ref:`, gated); no executable
+action actions/cache  cache entries this repository's own runs saved; no executable from outside the repository
+action actions/upload-artifact  nothing (uploads)
+action actions/download-artifact  artifacts this run's own jobs uploaded; no executable from outside the run
+action Swatinem/rust-cache  cache entries this repository's own runs saved; no executable from outside the repository
+action dtolnay/rust-toolchain  runs the runner's rustup for an exact toolchain (gated by action_supply `versions`); rustup checks every component against the sha256 in that release's channel manifest from static.rust-lang.org — bounded by the Rust release infrastructure, not by a digest stated here
+action actions/attest-build-provenance  no executable; signs through Sigstore (Fulcio / Rekor) and the GitHub attestations API

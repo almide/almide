@@ -483,8 +483,38 @@ impl Emitter<'_> {
                 || matches!(t, almide_ir::CallTarget::Named { name }
                     if self.resolve_named_fn(name).is_some_and(|j| self.table.infos[j].yields_address))
         };
-        crate::rc_ownership::body_uses_prim(body) || any_call(body, &hit)
+        crate::rc_ownership::body_uses_prim(body) || any_call(body, &hit) || passes_a_handle(body)
     }
+}
+
+/// Does any call in `body` take a `Handle` (`Ty::RawPtr`) argument? A Handle
+/// handed to a callee may be a Region's base (ADR-0031 D3: the
+/// `@extern(wasm)` wrapper extern_region.rs builds passes `r.base, r.len` to
+/// the import), an address into a block this frame owns, so the frame is
+/// under the raw-address rule like an address op's: a tail transfer that
+/// released the Region before the jump handed the host the free-list header
+/// (#3420). Decided by the argument's type, so every Handle-taking call is
+/// covered, a foreign token's included (holding a block to the epilogue is
+/// only conservative there).
+fn passes_a_handle(body: &almide_ir::IrExpr) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.0 {
+                return;
+            }
+            if let almide_ir::IrExprKind::Call { args, .. } | almide_ir::IrExprKind::TailCall { args, .. } = &e.kind
+                && args.iter().any(|a| a.ty == almide_types::types::Ty::RawPtr)
+            {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.0
 }
 
 /// The params of a prim-using body a raw address may be derived from: any
@@ -517,7 +547,8 @@ pub(crate) fn raw_address_sources(body: &almide_ir::IrExpr, params: &[almide_ir:
                     let prim = matches!(target, almide_ir::CallTarget::Module { module, .. } if module.as_str() == "prim")
                         || is_raw_address_op(target);
                     let computed = matches!(target, almide_ir::CallTarget::Computed { .. });
-                    if prim || computed || e.ty == almide_types::types::Ty::Int {
+                    let handle_arg = args.iter().any(|a| a.ty == almide_types::types::Ty::RawPtr);
+                    if prim || computed || handle_arg || e.ty == almide_types::types::Ty::Int {
                         self.mark_in(args);
                     }
                     if let almide_ir::CallTarget::Computed { callee } = target {

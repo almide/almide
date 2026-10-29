@@ -1,0 +1,31 @@
+// E113 (ADR-0030): each arm names `some(_)` or `none` in one column and `_`
+// elsewhere, so the coverage check branches twice per column: 2^12 steps,
+// past the `exhaustiveness_steps` budget.
+fn first_some(x0: Option[Int], x1: Option[Int], x2: Option[Int], x3: Option[Int], x4: Option[Int], x5: Option[Int], x6: Option[Int], x7: Option[Int], x8: Option[Int], x9: Option[Int], x10: Option[Int], x11: Option[Int]) -> Int = match (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11) {
+  (some(_), _, _, _, _, _, _, _, _, _, _, _) => 0,
+  (_, some(_), _, _, _, _, _, _, _, _, _, _) => 1,
+  (_, _, some(_), _, _, _, _, _, _, _, _, _) => 2,
+  (_, _, _, some(_), _, _, _, _, _, _, _, _) => 3,
+  (_, _, _, _, some(_), _, _, _, _, _, _, _) => 4,
+  (_, _, _, _, _, some(_), _, _, _, _, _, _) => 5,
+  (_, _, _, _, _, _, some(_), _, _, _, _, _) => 6,
+  (_, _, _, _, _, _, _, some(_), _, _, _, _) => 7,
+  (_, _, _, _, _, _, _, _, some(_), _, _, _) => 8,
+  (_, _, _, _, _, _, _, _, _, some(_), _, _) => 9,
+  (_, _, _, _, _, _, _, _, _, _, some(_), _) => 10,
+  (_, _, _, _, _, _, _, _, _, _, _, some(_)) => 11,
+  (none, _, _, _, _, _, _, _, _, _, _, _) => 12,
+  (_, none, _, _, _, _, _, _, _, _, _, _) => 13,
+  (_, _, none, _, _, _, _, _, _, _, _, _) => 14,
+  (_, _, _, none, _, _, _, _, _, _, _, _) => 15,
+  (_, _, _, _, none, _, _, _, _, _, _, _) => 16,
+  (_, _, _, _, _, none, _, _, _, _, _, _) => 17,
+  (_, _, _, _, _, _, none, _, _, _, _, _) => 18,
+  (_, _, _, _, _, _, _, none, _, _, _, _) => 19,
+  (_, _, _, _, _, _, _, _, none, _, _, _) => 20,
+  (_, _, _, _, _, _, _, _, _, none, _, _) => 21,
+  (_, _, _, _, _, _, _, _, _, _, none, _) => 22,
+  (_, _, _, _, _, _, _, _, _, _, _, none) => 23,
+}
+
+effect fn main() -> Unit = println("${first_some(some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1))}")

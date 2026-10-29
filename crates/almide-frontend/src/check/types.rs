@@ -208,17 +208,32 @@ impl UnionFind {
     }
 
     /// Check whether `var` occurs anywhere inside `ty` (infinite type prevention).
+    /// Each shared element list and each variable is visited once (ADR-0030
+    /// D5), so a type that references one subtree many times is checked in
+    /// time linear in its shared form.
     pub fn occurs(&self, var: u32, ty: &Ty) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        self.occurs_in(self.find(var), ty, &mut seen)
+    }
+
+    fn occurs_in(&self, root: u32, ty: &Ty, seen: &mut std::collections::HashSet<usize>) -> bool {
+        if !ty.has_infer_var() {
+            return false;
+        }
         match ty {
             Ty::TypeVar(name) if name.starts_with('?') => {
                 if let Ok(id) = name[1..].parse::<u32>() {
-                    self.find(var) == self.find(id)
-                        || self.resolve(id).map_or(false, |s| self.occurs(var, s))
+                    let r = self.find(id);
+                    // Variables are keyed past any list address.
+                    root == r
+                        || (seen.insert(usize::MAX - r as usize)
+                            && self.resolve(id).map_or(false, |s| self.occurs_in(root, s, seen)))
                 } else { false }
             }
-            Ty::Applied(_, args) => args.iter().any(|a| self.occurs(var, a)),
-            Ty::Tuple(elems) => elems.iter().any(|e| self.occurs(var, e)),
-            Ty::Fn { params, ret, is_effect: _ } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
+            Ty::Applied(_, args) | Ty::Tuple(args) => {
+                seen.insert(args.ptr_id()) && args.iter().any(|a| self.occurs_in(root, a, seen))
+            }
+            Ty::Fn { params, ret, is_effect: _ } => params.iter().any(|p| self.occurs_in(root, p, seen)) || self.occurs_in(root, ret, seen),
             _ => false,
         }
     }
@@ -229,80 +244,242 @@ pub fn is_structural_record(ty: &Ty) -> bool {
     matches!(ty, Ty::Record { .. } | Ty::OpenRecord { .. })
 }
 
+// ── The type-size budget (ADR-0030, #4114) ──────────────────────────
+//
+// A type is a tree, and an inference variable shares a subtree: `(t, t)` is
+// two references to one variable. Resolution copies the shared subtree into
+// every place it is referenced, so `let t1 = (t0, t0)` doubled n times
+// resolves to 2^n nodes — 22 lines took `almide check` to 3.7 GB. Every
+// resolution below counts the nodes it builds against the `type_size`
+// budget and stops at it: the over-budget type resolves to `Unknown`, and
+// the hit is recorded for the checker to report as E111 where it can name
+// the site. Counted, never timed, so the verdict is the same everywhere.
+
+thread_local! {
+    /// The largest type a resolution refused since the checker last asked.
+    static TYPE_BUDGET_HIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Did a resolution stop at the type-size budget since the last call?
+pub fn take_type_budget_hit() -> bool {
+    TYPE_BUDGET_HIT.with(|h| h.replace(false))
+}
+
+fn note_type_budget_hit() {
+    TYPE_BUDGET_HIT.with(|h| h.set(true));
+}
+
+fn type_budget() -> u64 {
+    almide_base::budget::limit(almide_base::budget::BudgetId::TypeSize)
+}
+
+/// The node count of `ty` as written, stopping once it passes `cap`
+/// ([`Ty::size_capped`]).
+pub fn type_size_capped(ty: &Ty, cap: u64) -> u64 {
+    ty.size_capped(cap)
+}
+
+/// Spend `n` nodes of a resolution's budget; `None` once it is gone.
+fn spend_n(left: &mut u64, n: u64) -> Option<()> {
+    if *left < n {
+        *left = 0;
+        return None;
+    }
+    *left -= n;
+    Some(())
+}
+
+fn spend(left: &mut u64) -> Option<()> {
+    spend_n(left, 1)
+}
+
+/// One resolution's memo (ADR-0030 D5): a variable, or a shared element
+/// list, resolved once is reused, so a type that references one subtree many
+/// times resolves to a type that shares it — linear in the source, not in the
+/// spelled-out tree. The budget is still charged the spelled-out size.
+#[derive(Default)]
+struct Memo {
+    vars: std::collections::HashMap<u32, Ty>,
+    lists: std::collections::HashMap<usize, Ty>,
+}
+
+fn finish_resolution(result: Option<Ty>, budget: u64, left: u64) -> Ty {
+    let built = budget - left;
+    almide_base::budget::add_work(almide_base::budget::BudgetId::TypeSize, built.min(1 << 20));
+    match result {
+        Some(t) => {
+            almide_base::budget::observe(almide_base::budget::BudgetId::TypeSize, built);
+            t
+        }
+        None => {
+            note_type_budget_hit();
+            Ty::Unknown
+        }
+    }
+}
+
 /// [`resolve_ty`] for UNIFICATION (#3290): an anonymous record literal's
 /// deferred variable that is still bound to its structural record stays a
 /// variable, so a nominal type unified with a type that CONTAINS it
 /// (`List[?e]` against `List[b.Extent]`) still reaches and names it. Every
 /// other variable resolves exactly as [`resolve_ty`] does.
 pub fn resolve_ty_keeping_literals(ty: &Ty, uf: &UnionFind) -> Ty {
+    let budget = type_budget();
+    let mut left = budget;
+    let mut memo = Memo::default();
+    let r = resolve_keeping_literals_in(ty, uf, &mut left, &mut memo);
+    finish_resolution(r, budget, left)
+}
+
+fn resolve_keeping_literals_in(ty: &Ty, uf: &UnionFind, left: &mut u64, memo: &mut Memo) -> Option<Ty> {
+    if !ty.has_infer_var() {
+        spend_n(left, ty.tree_size())?;
+        return Some(ty.clone());
+    }
     if let Ty::TypeVar(name) = ty
         && let Some(id) = name.strip_prefix('?').and_then(|n| n.parse::<u32>().ok())
         && uf.is_record_literal(id)
         && uf.resolve(id).is_some_and(is_structural_record)
     {
-        return Ty::TypeVar(sym(&format!("?{}", uf.find(id))));
+        spend(left)?;
+        return Some(Ty::TypeVar(sym(&format!("?{}", uf.find(id)))));
     }
-    match ty {
-        Ty::TypeVar(name) if name.starts_with('?') => match name[1..].parse::<u32>().ok().and_then(|id| uf.resolve(id)) {
-            Some(bound) => resolve_ty_keeping_literals(bound, uf),
-            None => resolve_ty(ty, uf),
-        },
-        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| resolve_ty_keeping_literals(a, uf)).collect()),
-        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_ty_keeping_literals(e, uf)).collect()),
+    if let Ty::TypeVar(name) = ty
+        && name.starts_with('?')
+        && let Some(id) = name[1..].parse::<u32>().ok()
+        && let Some(bound) = uf.resolve(id)
+    {
+        let root = uf.find(id);
+        if let Some(done) = memo.vars.get(&root) {
+            spend_n(left, done.tree_size())?;
+            return Some(done.clone());
+        }
+        let r = resolve_keeping_literals_in(bound, uf, left, memo)?;
+        memo.vars.insert(root, r.clone());
+        return Some(r);
+    }
+    if matches!(ty, Ty::TypeVar(_)) {
+        return resolve_in(ty, uf, left, &mut Memo::default());
+    }
+    if let Some(list) = ty.shared_args()
+        && let Some(done) = memo.lists.get(&list.ptr_id())
+    {
+        spend_n(left, done.tree_size())?;
+        return Some(rebuild_with(ty, done));
+    }
+    spend(left)?;
+    let mut each = |t: &Ty| resolve_keeping_literals_in(t, uf, left, memo);
+    let out = match ty {
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(&mut each).collect::<Option<_>>()?),
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(&mut each).collect::<Option<_>>()?),
         Ty::Fn { params, ret, is_effect } => Ty::Fn {
-            params: params.iter().map(|p| resolve_ty_keeping_literals(p, uf)).collect(),
-            ret: Box::new(resolve_ty_keeping_literals(ret, uf)),
+            params: params.iter().map(&mut each).collect::<Option<_>>()?,
+            ret: Box::new(each(ret)?),
             is_effect: *is_effect,
         },
         Ty::Named(name, args) if !args.is_empty() => {
-            Ty::Named(*name, args.iter().map(|a| resolve_ty_keeping_literals(a, uf)).collect())
+            Ty::Named(*name, args.iter().map(&mut each).collect::<Option<_>>()?)
         }
         Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| (*n, resolve_ty_keeping_literals(t, uf))).collect(),
+            fields: fields.iter().map(|(n, t)| Some((*n, each(t)?))).collect::<Option<_>>()?,
         },
         Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| (*n, resolve_ty_keeping_literals(t, uf))).collect(),
+            fields: fields.iter().map(|(n, t)| Some((*n, each(t)?))).collect::<Option<_>>()?,
         },
         _ => ty.clone(),
+    };
+    remember_list(ty, &out, memo);
+    Some(out)
+}
+
+/// Record the resolved element list of `ty` under its shared list's identity.
+fn remember_list(ty: &Ty, out: &Ty, memo: &mut Memo) {
+    if let (Some(list), Some(_)) = (ty.shared_args(), out.shared_args()) {
+        memo.lists.insert(list.ptr_id(), out.clone());
+    }
+}
+
+/// `ty` with the element list of `resolved` (the same constructor, resolved
+/// once already): shares that list.
+fn rebuild_with(ty: &Ty, resolved: &Ty) -> Ty {
+    let Some(args) = resolved.shared_args() else { return resolved.clone() };
+    match ty {
+        Ty::Applied(id, _) => Ty::Applied(id.clone(), args.clone()),
+        Ty::Tuple(_) => Ty::Tuple(args.clone()),
+        Ty::Named(n, _) => Ty::Named(*n, args.clone()),
+        Ty::Union(_) => Ty::Union(args.clone()),
+        _ => resolved.clone(),
     }
 }
 
 // ── Type resolution ──────────────────────────────────────────────────
 
 /// Resolve all inference variables in `ty` through the Union-Find,
-/// replacing each `?N` with its bound concrete type.
+/// replacing each `?N` with its bound concrete type. A result past the
+/// `type_size` budget is `Unknown`, and the hit is recorded (see above).
 pub fn resolve_ty(ty: &Ty, uf: &UnionFind) -> Ty {
-    match ty {
-        Ty::TypeVar(name) if name.starts_with('?') => {
-            if let Ok(id) = name[1..].parse::<u32>() {
-                match uf.resolve(id) {
-                    Some(bound) => resolve_ty(bound, uf),
-                    None => {
-                        // Point to canonical root (may differ from original id)
-                        let root = uf.find(id);
-                        if root != id { Ty::TypeVar(sym(&format!("?{}", root))) } else { ty.clone() }
-                    }
+    let budget = type_budget();
+    let mut left = budget;
+    let mut memo = Memo::default();
+    let r = resolve_in(ty, uf, &mut left, &mut memo);
+    finish_resolution(r, budget, left)
+}
+
+fn resolve_in(ty: &Ty, uf: &UnionFind, left: &mut u64, memo: &mut Memo) -> Option<Ty> {
+    if !ty.has_infer_var() {
+        spend_n(left, ty.tree_size())?;
+        return Some(ty.clone());
+    }
+    if let Ty::TypeVar(name) = ty
+        && name.starts_with('?')
+        && let Ok(id) = name[1..].parse::<u32>()
+    {
+        return match uf.resolve(id) {
+            Some(bound) => {
+                let root = uf.find(id);
+                if let Some(done) = memo.vars.get(&root) {
+                    spend_n(left, done.tree_size())?;
+                    return Some(done.clone());
                 }
-            } else {
-                ty.clone()
+                let r = resolve_in(bound, uf, left, memo)?;
+                memo.vars.insert(root, r.clone());
+                Some(r)
             }
-        }
-        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect()),
-        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_ty(e, uf)).collect()),
+            None => {
+                spend(left)?;
+                // Point to canonical root (may differ from original id)
+                let root = uf.find(id);
+                Some(if root != id { Ty::TypeVar(sym(&format!("?{}", root))) } else { ty.clone() })
+            }
+        };
+    }
+    if let Some(list) = ty.shared_args()
+        && let Some(done) = memo.lists.get(&list.ptr_id())
+    {
+        spend_n(left, done.tree_size())?;
+        return Some(rebuild_with(ty, done));
+    }
+    spend(left)?;
+    let mut each = |t: &Ty| resolve_in(t, uf, left, memo);
+    let out = match ty {
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(&mut each).collect::<Option<_>>()?),
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(&mut each).collect::<Option<_>>()?),
         Ty::Fn { params, ret, is_effect } => Ty::Fn {
-            params: params.iter().map(|p| resolve_ty(p, uf)).collect(),
-            ret: Box::new(resolve_ty(ret, uf)),
+            params: params.iter().map(&mut each).collect::<Option<_>>()?,
+            ret: Box::new(each(ret)?),
             is_effect: *is_effect,
         },
         Ty::Named(name, args) if !args.is_empty() => {
-            Ty::Named(name.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect())
+            Ty::Named(name.clone(), args.iter().map(&mut each).collect::<Option<_>>()?)
         }
         Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty(t, uf))).collect(),
+            fields: fields.iter().map(|(n, t)| Some((n.clone(), each(t)?))).collect::<Option<_>>()?,
         },
         Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty(t, uf))).collect(),
+            fields: fields.iter().map(|(n, t)| Some((n.clone(), each(t)?))).collect::<Option<_>>()?,
         },
         _ => ty.clone(),
-    }
+    };
+    remember_list(ty, &out, memo);
+    Some(out)
 }

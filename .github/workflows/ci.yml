@@ -52,6 +52,10 @@ env:
   ALMIDE_CI_SEED: ${{ github.sha }}
   ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
   RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  # The perf ratchets compile with the newest STABLE rustc ("what users run",
+  # see perf-ratchet), named exactly so a run cannot fetch a different
+  # compiler than the commit says (security row 16). Bump it by hand.
+  RUST_STABLE_TOOLCHAIN: "1.99.1"
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -143,6 +147,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
 
       - id: classify
         name: Classify the change set (scripts/check-docs-only.sh)
@@ -193,6 +198,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       - name: Check every commit in the range
         run: |
           set -euo pipefail
@@ -289,6 +295,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -328,15 +335,21 @@ jobs:
       # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
+          bash scripts/fetch-pinned.sh "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz" /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
-        run: cargo nextest archive --workspace --cargo-profile ci-test --archive-file /tmp/almide-tests.tar.zst
+        # On $RUNNER_TEMP (the root volume), not the ~7.9 GB /tmp tmpfs: the
+        # archive is 3.0 GB (see .github/actions/fetch-test-archive).
+        run: |
+          df -h / /tmp "$RUNNER_TEMP"
+          cargo nextest archive --workspace --cargo-profile ci-test --archive-file "$RUNNER_TEMP/almide-tests.tar.zst"
+          ls -la "$RUNNER_TEMP/almide-tests.tar.zst"
+          df -h / /tmp "$RUNNER_TEMP"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: almide-tests-archive
-          path: /tmp/almide-tests.tar.zst
+          path: ${{ runner.temp }}/almide-tests.tar.zst
           retention-days: 1
           # nextest already zstd-compressed the archive; a second gzip pass
           # over incompressible bytes only costs upload-artifact time.
@@ -391,6 +404,7 @@ jobs:
           echo "::error::Test Rust (solo …) result is '${{ needs.test-rust-solo.result }}' — a solo corpus gate failed or did not run; this gate refuses to certify coverage over it"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -403,13 +417,12 @@ jobs:
       # job's old enumerate compiled the workspace.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
+          bash scripts/fetch-pinned.sh "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz" /tmp/nextest.tar.gz
           sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: almide-tests-archive
-          path: /tmp/almide-archive
+      # Each `nextest list --archive-file` below unpacks the whole archive
+      # into $TMPDIR, which root-tmpdir (after checkout) put on the root volume.
+      - uses: ./.github/actions/fetch-test-archive
       - name: Union of shards + solo legs == full target set
         # #2381: the five solo targets run in `Test Rust (solo …)` jobs, one
         # per giant, so the union is the four shards PLUS the solo rows, each
@@ -418,7 +431,7 @@ jobs:
         # diff here, not a silently empty job.
         run: |
           set -euo pipefail
-          A=/tmp/almide-archive/almide-tests.tar.zst
+          A="$TEST_ARCHIVE_FILE"
           bash scripts/ci-test-shard.sh --list-all-archive "$A" | sort > /tmp/all.txt
           : > /tmp/union.txt
           for i in 0 1 2 3; do
@@ -450,7 +463,7 @@ jobs:
         # test added to the binary cannot fall outside the leg.
         run: |
           set -euo pipefail
-          A=/tmp/almide-archive/almide-tests.tar.zst
+          A="$TEST_ARCHIVE_FILE"
           bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_ledger "$A" > /tmp/leg_a.txt
           cargo nextest list --archive-file "$A" --workspace-remap . --message-format json -E 'binary_id(=almide::wasm_runtime_interp_ledger)' \
             | python3 -c '
@@ -483,11 +496,11 @@ jobs:
       - name: Corpus shards cover every fixture (∪ walked lists == ls spec/wasm_cross, no duplicates)
         run: bash scripts/ci-corpus-shards.sh --coverage /tmp/corpus-shard 2
       - name: Merge the shard partials — run_parity ceilings summed, bridge-fallback names unioned — and judge the whole
-        run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 "$TEST_ARCHIVE_FILE"
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
-            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst | wc -l | tr -d ' ')"
+            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$TEST_ARCHIVE_FILE" | wc -l | tr -d ' ')"
           done
 
   test-rust:
@@ -533,6 +546,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.DOCS_ONLY != 'true'
+      - uses: ./.github/actions/root-tmpdir
+        if: env.DOCS_ONLY != 'true'
       - name: CI slice — the change's own files (a full run does nothing)
         if: env.DOCS_ONLY != 'true'
         run: bash scripts/ci-slice-prepare.sh
@@ -569,9 +584,18 @@ jobs:
         # SHAPE_MATRIX_SLICE (#3309): tests/shape_matrix_test.rs runs a fixed
         # quarter of the shape matrix per PR (the cells whose name hashes to 0
         # mod 4); .github/workflows/shape-matrix-nightly.yml runs all of it.
+        # ALMIDE_CERTIFY_OWNERSHIP=fail (#4292, #4294): ALMIDE_BIN is the
+        # RELEASE compiler, where the ownership certifier (#2231) is off by
+        # default, so the programs these tests compile and run were never
+        # certified — a debug build refused `box_binder_borrow_no_clone`'s
+        # `moved_after` and `native_borrowed_string_flows`'s `classify` (C4)
+        # while this leg passed them. Armed here, every program a test hands
+        # the compiler is certified as a debug build would; a test that sets
+        # the switch itself (the certifier's own controls) still wins.
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
+          ALMIDE_CERTIFY_OWNERSHIP: fail
           SHAPE_MATRIX_SLICE: "0/4"
         # The script enumerates every workspace test target from cargo's own
         # JSON (root package AND member crates — a bare `cargo test` at the root
@@ -580,7 +604,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 "$TEST_ARCHIVE_FILE"
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each
@@ -641,6 +665,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.DOCS_ONLY != 'true'
+      - uses: ./.github/actions/root-tmpdir
+        if: env.DOCS_ONLY != 'true'
       - name: CI slice — the change's own files (a full run does nothing)
         if: env.DOCS_ONLY != 'true'
         run: bash scripts/ci-slice-prepare.sh
@@ -679,7 +705,7 @@ jobs:
           # is `scripts/gen-corpus-weights.sh --from-ci <run-id>` over these
           # artifacts; the weekly ratchet in shard-balance.yml says when.
           ALMIDE_CORPUS_WEIGHTS_DIR: /tmp/corpus-shard
-        run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} "$TEST_ARCHIVE_FILE"
 
       # The walked-fixture list and the partial counts / names, for the
       # coverage job. Uploaded on failure too, so a red shard's partial
@@ -729,6 +755,7 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
 
@@ -757,10 +784,9 @@ jobs:
 
       - name: Install wasmtime
         run: |
-          if [ ! -f /tmp/wasmtime.tar.xz ]; then
-            curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/wasmtime.tar.xz \
-              https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz
-          fi
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
           sudo mv /tmp/wasmtime-v49.0.1-x86_64-linux/wasmtime /usr/local/bin/
           wasmtime --version
@@ -793,6 +819,11 @@ jobs:
         run: ORACLE=/tmp/almide-bin/almide bash scripts/check-parity-goldens.sh
 
       - name: Almide spec tests (Rust target)
+        # The certifier armed (#4292): the corpus gate certifies spec/lang and
+        # spec/wasm_cross only; this run reaches spec/stdlib and
+        # spec/integration natively, with the release compiler.
+        env:
+          ALMIDE_CERTIFY_OWNERSHIP: fail
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test spec/ --target rust
@@ -942,6 +973,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -965,6 +997,39 @@ jobs:
           printf '\n[workspace]\n' >> crates/almide-kernel/Cargo.toml
           cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
 
+      # Security table row 10 on macOS: the rooted family and `[permissions] fs`
+      # by descriptor (the O_NOFOLLOW openat walk, fstatat for an entry the
+      # process may not open), which no other job runs on this platform.
+      - name: Rooted and scoped fs by descriptor (macOS)
+        run: |
+          git checkout -- crates/almide-kernel/Cargo.toml
+          cargo test --release -p almide-rt-core --test fs_beneath_platform --test fs_beneath_core --test fs_scoped_core
+
+  fs-beneath-32bit:
+    name: Rooted fs by descriptor (32-bit Linux)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # Security table row 10 on a 32-bit target (#4293): the rooted family and
+    # `[permissions] fs` by descriptor with the 32-bit layouts (readdir64,
+    # O_LARGEFILE): `..`, absolute paths and a symlink at any segment are
+    # refused, a directory swapped for a symlink mid-walk or after the
+    # scope's decision is never followed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: i686-unknown-linux-gnu
+
+      - name: Install the 32-bit C toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
+
+      - name: Rooted and scoped fs by descriptor on i686
+        run: cargo test -p almide-rt-core --target i686-unknown-linux-gnu --test fs_beneath_platform --test fs_beneath_core --test fs_scoped_core
+
   miri-almide-str:
     name: Miri (almide-str)
     needs: changes
@@ -980,6 +1045,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
@@ -991,6 +1057,33 @@ jobs:
           cargo miri setup
           cargo miri test -p almide-str
 
+  gpu-parity:
+    name: GPU parity (almide-gpu-run on lavapipe)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # #4236 / #1331: the GPU leg's CPU ⇄ GPU parity and its negative controls
+    # (a kernel with the 64-bit carry, the multiply's cross terms or the signed
+    # high-word compare broken must be CAUGHT). The runner has no GPU; Mesa's
+    # lavapipe is a software Vulkan driver, so the same WGSL → SPIR-V → driver
+    # path runs. ALMIDE_GPU_REQUIRED turns a missing adapter into a failure —
+    # elsewhere (the workspace shards) these tests print SKIP instead.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Install lavapipe (software Vulkan)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1
+      - name: CPU ⇄ GPU parity and negative controls
+        env:
+          ALMIDE_GPU_REQUIRED: "1"
+        run: cargo test --release --locked -p almide-gpu-run -- --test-threads=1
+
   test-wasm:
     name: Test WASM
     needs: [changes, build]
@@ -999,6 +1092,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1021,12 +1115,7 @@ jobs:
           # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1058,6 +1147,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -1083,12 +1173,7 @@ jobs:
         run: |
           VERSION=v49.0.1
           ZIP="wasmtime-${VERSION}-x86_64-windows.zip"
-          if [ ! -s "$ZIP" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${ZIP}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$ZIP"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${ZIP}" "$ZIP"
           unzip -oq "$ZIP"
           # NATIVE spelling, not git-bash's /d/... form: the runner prepends
           # this string to PATH verbatim, and the almide.exe → CreateProcess
@@ -1115,6 +1200,41 @@ jobs:
             fi
             echo "parity ok: $f"
           done
+
+      # Security table row 10 on Windows (#4293): the rooted family and
+      # `[permissions] fs` by handle — NtCreateFile relative to the held
+      # directory with FILE_OPEN_REPARSE_POINT, a symlink or junction refused,
+      # `..`, absolute, `\\?\`, device and UNC paths and `:stream` refused
+      # (the core's test), and a scoped and a rooted program run on both
+      # legs: the read inside the root answers, the read outside is refused,
+      # and the legs agree byte for byte.
+      - name: Rooted and scoped fs by handle (Windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release -p almide-rt-core --test fs_beneath_platform
+          ALMIDE="$PWD/target/release/almide.exe"
+          d=$(mktemp -d)
+          mkdir -p "$d/data/sub"
+          printf 'hello\n' > "$d/data/sub/a.txt"
+          printf 'secret\n' > "$d/outside.txt"
+          printf 'import fs\n\neffect fn main() -> Unit = {\n  match fs.read_text("data/sub/a.txt") {\n    ok(v) => println("inside ${v}"),\n    err(e) => println("err ${e}"),\n  }\n  match fs.read_text("outside.txt") {\n    ok(v) => println("leaked ${v}"),\n    err(e) => println("err ${e}"),\n  }\n}\n' > "$d/main.almd"
+          printf 'import fs\n\neffect fn main() -> Unit = {\n  let root = fs.open_root("data")!\n  match fs.root_read_text(root, "sub/a.txt") {\n    ok(v) => println("read ${v}"),\n    err(e) => println("err ${e}"),\n  }\n  match fs.root_read_text(root, "../outside.txt") {\n    ok(v) => println("leaked ${v}"),\n    err(e) => println("err ${e}"),\n  }\n}\n' > "$d/rooted.almd"
+          n=$(cd "$d" && "$ALMIDE" run rooted.almd)
+          w=$(cd "$d" && "$ALMIDE" run rooted.almd --target wasm)
+          echo "native: $n"; echo "wasm:   $w"
+          case "$n" in *"read hello"*) ;; *) echo "native rooted read inside the root failed"; exit 1 ;; esac
+          case "$n" in *"escapes root"*) ;; *) echo "native rooted read outside the root was not refused"; exit 1 ;; esac
+          case "$n" in *secret*) echo "the rooted read leaked the outside"; exit 1 ;; esac
+          [ "$n" = "$w" ] || { echo "the rooted answers differ between the legs"; exit 1; }
+          printf '[package]\nname = "scoped"\n\n[permissions]\nfs = ["./data"]\n' > "$d/almide.toml"
+          n=$(cd "$d" && "$ALMIDE" run main.almd)
+          w=$(cd "$d" && "$ALMIDE" run main.almd --target wasm)
+          echo "native: $n"; echo "wasm:   $w"
+          case "$n" in *"inside hello"*) ;; *) echo "native scoped read inside the grant failed"; exit 1 ;; esac
+          case "$n" in *"is outside [permissions] fs"*) ;; *) echo "native scoped read outside the grant was not refused"; exit 1 ;; esac
+          case "$n" in *secret*) echo "the scoped read leaked the outside"; exit 1 ;; esac
+          [ "$n" = "$w" ] || { echo "the scoped answers differ between the legs"; exit 1; }
 
   # ═══════════════════════════════════════════════
   # WASM host-arch codegen determinism
@@ -1147,6 +1267,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -1161,9 +1282,9 @@ jobs:
       - name: Library builds for wasm32-unknown-unknown without the embedded host
         run: cargo check --lib --no-default-features --target wasm32-unknown-unknown --locked
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-node-pinned
         with:
-          node-version: 20
+          node-version: "20.20.2"  # exact (security row 16): a major alone resolves to the newest 20.x at run time
 
       - name: Cache wasm-pack tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1179,12 +1300,7 @@ jobs:
         run: |
           VERSION=v0.13.1
           TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xzf "$TARBALL"
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
@@ -1217,12 +1333,7 @@ jobs:
           # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1245,15 +1356,16 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: wasm32-wasip1, wasm32-unknown-unknown
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-node-pinned
         with:
-          node-version: 20
+          node-version: "20.20.2"  # exact (security row 16): a major alone resolves to the newest 20.x at run time
 
       - name: Cache wasm-pack tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1269,12 +1381,7 @@ jobs:
         run: |
           VERSION=v0.13.1
           TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xzf "$TARBALL"
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
@@ -1311,12 +1418,7 @@ jobs:
           # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1335,6 +1437,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       # Two complementary checks — both are required for the "proven" claim:
       # 1. grep for `sorry`: `lake build` only WARNS on sorry, so the grep is what
@@ -1377,7 +1480,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.elan
-          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
+          key: elan-pinned-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
 
       - name: Install elan (retry-resilient)
         # A transient GitHub 504 (or 403 rate-limit) on the elan tarball
@@ -1390,18 +1493,43 @@ jobs:
         # below call `lake` directly so nothing downloads elan again.
         run: |
           if [ ! -x "$HOME/.elan/bin/elan" ]; then
-            for i in 1 2 3 4 5; do
-              curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz -o /tmp/elan.tar.gz && break
-              echo "elan download failed (504/rate-limit?), retry ${i}/5"; sleep 20; rm -f /tmp/elan.tar.gz
-            done
+            # elan by an exact release, not `latest` (security row 16).
+            bash scripts/fetch-pinned.sh https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz /tmp/elan.tar.gz
             tar xzf /tmp/elan.tar.gz -C /tmp
             /tmp/elan-init -y --default-toolchain none --no-modify-path
           fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      - name: Install the belts' Lean toolchain (pinned sha256)
+        # On a cache miss `lake build` downloaded the toolchain itself, once,
+        # with no retry: a TLS connect error to releases.lean-lang.org failed
+        # the release PR #4286's run 40638509907 before any proof was checked.
+        # Security row 16: elan verifies no digest of the archive it fetches,
+        # so it fetches nothing here. The release archive is fetched through
+        # scripts/fetch-pinned.sh (sha256 in .github/pinned-downloads.txt;
+        # releases.lean-lang.org redirects to the same GitHub asset) and
+        # unpacked where elan looks for an installed toolchain
+        # (~/.elan/toolchains/leanprover--lean4---v<V>), so `lake build` finds
+        # it and never downloads. Every belt's `lean-toolchain` must name
+        # exactly LEAN below — bump them, this and the manifest line together.
+        run: |
+          set -euo pipefail
+          LEAN=4.29.1
+          for f in crates/almide-perceus-belt/lean-toolchain crates/almide-race-belt/lean-toolchain crates/almide-edit-belt/lean-toolchain; do
+            [ "$(tr -d '[:space:]' < "$f")" = "leanprover/lean4:v${LEAN}" ] \
+              || { echo "::error::$f names $(cat "$f"), not the pinned leanprover/lean4:v${LEAN}"; exit 1; }
+          done
+          dir="$HOME/.elan/toolchains/leanprover--lean4---v${LEAN}"
+          if [ ! -x "$dir/bin/lean" ]; then
+            bash scripts/fetch-pinned.sh "https://github.com/leanprover/lean4/releases/download/v${LEAN}/lean-${LEAN}-linux.tar.zst" /tmp/lean.tar.zst
+            rm -rf "$dir" && mkdir -p "$dir"
+            tar --zstd -xf /tmp/lean.tar.zst -C "$dir" --strip-components=1
+          fi
+          "$dir/bin/lean" --version
+
       # The three belts are kernel-checked with `lake build` straight from the
-      # cached elan (elan installs each belt's `lean-toolchain` on first use;
-      # the toolchain lives in the ~/.elan cache keyed on those files). The
+      # cached elan (the toolchain the step above unpacked from its pinned
+      # archive; it lives in the ~/.elan cache keyed on those files). The
       # GITHUB_TOKEN authenticates elan's release-tag lookups so they use the
       # 5000/hr authenticated limit, not the 60/hr per-IP one that 403s.
       - name: Kernel-check proofs (lake build)
@@ -1469,6 +1597,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       - name: Relevance — skip when nothing measured changed
         id: rel
         run: |
@@ -1551,6 +1680,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1583,9 +1713,9 @@ jobs:
 
       # Node 24: the JS host gate's `returns: promise` fixtures need JSPI
       # (WebAssembly.Suspending / promising, on by default from Node 24.20, #3353 #3362).
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-node-pinned
         with:
-          node-version: 24
+          node-version: "24.22.1"  # exact (security row 16); JSPI needs >= 24.20
       - name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
       - name: JS host (#2265/#2276 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal to expected and native; the module and glue ship only the program's surface)
@@ -1645,8 +1775,14 @@ jobs:
       - name: Action pins — every third-party action is pinned to a commit, not a movable tag (#4094)
         run: bash scripts/check-action-pins.sh
 
-      - name: Action pin gate refuses a tag pin and a branch pin (negative control)
+      - name: Action pin gate refuses a tag pin, a branch pin, a moving toolchain / runtime / installer and a composite's nested tag (negative control)
         run: bash scripts/check-action-pins.sh --self-test
+
+      - name: Action closure — every pinned action's own action.yml, read at its commit, pins its nested uses and images (security row 16)
+        run: bash scripts/check-action-pins.sh --closure
+
+      - name: Installers refuse a release whose attestation they could not verify, unless --skip-attestation (security row 16)
+        run: bash scripts/check-installer-attestation.sh --require-pwsh
 
       - name: Exit sites — every frame exit of the structural emitter goes through the ExitPlan renderer (#1995)
         run: bash scripts/check-exit-sites.sh
@@ -1793,7 +1929,7 @@ jobs:
       - name: Build-speed block on the measurements page is fresh (#999 — render check, no measurement)
         # `almide run` builds the gates tool natively, so this step needs cargo.
         run: |
-          rustup toolchain install stable --profile minimal >/dev/null 2>&1 || true
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal >/dev/null 2>&1 || true
           /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check-readme
 
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
@@ -1866,7 +2002,7 @@ jobs:
           ALMIDE: /tmp/almide-bin/almide
           LARK_GATE_CACHE: ${{ runner.temp }}/lark-gate-memo.json
         run: |
-          python3 -m pip install --quiet lark
+          python3 -m pip install --quiet lark==1.3.1
           bash scripts/check-lark-grammar.sh
 
       - name: Layout discipline for new long-lived structures (#1387 / #1316)
@@ -1880,6 +2016,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       # rustc/cargo: the ratchet compiles the handwritten references and the
       # generated Rust of each benchmark with the same toolchain — STABLE,
@@ -1892,6 +2029,8 @@ jobs:
       # the cause.) Build and test jobs keep the 1.96 MSRV pin; this job's
       # claim is about the GENERATED CODE, not the compiler's build floor.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_STABLE_TOOLCHAIN }}
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1933,12 +2072,7 @@ jobs:
         run: |
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1951,6 +2085,12 @@ jobs:
       # above, and both are the perf tier (#1383 scale, #1396 per-phase).
       - name: Edit-loop cost stays scale-independent (#1383 / #1396)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-edit-loop-scale.sh
+
+      # #4289: the cost of compiling a small program relative to lexing and
+      # parsing what it loads, same process, same runner — the edit-loop gate
+      # imports the whole stdlib and cannot see a program loading more of it.
+      - name: Compile-time ratio (#4289)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-compile-time-ratio.sh
 
       # #2098: the cost of the spelling the DOCS recommend, against the
       # spelling they tell writers to avoid — one program, one leg, one
@@ -1975,8 +2115,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_STABLE_TOOLCHAIN }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -2011,6 +2154,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -2048,10 +2192,7 @@ jobs:
             *)     ARCH_TRIPLE="x86_64-linux"  ;;
           esac
           TARBALL="wasmtime-${VERSION}-${ARCH_TRIPLE}.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -2101,6 +2242,9 @@ jobs:
         shell: bash
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
+          # The runtime's per-OS entropy arm (random.bytes, C-394), judged on
+          # each OS: a missing arm made every Windows random.bytes abort.
+          cargo test --test runtime_random_float_construction_test
           if [ "${{ runner.os }}" = "Windows" ]; then
             # The rustc floor on Windows (#4110, CVE-2024-24576 is a Windows
             # bug): a stub rustc.exe reporting 1.77.1 or the floor minus one
@@ -2142,6 +2286,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -2159,10 +2304,7 @@ jobs:
           # The same pinned, verified install as build-cross (#1036).
           VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-aarch64-macos.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -2194,6 +2336,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -2263,7 +2406,21 @@ jobs:
   # v47 pin elsewhere is the embedded host's, and the two are not the same
   # instrument, so they are not unified here).
   commissioned-wasm-gates:
-    name: Commissioned wasm gates (structural leg, release)
+    # Five shards of the one release-shape step (2026-10-29, release PR
+    # #4286): the step ran its test binaries one after another, and its
+    # corpus gates are one single-threaded #[test] each, so it took their
+    # SUM — 21 min of tests on 2026-10-24, 58 min on 2026-10-29, cancelled at
+    # the 70-minute timeout. Every shard runs the SAME `cargo test` command
+    # (one build shape, one shared rust-cache entry) with a libtest filter
+    # from scripts/ci-commissioned-wasm-shard.sh: a named shard runs only its
+    # gates (and `verify` fails it if one of them stopped running), `rest`
+    # skips exactly those names, so the five are a partition of the step.
+    name: Commissioned wasm gates (structural leg, release, ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in step with `shards` in scripts/ci-commissioned-wasm-shard.sh.
+        shard: [ratchet, ledgers, parity, wasi, rest]
     # `build` too (#2381): the probe jobs below drive the almide CLI, which
     # this job used to build for itself a second time (`cargo build
     # --release --locked --bin almide`, 426–432 s on every develop run) — the
@@ -2284,9 +2441,13 @@ jobs:
     # step alone took 42 min of 45 on 2026-10-23 before it was cancelled. (The
     # separate double-free trap sweep #4081 added is gone: the trap is in every
     # wasm build since #4023, so the carried-gates step runs under it.)
-    timeout-minutes: 70
+    # 45 since the shards: the heaviest shard measured 851 s of tests on the
+    # unsharded 2026-10-29 run (ledgers), plus a 9.8 min warm build; the cold
+    # build is the rest of the margin.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -2311,24 +2472,29 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" "$TARBALL"
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
-      - name: Carried gates in release shape
-        run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      - name: Carried gates in release shape (this shard's tests)
+        run: |
+          set -euo pipefail
+          ARGS="$(bash scripts/ci-commissioned-wasm-shard.sh args ${{ matrix.shard }})"
+          echo "libtest filter: $ARGS"
+          # The runner's CPU, so a slower step can be told apart from slower code.
+          lscpu | grep -E '^(Model name|CPU\(s\)):' || true
+          # shellcheck disable=SC2086 # the filter is a word list on purpose
+          cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout -- $ARGS 2>&1 | tee "$RUNNER_TEMP/shard.log"
+          bash scripts/ci-commissioned-wasm-shard.sh verify ${{ matrix.shard }} "$RUNNER_TEMP/shard.log"
       # #2141: the stdlib-LINKING size ladder (crates/almide-wasm/tests/
-      # size_ladder.rs, golden/size-ladder.txt) already ran inside the step
-      # above; this run prints its table — rung / program / shipped / pinned
+      # size_ladder.rs, golden/size-ladder.txt) already ran inside the `rest`
+      # shard's step above; this run prints its table — rung / program / shipped / pinned
       # / delta — into the log on every push, so a reader sees which rung
       # grew without a diff. The manifest-wide size_ratchet pins 700 programs
       # that link almost nothing; the ladder pins the Map / String / JSON /
       # regex programs where the size story is actually decided.
       - name: Stdlib-linking wasm size ladder (#2141 — a shrink-only ceiling per rung, the table in the log)
+        if: matrix.shard == 'rest'
         run: cargo test --release --locked -p almide-wasm --test size_ladder -- --nocapture
 
   commissioned-wasm-gates-root:
@@ -2341,6 +2507,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
         run: bash scripts/ci-slice-prepare.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -2365,11 +2532,7 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" "$TARBALL"
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
@@ -2393,7 +2556,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -2413,11 +2579,7 @@ jobs:
           set -euo pipefail
           VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
-          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
-            curl --fail --location --retry 5 --retry-all-errors \
-              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
-              --output "$TARBALL"
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" "$TARBALL"
           tar -xf "$TARBALL" -C /tmp
           sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
@@ -2434,13 +2596,15 @@ jobs:
       # step: a gate that quietly degrades to informational is the hole
       # #2143 closed, so the script refuses to run on CI without a baseline.
       - name: Fetch the latest release binary (the wasm A/B baseline, #2143)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/almide-baseline
-          for i in 1 2 3 4 5; do
-            curl -fsSL "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" -o /tmp/almide-baseline/almide.tar.gz && break
-            echo "baseline download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f /tmp/almide-baseline/almide.tar.gz
-          done
+          # A moving name (`latest`) no digest can pin: the release
+          # workflow's Sigstore attestation is checked instead (row 16).
+          bash scripts/fetch-pinned.sh --attested almide/almide \
+            "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" /tmp/almide-baseline/almide.tar.gz
           tar xzf /tmp/almide-baseline/almide.tar.gz -C /tmp/almide-baseline --strip-components=1
           chmod +x /tmp/almide-baseline/almide
           /tmp/almide-baseline/almide --version
@@ -2464,23 +2628,25 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CODOPSY_SHA: 85ac6cdcda79e07c02a1c796d3b37ee5236848be  # O6lvl4/codopsy, pinned (security row 16)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       # #2381: the analyzer was cloned and built from source on every run
-      # (400–437 s, the whole job) although its input — codopsy's HEAD —
-      # moves rarely. The built binary is cached under that HEAD's sha, so a
-      # run pays the build only when the analyzer itself changed; a stale
-      # binary cannot be served because the key IS the source revision.
+      # (400–437 s, the whole job). The built binary is cached under its
+      # source revision, so a run pays the build only when the pin moves.
+      # Security row 16: the revision is a PINNED commit, not codopsy's HEAD —
+      # a push to that repository no longer changes what this gate runs (or
+      # what code it builds and executes here). Bump CODOPSY_SHA on purpose.
       - name: Resolve the analyzer revision
         id: codopsy-rev
         run: |
           set -euo pipefail
-          sha="$(git ls-remote https://github.com/O6lvl4/codopsy HEAD | cut -f1)"
-          [ -n "$sha" ] || { echo "::error::could not resolve codopsy HEAD"; exit 1; }
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "sha=$CODOPSY_SHA" >> "$GITHUB_OUTPUT"
       - name: Cache the built analyzer
         id: codopsy-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -2490,7 +2656,8 @@ jobs:
       - name: build codopsy
         if: steps.codopsy-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy
+          git clone -q https://github.com/O6lvl4/codopsy /tmp/codopsy
+          git -C /tmp/codopsy checkout -q --detach "$CODOPSY_SHA"
           cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
           mkdir -p /tmp/codopsy-bin && cp /tmp/codopsy/target/release/codopsy /tmp/codopsy-bin/codopsy
       # Every workspace member crate holds A (>= 90), not only the
@@ -2565,6 +2732,7 @@ jobs:
         with:
           # The incremental scope diffs against the PR base ref.
           fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
       # #2381: this job runs on pull_request only, so the default per-job
       # rust-cache key was written by no develop run and every PR started
       # cold ("No cache found" on the v0.63.0-rc3 PR: 7m08s to the first

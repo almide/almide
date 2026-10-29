@@ -1,0 +1,39 @@
+# compile-time ratios (see scripts/check-compile-time-ratio.sh, #4289)
+#
+# Measured 2026-10-28 on one GCE n2-standard-16 (Intel Cascade Lake), release
+# builds, the script's 24-file corpus, min of 3, two rounds each (the rounds
+# agreed to 0.6%):
+#
+#   tree                                   check   wasm
+#   pre-batch develop 3d7a1ab70            4.52    21.2
+#   post-batch release-fix 0ff4366bc       6.65    27.3   <- fails both rows
+#   this tree (the #4289 fixes)            5.10    22.5
+#
+# Re-anchored after int's radix functions stopped calling bytes (a program
+# reaching int loaded bytes), on a second n2-standard-16 (asia-northeast1-b),
+# same corpus, one domain-edge sweep running on one of its 16 cores:
+#
+#   pre-batch develop 3d7a1ab70            4.82    22.6
+#   before the int rewrite 5f0652ec0       5.38    23.4
+#   this tree                              4.63    20.5
+#
+# The rows read lower than the first VM's, so anchor on the second VM's
+# reading of this tree; release-fix's 6.65 / 27.3 stays far over the ceiling.
+#
+# Re-anchored for #4317 (2026-10-29) on a third n2-standard-16
+# (asia-northeast2-b), same corpus, min of 3, every binary run back to back
+# pinned to one core, the fixed tree twice (agreeing to 0.6%):
+#
+#   tree                                     check   wasm
+#   before #4182, e853bea68                  2.63    13.8
+#   #4182's merge, 926542089                 4.66    22.4   <- the #4317 slowdown
+#   develop before the fix, ab7c28b74        4.18    18.9
+#   this tree (the wasm link scans only reached fns)  4.13    7.2
+#
+# The wasm link used to scan every fn of every module it loaded for demands,
+# so a module's unused fns linked their callees' self-host bodies and
+# modules, transitively. The check row keeps its anchor: the front end still
+# loads a reached module whole (the native leg emits a loaded module whole,
+# so its closure must be too), and this tree reads inside its band.
+check 4.63
+wasm 7.2

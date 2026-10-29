@@ -32,6 +32,7 @@ mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod eq_operands;
 mod mut_fn_value;
 mod pure_attr;
 mod bang_error_channel;
@@ -46,6 +47,8 @@ mod effect_isolation_cascade;
 mod qq_effect_bang;
 mod expect_effect;
 mod regex_runtime;
+/// E111: an inferred type over the `type_size` budget (ADR-0030, #4114).
+mod type_budget;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -291,7 +294,21 @@ pub struct Checker {
     /// post-solve EQUALITY check (E016, #2606): a function anywhere in the
     /// type has no equality ("Function types are never Eq",
     /// docs/specs/type-system.md).
-    pub(crate) deferred_eq_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    pub(crate) deferred_eq_checks: Vec<EqSite>,
+    /// #4239, checker-wide like `interp_reqs`: for each generic fn, the
+    /// operand types (in its rigid generics) its body compares with `==` —
+    /// a requirement every instantiation must meet: a generic compare is
+    /// structural, so no instantiation may hold a Secret (E103).
+    pub(crate) eq_reqs: std::collections::HashMap<Sym, Vec<InterpReq>>,
+    /// #4239: (call site, requirement origin) pairs already reported.
+    pub(crate) eq_reported: std::collections::HashSet<(String, usize, usize, String, usize, usize)>,
+    /// Record-update bases (`{ ...b }`) awaiting the post-solve opaque
+    /// check (E033): a base whose type is still open at the spread is
+    /// judged once it resolves.
+    pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Comparison operand pairs awaiting the post-solve one-type check
+    /// (E037, #4018 / security row 11b): see `eq_operands.rs`.
+    pub(crate) deferred_eq_pair_checks: Vec<eq_operands::EqPairSite>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
     /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
@@ -361,6 +378,9 @@ pub struct Checker {
     /// Protocol bounds whose type parameter was an open inference var at the
     /// call, judged post-solve — see `calls::DeferredBoundSite`.
     pub(crate) deferred_protocol_bounds: Vec<calls::DeferredBoundSite>,
+    /// Where E111 (a type over the `type_size` budget, ADR-0030) was
+    /// reported, so one site is named once — see `type_budget.rs`.
+    pub(crate) type_budget_sites: std::collections::HashSet<(usize, usize)>,
     /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
     /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
     /// type resolved to Result is a hard error — E042 (must-use: a discarded
@@ -727,6 +747,10 @@ impl Checker {
             interp_reported: std::collections::HashSet::new(),
             deferred_ord_elem_checks: Vec::new(),
             deferred_eq_checks: Vec::new(),
+            eq_reqs: std::collections::HashMap::new(),
+            eq_reported: std::collections::HashSet::new(),
+            deferred_opaque_spreads: Vec::new(),
+            deferred_eq_pair_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_float_overflow_checks: Vec::new(),
@@ -736,6 +760,7 @@ impl Checker {
             deferred_type_param_checks: Vec::new(),
             deferred_input_sink_checks: Vec::new(),
             deferred_protocol_bounds: Vec::new(),
+            type_budget_sites: std::collections::HashSet::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             isolation_cascade: Default::default(),
@@ -1268,7 +1293,9 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.report_type_budget_hit(None);
         self.validate_after_solve(program);
+        self.report_type_budget_hit(None);
         // Unused import warnings. Usage is judged SYNTACTICALLY first
         // (#1783): every `alias.x` spelling in the file — call targets,
         // record/variant constructors, type annotations, patterns — marks
@@ -1343,12 +1370,19 @@ impl Checker {
             let used_via_bound = self.env.import_table.aliases.get(&sym(&import_name))
                 .is_some_and(|canon| bound_origins.contains(canon));
             // A selectively imported TYPE or CONSTRUCTOR is spelled bare
-            // (`import self.t.{T, V}` then `-> T`, `V(1)`, #3384): that
-            // spelling is the import's use, and deleting the line would
-            // strand it.
+            // (`import self.t.{T, V}` then `-> T`, `V(1)`, #3384), and so is
+            // a selectively imported FUNCTION (`import p.common.{items}` then
+            // `items()`, #4318): that spelling is the import's use, and
+            // deleting the line would strand it. Judged from the spelling,
+            // not from the call-site mark — that mark records the module's
+            // canonical path (`p.common`), which is not the name this verdict
+            // keys on (`common`), so a package submodule's selective import
+            // was judged unused however many of its names were called.
             let used_via_selective = names.as_ref().is_some_and(|ns| ns.iter().any(|n| {
                 !spelled.declared.contains(n)
-                    && (spelled.bare_ctors.contains(n) || spelled.bare_types.iter().any(|(t, _)| t == n))
+                    && (spelled.bare_ctors.contains(n)
+                        || spelled.bare_values.contains(n)
+                        || spelled.bare_types.iter().any(|(t, _)| t == n))
             }));
             if import_name.is_empty()
                 || self.env.import_table.used.contains(&sym(&import_name))
@@ -1509,10 +1543,13 @@ include!("post_solve_validation.rs");
 include!("unknown_type_root.rs");
 include!("qualified_type_head.rs");
 include!("interp_string_form.rs");
+include!("polymorphic_recursion.rs");
+include!("generic_eq.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
 include!("regex_literal_check.rs");
+include!("body_rules.rs");
 include!("abort_site_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");
@@ -1539,6 +1576,11 @@ struct ImportSpellings {
     /// constructor's (`V4(..)`, `V4(..) => ..`). The E060 pass
     /// maps each to its declaring type through the constructor table.
     bare_ctors: std::collections::HashSet<Sym>,
+    /// Every BARE lower-case value spelling — a call target or a function
+    /// value (`items(..)`, `xs |> list.map(sep)`). A selective import's
+    /// function is used by exactly this spelling (#4318); a local of the
+    /// same name over-approximates, which only ever keeps an import.
+    bare_values: std::collections::HashSet<Sym>,
     /// Every type name and variant case THIS file declares. A bare spelling
     /// of one is the file's own declaration — a user `type IpAddr` shadows
     /// the stdlib's, it never uses `import net` (#1837).
@@ -1577,7 +1619,7 @@ impl ImportSpellings {
             None if name.as_str().starts_with(|c: char| c.is_ascii_uppercase()) => {
                 self.bare_ctors.insert(name);
             }
-            None => {}
+            None => { self.bare_values.insert(name); }
         }
     }
 }

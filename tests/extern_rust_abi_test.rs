@@ -111,9 +111,9 @@ const ROWS: &[Row] = &[
           expected: "2\n1" },
     Row { id: "two", almide_params: "a: Bytes, b: String, c: Int", almide_ret: "Int", host_params: "a: &[u8], b: &str, c: i64", host_ret: "i64", host_body: "a.len() as i64 + b.len() as i64 + c",
           call: "println(int.to_string(f_two(bytes.from_string(\"ab\"), \"cde\", 100)))", expected: "105" },
-    Row { id: "rawptr", almide_params: "v: RawPtr", almide_ret: "Int", host_params: "v: *mut u8", host_ret: "i64", host_body: "v.is_null() as i64",
+    Row { id: "rawptr", almide_params: "v: Handle", almide_ret: "Int", host_params: "v: *mut u8", host_ret: "i64", host_body: "v.is_null() as i64",
           call: "println(int.to_string(f_rawptr(f_ret_rawptr(0))))", expected: "1" },
-    Row { id: "ret_rawptr", almide_params: "n: Int", almide_ret: "RawPtr", host_params: "_n: i64", host_ret: "*mut u8", host_body: "std::ptr::null_mut()",
+    Row { id: "ret_rawptr", almide_params: "n: Int", almide_ret: "Handle", host_params: "_n: i64", host_ret: "*mut u8", host_body: "std::ptr::null_mut()",
           call: "println(int.to_string(f_rawptr(f_ret_rawptr(1))))", expected: "1" },
     // Returns: a raw `Vec<u8>` / `AlmideMatrix` is accepted (`.into()`).
     Row { id: "ret_bytes", almide_params: "n: Int", almide_ret: "Bytes", host_params: "n: i64", host_ret: "Vec<u8>", host_body: "vec![7u8; n as usize]",
@@ -186,19 +186,19 @@ fn covering_rows(ty: &Ty) -> Result<&'static [&'static str], &'static str> {
 /// One sample of every `Ty` variant that can be a parameter type, with its
 /// Almide spelling (the C side's E090 program declares each spelling).
 fn every_ty_variant() -> Vec<(Ty, &'static str)> {
-    let named = |n: &str| Ty::Named(almide::intern::sym(n), vec![]);
+    let named = |n: &str| Ty::Named(almide::intern::sym(n), Default::default());
     vec![
         (Ty::Int, "Int"), (Ty::Int8, "Int8"), (Ty::Int16, "Int16"), (Ty::Int32, "Int32"), (Ty::Int64, "Int64"),
         (Ty::UInt8, "UInt8"), (Ty::UInt16, "UInt16"), (Ty::UInt32, "UInt32"), (Ty::UInt64, "UInt64"),
         (Ty::Float, "Float"), (Ty::Float32, "Float32"), (Ty::Float64, "Float64"),
         (Ty::Bool, "Bool"), (Ty::Unit, "Unit"), (Ty::String, "String"), (Ty::Bytes, "Bytes"),
-        (Ty::Matrix, "Matrix"), (Ty::RawPtr, "RawPtr"),
-        (Ty::Applied(TypeConstructorId::List, vec![Ty::Int]), "List[Int]"),
-        (Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int]), "Map[String, Int]"),
-        (Ty::Applied(TypeConstructorId::Set, vec![Ty::Int]), "Set[Int]"),
-        (Ty::Applied(TypeConstructorId::Option, vec![Ty::Int]), "Option[Int]"),
-        (Ty::Applied(TypeConstructorId::Result, vec![Ty::Int, Ty::String]), "Result[Int, String]"),
-        (Ty::Tuple(vec![Ty::Int, Ty::String]), "(Int, String)"),
+        (Ty::Matrix, "Matrix"), (Ty::RawPtr, "Handle"),
+        (Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into()), "List[Int]"),
+        (Ty::Applied(TypeConstructorId::Map, vec![Ty::String, Ty::Int].into()), "Map[String, Int]"),
+        (Ty::Applied(TypeConstructorId::Set, vec![Ty::Int].into()), "Set[Int]"),
+        (Ty::Applied(TypeConstructorId::Option, vec![Ty::Int].into()), "Option[Int]"),
+        (Ty::Applied(TypeConstructorId::Result, vec![Ty::Int, Ty::String].into()), "Result[Int, String]"),
+        (Ty::Tuple(vec![Ty::Int, Ty::String].into()), "(Int, String)"),
         (named("Pt"), "Pt"),
         (named("Sh"), "Sh"),
         (Ty::Record { fields: vec![(almide::intern::sym("x"), Ty::Int)] }, "{ x: Int }"),
@@ -328,7 +328,7 @@ const C_ROWS: &[CRow] = &[
     CRow { id: "float32", almide_ty: "Float32", c_ty: "f32", host_body: "v * 2.0", arg: "a_f32", print: "float.to_string(float.from(r))", expected: "3.0" },
     CRow { id: "float64", almide_ty: "Float64", c_ty: "f64", host_body: "v * 2.0", arg: "a_f64", print: "float.to_string(r)", expected: "18.0" },
     CRow { id: "bool", almide_ty: "Bool", c_ty: "i32", host_body: "1 - v", arg: "false", print: "\"${r}\"", expected: "true" },
-    CRow { id: "rawptr", almide_ty: "RawPtr", c_ty: "*mut u8", host_body: "v", arg: "c_null(0)", print: "int.to_string(c_is_null(r))", expected: "1" },
+    CRow { id: "rawptr", almide_ty: "Handle", c_ty: "*mut u8", host_body: "v", arg: "c_null(0)", print: "int.to_string(c_is_null(r))", expected: "1" },
 ];
 
 /// The C side: every row above as `c_<id>(v: T) -> T` over an `extern "C"`
@@ -350,8 +350,8 @@ fn c_program() -> (String, String) {
     almd.push_str(concat!(
         "@extern(c, \"c\", \"cf_strlen\")\nfn c_strlen(s: String) -> Int = _\n\n",
         "@extern(c, \"c\", \"cf_note\")\nfn c_note(n: Int) -> Unit = _\n\n",
-        "@extern(c, \"c\", \"cf_null\")\nfn c_null(n: Int) -> RawPtr = _\n\n",
-        "@extern(c, \"c\", \"cf_is_null\")\nfn c_is_null(p: RawPtr) -> Int = _\n\n",
+        "@extern(c, \"c\", \"cf_null\")\nfn c_null(n: Int) -> Handle = _\n\n",
+        "@extern(c, \"c\", \"cf_is_null\")\nfn c_is_null(p: Handle) -> Int = _\n\n",
     ));
     host.push_str(concat!(
         "#[no_mangle]\npub unsafe extern \"C\" fn cf_strlen(s: *const u8) -> i32 { unsafe { std::ffi::CStr::from_ptr(s as *const std::ffi::c_char) }.to_bytes().len() as i32 }\n",
@@ -428,4 +428,68 @@ fn c_types_without_a_c_form_are_e090() {
     let (almd_ok, host) = c_program();
     let (ok, _, stderr) = run_package("c_clean", &almd_ok, &host, &["check"]);
     assert!(ok, "check refused the accepted @extern(c) rows:\n{stderr}");
+}
+
+/// ADR-0031 D2, D3, D6 on the native C ABI. A `Region` parameter is two C
+/// arguments, the base and the runtime's `size_t` length (`cf_fill` writes
+/// exactly `len` bytes, so a wrong length would show in the read-back); a
+/// `@region(len = n, release = "…")` return is a read-only Region of `n`
+/// bytes whose release function runs exactly once, after the last copy of the
+/// region dropped — never while one is alive, never twice.
+#[test]
+#[cfg(unix)]
+fn a_region_crosses_c_as_pointer_and_length_and_is_released_once() {
+    let almd = concat!(
+        "import ffi\n\n",
+        "@extern(c, \"c\", \"cf_fill\")\nfn c_fill(buf: Region, byte: Int) -> Unit = _\n\n",
+        "@extern(c, \"c\", \"cf_buf_new\")\n@region(len = n, release = \"cf_buf_free\")\nfn c_buf_new(n: Int) -> Region = _\n\n",
+        "@extern(c, \"c\", \"cf_freed\")\nfn c_freed() -> Int = _\n\n",
+        "fn show(r: Result[Bytes, String]) -> String = match r {\n  ok(b) => bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(\",\"),\n  err(e) => \"err \" + e,\n}\n\n",
+        "effect fn use_buf() -> Unit = {\n",
+        "  let r = c_buf_new(3)\n  let copy = r\n",
+        "  println(\"len ${ffi.len(r)} writable ${ffi.is_writable(r)}\")\n",
+        "  println(show(ffi.read(copy, 0, 3)))\n",
+        "  println(show(ffi.read(r, 1, 3)))\n",
+        "  println(\"freed while held ${c_freed()}\")\n",
+        "}\n\n",
+        "effect fn main() -> Unit = {\n",
+        "  let w = ffi.alloc(4)!\n  c_fill(w, 7)\n  println(show(ffi.read(w, 0, 4)))\n",
+        "  use_buf()!\n",
+        "  println(\"freed after ${c_freed()}\")\n",
+        "}\n",
+    );
+    let host = concat!(
+        "#![allow(dead_code, unused_imports, clippy::missing_safety_doc)]\n\n",
+        "static FREED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);\n",
+        "#[no_mangle]\npub unsafe extern \"C\" fn cf_fill(buf: *mut u8, len: usize, byte: i32) { for i in 0..len { unsafe { *buf.add(i) = byte as u8 } } }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_buf_new(n: i32) -> *mut u8 { let v: Vec<u8> = (1..=n as u8).collect(); Box::into_raw(v.into_boxed_slice()) as *mut u8 }\n",
+        "#[no_mangle]\npub unsafe extern \"C\" fn cf_buf_free(p: *mut u8) { FREED.fetch_add(1, std::sync::atomic::Ordering::SeqCst); unsafe { drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, 3))) } }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_freed() -> i32 { FREED.load(std::sync::atomic::Ordering::SeqCst) }\n",
+    );
+    let (ok, stdout, stderr) = run_package("c_region", almd, host, &["run"]);
+    assert!(ok, "the Region C ABI program failed\n--- stderr ---\n{stderr}\n--- program ---\n{almd}");
+    assert_eq!(
+        stdout,
+        concat!(
+            "7,7,7,7\n",
+            "len 3 writable false\n",
+            "1,2,3\n",
+            "err ffi.read: 3 bytes at offset 1 are outside a region of 3 bytes\n",
+            "freed while held 0\n",
+            "freed after 1\n",
+        ),
+        "--- program ---\n{almd}"
+    );
+}
+
+/// A `Region` return without its length clause is E090: the declaration is
+/// the one place a foreign buffer's length can be stated (ADR-0031 D2).
+#[test]
+fn a_region_return_without_a_region_clause_is_e090() {
+    let almd = "import ffi\n\n@extern(c, \"c\", \"cf_buf_new\")\nfn c_buf_new(n: Int) -> Region = _\n\n@extern(c, \"c\", \"cf_bad\")\n@region(len = m, release = \"free\")\nfn c_bad(n: Int) -> Region = _\n\neffect fn main() -> Unit = println(\"x\")\n";
+    let (ok, stdout, stderr) = run_package("c_region_e090", almd, "", &["check"]);
+    let out = format!("{stdout}{stderr}");
+    assert!(!ok, "check accepted a Region return with no length:\n{out}");
+    assert!(out.contains("fn 'c_buf_new': a Region return needs the length"), "{out}");
+    assert!(out.contains("`len = m` names no parameter"), "{out}");
 }

@@ -314,7 +314,7 @@ mod proptest_lean_rust {
             Just(Ty::String),
             Just(Ty::Unknown),
             Just(Ty::Applied(
-                almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
+                almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int].into(),
             )),
             Just(Ty::Record { fields: vec![(almide_base::intern::sym("x"), Ty::Int)] }),
             Just(Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) }),
@@ -753,20 +753,20 @@ mod heap_classification_pin {
             (Ty::RawPtr, false),
             (Ty::Bytes, false),
             (Ty::Matrix, false),
-            (Ty::Tuple(vec![Ty::Int, Ty::Bool]), false),
+            (Ty::Tuple(vec![Ty::Int, Ty::Bool].into()), false),
             (Ty::OpenRecord { fields: vec![(sym("x"), Ty::Int)] }, false),
             (Ty::Variant { name: sym("V"), cases: Vec::<VariantCase>::new() }, false),
-            (Ty::Union(vec![Ty::Int, Ty::String]), false),
+            (Ty::Union(vec![Ty::Int, Ty::String].into()), false),
             (Ty::TypeVar(sym("T")), false),
             (Ty::ConstParam { name: sym("N"), ty: Box::new(Ty::Int) }, false),
             (Ty::ConstValue { ty: Box::new(Ty::Int), value: 3 }, false),
             (Ty::String, true),
-            (Ty::Applied(TC::List, vec![Ty::Int]), true),
+            (Ty::Applied(TC::List, vec![Ty::Int].into()), true),
             (Ty::Record { fields: vec![(sym("x"), Ty::Int)] }, true),
             // The variant whose ABSENCE in two per-pass copies was the #926
             // leak: ANF didn't lift what Perceus Dec's, and TCO left a
             // nominal-record accumulator unmanaged.
-            (Ty::Named(sym("P"), vec![]), true),
+            (Ty::Named(sym("P"), Default::default()), true),
             (Ty::Fn { is_effect: false, params: vec![], ret: Box::new(Ty::Unit) }, true),
             (Ty::Unknown, true),
         ];

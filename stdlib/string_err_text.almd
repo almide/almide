@@ -1,10 +1,35 @@
 // string_err_text — the SELF-HOSTED twin of C-418's escaper (#4126), the body
 // `string.__err_text` runs on wasm and in the interp oracle; native calls
-// almide-base's err_text.rs. Rule for rule: a C0 control, DEL, a C1 control and
-// a bidirectional control (U+061C, U+200E, U+200F, U+202A..=U+202E,
-// U+2066..=U+2069) read `\n` `\r` `\t` `\0` or `\u{<lowercase hex>}`; every
-// other character is kept. This file never reaches `prim.`.
-fn __et_escaped(n: Int) -> Bool = n <= 31 or (n >= 127 and n <= 159) or n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
+// almide-base's err_text.rs. Rule for rule: a character in the ranges of
+// almide-base's ALMIDE_RT_ERRTEXT_ESCAPED (C0, DEL, C1, General Category Cf /
+// Zl / Zp of Unicode 16.0 and the Tags block, #4265) reads `\n` `\r` `\t`
+// `\0` or `\u{<lowercase hex>}`; every other character is kept. The ranges
+// are written one `__et_in` each, in the table's order and in decimal, and
+// crates/almide-base/tests/err_text.rs reads them back. This file never
+// reaches `prim.`.
+fn __et_in(n: Int, lo: Int, hi: Int) -> Bool = n >= lo and n <= hi
+
+fn __et_escaped(n: Int) -> Bool = __et_in(n, 0, 31) or __et_in(n, 127, 159) or __et_in(n, 173, 173) or __et_in(
+  n,
+  1536,
+  1541,
+) or __et_in(n, 1564, 1564) or __et_in(n, 1757, 1757) or __et_in(n, 1807, 1807) or __et_in(
+  n,
+  2192,
+  2193,
+) or __et_in(n, 2274, 2274) or __et_in(n, 6158, 6158) or __et_in(n, 8203, 8207) or __et_in(
+  n,
+  8232,
+  8238,
+) or __et_in(n, 8288, 8292) or __et_in(n, 8294, 8303) or __et_in(n, 65279, 65279) or __et_in(
+  n,
+  65529,
+  65531,
+) or __et_in(n, 69821, 69821) or __et_in(n, 69837, 69837) or __et_in(n, 78896, 78911) or __et_in(
+  n,
+  113824,
+  113827,
+) or __et_in(n, 119155, 119162) or __et_in(n, 917504, 917631)
 
 fn __et_char(c: String, n: Int) -> String = match n {
   10 => "\\n",
@@ -15,6 +40,6 @@ fn __et_char(c: String, n: Int) -> String = match n {
 }
 
 @implements("string.__err_text")
-fn string_err_text(s: String) -> String =
+fn err_text_escape(s: String) -> String =
   if string.to_list(s) |> list.any((c) => __et_escaped(string.to_codepoint(c) ?? 0)) then string.to_list(s) |> list.map((c) => __et_char(c, string.to_codepoint(c) ?? 0)) |> list.join("")
   else s

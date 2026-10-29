@@ -43,9 +43,10 @@ fn panics_abort_and_discharge_their_message() {
         // A literal message is a pool static: only the line.
         ("plain", "{|id}\n"),
         // A value arm that panicked settles no value; the other arm's value
-        // moves into the join (`im`), which the bind owns (`ibd`), and the
-        // concatenation moves out (`im`) — on the path that did not abort.
-        ("label", "{|id}\n{|it}\n{|im}\n{|ibd}\n{|im}\n"),
+        // moves into the join (`im`), the dying bind moves into the in-place
+        // append (`im`, #4261), and the concatenation moves out (`im`) — on
+        // the path that did not abort.
+        ("label", "{|id}\n{|it}\n{|im}\n{|im}\n{|im}\n"),
     ];
     for (name, cert) in expect {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));

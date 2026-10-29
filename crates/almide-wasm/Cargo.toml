@@ -11,6 +11,8 @@ almide-ir = { path = "../almide-ir" }
 almide-base = { path = "../almide-base" }
 almide-types = { path = "../almide-types" }
 almide-layout = { path = "../almide-layout" }
+# The stamp the Region-export rewrite writes on its wrapper (extern_region.rs).
+almide-lang = { path = "../almide-lang" }
 wasm-encoder = { version = "0.262", features = ["wasmparser"] }
 wasmparser = "0.262"
 # #1315: the DWARF line table of a debug build (`debug_lines.rs`). The writer

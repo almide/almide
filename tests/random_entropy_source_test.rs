@@ -115,8 +115,8 @@ fn fn_bodies<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
 // clock) and the matching test fails.
 
 /// Native: `random.bytes` fills only through `almide_os_entropy`, which is
-/// getrandom(2) on Linux, getentropy(3) on the other unixes, and a refusal
-/// (the abort, never a fallback) anywhere else.
+/// getrandom(2) on Linux, getentropy(3) on the other unixes, BCryptGenRandom
+/// on Windows, and a refusal (the abort, never a fallback) anywhere else.
 #[test]
 fn native_random_bytes_reads_only_the_os_csprng() {
     let rt = code(&source("runtime/rs/src/random.rs"));
@@ -134,8 +134,8 @@ fn native_random_bytes_reads_only_the_os_csprng() {
     let sources = fn_bodies(&rt, "almide_os_entropy");
     assert_eq!(
         sources.len(),
-        3,
-        "almide_os_entropy: one body per cfg (linux, other unix, the rest)"
+        4,
+        "almide_os_entropy: one body per cfg (linux, other unix, windows, the rest)"
     );
     for s in &sources {
         for other in ["next_u64", "RNG_STATE", "RandomState", "SystemTime", "Instant"] {
@@ -151,9 +151,13 @@ fn native_random_bytes_reads_only_the_os_csprng() {
         "no almide_os_entropy reads getentropy(3)"
     );
     assert!(
+        sources.iter().any(|s| s.contains("BCryptGenRandom(")),
+        "no almide_os_entropy reads BCryptGenRandom (Windows)"
+    );
+    assert!(
         sources
             .iter()
-            .filter(|s| !s.contains("getrandom(") && !s.contains("getentropy("))
+            .filter(|s| !s.contains("getrandom(") && !s.contains("getentropy(") && !s.contains("BCryptGenRandom("))
             .all(|s| s.trim_end().ends_with("false")),
         "an almide_os_entropy with no OS source must refuse (false), not fall back"
     );
