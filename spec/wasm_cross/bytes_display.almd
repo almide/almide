@@ -1,0 +1,22 @@
+// @contract: C-444
+// A Bytes value renders as the list of its byte values wherever it is
+// displayed: at the top of an interpolation, nested in an Option, a Result, a
+// list, a tuple and a record, empty, with bytes above 127, and as an operand
+// of a failing assert_eq. Both legs print the same bytes.
+type Frame = { tag: String, payload: Bytes }
+
+fn main() -> Unit = {
+  let b = bytes.from_string("ab")
+  let hi = bytes.from_list([0, 127, 128, 255])
+  let none_b: Bytes? = none
+  println("${b}")
+  println("${bytes.from_string("")}")
+  println("${hi}")
+  println("${some(b)} ${none_b}")
+  let r: Result[Bytes, String] = ok(b)
+  println("${r}")
+  println("${[b, hi]} ${(b, 1)}")
+  println("${Frame { tag: "x", payload: hi }}")
+  let r2: Result[Bytes, String] = ok(hi)
+  assert_eq(r, r2)
+}
