@@ -83,13 +83,16 @@ fn split_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
             let field = |name: &str, ty: Ty| {
                 expr(IrExprKind::Member { object: Box::new(var.clone()), field: almide_base::intern::sym(name) }, ty)
             };
-            // A slice's view starts `off` bytes past its block's base.
+            // A slice's view starts `off` bytes past its block's base. The
+            // sum is still an address into the Region's block, so it stays
+            // typed `Handle`: the exit plan keys its raw-address rule (the
+            // frame holds the Region across the host call) on that type.
             let start = IrExprKind::BinOp {
                 op: almide_ir::BinOp::AddInt,
                 left: Box::new(field("base", Ty::RawPtr)),
                 right: Box::new(field("off", Ty::Int)),
             };
-            args.push(expr(start, Ty::Int));
+            args.push(expr(start, Ty::RawPtr));
             args.push(field("len", Ty::Int));
         }
         let mut stub = f.clone();
