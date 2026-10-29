@@ -35,7 +35,7 @@ effect fn main() -> Unit = {
   let port = net.udp_local_port(a)!
   println(show_ok(net.udp_send_to(a, bytes.from_string("x"), "127.0.0.1", 70000)))
   println(show_ok(net.udp_send_to(a, bytes.from_string("x"), "127.0.0.1", -2)))
-  println(show_ok(net.udp_send_to(a, bytes.from_string("x"), "", port)))
+  println(show_masked(net.udp_send_to(a, bytes.from_string("x"), "", port), port))
   println(show_ok(net.udp_recv_from(a, -1)))
   // An occupied port.
   println(show_masked(net.udp_bind("127.0.0.1", port), port))

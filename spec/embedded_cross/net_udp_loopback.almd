@@ -66,9 +66,9 @@ effect fn main() -> Unit = {
   println("lookup 127.0.0.1: ${show_ips(net.lookup_host("127.0.0.1"))}")
   println("lookup ::1: ${show_ips(net.lookup_host("::1"))}")
   println("lookup [::1]: ${show_ips(net.lookup_host("[::1]"))}")
-  let local = net.lookup_host("localhost")!
-  println("localhost non-empty: ${list.len(local) >= 1}")
-  println("localhost all loopback: ${local |> list.all((ip) => net.is_loopback(ip))}")
-  println("localhost each once: ${list.len(list.unique(local |> list.map((ip) => net.ip_to_string(ip)))) == list.len(local)}")
+  let names = net.lookup_host("localhost")!
+  println("localhost non-empty: ${list.len(names) >= 1}")
+  println("localhost all loopback: ${names |> list.all((ip) => net.is_loopback(ip))}")
+  println("localhost each once: ${list.len(list.unique(names |> list.map((ip) => net.ip_to_string(ip)))) == list.len(names)}")
   println("done")
 }
