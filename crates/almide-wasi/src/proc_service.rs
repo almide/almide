@@ -6,7 +6,7 @@
 //! `call: func(op: op, a: string, b: string) -> result<string, string>`
 //! (crates/almide-wasm-run/wit/process/spawn.wit) — which ships only when the
 //! module's op set names a process op (80..=90, or the `start` child's
-//! 140..=145), the selection the environ
+//! 146..=151), the selection the environ
 //! pair gets from op 26. A stock runtime has no such import and refuses the
 //! module at load, before `_start` runs: the failure is loud and early,
 //! never a wrong answer. A host that implements the import (the embedded
@@ -30,7 +30,7 @@ use wasm_encoder::{BlockType, Function, ValType};
 pub const PROC_OPS: std::ops::RangeInclusive<i32> = 80..=90;
 /// The `process.start` child's ops (#4308): the cases after `run-with`, case
 /// index = op − [`CHILD_CASE_BIAS`]. 91..=139 serve other families.
-pub const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = 140..=145;
+pub const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = 146..=151;
 /// `op − CHILD_CASE_BIAS` is a child op's WIT case index (11..=16).
 pub const CHILD_CASE_BIAS: i32 = *PROC_CHILD_OPS.start() - (*PROC_OPS.end() - *PROC_OPS.start() + 1);
 

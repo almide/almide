@@ -320,7 +320,7 @@ pending_self_host_ceiling = 0
 # 2026-10-30 (#4308): 31 -> 24. The process.start child family (start, poll,
 # wait, stop, read_new_stdout, read_new_stderr, child_pid) leaves
 # pending-port: the embedded host keeps a started child as a host resource
-# over almide:process/spawn cases start..child-pid (ops 140..=145) and runs
+# over almide:process/spawn cases start..child-pid (ops 146..=151) and runs
 # native's child core on it, the structural leg lowers the family through
 # stdlib/process_wasm.almd, and the stock artifact carries the private
 # import, so the seven rows join the subprocess family in host-capability

@@ -5,7 +5,7 @@
 //! with native by construction.
 //!
 //! One operation = `(op, a, b) -> ok(text) | err(text)`, op 80..=90 and the
-//! `start` child's 140..=145 in the WIT `enum op` order
+//! `start` child's 146..=151 in the WIT `enum op` order
 //! (wit/process/spawn.wit). It reaches the host two ways:
 //!
 //! - the raw module's `almide.fs_call` (the embedded lane — `almide run
@@ -25,8 +25,8 @@ use std::sync::Mutex;
 pub(crate) const OP_FIRST: i32 = 80;
 pub(crate) const OP_LAST: i32 = 90;
 /// The `process.start` child's ops (#4308): the WIT cases after `run-with`.
-pub(crate) const CHILD_FIRST: i32 = 140;
-pub(crate) const CHILD_LAST: i32 = 145;
+pub(crate) const CHILD_FIRST: i32 = 146;
+pub(crate) const CHILD_LAST: i32 = 151;
 const _: () = assert!(
     *crate::wasi::PROC_OPS.start() == OP_FIRST
         && *crate::wasi::PROC_OPS.end() == OP_LAST
@@ -213,7 +213,7 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn(), procs: &ProcTabl
             core::almide_proc_run_cmd(&all[0], &rest, a, &all[1], ms).map(|c| c.to_string())
         }
         // The `start` child (#4308): native's child core on this run's table.
-        140 => {
+        146 => {
             let mut all = cells(b)?;
             if all.len() < 3 {
                 return Err("malformed process frame (missing operand)".to_string());
@@ -227,14 +227,14 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn(), procs: &ProcTabl
             t.push(Some(c));
             Ok((t.len() - 1).to_string())
         }
-        141 => with_child(procs, a, |c| if c.step(core::almide_proc_try_wait_poll).is_some() { "1" } else { "0" }.to_string()),
-        142 => with_child(procs, a, |c| c.wait(core::almide_proc_try_wait_poll))?.map(status_text),
-        143 => {
+        147 => with_child(procs, a, |c| if c.step(core::almide_proc_try_wait_poll).is_some() { "1" } else { "0" }.to_string()),
+        148 => with_child(procs, a, |c| c.wait(core::almide_proc_try_wait_poll))?.map(status_text),
+        149 => {
             let grace: i64 = b.parse().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(b)))?;
             with_child(procs, a, |c| c.stop(grace))?.map(status_text)
         }
-        144 => Ok(with_child(procs, a, |c| c.read_new(b == "2")).unwrap_or_default()),
-        145 => Ok(with_child(procs, a, |c| c.pid()).unwrap_or(-1).to_string()),
+        150 => Ok(with_child(procs, a, |c| c.read_new(b == "2")).unwrap_or_default()),
+        151 => Ok(with_child(procs, a, |c| c.pid()).unwrap_or(-1).to_string()),
         _ => Err(format!("unknown process op {op}")),
     }
 }
