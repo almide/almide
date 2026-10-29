@@ -317,7 +317,8 @@ pending_self_host_ceiling = 0
 # entropy every leg serves; a started child becomes a resource on the
 # almide:process capability (ADR-0025). `forever` was the wrong closure
 # class for all three. No row's legs changed and no served function moved.
-pending_port_ceiling = 31
+# 31 -> 30 (2026-10-30, #4307): uuid.v7 serves on every wasm leg; its stamp cell is a guest global (stdlib/uuid_wasm.almd), pinned by spec/wasm_cross/uuid_v7_monotonic.almd.
+pending_port_ceiling = 30
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -625,15 +626,6 @@ reason-structural = "pending-port: UDP sockets and name resolution are not serve
 reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
 reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
 issue = "#4306"
-
-[[unavailable]]
-fn = "uuid.v7"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-reason-stock-p1 = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-reason-embedded = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-issue = "#4307"
 
 [[unavailable]]
 fn = "process.start"
