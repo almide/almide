@@ -10061,7 +10061,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
-fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__with_headers(
+fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
   status,
   body.__self_to_text(),
   ["Content-Type", body.__self_media_type()],
@@ -10109,8 +10109,15 @@ fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 @borrow_ref(flat)
 local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
+
+
+
+@intrinsic("almide_rt_http___http_response_flat")
+@borrow_ref(flat)
+local fn __http_response_flat(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+
 /// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
-fn redirect(url: String) -> HttpResponse = http.__with_headers(
+fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
   302,
   "",
   ["Location", url, "Content-Type", string.__string_media_type("")],
@@ -10201,14 +10208,28 @@ local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse
 local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
 
-local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.map((c) => match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+
+local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
+  string.to_list(a),
+  string.to_list(b),
+  0,
+)
+
+local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
+  if i >= list.len(a) then true
+  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
+  else __http_response_ci_at(a, b, i + 1)
+
+local fn __http_response_fold(c: String) -> String = match string.index_of(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
-}) |> list.join("")
-
+}
 
 local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
-  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and __http_response_fold(h) == __http_response_fold(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
@@ -11069,6 +11090,11 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
+
+
+
+@implements("http.__http_response_flat")
+fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
 
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
