@@ -155,7 +155,7 @@
 67600	spec/wasm_cross/edge_int_boundaries.almd
 66112	spec/wasm_cross/edge_map_order.almd
 112384	spec/wasm_cross/edge_string_unicode.almd
-66256	spec/wasm_cross/effect_assign_unwrap.almd
+66192	spec/wasm_cross/effect_assign_unwrap.almd
 66128	spec/wasm_cross/effect_branch_keeps_result.almd
 70336	spec/wasm_cross/effect_call_arg_credit.almd
 68368	spec/wasm_cross/effect_dispatcher_many_arms.almd
@@ -399,9 +399,9 @@
 68784	spec/wasm_cross/json_parse_lenient_edges.almd
 68960	spec/wasm_cross/json_parse_strict_strings.almd
 69664	spec/wasm_cross/json_parse_strict_structure.almd
-73120	spec/wasm_cross/json_path_edges.almd
-70928	spec/wasm_cross/json_path_index_domain.almd
-2049824	spec/wasm_cross/json_set_path_depth_bound.almd
+73056	spec/wasm_cross/json_path_edges.almd
+70896	spec/wasm_cross/json_path_index_domain.almd
+2049280	spec/wasm_cross/json_set_path_depth_bound.almd
 69072	spec/wasm_cross/json_string_span.almd
 70160	spec/wasm_cross/json_stringify_control_chars.almd
 71232	spec/wasm_cross/json_stringify_nonfinite.almd
