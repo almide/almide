@@ -130,6 +130,15 @@ effect fn main() -> Unit = {{
     )
 }
 
+/// The object fold spelled with a fallback instead of `!` (#4315): the same
+/// answer, the same walk.
+fn set_obj_or_src(n: usize) -> String {
+    set_obj_src(n).replace(
+        "value.int(i))!\n",
+        "value.int(i)) ?? value.null()\n",
+    )
+}
+
 fn set_obj_want(n: usize) -> String {
     format!("{n} k0 k{} {{\"k0\":\"again\",\"k1\":1}}\n", n - 1)
 }
@@ -199,6 +208,7 @@ const MERGE_SELF: Cell = ("value.merge (v, v)", merge_self_src, merge_self_want)
 const PICK_OMIT: Cell = ("value.pick / value.omit", pick_src, pick_want);
 const SET_OBJ: Cell = ("value.set_path (object fold)", set_obj_src, set_obj_want);
 const SET_ARR: Cell = ("value.set_path (array fold)", set_arr_src, set_arr_want);
+const SET_OBJ_OR: Cell = ("value.set_path (object fold, `?? fallback`)", set_obj_or_src, set_obj_want);
 
 /// The wasm cells at n and 2n, each under its budget, each equal to native.
 fn wasm_doubling((name, src, want): Cell, n: usize, fuel_n: u64) {
@@ -252,6 +262,15 @@ fn value_set_path_object_fold_is_linear_on_wasm() {
 #[test]
 fn value_set_path_array_fold_is_linear_on_wasm() {
     wasm_doubling(SET_ARR, 20_000, ARR_FOLD_FUEL);
+}
+
+/// The fold step is linear whichever extraction it is spelled with: `??`
+/// leaves its carrier unparked as `!` does (arg_temps.rs `fold_step_call`).
+#[test]
+fn value_set_path_fallback_fold_is_linear_on_wasm() {
+    let src = set_obj_or_src(4);
+    assert!(src.contains("?? value.null()") && !src.contains(")!\n  }"), "the fallback spelling:\n{src}");
+    wasm_doubling(SET_OBJ_OR, 20_000, OBJ_FOLD_FUEL);
 }
 
 #[test]
