@@ -64,7 +64,7 @@
 6761	spec/wasm_cross/bytes_param_writeback.almd
 2766	spec/wasm_cross/bytes_push_growth.almd
 1978	spec/wasm_cross/bytes_push_inplace.almd
-15132	spec/wasm_cross/bytes_rawptr.almd
+15111	spec/wasm_cross/bytes_rawptr.almd
 2940	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 3143	spec/wasm_cross/bytes_repeat_size_ceiling.almd
 20161	spec/wasm_cross/bytes_search_edit_family.almd
