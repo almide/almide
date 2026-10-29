@@ -312,13 +312,15 @@ pub fn check_rc(
         //   routine) takes a release on its local INSIDE that window — the
         //   arm's or routine's release of the credit it was given. A move
         //   the arm keeps (stores or returns) takes nothing.
-        // The rebinds and moves are matched first, the named and unnamed
-        // events after them (augmenting paths never unmatch an earlier
-        // event). A rebind or a move may go without an instruction, so it
-        // must not be left the call a release elsewhere was dropped from:
-        // matched last, it would let the release take the rebind's call and
-        // go unmatched itself, hiding the dropped release (the
-        // rc-release-dropped drill);
+        // The rebinds are matched first, the named and unnamed events next,
+        // the moves last (augmenting paths never unmatch an earlier event).
+        // A rebind may go without an instruction, so it must not be left the
+        // call a release elsewhere was dropped from: matched after the
+        // releases, it would let a release take the rebind's call and go
+        // unmatched itself, hiding the dropped release (the
+        // rc-release-dropped drill). A move takes only what the frame's own
+        // events left inside its window — its credit may as well leave
+        // through the callee (a tail call) with no release here;
         // each event tries the calls outside every arm and routine window
         // before those inside one.
         let fits = |e: usize, i: usize| -> bool {
@@ -334,8 +336,9 @@ pub fn check_rc(
             }
         };
         let order: Vec<usize> = (0..evs.len())
-            .filter(|&e| matches!(evs[e].0, 'o' | 'm'))
+            .filter(|&e| evs[e].0 == 'o')
             .chain((0..evs.len()).filter(|&e| !matches!(evs[e].0, 'o' | 'm')))
+            .chain((0..evs.len()).filter(|&e| evs[e].0 == 'm'))
             .collect();
         // A call inside an arm or routine window is tried last: left over,
         // it is that arm's or routine's own; one outside has no such reading.
