@@ -1131,30 +1131,34 @@ them.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (35 functions)
+## Signature index (36 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
 // @since 0.5.0 or earlier
 effect http.serve(port: Int, handler: HttpHandler) -> Unit
 
-// Reply with Content-Type text/plain.
+// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
 // @since 0.5.0 or earlier
-http.response(status: Int, body: String) -> HttpResponse
+http.response(status: Int, body: B) -> HttpResponse
 
-// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-// @since unreleased
-http.html(status: Int, body: SafeHtml) -> HttpResponse
-
-// Reply with Content-Type application/json.
+// Reply with Content-Type application/json; body is JSON text.
 // @since 0.5.0 or earlier
 http.json(status: Int, body: String) -> HttpResponse
 
-// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value; aborts on an HTML Content-Type.
+// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
 // @since 0.5.0 or earlier
-http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse
+http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> HttpResponse
 
-// 302 with Location url and empty body.
+// resp with its body replaced by body and its Content-Type by body's type.
+// @since unreleased
+http.with_body(resp: HttpResponse, body: B) -> HttpResponse
+
+// A body of media type media_type; a literal, never one a safe module owns (html, svg).
+// @since unreleased
+http.typed(media_type: String, body: Bytes) -> TypedBody
+
+// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 // @since 0.6.0 or earlier
 http.redirect(url: String) -> HttpResponse
 
@@ -1186,15 +1190,15 @@ http.body(m: M) -> String
 // @since unreleased
 http.body_bytes(m: M) -> Bytes
 
-// m with header name set, any case: the first match replaced in place, else appended; a response aborts on an HTML Content-Type.
+// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
 // @since 0.6.0 or earlier
 http.set_header(m: M, name: String, value: String) -> M
 
-// m with its body replaced; a text/html response aborts on a non-empty body.
+// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 // @since unreleased
 http.set_body(m: M, body: String) -> M
 
-// m with its body replaced by body, decoded as lossy UTF-8.
+// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 // @since unreleased
 http.set_body_bytes(m: M, body: Bytes) -> M
 
