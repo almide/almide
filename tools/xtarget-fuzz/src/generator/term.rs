@@ -132,6 +132,11 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
         .map(|r| (r, *b.rng.pick(&[100u64, 300, 1000, 2000, 5000])));
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        // A literal-only parameter (E117) is written as one of its literals.
+        if let Some(lits) = sig.literal_at(i) {
+            args.push(b.rng.pick(lits).to_string());
+            continue;
+        }
         // net's descriptors, socket paths and bounded sizes (#3620).
         if sig.module == "net" {
             if let Some(a) = super::net_unix_args::arg(b, &sig.func, name) {
@@ -613,7 +618,8 @@ fn gen_call(b: &mut Builder, goal: &GenType) -> Option<String> {
     let mut candidates: Vec<(usize, HashMap<String, GenType>, u32)> = Vec::new();
     for (i, sig) in b.catalogue.iter().enumerate() {
         let mut subst = sig.forced_bindings();
-        if sig.effective_ret().unify_with_goal(goal, &mut subst) {
+        // A bounded variable the goal binds must conform to its bounds.
+        if sig.effective_ret().unify_with_goal(goal, &mut subst) && sig.admits(&subst) {
             candidates.push((i, subst, sig.weight));
         }
     }
@@ -712,12 +718,13 @@ fn bind_free_vars(
     sig.ret.collect_vars(&mut vars);
     for v in vars {
         if !subst.contains_key(&v) {
-            let chosen =
-                FREE_VAR_CHOICES[b.rng.below(FREE_VAR_CHOICES.len() as u32) as usize].clone();
+            // A bounded variable takes one of its conformers (`[B: Body]`).
+            let choices = sig.bound_of(&v).unwrap_or(FREE_VAR_CHOICES);
+            let chosen = choices[b.rng.below(choices.len() as u32) as usize].clone();
             subst.insert(v, chosen);
         }
     }
-    Some(())
+    sig.admits(subst).then_some(())
 }
 
 /// Generate an argument expression for a (possibly generic) parameter,
