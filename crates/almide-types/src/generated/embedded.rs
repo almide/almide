@@ -5638,6 +5638,8 @@ pub const SRC_FFI: &str = r#"
 
 
 
+
+
 /// A view of memory: base, length, permission and owner (ADR-0031 D1).
 mod type Region = { owner: Bytes, base: Handle, len: Int, writable: Bool, keep: () -> Unit }
 
@@ -5687,6 +5689,13 @@ effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
 @memory_unsafe
 effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, 0, r.len))
 
+/// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.slice: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok({ ...r, base: __offset(r.base, off), len: n, writable: false })
+
 /// `Region(<len> bytes)`: the base address differs per target and is never shown.
 mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
 
@@ -5695,6 +5704,24 @@ mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
 local fn __address(b: Bytes) -> Handle = _
+
+
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_offset")
+local fn __offset(base: Handle, off: Int) -> Handle = _
+
+
+
+
+
+
+
+
+@memory_unsafe
+local fn __export_owner(r: Region) -> Bytes =
+  if r.len == bytes.len(r.owner) then r.owner
+  else panic("ffi: an @export(wasm) fn returned a sub-region of ${r.len} bytes; return the whole region and pass the offset")
 
 
 
@@ -5723,10 +5750,17 @@ pub const SRC_FFI_BRIDGE: &str = r#"
 
 
 
+
 @implements("ffi.__address")
 fn ffi_address(b: Bytes) -> Handle = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
+
+@implements("ffi.__offset")
+fn ffi_offset(base: Handle, off: Int) -> Handle = {
+  let a = prim.ptr_to_int(base)
+  if a == 0 then base else prim.int_to_ptr(a + off)
 }
 
 fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
