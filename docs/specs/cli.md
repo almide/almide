@@ -211,6 +211,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 |---|---|---|
 | `--run` が 1 件も一致しなかった | **5** | 何も走っていない。CI のフィルタの打ち間違いが緑に見えないように。メッセージはパターンが一致しなかったと言う。`--allow-no-tests` で opt-out |
 | 実行すべきテストが 1 件も無かった | **5** | 事故。`--allow-no-tests` で opt-out |
+| テストはあったが、全ファイルがスキップされ 1 件も走らなかった | **5** | 何も走っていない（#4325）。メッセージは `no test ran: N file(s) were skipped` と言う。`--allow-no-tests` で opt-out |
 
 「テストが無かった」は**テストファイルが見つからなかった場合と、名指ししたファイルに
 `test` ブロックが無かった場合の両方**に適用される。5 は 1(テスト失敗)と区別するための
@@ -221,7 +222,35 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 レンダラの壁(WALL、そのレグが辞退した)ではなく「走らせるものが無かった」であり、両レグで
 5 になる(#2204)。
 
-テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`
+**スキップは、同じ実行で 1 件以上のテストが走ったときだけ緑**(#4325)。`--target wasm`
+のスキップは 3 種あり、要約行に種類ごとの数が出る（`1 passed, 0 failed, 2 skipped: 1 walled,
+1 declared `// wasm:skip` (of 3 files)`、件数行は `1 test in 3 files, 2 files skipped`）:
+
+| スキップ | 意味 |
+|---|---|
+| declared（先頭 3 行の `// wasm:skip`） | 作者が「wasm ではこのファイルを走らせられない」と理由付きで宣言した |
+| walled（`WALL` 行） | wasm レグがそのプログラムを lower できなかった（E082 と同じ判定） |
+| host unavailable | レーンを起動できない環境（`ALMIDE_TEST_WASM_RUNNER=wasmtime` で CLI が無い等） |
+
+どれも「テストはあるが、このレグでは走らなかった」であって合格ではない。そこで規則は
+1 つ: **実行全体で走ったテストが 0 件なら、スキップの有無にかかわらず 5**。宣言済みの
+`// wasm:skip` ファイルも、そのファイル単独で `--target wasm` にかければ 5 になる（走らせた
+ものが無い）。ディレクトリ実行で他のファイルのテストが 1 件でも走れば、宣言スキップは
+緑のまま。以前はスキップがあると 0 件でも 0 で終わり、wasm で lower できない負の対照が
+`0 passed, 0 failed, 1 skipped` で通っていた。
+
+**組み込みホストに無い `@extern(wasm)` import はミスコンパイルではない**(#4324)。
+`@extern(wasm, "m", "f")` を import するプログラムは、`almide run --target wasm` と同じ
+文言（`this program imports `m.f` … has no host for it` と `--host js` の hint）で断られる:
+
+- 既定の `almide test`（wasm 先行 + native fallback）: そのファイルは native で走り、
+  `note: <file>: the wasm leg cannot run this file; its tests run on the native fallback`
+  と理由が出る。「wasm-only miscompile」の WASM TRAP にはならない
+- `--target wasm`: `almide run --target wasm` と同じく **FAIL**（終了 1）。そのホストを
+  前提とするファイルは `// wasm:skip <理由>` で宣言する
+
+テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`、
+スキップと無ホストの判定は `tests/wasm_test_skip_verdict_test.rs`
 
 **失敗したテストの出力は失敗報告の下に付く**(#2538)。`println` / `eprintln` で途中の値を
 出したテストが落ちたとき、その出力が捨てられないようにするため:

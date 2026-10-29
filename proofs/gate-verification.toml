@@ -1558,6 +1558,10 @@ path = "scripts/lib/ci-slice.sh"
 reason = "the CI slice's selection library (sourced by the sliced gates and the cross-target spec step); it picks fixtures and judges nothing — every verdict is the sourcing gate's, and crates/almide-corpus pins it to the Rust twin (bash_twin_selects_what_rust_selects)"
 
 [[not_a_gate]]
+path = "scripts/lib/wasm-skip.sh"
+reason = "the `// wasm:skip` declaration reader (sourced by scripts/check-memory-traps.sh's per-file wasm leg and the cross-target per-file loop); it picks which files a wasm leg skips and judges nothing — every verdict is the sourcing gate's, and `almide test` applies the same first-three-lines rule itself (src/cli/test_wasm.rs)"
+
+[[not_a_gate]]
 path = "scripts/ci-slice-prepare.sh"
 reason = "resolves the CI slice's touched-file list once per job (fetches ALMIDE_CI_BASE, writes ALMIDE_CI_TOUCHED); it judges nothing — the sliced gates do, and it exits 1 only when a slice could not see the change's own files"
 

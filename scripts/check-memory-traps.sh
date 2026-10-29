@@ -37,6 +37,7 @@ mode="${1:-spec}"
 # 20, xtarget-fuzz at least 30). The full run (develop, main, PRs into main,
 # the nightly) runs all of spec/ and every program.
 . scripts/lib/ci-slice.sh
+. scripts/lib/wasm-skip.sh
 
 arm() { ALMIDE_REGION_TRAP_STALE=1 "$@"; }
 unarm() { env -u ALMIDE_REGION_TRAP_STALE "$@"; }
@@ -56,10 +57,18 @@ spec)
     n=$(wc -l < "$sel" | tr -d ' ')
     [ "$n" -gt 0 ] || { echo "memory-traps: the CI slice selected 0 test files — a vacuous run is not a pass" >&2; exit 1; }
     one() { # $1 = target, $2 = file
+      # A file that DECLARES `// wasm:skip` has no wasm leg to arm: run on
+      # its own it runs no test, which `almide test` fails (#4325). Not run,
+      # and named with its reason so the skip stays visible. A file the leg
+      # merely WALLS carries no declaration and still runs here — and fails.
+      local reason
+      if [ "$1" = wasm ] && reason=$(wasm_skip_reason "$2"); then
+        printf 'SKIP %s (--target wasm: declared // wasm:skip: %s)\n' "$2" "$reason"; return 0
+      fi
       local o; o=$(ALMIDE_REGION_TRAP_STALE=1 "$ALMIDE" test "$2" --target "$1" 2>&1) && return 0
       printf 'FAIL %s (--target %s):\n%s\n' "$2" "$1" "$o" | head -60; return 1
     }
-    export -f one; export ALMIDE
+    export -f one wasm_skip_reason; export ALMIDE
     for leg in rust wasm; do
       echo "== spec/ CI slice ($n test files) on $leg, ALMIDE_REGION_TRAP_STALE=1"
       xargs -P "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" -I{} bash -c 'one "$@"' _ "$leg" {} < "$sel" || fail=1
