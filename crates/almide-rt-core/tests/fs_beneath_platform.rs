@@ -56,10 +56,8 @@ fn the_platform_constant_names_the_descriptor_platforms() {
 fn real(p: &Path) -> PathBuf {
     let c = std::fs::canonicalize(p).expect("test fixture setup");
     #[cfg(windows)]
-    if let Some(rest) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-        if rest.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(rest);
-        }
+    if let Some(rest) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\")).filter(|rest| rest.as_bytes().get(1) == Some(&b':')) {
+        return PathBuf::from(rest);
     }
     c
 }
@@ -157,7 +155,7 @@ fn outside_untouched(base: &Path) {
 
 /// Replace `data/sub` by a link to `outside/sub` (the original kept aside).
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-fn swap(base: &Path, link: fn(&Path, &Path)) {
+fn swap(base: &Path, link: LinkFn) {
     std::fs::rename(base.join("data").join("sub"), base.join("data").join("sub.orig")).expect("test fixture setup");
     link(&base.join("outside").join("sub"), &base.join("data").join("sub"));
 }
@@ -178,12 +176,16 @@ fn every_rooted_call_escapes(root: &str, rel: &str) {
     assert!(escapes(fs_beneath_remove(root, rel)), "remove {rel:?}");
 }
 
+/// A directory-link maker: `(target, at)`.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+type LinkFn = fn(&Path, &Path);
+
 /// The directory links this platform has: a symlink (or its junction
 /// stand-in), and on Windows an explicit junction too.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-fn dir_links() -> Vec<(&'static str, fn(&Path, &Path))> {
+fn dir_links() -> Vec<(&'static str, LinkFn)> {
     #[allow(unused_mut)]
-    let mut v: Vec<(&'static str, fn(&Path, &Path))> = vec![("symlink", link_dir)];
+    let mut v: Vec<(&'static str, LinkFn)> = vec![("symlink", link_dir)];
     #[cfg(windows)]
     v.push(("junction", junction));
     v
@@ -213,6 +215,7 @@ fn rooted_calls_never_leave_their_root() {
 
     // `..` and absolute paths, refused before anything is opened.
     let secret = base.join("outside").join("secret.txt");
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut rels = vec![
         "..".to_string(),
         "../outside/secret.txt".to_string(),
