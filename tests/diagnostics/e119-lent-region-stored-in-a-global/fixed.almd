@@ -1,0 +1,11 @@
+import ffi
+
+var kept: Bytes = bytes.new()
+
+@export(c, "keep")
+effect fn keep(buf: Region) -> Int = {
+  kept = ffi.read(buf, 0, ffi.len(buf))!
+  ffi.len(buf)
+}
+
+effect fn main() -> Unit = println("ok")

@@ -21,6 +21,7 @@
 
 mod types;
 mod fallible_user_hof;
+mod lent_region_escape;
 mod toplet_order;
 mod infer;
 pub(crate) mod calls;

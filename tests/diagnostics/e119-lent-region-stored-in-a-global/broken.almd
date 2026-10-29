@@ -1,0 +1,12 @@
+import ffi
+
+var kept: Region = ffi.region(bytes.new())
+
+@export(c, "keep")
+fn keep(buf: Region) -> Int = {
+  let view = buf
+  kept = view
+  ffi.len(buf)
+}
+
+effect fn main() -> Unit = println("ok")
