@@ -371,26 +371,21 @@ impl WitnessRecorder {
         if !self.rebind_site(local) {
             return false;
         }
-        let fresh = match src {
-            None => {
-                let o = self.new_obj();
-                self.ops(o, "i");
-                Some(o)
-            }
-            Some(s) => {
-                if !self.held_ops(s, "a") {
-                    return false;
-                }
-                None
-            }
-        };
+        if let Some(s) = src
+            && !self.held_ops(s, "a")
+        {
+            return false;
+        }
         if released_old {
             self.held_ops(local, "d");
         }
-        match (fresh, src) {
-            (Some(o), _) => self.log(Ev::Bind { local, obj: o, owner: true }),
-            (None, Some(s)) => self.log(Ev::Alias { local, src: s, owner: true }),
-            (None, None) => {}
+        match src {
+            None => {
+                let o = self.new_obj();
+                self.ops(o, "i");
+                self.log(Ev::Bind { local, obj: o, owner: true });
+            }
+            Some(s) => self.log(Ev::Alias { local, src: s, owner: true }),
         }
         true
     }
