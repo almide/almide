@@ -466,6 +466,48 @@ pub fn check_rc(
             let mut seen = vec![false; owner.len()];
             augment(e, &by_pref, &fits, &mut seen, &mut owner);
         }
+        // Then from the calls' side: a call with no reading of its own still
+        // unmatched takes an event along an alternating path that ends at an
+        // unmatched event, or frees a call that has a reading of its own — so
+        // the leftovers are, as far as any matching allows, the calls that
+        // have one (never fewer events matched).
+        fn rehome(
+            c: usize,
+            n_events: usize,
+            fits: &dyn Fn(usize, usize) -> bool,
+            fallback: &dyn Fn(usize) -> bool,
+            seen: &mut [bool],
+            owner: &mut [Option<usize>],
+        ) -> bool {
+            for e in 0..n_events {
+                if seen[e] || !fits(e, c) {
+                    continue;
+                }
+                seen[e] = true;
+                match owner.iter().position(|&o| o == Some(e)) {
+                    None => {
+                        owner[c] = Some(e);
+                        return true;
+                    }
+                    Some(c2) if fallback(c2) || rehome(c2, n_events, fits, fallback, seen, owner) => {
+                        if owner[c2] == Some(e) {
+                            owner[c2] = None;
+                        }
+                        owner[c] = Some(e);
+                        return true;
+                    }
+                    Some(_) => {}
+                }
+            }
+            false
+        }
+        let fallback_call = |i: usize| i >= nc || fallback(i);
+        for c in 0..nc {
+            if owner[c].is_none() && !fallback(c) {
+                let mut seen = vec![false; evs.len()];
+                rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
+            }
+        }
         // A move's credit is released by the arm on some of its paths: one
         // release per path. Releases of it that no run passes through two of
         // (the two arms of one `if`) are all that one move's.
