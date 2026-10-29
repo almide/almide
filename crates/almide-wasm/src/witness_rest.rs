@@ -53,3 +53,42 @@ impl WitnessRecorder {
         }
     }
 }
+
+/// A FUSED chain (list_fuse.rs, #2977): a map stage's owned result makes the
+/// next stage's param its owner for one element. The chain releases it where
+/// the element is done with: where a filter skips it, and after the fold step.
+/// That release is the iteration-end `d` the paths renderer writes for each
+/// owner local bound in the iteration (witness_paths.rs `end_iteration`), so
+/// it is not logged on the certificate; it is logged for the byte check
+/// (#4277) on the owner it names, at each edge the iteration ends on.
+impl WitnessRecorder {
+    pub fn fused_open(&mut self) {
+        self.iter_owned.push(Vec::new());
+    }
+
+    /// A stage param takes an owned element: a new object it owns (`i`). No
+    /// dec-old: the chain released the previous element's block where that
+    /// element was done with, so the rebind releases nothing.
+    pub fn iteration_owner(&mut self, local: u32) {
+        let o = self.fresh_obj(local, true);
+        self.ops(o, "i");
+        if let Some(v) = self.iter_owned.last_mut() {
+            v.push(local);
+        }
+    }
+
+    /// The iteration ends here (a filter's skip, or the step's end): each
+    /// owner bound so far is released on this edge.
+    pub fn iteration_releases(&mut self) {
+        if self.branches.dead() {
+            return;
+        }
+        for &l in self.iter_owned.last().into_iter().flatten() {
+            crate::witness::rc::event('d', Some(l));
+        }
+    }
+
+    pub fn fused_close(&mut self) {
+        self.iter_owned.pop();
+    }
+}

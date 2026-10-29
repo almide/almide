@@ -113,6 +113,8 @@ pub struct WitnessRecorder {
     /// a different fn set); the floor test compares their certificates only
     /// where this agrees. Never part of the certificate.
     conv: String,
+    /// Per open fused chain, the owner locals its stages bound (witness_rest.rs).
+    iter_owned: Vec<Vec<u32>>,
 }
 
 impl Default for WitnessRecorder {
@@ -134,6 +136,7 @@ impl WitnessRecorder {
             hooked: Vec::new(),
             err_exit_armed: false,
             conv: String::new(),
+            iter_owned: Vec::new(),
         }
     }
 

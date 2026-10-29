@@ -223,9 +223,19 @@ impl Emitter<'_> {
         w.note_arg(chain as *const almide_ir::IrExpr as usize);
         w.note_arg(cb as *const almide_ir::IrExpr as usize);
         w.loop_open();
+        w.fused_open();
         if carried {
             w.carried_owned(acc);
         }
+    }
+
+    /// The fused iteration's end: the element's owners are released on this
+    /// edge (witness_rest.rs), and the activation closes.
+    pub(crate) fn witness_fused_close(&mut self) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.iteration_releases();
+        w.fused_close();
+        w.loop_close();
     }
 
     /// A fused stage's param takes the element: an OWNED map result (a
@@ -238,7 +248,7 @@ impl Emitter<'_> {
         }
         let Some(w) = self.witness.as_mut() else { return };
         if owned {
-            w.bind_fresh(local);
+            w.iteration_owner(local);
         } else {
             w.param_borrowed(local);
         }
@@ -250,6 +260,7 @@ impl Emitter<'_> {
         let Some(w) = self.witness.as_mut() else { return };
         w.branch_open();
         w.branch_arm();
+        w.iteration_releases();
         w.loop_jump();
         w.branch_arm();
         w.branch_close();
