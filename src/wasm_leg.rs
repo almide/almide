@@ -272,9 +272,12 @@ fn link_self_host(
     use std::collections::{HashMap, HashSet};
 
     let mut registry: HashMap<String, &'static str> = HashMap::new();
+    // Each surface's implementing fn, by the self-host source that holds it.
+    let mut impls: HashMap<String, (&'static str, &'static str)> = HashMap::new();
     for (src, maps) in almide_types::self_host_registry::self_host_runtime() {
-        for (_impl_fn, surface) in *maps {
+        for (impl_fn, surface) in *maps {
             registry.insert((*surface).to_string(), *src);
+            impls.insert((*surface).to_string(), (*src, *impl_fn));
         }
     }
 
@@ -313,18 +316,6 @@ fn link_self_host(
         }
     }
 
-    // Each scan clones the body ONCE and walks the owned copy:
-    // `map_children` consumes its node, and cloning at every level instead
-    // copied each subtree once per ancestor — O(size x depth), the bulk of a
-    // small program's wasm link step once more stdlib bodies reached it
-    // (#4289). The traversal (which children, in which order) is unchanged.
-    fn scan_expr(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
-        scan_owned(e.clone(), out);
-    }
-    fn scan_owned(e: crate::ir::IrExpr, out: &mut HashSet<String>) -> crate::ir::IrExpr {
-        scan_node(&e, out);
-        e.map_children(&mut |c| scan_owned(c, out))
-    }
     fn scan_node(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
         // A value of a runtime-backed type displays through its declared repr
         // (#4204) wherever it meets a display — bare, nested, or in an error
@@ -413,6 +404,19 @@ fn link_self_host(
             _ => {}
         }
     }
+    /// One owned walk of a body: its demands (`scan_node`), whether an error
+    /// type of it can reach a Float (`err_float`, below), and — for a module
+    /// fn — its bare calls to its own module's fns as the surface
+    /// `<module>.<fn>` (`__address(b)` inside stdlib/ffi.almd, a `local`
+    /// intrinsic, demands `ffi.__address`, so a registered self-host body for
+    /// it is loaded — ADR-0031). `refs` collects the fn VALUES and unresolved
+    /// method names the body names, which reach fns without demanding a
+    /// surface.
+    ///
+    /// The walk clones the body ONCE and walks the owned copy:
+    /// `map_children` consumes its node, and cloning at every level instead
+    /// copied each subtree once per ancestor — O(size x depth) (#4289).
+    ///
     /// An error value whose type can reach a Float is displayed at emission
     /// wherever it meets a String channel: `main`'s abort renders it through
     /// its repr (#3470, `emit_abort_message`), and a `!` from a
@@ -421,63 +425,132 @@ fn link_self_host(
     /// the same as `${e}` (an unused splice is reachability-pruned). Before
     /// #4071 the demand was met by accident — every auto-imported module was
     /// lowered into every program, and their bodies demanded the formatter.
-    fn err_reaches_float(e: &crate::ir::IrExpr) -> bool {
-        let mut found = false;
-        err_float_owned(e.clone(), &mut found);
-        found
+    struct BodyScan<'a> {
+        module: Option<&'a str>,
+        keys: HashSet<String>,
+        refs: HashSet<String>,
+        err_float: bool,
     }
-    fn err_float_owned(e: crate::ir::IrExpr, found: &mut bool) -> crate::ir::IrExpr {
-        *found |= matches!(
+    fn scan_body_owned(e: crate::ir::IrExpr, s: &mut BodyScan<'_>) -> crate::ir::IrExpr {
+        use crate::ir::{CallTarget, IrExprKind};
+        scan_node(&e, &mut s.keys);
+        s.err_float |= matches!(
             &e.ty,
             crate::types::Ty::Applied(crate::types::TypeConstructorId::Result, a)
                 if a.len() == 2 && !ty_float_free(&a[1]) && !a[1].is_unresolved()
         );
-        e.map_children(&mut |c| err_float_owned(c, found))
-    }
-    fn scan_own_calls(e: &crate::ir::IrExpr, module: &str, out: &mut HashSet<String>) {
-        if let crate::ir::IrExprKind::Call { target: crate::ir::CallTarget::Named { name }, .. }
-        | crate::ir::IrExprKind::TailCall { target: crate::ir::CallTarget::Named { name }, .. } = &e.kind
-            && !name.as_str().contains('.')
-        {
-            out.insert(format!("{module}.{}", name.as_str()));
+        match &e.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, .. }
+                if !name.as_str().contains('.') =>
+            {
+                if let Some(m) = s.module {
+                    s.keys.insert(format!("{m}.{}", name.as_str()));
+                }
+                s.refs.insert(name.as_str().to_string());
+            }
+            IrExprKind::Call { target: CallTarget::Method { method, .. }, .. }
+            | IrExprKind::TailCall { target: CallTarget::Method { method, .. }, .. } => {
+                s.refs.insert(method.as_str().to_string());
+            }
+            IrExprKind::FnRef { name } => {
+                s.refs.insert(name.as_str().to_string());
+                if let Some(m) = s.module.filter(|_| !name.as_str().contains('.')) {
+                    s.refs.insert(format!("{m}.{}", name.as_str()));
+                }
+            }
+            _ => {}
         }
-        e.clone().map_children(&mut |c| {
-            scan_own_calls(&c, module, out);
-            c
-        });
+        e.map_children(&mut |c| scan_body_owned(c, s))
     }
-    fn scan_program(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
-        let bodies = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter()));
-        if bodies.into_iter().any(|f| err_reaches_float(&f.body)) {
+    /// The demands of every body the program can REACH (#4317). The roots
+    /// are the entry program (its fns and top-level lets), every module's
+    /// top-level lets, and every fn of a module that is neither a bundled
+    /// stdlib module nor a linked self-host body. A library fn is scanned
+    /// once something scanned names it: a call `<module>.<fn>`, a sibling's
+    /// bare call, a fn value, an unresolved method of that name (any module
+    /// declaring it), or a demanded surface whose loaded self-host body is
+    /// it. Scanning every fn of every loaded module instead made a module's
+    /// unused fns demand their callees' modules and self-host bodies, which
+    /// demanded theirs: `int.to_string` linked 63 self-host bodies and the
+    /// sized-int, list and string modules into a three-function program,
+    /// tripling every wasm compile. An unscanned fn is never reached, so the
+    /// emitter's reachability prunes it; a demand it alone would have made is
+    /// never needed.
+    fn scan_program(
+        ir: &crate::ir::IrProgram,
+        impls: &HashMap<String, (&'static str, &'static str)>,
+        loaded: &HashMap<&'static str, String>,
+        out: &mut HashSet<String>,
+    ) {
+        let library = |m: &str| m.starts_with("__selfhost_") || crate::stdlib::is_bundled_module(m);
+        let mut by_key: HashMap<String, (usize, usize)> = HashMap::new();
+        let mut by_name: HashMap<&str, Vec<(usize, usize)>> = HashMap::new();
+        let mut work: Vec<(usize, usize)> = Vec::new();
+        for (mi, m) in ir.modules.iter().enumerate() {
+            for (fi, f) in m.functions.iter().enumerate() {
+                by_key.insert(format!("{}.{}", m.name.as_str(), f.name.as_str()), (mi, fi));
+                by_name.entry(f.name.as_str()).or_default().push((mi, fi));
+                if !library(m.name.as_str()) {
+                    work.push((mi, fi));
+                }
+            }
+        }
+        let mut err_float = false;
+        let mut absorb = |s: BodyScan<'_>, work: &mut Vec<(usize, usize)>, out: &mut HashSet<String>| {
+            err_float |= s.err_float;
+            for k in s.keys.iter().chain(s.refs.iter()) {
+                work.extend(by_key.get(k).copied());
+                if let Some((src, impl_fn)) = impls.get(k)
+                    && let Some(module) = loaded.get(src)
+                {
+                    work.extend(by_key.get(&format!("{module}.{impl_fn}")).copied());
+                }
+            }
+            for r in &s.refs {
+                let bare = r.rsplit('.').next().unwrap_or(r);
+                work.extend(by_name.get(bare).into_iter().flatten().copied());
+            }
+            for k in s.keys.iter().filter(|k| !k.contains('.')) {
+                work.extend(by_name.get(k.as_str()).into_iter().flatten().copied());
+            }
+            out.extend(s.keys);
+        };
+        let scan = |e: &crate::ir::IrExpr, module: Option<&str>| {
+            let mut s = BodyScan { module, keys: HashSet::new(), refs: HashSet::new(), err_float: false };
+            scan_body_owned(e.clone(), &mut s);
+            BodyScan { module: None, keys: s.keys, refs: s.refs, err_float: s.err_float }
+        };
+        for f in &ir.functions {
+            absorb(scan(&f.body, None), &mut work, out);
+        }
+        for tl in &ir.top_lets {
+            absorb(scan(&tl.value, None), &mut work, out);
+        }
+        for m in &ir.modules {
+            for tl in &m.top_lets {
+                absorb(scan(&tl.value, Some(m.name.as_str())), &mut work, out);
+            }
+        }
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        while let Some((mi, fi)) = work.pop() {
+            if !seen.insert((mi, fi)) {
+                continue;
+            }
+            let m = &ir.modules[mi];
+            absorb(scan(&m.functions[fi].body, Some(m.name.as_str())), &mut work, out);
+        }
+        if err_float {
             out.insert("float.to_string_compound".to_string());
             out.insert("float32.to_string_compound".to_string());
         }
-        for f in &ir.functions {
-            scan_expr(&f.body, out);
-        }
-        for tl in &ir.top_lets {
-            scan_expr(&tl.value, out);
-        }
-        for m in &ir.modules {
-            for f in &m.functions {
-                scan_expr(&f.body, out);
-                // A module's bare call to its own fn (`__address(b)` inside
-                // stdlib/ffi.almd, a `local` intrinsic) is the surface
-                // `<module>.<fn>`: demand it under that key, so a registered
-                // self-host body for it is loaded (ADR-0031).
-                scan_own_calls(&f.body, m.name.as_str(), out);
-            }
-            for tl in &m.top_lets {
-                scan_expr(&tl.value, out);
-            }
-        }
     }
 
-    let mut loaded: HashSet<&'static str> = HashSet::new();
+    let mut loaded: HashMap<&'static str, String> = HashMap::new();
     let mut module_diags = Vec::new();
     loop {
         let mut needed = HashSet::new();
-        scan_program(ir, &mut needed);
+        scan_program(ir, &impls, &loaded, &mut needed);
         // Deterministic load order: module indices, names, and layouts
         // must not depend on hash-seed iteration order.
         let mut needed: Vec<String> = needed.into_iter().collect();
@@ -525,11 +598,11 @@ fn link_self_host(
         }
         for surface in needed {
             let Some(&src) = registry.get(&surface) else { continue };
-            if loaded.contains(&src) {
+            if loaded.contains_key(&src) {
                 continue;
             }
-            loaded.insert(src);
-            let name = format!("__selfhost_{}", loaded.len());
+            let name = format!("__selfhost_{}", loaded.len() + 1);
+            loaded.insert(src, name.clone());
             let tokens = crate::lexer::Lexer::tokenize(src);
             let mut parser = crate::parser::Parser::new(tokens).with_file(&name);
             let Ok(mut mod_prog) = parser.parse() else { continue };
