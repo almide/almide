@@ -1,0 +1,22 @@
+diff --git a/crates/almide-wasm/src/rc_ownership.rs b/crates/almide-wasm/src/rc_ownership.rs
+index a55675f0c..33390ad97 100644
+--- a/crates/almide-wasm/src/rc_ownership.rs
++++ b/crates/almide-wasm/src/rc_ownership.rs
+@@ -742,7 +742,7 @@ impl Emitter<'_> {
+                 self.rc_inc_top();
+             }
+             if self.rc_droppable(ty) && (normalize || then_owned) {
+-                self.witness_arm_value(then);
++                self.witness_arm_value(else_);
+             }
+             self.f.instructions().else_();
+             crate::witness::rc::site_window(site, if_at, self.f.byte_len());
+@@ -754,7 +754,7 @@ impl Emitter<'_> {
+                 self.rc_inc_top();
+             }
+             if join {
+-                self.witness_arm_value(else_);
++                self.witness_arm_value(then);
+             }
+             Ok(join)
+         })();
