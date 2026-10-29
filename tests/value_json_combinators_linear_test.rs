@@ -13,9 +13,8 @@
 //! keyed Map; the interp's prim bodies: a sorted index). Native `set_path`
 //! updates a document at its last use in place (`@consume(v, x)` on the
 //! `almide_rt_value_set_path_steps` intrinsic): only the path is walked, so the array
-//! fold is linear; the object fold still compares each new key against the
-//! fields so far (an Object is a pair vector with no index), but no longer
-//! copies them.
+//! fold is linear; the object fold finds each key through the Object's key
+//! index (#4297), so it is linear too.
 //!
 //! The wasm leg is pinned by wasmtime's FUEL at n and 2n (the 2n budget is
 //! twice the n budget, so a super-linear body fails the larger cell first):
@@ -240,17 +239,14 @@ fn native_bodies_stay_fast_at_the_issue_sizes() {
     // 160,000 (4.6 s at 80,000), pick/omit 11.8 s, the object fold 18 s, the
     // array fold ~14 s at 80,000 (3.4 s at 40,000).
     // `growth` is the full/quarter bound: 8 for a linear body (linear ~4x,
-    // quadratic ~16x). The object fold keeps 32: a native Object is a vector
-    // of pairs (C-401) and set_path finds its key by a linear scan, so a fold
-    // of n inserts is n^2/2 key compares by representation — measured 14.6x
-    // at 40,000 against 10,000 on release-fix 0ff4366bc and on this tree alike
-    // (2.7 s / 0.19 s, GCE n2-standard-16). Its bound catches growth past
-    // quadratic; its constant is the open cost, not a regression (#4289).
+    // quadratic ~16x). The object fold had 32 while set_path found its key by
+    // a scan of the pairs — n^2/2 key compares, 14.6x at 40,000 against
+    // 10,000 (#4289); the Object's key index makes it linear (#4297).
     for ((name, src, want), size, growth) in [
         (MERGE, 80_000, 8),
         (MERGE_SELF, 160_000, 8),
         (PICK_OMIT, 80_000, 8),
-        (SET_OBJ, 40_000, 32),
+        (SET_OBJ, 40_000, 8),
         (SET_ARR, 80_000, 8),
     ] {
         // The bound is RELATIVE, the way set_map_wasm_linear_test and
@@ -275,6 +271,72 @@ fn native_bodies_stay_fast_at_the_issue_sizes() {
             full < small * growth,
             "{name} took {full:?} on native at {size} against {small:?} at {quarter} — quadratic again?"
         );
+    }
+}
+
+/// The key index (#4297) changes no answer: objects on both sides of its
+/// 16-entry threshold — set_path inserts, overwrites and nested steps, a
+/// pair list repeating keys, merge, pick, a parsed document repeating a key
+/// past the threshold, field lookups — print the same bytes natively and on
+/// wasm, and in insertion order (C-401).
+#[test]
+fn indexed_objects_answer_like_the_pair_scan_on_both_legs() {
+    let src = r#"import json
+
+effect fn fold(n: Int) -> Value = {
+  var acc = value.object([])
+  for i in 0..<n {
+    acc = value.set_path(acc, value.key(value.root(), "k${(i * 7) % n}"), value.int(i))!
+  }
+  acc = value.set_path(acc, value.key(value.root(), "k3"), value.string("again"))!
+  acc = value.set_path(acc, value.key(value.key(value.root(), "k5"), "in"), value.int(5))!
+  acc = value.set_path(acc, value.key(value.root(), "z"), value.null())!
+  acc
+}
+
+fn dups(n: Int) -> Value =
+  value.object(list.range(0, n) |> list.map((i) => ("d${i % 5}", value.int(i))))
+
+effect fn main() -> Unit = {
+  for n in [3, 15, 16, 17, 40] {
+    let v = fold(n)!
+    println(json.stringify(v))
+    println("${json.stringify(value.get(v, "k3") ?? value.null())} ${json.stringify(value.get(v, "k${n - 1}") ?? value.null())} ${json.stringify(value.get(v, "nope") ?? value.null())}")
+    let d = dups(n)
+    println(json.stringify(d))
+    let m = value.merge(v, value.object([("k0", value.bool(true)), ("new", value.int(1)), ("k1", value.int(9))]))
+    println(json.stringify(value.merge(m, d)))
+    println(json.stringify(value.pick(m, ["new", "k1", "k0", "zz"])))
+    let text = json.stringify(v)
+    let back = json.parse(text)!
+    println(json.stringify(value.set_path(back, value.key(value.root(), "k1"), value.int(-1))!))
+    let rep = "${string.drop_end(text, 1)},\"k1\":0}"
+    match json.parse(rep) {
+      ok(_) => println("accepted"),
+      err(e) => println(e),
+    }
+  }
+}
+"#;
+    let dir = tempfile::tempdir().expect("scratch");
+    let (native_out, _) = native(dir.path(), src);
+    assert_eq!(native_out.lines().count(), 35, "native answer:\n{native_out}");
+    assert_eq!(
+        native_out.lines().next(),
+        Some(r#"{"k0":0,"k1":1,"k2":2,"k3":"again","k5":{"in":5},"z":null}"#),
+        "native answer:\n{native_out}"
+    );
+    assert!(
+        native_out.lines().nth(28).is_some_and(|l| l.starts_with(r#"{"k0":0,"k7":1,"k14":2,"k21":3,"#)),
+        "the 40-key fold lost insertion order:\n{native_out}"
+    );
+    assert!(native_out.contains("json: duplicate key"), "a repeated key past 16 was accepted:\n{native_out}");
+    if !has_wasmtime() {
+        return;
+    }
+    match stock_fueled(dir.path(), src, 50_000_000_000) {
+        Ok(got) => assert_eq!(got, native_out, "wasm differs from native"),
+        Err(e) => panic!("wasm run failed: {e}"),
     }
 }
 

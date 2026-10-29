@@ -12,7 +12,7 @@
 #![cfg(unix)]
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,12 @@ fn request(port: u16, body: &str) -> std::io::Result<String> {
     Ok(out)
 }
 
+/// A port nothing listens on: the OS's pick for a released bind. A port
+/// derived from the pid could collide with whatever else held it (#4313).
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port").local_addr().expect("addr").port()
+}
+
 /// Wait until the server answers a served request (it compiles first).
 fn wait_up(port: u16) {
     let start = Instant::now();
@@ -58,7 +64,7 @@ fn wait_up(port: u16) {
 #[test]
 fn an_abort_in_the_handler_fails_only_its_request() {
     let dir = tempfile::tempdir().unwrap();
-    let port = 20000 + (std::process::id() % 20000) as u16;
+    let port = free_port();
     std::fs::write(dir.path().join("s.almd"), SERVER.replace("PORT", &port.to_string())).unwrap();
     let stderr_path = dir.path().join("stderr.txt");
     let child = Command::new(env!("CARGO_BIN_EXE_almide"))
