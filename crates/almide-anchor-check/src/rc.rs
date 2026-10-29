@@ -695,16 +695,31 @@ pub fn check_rc(
             false
         };
         let mut co: Vec<Vec<usize>> = vec![Vec::new(); nc];
+        let shares = |e: usize, c: usize, owner: &[Option<usize>], co: &[Vec<usize>]| {
+            fits(e, c) && owner[c].is_some_and(|o| exclusive_events(e, o)) && co[c].iter().all(|&o| exclusive_events(e, o))
+        };
         for e in 0..evs.len() {
-            if got[e] || !matches!(evs[e].0, 'a' | 'd') {
+            if got[e] || !matches!(evs[e].0, 'a' | 'd' | 'o') {
                 continue;
             }
-            if let Some(c) = (0..nc).find(|&c| {
-                fits(e, c)
-                    && owner[c].is_some_and(|o| exclusive_events(e, o))
-                    && co[c].iter().all(|&o| exclusive_events(e, o))
-            }) {
+            if let Some(c) = (0..nc).find(|&c| shares(e, c, &owner, &co)) {
                 co[c].push(e);
+                got[e] = true;
+                continue;
+            }
+            // One step further: a call `e` fits whose sole holder `o` can
+            // share another call with that call's holder (their events in
+            // two arms of one site) — `o` moves there and `e` takes the call.
+            let moved = (0..nc).find_map(|c| {
+                let o = owner[c]?;
+                if !fits(e, c) || !co[c].is_empty() || !matches!(evs[o].0, 'a' | 'd' | 'o') || (0..owner.len()).any(|x| x != c && owner[x] == Some(o)) {
+                    return None;
+                }
+                (0..nc).find(|&c2| c2 != c && shares(o, c2, &owner, &co)).map(|c2| (c, o, c2))
+            });
+            if let Some((c, o, c2)) = moved {
+                co[c2].push(o);
+                owner[c] = Some(e);
                 got[e] = true;
             }
         }

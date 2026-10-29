@@ -1,6 +1,8 @@
 //! `almide-anchor-check <artifact.wasm> <bundle> <anchors>` — exit 0 when
 //! every located bounds and init event is the instruction it is anchored at
-//! in the shipped bytes (lib.rs), 1 when one is not, 2 on unreadable input.
+//! in the shipped bytes (lib.rs), 1 when one is not or when the check runs
+//! past its deadline (`DEADLINE_SECS`; a timeout is a reject), 2 on
+//! unreadable input.
 
 use std::io::Write;
 
@@ -24,8 +26,9 @@ fn main() {
         })
     };
     let (w, b, a) = (read(wasm), read(bundle), read(anchors));
-    let a = String::from_utf8_lossy(&a);
-    match almide_anchor_check::check(&w, &b, &a) {
+    let a = String::from_utf8_lossy(&a).into_owned();
+    let limit = std::time::Duration::from_secs(almide_anchor_check::DEADLINE_SECS);
+    match almide_anchor_check::check_within(w, b, a, limit) {
         Ok(r) => {
             println!(
                 "ANCHORS OK: init {} site(s) / {} store(s), {} fill(s), {} unlocated; bounds {} check(s), {} access(es), {} unlocated, {} operand pair(s)",

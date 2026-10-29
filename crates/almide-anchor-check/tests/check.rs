@@ -792,3 +792,33 @@ fn an_unreachable_release_is_never_refused_and_may_carry_an_event() -> Result<()
     check_rc(&bodies, 0, None, &releases, &[], &[(1, "".into())], &[vec![], vec![]], &mut RcReport::default())?;
     Ok(())
 }
+
+/// A check that runs past its deadline is a reject, never a pass or a skip.
+#[test]
+fn a_check_past_its_deadline_is_a_reject() {
+    use std::time::Duration;
+    assert_eq!(almide_anchor_check::within(Duration::from_millis(20), || {
+        std::thread::sleep(Duration::from_secs(5));
+        1
+    }), None);
+    assert_eq!(almide_anchor_check::within(Duration::from_secs(5), || 1), Some(1));
+    // A check that would have PASSED, had it finished: still a reject.
+    let late = almide_anchor_check::deadline(Duration::from_millis(20), || {
+        std::thread::sleep(Duration::from_secs(5));
+        Ok::<(), String>(())
+    });
+    assert!(late.is_err_and(|e| e.contains("deadline")));
+    assert_eq!(almide_anchor_check::deadline(Duration::from_secs(5), || Ok::<u8, String>(1)), Ok(1));
+}
+
+/// A rebind logged in both arms of one site is one release past the join;
+/// when matching first handed the exit release to one of them, that arm's
+/// rebind moves to share the join's release and the exit event takes its own.
+#[test]
+fn rebinds_in_two_arms_share_the_release_past_the_join() -> Result<(), String> {
+    let body = "local.get 1 (if (then) (else)) local.get 0 call $alloc drop local.get 0 call $alloc drop";
+    rc(body, "( o0 | o0 ) d0")?;
+    // Outside any site, two rebinds and an exit release are three releases.
+    assert!(rc(body, "o0 o0 d0").is_err());
+    Ok(())
+}

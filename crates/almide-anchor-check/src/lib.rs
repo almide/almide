@@ -783,3 +783,29 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     }
     Ok(rep)
 }
+
+/// The wall's per-artifact time limit (seconds) for `check`.
+pub const DEADLINE_SECS: u64 = 60;
+
+/// `check` held to a deadline. A check that has not finished when the time
+/// runs out is a REJECT, never a pass and never a skip: an artifact whose
+/// witness could not be matched in time is one the wall has not certified.
+pub fn check_within(wasm: Vec<u8>, bundle: Vec<u8>, anchors: String, limit: std::time::Duration) -> Result<Report, String> {
+    deadline(limit, move || check(&wasm, &bundle, &anchors))
+}
+
+/// A verdict held to `limit`: one not reached in time is an `Err`.
+pub fn deadline<T: Send + 'static>(limit: std::time::Duration, f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    within(limit, f).unwrap_or_else(|| {
+        Err(format!("the check did not finish within its {} s deadline; a timeout is a reject", limit.as_secs_f64()))
+    })
+}
+
+/// Runs `f` on its own thread; `None` when it has not returned within `limit`.
+pub fn within<T: Send + 'static>(limit: std::time::Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(limit).ok()
+}
