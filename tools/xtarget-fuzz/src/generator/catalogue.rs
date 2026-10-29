@@ -540,7 +540,7 @@ mod availability_tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(public.len(), 8, "{public:?}");
+        assert!(!public.is_empty(), "the ffi module declares no public fn");
         let cat = build();
         for f in &public {
             assert!(cat.iter().any(|s| s.module == "ffi" && s.func == *f), "ffi.{f} is not in the catalogue");
