@@ -2,7 +2,8 @@
 //! 91..=103 (the net/tcp design step 2), which the embedded host serves with
 //! native's net core (crates/almide-rt-core/src/net_core.rs), and of the
 //! unix-socket and shared-memory family's INTERIM ops 104..=116, served with
-//! native's net_unix_core. stdlib/net_wasm.almd declares the leaves bodyless
+//! native's net_unix_core, and of the udp and name-lookup ops 140..=145
+//! (#4306), served with the net core. stdlib/net_wasm.almd declares the leaves bodyless
 //! (`= _`); they intercept before resolution through `lower_host_leaf`, as
 //! the http and subprocess leaves do.
 //!
@@ -43,10 +44,20 @@ const OP_SHM_RESIZE: i32 = 114;
 const OP_SHM_WRITE: i32 = 115;
 const OP_SHM_READ: i32 = 116;
 
+/// The udp and name-lookup ops (#4306): the embedded host serves them with
+/// the net core (crates/almide-wasm-run/src/net_host.rs); a stock artifact
+/// does not (the p1 op set omits them) until the wasi:sockets route.
+const OP_UDP_BIND: i32 = 140;
+const OP_UDP_LOCAL_PORT: i32 = 141;
+const OP_UDP_SEND_TO: i32 = 142;
+const OP_UDP_RECV_FROM: i32 = 143;
+const OP_UDP_CLOSE: i32 = 144;
+const OP_LOOKUP_HOST: i32 = 145;
+
 /// The ops whose b operand is the Bytes to send.
-const SENDS_BYTES: [i32; 3] = [OP_NET_WRITE, OP_UNIX_SEND, OP_SHM_WRITE];
+const SENDS_BYTES: [i32; 4] = [OP_NET_WRITE, OP_UNIX_SEND, OP_SHM_WRITE, OP_UDP_SEND_TO];
 /// The ops that answer `Result[Bytes, String]`.
-const READS: [i32; 5] = [OP_NET_READ, OP_NET_READ_EXACT, OP_NET_READ_TIMEOUT, OP_UNIX_RECV, OP_SHM_READ];
+const READS: [i32; 6] = [OP_NET_READ, OP_NET_READ_EXACT, OP_NET_READ_TIMEOUT, OP_UNIX_RECV, OP_SHM_READ, OP_UDP_RECV_FROM];
 
 /// The tcp family's op for a `__net_*` leaf.
 fn tcp_op(name: &str) -> Option<i32> {
@@ -64,6 +75,19 @@ fn tcp_op(name: &str) -> Option<i32> {
         "__net_close_listener" => OP_NET_CLOSE_LISTENER,
         "__net_is_open" => OP_NET_IS_OPEN,
         "__net_local_port" => OP_NET_LOCAL_PORT,
+        _ => return None,
+    })
+}
+
+/// The udp and name-lookup op for a `__net_udp_*` / `__net_lookup_host` leaf.
+fn udp_op(name: &str) -> Option<i32> {
+    Some(match name {
+        "__net_udp_bind" => OP_UDP_BIND,
+        "__net_udp_local_port" => OP_UDP_LOCAL_PORT,
+        "__net_udp_send_to" => OP_UDP_SEND_TO,
+        "__net_udp_recv_from" => OP_UDP_RECV_FROM,
+        "__net_udp_close" => OP_UDP_CLOSE,
+        "__net_lookup_host" => OP_LOOKUP_HOST,
         _ => return None,
     })
 }
@@ -91,7 +115,7 @@ fn unix_op(name: &str) -> Option<i32> {
 impl Emitter<'_> {
     /// A net leaf, or `Ok(None)` when `name` is not one.
     pub(crate) fn lower_net_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
-        let Some(op) = tcp_op(name).or_else(|| unix_op(name)) else { return Ok(None) };
+        let Some(op) = tcp_op(name).or_else(|| udp_op(name)).or_else(|| unix_op(name)) else { return Ok(None) };
         let [a, b] = args else { return unsup("net-leaf-arity") };
         let b_ty = if SENDS_BYTES.contains(&op) { crate::bytes::BYTES } else { STR };
         self.fs_call_two((a, STR), (b, b_ty), op)?;

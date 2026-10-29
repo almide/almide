@@ -1,0 +1,55 @@
+// @contract: C-443
+// net udp and lookup failure texts (#4306): every failure is errno-free text
+// from net's one table (the tcp family's, C-378), identical on native and the
+// embedded lane. Bind and send read `<fn>(<host>:<port>): <class text>`,
+// lookup `lookup_host(<host>:0): <class text>`, the rest `<fn>: <class
+// text>`; the Almide-local texts (a port outside 0..=65535, a negative max, a
+// closed socket, a name that resolves to nothing) are decided before any
+// transport call. The OS-assigned port differs per run, so it is masked as
+// `<port>` before printing. Staged on 127.0.0.1; the one name looked up is
+// the empty name, which no resolver answers, so nothing leaves the machine.
+import net
+import io
+
+fn show_int(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
+fn show_masked[A](r: Result[A, String], port: Int) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${string.replace(e, int.to_string(port), "<port>")}",
+}
+
+fn show_ok[A](r: Result[A, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  // Argument domains.
+  println(show_ok(net.udp_bind("127.0.0.1", 70000)))
+  println(show_ok(net.udp_bind("127.0.0.1", -1)))
+  println(show_ok(net.udp_bind("", 0)))
+  let a = net.udp_bind("127.0.0.1", 0)!
+  let port = net.udp_local_port(a)!
+  println(show_ok(net.udp_send_to(a, bytes.from_string("x"), "127.0.0.1", 70000)))
+  println(show_ok(net.udp_send_to(a, bytes.from_string("x"), "127.0.0.1", -2)))
+  println(show_masked(net.udp_send_to(a, bytes.from_string("x"), "", port), port))
+  println(show_ok(net.udp_recv_from(a, -1)))
+  // An occupied port.
+  println(show_masked(net.udp_bind("127.0.0.1", port), port))
+  // A closed socket.
+  println("close: ${show_ok(io.close(a))}")
+  println(show_int(net.udp_local_port(a)))
+  println(show_masked(net.udp_send_to(a, bytes.from_string("x"), "127.0.0.1", port), port))
+  println(show_ok(net.udp_recv_from(a, 4)))
+  println("close twice: ${show_ok(io.close(a))}")
+  // Its port is free again.
+  let b = net.udp_bind("127.0.0.1", port)!
+  println("rebind freed port: ${(net.udp_local_port(b)!) == port}")
+  println("close rebound: ${show_ok(io.close(b))}")
+  // Name lookup.
+  println(show_ok(net.lookup_host("")))
+  println("done")
+}
