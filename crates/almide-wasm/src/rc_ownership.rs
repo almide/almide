@@ -728,6 +728,7 @@ impl Emitter<'_> {
         // #4277: the site is anchored to this `if` and its `else`, so the RC
         // check reads the recorder's first arm as the shipped then-arm.
         let site = crate::witness::rc::site_id();
+        self.if_sites.insert(e as *const _, site);
         let if_at = self.f.byte_len();
         self.f.instructions().if_(wasm_encoder::BlockType::Result(ty.val_type()));
         self.branch_depth += 1;
