@@ -1,0 +1,96 @@
+// @contract: C-374
+// The `process.start` child on the embedded wasm host (#4308, ADR-0025,
+// R-process-03): every call on a started child answers what native answers.
+// The host keeps the child as a resource of the private almide:process/spawn
+// capability and runs native's child core on it, so poll, wait, stop, the
+// incremental reads, the deadline and every err string agree byte for byte.
+// Each child is driven to a state before it is observed (a TERM trap the
+// parent fires once it has read the child's first output), so no line depends
+// on timing. Pids are host values, printed as predicates. The commands are
+// POSIX `sh` and `sleep`, and `cat`.
+import process
+import env
+
+fn show_status(r: Result[ProcessStatus, String]) -> String = match r {
+  ok(st) => "code=${st.code} out=[${st.stdout}] err=[${st.stderr}]",
+  err(e) => "err ${e}",
+}
+
+fn show_poll(r: Option[Result[ProcessStatus, String]]) -> String = match r {
+  none => "running",
+  some(s) => "ended ${show_status(s)}",
+}
+
+fn sh(script: String) -> process.ProcessCommand = process.ProcessCommand { cmd: "sh", args: ["-c", script] }
+
+// Reads stdout (or stderr) until the text read so far is `want`, 20 ms
+// apart, at most 500 looks: the reads add up to what the child wrote.
+effect fn read_until(c: ProcessChild, stderr: Bool, want: String, acc: String, left: Int) -> String = if acc == want or left == 0 then acc
+else {
+  env.sleep_ms(20)
+  let got = if stderr then process.read_new_stderr(c)! else process.read_new_stdout(c)!
+  read_until(c, stderr, want, acc + got, left - 1)!
+}
+
+effect fn main() -> Unit = {
+  // poll while running, then stop: SIGTERM ends `sleep`, code -1; a second
+  // stop and a poll answer the same outcome.
+  let sleeper = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
+  println("poll while running: ${show_poll(process.poll(sleeper)!)}")
+  println("stop: ${show_status(process.stop(sleeper, 200))}")
+  println("stop again: ${show_status(process.stop(sleeper, 200))}")
+  println("poll after stop: ${show_poll(process.poll(sleeper)!)}")
+
+  // wait: the exit code and both streams; reads after the end.
+  let w = process.start(sh("printf out; printf err >&2; exit 3"))!
+  println("wait: ${show_status(process.wait(w))}")
+  println("poll after wait: ${show_poll(process.poll(w)!)}")
+  let o1 = process.read_new_stdout(w)!
+  let o2 = process.read_new_stdout(w)!
+  let e1 = process.read_new_stderr(w)!
+  println("reads after wait: [${o1}] [${o2}] [${e1}]")
+
+  // both streams read while the child runs, then a signal ends it: each
+  // read answers only what is new since the last one.
+  let h = process.start(sh("trap 'printf b; printf y >&2; exit 4' TERM; printf a; printf x >&2; while :; do sleep 0.05; done"))!
+  let a = read_until(h, false, "a", "", 500)!
+  let x = read_until(h, true, "x", "", 500)!
+  println("first reads: out=[${a}] err=[${x}]")
+  println("poll mid-run: ${show_poll(process.poll(h)!)}")
+  process.kill(process.child_pid(h)!, 15)!
+  println("after the signal: ${show_status(process.wait(h))}")
+  let b = process.read_new_stdout(h)!
+  let y = process.read_new_stderr(h)!
+  let rest = process.read_new_stdout(h)!
+  println("reads after the end: out=[${b}] err=[${y}] then [${rest}]")
+
+  // stop before the child finishes: its TERM trap runs within the grace.
+  let t = process.start(sh("trap 'printf bye; exit 7' TERM; printf hi; while :; do sleep 0.05; done"))!
+  let hi = read_until(t, false, "hi", "", 500)!
+  println("before stop: [${hi}]")
+  println("stop with a trap: ${show_status(process.stop(t, 2000))}")
+
+  // the deadline ends the child with the pinned err, and poll keeps it.
+  let late = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"], timeout_ms: 100 })!
+  println("deadline: ${show_status(process.wait(late))}")
+  println("poll after the deadline: ${show_poll(process.poll(late)!)}")
+
+  // the stdin text and the working directory reach the child.
+  let c = process.start(process.ProcessCommand { cmd: "cat", args: [], stdin: "piped héllo" })!
+  println("stdin: ${show_status(process.wait(c))}")
+  let d = process.start(process.ProcessCommand { cmd: "sh", args: ["-c", "pwd"], dir: "/" })!
+  println("dir: ${show_status(process.wait(d))}")
+
+  // child_pid names the child: kill by it ends the child, code -1.
+  let k = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
+  let pid = process.child_pid(k)!
+  println("child_pid positive: ${pid > 0}, not this program's: ${pid != process.pid()}")
+  process.kill(pid, 9)!
+  println("after kill: ${show_status(process.wait(k))}")
+
+  // a program that cannot start is the err naming it.
+  match process.start(process.ProcessCommand { cmd: "almide-no-such-binary-4308", args: [] }) {
+    ok(_) => println("started"),
+    err(e) => println("start err: ${e}"),
+  }
+}

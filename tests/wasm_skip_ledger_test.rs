@@ -64,11 +64,10 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // handle runs on the embedded lane since #2633 — tests/
     // http_call_handle_test.rs covers it on both legs.
     ("spec/stdlib/http_call_test.almd", SkipReason::NativeOnlyApi),
-    // Native-only by ruling (stdlib redesign wave 4B): `process.start` keeps
-    // a live child behind a native runtime table, and `uuid.v7`'s
-    // process-wide monotonic stamp is a native runtime cell; both are
-    // declared native-only-forever in proofs/target-availability.toml (E081).
-    ("spec/stdlib/process_start_test.almd", SkipReason::NativeOnlyApi),
+    // Native-only by ruling (stdlib redesign wave 4B): `uuid.v7`'s
+    // process-wide monotonic stamp is a native runtime cell, declared in
+    // proofs/target-availability.toml (E081). `process.start` left with
+    // #4308: the embedded host keeps the child as a host resource.
     ("spec/stdlib/uuid_v7_test.almd", SkipReason::NativeOnlyApi),
     // `http.serve` binds a TCP listener.
     ("spec/lang/effect_intrinsic_tail_test.almd", SkipReason::NativeOnlyApi),

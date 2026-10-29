@@ -2,10 +2,10 @@
 // A program that started a child with `process.start` and neither waited on
 // nor stopped it stops that child when it exits — main returns,
 // `process.exit`, or an effect error ends main (almide/almide#4214). The
-// start family is native-only (E081 on every wasm leg), so no cross-target
-// runner executes this file; `almide run` runs it on native and
-// tests/process_start_unwaited_child_stopped_test.rs in almide/almide pins
-// its stdout.
+// observer runs its own binary as the parent, which only a native build is,
+// so no cross-target runner executes this file; `almide run` runs it on
+// native and tests/process_start_unwaited_child_stopped_test.rs in
+// almide/almide pins its stdout.
 //
 // Run with its own binary's path as the one argument it is the OBSERVER: for
 // each exit route it runs that binary as the PARENT, which starts `sleep 30`, prints the
