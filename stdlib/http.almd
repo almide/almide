@@ -197,11 +197,15 @@ local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == 
   0,
 )
 
-local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool = if i >= list.len(a) then true
-else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
-else __http_response_ci_at(a, b, i + 1)
+local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
+  if i >= list.len(a) then true
+  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
+  else __http_response_ci_at(a, b, i + 1)
 
-local fn __http_response_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+local fn __http_response_fold(c: String) -> String = match string.index_of(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
 }
