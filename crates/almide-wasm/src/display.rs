@@ -363,7 +363,7 @@ impl Emitter<'_> {
                 self.f
                     .instructions()
                     .local_get(cur)
-                    .i32_load8_u(crate::bytes::byte_at())
+                    .i32_load8_u(wasm_encoder::MemArg { offset: 0, align: 0, memory_index: 0 })
                     .i64_extend_i32_u();
                 self.emit_int_display(false);
                 {
