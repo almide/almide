@@ -1,8 +1,7 @@
 // ffi_bridge — SELF-HOSTED raw operations under `ffi` (R-ffi-01, ADR-0031).
 //
-// The four `local` intrinsics of stdlib/ffi.almd on wasm: the address of a
-// Bytes data region, an address `off` bytes further (`ffi.slice`, after its
-// bounds check) (handle + 12, an i32 linear-memory offset carried in the
+// The three `local` intrinsics of stdlib/ffi.almd on wasm: the address of a
+// Bytes data region (handle + 12, an i32 linear-memory offset carried in the
 // i64 scalar), a copy out of memory at base + off, and a copy into it. They
 // run only after `ffi.read` / `ffi.write` checked the region's bounds and
 // permission, so nothing here checks a length against an owner; they mirror
@@ -18,12 +17,6 @@
 fn ffi_address(b: Bytes) -> Handle = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-@implements("ffi.__offset")
-fn ffi_offset(base: Handle, off: Int) -> Handle = {
-  let a = prim.ptr_to_int(base)
-  if a == 0 then base else prim.int_to_ptr(a + off)
 }
 
 fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0

@@ -168,10 +168,8 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // `ffi`'s Region checks — the address of a Bytes data region
     // (handle+12 = OUR PAYLOAD, NULL for an empty buffer, the 2026-08-10 fuzz
     // doctrine) and load8/store8 copies at base + off. They run only after
-    // `ffi.read` / `ffi.write` checked the region's bounds and permission;
-    // and the address `off` bytes further that `ffi.slice` takes after its
-    // own bounds check (NULL stays NULL).
-    "ffi_address", "ffi_load", "ffi_store", "ffi_offset",
+    // `ffi.read` / `ffi.write` checked the region's bounds and permission.
+    "ffi_address", "ffi_load", "ffi_store",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
