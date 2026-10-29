@@ -272,8 +272,6 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_http___with_headers" => &[false, false, false],
         "almide_rt_http_json" => &[false, false],
         "almide_rt_http_not_found" => &[false],
-        "almide_rt_http_redirect" => &[false],
-        "almide_rt_http_response" => &[false, false],
         "almide_rt_http_serve" => &[false, false],
         "almide_rt_int_abs" => &[false],
         "almide_rt_int_band" => &[false, false],
