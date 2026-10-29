@@ -384,7 +384,8 @@ pub(super) fn evict_stale_artifacts(project_dir: &std::path::Path) {
             }
         }
     };
-    for profile in ["debug", "release"] {
+    // `wasm`: the embedded leg's cached modules (`wasm_run_cache`).
+    for profile in ["debug", "release", "wasm"] {
         let dir = project_dir.join("target").join(profile);
         sweep(&dir, "almide-");
         sweep(&dir.join("deps"), "almide_out-");

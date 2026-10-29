@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-10-27
+> Last updated: 2026-10-30
 
 ## Overview
 
@@ -77,6 +77,25 @@ native バイナリに時間制限が無いのと同じく、`--target wasm` の
 - **`almide clean`** がこの dir を空にする（下記）。
 
 テスト: `tests/run_cache_recovery_test.rs`
+
+**wasm のビルドキャッシュ**: `--target wasm`（と `almide bench`）は、描画した wasm モジュールを
+同じ dir の `target/wasm/almide-<key>` に置き、変わっていないプログラムの再実行ではモジュールを描画し直さない。
+key は構造レグが読むもの全部: 入口ファイルのパスとソース、リゾルバがディスクから読んだ全モジュール
+（自分のモジュールと依存パッケージ）のパスとソース、依存 dir、作業 dir、コンパイラ自身（バージョン行と
+実行ファイルのパス・サイズ・mtime。同梱 stdlib はこの中にある）、環境の `ALMIDE_*` 変数すべて。
+パース・型検査（警告も）・`[permissions]`・IR 検証・E081 は毎回ヒットの前に走るので、ヒットでも
+ミスと同じ診断が出て、同じものを拒否する。飛ばすのは描画（構造レグ自身の front・emit・検証）だけ。
+壁で止まった描画はキャッシュしない。ヒットの条件（SHA-256 の記録と一致）・7 日の退避・
+`ALMIDE_CACHE_MAX_BYTES` の上限・`almide clean` は native の成果物と同じ。
+`ALMIDE_TIME_PHASES=1` の `[phase] render (cache hit)` 行でヒットが見える。
+テスト: `tests/wasm_run_cache_test.rs`
+
+**`main` の無いファイル**: どちらのターゲットでも、そのファイルの `test` ブロックを
+`almide test <file> --target <leg>` と同じ判定で走らせる（stderr に
+``note: <file> declares no `main`; running its test blocks …`` を 1 行出す）。全部通れば 0、
+1 件でも落ちれば 1、`test` ブロックも無ければ「走らせるものが無かった」の 5（`almide test` の
+ゼロの扱い、#2204）。以前は native が libtest のハーネスをそのまま実行し、wasm は拒否していた。
+`--` 以降のプログラム引数は使わない。テスト: `tests/wasm_run_cache_test.rs`
 
 **stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` /
 `io.write(io.stdout()!, …)` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み

@@ -6,6 +6,7 @@ pub(crate) mod build;
 mod fs_scope_twin;
 mod build_wasm;
 mod wasm_compile;
+mod wasm_run_cache;
 mod bench;
 mod compile;
 mod emit;
