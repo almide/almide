@@ -65,11 +65,11 @@ struct Matches {
 
 impl IrVisitor for Matches {
     fn visit_expr(&mut self, e: &IrExpr) {
-        if let IrExprKind::Match { subject, arms } = &e.kind {
-            if crate::pass_match_subject::matches_through_str_view(&subject.ty, arms) {
-                let root = str_view_subject_root(subject);
-                self.owned.extend(arms.iter().filter_map(|arm| owned_binder(arm, root)));
-            }
+        if let IrExprKind::Match { subject, arms } = &e.kind
+            && crate::pass_match_subject::matches_through_str_view(&subject.ty, arms)
+        {
+            let root = str_view_subject_root(subject);
+            self.owned.extend(arms.iter().filter_map(|arm| owned_binder(arm, root)));
         }
         walk_expr(self, e);
     }
