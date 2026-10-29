@@ -97,6 +97,7 @@ fn split_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
         }
         let mut stub = f.clone();
         stub.name = almide_base::intern::sym(&stub_name);
+        stub.attrs.push(address_params_attr(&stub_params, f));
         stub.params = stub_params;
         stub.def_id = None;
         stubs.push(stub);
@@ -206,4 +207,47 @@ fn almide_lang_attr(name: &str) -> almide_lang::ast::Attribute {
 /// `ffi.RegionExportView`, the record `__export_view` answers.
 fn export_view_ty() -> Ty {
     Ty::Named(almide_base::intern::sym("RegionExportView"), Vec::new())
+}
+
+/// The stamp on a Region import stub naming its address and length
+/// parameters: they cross in the target memory's address width
+/// (imports::declare). A declaration this rewrite writes, never a name.
+const ADDRESS_PARAMS_ATTR: &str = "address_params";
+
+fn address_params_attr(stub_params: &[IrParam], f: &IrFunction) -> almide_lang::ast::Attribute {
+    // Each Region parameter of `f` became two stub parameters, in order.
+    let mut positions = Vec::new();
+    let mut k = 0i64;
+    for p in &f.params {
+        if is_region(&p.ty) {
+            positions.push(k);
+            positions.push(k + 1);
+            k += 2;
+        } else {
+            k += 1;
+        }
+    }
+    debug_assert_eq!(k as usize, stub_params.len());
+    almide_lang::ast::Attribute {
+        name: almide_base::intern::sym(ADDRESS_PARAMS_ATTR),
+        args: positions
+            .into_iter()
+            .map(|v| almide_lang::ast::AttrArg { name: None, value: almide_lang::ast::AttrValue::Int { value: v } })
+            .collect(),
+        span: None,
+    }
+}
+
+/// The parameter positions of an import stub that carry an address or a
+/// length, from the stamp above (none for any other fn).
+pub(crate) fn address_params(f: &IrFunction) -> Vec<u32> {
+    f.attrs
+        .iter()
+        .filter(|a| a.name.as_str() == ADDRESS_PARAMS_ATTR)
+        .flat_map(|a| a.args.iter())
+        .filter_map(|a| match a.value {
+            almide_lang::ast::AttrValue::Int { value } => u32::try_from(value).ok(),
+            _ => None,
+        })
+        .collect()
 }

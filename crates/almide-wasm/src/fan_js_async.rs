@@ -84,7 +84,7 @@ pub(crate) fn declared_protocol(table: &FnTable, work: &FnWork) -> Vec<crate::im
                 Helper::FanTake { hook, .. } => format!("take:{}", hook_name(*hook as usize)),
                 _ => return None,
             };
-            Some(crate::imports::Declared { index: base + pos as u32, module: FAN_MODULE.to_string(), name })
+            Some(crate::imports::Declared { index: base + pos as u32, module: FAN_MODULE.to_string(), name, narrow: Vec::new() })
         })
         .collect()
 }

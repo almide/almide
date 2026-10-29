@@ -670,9 +670,11 @@ fn emit_program_pass(
     let declared: Vec<imports::Declared> = table
         .infos
         .iter()
-        .filter_map(|info| {
+        .enumerate()
+        .filter_map(|(i, info)| {
             let (module, name) = info.import.clone()?;
-            Some(imports::Declared { index: info.wasm_index, module, name })
+            let narrow = crate::extern_region::address_params(program_fns[i].0);
+            Some(imports::Declared { index: info.wasm_index, module, name, narrow })
         })
         .chain(crate::fan::js_async::declared_protocol(&table, &work))
         .collect();
