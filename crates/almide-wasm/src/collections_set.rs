@@ -561,6 +561,7 @@ impl Emitter<'_> {
                 self.emit_release_hold(xh, e);
                 self.f.instructions().local_get(sh);
                 self.rc_inc_top();
+                self.witness_arm_share_out(s);
                 self.f.instructions().else_();
                 let (len_h, rh) = self.emit_copy_grow(sh, e.slot_size())?;
                 let st = SliceTy::Set(self.types.intern(e));

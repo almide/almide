@@ -62,7 +62,7 @@ pub(crate) fn begin_pass(pass: usize) {
     with(|s| s.pass = pass);
 }
 
-/// The recorder logged a live `a` / `d` / `o` on `local` (`None`: a
+/// The recorder logged a live `a` / `d` / `o` / `s` on `local` (`None`: a
 /// temporary), or an `m`: the variable's credit moved into the arm or
 /// routine whose window is open (`#<window id>`; outside every window an
 /// `m` is no RC event and is not logged).
@@ -80,8 +80,9 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
             None => e.push('-'),
         }
         // A move names its window; so does a temporary's event logged inside
-        // one (the arm or routine may release that temporary in its callee).
-        if kind == 'm' || (local.is_none() && window.is_some()) {
+        // one (the arm or routine may release that temporary in its callee),
+        // and an arm's share-out (#4278), held to the `rc_inc` in its arm.
+        if kind == 'm' || kind == 's' || (local.is_none() && window.is_some()) {
             e.push_str(&format!("#{}", window.unwrap_or(0)));
         }
         e.push(' ');

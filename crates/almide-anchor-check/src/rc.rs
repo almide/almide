@@ -57,6 +57,13 @@
 //! their outgrown block only when uniquely owned, and now release it on
 //! every grow path.
 //!
+//! An arm that answers with its ARGUMENT's block as its owned result on
+//! some path (`if c { rc_inc(p); p } else { fresh }`) states it per site: the
+//! recorder logs the share-out `s<local>` (#4278's per-arm certificate, the
+//! `s` byte the proven checker folds), and it matches only the `rc_inc` in
+//! that arm's own window read through the argument — a named event, never a
+//! counted class.
+//!
 //! The four counted classes (arm-internal, routine-internal, element,
 //! consumed) are debts to #4278's per-helper certificates — a declared
 //! per-path effect for each helper, checked against its body. They may only
@@ -547,6 +554,18 @@ pub fn check_rc(
                         })
                 }
                 ('m', None) => false,
+                // An arm's share-out (#4278, `s<local>@<window>`): the arm
+                // answers with its argument's block as its owned result after
+                // an `rc_inc` on it. It takes exactly that `rc_inc` — read
+                // through the argument's variable (or, for a temporary, any)
+                // and INSIDE the arm's own window, never a +1 elsewhere.
+                ('s', l) => {
+                    k == 'a'
+                        && evwin[e].is_some_and(|(a, z)| a <= calls[i].0 && calls[i].0 <= z)
+                        && l.is_none_or(|l| {
+                            names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l)))
+                        })
+                }
                 // A C-319 cell variable's events name its local; a call on
                 // the block the cell holds reads through it (`CELL_HOLDER | l`).
                 // Both are that variable's credit, matched one to one.
