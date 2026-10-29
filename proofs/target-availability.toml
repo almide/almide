@@ -317,6 +317,14 @@ pending_self_host_ceiling = 0
 # entropy every leg serves; a started child becomes a resource on the
 # almide:process capability (ADR-0025). `forever` was the wrong closure
 # class for all three. No row's legs changed and no served function moved.
+# 2026-10-30 (#4306): 31 -> 31. net.lookup_host and the four net.udp_* rows
+# lose their embedded and structural legs: the embedded host serves them
+# through ops 140..=145 over native's net core, and the structural leg lowers
+# their stdlib/net_wasm.almd bodies (evidence: spec/embedded_cross/
+# net_udp_loopback.almd and net_udp_errors.almd under
+# tests/net_udp_embedded_cross_test.rs). Each row keeps its stock-p1 leg —
+# the stock p1 standard has no sockets — so no row is removed and the count
+# stays.
 pending_port_ceiling = 31
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
@@ -583,47 +591,37 @@ issue = "#3620"
 
 [[unavailable]]
 fn = "net.lookup_host"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_bind"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_local_port"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_send_to"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_recv_from"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
