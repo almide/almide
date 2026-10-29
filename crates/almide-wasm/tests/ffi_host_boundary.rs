@@ -328,3 +328,20 @@ fn a_slice_crosses_an_import_as_its_sub_range() {
     let f = r.inst.get_typed_func::<(), i64>(&mut r.store, "sum_tail").unwrap();
     assert_eq!(f.call(&mut r.store, ()).unwrap(), 43);
 }
+
+/// A Region crosses an import in the target memory's address width, as an
+/// export returns one: `(i32, i32)` on wasm32, the byte argument staying the
+/// `Int` scalar.
+#[test]
+fn a_region_crosses_an_import_as_two_i32s_on_wasm32() {
+    let ir = almide_spine::s5::lower_to_ir("ffi_host_boundary.almd", SRC).expect("front");
+    let bytes = almide_wasm::emit_program(&ir).expect("emit");
+    let engine = Engine::default();
+    let module = Module::new(&engine, &bytes).expect("module");
+    let ty = |name: &str| {
+        let f = module.imports().find(|i| i.module() == "host" && i.name() == name).unwrap().ty().func().cloned().unwrap();
+        (f.params().map(|v| format!("{v}")).collect::<Vec<_>>(), f.results().map(|v| format!("{v}")).collect::<Vec<_>>())
+    };
+    assert_eq!(ty("fill"), (vec!["i32".into(), "i32".into(), "i64".into()], vec![]));
+    assert_eq!(ty("sum"), (vec!["i32".into(), "i32".into()], vec!["i64".into()]));
+}
