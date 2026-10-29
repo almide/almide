@@ -299,6 +299,8 @@ pub const NOMINALS: &[Nominal] = &[
             "(match ffi.alloc(1) { ok(r) => r, err(e) => panic(e) })",
             "(match ffi.alloc(4) { ok(r) => r, err(e) => panic(e) })",
             "(match ffi.alloc(16) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.slice(ffi.region(bytes.from_list([1, 2, 3, 4])), 1, 2) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(8) { ok(w) => match ffi.slice(w, 3, 4) { ok(r) => r, err(e) => panic(e) }, err(e) => panic(e) })",
         ],
         observe: "(ffi.len({v}), (ffi.is_writable({v}), bytes.to_list(ffi.to_bytes({v})!)))",
         observed: || pair(GenType::Int, pair(GenType::Bool, GenType::List(Box::new(GenType::Int)))),
