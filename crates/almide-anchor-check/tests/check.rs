@@ -695,3 +695,15 @@ fn an_event_outside_every_branch_site_accounts_for_one_release_per_path() -> Res
     assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+/// A C-319 cell variable's `a` event meets the +1 on the block its cell holds
+/// (read through the cell), one to one.
+#[test]
+fn a_cell_variables_event_meets_a_call_through_its_cell() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 local.set 1 local.get 1 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    Ok(())
+}

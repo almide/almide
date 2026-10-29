@@ -399,7 +399,13 @@ pub fn check_rc(
                     k == 'd' && names_of.contains(&l) && evwin[e].is_some_and(|(a, b)| a <= calls[i].0 && calls[i].0 <= b)
                 }
                 ('m', None) => false,
-                (kind, Some(l)) => (k == kind || (kind == 'd' && k == 'j')) && names_of.contains(&l),
+                // A C-319 cell variable's events name its local; a call on
+                // the block the cell holds reads through it (`CELL_HOLDER | l`).
+                // Both are that variable's credit, matched one to one.
+                (kind, Some(l)) => {
+                    (k == kind || (kind == 'd' && k == 'j'))
+                        && (names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l))))
+                }
                 (kind, None) => k == kind,
             }
         };
