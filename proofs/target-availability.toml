@@ -309,7 +309,15 @@ pending_self_host_ceiling = 0
 # streaming and tcp read/write/close twins left the surface (send, start,
 # io.read / io.write / io.close replace them); http.send and io.close take
 # their place. No served function moved.
-pending_port_ceiling = 18
+# 18 -> 31 (2026-10-29, #4306 / #4307 / #4308): a RECLASSIFICATION, not a
+# regression. Thirteen rows declared `native-only-forever` on every wasm leg
+# (net.lookup_host and the four net.udp_* fns, uuid.v7, and the seven-fn
+# process.start child family) each have a route: wasi:sockets defines udp and
+# ip-name-lookup; uuid.v7 needs only a monotonic cell over the clock and
+# entropy every leg serves; a started child becomes a resource on the
+# almide:process capability (ADR-0025). `forever` was the wrong closure
+# class for all three. No row's legs changed and no served function moved.
+pending_port_ceiling = 31
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -576,129 +584,116 @@ issue = "#3620"
 [[unavailable]]
 fn = "net.lookup_host"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-structural = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-stock-p1 = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-embedded = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-issue = "#3620"
+class = "pending-port"
+reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_bind"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-structural = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-stock-p1 = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-embedded = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-issue = "#3620"
+class = "pending-port"
+reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_local_port"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-structural = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-stock-p1 = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-embedded = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-issue = "#3620"
+class = "pending-port"
+reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_send_to"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-structural = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-stock-p1 = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-embedded = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-issue = "#3620"
+class = "pending-port"
+reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_recv_from"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-structural = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-stock-p1 = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-reason-embedded = "native-only: UDP sockets and name resolution are served natively only: the embedded host and the WASI floors have no datagram or resolver op yet, and the redesign declares them native-only (R-net-03)."
-issue = "#3620"
+class = "pending-port"
+reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
+issue = "#4306"
 
 [[unavailable]]
 fn = "uuid.v7"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "uuid.v7's strictly increasing stamp is one process-wide cell in the native runtime; no wasm leg holds it, so v7 is declared native-only (R-uuid-01)."
-reason-structural = "native-only: uuid.v7's strictly increasing stamp is one process-wide cell in the native runtime; no wasm leg holds it, so v7 is declared native-only (R-uuid-01)."
-reason-stock-p1 = "native-only: uuid.v7's strictly increasing stamp is one process-wide cell in the native runtime; no wasm leg holds it, so v7 is declared native-only (R-uuid-01)."
-reason-embedded = "native-only: uuid.v7's strictly increasing stamp is one process-wide cell in the native runtime; no wasm leg holds it, so v7 is declared native-only (R-uuid-01)."
-issue = "#3934"
+class = "pending-port"
+reason-structural = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
+reason-stock-p1 = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
+reason-embedded = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
+issue = "#4307"
 
 [[unavailable]]
 fn = "process.start"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
 
 [[unavailable]]
 fn = "process.poll"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
 
 [[unavailable]]
 fn = "process.wait"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
 
 [[unavailable]]
 fn = "process.stop"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
 
 [[unavailable]]
 fn = "process.read_new_stdout"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
 
 [[unavailable]]
 fn = "process.read_new_stderr"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
 
 [[unavailable]]
 fn = "process.child_pid"
 legs = ["structural", "stock-p1", "embedded"]
-class = "native-only-forever"
-justification = "a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-structural = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-stock-p1 = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-reason-embedded = "native-only: a started child lives in the native runtime's handle table (the worker that drains its pipes and keeps its deadline); no wasm host keeps it, so the start family is declared native-only (R-process-03)."
-issue = "#2589"
+class = "pending-port"
+reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+issue = "#4308"
