@@ -6,19 +6,21 @@
 // `Body` served as image/svg+xml, and that media type is owned here, so no
 // String reaches a browser as SVG (whose `<script>`, `onload` and animated
 // `href` run like a page's) except through these functions.
-
 /// SVG markup that is safe to serve; built only by this module.
 mod type SafeSvg: Body = String
 
 /// s with & < > " ' turned into entities; text context only.
-fn escape(s: String) -> SafeSvg = SafeSvg(s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(">", "&gt;") |> string.replace('"', "&quot;") |> string.replace("'", "&#39;"))
+fn escape(s: String) -> SafeSvg = SafeSvg(s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(">", "&gt;") |> string.replace(
+  '"',
+  "&quot;",
+) |> string.replace("'", "&#39;"))
 
 /// s as SafeSvg, unescaped; trusted input only.
 fn raw(s: String) -> SafeSvg = SafeSvg(s)
 
 /// SVG text inside h, as-is.
 fn to_string(h: SafeSvg) -> String = match h {
-  SafeSvg(s) => s,
+  SafeSvg(s) => s
 }
 
 /// a then b as one SafeSvg; nothing re-escaped.
@@ -78,7 +80,10 @@ fn __svg_scheme(url: String) -> String? = {
   let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
   let head = list.take(cs, i)
   let colon = list.get(cs, i) == some(":")
-  if colon and not list.is_empty(head) and list.all(head, (c) => __svg_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == ".")) then some(string.to_lower(list.join(head, "")))
+  if colon and not list.is_empty(head) and list.all(
+    head,
+    (c) => __svg_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == "."),
+  ) then some(string.to_lower(list.join(head, "")))
   else if colon or list.any(head, (c) => (string.to_codepoint(c) ?? 0) <= 32) then some("")
   else none
 }

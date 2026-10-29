@@ -60,7 +60,11 @@ test "http.set_status rebind leaves an earlier alias at its old status" {
 }
 
 test "http.with_headers creates response with custom headers" {
-  let resp = http.with_headers(200, http.typed("text/csv", bytes.from_string("a,b")), [("X-Custom", "value")])
+  let resp = http.with_headers(
+    200,
+    http.typed("text/csv", bytes.from_string("a,b")),
+    [("X-Custom", "value")],
+  )
   assert_eq(http.header(resp, "Content-Type"), some("text/csv"))
   assert_eq(http.header(resp, "X-Custom"), some("value"))
   assert_eq(http.body(resp), "a,b")
@@ -90,7 +94,10 @@ test "http.headers lists every header in order, repeats kept" {
     "x-a",
     "3",
   )
-  assert_eq(http.headers(resp), [("Content-Type", "text/plain; charset=utf-8"), ("X-A", "3"), ("X-B", "2")])
+  assert_eq(
+    http.headers(resp),
+    [("Content-Type", "text/plain; charset=utf-8"), ("X-A", "3"), ("X-B", "2")],
+  )
 }
 
 test "body_bytes and set_body_bytes carry the body as bytes" {

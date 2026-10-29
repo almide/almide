@@ -15,18 +15,36 @@ import testing
 fn name(s: String) -> String = s
 
 test "each body type gives the response its Content-Type" {
-  assert_eq(http.header(http.response(200, "hi"), "Content-Type"), some("text/plain; charset=utf-8"))
-  assert_eq(http.header(http.response(200, bytes.from_string("hi")), "Content-Type"), some("application/octet-stream"))
+  assert_eq(
+    http.header(http.response(200, "hi"), "Content-Type"),
+    some("text/plain; charset=utf-8"),
+  )
+  assert_eq(
+    http.header(http.response(200, bytes.from_string("hi")), "Content-Type"),
+    some("application/octet-stream"),
+  )
   assert_eq(http.header(http.response(200, value.int(1)), "Content-Type"), some("application/json"))
-  assert_eq(http.header(http.response(200, html.escape("x")), "Content-Type"), some("text/html; charset=utf-8"))
+  assert_eq(
+    http.header(http.response(200, html.escape("x")), "Content-Type"),
+    some("text/html; charset=utf-8"),
+  )
   assert_eq(http.header(http.response(200, svg.escape("x")), "Content-Type"), some("image/svg+xml"))
-  assert_eq(http.header(http.response(200, http.typed("text/csv", bytes.from_string("a,b"))), "Content-Type"), some("text/csv"))
+  assert_eq(
+    http.header(
+      http.response(200, http.typed("text/csv", bytes.from_string("a,b"))),
+      "Content-Type",
+    ),
+    some("text/csv"),
+  )
   assert_eq(http.header(http.redirect("/next"), "Content-Type"), some("text/plain; charset=utf-8"))
   assert_eq(http.header(http.json(200, "{}"), "Content-Type"), some("application/json"))
 }
 
 test "each body type gives the response its bytes" {
-  assert_eq(http.body(http.response(200, html.escape("<script>alert(1)</script>"))), "&lt;script&gt;alert(1)&lt;/script&gt;")
+  assert_eq(
+    http.body(http.response(200, html.escape("<script>alert(1)</script>"))),
+    "&lt;script&gt;alert(1)&lt;/script&gt;",
+  )
   assert_eq(http.body(http.response(200, value.object([("a", value.int(1))]))), "{\"a\":1}")
   assert_eq(http.body(http.response(200, http.typed("text/csv", bytes.from_string("a,b")))), "a,b")
 }
@@ -34,7 +52,11 @@ test "each body type gives the response its bytes" {
 test "set_header and with_headers refuse Content-Type in any spelling" {
   testing.assert_aborts(
     "http.set_header: `Content-Type` is written from the body's type, never by name",
-    () => http.set_header(http.response(200, "<script>alert(1)</script>"), name("Content-Type"), "text/html"),
+    () => http.set_header(
+      http.response(200, "<script>alert(1)</script>"),
+      name("Content-Type"),
+      "text/html",
+    ),
   )
   testing.assert_aborts(
     "http.set_header: `content-TYPE` is written from the body's type, never by name",
@@ -64,23 +86,52 @@ test "other headers, the status and the header order stay as written" {
     "2",
   )
   assert_eq(http.status(resp), 201)
-  assert_eq(http.headers(resp), [("Content-Type", "text/html; charset=utf-8"), ("X-Frame-Options", "DENY"), ("X-A", "2")])
+  assert_eq(
+    http.headers(resp),
+    [("Content-Type", "text/html; charset=utf-8"), ("X-Frame-Options", "DENY"), ("X-A", "2")],
+  )
 }
 
 test "a request is not a response body, so it may carry any Content-Type" {
-  let req = http.set_header(http.new_request("POST", "/pages", "<p>draft</p>", []), name("Content-Type"), "text/html")
+  let req = http.set_header(
+    http.new_request("POST", "/pages", "<p>draft</p>", []),
+    name("Content-Type"),
+    "text/html",
+  )
   assert_eq(http.header(req, "Content-Type"), some("text/html"))
   assert_eq(http.body(http.set_body(req, "<p>v2</p>")), "<p>v2</p>")
   assert_eq(http.header(http.set_body(req, "<p>v2</p>"), "Content-Type"), some("text/html"))
 }
 
 test "svg builds only safe markup" {
-  let s = svg.element("svg", [svg.attr("width", "10\" onload=\"alert(1)"), svg.url_attr("href", "javascript:alert(1)")], [svg.escape("<t>")])
-  assert_eq(svg.to_string(s), "<svg width=\"10&quot; onload=&quot;alert(1)\" href=\"about:invalid#almide-blocked\">&lt;t&gt;</svg>")
-  testing.assert_aborts("svg.element: `script` runs script or rewrites attributes", () => svg.element("script", [], []))
-  testing.assert_aborts("svg.element: `animate` runs script or rewrites attributes", () => svg.element("animate", [], []))
-  testing.assert_aborts("svg.element: `foreignObject` runs script or rewrites attributes", () => svg.element("foreignObject", [], []))
+  let s = svg.element(
+    "svg",
+    [svg.attr("width", "10\" onload=\"alert(1)"), svg.url_attr("href", "javascript:alert(1)")],
+    [svg.escape("<t>")],
+  )
+  assert_eq(
+    svg.to_string(s),
+    "<svg width=\"10&quot; onload=&quot;alert(1)\" href=\"about:invalid#almide-blocked\">&lt;t&gt;</svg>",
+  )
+  testing.assert_aborts(
+    "svg.element: `script` runs script or rewrites attributes",
+    () => svg.element("script", [], []),
+  )
+  testing.assert_aborts(
+    "svg.element: `animate` runs script or rewrites attributes",
+    () => svg.element("animate", [], []),
+  )
+  testing.assert_aborts(
+    "svg.element: `foreignObject` runs script or rewrites attributes",
+    () => svg.element("foreignObject", [], []),
+  )
   testing.assert_aborts("svg.attr: `onload` runs script or styles", () => svg.attr("onload", "x"))
-  testing.assert_aborts("svg.attr: `href` takes a URL; use svg.url_attr", () => svg.attr("href", "x"))
-  testing.assert_aborts("svg.element: `a b` is not an element name", () => svg.element("a b", [], []))
+  testing.assert_aborts(
+    "svg.attr: `href` takes a URL; use svg.url_attr",
+    () => svg.attr("href", "x"),
+  )
+  testing.assert_aborts(
+    "svg.element: `a b` is not an element name",
+    () => svg.element("a b", [], []),
+  )
 }
