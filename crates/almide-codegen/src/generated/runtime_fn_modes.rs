@@ -268,6 +268,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_hex_encode" => &[false],
         "almide_rt_hex_encode_upper" => &[false],
         "almide_rt_http___call_start" => &[false, false, false, false, false, false],
+        "almide_rt_http___http_response_ascii_lower" => &[false],
         "almide_rt_http___http_response_flat" => &[false, false, false],
         "almide_rt_http___new_request" => &[false, false, false, false],
         "almide_rt_http___with_headers" => &[false, false, false],
