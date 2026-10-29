@@ -426,7 +426,7 @@ fn report_route_error(e: almide::wasm_route::RouteError, file: &str, library_ok:
         RouteError::Front(why) => err(&format!("error: {why}")),
         // #2752: said by the route itself — no leg is needed to refuse it.
         RouteError::NoMain => {
-            err(&format!("error: `almide run --target wasm` needs a `main` function, and {file} declares none"));
+            err(&format!("error: running on `--target wasm` needs a `main` function, and {file} declares none"));
             err(&format!("  hint: `almide build {file} --target wasm` builds a main-less library module (its `pub fn`s become exports)"));
         }
         // E082 (#1922, one leg since #2752): the structural leg declined the
@@ -484,7 +484,10 @@ pub(crate) type SurfacedWasm = (Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurf
 /// `pub fn` exports, the `@extern(wasm, ..)` imports, whether `main` exists),
 /// read from the IR before routing — what `--host js` marshals (#2265).
 pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<SurfacedWasm, ()> {
+    // ALMIDE_TIME_PHASES: the wasm leg's own breakdown, as the native leg's.
+    let t = super::run::PhaseTimer::start();
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
+    t.lap("parse+resolve");
     // Read off the source before the checker desugars it (#2659).
     let serve_shape = almide::serve_export::check_serve_shape(&program);
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the structural leg's allocation
@@ -506,7 +509,9 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // same resolver) and hands the FRESH un-inferred programs to whichever
     // leg renders — the capture that used to live here (#782).
     let mut checker = typecheck_wasm_program(file, &source_text, &mut program, &resolved)?;
+    t.lap("typecheck");
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved, (file, &source_text))?;
+    t.lap("lower+link");
     // #4008: the entry and every user module are checked by now.
     let outside_guarantee = std::mem::take(&mut checker.outside_guarantee);
     verify_wasm_ir(&ir_program)?;
@@ -520,6 +525,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // The availability check runs on EVERY route (run, check, build); only the
     // serve-export verdict it answers is the build route's (#2659).
     let serves_export = check_wasm_availability(&ir_program, &package, embedded_leg, &serve_shape)?;
+    t.lap("availability");
     let serve_export = library_ok && serves_export;
     // `[permissions]` (`allow`, and `proc` #2589 — statically, and as the
     // embedded host's run-time bound) was enforced in `lower_and_link_wasm_ir`.
@@ -544,7 +550,25 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // the module. An unlinked stdlib fn walls at lowering (#1598), so every
     // newly linked fn flips its own verdict with no hand-mirrored list.
     let _ = (&mut ir_program, allow_unverified, verified);
-    let (bytes, host_ops) = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths)?;
+    // The embedded-leg run form (`run` / `bench`) reuses a module rendered
+    // from the same inputs (`wasm_run_cache`); every gate above has run.
+    let cache = (embedded_leg && !library_ok && inputs.has_main)
+        .then(|| super::wasm_run_cache::Key::of(file, &source_text, &resolved, &dep_paths, verified))
+        .flatten();
+    let (bytes, host_ops) = match cache.as_ref().and_then(super::wasm_run_cache::Key::lookup) {
+        Some(hit) => {
+            t.lap("render (cache hit)");
+            hit
+        }
+        None => {
+            let rendered = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths)?;
+            if let Some(key) = &cache {
+                key.store(&rendered.0, &rendered.1);
+            }
+            t.lap("render");
+            rendered
+        }
+    };
     // The export's world imports no wasi:filesystem (`wasmtime serve` links
     // none without a flag): an op the service shim cannot answer is refused
     // here, at check time as at build time.
