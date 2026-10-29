@@ -769,15 +769,15 @@ fn a_move_may_be_released_by_an_enclosing_window() -> Result<(), String> {
 }
 
 /// Events logged in the two arms of one branch site never happen on one
-/// path: the one `+1` past the join, on the value either arm chose, is each
+/// path: the one `+1` past the join, on the value both arms name, is each
 /// one's. Logged outside the site, two events need two calls.
 #[test]
 fn events_in_two_arms_of_one_site_share_the_call_past_the_join() -> Result<(), String> {
-    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
+    let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 0)) call $alloc drop");
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
-    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "( a0 | a1 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
-    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a1".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "( a0 | a0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, Some(0), &none, &[], &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 

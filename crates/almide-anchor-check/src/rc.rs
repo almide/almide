@@ -369,18 +369,7 @@ pub fn check_rc(
             if crate::operands::is_loaded(&arg) {
                 elements.insert(k);
             }
-            let mut named = names_through(bodies, imports, b, &arg, 2);
-            // A value an `if` chose: either arm's value (the `+1` past the join
-            // is that of whichever variable the arm yielded).
-            if let crate::operands::T::Opaque(p) = crate::operands::pl(&arg) {
-                for t in fl.arm_values(*p, FUEL) {
-                    for n in names_through(bodies, imports, b, &t, 2) {
-                        if !named.contains(&n) {
-                            named.push(n);
-                        }
-                    }
-                }
-            }
+            let named = names_through(bodies, imports, b, &arg, 2);
             calls.push((k, kind, named));
         }
         rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
