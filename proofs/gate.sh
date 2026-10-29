@@ -934,14 +934,14 @@ def nums(k, hi):
 def ops(n):
     # Mostly net-zero tokens, so bodies and arms balance often enough to
     # exercise the accept side; the singles break the balance the rest of the time.
-    return "".join(rng.choice(["di", "di", "id", "ad", "b", "i", "d", "m"]) for _ in range(n))
+    return "".join(rng.choice(["di", "di", "id", "ad", "b", "i", "d", "m", "s"]) for _ in range(n))
 
 def ownership():
     # Half byte soup (malformed nesting, stray markers), half the emitter's
     # shapes with random contents — the soup alone almost never balances,
     # and the accept side needs coverage too.
     if rng.random() < 0.5:
-        return "".join(rng.choice("iiiidddaambrIDxXtT(){}[]||\n ") for _ in range(rng.randint(0, 28)))
+        return "".join(rng.choice("iiiidddaambrsSIDxXtT(){}[]||\n ") for _ in range(rng.randint(0, 28)))
     def item():
         r = rng.random()
         if r < 0.5:
@@ -980,7 +980,8 @@ cases = [(mode, gen()) for mode, gen in GENS for _ in range(PER_MODE)]
 want = []
 with tempfile.TemporaryDirectory() as d:
     one = os.path.join(d, "w")
-    bundle = bytearray(b"almide-certificate-bundle 1\nproducer proofs/gate.sh random differential\n")
+    # Version 3: the ownership alphabet with the arm share-out `s` (#4278).
+    bundle = bytearray(b"almide-certificate-bundle 3\nproducer proofs/gate.sh random differential\n")
     for i, (mode, w) in enumerate(cases):
         with open(one, "w") as f:
             f.write(w)
