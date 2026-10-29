@@ -946,6 +946,8 @@ pub mod almide_sfs {
     pub fn create_dir_with_mode<P: AsRef<std::path::Path>>(p: P, mode: u16) -> std::io::Result<()> {
         match scope() {
             None => {
+                // Only unix sets a mode on the builder.
+                #[cfg_attr(not(unix), allow(unused_mut))]
                 let mut b = std::fs::DirBuilder::new();
                 #[cfg(unix)]
                 std::os::unix::fs::DirBuilderExt::mode(&mut b, u32::from(mode));

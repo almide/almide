@@ -84,6 +84,7 @@ fn link_dir(target: &Path, at: &Path) {
         assert_eq!(e.raw_os_error(), Some(1314), "test fixture setup: {e}");
         junction(target, at);
     }
+    assert!(std::fs::symlink_metadata(at).is_ok(), "test fixture setup: the link {at:?} was not made");
 }
 
 #[cfg(windows)]
@@ -111,7 +112,10 @@ fn link_file(target: &Path, at: &Path) -> bool {
 #[cfg(windows)]
 fn link_file(target: &Path, at: &Path) -> bool {
     match std::os::windows::fs::symlink_file(target, at) {
-        Ok(()) => true,
+        Ok(()) => {
+            assert!(std::fs::symlink_metadata(at).is_ok(), "test fixture setup: the link {at:?} was not made");
+            true
+        }
         Err(e) if e.raw_os_error() == Some(1314) => {
             eprintln!("note: no symlink privilege; the file-link refusal is covered on unix only in this run");
             false
