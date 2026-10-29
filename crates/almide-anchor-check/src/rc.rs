@@ -412,8 +412,17 @@ pub fn check_rc(
         // outside (left over, it is that arm's or routine's own; one outside
         // has no such reading), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
+        // More generally: a call that has a reading of its own when left over
+        // (an arm's or routine's, a replaced element's, one before an abort)
+        // is tried after the calls that have none.
+        let fallback = |i: usize| {
+            let k = calls[i].0;
+            let frame_owned = calls[i].2.iter().any(|n| witnessed.contains(n));
+            (!frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)))))
+                || aborting.contains(&k)
+        };
         let mut by_pref: Vec<usize> = (0..nc).collect();
-        by_pref.sort_by_key(|&i| (in_window(calls[i].0), calls[i].0));
+        by_pref.sort_by_key(|&i| (fallback(i), in_window(calls[i].0), calls[i].0));
         by_pref.extend(nc..nc + takers.len());
         let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
         fn augment(
