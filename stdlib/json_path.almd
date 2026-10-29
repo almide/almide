@@ -54,12 +54,22 @@ fn value_path_index(p: List[String], i: Int) -> List[String] =
 @implements("value.get_path")
 fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
 
+// set_path is the bundled Path's walk over these segments' (is_key, name,
+// index) steps (#4315): the structural wasm leg lowers that walk in place
+// where `v` is its alone (crates/almide-wasm/src/value_set_path.rs), and `v`
+// reaches it at its last use. The nesting bound (#4209) is the walk's own.
 @implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
-  let steps = list.len(p)
-  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(v, p, 0, x))
-}
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = value.__set_path_steps(
+  v,
+  __jpath_steps(p),
+  x,
+)
+
+// "f<name>" -> (true, name, 0); "i<int>" -> (false, "", int).
+fn __jpath_steps(p: List[String]) -> List[(Bool, String, Int)] = p |> list.map((seg) => match string.take(seg, 1) {
+  "f" => (true, string.drop(seg, 1), 0),
+  _ => (false, "", int.parse(string.drop(seg, 1)) ?? 0),
+})
 
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
