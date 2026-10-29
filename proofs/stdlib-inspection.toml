@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "1124"
+# uninspected_ceiling = "1122"
 
 [[fn]]
 name = "args.option"
