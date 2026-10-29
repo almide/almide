@@ -28,6 +28,9 @@ pub(crate) struct AssembleIn<'a> {
     pub(crate) extra_fns: &'a [(u32, Function)],
     pub(crate) global_decls: &'a [(almide_ir::VarId, SliceTy)],
     pub(crate) export_fns: &'a [(String, u32)],
+    /// ADR-0031 amendment A1: the `(ptr, len)` adapters of the Region
+    /// exports, appended after `extra_fns` (region_export.rs).
+    pub(crate) region_exports: &'a [crate::region_export::RegionExport],
     pub(crate) main_index: u32,
 }
 
@@ -134,8 +137,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         extra_fns,
         global_decls,
         export_fns,
+        region_exports,
         main_index,
     } = a;
+    let adapters: Vec<Function> = region_exports.iter().map(crate::region_export::adapter).collect();
+    let release = (!adapters.is_empty()).then(crate::region_export::release);
     // #2407: the allocation counters, APPENDED after the top-let globals so
     // no existing index moves — four i64 globals `$alloc` / `$free` bump,
     // present only under the `alloc_count` switch (a shipped module has
@@ -155,7 +161,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
                 _ => None,
             })
             .chain(std::iter::once(main_fn))
-            .chain(extra_fns.iter().map(|(_, f)| f)),
+            .chain(extra_fns.iter().map(|(_, f)| f))
+            .chain(adapters.iter())
+            .chain(release.iter()),
         if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
     let mut lits = HelperLits::intern(pool, &used);
@@ -205,6 +213,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // indices assigned eagerly during lowering from itype_base.
     for (ps, r) in work.itypes.borrow().iter() {
         types.ty().function(ps.clone(), r.iter().copied().collect::<Vec<_>>());
+    }
+    let adapter_ty = T_FN_BASE + table.infos.len() as u32 + work.itypes.borrow().len() as u32;
+    for e in region_exports {
+        types.ty().function(e.params.clone(), [ValType::I32, ValType::I32]);
     }
 
     let mut imports = ImportSection::new();
@@ -258,6 +270,13 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     functions.function(T_MAIN); // main, last
     for (ti, _) in extra_fns {
         functions.function(*ti);
+    }
+    let adapter_base = main_index + 1 + extra_fns.len() as u32;
+    for k in 0..adapters.len() as u32 {
+        functions.function(adapter_ty + k);
+    }
+    if release.is_some() {
+        functions.function(1); // __region_release ((i32) -> ())
     }
 
     let mut memories = MemorySection::new();
@@ -404,6 +423,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
     }
+    for (k, e) in region_exports.iter().enumerate() {
+        exports.export(&e.name, ExportKind::Func, adapter_base + k as u32);
+    }
+    if release.is_some() {
+        exports.export(crate::region_export::RELEASE_EXPORT, ExportKind::Func, adapter_base + adapters.len() as u32);
+    }
     // #2265: the JS host allocates the `String` blocks it passes in and
     // releases the ones it takes out through the module's own runtime —
     // both helpers ship unconditionally (the proven core), so exporting
@@ -458,6 +483,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
     code.function(main_fn);
     for (_, f) in extra_fns {
+        code.function(f);
+    }
+    for f in adapters.iter().chain(release.iter()) {
         code.function(f);
     }
 
