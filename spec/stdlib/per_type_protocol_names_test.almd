@@ -15,11 +15,17 @@ effect fn Tape.close(self) -> Result[Unit, String] = ok(())
 
 type Note: HttpMessage = { text: String }
 
-fn Note.header(self, name: String) -> String? = if name == "X-Note" then some(self.text) else none
+fn Note.header(self, name: String) -> String? = if name == "X-Note" then some(self.text)
+else none
 
-fn Note.header_values(self, name: String) -> List[String] = if name == "X-Note" then [self.text] else []
+fn Note.header_values(self, name: String) -> List[String] = if name == "X-Note" then [
+  self.text
+]
+else []
 
-fn Note.headers(self) -> List[(String, String)] = [("X-Note", self.text)]
+fn Note.headers(self) -> List[(String, String)] = [
+  ("X-Note", self.text)
+]
 
 fn Note.body(self) -> String = self.text
 
