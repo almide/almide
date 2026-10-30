@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 107 of 1003
+# rendered: 115 of 1005
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/assert_abort_eq.almd
 spec/wasm_cross/assert_abort_msg.almd
@@ -12,6 +12,7 @@ spec/wasm_cross/binding_stmts.almd
 spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/closure_tail_recursion.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
+spec/wasm_cross/control_flow.almd
 spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/effect_operand_unwrap_distinct.almd
 spec/wasm_cross/effect_tco.almd
@@ -20,7 +21,9 @@ spec/wasm_cross/exit_code_passthrough.almd
 spec/wasm_cross/exit_code_upper_bound.almd
 spec/wasm_cross/expr_stmt_comment.almd
 spec/wasm_cross/fan_any_allfail.almd
+spec/wasm_cross/fan_race_mapper.almd
 spec/wasm_cross/float_shortest_roundtrip.almd
+spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
 spec/wasm_cross/fuel_bounded_boundary.almd
@@ -31,6 +34,7 @@ spec/wasm_cross/fuel_dyn_charge.almd
 spec/wasm_cross/fuel_interp_uncharged.almd
 spec/wasm_cross/fuel_race_boundary.almd
 spec/wasm_cross/fuel_race_err_skip.almd
+spec/wasm_cross/fuel_single_call_args.almd
 spec/wasm_cross/fuel_timeout_ends.almd
 spec/wasm_cross/fuel_trap_cut.almd
 spec/wasm_cross/fuel_trap_window.almd
@@ -69,13 +73,17 @@ spec/wasm_cross/koka_parc14_generic_pick.almd
 spec/wasm_cross/koka_parc21_eval_order.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
+spec/wasm_cross/licm_zero_trip_hoist.almd
 spec/wasm_cross/literal_int_forms.almd
 spec/wasm_cross/literal_unit.almd
 spec/wasm_cross/loop_break_continue.almd
+spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mutual_tail_recursion.almd
 spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/num_edge_to_string.almd
+spec/wasm_cross/panic_abort_positions.almd
 spec/wasm_cross/panic_value_arm.almd
+spec/wasm_cross/pipe_compose_forms.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
 spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 spec/wasm_cross/r5_mod_producer_variant.almd
