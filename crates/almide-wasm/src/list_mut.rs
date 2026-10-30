@@ -320,6 +320,10 @@ impl Emitter<'_> {
                 i.local_get(hres).i32_load(slot_memarg(almide_layout::OPTION_FIELD)).call(F_INC);
             }
         }
+        if inc_elems.is_some() {
+            // #4278 B1: the popped element's own credit stays in the Option.
+            self.arm_share_stored();
+        }
         self.field_assign_with(&id, path, false, |s, _| {
             s.f.instructions().local_get(hnew);
             Ok(())
@@ -396,6 +400,7 @@ impl Emitter<'_> {
                         }
                         let drop_one = s.dec_fn_of(fty);
                         s.f.instructions().local_get(one).call(drop_one);
+                        s.arm_temp_released();
                         s.release_i32();
                         Ok(())
                     })?;

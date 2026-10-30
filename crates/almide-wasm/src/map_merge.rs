@@ -42,8 +42,11 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
-        if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+        match dying {
+            Some((id, idx, _)) => self.empty_dying(id, idx),
+            // #4278 B1: an owned temporary receiver's credit moves into the
+            // upserts through `mh` (try_map_set_owned's rule).
+            None => self.witness_rc_hold_move(mh),
         }
         let fns = self.map_set_fns(k, v)?;
         if self.lower_arg(b, None, ArgMode::Borrow)? != got {
@@ -83,6 +86,11 @@ impl Emitter<'_> {
             self.load_ty_slot_at(ty);
             self.arm_share_handle_top(ty);
             self.f.instructions().local_set(hold);
+        }
+        // #4278 B1: the key's share moves in through `kh`; a present key
+        // gives it back there.
+        if self.elem_is_handle(k) {
+            self.witness_rc_hold_move(kh);
         }
         self.emit_map_set_judged(mh, kh, vh, (k, v), fns)?;
         let mut i = self.f.instructions();

@@ -205,6 +205,11 @@ impl Emitter<'_> {
                     return Ok(Some(owned));
                 }
                 let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, (ArgMode::Retain, false))?;
+                // #4278 B1: a fresh key's credit moves in through its hold; an
+                // overwrite gives it back there (the judged set's rule).
+                if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+                    self.witness_rc_hold_move(kh_local);
+                }
                 let vh = self.hold_for(v)?;
                 self.lower_arg(value, Some(v), ArgMode::Retain)?;
                 self.f.instructions().local_set(vh);
