@@ -671,7 +671,7 @@ impl Emitter<'_> {
             i.local_get(params[0]);
         }
         // the group list co-owns the element it copied out of xs
-        self.arm_share_handle_top(elem);
+        self.share_handle_top(elem);
         if elem.val_type() == wasm_encoder::ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
@@ -686,7 +686,7 @@ impl Emitter<'_> {
             i.i32_const(0).call(F_ALLOC);
             i.local_get(params[0]);
         }
-        self.arm_share_handle_top(elem);
+        self.share_handle_top(elem);
         if elem.val_type() == wasm_encoder::ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
@@ -704,7 +704,7 @@ impl Emitter<'_> {
             i.local_get(hkey);
         }
         if !key_owned {
-            self.arm_share_handle_top(kt);
+            self.share_handle_top(kt);
         }
         self.store_ty_slot_at(kt);
         {

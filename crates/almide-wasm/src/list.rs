@@ -295,7 +295,7 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(rh)
             .local_get(params[0]);
-        self.arm_share_handle_top(elem);
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().br(2);
         self.f.instructions().end();

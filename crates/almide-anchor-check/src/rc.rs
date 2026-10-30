@@ -595,8 +595,13 @@ pub fn check_rc(
             (!frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)))))
                 || aborting.contains(&k)
         };
+        // A call a move (`m` / `h`) could take is tried after the others: a
+        // move is matched last and never displaces an event, so an unnamed
+        // event that took such a call first would leave the move's release
+        // over and an instruction the window's own events account unmatched.
+        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| is_move(evs[e].0) && fits(e, i))).collect();
         let mut by_pref: Vec<usize> = (0..nc).collect();
-        by_pref.sort_by_key(|&i| (i >= live, fallback(i), in_window(calls[i].0), calls[i].0));
+        by_pref.sort_by_key(|&i| (i >= live, fallback(i), move_fits[i], in_window(calls[i].0), calls[i].0));
         by_pref.extend(nc..nc + takers.len());
         let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
         fn augment(
@@ -680,7 +685,6 @@ pub fn check_rc(
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
             }
         }
-        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| is_move(evs[e].0) && fits(e, i))).collect();
         let or_move = |i: usize| fallback_call(i) || move_fits[i];
         for round in 0..2 {
             // A move's credit is released by the arm on some of its paths: one

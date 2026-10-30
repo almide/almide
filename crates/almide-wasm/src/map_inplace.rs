@@ -119,11 +119,16 @@ impl Emitter<'_> {
                 .i32_const(lay.1 as i32)
                 .i32_add();
         }
-        // #4278 B1: the replaced value is the slot's consume (`r`).
-        self.slot_release(|em| {
-            em.emit_release_slot_at(v);
-            Ok(())
-        })?;
+        // #4278 B1: the replaced value is the slot's consume (`r`); a flat
+        // value has no release.
+        if self.elem_is_handle(v) {
+            self.slot_release(|em| {
+                em.emit_release_slot_at(v);
+                Ok(())
+            })?;
+        } else {
+            self.emit_release_slot_at(v);
+        }
         self.f.instructions().local_get(vh);
         self.store_ty_slot_raw(v);
         self.emit_release_hold(kh, k);
@@ -286,11 +291,16 @@ impl Emitter<'_> {
             // place; the key was not stored, its credit goes back
             i.local_get(eh).i32_const(voff).i32_add();
         }
-        // #4278 B1: the replaced value is the slot's consume (`r`).
-        self.slot_release(|em| {
-            em.emit_release_slot_at(v);
-            Ok(())
-        })?;
+        // #4278 B1: the replaced value is the slot's consume (`r`); a flat
+        // value has no release.
+        if self.elem_is_handle(v) {
+            self.slot_release(|em| {
+                em.emit_release_slot_at(v);
+                Ok(())
+            })?;
+        } else {
+            self.emit_release_slot_at(v);
+        }
         self.f.instructions().local_get(eh).i32_const(voff).i32_add().local_get(vh);
         self.store_ty_slot_raw(v);
         self.emit_release_hold(kh, k);
