@@ -107,6 +107,7 @@ fn native_sig_subset_check(
             || crate::render_native_rec::is_scalar_instance(t)
             || (matches!(t, Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
+            || heap_carrier_of(t).is_some()
     };
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
@@ -257,8 +258,29 @@ fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut 
                 .collect(),
             _ => Vec::new(),
         };
-        crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params);
+        let carriers = heap_carrier_values(ir, f);
+        crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params, &carriers);
     }
+}
+
+/// The generated heap Option/Result carrier a declared type stands for.
+fn heap_carrier_of(t: &almide_lang::types::Ty) -> Option<u16> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _))
+        .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
+        .flatten()
+        .filter(|i| crate::render_native_addr::is_carrier(*i))
+}
+
+/// The values of `f` whose declared type is a generated heap carrier.
+fn heap_carrier_values(ir: &almide_ir::IrProgram, f: &crate::MirFunction) -> std::collections::BTreeSet<crate::ValueId> {
+    let sig = |name: &str| -> Option<crate::render_native_addr::CarrierSig> {
+        let d = ir.functions.iter().find(|d| d.name.as_str() == name)?;
+        Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)))
+    };
+    let own = sig(f.name.as_str()).unwrap_or_default();
+    crate::render_native_addr::carrier_values(f, &own, &sig).into_keys().collect()
 }
 
 /// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
@@ -293,7 +315,8 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
                 .collect(),
             _ => Vec::new(),
         };
-        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params);
+        let carriers = heap_carrier_values(ir, f);
+        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers);
     }
 }
 
@@ -425,6 +448,9 @@ fn native_sig_kind(
         Ty::Named(_, _) if crate::render_native_rec::is_scalar_instance(t) => Some(NativeSigKind::ListI64),
         Ty::Named(_, _) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
         Ty::Bytes => Some(NativeSigKind::Rec(crate::render_native_rec::bytes_index())),
+        // #4006: a heap Option / a Result outside the scalar carriers rides its
+        // generated `Option<T>` / `Result<T, E>`.
+        Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => heap_carrier_of(t).map(NativeSigKind::Rec),
         Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) => {
             crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec)
         }

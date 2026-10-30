@@ -32,7 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `Store8` of a handle at +12 and a `Store4` at +16 (a one-element list has
 /// no word at +16: its element fills +12..+20) — and the piece handles those
 /// stores take.
-fn recognize(ops: &[Op]) -> (BTreeSet<ValueId>, BTreeSet<ValueId>) {
+fn recognize(ops: &[Op], skip: &BTreeSet<ValueId>) -> (BTreeSet<ValueId>, BTreeSet<ValueId>) {
     let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
     let mut blocks: BTreeSet<ValueId> = BTreeSet::new();
     let mut handles: BTreeMap<ValueId, ValueId> = BTreeMap::new();
@@ -44,7 +44,7 @@ fn recognize(ops: &[Op]) -> (BTreeSet<ValueId>, BTreeSet<ValueId>) {
             Op::ConstInt { dst, value } => {
                 consts.insert(*dst, *value);
             }
-            Op::Alloc { dst, init: Init::DynListStr { len }, .. } if consts.get(len) == Some(&1) => {
+            Op::Alloc { dst, init: Init::DynListStr { len }, .. } if consts.get(len) == Some(&1) && !skip.contains(dst) => {
                 blocks.insert(*dst);
             }
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
@@ -76,8 +76,17 @@ fn recognize(ops: &[Op]) -> (BTreeSet<ValueId>, BTreeSet<ValueId>) {
 }
 
 /// Rewrite every recognized String-Ok Result window in `f`.
-pub fn rewrite_result_str_ops(f: &mut MirFunction, res_str_fns: &BTreeSet<String>, res_str_params: &[ValueId]) {
-    let (recognized, piece_handle_ids) = recognize(&f.ops);
+///
+/// `carriers` are the values whose declared type is a generated heap
+/// Option/Result carrier (`render_native_carrier`): their one-slot blocks
+/// share this window's shape and are left to that render.
+pub fn rewrite_result_str_ops(
+    f: &mut MirFunction,
+    res_str_fns: &BTreeSet<String>,
+    res_str_params: &[ValueId],
+    carriers: &BTreeSet<ValueId>,
+) {
+    let (recognized, piece_handle_ids) = recognize(&f.ops, carriers);
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = Tracker::default();
