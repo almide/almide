@@ -341,7 +341,11 @@ access's width and offset, a variant site's tag store of its own case, and
 each variant CASE field's read to a tag test of its own address that
 guards it (an enclosing `if` whose condition implies `tag == C`, the address
 the same variable or the same field re-loaded with nothing that may write
-memory between). TRUSTED: that a block's static type is its layout (the
+memory between; a call only when the callee's body writes none, a fixpoint
+over the module). On the 1000-fixture certified corpus (GCE, ba31c7646): 1000/1000
+`fields` witnesses accepted by all three verdicts and FIELDS OK on every
+artifact — 3998 sites / 8636 stores, 5390 field accesses (552 variant case
+fields held to their tag test), 614 tag reads. TRUSTED: that a block's static type is its layout (the
 representation, trusted already for the bounds and init witnesses; the IR is
 cast-free and FieldAssign is refused),
 and the one row #4279 adds (owner ruling, 2026-10-30):
