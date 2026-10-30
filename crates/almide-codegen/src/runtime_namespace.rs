@@ -438,7 +438,7 @@ mod tests {
             pub use inner::*;
             #[cfg(unix)]
             pub fn almide_unix_only() {}
-            pub unsafe extern "C" fn almide_c() {}
+            pub extern "C" fn almide_c() {}
         "#;
         let got = names(src);
         let want: Vec<(&str, Vis)> = vec![
