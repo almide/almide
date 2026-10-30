@@ -81,21 +81,9 @@ reason = "the C-196 stack guard both native renders emit (module almide_stack_gu
 
 [[file]]
 path = "crates/almide-kernel/src/matmul.rs"
-count = 3
-class = "emitted-prelude"
-reason = "the AVX / register-tiled matmul kernels and their call behind is_x86_feature_detected"
-
-[[file]]
-path = "crates/almide-kernel/src/scale.rs"
 count = 2
 class = "emitted-prelude"
-reason = "scale_avx and its #[cfg(test)] bitwise check (the test block is stripped before emission)"
-
-[[file]]
-path = "crates/almide-kernel/src/transpose.rs"
-count = 7
-class = "emitted-prelude"
-reason = "the AVX 8x8 f32 transpose and its five passes"
+reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342)."
 
 [[file]]
 path = "crates/almide-kernel/src/transpose_f64.rs"
