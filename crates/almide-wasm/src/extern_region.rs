@@ -90,9 +90,16 @@ fn split_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
         stub.name = almide_base::intern::sym(&stub_name);
         stub.params = stub_params;
         stub.def_id = None;
+        // The stub is the wasm import alone: a native binding beside it
+        // (`@extern(rust)` / `@extern(c)`, #4353) names a host this target
+        // does not have, and the import reads only the wasm attr.
+        stub.extern_attrs.retain(|a| a.target.as_str() == "wasm");
         stubs.push(stub);
         // The wrapper: same name and signature, a body that calls the stub.
-        f.extern_attrs.retain(|a| a.target.as_str() != "wasm");
+        // It is an ordinary fn now, bound to no host, so it keeps no extern
+        // attr — a native one left on it read as a native-only extern
+        // (`extern-native`, E082) on a dual binding (#4353).
+        f.extern_attrs.clear();
         f.body = expr(
             IrExprKind::Call {
                 target: CallTarget::Named { name: almide_base::intern::sym(&stub_name) },

@@ -9,7 +9,8 @@
 /// disagree. The host fn sees plain Rust types: `&str`, `&[T]`, `&[u8]`,
 /// `&AlmideMatrix`, `&T` for records / maps / sets, `&mut T` for `mut`
 /// params, `&dyn Fn(A) -> B` for fn values, and owned scalars / `Option` /
-/// `Result` / tuples / variants. A `Bytes` / `Matrix` RETURN accepts either the raw
+/// `Result` / tuples / variants, and a `Region` as two arguments `(*mut u8,
+/// usize)` — its base and runtime length (#4353). A `Bytes` / `Matrix` RETURN accepts either the raw
 /// `Vec<u8>` / `AlmideMatrix` or the `AlmideRcCow` handle (`.into()`).
 fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
     use types::render_type;
