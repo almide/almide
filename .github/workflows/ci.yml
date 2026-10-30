@@ -1838,10 +1838,23 @@ jobs:
           python3 scripts/check-rawptr-surface.py --self-test
           python3 scripts/check-rawptr-surface.py
 
-      - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime and the compiler-emitted code listed with a class and a reason)
+      - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime and the compiler-emitted code listed with a class and a reason, each with a SAFETY invariant, the total shrink-only)
         run: |
+          set -euo pipefail
           bash scripts/check-runtime-unsafe.sh --self-test
-          bash scripts/check-runtime-unsafe.sh
+          # The total never rises above the base's (the same base as the other
+          # shrink-only gates).
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            git fetch -q origin "${{ github.base_ref }}"
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
+          bash scripts/check-runtime-unsafe.sh --base "$BASE"
 
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
