@@ -18,6 +18,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust CapabilityBound.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityReach.v >/dev/null
 "$COQC" -Q . AlmideTrust CallModes.v >/dev/null
+"$COQC" -Q . AlmideTrust HelperSig.v >/dev/null
 "$COQC" -Q . AlmideTrust MemorySafe.v >/dev/null
 "$COQC" -Q . AlmideTrust SpatialCert.v >/dev/null
 "$COQC" -Q . AlmideTrust BoundsCert.v >/dev/null
@@ -153,6 +154,25 @@ printf 'h12 w8 v4 r0 f4 t8'  > $GATE_TMP/init_fill.cert      # a range's loop fi
 printf 'h12 w8 v4 r0 f4 t16' > $GATE_TMP/init_fill_skip.cert # the cursor skips a slot per step → REJECT
 runi $GATE_TMP/init_fill.cert 0
 runi $GATE_TMP/init_fill_skip.cert 1
+
+# RC-SIG witness (#4278 B1): a runtime helper's own certificate — per heap
+# parameter its declared mode (0 = borrow, 1 = consume), then one ownership
+# line per parameter judged from that mode's entry count, then the helper's
+# other lines. accept ⟹ every run of each parameter line keeps its declared
+# mode (check_sig_cert_sound), the premise of composing at a call site.
+printf '1 1|{mx|}d\nm' > $GATE_TMP/sig_push.cert          # $list_push: list returned or released, value stored → ACCEPT
+printf '0 1|{mx|}d\nm' > $GATE_TMP/sig_push_borrow.cert   # the same body declared BORROWING the list → REJECT
+printf '1|{d|}'        > $GATE_TMP/sig_some_paths.cert    # a consumed parameter released on one path only → REJECT
+printf '1 1|d'         > $GATE_TMP/sig_missing_line.cert  # a declared parameter with no line → REJECT
+runs() { # path expected_exit  (rc-sig mode)
+  set +e; ./checker rc-sig "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runs $GATE_TMP/sig_push.cert 0
+runs $GATE_TMP/sig_push_borrow.cert 1
+runs $GATE_TMP/sig_some_paths.cert 1
+runs $GATE_TMP/sig_missing_line.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
