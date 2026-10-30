@@ -444,22 +444,19 @@ fn a_reused_instance_answers_many_requests_in_constant_heap() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A serve-shaped app for the abort-reuse test: `/abort` builds a 5 000
-/// element list (about 200 KiB of blocks) and then indexes out of bounds;
-/// any other path is served.
+/// A serve-shaped app for the abort-reuse test: `/abort` builds a 20 000
+/// element list (about 800 KiB of blocks) and then indexes out of bounds;
+/// any other request is served with its body's length.
 const ABORT_REUSE_APP: &str = r#"import http
 
 effect fn app(req: HttpRequest) -> HttpResponse = {
   let xs = [10, 20, 30]
   match http.path(req) {
     "/abort" => {
-      let big = list.range(0, 5000) |> list.map((i) => "${i}")
+      let big = list.range(0, 20000) |> list.map((i) => "${i}")
       http.response(200, "big ${list.len(big)} ${xs[9]}")
     },
-    _ => {
-      let small = list.range(0, 100) |> list.map((i) => "${i}")
-      http.response(200, "ok ${list.len(small)}")
-    },
+    _ => http.response(200, "ok ${string.len(http.body(req))}"),
   }
 }
 
@@ -477,20 +474,25 @@ effect fn main() -> Unit = http.serve(8080, app)!
 /// the per-request arena (#3444), so a reused instance starts every request
 /// from the same heap.
 ///
-/// Thirty rounds of `/ok`, `/ok`, `/abort` go to one host that may reuse an
-/// instance 200 times, under a 2 MiB linear-memory ceiling. One `/abort`
-/// leaves about 200 KiB of blocks unreleased, so an instance re-entered
-/// after its abort with them still allocated would outgrow the ceiling
-/// long before the thirtieth round, and so would a reused instance whose served requests
-/// kept their blocks: every `/ok` must be served, every `/abort` answered
-/// with the host's 500, and each abort's worker discarded.
+/// Five rounds of forty served POSTs (a 4 KiB body each) and one `/abort` go
+/// to one host that may reuse an instance 250 times, under a 2 MiB
+/// linear-memory ceiling. One `/abort` leaves about 800 KiB of blocks
+/// unreleased, so an instance entered again after its abort with them still
+/// allocated would outgrow the ceiling by the third round, and a reused
+/// instance whose served requests kept their blocks outgrows it within a
+/// round: every POST must be served, every `/abort` answered with the host's
+/// 500, and each abort's worker discarded.
 ///
 /// Negative control (GCE, sec-b2): with `arena.close` removed from the
-/// export's `handle` (crates/almide-wasm-run/src/wasi_p3_serve.rs) the
-/// served requests fail with the host's 500 and this test fails.
+/// export's `handle` (crates/almide-wasm-run/src/wasi_p3_serve.rs) served
+/// requests fail with the host's 500 and this test fails. The other half,
+/// a host that re-enters an instance after its abort, is the component
+/// model's to refuse and has no switch here; the discarded-worker count is
+/// what this test reads of it.
 #[test]
 fn aborting_requests_leave_nothing_a_later_request_on_the_reuse_path_sees() {
-    const ROUNDS: usize = 30;
+    const ROUNDS: usize = 5;
+    const SERVED: usize = 40;
     let dir = scratch("abort-reuse");
     let src = dir.join("app.almd");
     std::fs::write(&src, ABORT_REUSE_APP).expect("write the app");
@@ -509,26 +511,29 @@ fn aborting_requests_leave_nothing_a_later_request_on_the_reuse_path_sees() {
     let mut flags = vec!["-W".to_string(), format!("max-memory-size={}", 2 << 20)];
     let help = Command::new("wasmtime").args(["serve", "--help"]).output().map(|o| o.stdout).unwrap_or_default();
     if String::from_utf8_lossy(&help).contains("--max-instance-reuse-count") {
-        flags.extend(["--max-instance-reuse-count".to_string(), "200".to_string()]);
+        flags.extend(["--max-instance-reuse-count".to_string(), "250".to_string()]);
     }
     let (port, mut served) = serve_artifact(&dir, &wasm, &flags);
+    let body: Vec<u8> = (0..4096).map(|k| b'a' + (k % 26) as u8).collect();
     let mut failed = Vec::new();
     for round in 0..ROUNDS {
-        for path in ["/ok", "/ok", "/abort"] {
-            let o = observe(&ask(port, &request("GET", path, &[], b"")));
-            let good = match path {
-                "/abort" => matches!(&o, Ok(o) if o.status == 500),
-                _ => matches!(&o, Ok(o) if o.status == 200 && o.body == b"ok 100"),
+        for k in 0..=SERVED {
+            let (raw, want) = if k < SERVED {
+                (request("POST", "/ok", &[], &body), (200, b"ok 4096".as_slice()))
+            } else {
+                (request("GET", "/abort", &[], b""), (500, b"".as_slice()))
             };
+            let o = observe(&ask(port, &raw));
+            let good = matches!(&o, Ok(o) if o.status == want.0 && (want.0 != 200 || o.body == want.1));
             if !good {
-                failed.push((round, path, o.map(|o| o.status)));
+                failed.push((round, k, o.map(|o| o.status)));
             }
         }
     }
     std::thread::sleep(Duration::from_millis(500));
     kill_group(&mut served);
     let log = std::fs::read_to_string(dir.join("wasmtime.log")).unwrap_or_default();
-    assert!(failed.is_empty(), "{} answer(s) wrong, the first: {:?}\nwasmtime log:\n{log}", failed.len(), failed.first());
+    assert!(failed.is_empty(), "{} answer(s) wrong, the first (round, request, status): {:?}\nwasmtime log:\n{log}", failed.len(), failed.first());
     let discarded = log.lines().filter(|l| l.starts_with("worker failed")).count();
     assert_eq!(discarded, ROUNDS, "each abort's worker is discarded:\n{log}");
     let _ = std::fs::remove_dir_all(&dir);
