@@ -235,15 +235,16 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         return Err(format!("runtime return `{rust_ret}` disagrees with the declaration"));
     }
     // An element-typed param or return needs the list that decides it, and
-    // a runtime generic with no bound: a native `Vec<i64>` may carry Float
-    // bits, which equality and ordering on `i64` would misjudge.
+    // no equality or ordering capability on its generic (the declared
+    // `capability_bounds`, read off the runtime's bounds): a native
+    // `Vec<i64>` may carry Float bits, which `i64` comparison would misjudge.
     let elem_typed = matches!(fret, FloorRet::Elem(_)) || fparams.iter().any(|p| matches!(p, FloorParam::Elem(_)));
     if elem_typed {
         if !fparams.iter().any(|p| matches!(p, FloorParam::List(ListElem::Any))) {
             return Err("an element-typed param or return with no `List[A]` param to decide it".into());
         }
-        if runtime_generics_bounded(body.text) {
-            return Err("an element-typed runtime generic with a bound".into());
+        if almide_lang::capability_bounds::of(module, func).next().is_some() {
+            return Err("an element-typed generic that needs equality or ordering".into());
         }
     }
     let fparams: Vec<FloorParam> = fparams
@@ -254,7 +255,7 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
             other => other,
         })
         .collect();
-    let items = closure(&symbol, rt).ok_or("the body reaches a name the native header cannot carry")?;
+    let items = closure(&symbol, rt)?;
     Ok(FloorFn { symbol, params: fparams, ret: fret, items })
 }
 
@@ -372,15 +373,6 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
     }
 }
 
-/// Whether the runtime fn's generic parameter list carries a bound or a
-/// `where` clause.
-fn runtime_generics_bounded(text: &str) -> bool {
-    let head = text.split('(').next().unwrap_or("");
-    let generics_bound = head.split_once('<').is_some_and(|(_, g)| g.contains(':'));
-    let sig_end = text.find('{').unwrap_or(text.len());
-    generics_bound || text[..sig_end].contains(" where ")
-}
-
 fn is_type_param(s: &str) -> bool {
     s.len() == 1 && s.chars().all(|c| c.is_ascii_uppercase())
 }
@@ -434,6 +426,10 @@ fn runtime_index() -> &'static RuntimeIndex {
     IDX.get_or_init(|| {
         let mut items: HashMap<&'static str, RtItem> = HashMap::new();
         let mut seen: BTreeMap<&'static str, usize> = BTreeMap::new();
+        // A module the runtime glob-imports (`mod almide_libm { … } pub use
+        // almide_libm::*;`) puts its names in scope unqualified: each of them
+        // takes the whole module and its glob along.
+        let mut glob_mods: Vec<(&'static str, &'static str)> = Vec::new();
         for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
             for (kind, name, text, attributed) in top_level_items(src) {
                 *seen.entry(name).or_default() += 1;
@@ -442,9 +438,26 @@ fn runtime_index() -> &'static RuntimeIndex {
                 if matches!(kind, ItemKind::Fn | ItemKind::Const) && !attributed {
                     items.insert(name, RtItem { text });
                 }
+                let is_mod = kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != name).any(|t| t.text == "mod");
+                if is_mod && !attributed && src.contains(&format!("\npub use {name}::*;")) {
+                    let whole: &'static str = Box::leak(format!("{text}\npub use {name}::*;").into_boxed_str());
+                    glob_mods.push((name, whole));
+                }
             }
         }
         items.retain(|n, _| seen.get(n) == Some(&1));
+        for (name, whole) in glob_mods {
+            if seen.get(name) != Some(&1) {
+                continue;
+            }
+            let body = &whole[whole.find('{').unwrap_or(0) + 1..whole.rfind("} //").or_else(|| whole.rfind('}')).unwrap_or(whole.len())];
+            items.insert(name, RtItem { text: whole });
+            for inner in defined_names(body) {
+                if !items.contains_key(inner) && seen.get(inner).is_none() {
+                    items.insert(inner, RtItem { text: whole });
+                }
+            }
+        }
         // Every name the runtime or the v0 prelude defines, at any depth: what
         // a body may reach only as a takeable item. The prelude rides in the
         // runtime crate's source (`emit_runtime_crate`).
@@ -599,30 +612,34 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
 
 /// The runtime body of `symbol` and every item it reaches, or `None` when it
 /// reaches something the native header cannot carry.
-fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Option<Vec<&'static str>> {
+fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
+    let mut texts: BTreeSet<&'static str> = BTreeSet::new();
     let mut todo: Vec<String> = vec![symbol.to_string()];
     let mut out = Vec::new();
     while let Some(name) = todo.pop() {
-        let (&key, item) = rt.items.get_key_value(name.as_str())?;
-        if header_items().contains(key) || !taken.insert(key) {
+        let (&key, item) = rt
+            .items
+            .get_key_value(name.as_str())
+            .ok_or_else(|| format!("`{name}` is not a takeable runtime item"))?;
+        if header_items().contains(key) || !taken.insert(key) || !texts.insert(item.text) {
             continue;
         }
         out.push(item.text);
-        for r in references(item.text)? {
+        for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
             if !taken.contains(r.as_str()) {
                 todo.push(r);
             }
         }
     }
-    Some(out)
+    Ok(out)
 }
 
 /// The runtime item names `text` reaches that need a definition beside it,
-/// or `None` when it reaches a name the runtime or its prelude defines that
+/// or `Err(name)` when it reaches a name the runtime or its prelude defines that
 /// is not an item we can take along (a type, a macro, a module, a prelude
 /// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
-fn references(text: &str) -> Option<Vec<String>> {
+fn references(text: &str) -> Result<Vec<String>, String> {
     let toks = lex(text);
     let rt = runtime_index();
     let header = header_items();
@@ -636,7 +653,7 @@ fn references(text: &str) -> Option<Vec<String>> {
         let prev = i.checked_sub(1).map(|k| toks[k].text);
         let next = toks.get(i + 1).map(|t| t.text);
         if prev == Some(".") && rt.trait_methods.contains(s) {
-            return None; // a method of the runtime's own traits
+            return Err(s.to_string()); // a method of the runtime's own traits
         }
         if matches!(prev, Some("." | "::" | "'")) {
             continue; // a method, a field, a path tail, a lifetime
@@ -658,11 +675,16 @@ fn references(text: &str) -> Option<Vec<String>> {
         if locals.contains(s) {
             continue;
         }
-        if rt.defined.contains(s) {
-            return None;
+        // A lowercase name used as a value (no call, path or macro after it)
+        // is a binding of this body: a pattern or closure param the token
+        // scan did not see bind it. An item it could name would be a `const`
+        // or `static`, which are UPPERCASE.
+        let used_as_item = matches!(next, Some("(" | "::" | "!")) || s.chars().next().is_some_and(|c| c.is_uppercase());
+        if rt.defined.contains(s) && used_as_item {
+            return Err(s.to_string());
         }
     }
-    Some(out)
+    Ok(out)
 }
 
 /// The names the native header defines for a floor body.
