@@ -326,6 +326,22 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
     }
 }
 
+/// `t` with each declared type parameter bound: the layouts spell a parameter
+/// as `TypeVar(T)` or as a bare `Named(T, [])`.
+fn bind_type_params(
+    t: &almide_lang::types::Ty,
+    b: &std::collections::HashMap<almide_lang::intern::Sym, almide_lang::types::Ty>,
+) -> almide_lang::types::Ty {
+    use almide_lang::types::Ty;
+    match t {
+        Ty::Named(n, a) if a.is_empty() && b.contains_key(n) => b[n].clone(),
+        Ty::Named(n, a) => Ty::Named(*n, a.iter().map(|x| bind_type_params(x, b)).collect()),
+        Ty::Applied(c, a) => Ty::Applied(c.clone(), a.iter().map(|x| bind_type_params(x, b)).collect()),
+        Ty::Tuple(es) => Ty::Tuple(es.iter().map(|x| bind_type_params(x, b)).collect()),
+        _ => almide_lang::types::substitute(t, b),
+    }
+}
+
 /// Derive the generated types from the declared record and variant layouts.
 pub(crate) fn derive_records(
     layouts: &crate::lower::RecordLayouts,
@@ -373,7 +389,7 @@ pub(crate) fn derive_records(
             let bind = |gs: &[almide_lang::intern::Sym]| -> Option<std::collections::HashMap<almide_lang::intern::Sym, Ty>> {
                 (gs.len() == args.len()).then(|| gs.iter().cloned().zip(args.iter().cloned()).collect())
             };
-            let sub = |b: &std::collections::HashMap<almide_lang::intern::Sym, Ty>, t: &Ty| almide_lang::types::substitute(t, b);
+            let sub = |b: &std::collections::HashMap<almide_lang::intern::Sym, Ty>, t: &Ty| bind_type_params(t, b);
             if args.is_empty() {
                 continue;
             }
