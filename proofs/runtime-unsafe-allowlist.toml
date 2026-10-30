@@ -59,7 +59,7 @@ reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per 
 path = "crates/almide-codegen/src/prelude_rem_body.rs"
 count = 1
 class = "emitted-prelude"
-reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri"
+reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri. kept (#4342): the safe `((a as i128 * b as i128) >> 64) as i64` in its place measured, min of 7 pinned runs, 1.32x on the 90M-step chain `acc = (acc * 31 + j) % 1000003`, 1.24x / 1.27x on fanblock, 1.03x / 1.06x on decode, and 1.17x / 0.79x on an unchained `j % 7 + j % 1000 + (j * 13) % 3` loop, GCE Intel Xeon 2.8 GHz (n2) / AMD EPYC 7B13 (n2d), x86-64-v3, Rust 1.96.0, 2026-10-30 — over the 5% bar on the chains"
 
 [[file]]
 path = "crates/almide-codegen/src/walker/mod.rs"
