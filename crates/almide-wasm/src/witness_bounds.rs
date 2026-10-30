@@ -57,6 +57,11 @@
 //! stretch normally — and almide-anchor-check holds the `br_if`'s compare
 //! to the load as it holds a `c`'s: the counter against `len(xs) / S`
 //! captured at entry, the load at `xs + cur * S`, neither changed between.
+//! The loop holds its subject across the body (+1 on a borrowed list,
+//! #4351); that `rc_inc` call is recorded as a HOLD ([`hold`]), and the
+//! anchor file's `holds` line lets almide-anchor-check accept a call handed
+//! the list inside the loop (the copy-on-write contract: a shared block is
+//! never written or resized in place).
 //! Element accesses that go through neither (stdlib `list.get`, the
 //! runtime's own routines) are not recorded.
 
@@ -86,6 +91,10 @@ struct State {
     /// The pass's copy-on-write judge calls, one anchor each.
     judges: String,
     done_judges: Vec<(usize, String)>,
+    /// The pass's loop HOLDS (#4280): the rc_inc a list `for` takes on its
+    /// subject before the loop, one anchor each.
+    holds: String,
+    done_holds: Vec<(usize, String)>,
     /// A site outlived its stretch: the witness is made unparseable, so it
     /// is rejected rather than read short.
     broken: bool,
@@ -149,6 +158,10 @@ impl State {
         let judges = std::mem::take(&mut self.judges);
         if !judges.is_empty() {
             self.done_judges.push((self.pass, judges.trim_end().to_string()));
+        }
+        let holds = std::mem::take(&mut self.holds);
+        if !holds.is_empty() {
+            self.done_holds.push((self.pass, holds.trim_end().to_string()));
         }
         let stretches = std::mem::take(&mut self.stretches);
         let anchors = std::mem::take(&mut self.stretch_anchors);
@@ -278,6 +291,17 @@ pub(crate) fn exit(site: Option<Site>, at: &wasm_encoder::Function) {
     }
 }
 
+/// A list `for` loop's +1 on its subject (the `call` of rc_inc) was just
+/// emitted: while the loop runs the block has a second holder, so no
+/// routine writes or resizes it in place (the copy-on-write contract).
+pub(crate) fn hold(at: &wasm_encoder::Function) {
+    let a = crate::witness::anchor::at(at);
+    with(|s| {
+        s.holds.push_str(&a);
+        s.holds.push(' ');
+    });
+}
+
 /// Variable `v` changed: every slot of every open stretch that names it.
 pub(crate) fn kill(v: u32) {
     with(|s| s.kill(v));
@@ -290,6 +314,7 @@ pub fn take() -> Vec<(usize, String)> {
     s.flush();
     *taken_anchors().lock().expect("bounds anchors") = std::mem::take(&mut s.done_anchors);
     *taken_judges().lock().expect("bounds judges") = std::mem::take(&mut s.done_judges);
+    *taken_holds().lock().expect("bounds holds") = std::mem::take(&mut s.done_holds);
     s.done
 }
 
@@ -302,6 +327,17 @@ fn taken_judges() -> &'static Mutex<Vec<(usize, String)>> {
 /// The judge-call anchors of the passes the last [`take`] flushed.
 pub fn take_judges() -> Vec<(usize, String)> {
     std::mem::take(&mut *taken_judges().lock().expect("bounds judges"))
+}
+
+fn taken_holds() -> &'static Mutex<Vec<(usize, String)>> {
+    use std::sync::OnceLock;
+    static H: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+    H.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// The loop-hold anchors of the passes the last [`take`] flushed.
+pub fn take_holds() -> Vec<(usize, String)> {
+    std::mem::take(&mut *taken_holds().lock().expect("bounds holds"))
 }
 
 fn taken_anchors() -> &'static Mutex<Vec<(usize, String)>> {
