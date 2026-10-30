@@ -1,14 +1,17 @@
 diff --git a/crates/almide-wasm/src/dying_move.rs b/crates/almide-wasm/src/dying_move.rs
-index cea8a7dea..a9e857367 100644
+index 9b6ef871e..029c8eb0d 100644
 --- a/crates/almide-wasm/src/dying_move.rs
 +++ b/crates/almide-wasm/src/dying_move.rs
-@@ -538,7 +538,8 @@ impl Emitter<'_> {
-         if let Some((id, idx, _)) = dying {
-             self.empty_dying(id, idx);
-         }
--        self.witness_rc_hold_move(mh);
+@@ -541,9 +541,9 @@ impl Emitter<'_> {
+             Some((id, idx, _)) => self.empty_dying(id, idx),
+             None => false,
+         };
+-        if !var_moved {
+-            self.witness_rc_hold_move(mh);
+-        }
 +        // RE-INJECTED (#4278 B1 drill): the routine no longer declares the
 +        // receiver's credit it consumes.
++        let _ = var_moved;
          let fns = self.map_set_fns(k, v)?;
          let kh = self.hold_for(k)?;
          self.lower_arg(key, Some(k), ArgMode::Retain)?;

@@ -1,13 +1,13 @@
 // #4278 B1 drill (a routine whose declaration lies about its body): the
-// judged map set takes the dying receiver's credit through its hold `mh` and
-// releases it inside the routine's window when the block is shared and
-// copies. Re-injected, the routine no longer logs the hold move — it declares
-// no consumption of the receiver while its body still releases it. The
-// ownership witness is unchanged. With the routine-internal class retired,
-// that release has no event to take it and nothing counts it: the RC byte
-// check must refuse the frame.
+// judged map set takes an owned temporary receiver's credit through its hold
+// `mh` (`h<local>@window`) and releases it inside the routine's window when
+// the block is shared and copies. Re-injected, the routine no longer logs the
+// hold move — it declares no consumption of the receiver while its body
+// still releases it. The ownership witness is unchanged. With the
+// routine-internal class retired, that release has no event to take it and
+// nothing counts it: the RC byte check must refuse the frame. (Int keys and
+// values: no key or value hold move shares the window.)
 effect fn main() -> Unit = {
-  var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
-  m = map.set(m, "c", 3)
+  let m = map.set(map.from_list([(1, 10), (2, 20)]), 3, 30)
   println(int.to_string(map.len(m)))
 }
