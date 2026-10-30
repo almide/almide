@@ -622,7 +622,11 @@ impl Emitter<'_> {
             // NULL: a release of nothing).
             if self.elem_is_handle(fty) {
                 let dec = self.dec_fn_of(fty);
-                self.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                // #4278 B1: the overwritten field is the slot's consume (`r`).
+                self.slot_release(|em| {
+                    em.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                    Ok(())
+                })?;
             }
             self.f.instructions().local_get(hold);
             self.f.instructions().local_get(vh);

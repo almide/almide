@@ -128,6 +128,12 @@ impl Emitter<'_> {
             {
                 w.poison();
             }
+            // #4278 B1: a value read out of a block (a variant's payload, a
+            // field) hands the repr a share of that slot's occupant, moved
+            // into the callee (`am`).
+            if src.is_none() {
+                self.arm_share_stored();
+            }
         }
         self.calls.insert(i);
         self.witness_discard();

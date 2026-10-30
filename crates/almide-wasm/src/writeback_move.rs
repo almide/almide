@@ -289,11 +289,17 @@ impl Emitter<'_> {
         i.local_get(idx).global_get(crate::G_LINE_END).i32_ge_u();
         i.local_get(idx).i32_load(rc).i32_const(1).i32_eq();
         i.i32_and().if_(wasm_encoder::BlockType::Empty);
+        let _ = i;
         for (dec, off) in slots {
-            i.local_get(idx).i32_load(crate::slot_memarg(off)).call(dec);
-            i.local_get(idx).i32_const(0).i32_store(crate::slot_memarg(off));
+            // #4278 B1: the tuple's credit on the slot is the slot's consume
+            // (`r`), the slot then overwritten with NULL.
+            let _ = self.slot_release(|em| {
+                em.f.instructions().local_get(idx).i32_load(crate::slot_memarg(off)).call(dec);
+                Ok(())
+            });
+            self.f.instructions().local_get(idx).i32_const(0).i32_store(crate::slot_memarg(off));
         }
-        i.end();
+        self.f.instructions().end();
     }
 
     /// #3337: the vars this call (by its argument slice) may take by move.
