@@ -203,6 +203,8 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         render_closed_shim_call(call, shim_entry, OpSink { tys, out, indent, used_shims })
     } else if let Some(floor) = crate::native_floor::declared(name) {
         render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
+    } else if crate::native_list_ops::is_list_concat(name) {
+        render_list_concat(call, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -388,6 +390,37 @@ fn bind_user_fn_result(
 /// param list gates each arg, its source is pulled into `used_shims`, and the
 /// result binds by the shim's declared return. Extracted verbatim from
 /// `render_call_fn` (codopsy r2, #852).
+/// The list `+` operator: a fresh list of `a`'s elements then `b`'s.
+fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerError> {
+    let NativeCall { dst, name, args, .. } = call;
+    let OpSink { tys, out, indent, .. } = s;
+    let [a, b] = args.as_slice() else {
+        return Err(wall(format!("native: `{name}` arity mismatch")));
+    };
+    let (a, at) = call_arg(a, tys)?;
+    let (b, bt) = call_arg(b, tys)?;
+    let mismatch = || wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"));
+    let (sa, ty) = crate::native_list_ops::as_slice(&a, at).ok_or_else(mismatch)?;
+    let (sb, ty_b) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
+    if ty != ty_b {
+        return Err(mismatch());
+    }
+    let Some(d) = dst else {
+        return Err(wall(format!("native: `{name}` without a result")));
+    };
+    tys.insert(*d, crate::native_list_ops::owned(at));
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    writeln!(
+        out,
+        "let mut {}: {ty} = {{ let mut r: {ty} = Vec::with_capacity({sa}.len() + {sb}.len()); r.extend_from_slice({sa}); r.extend_from_slice({sb}); r }};",
+        var(*d)
+    )
+    .unwrap();
+    Ok(())
+}
+
 /// A stdlib call its declaration puts on the native floor (`@intrinsic`, a
 /// per-type signature, a runtime body the header can carry): the runtime
 /// body is rendered beside the program and called as v0 calls it.

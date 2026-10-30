@@ -42,7 +42,8 @@ pub(crate) fn self_append_window(func: &MirFunction, i: usize) -> Option<(ValueI
     let [CallArg::Handle(s), CallArg::Handle(x)] = args.as_slice() else {
         return None;
     };
-    (name == "__str_concat" && v == s && local == s && src == d && x != s).then_some((*s, *x, *d))
+    let concat = name == "__str_concat" || crate::native_list_ops::is_list_concat(name);
+    (concat && v == s && local == s && src == d && x != s).then_some((*s, *x, *d))
 }
 
 /// The `s.push_str(…)` line for the window opening at `ops[i]`, or `None`
@@ -65,4 +66,20 @@ fn touches(func: &MirFunction, v: ValueId) -> usize {
         crate::mir_ops::op_values(op, &mut vals);
     }
     vals.iter().filter(|&&w| w == v).count()
+}
+
+/// The list twin of [`str_self_append`] (#4006): `xs = xs + ys` (the rebind
+/// `d = xs + ys; drop xs; xs = d`) renders as `xs.extend_from_slice(ys)`, so
+/// an append loop is amortized linear (C-131) where a fresh list per append
+/// was quadratic. Taken under the string window's conditions: `xs` an owned
+/// list local, `d` touched by no other op, `ys` not `xs` itself.
+pub(crate) fn list_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>) -> Option<String> {
+    let (s, x, d) = self_append_window(func, i)?;
+    let st = *tys.get(&s)?;
+    if !matches!(st, NTy::Vec | NTy::VecStr | NTy::Rec(_)) || func.ret == Some(d) || touches(func, d) != 2 {
+        return None;
+    }
+    let (_, own) = crate::native_list_ops::as_slice(&var(s), st)?;
+    let (xs, x_own) = crate::native_list_ops::as_slice(&var(x), *tys.get(&x)?)?;
+    (own == x_own).then(|| format!("{}.extend_from_slice({xs});", var(s)))
 }
