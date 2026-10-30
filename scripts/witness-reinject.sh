@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A structural witness must catch an emitter that loses what it certifies:
 #   bounds (#4005) — a bounds check;   init (#4013) — a slot store;
+#   fields (#4279) — a record / tuple / variant field store;
 #   native (#4006) — a release in the verified native render, with the
 #   renderer's own Rust-mirror check bypassed (the witness is main's
 #   ownership witness in the native bundle, judged by check_xc);
@@ -9,7 +10,7 @@
 #   wrong slot holder, or a consuming routine that no longer consumes) while
 #   its recorded event stays: almide-verify still accepts the bundle, and
 #   almide-anchor-check's RC check (ALMIDE_RC_ANCHORS=1) must reject;
-#   anchors (#4011 (d)) — an instruction the bounds or init witness names,
+#   anchors (#4011 (d)) — an instruction the bounds, init or fields witness names,
 #   changed while its recording call stays: the proven checkers still
 #   accept both witnesses (step 2 requires it), and almide-anchor-check,
 #   which holds each event to the shipped bytes, must reject.
@@ -40,7 +41,7 @@
 # anchors drill's subject: the event stays, the instruction changes, and the
 # byte-level check (#4011 (d)) is what rejects.
 #
-#   scripts/witness-reinject.sh <bounds|init|native|anchors|rc> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|fields|native|anchors|rc> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -49,10 +50,11 @@ PROP="${1:-}"
 case "$PROP" in
   bounds) ISSUE=4005 ;;
   init) ISSUE=4013 ;;
+  fields) ISSUE=4279 ;;
   native) ISSUE=4006 ;;
   anchors) ISSUE=4011 ;;
   rc) ISSUE=4277; export ALMIDE_RC_ANCHORS=1 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init|native|anchors|rc> [name ...]" >&2; exit 2 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|anchors|rc> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -118,9 +120,9 @@ verdict() {
     if ! "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --anchors "$wt/a.anchors" > "$wt/a.bundle" 2> "$wt/producer.err"; then
       echo "producer-failed"; return
     fi
-    # The proven checkers must still ACCEPT both witnesses: the bug is one
+    # The proven checkers must still ACCEPT the witnesses: the bug is one
     # only the bytes show.
-    for p in bounds init; do
+    for p in bounds init fields; do
       "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --only "$p" '(program)' > "$wt/$p.w" 2>/dev/null || { echo "producer-failed"; return; }
       "$TARGET/debug/almide-verify" "$p" "$wt/$p.w" > /dev/null 2>&1 || { echo "$p-witness-rejected"; return; }
     done

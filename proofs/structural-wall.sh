@@ -129,19 +129,30 @@ python3 - "$OUT" <<'PYEOF'
 import os, re, sys
 out = sys.argv[1]
 keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated", "operands"]
+fkeys = ["f_sites", "f_stores", "f_accesses", "f_guarded", "f_tags", "f_unlocated"]
+ftot = dict.fromkeys(fkeys, 0)
+fpat = re.compile(r"FIELDS OK: (\d+) site\(s\) / (\d+) store\(s\), (\d+) access\(es\) \((\d+) case field\(s\) under their tag test\), (\d+) tag read\(s\), (\d+) unlocated")
 tot = dict.fromkeys(keys, 0)
 pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated, (\d+) operand pair\(s\)")
 for f in os.listdir(out):
     if f.endswith(".anchor"):
-        m = pat.search(open(os.path.join(out, f)).read())
+        text = open(os.path.join(out, f)).read()
+        m = pat.search(text)
         if m:
             for k, v in zip(keys, m.groups()):
                 tot[k] += int(v)
+        m = fpat.search(text)
+        if not m:
+            sys.exit(f"STRUCTURAL WALL FAIL: {f} carries no FIELDS OK line — the fields witness was not held to the bytes")
+        for k, v in zip(fkeys, m.groups()):
+            ftot[k] += int(v)
 if tot["operands"] != tot["accesses"]:
     sys.exit(f"STRUCTURAL WALL FAIL: {tot['accesses']} located access(es) but {tot['operands']} held to their guard's operands")
 print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
       f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes, every access's guard operands to it; unlocated (dead bodies): "
       f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")
+print(f"  [anchors] FIELDS OK on every artifact: {ftot['f_sites']} site(s) / {ftot['f_stores']} store(s), {ftot['f_accesses']} field access(es) "
+      f"({ftot['f_guarded']} variant case field(s) held to their tag test), {ftot['f_tags']} tag read(s); unlocated (dead bodies): {ftot['f_unlocated']}")
 PYEOF
 
 echo "== drill: one byte of a shipped artifact changed — the verifier must reject =="
@@ -173,7 +184,7 @@ import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
-      "bounds": "check_bounds_cert", "init": "check_init_cert"}
+      "bounds": "check_bounds_cert", "init": "check_init_cert", "fields": "check_fields_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -262,7 +273,7 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert FieldCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -293,6 +304,15 @@ print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c
 # literals today; every other allocation site records nothing).
 sites = sum(len([x for x in w.split(";") if x.strip()]) for w in accepts["init"])
 print(f"  [init] recorded: {sites} construction site(s), over {sum(1 for w in accepts['init'] if w.strip())} non-empty witness(es)")
+# #4279 coverage: the record / tuple / variant sites, field accesses and tag
+# reads the fields witnesses record.
+ftoks = {k: 0 for k in "Lkat"}
+for w in accepts["fields"]:
+    for item in w.split(";"):
+        item = item.strip()
+        if item and item[0] in ftoks:
+            ftoks[item[0]] += 1
+print(f"  [fields] recorded: {ftoks['k']} construction site(s), {ftoks['a']} field access(es), {ftoks['t']} tag read(s) over {ftoks['L']} layout(s), in {sum(1 for w in accepts['fields'] if w.strip())} non-empty witness(es)")
 n = sum(1 for _ in open(os.path.join(out, "index")))
 print(f"  {fixtures_ok}/{n} fixture(s) accepted on every property; {len(rejects)} rejected witness(es), each named in the exception ledger")
 for m in fail[:20]:
@@ -368,8 +388,8 @@ fi
 # slot store lost — scripts/witness-reinject.sh <property> re-injects each
 # bug and pins its witness to
 # these files. Every verdict must REJECT each one, on every run.
-for prop in bounds init; do
-  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; esac
+for prop in bounds init fields; do
+  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; fields) PFN=check_fields_cert; PMOD=FieldCert ;; esac
   echo "== $(printf %s "$prop" | tr a-z A-Z) POISON LEG: every lost-${prop} witness is REJECTED by all three verdicts =="
   PPOISONED=("$ROOT"/proofs/poisoned-certs/$prop/*.cert)
   if [ ! -e "${PPOISONED[0]}" ]; then
@@ -410,6 +430,6 @@ done
 
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
-echo "bounds, init, name-totality, capability and call-graph witness of the structural build is accepted —"
+echo "bounds, init, fields, name-totality, capability and call-graph witness of the structural build is accepted —"
 echo "the extracted checker, the Rocq kernel and almide-verify agreeing on every verdict — and"
 echo "every bundle names the SHA-256 of the file 'almide build --target wasm' shipped for it."

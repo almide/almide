@@ -1,0 +1,13 @@
+// #4279 drill: a match arm binds its variant case's field BEFORE the arm's
+// tag test — the fields checker accepts, the bytes read a case field with no
+// test of the case.
+type Shape = | Circle(Int) | Square(Int)
+
+effect fn main() -> Unit = {
+  let s = Square(5)
+  let r = match s {
+    Circle(a) => a,
+    Square(b) => b + 1,
+  }
+  println("${r}")
+}
