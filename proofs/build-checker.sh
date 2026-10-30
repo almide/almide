@@ -23,6 +23,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust BoundsCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Certified.v >/dev/null
 "$COQC" -Q . AlmideTrust InitCert.v >/dev/null
+"$COQC" -Q . AlmideTrust FieldCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -145,6 +146,24 @@ printf 'h12 w8 v4 r0 f4 t8'  > $GATE_TMP/init_fill.cert      # a range's loop fi
 printf 'h12 w8 v4 r0 f4 t16' > $GATE_TMP/init_fill_skip.cert # the cursor skips a slot per step → REJECT
 runi $GATE_TMP/init_fill.cert 0
 runi $GATE_TMP/init_fill_skip.cert 1
+
+# FIELDS witness (#4013 / #4279): layouts `L R c C n N z S (o O w W)*`, record /
+# tuple / variant sites `k R c C (s I)*`, accesses `a R c C f I`, tag reads `t R`.
+# accept ⟹ every site leaves its block of the layout with every field
+# initialized, every access names a declared field (check_fields_cert_sound).
+printf 'L3 c0 n1 z16 o0 w8 o8 w4 ; k3 c0 s0 s1 ; a3 c0 f1' > $GATE_TMP/fields_record.cert   # a record built and read → ACCEPT
+printf 'L3 c0 n1 z16 o0 w8 o8 w4 ; k3 c0 s0'             > $GATE_TMP/fields_unstored.cert # field 1 never stored → REJECT
+printf 'L3 c0 n1 z12 o0 w8 o8 w8'                         > $GATE_TMP/fields_past.cert     # a field past the payload → REJECT
+printf 'L3 c0 n1 z16 o0 w8 o8 w4 ; a3 c0 f2'              > $GATE_TMP/fields_undeclared.cert # an access of an undeclared field → REJECT
+runf() { # path expected_exit  (fields mode)
+  set +e; ./checker fields "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runf $GATE_TMP/fields_record.cert 0
+runf $GATE_TMP/fields_unstored.cert 1
+runf $GATE_TMP/fields_past.cert 1
+runf $GATE_TMP/fields_undeclared.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
