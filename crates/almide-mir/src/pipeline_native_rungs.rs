@@ -159,15 +159,22 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
 fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    rewrite_native_result_windows_over(ir.functions.iter(), functions)
+}
+
+/// [`rewrite_native_result_windows`] over the declarations of several
+/// programs (the user program and every linked self-host source).
+fn rewrite_native_result_windows_over<'a>(
+    decls: impl Iterator<Item = &'a almide_ir::IrFunction>,
+    functions: &mut [crate::MirFunction],
+) {
 // T1-3: rewrite the stereotyped Result block windows onto the native
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
 // sees these ops. Runs BEFORE verification/render (both are downstream).
 {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    let result_fns: std::collections::BTreeSet<String> = ir
-        .functions
-        .iter()
+    let result_fns: std::collections::BTreeSet<String> = decls
         .filter(|f| {
             matches!(&f.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
                 if a.len() == 2
@@ -327,6 +334,7 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
 }
 
 include!("pipeline_native_concurrency.rs");
+include!("pipeline_native_selfhost.rs");
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     try_render_rust_source_certified(source).map(|(rust, _)| rust)
@@ -405,19 +413,31 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         })?;
         functions.extend(all);
     }
+    // #4006: the registry bodies the program calls, linked as certified MIR.
+    let linked = link_native_self_host(&mut functions)?;
     if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
         return Err(LowerError::Unsupported(format!(
             "native: fn `{}` passes a heap value to its own tail call — no loop conversion on this render (#3550)",
             f.name
         )));
     }
-    rewrite_native_result_windows(&ir, &mut functions);
+    rewrite_native_result_windows_over(
+        ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
+        &mut functions,
+    );
     if !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),
         ));
     }
     let mut sigs = build_native_sig_table(&ir, &functions, &record_layouts, &variant_layouts)?;
+    for l in &linked {
+        for (name, sig) in build_native_sig_table(&l.ir, &[], &l.record_layouts, &l.variant_layouts)? {
+            if functions.iter().any(|f| f.name == name) {
+                sigs.entry(name).or_insert(sig);
+            }
+        }
+    }
     // Stage 1 probe: same insertion point in pass order as the wasm leg.
     // T1-2 metered clones carry their base fn's declared signature — copy the
     // sig entry so a call to `__fuel__heavy` types exactly like `heavy` (without
