@@ -143,16 +143,16 @@ Qed.
 
 (* Every field index below the field count is stored, and none past it. *)
 Definition stored_ok (s : Shape) (st : list nat) : bool :=
-  forallb (fun i => existsb (Nat.eqb i) st) (seq 0 (length (FLD s))) &&
-  forallb (fun i => (i <? length (FLD s))%nat) st.
+  forallb (fun i => existsb (Nat.eqb i) st) (seq 0 (List.length (FLD s))) &&
+  forallb (fun i => (i <? List.length (FLD s))%nat) st.
 
 Lemma stored_ok_spec : forall s st, stored_ok s st = true ->
-  (forall i, (i < length (FLD s))%nat -> In i st) /\
-  (forall i, In i st -> (i < length (FLD s))%nat).
+  (forall i, (i < List.length (FLD s))%nat -> In i st) /\
+  (forall i, In i st -> (i < List.length (FLD s))%nat).
 Proof.
   intros s st H. unfold stored_ok in H. apply andb_true_iff in H. destruct H as [H1 H2].
   rewrite forallb_forall in H1, H2. split.
-  - intros i Hi. assert (Hs : In i (seq 0 (length (FLD s)))) by (apply in_seq; lia).
+  - intros i Hi. assert (Hs : In i (seq 0 (List.length (FLD s)))) by (apply in_seq; lia).
     specialize (H1 i Hs). apply existsb_exists in H1. destruct H1 as [j [Hj E]].
     apply Nat.eqb_eq in E. subst. exact Hj.
   - intros i Hi. apply Nat.ltb_lt. exact (H2 i Hi).
@@ -171,7 +171,7 @@ Definition fshaped (s : Shape) (r : Repr) (x : Block) : Prop :=
   forall p, In p (FLD s) -> all_init (init x) (foff p) (fwid p).
 
 Lemma fstores_window : forall s r b l h x,
-  shape_ok s = true -> (forall i, In i l -> (i < length (FLD s))%nat) ->
+  shape_ok s = true -> (forall i, In i l -> (i < List.length (FLD s))%nat) ->
   h b = Some x -> size x = fsize s -> repr x = r -> rc x = 1 ->
   holds safe_ev h (map (fstore b r s) l) /\
   exists y, after h (map (fstore b r s) l) b = Some y /\ size y = fsize s /\ repr y = r /\ rc y = 1 /\
@@ -181,7 +181,7 @@ Proof.
   intros s r b l. induction l as [| i l IH]; intros h x Ok Hl Hx Sz Rp Rc.
   - split; [exact I |]. exists x. split; [exact Hx |]. split; [exact Sz |]. split; [exact Rp |].
     split; [exact Rc |]. split; [auto | intros i Hi; destruct Hi].
-  - assert (Hi : (i < length (FLD s))%nat) by (apply Hl; left; reflexivity).
+  - assert (Hi : (i < List.length (FLD s))%nat) by (apply Hl; left; reflexivity).
     assert (F : fits (SZ s) (fld s i) = true) by (apply shape_fits; [exact Ok | unfold fld; apply nth_In; exact Hi]).
     set (x1 := mkBlock (size x) (repr x) (rc x) (mark (init x) (foff (fld s i)) (fwid (fld s i)))).
     assert (E1 : step h (fstore b r s i) = set h b x1) by (unfold fstore; simpl; rewrite Hx; reflexivity).
@@ -373,7 +373,7 @@ Proof.
                                 (flookup tb (Kd (ev_blk e)) = None -> safe_ev h e))).
   - intros h e [A B]. destruct (flookup tb (Kd (ev_blk e))) eqn:E.
     + apply A. rewrite E. discriminate.
-    + apply B. exact E.
+    + apply B. reflexivity.
   - exact (holds_both (on_recorded tb Kd) (fun h e => flookup tb (Kd (ev_blk e)) = None -> safe_ev h e)
              t empty_heap Rec Rest).
 Qed.
@@ -519,7 +519,7 @@ Definition item_ok (tb : FTable) (it : FItem) : bool :=
   match it with
   | ILay k n s => shape_ok s && (snd k <? n)%nat
   | ISite k st => match flookup tb k with Some s => stored_ok s st | None => false end
-  | IAcc k f => match flookup tb k with Some s => (f <? length (FLD s))%nat | None => false end
+  | IAcc k f => match flookup tb k with Some s => (f <? List.length (FLD s))%nat | None => false end
   | ITag r =>
       existsb (fun e => Nat.eqb (fst (fst e)) r) tb &&
       forallb (fun e => if Nat.eqb (fst (fst e)) r then tag_first (snd e) else true) tb
@@ -580,7 +580,7 @@ Proof.
     split; assumption.
   - destruct (flookup (table_of its) k) as [s |] eqn:E; [| discriminate].
     apply Nat.ltb_lt in H. destruct (nth_error (FLD s) f) as [p |] eqn:En.
-    + exists s, p. split; [reflexivity | split; [reflexivity | eapply nth_error_In; exact En]].
+    + exists s, p. split; [reflexivity | split; [exact En | eapply nth_error_In; exact En]].
     + apply nth_error_None in En. lia.
   - apply andb_true_iff in H. destruct H as [_ H]. intros c s E.
     rewrite forallb_forall in H. specialize (H ((r, c), s) (flookup_in _ _ _ E)). simpl in H.
