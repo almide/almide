@@ -54,8 +54,8 @@ design + prove in Wyve → port to Rust here → differential-test bitwise-exact
 
 | kernel | impl | correctness | speed |
 |---|---|---|---|
-| `transpose_8x8` | AVX 3-pass shuffle network + naive fallback | bitwise-exact, 100 patterns | **1.57× default / 4.23× native** |
-| `scale` | naive (autovec); `scale_avx` measurement only | bitwise-exact (avx == naive) | **0.99× native** → naive kept |
+| `transpose_8x8` | wasm simd128 shuffles; the plain tile elsewhere (the x86 AVX 3-pass network served no program and left with its `unsafe`, #4342) | bitwise-exact, 100 patterns | AVX measured **1.57× default / 4.23× native**; the plain tile is 1.28× slower than it (GCE Intel, 2026-10-30) |
+| `scale` | naive (autovec); the measurement-only `scale_avx` was removed (#4342) | bitwise-exact (avx == naive) | **0.99× native** → naive kept |
 | `q1_0_dot` | AVX2 bit-unpack + signed sum + reduce | within-tolerance (reassoc reduction) | **3.5× (default AND native)** |
 
 ### Beating Rust — where, and the right correctness bar
