@@ -339,6 +339,10 @@ impl Emitter<'_> {
         if keep_first {
             i.local_get(slot).if_(BlockType::Empty);
             i.local_get(hmsg).call(dec_str);
+            let _ = i;
+            // #4278 B1: the stream's message is the arm's own temporary.
+            self.arm_temp_released();
+            i = self.f.instructions();
             i.else_();
         }
         i.i32_const(16).call(F_ALLOC).local_set(hs);

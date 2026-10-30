@@ -365,6 +365,8 @@ impl Emitter<'_> {
             em.f.instructions().local_get(hfirst).if_(BlockType::Empty);
             em.f.instructions().i32_const(0).local_set(hfirst);
             em.f.instructions().local_get(hline).call(F_DEC_FLAT);
+            // #4278 B1: the dropped first frame is the arm's own temporary.
+            em.arm_temp_released();
             em.f.instructions().else_();
             em.f.instructions().local_get(hlist).local_get(hline).call(F_LIST_PUSH_4).local_set(hlist);
             em.f.instructions().end();

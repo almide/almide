@@ -265,7 +265,7 @@ impl Emitter<'_> {
                 self.arm_share_handle_top(et);
                 // #2969: the default was evaluated (strict) and retained, and
                 // this branch does not hand it back — its credit ends here.
-                self.emit_release_hold(hdef, et);
+                self.arm_release_hold(hdef, et, &args[1]);
                 self.f.instructions().end();
                 match et.val_type() {
                     ValType::I64 => self.release_i64(),

@@ -58,6 +58,16 @@ impl Emitter<'_> {
         }
     }
 
+    /// The arm gives back the `Retain` credit of argument `arg`, parked in
+    /// `hold`, on a path that does not store it — [`Emitter::emit_release_hold`]
+    /// logged as [`Emitter::arm_retained_released`].
+    pub(crate) fn arm_release_hold(&mut self, hold: u32, ty: SliceTy, arg: &almide_ir::IrExpr) {
+        self.emit_release_hold(hold, ty);
+        if self.elem_is_handle(ty) {
+            self.arm_retained_released(arg);
+        }
+    }
+
     /// [`Emitter::share_handle_top`], logged as the arm's share handed on.
     pub(crate) fn arm_share_handle_top(&mut self, t: SliceTy) {
         if self.elem_is_handle(t) {

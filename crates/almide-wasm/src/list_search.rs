@@ -257,6 +257,8 @@ impl Emitter<'_> {
             }
             i.local_get(hseen).call(seen_dec);
         }
+        // #4278 B1: logged as the arm's own temporary.
+        self.arm_temp_released();
         // The kept slots are COPIES of the source's handles (after LEN is
         // final — the walk reads it).
         self.emit_inc_elems(hout, elem);
@@ -355,6 +357,8 @@ impl Emitter<'_> {
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
             i.local_get(hseen).call(seen_dec);
         }
+        // #4278 B1: logged as the arm's own temporary.
+        self.arm_temp_released();
         // The kept slots are COPIES of the source's handles (after LEN).
         self.emit_inc_elems(hout, elem);
         self.f.instructions().local_get(hout);

@@ -252,15 +252,21 @@ impl Emitter<'_> {
     }
 
     /// Release the handle in the slot `off` bytes into entry `eh` and leave
-    /// NULL there, so a later walk of the hole releases nothing.
-    fn emit_release_and_clear(&mut self, eh: u32, off: u32, ty: SliceTy) {
+    /// NULL there, so a later walk of the hole releases nothing. The NULL
+    /// store makes the release the slot's consume (`r`, #4278 B1): the RC
+    /// check holds it to a later store over the same slot.
+    fn emit_release_and_clear(&mut self, eh: u32, off: u32, ty: SliceTy) -> Result<(), EmitError> {
         if !self.elem_is_handle(ty) {
-            return;
+            return Ok(());
         }
-        self.f.instructions().local_get(eh).i32_const(off as i32).i32_add();
-        self.emit_release_slot_at(ty);
-        let at = MemArg { offset: u64::from(off), align: 2, memory_index: 0 };
-        self.f.instructions().local_get(eh).i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
+        self.slot_release(|em| {
+            em.f.instructions().local_get(eh).i32_const(off as i32).i32_add();
+            em.emit_release_slot_at(ty);
+            Ok(())
+        })?;
+        let at = MemArg { offset: 0, align: 2, memory_index: 0 };
+        self.f.instructions().local_get(eh).i32_const(off as i32).i32_add().i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
+        Ok(())
     }
 
     /// The in-place delete of a tombstone var: `$mapidx_kill` holes the
@@ -268,19 +274,20 @@ impl Emitter<'_> {
     /// cleared; an Int key stays for the liveness probe), then
     /// `$mapidx_settle` compacts once the holes outnumber the live entries.
     /// Under the threshold the kill declines and the shift runs.
-    fn emit_map_remove_hole(&mut self, h: RemoveHolds, k: SliceTy, v: SliceTy, fns: RemoveFns, (kill, settle): (u32, u32)) {
+    fn emit_map_remove_hole(&mut self, h: RemoveHolds, k: SliceTy, v: SliceTy, fns: RemoveFns, (kill, settle): (u32, u32)) -> Result<(), EmitError> {
         let RemoveHolds { mh, eh } = h;
         let (koff, voff, esz) = crate::collections::entry_layout(k, v);
         let mut i = self.f.instructions();
         i.local_get(mh).i32_const(esz as i32).i32_const(koff as i32).local_get(eh).call(kill);
         i.if_(BlockType::Empty);
-        self.emit_release_and_clear(eh, voff, v);
-        self.emit_release_and_clear(eh, koff, k);
+        self.emit_release_and_clear(eh, voff, v)?;
+        self.emit_release_and_clear(eh, koff, k)?;
         let mut i = self.f.instructions();
         i.local_get(mh).i32_const(esz as i32).i32_const(koff as i32).i32_const(0).call(settle).drop();
         i.else_();
-        self.emit_map_remove_shift(h, k, v, fns.forget);
+        self.emit_map_remove_shift(h, k, v, fns.forget)?;
         self.f.instructions().end();
+        Ok(())
     }
 
     /// The functional remove's result, left on the stack: a copy of `mh`
@@ -325,13 +332,13 @@ impl Emitter<'_> {
 
     /// Remove the entry at `eh` from `mh` IN PLACE: its credits released,
     /// the later entries moved down one, `len` shrunk, the index retired.
-    fn emit_map_remove_shift(&mut self, RemoveHolds { mh, eh }: RemoveHolds, k: SliceTy, v: SliceTy, forget: Option<u32>) {
+    fn emit_map_remove_shift(&mut self, RemoveHolds { mh, eh }: RemoveHolds, k: SliceTy, v: SliceTy, forget: Option<u32>) -> Result<(), EmitError> {
         let (koff, voff, esz) = crate::collections::entry_layout(k, v);
-        let (koff, voff, esz) = (koff as i32, voff as i32, esz as i32);
-        self.f.instructions().local_get(eh).i32_const(koff).i32_add();
-        self.emit_release_slot_at(k);
-        self.f.instructions().local_get(eh).i32_const(voff).i32_add();
-        self.emit_release_slot_at(v);
+        // The entry's credits are released and their slots cleared (the
+        // slot consume, `r`) before the later entries move down over them.
+        self.emit_release_and_clear(eh, koff, k)?;
+        self.emit_release_and_clear(eh, voff, v)?;
+        let esz = esz as i32;
         let mut i = self.f.instructions();
         // memmove(eh, eh + esz, end - (eh + esz)), end = mh + PAYLOAD + len
         i.local_get(eh).local_get(eh).i32_const(esz).i32_add();
@@ -342,6 +349,7 @@ impl Emitter<'_> {
         if let Some(forget) = forget {
             i.local_get(mh).i32_const(0).call(forget).drop();
         }
+        Ok(())
     }
 
     /// The judged delete over a receiver `mh` whose ONE credit the caller
@@ -358,8 +366,8 @@ impl Emitter<'_> {
             i.i32_and().if_(BlockType::Empty);
         }
         match fns.tomb {
-            Some(tomb) => self.emit_map_remove_hole(h, k, v, fns, tomb),
-            None => self.emit_map_remove_shift(h, k, v, fns.forget),
+            Some(tomb) => self.emit_map_remove_hole(h, k, v, fns, tomb)?,
+            None => self.emit_map_remove_shift(h, k, v, fns.forget)?,
         }
         self.f.instructions().else_();
         self.emit_map_remove_copy(RemoveHolds { mh, eh }, k, v)?;
@@ -461,14 +469,14 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_get(sh).i32_const(stride).i32_const(0).local_get(eh).call(kill);
                 i.if_(BlockType::Empty);
-                self.emit_release_and_clear(eh, 0, e);
+                self.emit_release_and_clear(eh, 0, e)?;
                 let mut i = self.f.instructions();
                 i.local_get(sh).i32_const(stride).i32_const(0).i32_const(0).call(settle).drop();
                 i.else_();
-                self.emit_set_remove_shift(sh, eh, e, forget);
+                self.emit_set_remove_shift(sh, eh, e, forget)?;
                 self.f.instructions().end();
             }
-            None => self.emit_set_remove_shift(sh, eh, e, forget),
+            None => self.emit_set_remove_shift(sh, eh, e, forget)?,
         }
         self.f.instructions().else_();
         self.emit_set_remove_copy(sh, eh, e)?;
@@ -486,10 +494,11 @@ impl Emitter<'_> {
     /// Remove the member at `eh` from set `sh` IN PLACE: its credit
     /// released, the later members moved down one, `len` shrunk, the index
     /// retired.
-    fn emit_set_remove_shift(&mut self, sh: u32, eh: u32, e: SliceTy, forget: Option<u32>) {
+    fn emit_set_remove_shift(&mut self, sh: u32, eh: u32, e: SliceTy, forget: Option<u32>) -> Result<(), EmitError> {
         let stride = e.slot_size() as i32;
-        self.f.instructions().local_get(eh);
-        self.emit_release_slot_at(e);
+        // The member's credit is released and its slot cleared (the slot
+        // consume, `r`) before the later members move down over it.
+        self.emit_release_and_clear(eh, 0, e)?;
         let mut i = self.f.instructions();
         // memmove(eh, eh + stride, end - (eh + stride)), end = sh + PAYLOAD + len
         i.local_get(eh).local_get(eh).i32_const(stride).i32_add();
@@ -500,5 +509,6 @@ impl Emitter<'_> {
         if let Some(forget) = forget {
             i.local_get(sh).i32_const(0).call(forget).drop();
         }
+        Ok(())
     }
 }

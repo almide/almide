@@ -558,7 +558,7 @@ impl Emitter<'_> {
                 // already present: the functional result IS the input
                 // block, which the owned result co-owns (+1); the unstored
                 // member's Retain credit goes back.
-                self.emit_release_hold(xh, e);
+                self.arm_release_hold(xh, e, x);
                 self.f.instructions().local_get(sh);
                 self.rc_inc_top();
                 self.witness_arm_share_out(s);

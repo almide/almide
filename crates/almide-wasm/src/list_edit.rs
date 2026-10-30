@@ -240,6 +240,7 @@ impl Emitter<'_> {
         // this arm's to give back (#2977 — it leaked on every miss).
         if let Some(dec) = old_dec {
             self.f.instructions().else_().local_get(hvi).call(dec);
+            self.arm_retained_released(v);
         }
         self.f.instructions().end().local_get(hb);
         match hv {

@@ -519,6 +519,11 @@ impl Emitter<'_> {
         i.local_get(hr).i32_const(msg as i32).i32_store(slot_memarg(PAY));
         i.local_get(hv).call(dec_value);
         i.local_get(hx).call(dec_value);
+        let _ = i;
+        // #4278 B1: the err path gives both retained credits back.
+        self.arm_retained_released(v);
+        self.arm_retained_released(x);
+        let mut i = self.f.instructions();
         i.else_();
         i.local_get(hr).i32_const(0).i32_store(slot_memarg(TAG));
         i.local_get(hr);

@@ -279,6 +279,10 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_get(hbad).if_(BlockType::Empty);
         i.local_get(hraw).call(dec_str);
+        let _ = i;
+        // #4278 B1: the text block is the arm's own temporary.
+        self.arm_temp_released();
+        let mut i = self.f.instructions();
         i.local_get(hp).i32_load(len_memarg()).i32_const(pre_len + suf_len).i32_add().call(F_ALLOC).local_set(hm);
         i.local_get(hm).i32_const(pay).i32_add();
         i.i32_const(pre_at as i32 + pay).i32_const(pre_len).memory_copy(0, 0);
@@ -382,6 +386,12 @@ impl Emitter<'_> {
             i.local_get(herr);
             i.else_();
             i.local_get(hraw).call(dec_str);
+        }
+        // #4278 B1: the text block is the arm's own temporary (on the err
+        // path it is the err payload, so only this path releases it).
+        self.arm_temp_released();
+        {
+            let mut i = self.f.instructions();
             i.i32_const(16)
                 .call(F_ALLOC)
                 .local_tee(hsr)
@@ -440,6 +450,8 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.local_get(hstat).call(stat_dec);
         }
+        // #4278 B1: the size probe's Result is the arm's own temporary.
+        self.arm_temp_released();
         self.note_host_op(OP_FOLD_LINES_RANGE);
         let (hraw, hlen, herr) = self.fs_range_call(hp, OP_FOLD_LINES_RANGE)?;
         {
@@ -452,6 +464,10 @@ impl Emitter<'_> {
             i.i32_const(0).local_set(hraw);
             i.else_();
             i.local_get(hstat).call(stat_dec);
+        }
+        self.arm_temp_released();
+        {
+            let mut i = self.f.instructions();
             i.i32_const(0).local_set(herr);
             i.i32_const(0).call(F_ALLOC).local_set(hraw);
             i.end();
@@ -515,6 +531,7 @@ impl Emitter<'_> {
         }
         if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
             self.f.instructions().local_get(hinit).call(dec);
+            self.arm_retained_released(init);
         }
         let el = self.types.intern(acc_ty);
         let list_ty = SliceTy::List(el);
@@ -523,6 +540,8 @@ impl Emitter<'_> {
         // discard names `fs.fold_lines_range` (only the size probe before
         // the workers names the chunked call).
         self.emit_utf8_err(hbad, hraw, hp, herr, "fs.fold_lines_range")?;
+        // The partials list leaves as the ok payload or goes with the err.
+        self.witness_walk_result(list_ty);
         self.fs_range_result(hraw, herr, hlist, list_ty, list_dec)?;
         for _ in 0..12 {
             self.release_i32();

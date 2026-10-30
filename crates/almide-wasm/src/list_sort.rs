@@ -667,6 +667,10 @@ impl Emitter<'_> {
             i.local_get(hvb).call(F_FREE);
             i.local_get(hva);
         }
+        // #4278 B1: the keys buffer is the sort's own block, released here.
+        if key_release != F_FREE {
+            self.arm_temp_released();
+        }
         for _ in 0..9 {
             self.release_i32();
         }
