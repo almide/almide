@@ -111,7 +111,7 @@ fn lowered_ok_err_view() -> MirFunction {
 fn the_rewrite_keeps_a_minted_carriers_release_and_verifies() {
     let mut f = lowered_ok_err_view();
     assert_eq!(kinds(&f), vec![], "the lowered MIR is balanced");
-    rewrite_result_ops(&mut f, &BTreeSet::new());
+    rewrite_result_ops(&mut f, &BTreeSet::new(), &[]);
     assert!(
         f.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::ResMakeOk, .. })),
         "the producer became the carrier prim: {:#?}",
