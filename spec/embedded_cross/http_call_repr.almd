@@ -9,10 +9,7 @@ import http
 
 effect fn main() -> Unit = {
   let c = http.start(
-    "GET",
-    "http://127.0.0.1:1/x",
-    "",
-    ["Authorization": "Bearer CALL-SECRET"],
+    http.new_request("GET", "http://127.0.0.1:1/x", "", [("Authorization", "Bearer CALL-SECRET")]),
     { total_ms: 1000, idle_ms: 1000 },
   )!
   println("${c}")
