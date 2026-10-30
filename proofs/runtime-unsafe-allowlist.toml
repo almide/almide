@@ -51,9 +51,9 @@ reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type'
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_region.rs"
-count = 9
+count = 6
 class = "emitted-prelude"
-reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per trap variant), the trapped header read, and the three TLS-cell borrows of alloc / save / restore per variant. Sound only while every handle dies inside its window, i.e. while pass_region_window.rs's region-pure verdict is right; ALMIDE_REGION_TRAP_STALE=1 arms a generation check that turns a wrong verdict into a panic (#4023: off by default — measured +30% on binarytrees and +52% on treealloc — and CI runs spec/ and the differential fuzz with it armed)"
+reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per trap variant), the trapped header read, the node write into a fresh block in alloc (per variant) and the armed restore's header poisoning. Since #4342 the arena's marks and chunk table are Cell / RefCell, so save, restore and the bump itself are safe code (1.00x on binarytrees and treealloc, GCE Intel n2 and AMD n2d, 2026-10-30). The arena itself stays: plain allocation in its place (ALMIDE_REGION_OFF=1) measured 4.04x / 4.26x on binarytrees and 4.42x / 5.71x on treealloc (Intel / AMD, min of 7 pinned runs). Sound only while every handle dies inside its window, i.e. while pass_region_window.rs's region-pure verdict is right; ALMIDE_REGION_TRAP_STALE=1 arms a generation check that turns a wrong verdict into a panic (#4023: off by default — measured +30% on binarytrees and +52% on treealloc — and CI runs spec/ and the differential fuzz with it armed)"
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_rem_body.rs"
