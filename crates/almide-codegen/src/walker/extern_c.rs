@@ -194,6 +194,12 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     };
     // A Region return binds the pointer first and builds the Region after.
     let (bind, end) = if epilogue.is_empty() { ("", "") } else { ("let __almide_p: *mut u8 = ", ";") };
+    // SAFETY: (of the emitted call) the program's own `@extern(c)` declaration
+    // states the foreign signature, which no compiler can check against the C
+    // side: it is trusted, and --profile critical refuses the declaration
+    // itself (E100, #4008). The glue adds nothing beyond it: every argument is a value of the
+    // declared C type (a CString kept alive in the wrapper for the call; a
+    // Region's base + off and len, bounds-checked by the Region itself).
     let ret_value = format!("    {bind}unsafe {{ {body} }}{end}\n{epilogue}");
     format!(
         "{link}\nextern \"C\" {{ fn {c_func}({}) -> {};{extra_decls} }}\n\
@@ -231,6 +237,9 @@ fn region_clause(func: &IrFunction) -> Option<(String, String)> {
 /// from `ffi.alloc`), and the release guard in `keep` (D6).
 fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
     let n = format!("    let __almide_n: i64 = if __almide_p.is_null() {{ 0 }} else {{ {len}.max(0) }};\n");
+    // SAFETY: (of the emitted release) the guard runs this once, on the last
+    // drop, with the pointer the foreign call returned — the contract the
+    // program's `@region(release = …)` declares (ADR-0031 D6).
     let release_call = format!("|__almide_q: *mut u8| unsafe {{ {release}(__almide_q) }}");
     let keep = format!("almide_rt_ffi_release_guard(__almide_p, {release_call})");
     format!(

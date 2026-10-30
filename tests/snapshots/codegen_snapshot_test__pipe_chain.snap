@@ -870,7 +870,7 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
         true
     };
     let take: &(dyn Fn() -> bool + Sync + '_) = &take;
-    // SAFETY (the lifetime erasure): a helper calls `take` only from inside
+    // SAFETY: (the lifetime erasure) a helper calls `take` only from inside
     // the gate, which it can enter only while the gate is published; this
     // function withdraws it and waits until no helper is inside before it
     // returns — so no call outlives the borrow. Written before publishing.
@@ -2337,7 +2337,7 @@ pub fn almide_rt_map_clear<K, V>(m: &mut AlmideMap<K, V>) { m.clear(); }
 // The ONE file under runtime/rs/src where `unsafe` is allowed. Every C / OS
 // function the runtime calls is declared here, behind a safe wrapper whose
 // arguments make the call sound, so http.rs, list.rs, process.rs and
-// matrix.rs hold no `unsafe` of their own. scripts/check-runtime-unsafe.sh
+// random.rs hold no `unsafe` of their own. scripts/check-runtime-unsafe.sh
 // counts this file's lines against its row in
 // proofs/runtime-unsafe-allowlist.toml; a new foreign call is added HERE.
 //
@@ -2356,13 +2356,30 @@ pub fn almide_rt_map_clear<K, V>(m: &mut AlmideMap<K, V>) { m.clear(); }
 mod almide_rt_sys_ffi {
     #[cfg(unix)]
     mod c {
-        extern "C" {
+        /// `struct timespec` on the 64-bit targets thread_cpu_ns serves.
+        #[repr(C)]
+        pub struct Timespec { pub sec: i64, pub nsec: i64 }
+        // `clockid_t` is `int` on Linux and an unsigned enum on macOS. Declaring
+        // it i32 on both passed the same bits, but a foreign signature that does
+        // not match the real one is UB, and Miri reports it (#4009).
+        #[cfg(target_os = "macos")]
+        pub type ClockId = u32;
+        #[cfg(not(target_os = "macos"))]
+        pub type ClockId = i32;
+        // SAFETY: each declaration is the libc prototype on Linux and macOS
+        // (pthread_t, sighandler_t as pointer-width integers; pid_t, int i32;
+        // clock_gettime with this target's clockid_t, declared only where
+        // Timespec is the real 64-bit layout; getentropy as POSIX.1-2024).
+        unsafe extern "C" {
             pub fn signal(sig: i32, handler: usize) -> usize;
             pub fn pthread_self() -> usize;
             pub fn pthread_kill(thread: usize, sig: i32) -> i32;
             pub fn _exit(code: i32) -> !;
             pub fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
             pub fn kill(pid: i32, sig: i32) -> i32;
+            pub fn getentropy(buf: *mut u8, buflen: usize) -> i32;
+            #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+            pub fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
         }
     }
 
@@ -2450,57 +2467,52 @@ mod almide_rt_sys_ffi {
     /// if the clock cannot be read.
     #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
     pub fn thread_cpu_ns() -> Option<u64> {
-        #[repr(C)]
-        struct Timespec { sec: i64, nsec: i64 }
-        // `clockid_t` is `int` on Linux and an unsigned enum on macOS. Declaring
-        // it i32 on both passed the same bits, but a foreign signature that does
-        // not match the real one is UB, and Miri reports it (#4009).
-        #[cfg(target_os = "macos")]
-        type ClockId = u32;
-        #[cfg(not(target_os = "macos"))]
-        type ClockId = i32;
-        extern "C" {
-            fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
-        }
+        use c::{ClockId, Timespec};
         const CLOCK: ClockId = if cfg!(target_os = "linux") { 3 } else { 16 };
         let mut ts = Timespec { sec: 0, nsec: 0 };
         // SAFETY: `ts` is a live, writable timespec (two 64-bit fields on both
         // 64-bit targets) for the whole call.
-        if unsafe { clock_gettime(CLOCK, &mut ts) } != 0 {
+        if unsafe { c::clock_gettime(CLOCK, &mut ts) } != 0 {
             return None;
         }
         Some((ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64))
     }
 
-    /// `out = a · b` for row-major `a` (m×k) and `b` (k×n) through the system
-    /// BLAS (`cfg(have_blas)`, set by the generated project's build script).
-    #[cfg(have_blas)]
-    pub fn dgemm(m: usize, n: usize, k: usize, a: &[f64], b: &[f64], out: &mut [f64]) {
-        extern "C" {
-            fn cblas_dgemm(
-                order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32,
-                alpha: f64, a: *const f64, lda: i32, b: *const f64, ldb: i32,
-                beta: f64, c: *mut f64, ldc: i32,
-            );
+    /// Fill `chunk` (at most 256 bytes) from the OS CSPRNG (`random.bytes`,
+    /// C-394): getentropy(3) on every unix — glibc 2.25+ (the release that
+    /// also added the getrandom(3) wrapper this replaced; both are the
+    /// getrandom(2) syscall there), musl, macOS and the BSDs — and
+    /// BCryptGenRandom with the system-preferred RNG on Windows. `false` when
+    /// the source fails (or the chunk is over 256 bytes, which getentropy
+    /// refuses with EIO); the caller aborts rather than hand back fewer bytes.
+    #[cfg(unix)]
+    pub fn fill_entropy(chunk: &mut [u8]) -> bool {
+        // SAFETY: `chunk` is one live &mut [u8]; getentropy writes at most
+        // chunk.len() bytes of it.
+        unsafe { c::getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
+    }
+
+    #[cfg(windows)]
+    pub fn fill_entropy(chunk: &mut [u8]) -> bool {
+        // SAFETY: the declaration is bcrypt.h's BCryptGenRandom (NTSTATUS is i32).
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(alg: *mut std::ffi::c_void, buf: *mut u8, len: u32, flags: u32) -> i32;
         }
-        assert!(a.len() >= m * k && b.len() >= k * n && out.len() >= m * n, "dgemm: operand shorter than its shape");
-        // CblasRowMajor=101, CblasNoTrans=111. C = 1.0·A·B + 0.0·C.
-        // SAFETY: the assert above: dgemm reads m*k of `a`, k*n of `b` and
-        // writes m*n of `out`, each within its slice.
-        unsafe {
-            cblas_dgemm(
-                101, 111, 111, m as i32, n as i32, k as i32, 1.0,
-                a.as_ptr(), k as i32, b.as_ptr(), n as i32,
-                0.0, out.as_mut_ptr(), n as i32,
-            );
-        }
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+        let Ok(len) = u32::try_from(chunk.len()) else { return false };
+        // SAFETY: a null algorithm handle is the documented form with
+        // BCRYPT_USE_SYSTEM_PREFERRED_RNG; `chunk` is one live &mut [u8] of
+        // `len` bytes, all the call writes.
+        unsafe { BCryptGenRandom(std::ptr::null_mut(), chunk.as_mut_ptr(), len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 }
     }
 
     /// `SetConsoleCtrlHandler(handler, add)`.
     #[cfg(windows)]
     pub fn set_console_ctrl_handler(handler: extern "system" fn(u32) -> i32, add: bool) -> bool {
+        // SAFETY: wincon.h's prototype (a PHANDLER_ROUTINE, a BOOL).
         #[link(name = "kernel32")]
-        extern "system" {
+        unsafe extern "system" {
             fn SetConsoleCtrlHandler(handler: Option<extern "system" fn(u32) -> i32>, add: i32) -> i32;
         }
         // SAFETY: `handler` is a function of the PHANDLER_ROUTINE signature,

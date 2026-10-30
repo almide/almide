@@ -64,6 +64,9 @@ fn push_handle(s: &mut String, vis: &str, trap: bool) {
         s.push_str(&format!("{vis}const ALMIDE_RGN_POISON: u64 = u64::MAX;\n"));
         // The cold half is out of line so the check itself stays a load and a compare.
         s.push_str(&format!("#[cold] #[inline(never)] {vis}fn almide_rgn_stale(stamp: u64, hdr: u64) -> ! {{ let slot = if hdr == ALMIDE_RGN_POISON {{ String::from(\"poisoned by a rewind\") }} else {{ format!(\"re-allocated under generation {{hdr}}\") }}; panic!(\"almide: region window trap (ALMIDE_REGION_TRAP_STALE): a region handle allocated under generation {{stamp}} was read after its window rewound the arena (slot {{slot}}); pass_region_window's region-pure verdict was wrong — report it\") }}\n"));
+        // SAFETY: p is a handle almide_rgn_alloc (trapped) made: the 8 bytes before it
+        // // are that block's header, inside a chunk the arena keeps for the thread's
+        // // life (chunks are never freed, only re-seated), so the read is in bounds.
         s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_check(p: *const u8, stamp: u64) {{ let hdr = unsafe {{ *(p.sub(8) as *const u64) }}; if hdr != stamp {{ almide_rgn_stale(stamp, hdr) }} }}\n"));
     } else {
         s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}std::ptr::NonNull<T>);\n"));
@@ -71,8 +74,13 @@ fn push_handle(s: &mut String, vis: &str, trap: bool) {
     s.push_str("impl<T> Clone for AlmideRgn<T> { #[inline(always)] fn clone(&self) -> Self { *self } }\n");
     s.push_str("impl<T> Copy for AlmideRgn<T> {}\n");
     if trap {
+        // SAFETY: the check above panics unless the header still holds this handle's
+        // // stamp, i.e. no restore rewound past the node, so the T it points at is live.
         s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { almide_rgn_check(self.0.as_ptr() as *const u8, self.1); unsafe { self.0.as_ref() } } }\n");
     } else {
+        // SAFETY: untrapped, the node is live while every handle dies inside its window
+        // // (pass_region_window.rs's region-pure verdict); the trapped build and the
+        // // CI runs with ALMIDE_REGION_TRAP_STALE=1 check that verdict.
         s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { unsafe { self.0.as_ref() } } }\n");
     }
     s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRgn<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { (**self).fmt(f) } }\n");
@@ -130,7 +138,7 @@ fn push_arena(s: &mut String, vis: &str, trap: bool) {
     s.push_str("    }\n");
     s.push_str("}\n");
     s.push_str(&format!("thread_local! {{ static ALMIDE_ARENA: AlmideArena = const {{ AlmideArena {{ chunks: std::cell::RefCell::new(std::vec::Vec::new()), cur: std::cell::Cell::new(0), off: std::cell::Cell::new(0), base: std::cell::Cell::new(0), end: std::cell::Cell::new(0){trap_init} }} }}; }}\n"));
-    // SAFETY (the node writes): the block `alloc` returns is fresh, sized and
+    // SAFETY: (the node writes) the block `alloc` returns is fresh, sized and
     // aligned for `T`, and inside a chunk the arena owns for the thread's
     // life. The untrapped `almide_rgn_alloc` takes only the block's address
     // out of `with` and writes `v` outside the closure: a closure capturing
@@ -141,10 +149,15 @@ fn push_arena(s: &mut String, vis: &str, trap: bool) {
         // The header sits in the 8 bytes before the value: the block is
         // over-aligned to `max(align, 8)` and the value placed one alignment
         // unit in, so both the header and the value keep their alignment.
+        // SAFETY: the node writes above; the header write lands in the block's first
+        // // 8 bytes, which max(align, 8) over-alignment reserves.
         s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let align = std::mem::align_of::<T>().max(8); let p = a.alloc(std::mem::size_of::<T>() + align, align); let g = a.gen.get(); let hdr = p.wrapping_add(align - 8) as *mut u64; unsafe {{ hdr.write(g) }}; a.hdrs.borrow_mut().push(hdr); let vp = p.wrapping_add(align) as *mut T; unsafe {{ vp.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(vp) }}, g) }}) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize, usize) {{ ALMIDE_ARENA.with(|a| (a.cur.get(), a.off.get(), a.hdrs.borrow().len())) }}\n"));
+        // SAFETY: each h is a header address alloc pushed, in a chunk still owned by
+        // // the arena; poisoning it is a plain aligned u64 store.
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ for h in a.hdrs.borrow_mut().drain(mark.2..) {{ unsafe {{ h.write(ALMIDE_RGN_POISON) }} }} a.gen.set(a.gen.get() + 1); a.seat(mark.0, mark.1); }}) }}\n"));
     } else {
+        // SAFETY: the node writes above: p is fresh, sized and aligned for T.
         s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ let p = ALMIDE_ARENA.with(|a| a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>())) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(p) }}) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize) {{ ALMIDE_ARENA.with(|a| (a.cur.get(), a.off.get())) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize)) {{ ALMIDE_ARENA.with(|a| a.seat(mark.0, mark.1)) }}\n"));

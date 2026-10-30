@@ -95,9 +95,9 @@ in a second place. Joining also adds `almide-kernel`, `almide_rt` and a second
 `webpki-roots` major version (0.26.11 beside the 1.0.9 `almide-rt-core` pins)
 to the workspace lock, for a crate that ships nothing.
 
-`Cargo.toml` and `build.rs` are kept as the record of what the runtime source
-needs (crates.io deps; the `have_blas` cfg `matrix.rs` reads). They are not a
-build unit — no CI job and no script invokes cargo here.
+`Cargo.toml` is kept as the record of what the runtime source needs (crates.io
+deps; #4007 removed `build.rs` with the `have_blas` BLAS path no build set). It
+is not a build unit — no CI job and no script invokes cargo here.
 
 ## The behavioural oracle is `spec/`
 

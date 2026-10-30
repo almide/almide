@@ -1,0 +1,77 @@
+// The boundaries of the listed `unsafe` (#4007, proofs/runtime-unsafe-allowlist.toml)
+// under AddressSanitizer: .github/workflows/miri-nightly.yml's asan job runs this
+// beside scripts/lib/sys-ffi-asan.almd. Each block drives one row's sites at the
+// edges its SAFETY: invariant names, and checks the answer against a safe
+// reference, so a wrong index is an ASan report and a wrong value a wrong line.
+//
+//   sys.rs fill_entropy      random.bytes at 0, 1, 255, 256, 257 and 1000 bytes
+//                            (the 256-byte chunk edge getentropy imposes)
+//   sys.rs send_signal       process.kill(pid, 0) on a live child, then SIGTERM,
+//   + wait_exited_or_stopped and poll / wait on it
+//   kernel matmul.rs         matrix * matrix at 1x1, 4x4, 8x8 and ragged shapes
+//                            (m % 4, n % 4 != 0), equal to the list product
+//   kernel transpose_f64.rs  matrix.transpose at 8x8, 16x16 and ragged 9x13
+//   prelude_box_body.rs      a 200 000-long recursive chain built, shared (clone),
+//                            compared, displayed and dropped
+import process
+import random
+
+type Chain = | Link(Int, Chain) | End
+
+fn chain(n: Int, poison: Int) -> Chain =
+  list.range(0, n) |> list.fold(End, (acc, i) => Link(if i == poison then -1 else i, acc))
+
+fn grid(r: Int, c: Int, seed: Int) -> List[List[Float]] =
+  list.range(0, r) |> list.map((i) => list.range(0, c) |> list.map((j) => float.from((i * 7 + j * 3 + seed) % 11 - 5)))
+
+fn col(m: List[List[Float]], j: Int) -> List[Float] =
+  m |> list.map((row) => list.get(row, j) ?? 0.0)
+
+fn dot(a: List[Float], b: List[Float]) -> Float =
+  list.zip(a, b) |> list.fold(0.0, (s, (x, y)) => s + x * y)
+
+fn list_mul(a: List[List[Float]], b: List[List[Float]], n: Int) -> List[List[Float]] =
+  a |> list.map((row) => list.range(0, n) |> list.map((j) => dot(row, col(b, j))))
+
+fn list_transpose(a: List[List[Float]], c: Int) -> List[List[Float]] =
+  list.range(0, c) |> list.map((j) => col(a, j))
+
+fn mul_ok(m: Int, k: Int, n: Int) -> Bool = {
+  let a = grid(m, k, 1)
+  let b = grid(k, n, 2)
+  matrix.to_lists(matrix.from_lists(a) * matrix.from_lists(b)) == list_mul(a, b, n)
+}
+
+fn transpose_ok(r: Int, c: Int) -> Bool = {
+  let a = grid(r, c, 3)
+  matrix.to_lists(matrix.transpose(matrix.from_lists(a))) == list_transpose(a, c)
+}
+
+effect fn main() -> Unit = {
+  let sizes = [0, 1, 255, 256, 257, 1000]
+  println("entropy: ${sizes |> list.map((n) => int.to_string(bytes.len(random.bytes(n)))) |> list.join(" ")}")
+
+  let child = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
+  let pid = process.child_pid(child)!
+  let alive = match process.kill(pid, 0) {
+    ok(_) => "alive",
+    err(e) => "err ${e}",
+  }
+  let termed = match process.kill(pid, 15) {
+    ok(_) => "sent",
+    err(e) => "err ${e}",
+  }
+  let st = process.wait(child)!
+  println("kill: ${alive} ${termed} exited=${st.code != 0}")
+
+  let shapes = [(1, 1, 1), (4, 4, 4), (8, 8, 8), (5, 3, 6), (9, 7, 10), (3, 9, 2), (17, 5, 13)]
+  println("matmul: ${shapes |> list.map(((m, k, n)) => if mul_ok(m, k, n) then "ok" else "BAD ${m}x${k}x${n}") |> list.join(" ")}")
+  let tshapes = [(8, 8), (16, 16), (9, 13), (1, 8), (24, 7)]
+  println("transpose: ${tshapes |> list.map(((r, c)) => if transpose_ok(r, c) then "ok" else "BAD ${r}x${c}") |> list.join(" ")}")
+
+  let a = chain(200000, -5)
+  let shared = [a, a]
+  let b = chain(200000, -5)
+  let s = "${a}"
+  println("box: ${a == b} ${a == chain(200000, 3)} ${list.len(shared)} ${string.len(s)} ${string.slice(s, 0, 16)}")
+}

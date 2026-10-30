@@ -332,11 +332,9 @@ pub fn almide_rt_matrix_neg(m: &AlmideMatrix) -> AlmideMatrix {
 
 
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
-    // Dense matmul: BLAS if linked (have_blas → Accelerate cblas_dgemm, ~4.9x
-    // beyond register tiling), else almide-kernel's register-tiled SIMD (5.23x
-    // over Almide's tiled-scalar, used where BLAS isn't linked: wasm, etc.).
-    // Either way it's the fastest available — BLAS for dense, almide-kernel for
-    // BLAS's blind spots (quant/fused/attention/data-movement).
+    // Dense matmul: almide-kernel's register-tiled SIMD (5.23x over Almide's
+    // tiled-scalar). #4007 removed the `cfg(have_blas)` cblas_dgemm path: no
+    // build ever set the cfg, so it was unsafe code no test or program reached.
     // #3651: a 0-row operand's stored width is unobservable (`shape` and `cols`
     // report 0), so the kernel reads the observable width too. Its own
     // `mk(0, n)` result kept `cols = n`, and that hidden width then failed the
@@ -353,15 +351,7 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     // the wasm body summed over `min(k, rows(b))` and printed a product.
     almide_rt_matrix_shape_eq(k, b.rows);
     let mut out = vec![0.0f64; m * n];
-    #[cfg(have_blas)]
-    {
-        // cblas_dgemm, through sys.rs.
-        almide_rt_sys_ffi::dgemm(m, n, k, &a.data, &b.data, &mut out);
-    }
-    #[cfg(not(have_blas))]
-    {
-        almide_kernel::matmul::matmul(&a.data, m, k, &b.data, n, &mut out);
-    }
+    almide_kernel::matmul::matmul(&a.data, m, k, &b.data, n, &mut out);
     mk(m, n, out)
 }
 
