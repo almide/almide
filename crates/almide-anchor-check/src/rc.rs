@@ -9,9 +9,15 @@
 //! kind. A call in dead code (after an unconditional branch in its block) is
 //! not live. A call on a path that aborts (in an aborting arm, or a release
 //! whose block then reaches `unreachable` through only calls, constants and
-//! local reads) is matched like any other; left over, it is counted
-//! (`pre_abort`), not refused — the process ends there, and the witness does
-//! not record every such release (#4278).
+//! local reads) is matched like any other, and left over it is REFUSED like
+//! any other: under `http.serve` an abort ends only the request, not the
+//! instance, so a release the emitter performs before an abort is a recorded
+//! event, never a trusted class (sec-b2, 2026-10-30). What an aborting path
+//! leaves unreleased is the abort terminal's: no later request sees it
+//! (the embedded lane copies its snapshot back, a trapped p3 instance is never
+//! re-entered; tests/http_serve_cross_test.rs `aborting_requests_leave_no_
+//! block_live…`, tests/http_serve_export_test.rs `aborting_requests_leave_
+//! nothing…`).
 //!
 //! An owner rebind's release of the old block (`o`, the recorder's DecOld)
 //! and a variable's release (`d` on a local) is a release call, or happens
@@ -106,7 +112,6 @@ pub struct RcReport {
     pub frames: usize,
     pub events: usize,
     pub calls: usize,
-    pub pre_abort: usize,
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
     pub arm_internal: usize,
@@ -203,19 +208,6 @@ fn dead(b: &Body<'_>) -> Vec<bool> {
         }
     }
     out
-}
-
-/// The release at `k` is followed, in its block, only by calls, constants,
-/// local reads and drops until `unreachable`.
-fn before_abort(b: &Body<'_>, k: usize) -> bool {
-    for op in &b.ops[k + 1..] {
-        match op {
-            Op::Unreachable => return true,
-            Op::Call { .. } | Op::I32Const { .. } | Op::I64Const { .. } | Op::LocalGet { .. } | Op::Drop => {}
-            _ => return false,
-        }
-    }
-    false
 }
 
 /// The recorder's pseudo locals for an OUTER holder (almide-wasm
@@ -360,12 +352,11 @@ pub fn check_rc(
         let fl = Flow::new(b, HashSet::new());
         let dead = dead(b);
         // The live RC calls: (instruction, kind, the locals its argument was
-        // read through). Those on a path that aborts take part in matching;
-        // left over, they are counted, not refused (#4278).
+        // read through). Those on a path that aborts are matched like any
+        // other (sec-b2: no class of their own); left over, they are refused.
         let mut calls: Vec<(usize, char, Vec<u32>)> = Vec::new();
         // Calls whose argument is a value loaded out of a heap block's slot.
         let mut elements: HashSet<usize> = HashSet::new();
-        let mut aborting: HashSet<usize> = HashSet::new();
         let mut dead_calls: Vec<(usize, char, Vec<u32>)> = Vec::new();
         for (k, op) in b.ops.iter().enumerate() {
             let Op::Call { function_index } = op else { continue };
@@ -384,9 +375,6 @@ pub fn check_rc(
                 // (an arm that aborts) may still name it, last of all.
                 dead_calls.push((k, kind, names(&fl.arg(k, 0, FUEL))));
                 continue;
-            }
-            if fl.in_abort_arm(k) || (kind == 'd' && before_abort(b, k)) {
-                aborting.insert(k);
             }
             let arg = fl.arg(k, 0, FUEL);
             if crate::operands::is_loaded(&arg) {
@@ -614,16 +602,15 @@ pub fn check_rc(
         // has no such reading), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // More generally: a call that has a reading of its own when left over
-        // (an arm's or routine's, a replaced element's, one before an abort)
-        // is tried after the calls that have none.
+        // (an arm's or routine's, a replaced element's) is tried after the
+        // calls that have none.
         let fallback = |i: usize| {
             if i >= live {
                 return true;
             }
             let k = calls[i].0;
             let frame_owned = owned_at(&calls[i].2, k);
-            (!frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)))))
-                || aborting.contains(&k)
+            !frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k))))
         };
         let mut by_pref: Vec<usize> = (0..nc).collect();
         by_pref.sort_by_key(|&i| (i >= live, fallback(i), in_window(calls[i].0), calls[i].0));
@@ -889,8 +876,6 @@ pub fn check_rc(
                 &mut rep.routine_internal
             } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
                 &mut rep.element
-            } else if aborting.contains(&k) {
-                &mut rep.pre_abort
             } else {
                 continue;
             };

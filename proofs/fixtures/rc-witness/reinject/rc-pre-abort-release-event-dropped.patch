@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
+index be545c2d1..d6fc35aba 100644
+--- a/crates/almide-wasm/src/witness_hooks.rs
++++ b/crates/almide-wasm/src/witness_hooks.rs
+@@ -282,7 +282,9 @@ impl Emitter<'_> {
+             // A Borrow lends the value as is (a Var, a static, a View: no
+             // RC site); only a parked owned temporary has one (`id`).
+             ArgMode::Borrow => {
+-                if parked && let Some(w) = self.witness.as_mut() {
++                // RE-INJECTED (sec-b2 drill): the `panic` line's release before the abort keeps its `$dec`; its events are dropped.
++                let panic_line = matches!(&e.kind, almide_ir::IrExprKind::BinOp { left, .. } if matches!(&left.kind, almide_ir::IrExprKind::LitStr { value } if value == "PANIC: "));
++                if parked && !panic_line && let Some(w) = self.witness.as_mut() {
+                     w.temp_borrowed();
+                 }
+             }

@@ -1141,6 +1141,78 @@ fn a_run_of_handler_aborts_does_not_grow_the_embedded_servers_memory() {
     assert!(large < small * 2, "6x the aborts took {} MB of peak RSS against {} MB", large >> 20, small >> 20);
 }
 
+// ── What an aborting request leaves unreleased (row 2, sec-b2) ──
+//
+// The ownership witness ends an aborting path in the checker's abort
+// terminal, which discharges every credit the path still holds. Under
+// `http.serve` an abort ends only the request: on the embedded lane the ONE
+// instance serves on. What the aborted request left unreleased is taken
+// back by the per-request teardown that reuse relies on: `serve_contained`
+// (crates/almide-wasm-run/src/host.rs) copies back the linear memory and
+// every global from the snapshot taken when serving began. The allocator's
+// own counters (ALMIDE_WASM_ALLOC_COUNT) are globals of the instance, so
+// the run's exit report counts the blocks still live in the memory it ends
+// with.
+//
+// Negative control (GCE, sec-b2): with the snapshot copy-back removed from
+// `serve_contained`, the live count after ten aborts exceeds the count after
+// one, and this test fails.
+
+/// The `__ALMD_WASM_ALLOC` report of an armed embedded-lane server that
+/// answers `X`, then `aborts` requests of `B` (each builds a 50 000-element
+/// list and then aborts), then `X`, and stops on SIGTERM.
+fn embedded_alloc_report_after(aborts: usize) -> String {
+    let port = free_port();
+    let mut c = Command::new(almide_bin());
+    c.arg("run").arg(abort_fixture()).args(["--target", "wasm", "--"]).arg(port.to_string());
+    c.env("ALMIDE_WASM_ALLOC_COUNT", "1");
+    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = c.spawn().expect("almide runs");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    assert_eq!(first, "ready\n", "the armed server did not come up");
+    let served = |a: Vec<u8>| assert!(a.ends_with(b"\r\n\r\nval=20"), "{:?}", String::from_utf8_lossy(&a));
+    served(ask(port, &post("X")));
+    for _ in 0..aborts {
+        let a = ask(port, &post("B"));
+        assert!(a.starts_with(b"HTTP/1.1 500 "), "{:?}", String::from_utf8_lossy(&a));
+    }
+    served(ask(port, &post("X")));
+    assert!(signal(&child.id().to_string(), "-TERM"), "could not signal the server");
+    let mut rest = String::new();
+    let _ = err.read_to_string(&mut rest);
+    let status = child.wait().expect("wait for the server");
+    assert!(status.success(), "the drained server exited {status:?}:\n{rest}");
+    rest.lines()
+        .find(|l| l.contains("__ALMD_WASM_ALLOC"))
+        .unwrap_or_else(|| panic!("no allocation report in:\n{rest}"))
+        .to_string()
+}
+
+/// `name=<n>` out of an allocation report.
+fn report_field(line: &str, name: &str) -> i64 {
+    line.split_whitespace()
+        .find_map(|w| w.strip_prefix(&format!("{name}=")))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| panic!("no {name}= in {line:?}"))
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn aborting_requests_leave_no_block_live_on_the_embedded_servers_reused_instance() {
+    let one = embedded_alloc_report_after(1);
+    let ten = embedded_alloc_report_after(10);
+    eprintln!("after 1 abort:   {one}\nafter 10 aborts: {ten}");
+    for field in ["live", "allocs", "bytes"] {
+        assert_eq!(
+            report_field(&one, field),
+            report_field(&ten, field),
+            "{field}: nine more aborting requests changed what the instance holds\n1:  {one}\n10: {ten}"
+        );
+    }
+}
+
 // ── Out of memory inside the handler is never contained (row 1) ──
 //
 // `spec/serve_cross/http_serve_oom.almd` serves `X`, contains the

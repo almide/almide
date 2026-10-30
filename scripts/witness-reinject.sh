@@ -157,10 +157,10 @@ for name in "${names[@]}"; do
     read -r cls delta < "$DIR/$name.count"
     got=$(python3 -c '
 import re, sys
-keys = ["before an abort", "rebind", "judge", "arm-internal", "routine-internal", "element", "consumed"]
+keys = ["rebind", "judge", "arm-internal", "routine-internal", "element", "consumed"]
 def counts(p):
     t = open(p).read()
-    m = re.search(r"(\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed", t)
+    m = re.search(r"(\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed", t)
     return dict(zip(keys, map(int, m.groups()))) if m else None
 a, b = counts(sys.argv[1]), counts(sys.argv[2])
 if a is None or b is None:

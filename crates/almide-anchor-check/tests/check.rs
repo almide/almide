@@ -577,13 +577,14 @@ fn a_dropped_release_a_doubled_one_and_one_on_another_local_are_refused() {
 }
 
 #[test]
-fn dead_and_pre_abort_releases_are_not_live_events() -> Result<(), String> {
+fn a_dead_release_is_not_live_and_a_pre_abort_release_is_an_event() -> Result<(), String> {
     rc("return local.get 0 call $alloc drop", "")?;
-    let r = rc("local.get 0 call $alloc drop unreachable", "")?;
-    assert_eq!(r.pre_abort, 1);
-    // Recorded, the release before the abort is matched, not merely counted.
+    // sec-b2: an abort ends only the request under `http.serve`, so a
+    // release before it is no trusted class: unrecorded, it is refused.
+    assert!(rc("local.get 0 call $alloc drop unreachable", "").unwrap_err().contains("calls with no recorded event [d@"));
+    // Recorded, the release before the abort is matched.
     let r = rc("local.get 0 call $alloc drop unreachable", "d0")?;
-    assert_eq!((r.pre_abort, r.calls), (0, 1));
+    assert_eq!((r.frames, r.calls), (1, 1));
     Ok(())
 }
 
