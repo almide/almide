@@ -42,9 +42,11 @@
 # certified frame against the ownership witness's recorded events (the anchor
 # file's `rc` lines), and every recorded event against a call; a call or an
 # event left over, or a check past the binary's deadline, is ANCHORS REJECT.
-# Its counted class (arm-internal — the #4278 debt; `element` retired by the
-# slot consume `r`, `routine-internal` by the routines' logged events) is
-# totalled per run below, and so are the consumptions a runtime
+# No counted window class is left (#4278 B1: `element` retired by the slot
+# consume `r`, `routine-internal` and `arm-internal` by the routines' and
+# arms' own logged events); the releases before an abort, the rebinds with
+# no instruction and the judges with no rebind are totalled per run below,
+# and so are the consumptions a runtime
 # helper's checked signature accounts (`signed`, #4278 B1: no longer a
 # trusted class — each helper's own `rc-sig` record is judged below).
 #
@@ -149,8 +151,8 @@ for f in os.listdir(out):
                 tot[k] += int(v)
 if tot["operands"] != tot["accesses"]:
     sys.exit(f"STRUCTURAL WALL FAIL: {tot['accesses']} located access(es) but {tot['operands']} held to their guard's operands")
-rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) signed")
-rk = ["frames", "events", "calls", "pre_abort", "rebind", "judges", "arm", "signed"]
+rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) signed")
+rk = ["frames", "events", "calls", "pre_abort", "rebind", "judges", "signed"]
 rc = dict.fromkeys(rk, 0)
 for f in os.listdir(out):
     if f.endswith(".anchor"):
@@ -159,8 +161,8 @@ for f in os.listdir(out):
             sys.exit(f"STRUCTURAL WALL FAIL: {f}: no RC verdict — the anchor file carried no rc lines")
         for k, v in zip(rk, m.groups()):
             rc[k] += int(v)
-print(f"  [rc] RC OK on every artifact: {rc['frames']} frame(s), {rc['events']} event(s) matched to {rc['calls']} call(s); counted (#4278): "
-      f"{rc['arm']} arm-internal; {rc['signed']} signed consumption(s); "
+print(f"  [rc] RC OK on every artifact: {rc['frames']} frame(s), {rc['events']} event(s) matched to {rc['calls']} call(s); "
+      f"{rc['signed']} signed consumption(s); counted (#4278): "
       f"{rc['pre_abort']} before an abort, {rc['rebind']} rebind(s) with no instruction, {rc['judges']} judge(s) with no rebind")
 print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
       f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes, every access's guard operands to it; unlocated (dead bodies): "

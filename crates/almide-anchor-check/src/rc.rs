@@ -22,10 +22,12 @@
 //! `o` is counted (`rebind_unmatched`), not refused, and a judge call no `o`
 //! takes is counted (`judges_unmatched`) — both #4278's to settle.
 //!
-//! An RC call left over inside a stdlib arm's window (`rcarms`) is the arm's
-//! own (an inlined `list.get` takes its payload's +1, which the witness
-//! accounts as the arm's handed-over credit): counted (`arm_internal`), not
-//! refused — the arm-certificate residue of #4278.
+//! A stdlib arm's window (`rcarms`) orders the matching (a call inside it is
+//! tried after those outside) but accounts nothing: an RC call left over
+//! inside it is refused like any other (#4278 B1 retired the `arm_internal`
+//! class — each RC call an arm makes is one of its logged events: a
+//! temporary it allocated and releases, a share it stores or gives back, a
+//! retained argument it gives back, a slot consume).
 //!
 //! A taken compound routine's window (`rcroutines`: an in-place append,
 //! string building, a map edit — every route the emitter takes through
@@ -82,17 +84,14 @@
 //! that arm's own window read through the argument — a named event, never a
 //! counted class.
 //!
-//! The one counted class left (arm-internal) is a debt to #4278's per-arm
-//! certificates — a declared per-path effect for each arm window, checked
-//! against its body. It may only shrink; a new trusted class is an owner
-//! decision, not a checker edit. (`consumed` was retired by the helper
-//! signatures, `element` by the slot consume, `routine-internal` by the
-//! routines' own logged events.)
+//! No counted window class is left (#4278 B1): `consumed` was retired by the
+//! helper signatures, `element` by the slot consume, `routine-internal` and
+//! `arm-internal` by the routines' and arms' own logged events. A new
+//! trusted class is an owner decision, not a checker edit.
 //!
-//! TRUSTED (#4278, until its arm certificates exist): that `rcfns` names
-//! every rc_inc and release routine; and that an arm's own RC keeps the
-//! balance its ownership declaration states. (A compound routine's RC is no
-//! longer trusted: each of its calls is one of its logged events.)
+//! TRUSTED (#4278): that `rcfns` names every rc_inc and release routine.
+//! (An arm's and a compound routine's RC are no longer trusted: each of
+//! their calls is one of their logged events.)
 
 use std::collections::{HashMap, HashSet};
 
@@ -121,7 +120,6 @@ pub struct RcReport {
     pub pre_abort: usize,
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
-    pub arm_internal: usize,
     /// Releases (or +1s) a callee's checked signature consumes (#4278 B1).
     pub signed: usize,
 }
@@ -596,21 +594,14 @@ pub fn check_rc(
             .chain((0..evs.len()).filter(|&e| is_move(evs[e].0)))
             .collect();
         // A call inside an arm or routine window is tried after those
-        // outside (left over, it is that arm's or routine's own; one outside
-        // has no such reading), and a consuming argument last.
+        // outside (a windowed temporary's event can take only a call inside
+        // its window), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // More generally: a call that has a reading of its own when left over
-        // (an arm's, one before an abort) is tried after the calls that have
-        // none. A routine's window gives no such reading (#4278 B1): every RC
-        // call a routine emits is one of its logged events.
-        let fallback = |i: usize| {
-            if i >= live {
-                return true;
-            }
-            let k = calls[i].0;
-            let frame_owned = owned_at(&calls[i].2, k);
-            (!frame_owned && inside(&windows[0], k)) || aborting.contains(&k)
-        };
+        // (one before an abort) is tried after the calls that have none. An
+        // arm's or a routine's window gives no such reading (#4278 B1): every
+        // RC call either emits is one of its logged events.
+        let fallback = |i: usize| i >= live || aborting.contains(&calls[i].0);
         // A call a move (`m` / `h`) could take is tried after the others —
         // before any other preference (a hold's name makes its release read
         // as a frame credit, which would otherwise sort it first): a move is
@@ -872,25 +863,14 @@ pub fn check_rc(
                 continue;
             }
             let k = calls[i].0;
-            // A frame variable's credit is never an arm's or a routine's: such
-            // a call stays unaccounted.
-            let frame_owned = owned_at(&calls[i].2, k);
-            let slot = if !frame_owned && inside(&windows[0], k) {
-                &mut rep.arm_internal
-            } else if aborting.contains(&k) {
-                &mut rep.pre_abort
-            } else {
+            if !aborting.contains(&k) {
                 continue;
-            };
-            *slot += 1;
+            }
+            rep.pre_abort += 1;
             used[i] = true;
             if EXPLAIN.load(std::sync::atomic::Ordering::Relaxed) {
                 // Diagnosis only: where each counted call is.
-                let class = if !frame_owned && inside(&windows[0], k) {
-                    "arm-internal"
-                } else {
-                    "before-abort"
-                };
+                let class = "before-abort";
                 let ctx: Vec<String> = b.ops[k.saturating_sub(6)..=k].iter().map(|o| format!("{o:?}")).collect();
                 eprintln!("counted {class}: function {pos} {}@{} on {:?} after {}", calls[i].1, k, calls[i].2, ctx.join("; "));
             }
