@@ -22,7 +22,7 @@ fn chain(n: Int, poison: Int) -> Chain =
   list.range(0, n) |> list.fold(End, (acc, i) => Link(if i == poison then -1 else i, acc))
 
 fn grid(r: Int, c: Int, seed: Int) -> List[List[Float]] =
-  list.range(0, r) |> list.map((i) => list.range(0, c) |> list.map((j) => int.to_float((i * 7 + j * 3 + seed) % 11 - 5)))
+  list.range(0, r) |> list.map((i) => list.range(0, c) |> list.map((j) => float.from((i * 7 + j * 3 + seed) % 11 - 5)))
 
 fn col(m: List[List[Float]], j: Int) -> List[Float] =
   m |> list.map((row) => list.get(row, j) ?? 0.0)
@@ -52,7 +52,7 @@ effect fn main() -> Unit = {
   println("entropy: ${sizes |> list.map((n) => int.to_string(bytes.len(random.bytes(n)))) |> list.join(" ")}")
 
   let child = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
-  let pid = process.child_pid(child)
+  let pid = process.child_pid(child)!
   let alive = match process.kill(pid, 0) {
     ok(_) => "alive",
     err(e) => "err ${e}",
