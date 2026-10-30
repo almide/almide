@@ -191,6 +191,13 @@ fn bounds_examples() {
             ("a0", false),
             ("c0 a0 s0 a0", false),
             ("w0 w1 c2 a2", false),
+            // #4280: the loop exit test
+            ("c0 a0;e0 a0;e0 a0 c1 a1", true),
+            ("L{ e0 a0 s0 }", true),
+            ("a0 e0", false),
+            ("L{ e0 s0 a0 }", false),
+            ("e1 a0", false),
+            ("e a0", false),
         ],
     );
 }
