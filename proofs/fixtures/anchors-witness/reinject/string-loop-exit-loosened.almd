@@ -2,6 +2,6 @@
 // while the bounds witness still records `e a` — the proven checker
 // accepts, the bytes read one byte past the string.
 effect fn main() -> Unit = {
-  let cs = string.chars("hey")
+  let cs = string.to_list("hey")
   println("${list.len(cs)}")
 }
