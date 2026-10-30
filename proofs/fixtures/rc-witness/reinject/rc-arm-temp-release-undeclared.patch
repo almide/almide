@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/string_scan.rs b/crates/almide-wasm/src/string_scan.rs
+index 63eac4128..22b9d55df 100644
+--- a/crates/almide-wasm/src/string_scan.rs
++++ b/crates/almide-wasm/src/string_scan.rs
+@@ -333,7 +333,7 @@ impl Emitter<'_> {
+         i.local_get(hb).call(F_DEC_FLAT);
+         let _ = i;
+         // #4278 B1: both halves are the arm's own temporaries.
+-        self.arm_temp_released();
++        // RE-INJECTED (#4278 B1 drill): the arm declares one release only.
+         self.arm_temp_released();
+         let mut i = self.f.instructions();
+         i.end();
