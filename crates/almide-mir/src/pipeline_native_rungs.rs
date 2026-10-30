@@ -241,7 +241,7 @@ fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut 
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
         let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -277,7 +277,7 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
         let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
