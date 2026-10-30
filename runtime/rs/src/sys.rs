@@ -138,30 +138,6 @@ mod almide_rt_sys_ffi {
         Some((ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64))
     }
 
-    /// `out = a · b` for row-major `a` (m×k) and `b` (k×n) through the system
-    /// BLAS (`cfg(have_blas)`, set by the generated project's build script).
-    #[cfg(have_blas)]
-    pub fn dgemm(m: usize, n: usize, k: usize, a: &[f64], b: &[f64], out: &mut [f64]) {
-        extern "C" {
-            fn cblas_dgemm(
-                order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32,
-                alpha: f64, a: *const f64, lda: i32, b: *const f64, ldb: i32,
-                beta: f64, c: *mut f64, ldc: i32,
-            );
-        }
-        assert!(a.len() >= m * k && b.len() >= k * n && out.len() >= m * n, "dgemm: operand shorter than its shape");
-        // CblasRowMajor=101, CblasNoTrans=111. C = 1.0·A·B + 0.0·C.
-        // SAFETY: the assert above: dgemm reads m*k of `a`, k*n of `b` and
-        // writes m*n of `out`, each within its slice.
-        unsafe {
-            cblas_dgemm(
-                101, 111, 111, m as i32, n as i32, k as i32, 1.0,
-                a.as_ptr(), k as i32, b.as_ptr(), n as i32,
-                0.0, out.as_mut_ptr(), n as i32,
-            );
-        }
-    }
-
     /// `SetConsoleCtrlHandler(handler, add)`.
     #[cfg(windows)]
     pub fn set_console_ctrl_handler(handler: extern "system" fn(u32) -> i32, add: bool) -> bool {
