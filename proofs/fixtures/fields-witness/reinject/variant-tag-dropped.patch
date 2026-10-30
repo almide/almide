@@ -1,13 +1,14 @@
 diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
 --- a/crates/almide-wasm/src/calls.rs
 +++ b/crates/almide-wasm/src/calls.rs
-@@ -432,8 +432,8 @@
+@@ -432,8 +432,9 @@
          self.emit_alloc_fixed(size, hold);
          self.f.instructions().local_tee(hold);
          let site = self.fw_site(SliceTy::Named(ti), Some(ci as usize));
 -        self.f.instructions().i32_const(tag as i32).i32_store(slot_memarg(almide_layout::SUM_TAG));
 -        self.fw_store(site, 0);
 +        // RE-INJECTED (#4279 drill): the tag word is never stored.
++        self.f.instructions().drop();
 +        let _ = tag;
          for (k, (a, (fty, off))) in args.iter().zip(fields).enumerate() {
              self.f.instructions().local_get(hold);
