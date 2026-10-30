@@ -31,7 +31,9 @@
 //! BOUNDS, per token: a `c` is `i64.ge_u` (the list compare) or `i32.eqz`
 //! (the Bytes room test), then `if` (empty), then `i32.const` — anchored at
 //! the const — and that `if` has no `else` and ends in `unreachable` (the
-//! abort); an `a` is a load (or a load then the `call` that releases what it
+//! abort); an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
+//! `br_if` — straight inside a `loop` whose parent `block` it leaves to (a
+//! loop's exit test, operands.rs `loop_exit`); an `a` is a load (or a load then the `call` that releases what it
 //! loaded); a `w` is a store; a slot's located events lie in one function,
 //! in byte order (a `c` before the access it guards).
 //!
@@ -582,18 +584,19 @@ pub fn check_bounds(
         // checker, so their mutual order is not a claim).
         let mut last: std::collections::HashMap<String, At> = std::collections::HashMap::new();
         // Per slot, its latest located check.
-        let mut guard: std::collections::HashMap<String, At> = std::collections::HashMap::new();
+        // Per slot, its latest located check: its anchor and its compare.
+        let mut guard: std::collections::HashMap<String, (At, usize)> = std::collections::HashMap::new();
         for (tok, a) in t.iter().zip(&g) {
             let kind = tok.chars().next().unwrap_or('?');
             let at = parse_at(a).map_err(what)?;
             match (kind, at) {
                 ('s', None) | ('x', None) => continue,
                 ('s' | 'x', Some(_)) => return Err(what(format!("`{tok}` carries an anchor"))),
-                ('c' | 'a' | 'w', None) => {
+                ('c' | 'e' | 'a' | 'w', None) => {
                     rep.bounds_unlocated += 1;
                     continue;
                 }
-                ('c' | 'a' | 'w', Some(at)) => {
+                ('c' | 'e' | 'a' | 'w', Some(at)) => {
                     if let Some(&p) = last.get(&tok[1..]) {
                         if p.func != at.func || at.op <= p.op {
                             return Err(what(format!("`{tok}` is not after its slot's earlier events in the same function")));
@@ -604,7 +607,20 @@ pub fn check_bounds(
                         'c' => {
                             ctx.check_guard(at)
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            guard.insert(tok[1..].to_string(), at);
+                            // The guard's compare: two before the anchor.
+                            guard.insert(tok[1..].to_string(), (at, at.op - 2));
+                            rep.bounds_checks += 1;
+                        }
+                        'e' => {
+                            ctx.body(at).map_err(what)?;
+                            let flow = flows.entry(at.func).or_insert_with(|| {
+                                let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
+                                operands::Flow::new(&bodies[at.func], js)
+                            });
+                            operands::loop_exit(flow, at.op)
+                                .map_err(|e| what(format!("`{tok}`: {e}")))?;
+                            // The exit test's compare: the one before the `br_if`.
+                            guard.insert(tok[1..].to_string(), (at, at.op - 1));
                             rep.bounds_checks += 1;
                         }
                         _ => {
@@ -619,7 +635,8 @@ pub fn check_bounds(
                                 let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
                                 operands::Flow::new(&bodies[at.func], js)
                             });
-                            operands::covers(flow, c.op - 2, at.op)
+                            let (c, cmp) = c;
+                            operands::covers(flow, cmp, at.op)
                                 .map_err(|e| what(format!("`{tok}` against its check at {}:{}: {e}", c.func, c.op)))?;
                             rep.bounds_operands += 1;
                         }

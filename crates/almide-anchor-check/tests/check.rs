@@ -323,6 +323,85 @@ fn a_hoisted_count_rewritten_inside_the_loop_is_refused() {
     assert!(bounds(&body, "c0 a0", "1:20 1:30").is_err());
 }
 
+// ── bounds: a `for` loop's exit test (#4280) ───────────────────────────────
+
+/// Locals: 0 the list block, 1 the count, 2 the counter, 3 another block.
+fn for_loop(body: &str, w: &str, a: &str) -> Result<Report, String> {
+    let bytes = module("(local i32 i32 i32 i32)", body);
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    check_bounds(&bodies, w, a, &[], &mut r).map(|()| r)
+}
+
+/// `for x in xs`: the count captured at entry into local 1, the exit test's
+/// `br_if` at 12, the element's load at 18, the counter's step after it.
+const FOR: &str = "local.get 0 i32.load offset=4 i32.const 8 i32.div_u local.set 1
+  i32.const 0 local.set 2
+  (block (loop
+    local.get 2 local.get 1 i32.ge_u br_if 1
+    local.get 0 local.get 2 i32.const 8 i32.mul i32.add i64.load offset=12 drop
+    local.get 2 i32.const 1 i32.add local.set 2
+    br 0))";
+
+#[test]
+fn a_for_loops_exit_guarded_read_is_accepted() -> Result<(), String> {
+    let r = for_loop(FOR, "e0 a0", "1:12 1:18")?;
+    assert_eq!((r.bounds_checks, r.bounds_accesses, r.bounds_operands), (1, 1, 1));
+    Ok(())
+}
+
+#[test]
+fn an_exit_test_with_another_compare_is_refused() {
+    let body = FOR.replace("i32.ge_u", "i32.lt_u");
+    assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("i32.ge_u"));
+    let body = FOR.replace("i32.ge_u br_if 1", "i32.ge_u i32.eqz br_if 1");
+    assert!(for_loop(&body, "e0 a0", "1:13 1:19").unwrap_err().contains("i32.ge_u"));
+}
+
+#[test]
+fn an_exit_test_that_does_not_leave_the_loop_is_refused() {
+    let body = FOR.replace("br_if 1", "br_if 0");
+    assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("br_if 1"));
+    let body = FOR.replace("(block (loop", "(block (block");
+    assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("not a loop"));
+}
+
+#[test]
+fn an_exit_count_in_bytes_is_refused() {
+    let body = FOR.replace("i32.const 8 i32.div_u", "i32.const 1 i32.div_u");
+    assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("slots"));
+}
+
+#[test]
+fn a_counter_changed_after_the_exit_test_is_refused() {
+    let body = FOR.replace("br_if 1\n", "br_if 1 i32.const 99 local.set 2\n");
+    assert!(for_loop(&body, "e0 a0", "1:12 1:20").unwrap_err().contains("tests"));
+}
+
+#[test]
+fn an_exit_counting_another_list_is_refused() {
+    let body = FOR.replacen("local.get 0 i32.load offset=4", "local.get 3 i32.load offset=4", 1);
+    assert!(for_loop(&body, "e0 a0", "1:12 1:18").is_err());
+}
+
+#[test]
+fn a_read_past_the_first_slot_under_an_exit_test_is_refused() {
+    let body = FOR.replace("i64.load offset=12", "i64.load offset=20");
+    assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("payload"));
+}
+
+#[test]
+fn a_read_before_its_exit_test_is_refused() {
+    let body = "local.get 0 i32.load offset=4 i32.const 8 i32.div_u local.set 1
+      i32.const 0 local.set 2
+      (block (loop
+        local.get 0 local.get 2 i32.const 8 i32.mul i32.add i64.load offset=12 drop
+        local.get 2 local.get 1 i32.ge_u br_if 1
+        local.get 2 i32.const 1 i32.add local.set 2
+        br 0))";
+    assert!(for_loop(body, "a0 e0", "1:14 1:19").unwrap_err().contains("no located check"));
+}
+
 /// `xs[i] = v`: the count by `i64.div_u`, then the judge (here `$alloc`
 /// stands in for it, at 13) into local 3 and back into local 0, the store
 /// through local 3 at 24.
