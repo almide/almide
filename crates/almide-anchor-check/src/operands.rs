@@ -787,6 +787,14 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
     if !fl.dominates(cmp, acc) {
         return Err("the check does not dominate the access".into());
     }
+    // The surface's own test (#4281): its compare opens an `if` with an
+    // `else`, and the access lies in that `else` — the compare's TRUE side
+    // (the then-arm) never reaches it.
+    if let Some(Op::If { .. }) = fl.b.ops.get(cmp + 1) {
+        if fl.has_else(cmp + 1) && !fl.in_else(cmp + 1, acc) {
+            return Err("the access is not in the `else` of its test's `if`".into());
+        }
+    }
     let (addr, off, width) = access_parts(fl, acc)?;
     match fl.b.ops[cmp] {
         Op::I64GeU => {
@@ -823,14 +831,17 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             fl.same_count(cb, ab, count_at, acc)
         }
         Op::I32GeU => {
-            // The loop exit test (#4280): its `br_if` must dominate too. The
-            // other i32 shape is a guard opening an aborting `if` (#4281,
-            // lib.rs `check_guard`), which the compare's dominance covers.
+            // A loop's exit test (#4280): its `br_if` must dominate too. The
+            // other i32 shapes open an `if`: an aborting guard, or the
+            // surface's own test with the access in its `else` (#4281).
             if matches!(fl.b.ops.get(cmp + 1), Some(Op::BrIf { .. })) && !fl.dominates(cmp + 1, acc) {
                 return Err("the exit test's br_if does not dominate the access".into());
             }
             let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
-            let ((cb, count_at), s) = count_of32(&cnt).ok_or_else(|| format!("the exit test's right operand is not a list's count: {cnt:?}"))?;
+            // The count: `len(B) / S`, `len(B)` (a string's bytes), or a
+            // value an enclosing test bounds by a string's `len` (below).
+            let counted = count_of32(&cnt);
+            let s = counted.as_ref().map_or(1, |&(_, s)| s);
             // A one-byte slot: `B + I`, or `B` alone for byte 0.
             let zero = T::Const(0);
             let (ab, ai, s2) = match op(&addr, "i32.add") {
@@ -857,10 +868,32 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             if !fl.same(&ix, ai) {
                 return Err(format!("the exit test tests {ix:?}, the access reads slot {ai:?}"));
             }
-            fl.same_count(cb, ab, count_at, acc)
+            let direct = match counted {
+                Some(((cb, count_at), _)) => fl.same_count(cb, ab, count_at, acc),
+                None => Err(format!("the exit test's right operand is not a list's count: {cnt:?}")),
+            };
+            match direct {
+                Ok(()) => Ok(()),
+                Err(e) if s == 1 => fl.len_bounds(&cnt, ab, acc).map_err(|f| format!("{e}; {f}")),
+                Err(e) => Err(e),
+            }
         }
         Op::I32Eqz => {
             let room = fl.arg(cmp, 0, FUEL);
+            // `len(B) == 0` (#4281), the access byte 0 of B in the test's
+            // `else`: there `len(B) >= 1`.
+            if let Some((cb, count_at)) = len(&room) {
+                if !(fl.b.ops.get(cmp + 1).is_some_and(|o| matches!(o, Op::If { .. })) && fl.has_else(cmp + 1)) {
+                    return Err("the empty test opens no `if` with an `else`".into());
+                }
+                if width != 1 || off as i64 != PAYLOAD {
+                    return Err(format!("the access under an empty test is {width} bytes at offset {off}, not byte 0"));
+                }
+                if op(&addr, "i32.add").is_some() {
+                    return Err(format!("the access under an empty test is not byte 0: {addr:?}"));
+                }
+                return fl.same_count(cb, &addr, count_at, acc);
+            }
             let (i1, i2, (cb, count_at), w) = room_of(&room).ok_or_else(|| format!("the room test is not `0 <= i <= len - w`: {room:?}"))?;
             if !fl.same(i1, i2) {
                 return Err("the room test's two bounds test different indices".into());
@@ -881,6 +914,52 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             fl.same_count(cb, ab, count_at, acc)
         }
         ref o => Err(format!("the guard's compare is {o:?}")),
+    }
+}
+
+impl Flow<'_, '_> {
+    /// The `if` at `s` has an `else`.
+    pub(crate) fn has_else(&self, s: usize) -> bool {
+        let end = self.close.get(s).copied().unwrap_or(usize::MAX);
+        end != usize::MAX && (s + 1..end).any(|k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else))
+    }
+
+    /// `q` lies in the `else` arm of the `if` at `s`.
+    pub(crate) fn in_else(&self, s: usize, q: usize) -> bool {
+        let end = self.close.get(s).copied().unwrap_or(usize::MAX);
+        s < q && q < end && (s + 1..q).any(|k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else))
+    }
+
+    /// An enclosing test bounds the count `n` by the `len` word of the
+    /// string `ab` (#4281): the access at `acc` lies in the `else` of an
+    /// `if` testing `n >u len(B)` (there `n <= len(B)`) or `len(B) != n` /
+    /// `n != len(B)` (there `n == len(B)`), `B` keeping its count to the
+    /// access. With the exit test `i >=u n` failed, `i < n <= len(ab)`.
+    fn len_bounds(&self, n: &T, ab: &T, acc: usize) -> Result<(), String> {
+        let mut c = self.parent[acc];
+        let mut last = "no enclosing test bounds the count by the string's len".to_string();
+        while let Some(s) = c {
+            c = self.parent[s];
+            if !matches!(self.b.ops[s], Op::If { .. }) || s == 0 || !self.in_else(s, acc) {
+                continue;
+            }
+            let t = s - 1;
+            let (x, y) = (self.arg(t, 0, FUEL), self.arg(t, 1, FUEL));
+            let pair = match self.b.ops[t] {
+                Op::I32GtU => len(&y).map(|l| (x.clone(), l)),
+                Op::I32Ne => len(&y).map(|l| (x.clone(), l)).or_else(|| len(&x).map(|l| (y.clone(), l))),
+                _ => None,
+            };
+            let Some((m, (cb, count_at))) = pair else { continue };
+            if !self.same(&m, n) {
+                continue;
+            }
+            match self.same_count(cb, ab, count_at, acc) {
+                Ok(()) => return Ok(()),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
     }
 }
 
