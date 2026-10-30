@@ -491,13 +491,18 @@ impl Emitter<'_> {
 
     /// The moved place's credit goes to the callee — every argument has been
     /// lowered, so no later read precedes it — and its holder is now empty.
-    pub(crate) fn witness_move_and_empty(&mut self, id: VarId, global: bool) {
-        let Some(l) = self.witness_holder(id, global) else { return };
-        let Some(w) = self.witness.as_mut() else { return };
-        if !w.move_local(l) {
+    /// Answers whether the move is a byte-check event (`m<local>`: a live
+    /// move inside an open window).
+    pub(crate) fn witness_move_and_empty(&mut self, id: VarId, global: bool) -> bool {
+        let Some(l) = self.witness_holder(id, global) else { return false };
+        let Some(w) = self.witness.as_mut() else { return false };
+        let live = !w.dead();
+        let moved = w.move_local(l);
+        if !moved {
             w.poison();
         }
         w.empty_local(l);
+        moved && live && crate::witness::rc::in_window()
     }
 
     /// The moved temp's local index, when the statement the block walk

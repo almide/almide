@@ -42,13 +42,17 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
-        // #4278 B1: the receiver's credit — a dying var's, emptied here, or
-        // an owned temporary's — moves into the upserts through `mh`; a
-        // shared-path judge releases it there.
-        if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+        // #4278 B1: the receiver's credit moves into the upserts — as a dying
+        // var's own move when that is a byte-check event (`empty_dying`),
+        // else through `mh`: one event per credit. A shared-path judge
+        // releases it there.
+        let var_moved = match dying {
+            Some((id, idx, _)) => self.empty_dying(id, idx),
+            None => false,
+        };
+        if !var_moved {
+            self.witness_rc_hold_move(mh);
         }
-        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         if self.lower_arg(b, None, ArgMode::Borrow)? != got {
             return unsup("map-merge-ty");

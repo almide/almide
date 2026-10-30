@@ -58,6 +58,14 @@ fn with(f: impl FnOnce(&mut State)) {
     }
 }
 
+/// Whether an arm or routine window is open (a move logged now is an RC
+/// event: [`event`] drops one outside every window).
+pub(crate) fn in_window() -> bool {
+    let mut open = false;
+    with(|s| open = !s.open_windows.is_empty());
+    open
+}
+
 pub(crate) fn start() {
     *state().lock().expect("rc sink") = Some(State::default());
 }
