@@ -31,6 +31,14 @@ fn compile_to_rust(src: &str) -> String {
 fn user_code(full: &str) -> &str {
     // The runtime preamble ends before the first `pub fn` or `fn` declaration
     // that isn't part of a trait/impl block.
+    // The emitter marks the end of the preamble (`RT_BOUNDARY_MARKER`); the
+    // runtime modules live in a module of their own above it since #4345,
+    // so the last `macro_rules!` no longer bounds the runtime's fns.
+    if let Some(pos) = full.find(codegen::RT_BOUNDARY_MARKER) {
+        let rest = &full[pos + codegen::RT_BOUNDARY_MARKER.len()..];
+        let hit = rest.find("\npub fn ").or_else(|| rest.find("\nfn ")).map(|p| p + 1);
+        return hit.map_or(rest, |p| &rest[p..]).trim();
+    }
     // Simple heuristic: find the last `macro_rules!` line and take everything after.
     if let Some(pos) = full.rfind("macro_rules!") {
         let after_macro = &full[pos..];

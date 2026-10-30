@@ -4105,6 +4105,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_no_contraction.almd", class = "fixture" },
   { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_mul_no_fma.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-304"
