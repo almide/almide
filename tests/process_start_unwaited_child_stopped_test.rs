@@ -97,7 +97,7 @@ fn an_unwaited_child_is_stopped_by_process_exit() {
 #[test]
 fn an_unwaited_child_is_stopped_when_an_effect_error_ends_main() {
     let (stdout, stderr, code, elapsed) = run(&format!(
-        "import process\n\n{head}effect fn main() -> Unit = {{\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n  let n = fail()!\n  println(int.to_string(n))\n}}\n"
+        "import process\n\neffect fn fail() -> Int = err(\"boom\")\n\neffect fn main() -> Unit = {{\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n  let n = fail()!\n  println(int.to_string(n))\n}}\n"
     ));
     assert_eq!(code, Some(1), "stdout: {stdout}\nstderr: {stderr}");
     assert_eq!(stderr, "Error: boom\n");
