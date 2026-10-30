@@ -142,7 +142,7 @@ pub fn rewrite_result_str_ops(f: &mut MirFunction, res_str_fns: &BTreeSet<String
             Op::Consume { v } if t.vals.contains(v) => {}
             Op::CallFn { dst, name, args, result } => {
                 if let Some(d) = dst {
-                    if res_str_fns.contains(name) {
+                    if res_str_fns.contains(name) || crate::native_floor::declared_result_carrier(name) == Some(true) {
                         t.vals.insert(*d);
                     }
                 }

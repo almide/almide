@@ -74,8 +74,11 @@ pub(crate) enum FloorRet {
     Bool,
     Float,
     Str,
-    /// `Result[Int | Bool, String]` — the native Result carrier.
-    Res,
+    /// `Result[Int | Bool | Float | Unit, String]` — the native Result
+    /// carrier (`None`: a Unit Ok, carried as 0).
+    Res(Option<Scalar>),
+    /// `Result[String, String]` — the String-Ok carrier.
+    ResStr,
     /// `List[Int]` — an owned `Vec<i64>`.
     ListInt,
     /// `List[String]` — a runtime `Vec<String>`, rebound as `Vec<AlmideString>`.
@@ -131,6 +134,17 @@ pub(crate) fn declared(call: &str) -> Option<&'static FloorFn> {
     let made = derive(call).map(|f| &*Box::leak(Box::new(f)));
     cache.lock().unwrap_or_else(|e| e.into_inner()).insert(call.to_string(), made);
     made
+}
+
+/// Whether a call to `name` returns the scalar-Ok Result carrier (`Some(false)`)
+/// or the String-Ok one (`Some(true)`) through the declared floor: the result
+/// rewrites seed their carrier values from it, as from a declared user fn.
+pub(crate) fn declared_result_carrier(name: &str) -> Option<bool> {
+    match declared(name)?.ret {
+        FloorRet::Res(_) => Some(false),
+        FloorRet::ResStr => Some(true),
+        _ => None,
+    }
 }
 
 /// Every `module.fn` whose declaration gives a floor entry, over the bundled
@@ -203,9 +217,7 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
     if decls.next().is_some() {
         return Err("declared more than once".into());
     }
-    if effect.unwrap_or(false) {
-        return Err("an effect fn".into());
-    }
+    let is_effect = effect.unwrap_or(false);
     let symbol = attrs
         .iter()
         .find(|a| a.name.as_str() == "intrinsic")
@@ -225,6 +237,11 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         .map(|p| floor_param(&p.ty, &type_params).ok_or_else(|| format!("param type {:?} outside the per-type map", p.ty)))
         .collect::<Result<_, _>>()?;
     let fret = floor_ret(ret, &type_params).ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
+    // An effect fn's error reaches its caller through its declared Result,
+    // the carrier the call site's `!` reads; any other effect return walls.
+    if is_effect && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr) {
+        return Err("an effect fn whose return is not a Result carrier".into());
+    }
     let rt = runtime_index();
     let body = rt.items.get(symbol.as_str()).ok_or_else(|| format!("`{symbol}` is not a takeable runtime item"))?;
     let (rust_params, rust_ret) = rust_signature(body.text).ok_or("the runtime signature does not parse")?;
@@ -324,10 +341,14 @@ fn floor_ret(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
             _ => None,
         },
         TypeExpr::Generic { name, args } if name.as_str() == "Result" && args.len() == 2 => {
-            matches!(simple(&args[0])?, "Int" | "Bool")
-                .then_some(())
-                .filter(|_| simple(&args[1]) == Some("String"))
-                .map(|_| FloorRet::Res)
+            if simple(&args[1]) != Some("String") {
+                return None;
+            }
+            match simple(&args[0])? {
+                "Unit" => Some(FloorRet::Res(None)),
+                "String" => Some(FloorRet::ResStr),
+                ok => scalar_of(ok).map(|k| FloorRet::Res(Some(k))),
+            }
         }
         TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => {
             match simple(&args[0])? {
@@ -395,11 +416,24 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Elem(ElemRet::Opt) => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::Elem(ElemRet::List) => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::Bytes => t == "Vec<u8>",
-        FloorRet::Res => t
+        FloorRet::Res(k) => t
             .strip_prefix("Result<")
             .and_then(|x| x.strip_suffix('>'))
             .and_then(|x| x.split_once(','))
-            .is_some_and(|(ok, err)| (ok == "i64" || ok == "bool") && string(err)),
+            .is_some_and(|(ok, err)| {
+                let ok_agrees = match k {
+                    None => ok == "()",
+                    Some(Scalar::Int) => ok == "i64",
+                    Some(Scalar::Bool) => ok == "bool",
+                    Some(Scalar::Float) => ok == "f64",
+                };
+                ok_agrees && string(err)
+            }),
+        FloorRet::ResStr => t
+            .strip_prefix("Result<")
+            .and_then(|x| x.strip_suffix('>'))
+            .and_then(|x| x.split_once(','))
+            .is_some_and(|(ok, err)| string(ok) && string(err)),
     }
 }
 
@@ -705,7 +739,10 @@ fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
         if prev == Some("fn") {
             continue; // an item's own name
         }
-        if matches!(prev, Some("let" | "mut" | "|" | "ref")) || (next == Some(":") && prev != Some("::")) {
+        // A closure param sits between bars (`|e|`, `|a, b|`); the name after
+        // the closing bar is the closure's body.
+        let closure_param = prev == Some("|") && matches!(next, Some("|" | "," | ":"));
+        if matches!(prev, Some("let" | "mut" | "ref")) || closure_param || (next == Some(":") && prev != Some("::")) {
             locals.insert(s);
             continue; // a binding, a param, a field or label name
         }
@@ -1046,9 +1083,18 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
         FloorRet::Bool => (format!("({call}) as i64"), Some(NTy::I64)),
         FloorRet::Float => (call, Some(NTy::F64)),
         FloorRet::Str => (format!("AlmideString::from({call})"), Some(NTy::Str)),
-        FloorRet::Res => (
-            format!("({call}).map(|v| v as i64).map_err(AlmideString::from)"),
-            Some(NTy::Res),
+        FloorRet::Res(k) => {
+            let ok = match k {
+                None => "|_| 0i64",
+                Some(Scalar::Int) => "|v| v",
+                Some(Scalar::Bool) => "|v| v as i64",
+                Some(Scalar::Float) => "|v| v.to_bits() as i64",
+            };
+            (format!("({call}).map({ok}).map_err(AlmideString::from)"), Some(NTy::Res))
+        }
+        FloorRet::ResStr => (
+            format!("({call}).map(AlmideString::from).map_err(AlmideString::from)"),
+            Some(NTy::ResStr),
         ),
         FloorRet::ListInt => (call, Some(NTy::Vec)),
         FloorRet::Bytes => (call, Some(NTy::Rec(crate::render_native_rec::bytes_index()))),

@@ -107,7 +107,7 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>, re
             Op::Consume { v } if t.res_vals.contains(v) && !t.minted.contains(v) => {}
             Op::CallFn {
                 dst: Some(d), name, ..
-            } if result_fns.contains(name) => {
+            } if result_fns.contains(name) || crate::native_floor::declared_result_carrier(name) == Some(false) => {
                 t.res_vals.insert(*d);
                 out.push(op);
             }
