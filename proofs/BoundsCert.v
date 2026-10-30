@@ -272,12 +272,13 @@ Example accepts_for_loop_bytes : check_bounds_cert "L{ e0 a0 s0 }" = true.
 Proof. reflexivity. Qed.
 
 (* The drill scripts/witness-reinject.sh bounds gets from an emitter that
-   lost the loop's exit test (proofs/poisoned-certs/bounds/), and the other
-   orders the checker must refuse. *)
-Example rejects_drill_exit_dropped : check_bounds_cert "a0" = false.
+   reads the element before the loop's exit test (proofs/poisoned-certs/
+   bounds/4005-loop-exit-after-read.cert), and the other orders the checker
+   must refuse. *)
+Example rejects_drill_exit_after_read : check_bounds_cert "a0 e0" = false.
 Proof. reflexivity. Qed.
 
-Example rejects_exit_after_read : check_bounds_cert "a0 e0" = false /\
+Example rejects_exit_misplaced : check_bounds_cert "e0 L{ a0 s0 }" = false /\
   check_bounds_cert "L{ e0 s0 a0 }" = false /\ check_bounds_cert "e1 a0" = false /\
   check_bounds_cert "e a0" = false.
 Proof. repeat split; reflexivity. Qed.

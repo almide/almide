@@ -196,6 +196,7 @@ fn bounds_examples() {
             ("L{ e0 a0 s0 }", true),
             ("a0 e0", false),
             ("L{ e0 s0 a0 }", false),
+            ("e0 L{ a0 s0 }", false),
             ("e1 a0", false),
             ("e a0", false),
         ],

@@ -1,0 +1,1 @@
+ANCHORS REJECT: bounds stretch 0: `e0`: the exit test is Some(I32Eqz), not `i32.ge_u`
