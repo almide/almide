@@ -67,14 +67,7 @@ impl HelperLits {
     }
 }
 
-/// A helper body with its declared RC signature (#4278 B1, helper_sig.rs).
-fn signed(idx: u32, (f, sig): (Function, HelperSig)) -> (u32, Function, Option<HelperSig>) {
-    (idx, f, Some(sig))
-}
-
-/// The 37 fixed-slot helper bodies, in F_* slot order, each with the RC
-/// signature its builder declared (`None`: it moves no count on a block it
-/// is handed).
+/// The 37 fixed-slot helper bodies in F_* slot order, each with its RC signature.
 fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function, Option<HelperSig>)> {
     vec![
         (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT), None),
@@ -89,8 +82,8 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_STR_EQ, emit_str_eq(), None),
         (F_LIST_GET_8, emit_list_get(Scalar::Int), None),
         (F_LIST_GET_4, emit_list_get(Scalar::Str), None),
-        signed(F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
-        signed(F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
+        crate::helper_sig::signed(F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
+        crate::helper_sig::signed(F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
         (F_LIST_JOIN, emit_list_join(), None),
         (F_BLOCK_COPY, emit_block_copy(), None),
         (F_BUF_TO_BLOCK, emit_buf_to_block(), None),
@@ -108,9 +101,9 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_FREE, emit_free(counters, crate::canonical_alloc::armed()), None),
         (F_INC, emit_inc(), None),
         (F_DEC_FLAT, emit_dec_flat(), None),
-        signed(F_COW, emit_cow()),
-        signed(F_STR_APPEND, emit_str_append()),
-        signed(F_BYTES_PUSH, emit_bytes_push()),
+        crate::helper_sig::signed(F_COW, emit_cow()),
+        crate::helper_sig::signed(F_STR_APPEND, emit_str_append()),
+        crate::helper_sig::signed(F_BYTES_PUSH, emit_bytes_push()),
         (F_LINE_GROW, emit_line_grow(), None),
         (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT), None),
         (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT), None),
@@ -533,14 +526,12 @@ fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global
     }
 }
 
-/// A per-program helper's body, with the RC signature its builder declared
-/// (#4278 B1; `None`: it declares none).
+/// A per-program helper's body and its declared RC signature (#4278 B1).
 fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> (Function, Option<HelperSig>) {
-    if let Helper::CowElems { inc_elems } = h {
-        let (f, sig) = runtime_alloc::emit_cow_elems(*inc_elems);
-        return (f, Some(sig));
+    match crate::helper_sig::per_program(h) {
+        Some((f, sig)) => (f, Some(sig)),
+        None => (helper_body_unsigned(h, work, helper_snapshot, hpos), None),
     }
-    (helper_body_unsigned(h, work, helper_snapshot, hpos), None)
 }
 
 fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
@@ -632,9 +623,7 @@ pub(crate) fn resolve_extras(
         };
         let ti = work.itype(params, ret);
         let (f, sig) = helper_body(h, work, helper_snapshot.as_slice(), hpos);
-        if let Some(sig) = &sig {
-            crate::witness::rc::helper(extra_base + extra_fns.len() as u32, sig);
-        }
+        sig.iter().for_each(|s| crate::witness::rc::helper(extra_base + extra_fns.len() as u32, s));
         extra_fns.push((ti, f));
     }
     let mut entry_fn_indices: Vec<u32> = Vec::new();

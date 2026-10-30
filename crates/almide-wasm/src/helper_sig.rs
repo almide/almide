@@ -142,6 +142,19 @@ impl HelperSig {
     }
 }
 
+/// A static helper's slot with its body and declared signature.
+pub(crate) fn signed(idx: u32, (f, sig): (wasm_encoder::Function, HelperSig)) -> (u32, wasm_encoder::Function, Option<HelperSig>) {
+    (idx, f, Some(sig))
+}
+
+/// A per-program helper's body when its builder declares a signature.
+pub(crate) fn per_program(h: &crate::work::Helper) -> Option<(wasm_encoder::Function, HelperSig)> {
+    match h {
+        crate::work::Helper::CowElems { inc_elems } => Some(crate::runtime_alloc::emit_cow_elems(*inc_elems)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -16,6 +16,23 @@
 use super::WitnessRecorder;
 
 impl WitnessRecorder {
+    /// #4278 B1: a container SLOT's old occupant released before the slot is
+    /// overwritten (`xs[i] = v`, `r.f = v`). The occupant's credit is the
+    /// container's, handed to this release — the slot pseudo-parameter's
+    /// consume (`c`): a line seeded with that credit (`i`) and released
+    /// (`d`). The release is logged to the RC byte check as `r`, held to a
+    /// release call inside `window` on a value loaded out of a slot that a
+    /// later store writes — never a frame variable's event.
+    pub fn slot_replaced(&mut self, window: u64) {
+        if self.branches.dead() {
+            return;
+        }
+        let o = self.new_obj();
+        self.ops(o, "i");
+        self.log.push(super::paths::Ev::Op(o, 'd'));
+        crate::witness::rc::event_at('r', None, window);
+    }
+
     /// The rest block was built into `local`: a new object it holds (`i`).
     pub fn rest_born(&mut self, local: u32) {
         let o = self.fresh_obj(local, false);
