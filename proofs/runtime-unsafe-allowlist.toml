@@ -83,7 +83,7 @@ reason = "the C-196 stack guard both native renders emit (module almide_stack_gu
 path = "crates/almide-kernel/src/matmul.rs"
 count = 2
 class = "emitted-prelude"
-reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342). kept (#4342): a safe 4x4 tile with f64::mul_add (bitwise the same product) measured 0.97-1.03x on matrix.mul at 64^3, 256^3, 512^3, 64x768x768 and 128x768x3072 in --release builds (x86-64-v3, where mul_add is an inline vfmadd), but 12.3x / 13.2x at 256^3 in a default (non-release) build, where mul_add is a libm fma call per cell; GCE AMD EPYC 7B13 (n2d) / Intel Xeon 2.8 GHz (n2), min of 7 pinned runs, Rust 1.96.0, 2026-10-30"
+reason = "the AVX register-tiled matmul kernel (multiply then add, no fused step: C-303, #4344) and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342). kept (#4342, #4344): a safe 4x4 tile in its place measured 1.10x / 1.05x at 256^3 and 1.22x / 1.04x at 64x768x768 in --release builds (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d), over the 5% bar; the unfused kernel itself costs 1.10-1.18x against the fused one it replaced (matrix.mul at 64^3 .. 128x768x3072, Intel Xeon 2.8 GHz n2, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30), the price of native agreeing with wasm bit for bit"
 
 [[file]]
 path = "crates/almide-kernel/src/transpose_f64.rs"
