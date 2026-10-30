@@ -73,53 +73,16 @@ pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
 }
 
 // `random.bytes(n)` (C-394): the one CSPRNG — n bytes from the operating
-// system's cryptographic source, never the xorshift above. Linux reads the
-// getrandom(2) syscall through libc; every other unix reads getentropy(3),
-// which serves at most 256 bytes a call, so the fill goes in 256-byte chunks
-// on every OS. A negative n is a contract violation (the ALS-T6 abort, the
-// text the wasm self-host `random_bytes` dies with). A source that fails is
-// an abort too: handing back fewer or predictable bytes would be silent.
-#[cfg(target_os = "linux")]
+// system's cryptographic source, never the xorshift above, read through
+// sys.rs's `fill_entropy` (getentropy(3) on unix, BCryptGenRandom on
+// Windows; #4007 keeps every foreign call there). getentropy serves at most
+// 256 bytes a call, so the fill goes in 256-byte chunks on every OS. A
+// negative n is a contract violation (the ALS-T6 abort, the text the wasm
+// self-host `random_bytes` dies with). A source that fails is an abort too:
+// handing back fewer or predictable bytes would be silent.
+#[cfg(any(unix, windows))]
 fn almide_os_entropy(chunk: &mut [u8]) -> bool {
-    unsafe extern "C" {
-        fn getrandom(buf: *mut u8, buflen: usize, flags: u32) -> isize;
-    }
-    let mut filled = 0;
-    while filled < chunk.len() {
-        let rest = &mut chunk[filled..];
-        let r = unsafe { getrandom(rest.as_mut_ptr(), rest.len(), 0) };
-        if r > 0 {
-            filled += r as usize;
-        } else if r < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
-            continue;
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn almide_os_entropy(chunk: &mut [u8]) -> bool {
-    unsafe extern "C" {
-        fn getentropy(buf: *mut u8, buflen: usize) -> i32;
-    }
-    unsafe { getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
-}
-
-// Windows reads BCryptGenRandom with the system-preferred RNG (no algorithm
-// handle to open or close): the CSPRNG the getrandom crate reads there too.
-// Until this arm existed every Windows `random.bytes` call aborted with the
-// "OS random source failed" text below (uuid.v4 / v7 with it).
-#[cfg(windows)]
-fn almide_os_entropy(chunk: &mut [u8]) -> bool {
-    #[link(name = "bcrypt")]
-    unsafe extern "system" {
-        fn BCryptGenRandom(alg: *mut std::ffi::c_void, buf: *mut u8, len: u32, flags: u32) -> i32;
-    }
-    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
-    // A chunk is at most 256 bytes, so its length fits the u32 the call takes.
-    unsafe { BCryptGenRandom(std::ptr::null_mut(), chunk.as_mut_ptr(), chunk.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 }
+    almide_rt_sys_ffi::fill_entropy(chunk)
 }
 
 // No OS source known for this target: every draw aborts rather than return

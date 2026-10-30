@@ -14,7 +14,7 @@
 // quotient rounded to 1.0.
 //
 // So this test compiles the SHIPPED source text itself. `runtime/rs/src/random.rs`
-// is self-contained (`std::cell::Cell`, libc's entropy call, and the prelude's
+// is self-contained (`std::cell::Cell`, sys.rs's entropy call, and the prelude's
 // `almide_abort`, stubbed below), which is what makes
 // the include legal here and not a general answer: most of runtime/rs resolves
 // only under the embedder's flat concatenation plus a synthesised prelude, so
@@ -35,6 +35,10 @@ mod runtime_random {
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"
     ));
+    // random.bytes reads the OS source through sys.rs's `fill_entropy`
+    // (#4007: the runtime's foreign calls live in that one module), which is
+    // std-only too; the embedder pulls it in beside random.rs the same way.
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/rs/src/sys.rs"));
 
     // The emitted prelude's abort, which random.bytes calls on a negative n.
     fn almide_abort(msg: impl std::fmt::Display) -> ! {

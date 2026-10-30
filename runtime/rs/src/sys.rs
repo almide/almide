@@ -3,7 +3,7 @@
 // The ONE file under runtime/rs/src where `unsafe` is allowed. Every C / OS
 // function the runtime calls is declared here, behind a safe wrapper whose
 // arguments make the call sound, so http.rs, list.rs, process.rs and
-// matrix.rs hold no `unsafe` of their own. scripts/check-runtime-unsafe.sh
+// random.rs hold no `unsafe` of their own. scripts/check-runtime-unsafe.sh
 // counts this file's lines against its row in
 // proofs/runtime-unsafe-allowlist.toml; a new foreign call is added HERE.
 //
@@ -136,6 +136,39 @@ mod almide_rt_sys_ffi {
             return None;
         }
         Some((ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64))
+    }
+
+    /// Fill `chunk` (at most 256 bytes) from the OS CSPRNG (`random.bytes`,
+    /// C-394): getentropy(3) on every unix — glibc 2.25+ (the release that
+    /// also added the getrandom(3) wrapper this replaced; both are the
+    /// getrandom(2) syscall there), musl, macOS and the BSDs — and
+    /// BCryptGenRandom with the system-preferred RNG on Windows. `false` when
+    /// the source fails (or the chunk is over 256 bytes, which getentropy
+    /// refuses with EIO); the caller aborts rather than hand back fewer bytes.
+    #[cfg(unix)]
+    pub fn fill_entropy(chunk: &mut [u8]) -> bool {
+        // SAFETY: the declaration is getentropy's POSIX.1-2024 prototype.
+        unsafe extern "C" {
+            fn getentropy(buf: *mut u8, buflen: usize) -> i32;
+        }
+        // SAFETY: `chunk` is one live &mut [u8]; getentropy writes at most
+        // chunk.len() bytes of it.
+        unsafe { getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
+    }
+
+    #[cfg(windows)]
+    pub fn fill_entropy(chunk: &mut [u8]) -> bool {
+        // SAFETY: the declaration is bcrypt.h's BCryptGenRandom (NTSTATUS is i32).
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(alg: *mut std::ffi::c_void, buf: *mut u8, len: u32, flags: u32) -> i32;
+        }
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+        let Ok(len) = u32::try_from(chunk.len()) else { return false };
+        // SAFETY: a null algorithm handle is the documented form with
+        // BCRYPT_USE_SYSTEM_PREFERRED_RNG; `chunk` is one live &mut [u8] of
+        // `len` bytes, all the call writes.
+        unsafe { BCryptGenRandom(std::ptr::null_mut(), chunk.as_mut_ptr(), len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 }
     }
 
     /// `SetConsoleCtrlHandler(handler, add)`.
