@@ -14,6 +14,8 @@
 //! - `init`, every construction site the emitter fills itself — the
 //!   allocation and the slot stores that initialize it (witness_init.rs,
 //!   #4013);
+//! - `fields`, every record / tuple / variant construction site and field
+//!   access, held to the kind's layout (witness_fields.rs, #4279);
 //! - `names`, over the stock-WASI bytes the build ships: `(module:<space>)`
 //!   per shared index space, `locals:<fn>` per function (cert_project.rs);
 //! - `caps` per source-declared function and one `caps-transitive` call
@@ -52,6 +54,7 @@ pub fn records(
 /// alloc <function index of $alloc in the shipped bytes>
 /// init <one token per init event: position:ordinal | ->
 /// bounds <one token per bounds token: position:ordinal | ->
+/// fields <one token per fields event: position:ordinal | ->
 /// judges <one token per copy-on-write judge call: position:ordinal | ->
 /// ```
 ///
@@ -80,6 +83,8 @@ fn records_inner(
     let modes = super::take_modes();
     let bounds = super::take_bounds();
     let init = super::take_init();
+    let fields = super::take_fields();
+    let fields_anchors = super::fields::take_anchors();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids) = super::rc::take(pass);
@@ -112,7 +117,7 @@ fn records_inner(
         Some(fmap) => {
     let locate = Locator::new(emitted, shipped, seals, fmap)?;
     format!(
-        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\njudges {}\n",
+        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
             let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
@@ -123,6 +128,7 @@ fn records_inner(
         },
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
+        locate.text(&pick(fields_anchors))?,
         locate.text(&pick(judge_anchors))?,
     ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
         }
@@ -131,6 +137,8 @@ fn records_inner(
     records.push(Record { property: "bounds", function: "(program)".into(), bytes: b });
     let i = init.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
     records.push(Record { property: "init", function: "(program)".into(), bytes: i });
+    let fw = fields.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
+    records.push(Record { property: "fields", function: "(program)".into(), bytes: fw });
     use crate::cert_project as cp;
     // `to_wasi` keeps every defined function's order and moves it by the
     // change in the import count — up for the imports it adds, down for the
