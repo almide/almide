@@ -1,0 +1,47 @@
+// @contract: C-033
+// #4351: a `for x in xs` loop over a list walks the value `xs` held when the
+// loop began, whatever the body does to `xs`. Native iterates that value;
+// the structural wasm leg read the iterated block in place, so a write into
+// `xs` inside the loop showed up in later iterations (6 natively, 103 on
+// wasm). The loop now holds the list (+1, as the map loop does, #1219), so
+// the write finds the block shared and copies. Each case also reads the list
+// through a call inside the loop (#4280: the call is handed the held list).
+fn first_or(xs: List[Int], d: Int) -> Int = list.first(xs) ?? d
+
+effect fn main() -> Unit = {
+  // A. An index write into the iterated list.
+  var a = [1, 2, 3]
+  var sa = 0
+  for x in a {
+    a[2] = 100
+    sa = sa + x + first_or(a, 0) - 1
+  }
+  println("A ${sa} ${a[2]}")
+
+  // B. An append to the iterated list: three iterations, six elements.
+  var b = [1, 2, 3]
+  var nb = 0
+  for x in b {
+    b = b + [x * 10]
+    nb = nb + 1
+  }
+  println("B ${nb} ${list.len(b)}")
+
+  // C. The iterated list replaced by an empty one.
+  var c = [1, 2, 3, 4]
+  var sc = 0
+  for x in c {
+    c = []
+    sc = sc + x
+  }
+  println("C ${sc} ${list.len(c)}")
+
+  // D. A swap of two elements of the iterated list, every iteration.
+  var d = [1, 2, 3]
+  var seen = ""
+  for x in d {
+    d = list.swap(d, 0, 2)
+    seen = seen + int.to_string(x)
+  }
+  println("D ${seen} ${first_or(d, 0)}")
+}
