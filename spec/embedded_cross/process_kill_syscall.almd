@@ -22,7 +22,7 @@ effect fn main() -> Unit = {
   fs.write_text("${dir}/kill", "#!/bin/sh\necho ran > '${marker}'\nexit 0\n")!
   let _ = process.exec("chmod", ["+x", "${dir}/kill"])!
   let old_path = env.get("PATH") ?? "/usr/bin:/bin"
-  env.set("PATH", "${dir}:${old_path}")
+  env.set("PATH", "${dir}:${old_path}")!
   let dead = process.exec(
     "/bin/sh",
     [
@@ -48,7 +48,7 @@ effect fn main() -> Unit = {
   println("kill(child, 15): ${show(process.kill(child, 15))}")
   env.sleep_ms(300)
   println("after kill: ${show(process.kill(child, 0))}" |> string.replace(int.to_string(child), "<pid>"))
-  env.set("PATH", old_path)
+  env.set("PATH", old_path)!
   println("fake kill ran=${fs.exists(marker)}")
   let _ = process.exec("rm", ["-rf", dir])
 }
