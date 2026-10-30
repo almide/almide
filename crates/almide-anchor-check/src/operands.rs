@@ -217,6 +217,8 @@ pub(crate) struct Flow<'b, 'a> {
     abort_arm: Vec<bool>,
     /// The recorded copy-on-write judge call sites of this function.
     judges: HashSet<usize>,
+    /// Functions (by index) whose call writes no memory (`readonly_calls`).
+    ro_calls: HashSet<u32>,
 }
 
 impl<'b, 'a> Flow<'b, 'a> {
@@ -252,7 +254,7 @@ impl<'b, 'a> Flow<'b, 'a> {
                 abort_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
             }
         }
-        Flow { b, close, parent, abort_arm, judges }
+        Flow { b, close, parent, abort_arm, judges, ro_calls: HashSet::new() }
     }
 
     /// Inside an aborting `if` (module header).
@@ -753,7 +755,7 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
 
 /// An instruction that may change memory: a store, a call, a bulk memory or
 /// table operation, an atomic. Anything this list misses is a read-only op.
-fn may_write_memory(op: &Op<'_>) -> bool {
+pub(crate) fn may_write_memory(op: &Op<'_>) -> bool {
     if store_width(op).is_some()
         || matches!(
             op,
@@ -775,7 +777,51 @@ fn may_write_memory(op: &Op<'_>) -> bool {
     name.contains("Atomic") || name.contains("Store") || name.starts_with("Table") || name.starts_with("Memory")
 }
 
+/// The functions whose call writes no memory: a defined function none of
+/// whose instructions may write memory except calls of such functions (the
+/// greatest fixpoint, so read-only recursion stays read-only). An imported
+/// function, an indirect call and anything `may_write_memory` names are
+/// writes.
+pub(crate) fn readonly_calls(bodies: &[Body<'_>], imports: u32) -> HashSet<u32> {
+    let mut ro = vec![true; bodies.len()];
+    loop {
+        let mut changed = false;
+        for i in 0..bodies.len() {
+            if !ro[i] {
+                continue;
+            }
+            let writes = bodies[i].ops.iter().any(|op| match op {
+                Op::Call { function_index } | Op::ReturnCall { function_index } => {
+                    function_index.checked_sub(imports).and_then(|d| ro.get(d as usize).copied()) != Some(true)
+                }
+                o => may_write_memory(o),
+            });
+            if writes {
+                ro[i] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    (0..bodies.len()).filter(|&i| ro[i]).map(|i| i as u32 + imports).collect()
+}
+
 impl Flow<'_, '_> {
+    /// Calls of the functions in `ro` write no memory (`readonly_calls`).
+    pub(crate) fn with_readonly(mut self, ro: HashSet<u32>) -> Self {
+        self.ro_calls = ro;
+        self
+    }
+
+    fn may_write(&self, op: &Op<'_>) -> bool {
+        match op {
+            Op::Call { function_index } if self.ro_calls.contains(function_index) => false,
+            o => may_write_memory(o),
+        }
+    }
+
     /// No loop around `u` closes before `p`: a run that reaches `p` after
     /// `u` takes no back edge to before `u` in between, so what it runs
     /// between them lies in `window(u, p)`.
@@ -813,7 +859,7 @@ impl Flow<'_, '_> {
                     && s1 < s2
                     && self.forward(*s1, *s2)
                     && self.same_since(a1, a2, fuel - 1)
-                    && !self.window(*s1, *s2).into_iter().any(|k| may_write_memory(&self.b.ops[k]))
+                    && !self.window(*s1, *s2).into_iter().any(|k| self.may_write(&self.b.ops[k]))
             }
             _ => false,
         }

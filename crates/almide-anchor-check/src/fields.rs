@@ -24,8 +24,10 @@
 //!   `i32.load offset=12 (X) == C` (directly, or through the AND that a
 //!   pattern test builds as `if (result i32) .. else i32.const 0 end`), and
 //!   X is the access's own address — the same variable unwritten between,
-//!   or the same field re-loaded from the same block with no store and no
-//!   call between the two loads (operands.rs `same_reloaded`).
+//!   or the same field re-loaded from the same block with nothing between
+//!   the two loads that may write memory — a store, a bulk or atomic op, or
+//!   a call of anything but a function whose own body writes no memory
+//!   (operands.rs `same_since`, `readonly_calls`).
 //! - a tag read `t R` is `i32.load offset=12`.
 //!
 //! TRUSTED (TRUSTED_BASE.md): that a block's static type is its layout (the
@@ -71,6 +73,7 @@ fn load_width(op: &Op<'_>) -> Option<(u64, u64)> {
 struct Fx<'b, 'a> {
     bodies: &'b [Body<'a>],
     alloc: u32,
+    ro: std::collections::HashSet<u32>,
     layouts: BTreeMap<(u64, u64), Layout>,
 }
 
@@ -200,7 +203,7 @@ impl<'b, 'a> Fx<'b, 'a> {
         if !(is_variant(r) && n > 1 && i >= 1) {
             return Ok(false);
         }
-        let flow = flows.entry(at.func).or_insert_with(|| Flow::new(b, Default::default()));
+        let flow = flows.entry(at.func).or_insert_with(|| Flow::new(b, Default::default()).with_readonly(self.ro.clone()));
         operands::case_guarded(flow, at.op, c).map_err(|e| format!("a: the case-{c} field read is not under its tag test: {e}"))?;
         Ok(true)
     }
@@ -217,7 +220,7 @@ impl<'b, 'a> Fx<'b, 'a> {
 type Flows<'b, 'a> = std::collections::HashMap<usize, Flow<'b, 'a>>;
 
 /// Check the fields witness `fields` against its anchors `anch`.
-pub fn check_fields(bodies: &[Body<'_>], alloc: u32, fields: &str, anch: &str, rep: &mut Report) -> Result<(), String> {
+pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str, anch: &str, rep: &mut Report) -> Result<(), String> {
     if fields.trim().is_empty() && anch.trim().is_empty() {
         return Ok(());
     }
@@ -225,7 +228,7 @@ pub fn check_fields(bodies: &[Body<'_>], alloc: u32, fields: &str, anch: &str, r
     if items.len() != groups.len() {
         return Err(format!("fields: {} items, {} anchor groups", items.len(), groups.len()));
     }
-    let mut fx = Fx { bodies, alloc, layouts: BTreeMap::new() };
+    let mut fx = Fx { bodies, alloc, ro: operands::readonly_calls(bodies, imports), layouts: BTreeMap::new() };
     for item in &items {
         let t: Vec<&str> = item.split_whitespace().collect();
         if t.first().is_some_and(|x| x.starts_with('L')) {

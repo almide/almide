@@ -17,7 +17,7 @@ fn fields(body: &str, w: &str, a: &str) -> Result<Report, String> {
     let bytes = module(body);
     let bodies = decode(&bytes)?;
     let mut r = Report::default();
-    check_fields(&bodies, 0, w, a, &mut r).map(|()| r)
+    check_fields(&bodies, 0, 0, w, a, &mut r).map(|()| r)
 }
 
 // ── a record: its site and a field read ────────────────────────────────────
@@ -145,4 +145,36 @@ fn a_store_between_the_test_and_the_re_load_is_refused() {
     // `between` adds 3 instructions before the bind.
     let body = nested("local.get 0 i32.const 0 i32.store offset=20");
     assert!(fields(&body, w, "-;-;1:23").unwrap_err().contains("tag test"));
+}
+
+/// A call between the test and the re-load: refused when the callee may
+/// write memory, accepted when its body only reads.
+fn with_callee(callee: &str) -> Vec<u8> {
+    wat::parse_str(format!(
+        r#"(module (memory 1)
+             (func $alloc (param i32) (result i32) i32.const 64)
+             (func $main (local i32 i32 i64) {})
+             (func $callee {callee}))"#,
+        nested("call $callee")
+    ))
+    .expect("wat")
+}
+
+fn nested_call(callee: &str) -> Result<Report, String> {
+    let bytes = with_callee(callee);
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    // `call` adds one instruction before the bind.
+    check_fields(&bodies, 0, 0, "L4 c0 n2 z8 o0 w4;L4 c1 n2 z16 o0 w4 o8 w8;a4 c1 f1", "-;-;1:21", &mut r).map(|()| r)
+}
+
+#[test]
+fn a_read_only_call_between_the_test_and_the_re_load_is_accepted() -> Result<(), String> {
+    assert_eq!(nested_call("i32.const 0 i32.load drop")?.field_guarded, 1);
+    Ok(())
+}
+
+#[test]
+fn a_writing_call_between_the_test_and_the_re_load_is_refused() {
+    assert!(nested_call("i32.const 0 i32.const 1 i32.store").unwrap_err().contains("tag test"));
 }
