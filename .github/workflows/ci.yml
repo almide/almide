@@ -1057,6 +1057,56 @@ jobs:
           cargo miri setup
           cargo miri test -p almide-str
 
+  miri-asan-slice:
+    # #4009, owner ruling 2026-10-30: Miri and AddressSanitizer judge a slice
+    # of the spec/wasm_cross corpus's generated crates on every PR, merge
+    # group and push; the full corpus stays nightly (miri-nightly.yml, ~80 and
+    # ~25 runner minutes). scripts/miri-asan-slice.sh takes scripts/lib/
+    # ci-slice.sh's 1-in-k slice plus the fixtures the change touches, with
+    # the offset stepped by the run counter, so every program is judged at
+    # least once in any k consecutive runs (Miri k = 12, ASan k = 4: the
+    # measured heaviest offset of each fits the ~10-minute budget). Each slice
+    # also runs the runtime-unsafe boundary program, so a change to the
+    # runtime's `unsafe` is judged on the PR that makes it. The verdict
+    # scripts and their controls are the nightly's: UB / ASAN fails the job.
+    name: ${{ matrix.tool == 'miri' && 'Miri' || 'AddressSanitizer' }} slice (generated Rust)
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [miri, asan]
+    env:
+      MIRI_ASAN_ROTATION: ${{ github.run_number }}
+      # A push judges what it brought in: its own touched fixtures join the slice.
+      ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
+      ALMIDE_BIN: /tmp/almide-bin/almide
+      MIRI_TOOLCHAIN: nightly-2026-08-01
+      ASAN_TOOLCHAIN: nightly-2026-08-01
+      # A stress fixture Miri cannot finish is cut off and reported, not
+      # judged, at the nightly too; here sooner, so it cannot hold the slice.
+      MIRI_TIMEOUT: "240"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: nightly-2026-08-01
+          components: ${{ matrix.tool == 'miri' && 'miri, rust-src' || 'rust-src' }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Setup the built compiler
+        run: chmod +x /tmp/almide-bin/almide
+      - name: Miri sysroot
+        if: matrix.tool == 'miri'
+        run: cargo +nightly-2026-08-01 miri setup
+      - name: The slice under ${{ matrix.tool }}
+        run: bash scripts/miri-asan-slice.sh ${{ matrix.tool }}
+
   gpu-parity:
     name: GPU parity (almide-gpu-run on lavapipe)
     needs: changes
@@ -1235,6 +1285,14 @@ jobs:
           case "$n" in *"is outside [permissions] fs"*) ;; *) echo "native scoped read outside the grant was not refused"; exit 1 ;; esac
           case "$n" in *secret*) echo "the scoped read leaked the outside"; exit 1 ;; esac
           [ "$n" = "$w" ] || { echo "the scoped answers differ between the legs"; exit 1; }
+
+      # runtime/rs/src/sys.rs's Windows foreign calls on every develop push, not
+      # only on release PRs (build-cross): BCryptGenRandom (random.bytes) and
+      # SetConsoleCtrlHandler (http.serve's Ctrl-C stop), whose add / remove /
+      # second-remove round trip is the site's boundary test (#4009, #4007).
+      - name: Runtime foreign calls on Windows (entropy, console handler)
+        shell: bash
+        run: cargo test --release --test runtime_random_float_construction_test
 
   # ═══════════════════════════════════════════════
   # WASM host-arch codegen determinism
@@ -2256,7 +2314,8 @@ jobs:
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
           # The runtime's per-OS entropy arm (random.bytes, C-394), judged on
-          # each OS: a missing arm made every Windows random.bytes abort.
+          # each OS: a missing arm made every Windows random.bytes abort. On
+          # Windows the file also round-trips SetConsoleCtrlHandler (#4009).
           cargo test --test runtime_random_float_construction_test
           if [ "${{ runner.os }}" = "Windows" ]; then
             # The rustc floor on Windows (#4110, CVE-2024-24576 is a Windows
