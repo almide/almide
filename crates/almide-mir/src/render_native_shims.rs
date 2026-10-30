@@ -3,6 +3,14 @@
 //! expression so the differential gate pins byte-equality. One table row per
 //! shim: (MIR call name, param types, return type, Rust source). Adding a
 //! shim is adding a row; `shim` itself never changes.
+//!
+//! This table is a legacy name list (proofs/name-keyed-sites.toml) and only
+//! shrinks: a stdlib fn whose declaration names a native runtime body
+//! (`@intrinsic`) reaches the floor through `crate::native_floor`, which reads
+//! that declaration, and its row here was removed (#4006). What remains has
+//! no such declaration (`print_str`, `__str_concat`, the checked-division
+//! lanes, the Almide-bodied `int.pow`) or a v0 body the declared route walls
+//! on (`string.to_upper` reaches a runtime trait method).
 
 use super::render_native::NTy;
 
@@ -24,63 +32,20 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("string.eq", &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_eq(a: &str, b: &str) -> i64 { (a == b) as i64 }"),
-    ("string.len", // Codepoint count, NOT byte length (C-016 discipline).
-            &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }"),
     // String predicates/transforms: each shim is the EXACT v0 native oracle
     // expression (runtime/rs/src/string.rs delegates to Rust std the same way),
     // so the differential gate pins byte-equality, and C-016/C-019/C-020's
     // full-Unicode discipline carries over unchanged.
-    ("string.contains", &[NTy::Str, NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_contains(s: &str, sub: &str) -> i64 { s.contains(sub) as i64 }"),
-    ("string.starts_with", &[NTy::Str, NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_starts_with(s: &str, p: &str) -> i64 { s.starts_with(p) as i64 }"),
-    ("string.ends_with", &[NTy::Str, NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_ends_with(s: &str, p: &str) -> i64 { s.ends_with(p) as i64 }"),
     ("string.to_upper", &[NTy::Str],
             Some(NTy::Str),
             "fn rt_string_to_upper(s: &str) -> AlmideString {\n    // C-412: a non-ASCII scalar whose mapping holds ASCII stays unchanged.\n    let mut out = String::with_capacity(s.len());\n    for c in s.chars() { let m = c.to_uppercase(); if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(c) } else { out.extend(m) } }\n    AlmideString::from(out)\n}"),
     ("string.to_lower", &[NTy::Str],
             Some(NTy::Str),
             "fn rt_string_to_lower(s: &str) -> AlmideString {\n    // C-412: walk str::to_lowercase (Final_Sigma context) in step with each scalar's span.\n    let full = s.to_lowercase();\n    let mut lowered = full.chars();\n    let mut out = String::with_capacity(full.len());\n    for c in s.chars() { let span: String = lowered.by_ref().take(c.to_lowercase().count()).collect(); if !c.is_ascii() && span.chars().any(|x| x.is_ascii()) { out.push(c) } else { out.push_str(&span) } }\n    AlmideString::from(out)\n}"),
-    ("string.trim", &[NTy::Str],
-            Some(NTy::Str),
-            "fn rt_string_trim(s: &str) -> AlmideString { AlmideString::from(s.trim()) }"),
-    // #4006: four floor rows the corpus walls on most, each the v0 oracle's
-    // body (runtime/rs/src/string.rs, math.rs; stdlib/bool.almd).
+    // #4006: the v0 oracle's body (stdlib/bool.almd).
     ("bool.to_string", &[NTy::I64],
             Some(NTy::Str),
             "fn rt_bool_to_string(b: i64) -> AlmideString { AlmideString::from(if b != 0 { \"true\" } else { \"false\" }) }"),
-    ("string.replace", &[NTy::Str, NTy::Str, NTy::Str],
-            Some(NTy::Str),
-            "fn rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { AlmideString::from(s.replace(from, to)) }"),
-    // CODEPOINT indices clamped to [0, char_count] (almide_rt_string_slice).
-    ("string.slice", &[NTy::Str, NTy::I64, NTy::I64],
-            Some(NTy::Str),
-            "fn rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {\n    let s_idx = start.max(0) as usize;\n    let e_idx = end.max(0) as usize;\n    if s_idx >= e_idx { AlmideString::new() } else { AlmideString::from(s.chars().skip(s_idx).take(e_idx - s_idx).collect::<String>()) }\n}"),
-    ("string.is_empty", &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_is_empty(s: &str) -> i64 { s.is_empty() as i64 }"),
-    ("string.is_alpha", &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_is_alpha(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphabetic())) as i64 }"),
-    ("string.is_alphanumeric", &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_is_alphanumeric(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphanumeric())) as i64 }"),
-    ("string.capitalize", &[NTy::Str],
-            Some(NTy::Str),
-            "fn rt_string_capitalize(s: &str) -> AlmideString {\n    // C-412: the first scalar upper-cases under the to_upper rule.\n    let mut c = s.chars();\n    let mut out = String::with_capacity(s.len());\n    if let Some(f) = c.next() { let m = f.to_uppercase(); if !f.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(f) } else { out.extend(m) } out.push_str(c.as_str()); }\n    AlmideString::from(out)\n}"),
-    ("string.take", &[NTy::Str, NTy::I64],
-            Some(NTy::Str),
-            "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n.max(0) as usize).collect::<String>()) }"),
-    // A NaN maps to the one canonical quiet-NaN pattern (almide_rt_float_to_bits).
-    ("float.to_bits", &[NTy::F64],
-            Some(NTy::I64),
-            "fn rt_float_to_bits(f: f64) -> i64 { if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 } }"),
     // Square-and-multiply with wrapping steps; a negative exponent is the
     // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
     // `int.pow` is the public name (`math.pow` left the surface, R-math-01),
@@ -89,46 +54,10 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
-    // #1869: `list.range` joins the floor as a closed shim. The lowering
-    // materializes a `let`-bound range that is indexed or measured as
-    // `CallFn list.range(s, e)`; without a floor entry the whole program
-    // left the trust-spine for the v3 codegen — silently — on every such
-    // read. The body is the v3 runtime's `almide_rt_list_range` verbatim
-    // (runtime/rs/src/list.rs): empty when e <= s, the span through
-    // `saturating_sub` so `end - start` cannot wrap, and a span the machine
-    // cannot satisfy is the C-197 `Error: out of memory` abort via
-    // `try_reserve_exact` — never `(s..e).collect()`'s raw `capacity
-    // overflow` panic (range_materialize_oom reads exit 1 + that line on
-    // both legs). Rung-4 owned `Vec<i64>`.
-    // #1869: `list.len` over a rung-4 scalar list — the read that, with an
-    // index, forces the `list.range` materialization above; borrowed, like
-    // every heap arg at the MIR call boundary.
-    ("list.len", &[NTy::VecRef],
-            Some(NTy::I64),
-            "fn rt_list_len(xs: &[i64]) -> i64 {\n    xs.len() as i64\n}"),
-    ("list.range", &[NTy::I64, NTy::I64],
-            Some(NTy::Vec),
-            "fn rt_list_range(s: i64, e: i64) -> Vec<i64> {\n    let count = e.saturating_sub(s).max(0) as usize;\n    let mut v: Vec<i64> = Vec::new();\n    if v.try_reserve_exact(count).is_err() {\n        eprintln!(\"Error: out of memory\");\n        std::process::exit(1);\n    }\n    v.extend(s..e);\n    v\n}"),
-    ("string.repeat", &[NTy::Str, NTy::I64],
-            Some(NTy::Str),
-            // The SAME clamp + ceiling as the v0 runtime and the wasm self-host
-            // (stdlib/string_repeat.almd): a negative count is the empty string
-            // (C-054), and a result past the shared 2^31 ceiling aborts in the
-            // T6 form. The bare `s.repeat(n as usize)` turned `repeat(s, -1)`
-            // into a capacity-overflow PANIC (exit 101) on this leg while the
-            // wasm leg printed normally — a crash-form divergence the C-161
-            // rule forbids (differential fuzz, seed 1785015406589852000 index
-            // 1012). Keep in sync with ALMIDE_REPEAT_MAX_BYTES.
-            "fn rt_string_repeat(s: &str, n: i64) -> AlmideString {\n    let n = n.max(0);\n    if (s.len() as i64).saturating_mul(n) > (1i64 << 31) {\n        eprintln!(\"Error: repeat result too large\");\n        std::process::exit(1);\n    }\n    AlmideString::from(s.repeat(n as usize))\n}"),
     ("string.cmp", // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
             &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_cmp(a: &str, b: &str) -> i64 {\n    match a.cmp(b) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 }\n}"),
-    ("float.to_string", // The EXACT v0 native oracle (runtime/rs/src/float.rs::almide_rt_float_to_string):
-            // shortest round-trip Display, integral values forced to a `.0` tail.
-            &[NTy::F64],
-            Some(NTy::Str),
-            "fn rt_float_to_string(n: f64) -> AlmideString {\n    let s = format!(\"{}\", n);\n    AlmideString::from(if n.fract() == 0.0 && !s.contains('.') && !s.contains(\"inf\") && !s.contains(\"NaN\") {\n        format!(\"{}.0\", s)\n    } else {\n        s\n    })\n}"),
     ("__chk_div", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             "fn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a / b\n}"),
