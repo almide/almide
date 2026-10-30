@@ -50,6 +50,10 @@ pub(crate) enum FloorParam {
     List(ListElem),
     /// `Bytes` — the runtime borrows its `Vec<u8>` (`&Vec<u8>` / `&[u8]`).
     Bytes,
+    /// A bare type parameter `A` that is the element of a `List[A]` param:
+    /// the runtime takes the element by value (`T`, false) or by reference
+    /// (`&T`, true), and the call site's list decides its kind.
+    Elem(bool),
 }
 
 /// A declared list's element type.
@@ -78,6 +82,31 @@ pub(crate) enum FloorRet {
     ListStr,
     /// `Bytes` — the runtime's own `Vec<u8>`.
     Bytes,
+    /// `Int? | Bool? | Float?` — a runtime `Option` of the scalar, carried as
+    /// the native `Option<i64>` (`NTy::Opt`; a Float as its bits).
+    Opt(Scalar),
+    /// A return typed by the element `A` of the call's `List[A]` param: `A`,
+    /// `A?` or `List[A]` (the call site's list decides the kind).
+    Elem(ElemRet),
+}
+
+/// A scalar kind a runtime value converts from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Scalar {
+    Int,
+    Bool,
+    Float,
+}
+
+/// The shape of an element-typed return.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ElemRet {
+    /// `A`.
+    Value,
+    /// `A?`.
+    Opt,
+    /// `List[A]`.
+    List,
 }
 
 /// One declared floor function.
@@ -147,20 +176,35 @@ pub fn declared_floor_source() -> String {
 }
 
 fn derive(call: &str) -> Option<FloorFn> {
-    let (module, func) = call.split_once('.')?;
+    derive_explained(call).ok()
+}
+
+/// Why `call` is not on the declared floor: the first step of the
+/// derivation that refused it (a to-do list for widening the floor).
+pub fn refusal(call: &str) -> Option<String> {
+    derive_explained(call).err()
+}
+
+fn derive_explained(call: &str) -> Result<FloorFn, String> {
+    let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
     if !almide_lang::stdlib_info::is_bundled_module(module) {
-        return None;
+        return Err("not a bundled stdlib module".into());
     }
-    let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    let program = almide_lang::stdlib_info::bundled_source(module)
+        .and_then(almide_lang::parse_cached)
+        .ok_or("the module's source does not parse")?;
     let mut decls = program.decls.iter().filter_map(|d| match d {
         Decl::Fn { name, effect, attrs, generics, params, return_type, .. } if name.as_str() == func => {
             Some((effect, attrs, generics, params, return_type))
         }
         _ => None,
     });
-    let (effect, attrs, generics, params, ret) = decls.next()?;
-    if decls.next().is_some() || effect.unwrap_or(false) {
-        return None;
+    let (effect, attrs, generics, params, ret) = decls.next().ok_or("no declaration")?;
+    if decls.next().is_some() {
+        return Err("declared more than once".into());
+    }
+    if effect.unwrap_or(false) {
+        return Err("an effect fn".into());
     }
     let symbol = attrs
         .iter()
@@ -169,7 +213,8 @@ fn derive(call: &str) -> Option<FloorFn> {
         .and_then(|a| match &a.value {
             AttrValue::String { value } => Some(value.to_string()),
             _ => None,
-        })?;
+        })
+        .ok_or("no @intrinsic (an Almide body)")?;
     let type_params: BTreeSet<String> = generics
         .iter()
         .flatten()
@@ -177,20 +222,40 @@ fn derive(call: &str) -> Option<FloorFn> {
         .collect();
     let fparams: Vec<FloorParam> = params
         .iter()
-        .map(|p| floor_param(&p.ty, &type_params))
-        .collect::<Option<_>>()?;
-    let fret = floor_ret(ret)?;
+        .map(|p| floor_param(&p.ty, &type_params).ok_or_else(|| format!("param type {:?} outside the per-type map", p.ty)))
+        .collect::<Result<_, _>>()?;
+    let fret = floor_ret(ret, &type_params).ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
     let rt = runtime_index();
-    let body = rt.items.get(symbol.as_str())?;
-    let (rust_params, rust_ret) = rust_signature(body.text)?;
+    let body = rt.items.get(symbol.as_str()).ok_or_else(|| format!("`{symbol}` is not a takeable runtime item"))?;
+    let (rust_params, rust_ret) = rust_signature(body.text).ok_or("the runtime signature does not parse")?;
     if rust_params.len() != fparams.len() || !fparams.iter().zip(&rust_params).all(|(p, r)| param_agrees(*p, r)) {
-        return None;
+        return Err(format!("runtime params {rust_params:?} disagree with the declaration"));
     }
     if !ret_agrees(fret, &rust_ret) {
-        return None;
+        return Err(format!("runtime return `{rust_ret}` disagrees with the declaration"));
     }
-    let items = closure(&symbol, rt)?;
-    Some(FloorFn { symbol, params: fparams, ret: fret, items })
+    // An element-typed param or return needs the list that decides it, and
+    // a runtime generic with no bound: a native `Vec<i64>` may carry Float
+    // bits, which equality and ordering on `i64` would misjudge.
+    let elem_typed = matches!(fret, FloorRet::Elem(_)) || fparams.iter().any(|p| matches!(p, FloorParam::Elem(_)));
+    if elem_typed {
+        if !fparams.iter().any(|p| matches!(p, FloorParam::List(ListElem::Any))) {
+            return Err("an element-typed param or return with no `List[A]` param to decide it".into());
+        }
+        if runtime_generics_bounded(body.text) {
+            return Err("an element-typed runtime generic with a bound".into());
+        }
+    }
+    let fparams: Vec<FloorParam> = fparams
+        .into_iter()
+        .zip(&rust_params)
+        .map(|(p, r)| match p {
+            FloorParam::Elem(_) => FloorParam::Elem(squash(r).starts_with('&')),
+            other => other,
+        })
+        .collect();
+    let items = closure(&symbol, rt).ok_or("the body reaches a name the native header cannot carry")?;
+    Ok(FloorFn { symbol, params: fparams, ret: fret, items })
 }
 
 fn simple(t: &TypeExpr) -> Option<&str> {
@@ -208,6 +273,9 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "Float" => Some(FloorParam::Float),
             "String" => Some(FloorParam::Str),
             "Bytes" => Some(FloorParam::Bytes),
+            // Whether it is a list's element is checked against the params,
+            // and its by-value/by-reference mode against the runtime, below.
+            a if type_params.contains(a) => Some(FloorParam::Elem(false)),
             _ => None,
         },
         TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => {
@@ -223,8 +291,28 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
     }
 }
 
-fn floor_ret(t: &TypeExpr) -> Option<FloorRet> {
+fn scalar_of(name: &str) -> Option<Scalar> {
+    match name {
+        "Int" => Some(Scalar::Int),
+        "Bool" => Some(Scalar::Bool),
+        "Float" => Some(Scalar::Float),
+        _ => None,
+    }
+}
+
+fn floor_ret(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
+    let is_param = |e: &TypeExpr| simple(e).is_some_and(|a| type_params.contains(a));
     match t {
+        TypeExpr::Simple { name } if type_params.contains(name.as_str()) => Some(FloorRet::Elem(ElemRet::Value)),
+        TypeExpr::Generic { name, args } if is_option_name(name.as_str()) && args.len() == 1 => {
+            if is_param(&args[0]) {
+                return Some(FloorRet::Elem(ElemRet::Opt));
+            }
+            scalar_of(simple(&args[0])?).map(FloorRet::Opt)
+        }
+        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 && is_param(&args[0]) => {
+            Some(FloorRet::Elem(ElemRet::List))
+        }
         TypeExpr::Simple { name } => match name.as_str() {
             "Unit" => Some(FloorRet::Unit),
             "Int" => Some(FloorRet::Int),
@@ -251,6 +339,11 @@ fn floor_ret(t: &TypeExpr) -> Option<FloorRet> {
     }
 }
 
+/// `T?` parses as the generic `?`; `Option[T]` spells it out.
+fn is_option_name(n: &str) -> bool {
+    n == "?" || n == "Option"
+}
+
 fn squash(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }
@@ -263,6 +356,7 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Float => r == "f64",
         FloorParam::Str => r == "&str",
         FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
+        FloorParam::Elem(_) => is_type_param(&r) || r.strip_prefix('&').is_some_and(is_type_param),
         FloorParam::List(elem) => {
             let inner = r
                 .strip_prefix("&[")
@@ -276,6 +370,15 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
             }
         }
     }
+}
+
+/// Whether the runtime fn's generic parameter list carries a bound or a
+/// `where` clause.
+fn runtime_generics_bounded(text: &str) -> bool {
+    let head = text.split('(').next().unwrap_or("");
+    let generics_bound = head.split_once('<').is_some_and(|(_, g)| g.contains(':'));
+    let sig_end = text.find('{').unwrap_or(text.len());
+    generics_bound || text[..sig_end].contains(" where ")
 }
 
 fn is_type_param(s: &str) -> bool {
@@ -292,7 +395,13 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Float => t == "f64",
         FloorRet::Str => string(&t),
         FloorRet::ListInt => t == "Vec<i64>",
-        FloorRet::ListStr => t == "Vec<String>",
+        FloorRet::ListStr => t == "Vec<String>" || t == "Vec<AlmideString>",
+        FloorRet::Opt(Scalar::Int) => t == "Option<i64>",
+        FloorRet::Opt(Scalar::Bool) => t == "Option<bool>",
+        FloorRet::Opt(Scalar::Float) => t == "Option<f64>",
+        FloorRet::Elem(ElemRet::Value) => is_type_param(&t),
+        FloorRet::Elem(ElemRet::Opt) => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::Elem(ElemRet::List) => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Res => t
             .strip_prefix("Result<")
@@ -787,6 +896,14 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
         return Err(wall(format!("native: floor call `{name}` arity mismatch")));
     }
     let mismatch = || wall(format!("native: floor call `{name}` arg type mismatch"));
+    // The element kind of the call's `List[A]` arg, for an element-typed
+    // param or return: an Int list's `i64`, a String list's `AlmideString`.
+    let elem_str = f
+        .params
+        .iter()
+        .zip(args)
+        .find(|(p, _)| matches!(p, FloorParam::List(ListElem::Any)))
+        .map(|(_, (_, got))| matches!(got, NTy::VecStr | NTy::VecStrRef));
     let mut rendered = Vec::new();
     for ((code, got), p) in args.iter().zip(&f.params) {
         rendered.push(match p {
@@ -797,6 +914,15 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
                 .then(|| as_str_arg(code, *got))
                 .ok_or_else(mismatch)?,
             FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
+            FloorParam::Elem(by_ref) => {
+                let v = match (elem_str, got) {
+                    (Some(false), NTy::I64) => code.clone(),
+                    (Some(true), NTy::Str) => format!("{code}.clone()"),
+                    (Some(true), NTy::StrRef) => format!("AlmideString::from({code})"),
+                    _ => return Err(mismatch()),
+                };
+                if *by_ref { format!("&{v}") } else { v }
+            }
             FloorParam::Bytes => match got {
                 NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
                 NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.clone(),
@@ -821,5 +947,17 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
             format!("({call}).into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()"),
             Some(NTy::VecStr),
         ),
+        FloorRet::Opt(Scalar::Int) => (call, Some(NTy::Opt)),
+        FloorRet::Opt(Scalar::Bool) => (format!("({call}).map(|b| b as i64)"), Some(NTy::Opt)),
+        FloorRet::Opt(Scalar::Float) => (format!("({call}).map(|x| x.to_bits() as i64)"), Some(NTy::Opt)),
+        FloorRet::Elem(shape) => match (elem_str, shape) {
+            (Some(false), ElemRet::Value) => (call, Some(NTy::I64)),
+            (Some(false), ElemRet::Opt) => (call, Some(NTy::Opt)),
+            (Some(false), ElemRet::List) => (call, Some(NTy::Vec)),
+            (Some(true), ElemRet::Value) => (call, Some(NTy::Str)),
+            (Some(true), ElemRet::List) => (call, Some(NTy::VecStr)),
+            // An Option of a String is a heap payload, outside this carrier.
+            _ => return Err(wall(format!("native: floor call `{name}` element-typed result outside the native carriers"))),
+        },
     })
 }
