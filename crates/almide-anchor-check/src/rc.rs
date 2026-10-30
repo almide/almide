@@ -597,13 +597,15 @@ pub fn check_rc(
             let frame_owned = owned_at(&calls[i].2, k);
             (!frame_owned && in_window(k)) || aborting.contains(&k)
         };
-        // A call a move (`m` / `h`) could take is tried after the others: a
-        // move is matched last and never displaces an event, so an unnamed
-        // event that took such a call first would leave the move's release
-        // over and an instruction the window's own events account unmatched.
+        // A call a move (`m` / `h`) could take is tried after the others —
+        // before any other preference (a hold's name makes its release read
+        // as a frame credit, which would otherwise sort it first): a move is
+        // matched last and never displaces an event, so an unnamed event that
+        // took such a call first would leave the move's release over and an
+        // instruction the window's own events account unmatched.
         let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| is_move(evs[e].0) && fits(e, i))).collect();
         let mut by_pref: Vec<usize> = (0..nc).collect();
-        by_pref.sort_by_key(|&i| (i >= live, fallback(i), move_fits[i], in_window(calls[i].0), calls[i].0));
+        by_pref.sort_by_key(|&i| (i >= live, move_fits[i], fallback(i), in_window(calls[i].0), calls[i].0));
         by_pref.extend(nc..nc + takers.len());
         let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
         fn augment(
