@@ -122,13 +122,11 @@ pub fn declared_floor_calls() -> Vec<String> {
 
 /// The Rust source of every declared floor body and the items it reaches,
 /// each once, under the native header — what the compile gate hands rustc.
+/// rustc checks an unused item, a generic one included, all the same.
 pub fn declared_floor_source() -> String {
     let mut items: BTreeSet<&'static str> = BTreeSet::new();
-    let mut calls = String::new();
-    for (i, call) in declared_floor_calls().iter().enumerate() {
-        let f = declared(call).expect("enumerated from declared()");
-        items.extend(f.items.iter().copied());
-        calls.push_str(&format!("#[allow(unused)] fn floor_ref_{i}() {{ let _ = {} as usize; }}\n", f.symbol));
+    for call in declared_floor_calls() {
+        items.extend(declared(&call).expect("enumerated from declared()").items.iter().copied());
     }
     let mut out = String::from("#![allow(dead_code, unused_imports, unused_variables, unused_mut, unused_parens)]\n");
     out.push_str(&crate::render_native_str::almide_string_alias());
@@ -138,7 +136,6 @@ pub fn declared_floor_source() -> String {
         out.push_str(it);
         out.push('\n');
     }
-    out.push_str(&calls);
     out.push_str("fn main() {}\n");
     out
 }
@@ -302,6 +299,10 @@ struct RuntimeIndex {
     /// Every name the runtime and its prelude define (a type, a macro, a
     /// module, a twice-defined fn, …): reaching one that is not in `items` walls.
     defined: BTreeSet<&'static str>,
+    /// The methods the runtime's and the prelude's own traits declare
+    /// (`IntoAlmide::into_almide`): a body calling one needs the trait and
+    /// its impls, which the header does not carry.
+    trait_methods: BTreeSet<&'static str>,
 }
 
 fn runtime_index() -> &'static RuntimeIndex {
@@ -325,10 +326,12 @@ fn runtime_index() -> &'static RuntimeIndex {
         // runtime crate's source (`emit_runtime_crate`).
         let prelude: &'static str = Box::leak(almide_codegen::emit_runtime_crate().into_boxed_str());
         let mut defined: BTreeSet<&'static str> = defined_names(prelude);
+        let mut trait_methods = trait_method_names(prelude);
         for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
             defined.extend(defined_names(src));
+            trait_methods.extend(trait_method_names(src));
         }
-        RuntimeIndex { items, defined }
+        RuntimeIndex { items, defined, trait_methods }
     })
 }
 
@@ -340,8 +343,8 @@ enum ItemKind {
 }
 
 /// The top-level items of a runtime module: (kind, name, whole text, whether
-/// a `#[cfg…]` attribute precedes it). An item starts at column 0.
-fn top_level_items(src: &'static str) -> Vec<(ItemKind, &'static str, &'static str, bool)> {
+/// a `#[cfg…]` attribute precedes it).
+fn top_level_items<'a>(src: &'a str) -> Vec<(ItemKind, &'a str, &'a str, bool)> {
     let toks = lex(src);
     let mut out = Vec::new();
     let mut i = 0;
@@ -352,7 +355,7 @@ fn top_level_items(src: &'static str) -> Vec<(ItemKind, &'static str, &'static s
             i += 1;
             continue;
         }
-        if t.text == "#" && t.col0 {
+        if t.text == "#" {
             // An attribute: `#[...]` (skip to its closing bracket).
             let start = i;
             let mut j = i + 1;
@@ -361,10 +364,6 @@ fn top_level_items(src: &'static str) -> Vec<(ItemKind, &'static str, &'static s
             }
             cfg_attr |= toks[start..j].iter().any(|t| t.text == "cfg" || t.text == "cfg_attr");
             i = j + 1;
-            continue;
-        }
-        if !t.col0 {
-            i += 1;
             continue;
         }
         // Visibility and qualifiers.
@@ -411,17 +410,23 @@ fn top_level_items(src: &'static str) -> Vec<(ItemKind, &'static str, &'static s
 }
 
 /// The index of the token that ends the item starting at `from`: the `}`
-/// closing its first depth-0 block, or a depth-0 `;` met before any block.
+/// closing its first block, or a `;` met before any block, both outside any
+/// `()` / `[]` / `<>` nesting (`[u8; 4]` is not an end).
 fn item_end(toks: &[Tok], from: usize) -> usize {
     let base = toks[from].depth;
+    let mut nest = 0i32;
     let mut j = from;
     while j < toks.len() {
         let t = &toks[j];
-        if t.depth == base && t.text == ";" {
+        match t.text {
+            "(" | "[" => nest += 1,
+            ")" | "]" => nest -= 1,
+            _ => {}
+        }
+        if t.depth == base && nest == 0 && t.text == ";" {
             return j;
         }
-        if t.text == "{" && t.depth == base {
-            // Find the matching close: the next `}` back at `base`.
+        if t.text == "{" && t.depth == base && nest == 0 {
             let mut k = j + 1;
             while k < toks.len() && !(toks[k].text == "}" && toks[k].depth == base) {
                 k += 1;
@@ -472,7 +477,7 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
 /// reaches something the native header cannot carry.
 fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Option<Vec<&'static str>> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
-    let mut todo = vec![rt.items.get_key_value(symbol)?.0.to_owned()];
+    let mut todo: Vec<String> = vec![symbol.to_string()];
     let mut out = Vec::new();
     while let Some(name) = todo.pop() {
         let (&key, item) = rt.items.get_key_value(name.as_str())?;
@@ -506,6 +511,9 @@ fn references(text: &str) -> Option<Vec<String>> {
         }
         let prev = i.checked_sub(1).map(|k| toks[k].text);
         let next = toks.get(i + 1).map(|t| t.text);
+        if prev == Some(".") && rt.trait_methods.contains(s) {
+            return None; // a method of the runtime's own traits
+        }
         if matches!(prev, Some("." | "::" | "'")) {
             continue; // a method, a field, a path tail, a lifetime
         }
@@ -547,16 +555,29 @@ fn header_items() -> &'static BTreeSet<&'static str> {
     })
 }
 
-/// Every name `src` defines with an item keyword, at any depth.
+/// Every name `src` defines at its top level, and inside the `mod` blocks it
+/// defines there (a runtime module re-exports one with a glob,
+/// `pub use almide_libm::*`, so its names are in scope unqualified).
 fn defined_names(src: &str) -> BTreeSet<&str> {
-    let toks = lex(src);
     let mut out = BTreeSet::new();
-    for w in toks.windows(3) {
-        if matches!(w[0].text, "fn" | "struct" | "enum" | "const" | "static" | "mod" | "type" | "trait" | "union") && is_ident(w[1].text) {
-            out.insert(w[1].text);
+    for (kind, name, text, _) in top_level_items(src) {
+        out.insert(name);
+        let toks = lex(text);
+        let is_mod = kind == ItemKind::Other && toks.iter().take_while(|t| t.text != name).any(|t| t.text == "mod");
+        if let (true, Some(open), Some(close)) = (is_mod, text.find('{'), text.rfind('}')) {
+            out.extend(defined_names(&text[open + 1..close]));
         }
-        if w[0].text == "macro_rules" && w[1].text == "!" {
-            out.insert(w[2].text);
+    }
+    out
+}
+
+/// The fn names the top-level `trait` items of `src` declare.
+fn trait_method_names(src: &str) -> BTreeSet<&str> {
+    let mut out = BTreeSet::new();
+    for (kind, name, text, _) in top_level_items(src) {
+        let toks = lex(text);
+        if kind == ItemKind::Other && toks.iter().take_while(|t| t.text != name).any(|t| t.text == "trait") {
+            out.extend(toks.windows(2).filter(|w| w[0].text == "fn").map(|w| w[1].text));
         }
     }
     out
@@ -574,8 +595,6 @@ struct Tok<'a> {
     off: usize,
     /// Brace depth (`{}` only) BEFORE this token.
     depth: u32,
-    /// Starts at column 0.
-    col0: bool,
 }
 
 fn lex(src: &str) -> Vec<Tok<'_>> {
@@ -585,7 +604,6 @@ fn lex(src: &str) -> Vec<Tok<'_>> {
     let mut depth: u32 = 0;
     while i < b.len() {
         let c = b[i];
-        let col0 = i == 0 || b[i - 1] == b'\n';
         if c.is_ascii_whitespace() {
             i += 1;
         } else if b[i..].starts_with(b"//") {
@@ -610,24 +628,24 @@ fn lex(src: &str) -> Vec<Tok<'_>> {
             }
         } else if c == b'r' && matches!(b.get(i + 1), Some(b'"' | b'#')) && raw_string_end(b, i + 1).is_some() {
             let end = raw_string_end(b, i + 1).unwrap_or(b.len());
-            out.push(Tok { text: &src[i..end], off: i, depth, col0 });
+            out.push(Tok { text: &src[i..end], off: i, depth });
             i = end;
         } else if c == b'b' && b.get(i + 1) == Some(&b'"') {
             let end = string_end(b, i + 1);
-            out.push(Tok { text: &src[i..end], off: i, depth, col0 });
+            out.push(Tok { text: &src[i..end], off: i, depth });
             i = end;
         } else if c == b'"' {
             let end = string_end(b, i);
-            out.push(Tok { text: &src[i..end], off: i, depth, col0 });
+            out.push(Tok { text: &src[i..end], off: i, depth });
             i = end;
         } else if c == b'\'' || (c == b'b' && b.get(i + 1) == Some(&b'\'')) {
             let q = if c == b'b' { i + 1 } else { i };
             // A char literal ('x', '\n', '\u{..}') or a lifetime ('a).
             if let Some(end) = char_end(b, q) {
-                out.push(Tok { text: &src[i..end], off: i, depth, col0 });
+                out.push(Tok { text: &src[i..end], off: i, depth });
                 i = end;
             } else {
-                out.push(Tok { text: "'", off: i, depth, col0 });
+                out.push(Tok { text: "'", off: i, depth });
                 i = q + 1;
             }
         } else if c.is_ascii_alphabetic() || c == b'_' || c >= 0x80 {
@@ -635,21 +653,21 @@ fn lex(src: &str) -> Vec<Tok<'_>> {
             while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] >= 0x80) {
                 i += 1;
             }
-            out.push(Tok { text: &src[s..i], off: s, depth, col0 });
+            out.push(Tok { text: &src[s..i], off: s, depth });
         } else if c.is_ascii_digit() {
             let s = i;
             while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || (b[i] == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))) {
                 i += 1;
             }
-            out.push(Tok { text: &src[s..i], off: s, depth, col0 });
+            out.push(Tok { text: &src[s..i], off: s, depth });
         } else if b[i..].starts_with(b"::") {
-            out.push(Tok { text: "::", off: i, depth, col0 });
+            out.push(Tok { text: "::", off: i, depth });
             i += 2;
         } else {
             if c == b'}' {
                 depth = depth.saturating_sub(1);
             }
-            out.push(Tok { text: &src[i..i + 1], off: i, depth, col0 });
+            out.push(Tok { text: &src[i..i + 1], off: i, depth });
             if c == b'{' {
                 depth += 1;
             }
