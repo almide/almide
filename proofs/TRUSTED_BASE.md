@@ -344,9 +344,23 @@ the same variable or the same field re-loaded with nothing that may write
 memory between). TRUSTED: that a block's static type is its layout (the
 representation, trusted already for the bounds and init witnesses; the IR is
 cast-free and FieldAssign is refused),
-and — the row #4279 adds — that a variant block's tag word keeps the case its
-construction site stored (no instruction rewrites it; the heap model carries
-no values). The runtime's own routines over these blocks (typed drop, copy,
+and the one row #4279 adds (owner ruling, 2026-10-30):
+
+> **TRUSTED (#4279): nothing rewrites a variant block's tag word after its
+> construction window.**
+> Scope: only the case a variant CASE-FIELD read relies on. Both ends are
+> checked on the bytes: the construction site records its tag store as field
+> 0 and `almide-anchor-check` requires that store to store the site's own case
+> constant; every recorded case-field read must sit under a tag test of its
+> own address for that case (`operands.rs` `case_guarded`). What is trusted is
+> only the span between them — that no instruction stores to the tag word in
+> between — because the heap model (`MemorySafe.v`) carries no values. Tag
+> reads themselves need no such row: field 0 is the tag word in every case
+> (`ITag`). The drill `case-field-unguarded` (scripts/witness-reinject.sh
+> anchors) moves a case field's read above its test and must read ANCHORS
+> REJECT.
+
+The runtime's own routines over these blocks (typed drop, copy,
 equality, comparison, display bodies) record nothing yet (#4278), and a
 nullary case is a static pool block outside the allocation model.
 
