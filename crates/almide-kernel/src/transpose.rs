@@ -21,15 +21,13 @@ pub fn transpose_8x8_naive(input: &[f32; 64]) -> [f32; 64] {
     out
 }
 
-/// Public entry. Per-target schedule (AVX on x86, simd128 on wasm), naive else.
+/// Public entry. The simd128 schedule on wasm; the algorithm itself, left to
+/// the autovectorizer, everywhere else. The x86 AVX shuffle network that
+/// stood here was `unsafe` and served no Almide program (only
+/// `transpose_f64` and `matmul` are reached from the runtime), so it was
+/// removed (#4342): no program's time moves. On its own 8x8 bench the plain
+/// tile measured 1.28x the shuffle network (512x512: 1.43x).
 pub fn transpose_8x8(input: &[f32; 64]) -> [f32; 64] {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx") {
-            // SAFETY: guarded by the runtime feature check.
-            return unsafe { transpose_8x8_avx(input) };
-        }
-    }
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     {
         return transpose_8x8_simd128(input);
@@ -96,102 +94,9 @@ fn transpose_8x8_simd128(input: &[f32; 64]) -> [f32; 64] {
     out
 }
 
-// ===================== schedule: AVX 3-pass shuffle network =====================
-// The "how", separated from the algorithm. Each pass is a named, independent
-// transform on the 8 row-vectors. The schedule is their composition.
-
-#[cfg(target_arch = "x86_64")]
-mod avx {
-    use std::arch::x86_64::*;
-
-    #[inline(always)]
-    pub unsafe fn load_rows(input: &[f32; 64]) -> [__m256; 8] {
-        let p = input.as_ptr();
-        [
-            _mm256_loadu_ps(p),
-            _mm256_loadu_ps(p.add(8)),
-            _mm256_loadu_ps(p.add(16)),
-            _mm256_loadu_ps(p.add(24)),
-            _mm256_loadu_ps(p.add(32)),
-            _mm256_loadu_ps(p.add(40)),
-            _mm256_loadu_ps(p.add(48)),
-            _mm256_loadu_ps(p.add(56)),
-        ]
-    }
-
-    /// pass 1: unpack adjacent rows within each 128-bit lane.
-    #[inline(always)]
-    pub unsafe fn pass_unpack(r: [__m256; 8]) -> [__m256; 8] {
-        [
-            _mm256_unpacklo_ps(r[0], r[1]),
-            _mm256_unpackhi_ps(r[0], r[1]),
-            _mm256_unpacklo_ps(r[2], r[3]),
-            _mm256_unpackhi_ps(r[2], r[3]),
-            _mm256_unpacklo_ps(r[4], r[5]),
-            _mm256_unpackhi_ps(r[4], r[5]),
-            _mm256_unpacklo_ps(r[6], r[7]),
-            _mm256_unpackhi_ps(r[6], r[7]),
-        ]
-    }
-
-    /// pass 2: shuffle 64-bit groups across the unpacked pairs.
-    #[inline(always)]
-    pub unsafe fn pass_shuffle(t: [__m256; 8]) -> [__m256; 8] {
-        [
-            _mm256_shuffle_ps(t[0], t[2], 0x44),
-            _mm256_shuffle_ps(t[0], t[2], 0xEE),
-            _mm256_shuffle_ps(t[1], t[3], 0x44),
-            _mm256_shuffle_ps(t[1], t[3], 0xEE),
-            _mm256_shuffle_ps(t[4], t[6], 0x44),
-            _mm256_shuffle_ps(t[4], t[6], 0xEE),
-            _mm256_shuffle_ps(t[5], t[7], 0x44),
-            _mm256_shuffle_ps(t[5], t[7], 0xEE),
-        ]
-    }
-
-    /// pass 3: permute 128-bit lanes to finish the transpose.
-    #[inline(always)]
-    pub unsafe fn pass_permute(s: [__m256; 8]) -> [__m256; 8] {
-        [
-            _mm256_permute2f128_ps(s[0], s[4], 0x20),
-            _mm256_permute2f128_ps(s[1], s[5], 0x20),
-            _mm256_permute2f128_ps(s[2], s[6], 0x20),
-            _mm256_permute2f128_ps(s[3], s[7], 0x20),
-            _mm256_permute2f128_ps(s[0], s[4], 0x31),
-            _mm256_permute2f128_ps(s[1], s[5], 0x31),
-            _mm256_permute2f128_ps(s[2], s[6], 0x31),
-            _mm256_permute2f128_ps(s[3], s[7], 0x31),
-        ]
-    }
-
-    #[inline(always)]
-    pub unsafe fn store_rows(rows: [__m256; 8]) -> [f32; 64] {
-        let mut out = [0.0f32; 64];
-        let q = out.as_mut_ptr();
-        _mm256_storeu_ps(q, rows[0]);
-        _mm256_storeu_ps(q.add(8), rows[1]);
-        _mm256_storeu_ps(q.add(16), rows[2]);
-        _mm256_storeu_ps(q.add(24), rows[3]);
-        _mm256_storeu_ps(q.add(32), rows[4]);
-        _mm256_storeu_ps(q.add(40), rows[5]);
-        _mm256_storeu_ps(q.add(48), rows[6]);
-        _mm256_storeu_ps(q.add(56), rows[7]);
-        out
-    }
-}
-
-/// The AVX schedule: load → unpack → shuffle → permute → store, composed.
-/// This single line *is* the schedule — recompose the passes to change it.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx")]
-unsafe fn transpose_8x8_avx(input: &[f32; 64]) -> [f32; 64] {
-    use avx::*;
-    store_rows(pass_permute(pass_shuffle(pass_unpack(load_rows(input)))))
-}
-
 /// Transpose an arbitrary `rows × cols` row-major f32 matrix into `out`
 /// (`cols × rows`). This is what `almide_rt` actually needs — Almide's matrices
-/// aren't 8x8. Full 8x8 tiles go through the SIMD kernel; the ragged right/bottom
+/// aren't 8x8. Full 8x8 tiles go through `transpose_8x8`; the ragged right/bottom
 /// edges are scalar. Bitwise-exact (data movement, no reassoc).
 pub fn transpose_matrix(input: &[f32], rows: usize, cols: usize, out: &mut [f32]) {
     assert_eq!(input.len(), rows * cols);
@@ -207,7 +112,7 @@ pub fn transpose_matrix(input: &[f32], rows: usize, cols: usize, out: &mut [f32]
 }
 
 /// Gather the 8x8 tile whose top-left corner is `(ti, tj)`, run it through the
-/// SIMD kernel, and scatter the result into its transposed position.
+/// 8x8 kernel, and scatter the result into its transposed position.
 fn transpose_tile(input: &[f32], rows: usize, cols: usize, out: &mut [f32], ti: usize, tj: usize) {
     let mut tile = [0.0f32; 64];
     for r in 0..8 {

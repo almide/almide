@@ -1,10 +1,11 @@
-//! Dense matmul `C = A·B` (m×k · k×n, row-major). SIMD inner product: transpose
-//! B once so each column becomes a contiguous row, then a SIMD dot per (i,j).
+//! Dense matmul `C = A·B` (m×k · k×n, row-major). On x86_64 with AVX2 + FMA a
+//! register-tiled 4×4 micro-kernel; elsewhere the tiled-scalar reference.
 //!
-//! This beats Almide's tiled-*scalar* mul by vectorizing the inner product. BLAS
-//! lives here too — register-tiled micro-kernels (6x16, packing, prefetch) are
-//! the ceiling and we don't reach it; this is the SIMD-dot rung, enough to pass
-//! a scalar inner loop. Used for sdpa's QKᵀ and weights·V.
+//! This beats Almide's tiled-*scalar* mul by keeping a C block in registers.
+//! BLAS lives here too — 6x16 micro-kernels, packing and prefetch are the
+//! ceiling and we don't reach it. Used for sdpa's QKᵀ and weights·V. (The
+//! transpose-B SIMD-dot rung that preceded the register tile was dead code and
+//! left with #4342.)
 
 /// Row-major shape of the product `C(m×n) = A(m×k)·B(k×n)`. Bundles the three
 /// extents so the x86 kernel's edge pass stays inside the parameter budget.
@@ -57,43 +58,6 @@ fn accumulate_tile(a: &[f64], k: usize, b: &[f64], n: usize, out: &mut [f64], ti
             for (o, bv) in orow.iter_mut().zip(brow) {
                 *o += aik * bv;
             }
-        }
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,fma")]
-#[allow(dead_code)]
-unsafe fn matmul_avx(a: &[f64], m: usize, k: usize, b: &[f64], n: usize, out: &mut [f64]) {
-    use std::arch::x86_64::*;
-    // transpose B → bt (n×k), columns become contiguous rows
-    let mut bt = vec![0.0f64; n * k];
-    for kk in 0..k {
-        let brow = &b[kk * n..kk * n + n];
-        for j in 0..n {
-            bt[j * k + kk] = brow[j];
-        }
-    }
-    let chunks = k / 4;
-    for i in 0..m {
-        let ai = &a[i * k..i * k + k];
-        for j in 0..n {
-            let bj = &bt[j * k..j * k + k];
-            let mut acc = _mm256_setzero_pd();
-            for c in 0..chunks {
-                let av = _mm256_loadu_pd(ai.as_ptr().add(c * 4));
-                let bv = _mm256_loadu_pd(bj.as_ptr().add(c * 4));
-                acc = _mm256_fmadd_pd(av, bv, acc);
-            }
-            let hi = _mm256_extractf128_pd(acc, 1);
-            let lo = _mm256_castpd256_pd128(acc);
-            let s = _mm_add_pd(lo, hi);
-            let s = _mm_add_sd(s, _mm_unpackhi_pd(s, s));
-            let mut sum = _mm_cvtsd_f64(s);
-            for kk in (chunks * 4)..k {
-                sum += ai[kk] * bj[kk];
-            }
-            out[i * n + j] = sum;
         }
     }
 }
