@@ -342,11 +342,17 @@ impl Emitter<'_> {
         (!self.cells.contains(id) && self.holds_credit(idx) && self.rc_droppable(ty)).then_some((*id, idx, ty))
     }
 
-    /// The dying var's credit has moved out: empty its local. Answers
-    /// whether the var's move is a byte-check event (`m<local>`).
-    pub(crate) fn empty_dying(&mut self, id: VarId, idx: u32) -> bool {
+    /// The dying var's credit has moved out: empty its local.
+    pub(crate) fn empty_dying(&mut self, id: VarId, idx: u32) {
         self.f.instructions().i32_const(0).local_set(idx);
-        self.witness_move_and_empty(id, false)
+        self.witness_move_and_empty(id, false);
+    }
+
+    /// [`Self::empty_dying`] of a credit that moves on through a routine's
+    /// hold, whose hold move is its one byte-check event.
+    pub(crate) fn empty_dying_into_hold(&mut self, id: VarId, idx: u32) {
+        self.f.instructions().i32_const(0).local_set(idx);
+        self.witness_move_into_hold(id);
     }
 
     /// The receiver `m` of a consuming map op whose credit the op may take:
@@ -532,18 +538,15 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
-        // #4277: the receiver's credit moves into this routine — as a dying
-        // var's own move when that is a byte-check event (`empty_dying`),
-        // else through `mh`: one event per credit (a second would let a lost
-        // release read as moved). The judged set releases it when the block
-        // is shared and it copies.
-        let var_moved = match dying {
-            Some((id, idx, _)) => self.empty_dying(id, idx),
-            None => false,
-        };
-        if !var_moved {
-            self.witness_rc_hold_move(mh);
+        // #4277: the receiver's credit — a dying var's, emptied here, or an
+        // owned temporary's — moves into this routine through `mh`, its one
+        // byte-check event (a second would let a lost release read as
+        // moved). The judged set releases it when the block is shared and
+        // it copies.
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
