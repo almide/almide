@@ -143,6 +143,7 @@ pub(crate) fn render_set_local(
         NTy::Vec => format!("{}.clone()", var(*src)),
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
         NTy::Res => format!("{}.clone()", var(*src)),
+        NTy::Opt => var(*src),
     };
     let store_t = match t {
         NTy::StrRef => NTy::Str,
@@ -243,6 +244,7 @@ fn declared_param_want(
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::F64) => NTy::F64,
+        Some(NativeSigKind::Opt) => NTy::Opt,
         Some(NativeSigKind::Res) => {
             return Err(wall("native: Result-typed param — outside the rung subset"))
         }
@@ -267,6 +269,14 @@ fn user_arg_in_declared_mode(
             if got != NTy::I64 {
                 return Err(wall(format!(
                     "native: heap arg to scalar param of `{name}`"
+                )));
+            }
+            Ok(code)
+        }
+        NTy::Opt => {
+            if got != NTy::Opt {
+                return Err(wall(format!(
+                    "native: non-Option arg to Option param of `{name}`"
                 )));
             }
             Ok(code)
@@ -321,6 +331,7 @@ fn bind_user_fn_result(
                 Some(NativeSigKind::I64) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
                 Some(NativeSigKind::Res) => NTy::Res,
+                Some(NativeSigKind::Opt) => NTy::Opt,
                 None => repr_nty(r, false)?,
             };
             tys.insert(*d, t);
@@ -329,6 +340,7 @@ fn bind_user_fn_result(
                 NTy::Vec => "Vec<i64>",
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, AlmideString>",
+                NTy::Opt => "Option<i64>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
@@ -684,6 +696,11 @@ fn render_else(
                 NTy::Res,
                 format!("{}.clone()", var(v)),
             ),
+            NTy::Opt => (
+                format!("let mut {}: Option<i64> = None;", var(*d)),
+                NTy::Opt,
+                var(v),
+            ),
         };
         *out = out.replacen(marker.as_str(), &decl, 1);
         tys.insert(*d, join_t);
@@ -733,6 +750,7 @@ fn render_end_if(
             NTy::Vec => format!("{}.clone()", var(v)),
             NTy::VecRef => format!("{}.to_vec()", var(v)),
             NTy::Res => format!("{}.clone()", var(v)),
+            NTy::Opt => var(v),
         };
         let arm_t = match t {
             NTy::StrRef => NTy::Str,

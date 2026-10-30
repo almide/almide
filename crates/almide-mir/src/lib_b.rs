@@ -85,6 +85,23 @@ pub enum PrimKind {
     /// Result outlives a statement, #3669). The minted carrier has no object,
     /// so the copy is no ownership event, and neither is its release.
     ResCopy,
+    /// ── NATIVE-ONLY Option carrier prims (#4006 family B) ────────────────
+    /// Inserted exclusively by `native_option_rewrite` (never by the shared
+    /// lowering, never seen by the wasm renderer): a scalar Option's
+    /// `Init::OptSome` / `Init::OptNone` block and its tag/payload read
+    /// windows, rendered as a Rust `Option<i64>` local (`NTy::Opt`).
+    /// `Some(args[0])` — args[0] is the scalar payload (a Float as its bits).
+    OptMakeSome,
+    /// `None`.
+    OptMakeNone,
+    /// `dst = args[0].is_some() as i64` — the block's length word (1 = Some).
+    OptTag,
+    /// `dst = the Some payload` (scalar); 0 on the None side (unreached: the
+    /// tag dispatch guards it).
+    OptPayload,
+    /// `dst = args[0]` — a copy of a minted carrier (the `Dup` the shared
+    /// lowering emits when an Option outlives a statement); no ownership event.
+    OptCopy,
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no

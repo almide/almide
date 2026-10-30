@@ -239,6 +239,59 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 var(args[0])
             );
         }
+        // ── #4006 family B: the native scalar-Option carrier (native_option_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::OptMakeSome,
+            dst: Some(d),
+            args,
+        } => {
+            // The slot holds the MIR scalar: a Float as its bits.
+            let payload = match tys.get(&args[0]) {
+                Some(NTy::I64) => var(args[0]),
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                other => {
+                    return Err(wall(format!(
+                        "native: OptMakeSome over a non-scalar payload ({other:?})"
+                    )))
+                }
+            };
+            tys.insert(*d, NTy::Opt);
+            line!("let mut {}: Option<i64> = Some({});", var(*d), payload);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptMakeNone,
+            dst: Some(d),
+            ..
+        } => {
+            tys.insert(*d, NTy::Opt);
+            line!("let mut {}: Option<i64> = None;", var(*d));
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptCopy,
+            dst: Some(d),
+            args,
+        } => {
+            tys.insert(*d, NTy::Opt);
+            line!("let mut {}: Option<i64> = {};", var(*d), opt_operand(tys, args[0])?);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptTag,
+            dst: Some(d),
+            args,
+        } => {
+            let o = opt_operand(tys, args[0])?;
+            tys.insert(*d, NTy::I64);
+            line!("let {}: i64 = {}.is_some() as i64;", var(*d), o);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptPayload,
+            dst: Some(d),
+            args,
+        } => {
+            let o = opt_operand(tys, args[0])?;
+            tys.insert(*d, NTy::I64);
+            line!("let {}: i64 = {}.unwrap_or(0);", var(*d), o);
+        }
         _ => return Ok(false),
     }
     Ok(true)
@@ -425,4 +478,12 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// An Option-carrier operand, refusing anything the rewrite did not type `Opt`.
+fn opt_operand(tys: &std::collections::BTreeMap<crate::ValueId, NTy>, v: crate::ValueId) -> Result<String, LowerError> {
+    match tys.get(&v) {
+        Some(NTy::Opt) => Ok(var(v)),
+        other => Err(wall(format!("native: Option read over a non-Option value ({other:?})"))),
+    }
 }

@@ -100,6 +100,7 @@ fn native_sig_subset_check(
     };
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+            || is_scalar_option(t)
             || is_scalar_list(t)
             || is_scalar_record(t)
             || is_flat_variant(t)
@@ -151,6 +152,42 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
 /// T1-3: rewrite the stereotyped Result block windows onto the native
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
+/// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
+/// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
+fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float))
+}
+
+/// #4006 family B: rewrite every scalar-Option window onto the native
+/// carrier prims. The Option values are seeded from the declared types: a
+/// call to a fn returning a scalar Option, and a param declared as one.
+fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    let option_fns: std::collections::BTreeSet<String> = ir
+        .functions
+        .iter()
+        .filter(|f| is_scalar_option(&f.ret_ty))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    for f in functions.iter_mut() {
+        let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_scalar_option(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params);
+    }
+}
+
 fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
 // T1-3: rewrite the stereotyped Result block windows onto the native
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
@@ -217,6 +254,8 @@ fn native_sig_kind(
         {
             Some(NativeSigKind::ListI64)
         }
+        // #4006 family B: an Option of a scalar rides the `Option<i64>` carrier.
+        t if is_scalar_option(t) => Some(NativeSigKind::Opt),
         // An all-scalar record travels as its slot block (see sig_ok).
         Ty::Named(n, args)
             if args.is_empty()
@@ -402,6 +441,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         )));
     }
     rewrite_native_result_windows(&ir, &mut functions);
+    rewrite_native_option_windows(&ir, &mut functions);
     if !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),
