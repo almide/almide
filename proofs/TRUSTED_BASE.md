@@ -236,6 +236,10 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `reorder_memory_safe` | InitCert.v | Closed under the global context |
 | `check_init_cert_sound` | InitCert.v | Closed under the global context |
 | `fill_window` | InitCert.v | Closed under the global context |
+| `rsite_window` | FieldCert.v | Closed under the global context |
+| `ftrace_safe` | FieldCert.v | Closed under the global context |
+| `fields_memory_safe` | FieldCert.v | Closed under the global context |
+| `check_fields_cert_sound` | FieldCert.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -311,6 +315,41 @@ no certificate carries a trace yet, so the theorem the definition is for — `K(
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
 
+**Record, tuple and variant fields (#4013 TYPE clause, #4279).** A field is
+read and written at a CONSTANT offset with no check, so it is in bounds and
+initialized exactly when its block was built with the layout the access
+assumes. `FieldCert.v` adds the layout-typed construction site and the field
+access as a third per-build certificate, `fields`: a layout table (per kind —
+a record or tuple, or one case of a variant — its payload size and each
+field's offset and width, a variant case's field 0 its tag word), sites that
+must store every field of their kind, accesses that must name a declared
+field, and tag reads that must be field 0 of every case. `rsite_window` proves
+an accepted site's window MemorySafe and leaves its block of the layout with
+every field initialized; `ftrace_safe` proves every event on a block of a
+recorded kind MemorySafe in a trace whose allocations of such blocks are
+accepted sites and whose loads and stores of them name declared fields of
+their kind, given TEMPORAL; `fields_memory_safe` composes that with the other
+certificates' clauses for every other block into `MemorySafe`;
+`check_fields_cert_sound` puts the byte parser inside the proof (driver mode
+`fields`). The structural leg emits the witness per build
+(crates/almide-wasm/src/witness_fields.rs) for record, tuple and variant
+literals and constructors, member and positional reads, a dying read's slot
+take, pattern tests and binds and spread overwrites, and
+`almide-anchor-check` holds every located event to the shipped bytes against
+the SAME layout table: the allocation's payload size, each store's and each
+access's width and offset, a variant site's tag store of its own case, and
+each variant CASE field's read to a tag test of its own address that
+guards it (an enclosing `if` whose condition implies `tag == C`, the address
+the same variable or the same field re-loaded with nothing that may write
+memory between). TRUSTED: that a block's static type is its layout (the
+representation, trusted already for the bounds and init witnesses; the IR is
+cast-free and FieldAssign is refused),
+and — the row #4279 adds — that a variant block's tag word keeps the case its
+construction site stored (no instruction rewrites it; the heap model carries
+no values). The runtime's own routines over these blocks (typed drop, copy,
+equality, comparison, display bodies) record nothing yet (#4278), and a
+nullary case is a static pool block outside the allocation model.
+
 **The native leg (#4006).** For the programs the verified native renderer
 renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`
 programs, grow-only), `proofs/native-wall.sh` judges per build the ownership
@@ -357,7 +396,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (126 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (130 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
