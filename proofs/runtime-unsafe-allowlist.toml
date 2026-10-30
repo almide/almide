@@ -45,21 +45,21 @@ reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_box_body.rs"
-count = 25
+count = 23
 class = "emitted-prelude"
-reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its new / into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it"
+reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it. #4342: new and clone take the cell pointer from NonNull::from(Box::leak) (safe; 0.99-1.04x on binarytrees / treealloc with the region window off, a 200 000-long variant chain and a depth-18 recursive record tree, GCE Intel n2 and AMD n2d, 2026-10-30). A plain Box<T> in its place is not a replacement: its drop, clone and == recurse once per level and overflow the native stack on the 200 000-long chains (#4250, #4252), so the queues and their raw pointers stay"
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_region.rs"
-count = 9
+count = 6
 class = "emitted-prelude"
-reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per trap variant), the trapped header read, and the three TLS-cell borrows of alloc / save / restore per variant. Sound only while every handle dies inside its window, i.e. while pass_region_window.rs's region-pure verdict is right; ALMIDE_REGION_TRAP_STALE=1 arms a generation check that turns a wrong verdict into a panic (#4023: off by default — measured +30% on binarytrees and +52% on treealloc — and CI runs spec/ and the differential fuzz with it armed)"
+reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per trap variant), the trapped header read, the node write into a fresh block in alloc (per variant) and the armed restore's header poisoning. Since #4342 the arena's marks and chunk table are Cell / RefCell, so save, restore and the bump itself are safe code (1.00x on binarytrees and treealloc, GCE Intel n2 and AMD n2d, 2026-10-30). The arena itself stays: plain allocation in its place (ALMIDE_REGION_OFF=1) measured 4.04x / 4.26x on binarytrees and 4.42x / 5.71x on treealloc (Intel / AMD, min of 7 pinned runs). Sound only while every handle dies inside its window, i.e. while pass_region_window.rs's region-pure verdict is right; ALMIDE_REGION_TRAP_STALE=1 arms a generation check that turns a wrong verdict into a panic (#4023: off by default — measured +30% on binarytrees and +52% on treealloc — and CI runs spec/ and the differential fuzz with it armed)"
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_rem_body.rs"
 count = 1
 class = "emitted-prelude"
-reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri"
+reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri. kept (#4342): the safe `((a as i128 * b as i128) >> 64) as i64` in its place measured, min of 7 pinned runs, 1.32x on the 90M-step chain `acc = (acc * 31 + j) % 1000003`, 1.24x / 1.27x on fanblock, 1.03x / 1.06x on decode, and 1.17x / 0.79x on an unchained `j % 7 + j % 1000 + (j * 13) % 3` loop, GCE Intel Xeon 2.8 GHz (n2) / AMD EPYC 7B13 (n2d), x86-64-v3, Rust 1.96.0, 2026-10-30 — over the 5% bar on the chains"
 
 [[file]]
 path = "crates/almide-codegen/src/walker/mod.rs"
@@ -81,27 +81,15 @@ reason = "the C-196 stack guard both native renders emit (module almide_stack_gu
 
 [[file]]
 path = "crates/almide-kernel/src/matmul.rs"
-count = 3
-class = "emitted-prelude"
-reason = "the AVX / register-tiled matmul kernels and their call behind is_x86_feature_detected"
-
-[[file]]
-path = "crates/almide-kernel/src/scale.rs"
 count = 2
 class = "emitted-prelude"
-reason = "scale_avx and its #[cfg(test)] bitwise check (the test block is stripped before emission)"
-
-[[file]]
-path = "crates/almide-kernel/src/transpose.rs"
-count = 7
-class = "emitted-prelude"
-reason = "the AVX 8x8 f32 transpose and its five passes"
+reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342). kept (#4342): a safe 4x4 tile with f64::mul_add (bitwise the same product) measured 0.97-1.03x on matrix.mul at 64^3, 256^3, 512^3, 64x768x768 and 128x768x3072 in --release builds (x86-64-v3, where mul_add is an inline vfmadd), but 12.3x / 13.2x at 256^3 in a default (non-release) build, where mul_add is a libm fma call per cell; GCE AMD EPYC 7B13 (n2d) / Intel Xeon 2.8 GHz (n2), min of 7 pinned runs, Rust 1.96.0, 2026-10-30"
 
 [[file]]
 path = "crates/almide-kernel/src/transpose_f64.rs"
 count = 3
 class = "emitted-prelude"
-reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection"
+reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection. kept (#4342): the plain 8x8 tile in their place measured 1.26x / 1.30x on matrix.transpose of a 1024x1024 matrix and 1.18x / 1.17x on 512x768 (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30)"
 
 [[file]]
 path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
