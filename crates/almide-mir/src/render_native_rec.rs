@@ -28,8 +28,49 @@ pub(crate) struct RecDecl {
     pub list_of: Option<NTy>,
 }
 
+/// The declarations one render derives from: (record layouts, variant
+/// layouts, signature tuple and list types).
+type Inputs = (crate::lower::RecordLayouts, crate::lower::VariantLayouts, Vec<almide_lang::types::Ty>);
+
 thread_local! {
     static RECS: RefCell<Vec<RecDecl>> = const { RefCell::new(Vec::new()) };
+    static INPUTS: RefCell<Option<Inputs>> = const { RefCell::new(None) };
+}
+
+/// Derive and install the table for one render.
+pub(crate) fn install_derived(
+    layouts: &crate::lower::RecordLayouts,
+    variants: &crate::lower::VariantLayouts,
+    tuples: Vec<almide_lang::types::Ty>,
+) -> RecGuard {
+    let recs = derive_records(layouts, variants, &tuples);
+    INPUTS.with(|i| *i.borrow_mut() = Some((layouts.clone(), variants.clone(), tuples)));
+    install(recs)
+}
+
+/// Re-derive with the tuple and list types of more signatures (a linked
+/// self-host body's). Indices may move, so this runs before any signature
+/// table or render reads them.
+pub(crate) fn extend_with(more: &[almide_lang::types::Ty]) {
+    let recs = INPUTS.with(|i| {
+        let mut i = i.borrow_mut();
+        let (l, v, ts) = i.as_mut()?;
+        let mut grew = false;
+        for t in more {
+            let mut found = Vec::new();
+            collect_tuples(t, &mut found);
+            for f in found {
+                if !ts.contains(&f) {
+                    ts.push(f);
+                    grew = true;
+                }
+            }
+        }
+        grew.then(|| derive_records(l, v, ts))
+    });
+    if let Some(recs) = recs {
+        RECS.with(|r| *r.borrow_mut() = recs);
+    }
 }
 
 /// Clears the installed table when the render ends.
@@ -37,6 +78,7 @@ pub(crate) struct RecGuard;
 impl Drop for RecGuard {
     fn drop(&mut self) {
         RECS.with(|r| r.borrow_mut().clear());
+        INPUTS.with(|i| *i.borrow_mut() = None);
     }
 }
 

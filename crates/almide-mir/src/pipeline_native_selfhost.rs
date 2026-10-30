@@ -120,6 +120,9 @@ fn link_native_self_host(functions: &mut Vec<crate::MirFunction>) -> Result<Vec<
                     "native: the self-host source declares no body `{impl_fn}`"
                 )));
             };
+            crate::render_native_rec::extend_with(
+                &func.params.iter().map(|p| p.ty.clone()).chain(std::iter::once(func.ret_ty.clone())).collect::<Vec<_>>(),
+            );
             native_sig_subset_check(func, &sh.record_layouts, &sh.variant_layouts)?;
             let all = crate::lower::lower_function_all_with_globals(
                 func,
