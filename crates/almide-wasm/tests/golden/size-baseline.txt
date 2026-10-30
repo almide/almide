@@ -558,6 +558,7 @@
 11369	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 9342	spec/wasm_cross/matrix_index_domain_family.almd
 3171	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
+10649	spec/wasm_cross/matrix_mul_no_fma.almd
 8493	spec/wasm_cross/matrix_neg_signed_zero.almd
 11111	spec/wasm_cross/matrix_pow_libm.almd
 9021	spec/wasm_cross/matrix_product_family.almd
