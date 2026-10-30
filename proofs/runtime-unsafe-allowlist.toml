@@ -17,7 +17,13 @@
 # net_unix_sys.rs. Checks: scripts/miri-generated.sh and scripts/asan-generated.sh over the
 # generated crates (.github/workflows/miri-nightly.yml), scripts/miri-fan-gate.sh and
 # scripts/loom-fan-gate.sh (the gate protocol's interleavings enumerated) for fan-sync,
-# scripts/lib/sys-ffi-asan.almd for sys.rs's process paths.
+# scripts/lib/sys-ffi-asan.almd for sys.rs's process paths, scripts/lib/unsafe-boundary-asan.almd
+# for the entropy, kill, matmul / transpose kernel and AlmideBox edges.
+#
+# Per site (#4007): every counted line carries its own invariant, a `SAFETY:` comment (or a
+# `# Safety` doc section) on it or directly above it, and the gate refuses a line without
+# one. The total only goes down: CI runs the gate with --base, and a total above the base
+# tree's is refused (a row may move between files, the sum may not rise).
 
 [[file]]
 path = "runtime/rs/src/list.rs"
@@ -33,9 +39,9 @@ reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ff
 
 [[file]]
 path = "runtime/rs/src/sys.rs"
-count = 9
+count = 12
 class = "c-call"
-reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), kill (process.kill / is_alive, #4125: the syscall, never a `kill` on PATH), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe. Checked: thread_cpu_ns under Miri (the fan corpus, scripts/miri-fan-gate.sh) and ASan; set_signal and wait_exited_or_stopped under ASan (scripts/lib/sys-ffi-asan.almd in the asan job); send_signal only by spec/embedded_cross/process_kill_syscall.almd (functional, no sanitizer; it touches no memory); thread_self / thread_kill / exit_now only by tests/http_serve_cross_test.rs (functional, no sanitizer); dgemm by nothing (no build sets have_blas); the Windows handler by nothing"
+reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), kill (process.kill / is_alive, #4125: the syscall, never a `kill` on PATH), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), getentropy (random.bytes, every unix; moved here from random.rs by #4007, which also replaced Linux's getrandom(3) with it: the same glibc 2.25 floor and the same syscall), BCryptGenRandom (random.bytes on Windows) and SetConsoleCtrlHandler (Windows). cblas_dgemm is gone (#4007): cfg(have_blas) was set by no build, so it was unsafe code nothing reached, each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and random.rs call these and hold no unsafe. Checked: thread_cpu_ns under Miri (the fan corpus, scripts/miri-fan-gate.sh) and ASan; set_signal and wait_exited_or_stopped under ASan (scripts/lib/sys-ffi-asan.almd in the asan job); send_signal by spec/embedded_cross/process_kill_syscall.almd and, under ASan, scripts/lib/unsafe-boundary-asan.almd (a live child signalled 0 then SIGTERM); fill_entropy by tests/runtime_random_float_construction_test.rs on Linux, macOS and Windows CI (it includes sys.rs) and, under ASan, the boundary program at 0 / 1 / 255 / 256 / 257 / 1000 bytes; thread_self / thread_kill / exit_now only by tests/http_serve_cross_test.rs (functional, no sanitizer); the Windows console handler by nothing automated (no Windows CI job serves http) — the one row site without a boundary test, owed to #4009"
 
 [[file]]
 path = "crates/almide-rt-core/src/net_unix_sys.rs"
@@ -47,7 +53,7 @@ reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for
 path = "crates/almide-codegen/src/prelude_box_body.rs"
 count = 23
 class = "emitted-prelude"
-reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it. #4342: new and clone take the cell pointer from NonNull::from(Box::leak) (safe; 0.99-1.04x on binarytrees / treealloc with the region window off, a 200 000-long variant chain and a depth-18 recursive record tree, GCE Intel n2 and AMD n2d, 2026-10-30). A plain Box<T> in its place is not a replacement: its drop, clone and == recurse once per level and overflow the native stack on the 200 000-long chains (#4250, #4252), so the queues and their raw pointers stay"
+reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it. #4342: new and clone take the cell pointer from NonNull::from(Box::leak) (safe; 0.99-1.04x on binarytrees / treealloc with the region window off, a 200 000-long variant chain and a depth-18 recursive record tree, GCE Intel n2 and AMD n2d, 2026-10-30). A plain Box<T> in its place is not a replacement: its drop, clone and == recurse once per level and overflow the native stack on the 200 000-long chains (#4250, #4252), so the queues and their raw pointers stay Boundary test (#4007): beside tests/recursive_type_depth_test.rs, scripts/lib/unsafe-boundary-asan.almd builds, shares, compares, displays and drops a 200 000-long chain under ASan."
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_region.rs"
@@ -59,7 +65,7 @@ reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per 
 path = "crates/almide-codegen/src/prelude_rem_body.rs"
 count = 1
 class = "emitted-prelude"
-reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri. kept (#4342): the safe `((a as i128 * b as i128) >> 64) as i64` in its place measured, min of 7 pinned runs, 1.32x on the 90M-step chain `acc = (acc * 31 + j) % 1000003`, 1.24x / 1.27x on fanblock, 1.03x / 1.06x on decode, and 1.17x / 0.79x on an unchained `j % 7 + j % 1000 + (j * 13) % 3` loop, GCE Intel Xeon 2.8 GHz (n2) / AMD EPYC 7B13 (n2d), x86-64-v3, Rust 1.96.0, 2026-10-30 — over the 5% bar on the chains"
+reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri. kept (#4342): the safe `((a as i128 * b as i128) >> 64) as i64` in its place measured, min of 7 pinned runs, 1.32x on the 90M-step chain `acc = (acc * 31 + j) % 1000003`, 1.24x / 1.27x on fanblock, 1.03x / 1.06x on decode, and 1.17x / 0.79x on an unchained `j % 7 + j % 1000 + (j * 13) % 3` loop, GCE Intel Xeon 2.8 GHz (n2) / AMD EPYC 7B13 (n2d), x86-64-v3, Rust 1.96.0, 2026-10-30 — over the 5% bar on the chains Boundary test (#4007): prelude_rem.rs's mulhs_is_the_high_half_of_the_i128_product compares the asm with the i128 form over the operand edges (0, ±1, ±2, 3, MIN, MIN+1, MAX, MAX-1, the 1/3 magics)."
 
 [[file]]
 path = "crates/almide-codegen/src/walker/mod.rs"
@@ -83,22 +89,16 @@ reason = "the C-196 stack guard both native renders emit (module almide_stack_gu
 path = "crates/almide-kernel/src/matmul.rs"
 count = 2
 class = "emitted-prelude"
-reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342). kept (#4342): a safe 4x4 tile with f64::mul_add (bitwise the same product) measured 0.97-1.03x on matrix.mul at 64^3, 256^3, 512^3, 64x768x768 and 128x768x3072 in --release builds (x86-64-v3, where mul_add is an inline vfmadd), but 12.3x / 13.2x at 256^3 in a default (non-release) build, where mul_add is a libm fma call per cell; GCE AMD EPYC 7B13 (n2d) / Intel Xeon 2.8 GHz (n2), min of 7 pinned runs, Rust 1.96.0, 2026-10-30"
+reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342). kept (#4342): a safe 4x4 tile with f64::mul_add (bitwise the same product) measured 0.97-1.03x on matrix.mul at 64^3, 256^3, 512^3, 64x768x768 and 128x768x3072 in --release builds (x86-64-v3, where mul_add is an inline vfmadd), but 12.3x / 13.2x at 256^3 in a default (non-release) build, where mul_add is a libm fma call per cell; GCE AMD EPYC 7B13 (n2d) / Intel Xeon 2.8 GHz (n2), min of 7 pinned runs, Rust 1.96.0, 2026-10-30 Invariant (#4007): the kernel's `# Safety` states AVX2 + FMA and a, b, out at least m*k, k*n, m*n long; the safe entry now asserts the lengths (checked products) before dispatch, so a short slice is a panic, not an out-of-bounds store. Boundary test: scripts/lib/unsafe-boundary-asan.almd multiplies 1x1, 4x4, 8x8 and ragged shapes (m % 4, n % 4 != 0) under ASan against the list product."
 
 [[file]]
 path = "crates/almide-kernel/src/transpose_f64.rs"
 count = 3
 class = "emitted-prelude"
-reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection. kept (#4342): the plain 8x8 tile in their place measured 1.26x / 1.30x on matrix.transpose of a 1024x1024 matrix and 1.18x / 1.17x on 512x768 (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30)"
+reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection. kept (#4342): the plain 8x8 tile in their place measured 1.26x / 1.30x on matrix.transpose of a 1024x1024 matrix and 1.18x / 1.17x on 512x768 (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30) Invariant: AVX detected by the caller, fixed [f64; 64] in and out. Boundary test: the ASan program transposes 8x8, 16x16, 1x8, 9x13 and 24x7 against the list transpose."
 
 [[file]]
 path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
 count = 27
 class = "c-call"
 reason = "the rooted fs family and every fs call under [permissions] fs by descriptor (#4084): openat / readlinkat / unlinkat / mkdirat / renameat / fdopendir / readdir / closedir, Linux openat2 via syscall, errno reset for readdir, and owning a descriptor a successful open returned. Windows (2ebd5c083, #4293; 13 of the 27 lines, unlisted until #4007 wrote the row to match the tree): the ntdll / kernel32 declarations, NtCreateFile relative to a directory handle, NtQueryInformationFile / NtSetInformationFile, RtlNtStatusToDosError, GetFileInformationByHandle(Ex) and owning the returned HANDLE — each with its SAFETY: line; exercised on windows-latest by ci.yml's row-10 step (fs_beneath_platform / fs_beneath_core / fs_scoped_core and a rooted program), on i686 by the 32-bit step, and on macOS by the release step"
-
-[[file]]
-path = "runtime/rs/src/random.rs"
-count = 6
-class = "c-call"
-reason = "random.bytes (#3938): the getrandom(2), getentropy(3) and Windows BCryptGenRandom (system-preferred RNG, null algorithm handle) declarations and calls that fill a caller-owned buffer from the OS CSPRNG; each call's pointer and length come from one live &mut [u8]"
