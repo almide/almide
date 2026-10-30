@@ -1,20 +1,11 @@
-// #4277 drill: a routine's hold carries a credit read through frame variables
-// (`value.object`'s judged set: a key moved in through its hold,
-// `h<local>@window`), and the emitter releases that hold again PAST the
-// routine's window with no event. The ownership witness is unchanged. A hold
-// move's name is scoped to its window, so the hold slot alone no longer makes
-// the call the frame's; the value it releases is still read through frame
-// variables, so the RC byte check must refuse it — window scoping never hides
-// a frame credit.
-import json
-
+// #4277 drill: a routine's hold (a fresh key's credit moved into the judged
+// set, `h<local>@window`) is released again PAST the routine's window with no
+// event. The ownership witness is unchanged. A hold move's name is scoped to
+// its window, so outside it the call is no routine's own and no event takes
+// it: the RC byte check must refuse it — window scoping never lets a release
+// escape its routine.
 effect fn main() -> Unit = {
-  let items = [
-    value.int(1),
-    value.object([("a", value.int(2))]),
-    value.int(3)
-  ]
-  let updated = list.set(items, 1, value.array([value.int(7), value.int(8)]))
-  println(json.stringify(value.array(updated)))
-  println(json.stringify(value.array(list.set(items, 0, value.string("x")))))
+  var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
+  m = map.set(m, string.repeat("a", 1), 3)
+  println(int.to_string(map.len(m)))
 }
