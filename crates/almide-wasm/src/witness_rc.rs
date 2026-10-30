@@ -19,10 +19,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
 
-/// The recorder's pseudo local for a block cell's occupant (an element read
-/// out of the block a local holds) — anchor-check `rc.rs` `CELL_HOLDER`.
-pub(crate) const CELL_HOLDER: u32 = 0xA000_0000;
-
 #[derive(Default)]
 struct State {
     pass: usize,

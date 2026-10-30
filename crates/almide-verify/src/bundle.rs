@@ -350,8 +350,16 @@ mod tests {
     }
 
     #[test]
+    fn a_helper_signature_is_read_only_in_a_version_four_bundle() {
+        // #4278 B1: an `rc-sig` record needs version 4.
+        assert!(parse(format!("{MAGIC_V3}\nwitness rc-sig 2 $1\n0|\n").as_bytes()).is_err());
+        let b = parse(format!("{MAGIC_V4}\nwitness rc-sig 2 $1\n0|\n").as_bytes()).expect("a v4 bundle carries rc-sig");
+        assert_eq!(verify(&b).1, Outcome::Certified);
+    }
+
+    #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 4\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 5\n").is_err());
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

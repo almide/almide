@@ -628,7 +628,9 @@ pub(crate) fn emit_list_push(s: Scalar) -> (Function, HelperSig) {
         // Each copied element handle is a new reference the grown block
         // holds: a share of the element (`a`) moved into its slot (`m`),
         // any number of times (the walk runs only for a shared block).
-        let elem = sig.object(Some(crate::witness::rc::CELL_HOLDER | base));
+        // A temporary's event: the walk's one `$inc` (the slot address is a
+        // sum, which names no single holder).
+        let elem = sig.object(None);
         sig.loop_open();
         i.local_get(list).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_ne().if_(BlockType::Empty);
         i.i32_const(0).local_set(k);
