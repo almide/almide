@@ -100,6 +100,22 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
     });
 }
 
+/// #4278 B1: an event held to the instruction window `window` names (an
+/// [`site_id`] closed by [`site_window`]) — a container slot's replaced
+/// occupant (`r`), released inside that window before the slot is stored.
+pub(crate) fn event_at(kind: char, local: Option<u32>, window: u64) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| {
+        let e = s.open.entry(serial).or_default();
+        e.push(kind);
+        match local {
+            Some(l) => e.push_str(&l.to_string()),
+            None => e.push('-'),
+        }
+        e.push_str(&format!("#{window} "));
+    });
+}
+
 /// A branch site of the recorder opens (`(`) or joins (`)`): an event
 /// between them happens on some of the site's paths, one outside every site
 /// on each path through the frame (the RC check reads one release per path

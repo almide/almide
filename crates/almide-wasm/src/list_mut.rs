@@ -99,7 +99,10 @@ impl Emitter<'_> {
             self.f.instructions().local_get(parent).i32_load(slot_memarg(off)).call(copy).local_set(h);
             // The parent copy's credit on the record it no longer holds.
             if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-                self.f.instructions().local_get(parent).i32_load(slot_memarg(off)).call(dec);
+                self.slot_release(|em| {
+                    em.f.instructions().local_get(parent).i32_load(slot_memarg(off)).call(dec);
+                    Ok(())
+                })?;
             }
             holds.push(h);
         }
@@ -108,7 +111,10 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hl);
         // The replaced field's credit goes with it (stage 2c-ii).
         if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-            self.f.instructions().local_get(hl).i32_load(slot_memarg(off)).call(dec);
+            self.slot_release(|em| {
+                em.f.instructions().local_get(hl).i32_load(slot_memarg(off)).call(dec);
+                Ok(())
+            })?;
         }
         emit(self, fty)?;
         self.store_ty_slot(fty, off);
