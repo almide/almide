@@ -444,6 +444,114 @@ fn a_reused_instance_answers_many_requests_in_constant_heap() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A serve-shaped app for the abort-reuse test: `/abort` builds a 20 000
+/// element list and then indexes out of bounds; any other path is served.
+const ABORT_REUSE_APP: &str = r#"import http
+
+effect fn app(req: HttpRequest) -> HttpResponse = {
+  let xs = [10, 20, 30]
+  match http.path(req) {
+    "/abort" => {
+      let big = list.range(0, 20000) |> list.map((i) => "${i}")
+      http.response(200, "big ${list.len(big)} ${xs[9]}")
+    },
+    _ => {
+      let small = list.range(0, 100) |> list.map((i) => "${i}")
+      http.response(200, "ok ${list.len(small)}")
+    },
+  }
+}
+
+effect fn main() -> Unit = http.serve(8080, app)!
+"#;
+
+/// Row 2 (sec-b2): what an aborting request leaves unreleased never reaches
+/// a later request on the p3 reuse path. The ownership witness ends an
+/// aborting path in the checker's abort terminal, which discharges what the
+/// path still holds; under `http.serve` that is sound only if the next
+/// request cannot see it. On the export an abort traps (its exit, then
+/// `unreachable`), and a trapped component instance is never entered again:
+/// the host answers its own 500 and serves on with a fresh instance (C-367,
+/// C-434). A request that is answered runs in the per-request arena (#3444),
+/// so a reused instance starts every request from the same heap.
+///
+/// The artifact is ARMED (`ALMIDE_WASM_ALLOC_COUNT`): each request's `main`
+/// writes the allocator's report (cumulative per instance) to stderr. Ten
+/// rounds of `/ok`, `/ok`, `/abort` go to one host that may reuse an
+/// instance 200 times. Every served request must report the first one's heap
+/// end (no growth across the aborts), and the first `/ok` after an abort
+/// must report the first request's allocation count: it ran on a fresh
+/// instance, not on the one the abort left.
+///
+/// Negative control (GCE, sec-b2): with `arena.close` removed from the
+/// export's `handle` (crates/almide-wasm-run/src/wasi_p3_serve.rs) the
+/// second `/ok` of a round reports a higher heap end and this test fails.
+#[test]
+fn aborting_requests_leave_nothing_a_later_request_on_the_reuse_path_sees() {
+    const ROUNDS: usize = 10;
+    let dir = scratch("abort-reuse");
+    let src = dir.join("app.almd");
+    std::fs::write(&src, ABORT_REUSE_APP).expect("write the app");
+    let wasm = dir.join("app.wasm");
+    let r = Command::new(almide_bin())
+        .arg("build")
+        .arg(&src)
+        .args(["--target", "wasm", "-o"])
+        .arg(&wasm)
+        .env("ALMIDE_WASM_ALLOC_COUNT", "1")
+        .output()
+        .expect("almide build runs");
+    assert!(r.status.success(), "the armed build failed:\n{}", String::from_utf8_lossy(&r.stderr));
+    if !wasmtime_serves_p3() {
+        return;
+    }
+    let mut flags = Vec::new();
+    let help = Command::new("wasmtime").args(["serve", "--help"]).output().map(|o| o.stdout).unwrap_or_default();
+    if String::from_utf8_lossy(&help).contains("--max-instance-reuse-count") {
+        flags.extend(["--max-instance-reuse-count".to_string(), "200".to_string()]);
+    }
+    let (port, mut served) = serve_artifact(&dir, &wasm, &flags);
+    let mut statuses = Vec::new();
+    for _ in 0..ROUNDS {
+        for path in ["/ok", "/ok", "/abort"] {
+            let o = observe(&ask(port, &request("GET", path, &[], b"")));
+            statuses.push((path, o.map(|o| o.status)));
+        }
+    }
+    // The last report is written as the last request ends; give the host's
+    // stderr a moment to reach the log.
+    std::thread::sleep(Duration::from_millis(500));
+    kill_group(&mut served);
+    let log = std::fs::read_to_string(dir.join("wasmtime.log")).unwrap_or_default();
+    for (path, status) in &statuses {
+        let want = if *path == "/abort" { 500 } else { 200 };
+        assert_eq!(status.as_ref().ok(), Some(&want), "{path}: {status:?}\nwasmtime log:\n{log}");
+    }
+    let reports: Vec<&str> = log.lines().filter(|l| l.contains("__ALMD_WASM_ALLOC")).collect();
+    assert_eq!(reports.len(), 3 * ROUNDS, "one report per request:\n{log}");
+    let field = |line: &str, name: &str| -> i64 {
+        line.split_whitespace()
+            .find_map(|w| w.strip_prefix(&format!("{name}=")))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("no {name}= in {line:?}"))
+    };
+    let (heap0, allocs0) = (field(reports[0], "heap_end"), field(reports[0], "allocs"));
+    for round in 0..ROUNDS {
+        for k in 0..2 {
+            let line = reports[3 * round + k];
+            assert_eq!(field(line, "heap_end"), heap0, "round {round}, /ok {k}: the heap grew across the aborts\n{line}\nfirst: {}", reports[0]);
+        }
+        assert_eq!(
+            field(reports[3 * round], "allocs"),
+            allocs0,
+            "round {round}: the first /ok after an abort did not run on a fresh instance\n{}\nfirst: {}",
+            reports[3 * round],
+            reports[0]
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The shape rule: an http.serve program whose `main` does anything but
 /// serve is refused at check time with E081 and the rule as the reason, and
 /// a serve export that reaches the filesystem is E081 with the service
