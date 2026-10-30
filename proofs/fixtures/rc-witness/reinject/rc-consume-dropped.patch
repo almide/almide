@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
-index 5c3942d59..862460585 100644
---- a/crates/almide-wasm/src/runtime.rs
-+++ b/crates/almide-wasm/src/runtime.rs
-@@ -703,7 +703,8 @@ pub(crate) fn emit_bytes_push() -> (Function, HelperSig) {
+diff --git a/crates/almide-wasm/src/runtime_push.rs b/crates/almide-wasm/src/runtime_push.rs
+index 090aa8a78..16887f1b6 100644
+--- a/crates/almide-wasm/src/runtime_push.rs
++++ b/crates/almide-wasm/src/runtime_push.rs
+@@ -161,7 +161,8 @@ pub(crate) fn emit_bytes_push() -> (Function, HelperSig) {
      // RC-3: release the outgrown block on every path, as $list_push and
      // $str_append do — freed when uniquely owned, the caller's share
      // dropped when shared, a static left alone (#4304).
