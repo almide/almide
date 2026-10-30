@@ -599,7 +599,11 @@ impl Emitter<'_> {
                     .local_set(cur);
                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                 self.emit_det_charge_const(1);
+                // #4280: the exit test guards the element read below; the
+                // bounds witness records the pair as a stretch of its own.
+                let site = crate::witness::bounds::loop_header();
                 self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
+                crate::witness::bounds::exit(site, self.f);
                 self.f
                     .instructions()
                     .local_get(base)
@@ -609,6 +613,10 @@ impl Emitter<'_> {
                     .i32_add();
                 self.witness_loop_open();
                 self.load_ty_slot(elem, 0);
+                crate::witness::bounds::access(site, false, self.f);
+                if site.is_some() {
+                    crate::witness::bounds::close();
+                }
                 self.f.instructions().local_set(var_idx);
                 self.witness_view_local(var_idx, elem);
                 // for (a, b) in pairs — the loop var holds the tuple base;

@@ -48,9 +48,17 @@
 //! which calls are copy-on-write JUDGES (a judge returns a block of its
 //! argument's count): every judge call on a list or Bytes local, global or
 //! cell records its anchor with [`judge`].
-//! Element accesses that do not go through the index operator (a `for`
-//! loop's element reads, stdlib `list.get`, the runtime's own routines) are
-//! not recorded.
+//!
+//! A `for x in xs` loop over a list (#4280) reads its element guarded by the
+//! loop's EXIT test, `cur >=u count; br_if` to the block around the loop,
+//! not by an aborting check. Each such loop records a stretch of its own,
+//! `e0 a0`: `e` anchored at the `br_if`, `a` at the element's load.
+//! `PExit` (proofs/SpatialCert.v) is that test — failing it ends the
+//! stretch normally — and almide-anchor-check holds the `br_if`'s compare
+//! to the load as it holds a `c`'s: the counter against `len(xs) / S`
+//! captured at entry, the load at `xs + cur * S`, neither changed between.
+//! Element accesses that go through neither (stdlib `list.get`, the
+//! runtime's own routines) are not recorded.
 
 use std::sync::Mutex;
 
@@ -247,6 +255,29 @@ pub(crate) fn judge(at: &wasm_encoder::Function) {
     });
 }
 
+/// A list `for` loop's header (#4280): a stretch of its own with one fresh
+/// slot, for the exit test and the element read it guards. The caller
+/// records [`exit`] and [`access`] on the returned site, then [`close`]s.
+pub(crate) fn loop_header() -> Option<Site> {
+    let mut g = state().lock().expect("bounds sink");
+    g.as_mut().map(|s| {
+        s.open.push(Stretch::default());
+        let n = s.open.len();
+        // No variable is u32::MAX, so no kill names the slot.
+        s.open[n - 1].slots.push((u32::MAX, u32::MAX, 0));
+        Site { depth: Some(n - 1), slot: 0 }
+    })
+}
+
+/// The loop exit test guarding `site`'s access (its `br_if`) was just
+/// emitted.
+pub(crate) fn exit(site: Option<Site>, at: &wasm_encoder::Function) {
+    if let Some(site) = site {
+        let a = crate::witness::anchor::at(at);
+        with(|s| s.push_at(site, 'e', &a));
+    }
+}
+
 /// Variable `v` changed: every slot of every open stretch that names it.
 pub(crate) fn kill(v: u32) {
     with(|s| s.kill(v));
@@ -354,6 +385,25 @@ mod tests {
         });
         // The second access's check is missing: the checker must reject.
         assert_eq!(w, "c0 a0 w1");
+    }
+
+    #[test]
+    fn a_for_loop_header_is_a_stretch_of_its_own() {
+        let w = run(|s| {
+            s.open.push(Stretch::default());
+            let a = s.site(Some((1, 2, 0)));
+            s.push(a, 'c');
+            s.open.push(Stretch::default());
+            s.open[1].slots.push((u32::MAX, u32::MAX, 0));
+            let h = Site { depth: Some(1), slot: 0 };
+            s.push(h, 'e');
+            s.push(h, 'a');
+            s.kill(2);
+            s.close_one();
+            s.push(a, 'a');
+            s.close_one();
+        });
+        assert_eq!(w, "e0 a0;c0 s0 a0");
     }
 
     #[test]
