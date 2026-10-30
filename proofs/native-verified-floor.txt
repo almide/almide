@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 249 of 1005
+# rendered: 252 of 1005
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/allocation_within_limits.almd
 spec/wasm_cross/append_accumulator.almd
@@ -84,6 +84,7 @@ spec/wasm_cross/gleam_bool_shortcircuit.almd
 spec/wasm_cross/gleam_float_sci.almd
 spec/wasm_cross/gleam_int_radix.almd
 spec/wasm_cross/gleam_multi_subject.almd
+spec/wasm_cross/gleam_pipe_shapes.almd
 spec/wasm_cross/gleam_precedence_unary.almd
 spec/wasm_cross/global_in_both_arms.almd
 spec/wasm_cross/global_in_shortcircuit_operand.almd
@@ -181,6 +182,7 @@ spec/wasm_cross/ref_int_min_div_abort.almd
 spec/wasm_cross/ref_koka_guard_liveness.almd
 spec/wasm_cross/ref_roc_shared_cow.almd
 spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 spec/wasm_cross/replace_empty_pat.almd
 spec/wasm_cross/reserved_keyword_fn.almd
 spec/wasm_cross/result_default_and_passthrough.almd
@@ -244,6 +246,7 @@ spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/top_let_eager_through_call.almd
 spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/trig_libm.almd
+spec/wasm_cross/tuple_eq.almd
 spec/wasm_cross/tuple_single.almd
 spec/wasm_cross/unit_effect_abi.almd
 spec/wasm_cross/unwrap_in_callarg.almd
