@@ -513,12 +513,14 @@ pub fn check_rc(
         let temp_arg: Vec<bool> = (0..takers.len())
             .map(|t| !owned_at(&names_through(bodies, imports, b, &judged, &args[t], 2), takers[t].0))
             .collect();
-        // #4278 B1: a release read through a hold a routine's or an arm's
-        // `h` move names, inside that move's window, is that hold's credit:
-        // a temporary's unnamed event never takes it.
+        // #4278 B1: a release whose argument is read straight out of a hold
+        // a routine's or an arm's `h` move names, inside that move's window,
+        // is that hold's credit: a temporary's unnamed event never takes it.
+        // (The direct read only: a pooled hold also shows up among the
+        // locals an unrelated value may have passed through.)
         let hold_claimed: Vec<bool> = calls
             .iter()
-            .map(|(k, kind, names)| *kind == 'd' && held_at.iter().any(|&(l, a, z)| a <= *k && *k <= z && names.contains(&l)))
+            .map(|(k, kind, names)| *kind == 'd' && held_at.iter().any(|&(l, a, z)| a <= *k && *k <= z && names.first() == Some(&l)))
             .collect();
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
@@ -541,9 +543,11 @@ pub fn check_rc(
                 ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
                 // The arm or routine the credit moved into, or one enclosing
                 // it (a callback's move released by the fold that called it).
+                // A hold's move (`h`) takes only a release read straight out of
+                // its hold: the pooled local carries other values too.
                 (c, Some(l)) if is_move(c) => {
                     k == 'd'
-                        && names_of.contains(&l)
+                        && (if c == 'h' { names_of.first() == Some(&l) } else { names_of.contains(&l) })
                         && evwin[e].is_some_and(|(a, z)| {
                             windows.iter().flatten().any(|&(p, x, y)| p == *pos && x <= a && z <= y && x <= calls[i].0 && calls[i].0 <= y)
                                 || (a <= calls[i].0 && calls[i].0 <= z)
