@@ -5,7 +5,9 @@
 // variable's credit moves as that variable's own `m` — so the set's release
 // of the key (the key is present), left without its event, reads exactly as
 // the routine's own release: the frame is still accepted with routine-internal
-// one higher, the #4278 routine-internal debt, and no other count moves.
+// two higher — the set releases the key on each of its two present-key paths
+// (in place, and the copy of a shared block), one hold move per path — the
+// #4278 routine-internal debt, and no other count moves.
 effect fn main() -> Unit = {
   var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
   m = map.set(m, string.repeat("a", 1), 3)
