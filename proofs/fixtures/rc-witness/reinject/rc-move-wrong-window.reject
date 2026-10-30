@@ -1,1 +1,1 @@
-ANCHORS REJECT: rc: function 38: recorded events with no call []; calls with no recorded event [d@112 on [15, 9, 5, 2684354564], d@192 on [15, 9, 5, 2684354564]]
+ANCHORS REJECT: rc: function 15: recorded events with no call []; calls with no recorded event [d@276 on [8, 5, 1], d@356 on [8, 5, 1], d@448 on [8, 5, 2], d@528 on [8, 5, 2]]
