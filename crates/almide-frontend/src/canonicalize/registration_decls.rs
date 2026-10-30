@@ -363,6 +363,11 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     // registers, so the E020 duplicate check never sees it.
     let reserved = reserve_own_nominal_types(env, decls, prefix);
     super::resolve::register_builtin_named_type_keys(env, decls, type_cur_mod(env, prefix));
+    // The entry program's own type names (#4352), read by the bare-name
+    // resolver; a module's own types answer through their `mod.Name` keys.
+    if prefix.is_none() && env.alias_owner_module.is_none() {
+        super::resolve::register_entry_own_type_keys(env, decls);
+    }
     // An alias registers after every alias of this module it spells, and an
     // alias in a cycle registers as `Unknown` (#3407, registration_order.rs).
     for step in type_registration_steps(decls) {
