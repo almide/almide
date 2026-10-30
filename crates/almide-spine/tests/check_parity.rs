@@ -148,6 +148,38 @@ fn spec_corpus_check_matches_oracle_hashes() {
     assert_compared(compared, "check parity");
 }
 
+/// #4350: the manifest recorded `almide check`'s exit for each fixture, and a
+/// non-zero exit was accepted as a golden like any other, so a fixture that
+/// stopped compiling (`spec/embedded_cross/process_kill_syscall.almd`, E042)
+/// stayed green. A row may record a non-zero exit only when the fixture's own
+/// header declares it a compile-error fixture (`// @check-error: <reason>`),
+/// and a fixture that declares it must still exit non-zero. Read from the
+/// files, never from a list of names here.
+#[test]
+fn a_nonzero_check_exit_is_declared_by_the_fixture() {
+    let root = workspace_root();
+    let text = std::fs::read_to_string(root.join("crates/almide-spine/tests/golden/spec-check-manifest.txt"))
+        .expect("run scripts/gen-check-manifest.sh");
+    let mut problems = Vec::new();
+    let mut rows = 0usize;
+    for l in almide_corpus::manifest_rows(&text) {
+        let mut it = l.splitn(3, '\t');
+        let _h = it.next().expect("test harness invariant");
+        let rc = it.next().expect("test harness invariant");
+        let p = it.next().expect("test harness invariant");
+        let source = std::fs::read_to_string(almide_corpus::resolve(&root, p)).expect("test harness invariant");
+        let declared = source.lines().any(|line| line.trim_start().starts_with("// @check-error:"));
+        match (rc != "0", declared) {
+            (true, false) => problems.push(format!("{p}: `almide check` exits {rc} but the file does not declare `// @check-error:`")),
+            (false, true) => problems.push(format!("{p}: declares `// @check-error:` but `almide check` exits 0")),
+            _ => {}
+        }
+        rows += 1;
+    }
+    assert!(rows > 900, "spec-check-manifest.txt: suspiciously few rows ({rows})");
+    assert!(problems.is_empty(), "{} fixture(s) disagree with their declared check outcome:\n{}", problems.len(), problems.join("\n"));
+}
+
 /// The stage-2 variant (no #862 stdlib loop) must ALSO match the oracle
 /// byte-for-byte — this is the adjudication that the skipped loop has no
 /// observable effect on stdlib-only entries.

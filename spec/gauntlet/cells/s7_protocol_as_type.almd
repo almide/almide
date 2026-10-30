@@ -1,4 +1,5 @@
 // UNFILED: a protocol is not a type — no heterogeneous collection
+// @check-error: a protocol is not a type (the gauntlet's reject cell)
 import io
 
 protocol Policy {
