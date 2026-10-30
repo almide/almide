@@ -512,6 +512,11 @@ impl LowerCtx {
             return Ok(());
         }
         let IrExprKind::Range { start, end, inclusive } = &value.kind else { unreachable!() };
+        // `a..=MAX` materializes as `list.range(a, MAX + 1)`, and MAX + 1 wraps
+        // to MIN: the list would come out empty. Refuse the shape here.
+        if *inclusive && matches!(end.kind, IrExprKind::LitInt { value } if value == i64::MAX) {
+            return Err(LowerError::at(end.span, "an inclusive Range ending at Int max cannot materialize through an exclusive end (MAX + 1 wraps)"));
+        }
         let range_mark = self.ops.len();
         let (s_v, e_v0) = match (self.lower_scalar_value(start), self.lower_scalar_value(end)) {
             (Some(sv), Some(ev)) => (sv, ev),

@@ -249,6 +249,10 @@ impl LowerCtx {
         inclusive: bool,
         out: &mut Vec<CallArg>,
     ) -> Result<ArgOutcome, LowerError> {
+        // `a..=MAX` would pass MAX + 1, which wraps to MIN (an empty list).
+        if inclusive && matches!(end.kind, IrExprKind::LitInt { value } if value == i64::MAX) {
+            return Err(LowerError::at(end.span, "an inclusive Range ending at Int max cannot materialize through an exclusive end (MAX + 1 wraps)"));
+        }
         let range_mark = self.ops.len();
         let (s_v, e_v0) = match (
             self.lower_scalar_value(start),
