@@ -233,7 +233,7 @@ pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str,
         let t: Vec<&str> = item.split_whitespace().collect();
         if t.first().is_some_and(|x| x.starts_with('L')) {
             let what = |e: String| format!("fields layout `{item}`: {e}");
-            if t.len() < 4 || (t.len() - 4) % 2 != 0 {
+            if t.len() < 4 || !(t.len() - 4).is_multiple_of(2) {
                 return Err(what("not `L R c C n N z S (o O w W)*`".into()));
             }
             let (r, c, n, z) = (num(t[0], 'L').map_err(what)?, num(t[1], 'c').map_err(what)?, num(t[2], 'n').map_err(what)?, num(t[3], 'z').map_err(what)?);
