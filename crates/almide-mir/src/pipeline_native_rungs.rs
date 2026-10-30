@@ -241,7 +241,7 @@ fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut 
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
         let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -277,7 +277,7 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
         let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -308,7 +308,9 @@ fn rewrite_native_result_windows_over<'a>(
 // sees these ops. Runs BEFORE verification/render (both are downstream).
 {
     use almide_lang::types::Ty;
-    let result_fns: std::collections::BTreeSet<String> = decls
+    let decl_list: Vec<&almide_ir::IrFunction> = decls.collect();
+    let result_fns: std::collections::BTreeSet<String> = decl_list
+        .iter()
         .filter(|f| {
             is_native_result_ty(&f.ret_ty)
                 // A LIFTED effect fn (declared `-> Int|Bool`, `effect`) has
@@ -327,7 +329,7 @@ fn rewrite_native_result_windows_over<'a>(
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
         let res_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
