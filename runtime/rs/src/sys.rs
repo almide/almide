@@ -22,7 +22,9 @@
 mod almide_rt_sys_ffi {
     #[cfg(unix)]
     mod c {
-        extern "C" {
+        // SAFETY: each declaration is the libc prototype on Linux and macOS
+        // (pthread_t, sighandler_t as pointer-width integers; pid_t, int i32).
+        unsafe extern "C" {
             pub fn signal(sig: i32, handler: usize) -> usize;
             pub fn pthread_self() -> usize;
             pub fn pthread_kill(thread: usize, sig: i32) -> i32;
@@ -125,7 +127,8 @@ mod almide_rt_sys_ffi {
         type ClockId = u32;
         #[cfg(not(target_os = "macos"))]
         type ClockId = i32;
-        extern "C" {
+        // SAFETY: clock_gettime's prototype, with this target's clockid_t (above).
+        unsafe extern "C" {
             fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
         }
         const CLOCK: ClockId = if cfg!(target_os = "linux") { 3 } else { 16 };
@@ -174,8 +177,9 @@ mod almide_rt_sys_ffi {
     /// `SetConsoleCtrlHandler(handler, add)`.
     #[cfg(windows)]
     pub fn set_console_ctrl_handler(handler: extern "system" fn(u32) -> i32, add: bool) -> bool {
+        // SAFETY: wincon.h's prototype (a PHANDLER_ROUTINE, a BOOL).
         #[link(name = "kernel32")]
-        extern "system" {
+        unsafe extern "system" {
             fn SetConsoleCtrlHandler(handler: Option<extern "system" fn(u32) -> i32>, add: i32) -> i32;
         }
         // SAFETY: `handler` is a function of the PHANDLER_ROUTINE signature,
