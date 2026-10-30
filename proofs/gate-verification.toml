@@ -957,6 +957,16 @@ varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin: 10 UB of 30
 blind = "undefined behaviour Miri does not model or that the corpus does not reach (a program stopped at an unsupported foreign call such as a socket or a child process is reported, not judged, and a code path no fixture runs is not seen) -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
 
 [[gate]]
+path = "scripts/miri-asan-slice.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4009 PR slice (2026-10-30, GCE n2-standard-8, x86_64-linux, nightly-2026-08-01): with an out-of-bounds read planted in runtime/rs/src/sys.rs fill_entropy (std::ptr::read_volatile one byte past the chunk, reached by random.bytes in scripts/lib/unsafe-boundary-asan.almd, which every slice runs), `MIRI_ASAN_ROTATION=2 bash scripts/miri-asan-slice.sh asan` exited 1 (ASAN 2: heap-buffer-overflow READ of size 1 in the boundary program and spec/wasm_cross/uuid_v7_monotonic.almd; rotations 0 and 5 likewise red, ASAN 1) and `MIRI_ASAN_ROTATION=7 ... miri` exited non-zero (UB 2: the boundary program and spec/wasm_cross/random_bytes.almd, 'attempting to access 1 byte ... at or beyond the end of the allocation'); unplanted, rotation 0 exited 0 under both (82 programs Miri, 256 ASan) and rotation 2 under ASan (266 ok). Each invocation also runs the verdict scripts' own controls."
+measures = "the UB / ASAN verdicts of scripts/miri-generated.sh and scripts/asan-generated.sh over the run's 1-in-k slice of spec/wasm_cross (k = 12 Miri, 4 ASan; offset = the run counter mod k) plus the change's touched fixtures and the runtime-unsafe boundary program, and those scripts' control verdicts"
+varies = "2026-10-30 GCE: the planted out-of-bounds read gave ASAN 1 / UB 2, the unplanted tree 0 / 0, on the same rotations"
+blind = "a program outside this run's slice (the next k - 1 runs of this job take it) -> .github/workflows/miri-nightly.yml; a program Miri cuts off at MIRI_TIMEOUT=240 or stops at an unsupported call (sockets, child processes, fs) -> scripts/asan-generated.sh"
+
+[[gate]]
 path = "scripts/wasm-checked-alloc.sh"
 reads = "scalar"
 wired_by = ".github/workflows/wasm-checked-alloc-nightly.yml"

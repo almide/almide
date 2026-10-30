@@ -102,6 +102,30 @@ impl<Q: 'static> Drop for AlmideBoxQueueReset<Q> {
     }
 }
 
+/// While a walk runs, its queue is reached ONLY through the slot's pointer —
+/// a nested call's push and the outer walk's pop alike (#4303). The outer walk
+/// using its `work` by name between steps retags it, which ends the pointer the
+/// slot holds under Stacked Borrows, so the next nested push was undefined
+/// behaviour Miri reported on every deep recursive-type program.
+/// `Some(step)` back means no walk is running: the caller starts one.
+#[inline(always)]
+fn almide_box_q_push<Q: 'static>(slot: &'static std::thread::LocalKey<std::cell::Cell<*mut Vec<Q>>>, step: Q) -> Option<Q> {
+    let w = slot.with(|q| q.get());
+    // SAFETY: a non-null slot is the &mut work of the outer walk on this thread, live until its reset nulls the slot; that walk is suspended in the call that led here and reaches work only through this same pointer.
+    match unsafe { w.as_mut() } {
+        Some(work) => { work.push(step); None }
+        None => Some(step),
+    }
+}
+
+/// The outer walk's next step, popped through the slot's pointer.
+#[inline(always)]
+fn almide_box_q_pop<Q: 'static>(slot: &'static std::thread::LocalKey<std::cell::Cell<*mut Vec<Q>>>) -> Option<Q> {
+    let w = slot.with(|q| q.get());
+    // SAFETY: as in almide_box_q_push; called by the outer walk between steps, when no nested call holds the queue.
+    unsafe { w.as_mut() }.and_then(|work| work.pop())
+}
+
 // SAFETY: callers pass an AlmideBox<T>'s cell (a leaked Box<T>), once.
 unsafe fn almide_box_free<T>(p: *mut u8) {
     drop(std::boxed::Box::from_raw(p as *mut T));
@@ -110,21 +134,14 @@ unsafe fn almide_box_free<T>(p: *mut u8) {
 impl<T> Drop for AlmideBox<T> {
     fn drop(&mut self) {
         let step: AlmideBoxDropStep = (self.almide_p.as_ptr() as *mut u8, almide_box_free::<T>);
-        let running = ALMIDE_BOX_DROP_Q.with(|q| q.get());
-        if !running.is_null() {
-            // SAFETY: a non-null slot is &mut work of the outer drop on this thread,
-            // live until its _reset nulls the slot; the outer drop is suspended in
-            // the f(p) call that led here, so no other reference to work is used.
-            unsafe { (*running).push(step) };
-            return;
-        }
+        let Some(step) = almide_box_q_push(&ALMIDE_BOX_DROP_Q, step) else { return };
         let mut work: Vec<AlmideBoxDropStep> = Vec::new();
         ALMIDE_BOX_DROP_Q.with(|q| q.set(&mut work));
         let _reset = AlmideBoxQueueReset(&ALMIDE_BOX_DROP_Q);
         // SAFETY: step is this box's own cell with almide_box_free::<T>; Drop runs
         // once per box, and the queued steps are popped (taken) once each.
         unsafe { (step.1)(step.0) };
-        while let Some((p, f)) = work.pop() {
+        while let Some((p, f)) = almide_box_q_pop(&ALMIDE_BOX_DROP_Q) {
             // SAFETY: a step a nested drop queued: its own cell and free fn, popped once.
             unsafe { f(p) };
         }
@@ -143,19 +160,14 @@ impl<T: Clone> Clone for AlmideBox<T> {
         // the outermost clone drains every queued step before it returns.
         let cell = std::ptr::NonNull::from(std::boxed::Box::leak(std::boxed::Box::new(std::mem::MaybeUninit::<T>::uninit()))).cast::<T>();
         let step: AlmideBoxCloneStep = (self.almide_p.as_ptr() as *const u8, cell.as_ptr() as *mut u8, almide_box_clone_into::<T>);
-        let running = ALMIDE_BOX_CLONE_Q.with(|q| q.get());
-        if !running.is_null() {
-            // SAFETY: as in Drop: the slot is the outer clone's &mut work, live and
-            // not otherwise used while this inner clone runs.
-            unsafe { (*running).push(step) };
-        } else {
+        if let Some(step) = almide_box_q_push(&ALMIDE_BOX_CLONE_Q, step) {
             let mut work: Vec<AlmideBoxCloneStep> = Vec::new();
             ALMIDE_BOX_CLONE_Q.with(|q| q.set(&mut work));
             let _reset = AlmideBoxQueueReset(&ALMIDE_BOX_CLONE_Q);
             // SAFETY: step.0 is self's live cell, step.1 the fresh cell above, written
             // once here; each queued step is popped and run once before return.
             unsafe { (step.2)(step.0, step.1) };
-            while let Some((s, d, f)) = work.pop() {
+            while let Some((s, d, f)) = almide_box_q_pop(&ALMIDE_BOX_CLONE_Q) {
                 // SAFETY: a step a nested clone queued: its live source and fresh cell, popped once.
                 unsafe { f(s, d) };
             }
@@ -175,12 +187,7 @@ impl<T: PartialEq> PartialEq for AlmideBox<T> {
     /// one folds every queued step into its verdict.
     fn eq(&self, other: &Self) -> bool {
         let step: AlmideBoxEqStep = (self.almide_p.as_ptr() as *const u8, other.almide_p.as_ptr() as *const u8, almide_box_eq_at::<T>);
-        let running = ALMIDE_BOX_EQ_Q.with(|q| q.get());
-        if !running.is_null() {
-            // SAFETY: as in Drop: the slot is the outer == call's &mut work.
-            unsafe { (*running).push(step) };
-            return true;
-        }
+        let Some(step) = almide_box_q_push(&ALMIDE_BOX_EQ_Q, step) else { return true };
         let mut work: Vec<AlmideBoxEqStep> = Vec::new();
         ALMIDE_BOX_EQ_Q.with(|q| q.set(&mut work));
         let _reset = AlmideBoxQueueReset(&ALMIDE_BOX_EQ_Q);
@@ -189,7 +196,7 @@ impl<T: PartialEq> PartialEq for AlmideBox<T> {
         if !unsafe { (step.2)(step.0, step.1) } {
             return false;
         }
-        while let Some((a, b, f)) = work.pop() {
+        while let Some((a, b, f)) = almide_box_q_pop(&ALMIDE_BOX_EQ_Q) {
             // SAFETY: a step a nested == queued: two cells inside self / other, still borrowed.
             if !unsafe { f(a, b) } {
                 return false;
