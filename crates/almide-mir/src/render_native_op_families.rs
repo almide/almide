@@ -172,11 +172,16 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             dst: Some(d),
             args,
         } => {
+            // The Ok slot holds the MIR scalar: a Float as its bits.
+            let payload = match tys.get(&args[0]) {
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                _ => var(args[0]),
+            };
             tys.insert(*d, NTy::Res);
             line!(
                 "let {}: Result<i64, AlmideString> = Ok({});",
                 var(*d),
-                var(args[0])
+                payload
             );
         }
         Op::Prim {

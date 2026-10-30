@@ -39,10 +39,12 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Rewrite every recognized Result window in `f`. `result_fns` names the
 /// functions whose (declared) return is a native-carrier Result — their
 /// `CallFn` dsts seed the consumer-side value tracking.
-pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
+pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>, res_params: &[ValueId]) {
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
+    // A param declared as a carrier Result (#4006 family C) is one.
+    t.res_vals.extend(res_params.iter().copied());
 
     for op in ops {
         match &op {
@@ -101,11 +103,22 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
             // A Consume of a rewritten result value: the carrier is
             // scalar-like to the verifier (no object) — drop the op.
             Op::Consume { v } if t.res_vals.contains(v) => {}
-            Op::CallFn {
-                dst: Some(d), name, ..
-            } if result_fns.contains(name) => {
-                t.res_vals.insert(*d);
-                out.push(op);
+            Op::CallFn { dst, name, args, result } => {
+                if let Some(d) = dst {
+                    if result_fns.contains(name) {
+                        t.res_vals.insert(*d);
+                    }
+                }
+                // A minted carrier has no object: as a call arg it is a value
+                // the callee copies, not a heap handle it borrows.
+                let args = args
+                    .iter()
+                    .map(|a| match a {
+                        crate::CallArg::Handle(v) if t.minted.contains(v) => crate::CallArg::Scalar(*v),
+                        other => other.clone(),
+                    })
+                    .collect();
+                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: result.clone() });
             }
             // Res-ness propagates through if-value joins.
             Op::IfThen { dst, .. } => {

@@ -291,11 +291,8 @@ fn seed_param_ntys(
             Some(NativeSigKind::I64) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
             Some(NativeSigKind::Opt) => NTy::Opt,
-            // Result params are rejected by the sig gate; a Res kind can
-            // only name a RETURN.
-            Some(NativeSigKind::Res) => {
-                return Err(wall("native: Result-typed param — outside the rung subset"))
-            }
+            // A carrier Result param (#4006 family C) arrives by value.
+            Some(NativeSigKind::Res) => NTy::Res,
             None => repr_nty(&p.repr, true)?,
         };
         tys.insert(p.value, nty);

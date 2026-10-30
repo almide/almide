@@ -72,9 +72,22 @@ pub fn rewrite_option_ops(f: &mut MirFunction, option_fns: &BTreeSet<String>, op
                     _ => out.push(op),
                 }
             }
-            Op::CallFn { dst: Some(d), name, .. } if option_fns.contains(name) => {
-                t.opt_vals.insert(*d);
-                out.push(op);
+            Op::CallFn { dst, name, args, result } => {
+                if let Some(d) = dst {
+                    if option_fns.contains(name) {
+                        t.opt_vals.insert(*d);
+                    }
+                }
+                // A minted carrier has no object: as a call arg it is a value
+                // the callee copies, not a heap handle it borrows.
+                let args = args
+                    .iter()
+                    .map(|a| match a {
+                        crate::CallArg::Handle(v) if t.minted.contains(v) => crate::CallArg::Scalar(*v),
+                        other => other.clone(),
+                    })
+                    .collect();
+                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: result.clone() });
             }
             Op::IfThen { dst, .. } => {
                 t.if_dsts.push(*dst);

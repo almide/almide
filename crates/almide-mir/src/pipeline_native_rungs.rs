@@ -92,15 +92,11 @@ fn native_sig_subset_check(
     // T1-3: Result[scalar, String] returns ride a dedicated native
     // carrier (NTy::Res — Rust Result<i64, String>). String-Ok payloads
     // stay walled (their tag/payload windows are ambiguous with Err's).
-    let is_native_result = |t: &Ty| {
-        matches!(t, Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2
-                && matches!(a[0], Ty::Int | Ty::Bool)
-                && matches!(a[1], Ty::String))
-    };
+    let is_native_result = is_native_result_ty;
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
             || is_scalar_option(t)
+            || is_native_result(t)
             || is_scalar_list(t)
             || is_scalar_record(t)
             || is_flat_variant(t)
@@ -152,6 +148,18 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
 /// T1-3: rewrite the stereotyped Result block windows onto the native
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
+/// A `Result` whose Ok payload is a native scalar (Int, Bool, Float as its
+/// bits, Unit as 0) and whose Err is a String: the T1-3 carrier
+/// `Result<i64, AlmideString>` (#4006 family C widened it past Int | Bool).
+fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float | Ty::Unit)
+            && matches!(a[1], Ty::String))
+}
+
 /// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
 /// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
 fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
@@ -199,10 +207,7 @@ fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
         .functions
         .iter()
         .filter(|f| {
-            matches!(&f.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2
-                    && matches!(a[0], Ty::Int | Ty::Bool)
-                    && matches!(a[1], Ty::String))
+            is_native_result_ty(&f.ret_ty)
                 // A LIFTED effect fn (declared `-> Int|Bool`, `effect`) has
                 // the same wrapped carrier ABI on this leg — the native
                 // pipeline runs no never-err strip, so every lifted call
@@ -218,8 +223,20 @@ fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
         })
         .map(|f| f.name.as_str().to_string())
         .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
-        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns);
+        let res_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_native_result_ty(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params);
     }
 }
 }
@@ -242,13 +259,7 @@ fn native_sig_kind(
         Ty::String => Some(NativeSigKind::Str),
         // T1-3: the native Result carrier (return position only — the
         // param gate rejects Result params before this table is read).
-        Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2
-                && matches!(a[0], Ty::Int | Ty::Bool)
-                && matches!(a[1], Ty::String) =>
-        {
-            Some(NativeSigKind::Res)
-        }
+        t if is_native_result_ty(t) => Some(NativeSigKind::Res),
         Ty::Applied(TypeConstructorId::List, a)
             if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
         {

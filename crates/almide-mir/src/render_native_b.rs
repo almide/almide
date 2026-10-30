@@ -245,9 +245,7 @@ fn declared_param_want(
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::F64) => NTy::F64,
         Some(NativeSigKind::Opt) => NTy::Opt,
-        Some(NativeSigKind::Res) => {
-            return Err(wall("native: Result-typed param — outside the rung subset"))
-        }
+        Some(NativeSigKind::Res) => NTy::Res,
         None => repr_nty(&p.repr, true)?,
     })
 }
@@ -272,6 +270,14 @@ fn user_arg_in_declared_mode(
                 )));
             }
             Ok(code)
+        }
+        NTy::Res => {
+            if got != NTy::Res {
+                return Err(wall(format!(
+                    "native: non-Result arg to Result param of `{name}`"
+                )));
+            }
+            Ok(format!("{code}.clone()"))
         }
         NTy::Opt => {
             if got != NTy::Opt {
