@@ -854,7 +854,7 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
                     _ => return Err(format!("the access's counter is not scaled: {scaled:?}")),
                 },
                 None if s == 1 => (&addr, &zero, 1),
-                None => return Err(format!("the access's address is not block + scaled counter: {addr:?}")),
+                _ => return Err(format!("the access's address is not block + scaled counter: {addr:?}")),
             };
             if s <= 0 || s2 != s {
                 return Err(format!("the exit test counts slots of {s} bytes, the access scales by {s2}"));
