@@ -5826,3 +5826,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_display.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-445"
+spec      = "ALS-R5"
+title     = "The embedded wasm host stops a process.start child neither waited on nor stopped when the run ends by main's return, process.exit or an effect error, as native does"
+statement = "ALS-R5 (almide/almide#4347, almide/almide#4348): on the embedded wasm host (`almide run --target wasm` and the wasm leg of `almide test`), when a run ends because main returns, because `process.exit` is called, or because an effect error ends main, every child the program started with `process.start` and has neither waited on nor stopped is stopped the way `process.stop(child, 500)` stops it — SIGTERM to the child's process group, 500 ms to end, then SIGKILL — before the run's exit status is reported, as C-437 states for native. A host that serves the `almide:process/spawn` import a stand-alone artifact carries keeps the children each run starts as that run's own and stops them in the same way when the run ends. A child already waited on or stopped is left as it is, and the exit neither waits for a running child's own end nor changes the exit code, stdout or stderr, which are the ones native reports. An exit by a runtime abort or a signal is outside it."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/process_start_run_end_stops_children.almd", class = "fixture" },
+  { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_cross_fixture_sees_both_legs_stop_the_child", class = "fixture" },
+  { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_wasm_host_stops_an_unwaited_child_on_every_exit_route", class = "fixture" },
+]
