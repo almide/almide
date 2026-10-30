@@ -93,9 +93,9 @@ reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detecti
 
 [[file]]
 path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
-count = 14
+count = 27
 class = "c-call"
-reason = "the rooted fs family and every fs call under [permissions] fs by descriptor (#4084): openat / readlinkat / unlinkat / mkdirat / renameat / fdopendir / readdir / closedir, Linux openat2 via syscall, errno reset for readdir, and owning a descriptor a successful open returned"
+reason = "the rooted fs family and every fs call under [permissions] fs by descriptor (#4084): openat / readlinkat / unlinkat / mkdirat / renameat / fdopendir / readdir / closedir, Linux openat2 via syscall, errno reset for readdir, and owning a descriptor a successful open returned. Windows (2ebd5c083, #4293; 13 of the 27 lines, unlisted until #4007 wrote the row to match the tree): the ntdll / kernel32 declarations, NtCreateFile relative to a directory handle, NtQueryInformationFile / NtSetInformationFile, RtlNtStatusToDosError, GetFileInformationByHandle(Ex) and owning the returned HANDLE — each with its SAFETY: line; exercised on windows-latest by ci.yml's row-10 step (fs_beneath_platform / fs_beneath_core / fs_scoped_core and a rooted program), on i686 by the 32-bit step, and on macOS by the release step"
 
 [[file]]
 path = "runtime/rs/src/random.rs"
