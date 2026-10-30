@@ -708,6 +708,12 @@ impl OwnershipScan {
     /// handle, `rc_inc`/`rc_dec` move that object's count); every other prim kind is
     /// ownership-neutral. Verbatim.
     fn apply_prim_rc_event(&mut self, kind: &PrimKind, dst: &Option<ValueId>, args: &[ValueId]) {
+        // A native Result carrier birth is alloc-class: a fresh owned object,
+        // released by the carrier's kept `Drop`/`Consume` (#4349).
+        if let (true, Some(d)) = (kind.births_native_carrier(), dst) {
+            self.own_fresh_object(*d);
+            return;
+        }
         match kind {
             // The carrier is a LIVE alias of its source's object (#3263): a
             // borrowing use of it (a call's handle arg — `string.eq(prim.handle
@@ -789,6 +795,8 @@ impl OwnershipScan {
             PrimKind::LoadHandle | PrimKind::Load { .. } | PrimKind::Store { .. } => {
                 self.check_address_live(i, addr)
             }
+            // A native Result carrier read dereferences the carrier (#4349).
+            k if k.reads_native_carrier() => self.check_address_live(i, addr),
             PrimKind::ElemAddr => {
                 self.check_address_live(i, addr);
                 if let (Some(d), Some(o)) = (dst, self.address_object(addr)) {

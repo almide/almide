@@ -82,8 +82,9 @@ pub enum PrimKind {
     ResErrStr,
     /// `dst = args[0].clone()` — a copy of a carrier `ResMakeOk` /
     /// `ResMakeErrStr` minted (the `Dup` the shared lowering emits when a
-    /// Result outlives a statement, #3669). The minted carrier has no object,
-    /// so the copy is no ownership event, and neither is its release.
+    /// Result outlives a statement, #3669). Like the two makers it is a
+    /// carrier BIRTH ([`PrimKind::births_native_carrier`]): a fresh owned
+    /// object, released by the carrier's own kept `Drop`/`Consume` (#4349).
     ResCopy,
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
@@ -395,6 +396,26 @@ pub enum PrimKind {
     /// block is a distinct bump address — pointer identity IS the tag. Chains
     /// (via `args[2]`) when a family carries two singletons.
     RegionTagSel { tag: i64 },
+}
+
+impl PrimKind {
+    /// The native Result carrier prims that BIRTH a carrier — an owned Rust
+    /// `Result` local. The ownership mirror and the certificate both count
+    /// it alloc-class (`i`), balanced by the carrier's kept release (#4349).
+    pub fn births_native_carrier(&self) -> bool {
+        matches!(self, PrimKind::ResMakeOk | PrimKind::ResMakeErrStr | PrimKind::ResCopy)
+    }
+
+    /// The native Result carrier prims that READ a carrier (`args[0]`): the
+    /// tag, the Ok payload, the Err view, the copy. Each one dereferences the
+    /// carrier, so the carrier must still be live, the way the `Load`s of
+    /// the block window they replaced had to be (#4349).
+    pub fn reads_native_carrier(&self) -> bool {
+        matches!(
+            self,
+            PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr | PrimKind::ResCopy
+        )
+    }
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).

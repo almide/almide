@@ -443,7 +443,9 @@ impl CertScan {
     /// is refcount-neutral (the former catch-all).
     fn rc_prim_step(&mut self, op: &Op) {
         match op {
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } => {
+            // `ResErrStr` is the carrier's borrowed Err view: it aliases the
+            // carrier's object exactly as `Handle` does (the mirror's rule, #4349).
+            Op::Prim { kind: PrimKind::Handle | PrimKind::ResErrStr, dst: Some(d), args } => {
                 if let Some(&o) = args.first().and_then(|a| self.s.of.get(a)) {
                     self.s.of.insert(*d, o);
                 }
@@ -686,6 +688,8 @@ fn drop_family_value(op: &Op) -> Option<ValueId> {
 /// `Drop` — a String owns no nested handles).
 fn alloc_class_prim_dst(op: &Op) -> Option<ValueId> {
     match op {
+        // A native Result carrier birth (#4349): the mirror's alloc-class rule.
+        Op::Prim { kind, dst: Some(d), .. } if kind.births_native_carrier() => Some(*d),
         Op::Prim {
             kind:
                 PrimKind::ArgsGetList
