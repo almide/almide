@@ -169,6 +169,9 @@ impl Emitter<'_> {
         i.i32_or().if_(BlockType::Result(wasm_encoder::ValType::I32));
         i.local_get(hb).call(F_INC);
         i.local_get(hb);
+        let _ = i;
+        self.witness_arm_share_out(vb);
+        let mut i = self.f.instructions();
         i.else_();
         // Both operands are Objects on this arm (the tag test above), so the
         // payload slot is each one's pair list: pushed as the helper's
@@ -224,6 +227,9 @@ impl Emitter<'_> {
         } else {
             i.local_get(hv).call(F_INC);
             i.local_get(hv);
+            let _ = i;
+            self.witness_arm_share_out(v);
+            i = self.f.instructions();
         }
         i.else_();
         // An Object on this arm (the tag test above): its pair list.

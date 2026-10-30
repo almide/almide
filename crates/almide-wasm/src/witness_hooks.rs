@@ -293,6 +293,22 @@ impl Emitter<'_> {
         }
     }
 
+    /// #4278: the arm answers, on the path being emitted, with ARGUMENT `e`'s
+    /// block as its owned result, right after the `rc_inc` it just emitted on
+    /// it (the arm's lowering calls this where it emits that +1 — the site is
+    /// the declaration). The argument's line records the share-out `s`; a
+    /// frame variable the recorder does not hold poisons.
+    pub(crate) fn witness_arm_share_out(&mut self, e: &almide_ir::IrExpr) {
+        if self.witness.is_none() {
+            return;
+        }
+        let src = self.witness_src_local(e);
+        let Some(w) = self.witness.as_mut() else { return };
+        if !w.arm_share_out(src) {
+            w.poison();
+        }
+    }
+
     /// The declared type of a top-let global `e` names (a Var no local maps).
     pub(crate) fn witness_top_let_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };

@@ -12,9 +12,9 @@
 //! place a release routine is chosen). `almide-anchor-check` then matches the
 //! events against the calls of the shipped body (anchor-check `rc.rs`).
 //!
-//! Measurement-gated while #4278 is open: the anchor file carries the `rc`
-//! lines only under `ALMIDE_RC_ANCHORS=1`, since releases before an abort and
-//! RC inside runtime helpers are not recorded events by design.
+//! The anchor file always carries the `rc` lines, so the structural wall's
+//! anchor check (proofs/structural-wall.sh) judges every certified fixture's
+//! RC calls on every build.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
@@ -62,7 +62,7 @@ pub(crate) fn begin_pass(pass: usize) {
     with(|s| s.pass = pass);
 }
 
-/// The recorder logged a live `a` / `d` / `o` on `local` (`None`: a
+/// The recorder logged a live `a` / `d` / `o` / `s` on `local` (`None`: a
 /// temporary), or an `m`: the variable's credit moved into the arm or
 /// routine whose window is open (`#<window id>`; outside every window an
 /// `m` is no RC event and is not logged), or an `h`: a credit moved into the
@@ -83,8 +83,9 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
             None => e.push('-'),
         }
         // A move names its window; so does a temporary's event logged inside
-        // one (the arm or routine may release that temporary in its callee).
-        if moves || (local.is_none() && window.is_some()) {
+        // one (the arm or routine may release that temporary in its callee),
+        // and an arm's share-out (#4278), held to the `rc_inc` in its arm.
+        if moves || kind == 's' || (local.is_none() && window.is_some()) {
             e.push_str(&format!("#{}", window.unwrap_or(0)));
         }
         e.push(' ');

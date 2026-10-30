@@ -8,7 +8,7 @@
 #   dropped, doubled, made on the wrong local, inside an arm window, on the
 #   wrong slot holder, or a consuming routine that no longer consumes) while
 #   its recorded event stays: almide-verify still accepts the bundle, and
-#   almide-anchor-check's RC check (ALMIDE_RC_ANCHORS=1) must reject;
+#   almide-anchor-check's RC check must reject;
 #   anchors (#4011 (d)) — an instruction the bounds or init witness names,
 #   changed while its recording call stays: the proven checkers still
 #   accept both witnesses (step 2 requires it), and almide-anchor-check,
@@ -51,7 +51,7 @@ case "$PROP" in
   init) ISSUE=4013 ;;
   native) ISSUE=4006 ;;
   anchors) ISSUE=4011 ;;
-  rc) ISSUE=4277; export ALMIDE_RC_ANCHORS=1 ;;
+  rc) ISSUE=4277 ;;
   *) echo "usage: scripts/witness-reinject.sh <bounds|init|native|anchors|rc> [name ...]" >&2; exit 2 ;;
 esac
 shift

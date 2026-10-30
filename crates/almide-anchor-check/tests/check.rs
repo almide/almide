@@ -475,6 +475,27 @@ fn an_rc_call_inside_an_arm_window_is_the_arms_own() -> Result<(), String> {
 }
 
 #[test]
+fn an_arm_share_out_takes_only_the_rc_inc_in_its_own_window_on_its_variable() -> Result<(), String> {
+    // #4278: `$alloc` (function 0) stands in for rc_inc; the arm window is ops 0..=2.
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let none = std::collections::HashSet::new();
+    let arms = [vec![(1, 0, 2)], vec![]];
+    let run = |events: &str| check_rc(&bodies, 0, Some(0), &none, &[], &[(1, events.to_string())], &arms, &mut RcReport::default());
+    run("s0@0-2")?;
+    // An event on another variable, in another window, or in none: refused.
+    assert!(run("s1@0-2").is_err());
+    assert!(run("s0@2-2").is_err());
+    assert!(run("s0").is_err());
+    // The +1 dropped under its event: the share-out has no call.
+    let gone = module("(local i32 i32)", "local.get 0 drop");
+    assert!(check_rc(&decode(&gone)?, 0, Some(0), &none, &[], &[(1, "s0@0-2".into())], &arms, &mut RcReport::default())
+        .unwrap_err()
+        .contains("no call [s0]"));
+    Ok(())
+}
+
+#[test]
 fn a_variables_release_inside_its_judge_is_matched() -> Result<(), String> {
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc local.set 0");
     let bodies = decode(&bytes)?;

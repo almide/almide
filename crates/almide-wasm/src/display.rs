@@ -39,6 +39,12 @@ impl Emitter<'_> {
         nested: bool,
         ir: Option<&Ty>,
     ) -> Result<(), EmitError> {
+        // The top level of a part: a runtime-backed value read straight out
+        // of a frame variable hands its repr a share of that variable.
+        let src = self.display_src.take();
+        if let Some(i) = self.declared_repr_fn(ir) {
+            return self.emit_declared_repr(i, src);
+        }
         self.emit_display_at(got, nested, ir, &mut Vec::new())
     }
 
@@ -667,6 +673,7 @@ fn build_helper_body(
             owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
             if_sites: Default::default(),
+            display_src: None,
             borrowed_temps: Vec::new(),
             exit_ledger: Vec::new(),
             arm_rests: Default::default(),
