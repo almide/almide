@@ -273,10 +273,6 @@ impl<'b, 'a> Flow<'b, 'a> {
         false
     }
 
-    pub(crate) fn in_abort_arm(&self, k: usize) -> bool {
-        self.abort_arm[k]
-    }
-
     /// Every path from the entry to `q` passes `p` (`p < q`, structured
     /// control: nothing in `(p, q]` leaves the construct `p` sits in).
     pub(crate) fn dominates(&self, p: usize, q: usize) -> bool {
