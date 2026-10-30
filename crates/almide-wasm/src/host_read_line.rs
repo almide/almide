@@ -54,8 +54,12 @@ impl Emitter<'_> {
                 i.i32_const(1).local_set(g);
             }
             i.local_get(byte).i32_const(almide_layout::PAYLOAD as i32).i32_add().call(F_HOST_READ);
-            i.local_get(byte).i64_load8_u(crate::bytes::byte_k(0));
-            i.i64_const(10).i64_eq().br_if(1);
+        }
+        // #4281: the byte just read, through its recorded guard.
+        self.str_guarded_byte(byte, None);
+        {
+            let mut i = self.f.instructions();
+            i.i64_extend_i32_u().i64_const(10).i64_eq().br_if(1);
             // Owned dst, borrowed one-byte src. The helper grows geometrically
             // and releases each outgrown block; allocation failure is C-197.
             i.local_get(line).local_get(byte).call(F_STR_APPEND).local_set(line);
@@ -66,8 +70,13 @@ impl Emitter<'_> {
             i.local_get(line).i32_load(len_memarg()).local_set(len);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
             i.local_get(len).i32_eqz().br_if(1);
-            i.local_get(line).local_get(len).i32_add().i32_const(1).i32_sub();
-            i.i64_load8_u(crate::bytes::byte_k(0)).i64_const(13).i64_ne().br_if(1);
+            // byte len - 1, through `byte` (released above, free as a cursor)
+            i.local_get(len).i32_const(1).i32_sub().local_set(byte);
+        }
+        self.str_guarded_byte(line, Some(byte));
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(13).i32_ne().br_if(1);
             i.local_get(len).i32_const(1).i32_sub().local_set(len);
             i.br(0).end().end();
             i.local_get(line).local_get(len).i32_store(len_memarg());

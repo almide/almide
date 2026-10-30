@@ -8,7 +8,6 @@ use almide_ir::{CallTarget, IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
-use crate::string_scan::str_byte;
 use crate::*;
 
 #[path = "string_split_at.rs"]
@@ -146,7 +145,9 @@ impl Emitter<'_> {
         i.if_(BlockType::Result(ValType::I32));
         i.i32_const(0);
         i.else_();
-        i.local_get(hs).local_get(hoff).i32_add().i32_load8_u(str_byte()).local_set(hw);
+        self.str_guarded_byte(hs, Some(hoff));
+        i = self.f.instructions();
+        i.local_set(hw);
         i.i32_const(1);
         i.local_get(hw).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hw).i32_const(0xE0).i32_ge_u().i32_add();
@@ -271,6 +272,7 @@ impl Emitter<'_> {
         let hk = self.hold_i32()?;
         let hr = self.hold_i32()?;
         let hoff = self.hold_i32()?;
+        let hx = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hp);
         i.local_get(hp).i32_load(len_memarg()).local_set(hn);
@@ -288,9 +290,11 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hs).local_get(hoff).i32_add().local_get(hk).i32_add();
-        i.i32_load8_u(str_byte());
-        i.local_get(hp).local_get(hk).i32_add().i32_load8_u(str_byte());
+        let site = self.str_loop_exit();
+        self.f.instructions().local_get(hoff).local_get(hk).i32_add().local_set(hx);
+        self.str_guarded_byte(hs, Some(hx));
+        self.str_loop_byte(site, hp, hk);
+        i = self.f.instructions();
         i.i32_ne().if_(BlockType::Empty);
         i.i32_const(0).local_set(hr);
         i.br(2);
@@ -316,7 +320,7 @@ impl Emitter<'_> {
         i.end();
         i.end();
         let _ = i;
-        for _ in 0..6 {
+        for _ in 0..7 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(STR)))))
@@ -349,6 +353,8 @@ impl Emitter<'_> {
         let hn = self.hold_i32()?;
         let hk = self.hold_i32()?;
         let hr = self.hold_i32()?;
+        let hoff = self.hold_i32()?;
+        let hx = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hp);
         i.local_get(hp).i32_load(len_memarg()).local_set(hn);
@@ -356,16 +362,21 @@ impl Emitter<'_> {
         i.if_(BlockType::Result(ValType::I32));
         i.i32_const(0);
         i.else_();
+        // Compare from 0 or from len(s) − len(affix).
         if at_end {
-            // Compare from len(s) − len(affix): move the base by that much.
-            i.local_get(hs).local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().i32_add().local_set(hs);
+            i.local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().local_set(hoff);
+        } else {
+            i.i32_const(0).local_set(hoff);
         }
         i.i32_const(1).local_set(hr);
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte());
-        i.local_get(hp).local_get(hk).i32_add().i32_load8_u(str_byte());
+        let site = self.str_loop_exit();
+        self.f.instructions().local_get(hoff).local_get(hk).i32_add().local_set(hx);
+        self.str_guarded_byte(hs, Some(hx));
+        self.str_loop_byte(site, hp, hk);
+        i = self.f.instructions();
         i.i32_ne().if_(BlockType::Empty);
         i.i32_const(0).local_set(hr);
         i.br(2);
@@ -375,7 +386,7 @@ impl Emitter<'_> {
         i.local_get(hr);
         i.end();
         let _ = i;
-        for _ in 0..5 {
+        for _ in 0..7 {
             self.release_i32();
         }
         Ok(Some(Lowered::scalar(BOOL)))
