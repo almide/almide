@@ -104,6 +104,16 @@ const CORPUS: &[(&str, &str)] = &[
     // ── T1-3 Res carrier: a Result[Int, String]-returning plain fn and its
     //    match consumption ride NTy::Res (Rust Result<i64, String>) ──
     ("result_fn_match", "fn safe_div(a: Int, b: Int) -> Result[Int, String] =\n  if b == 0 then err(\"div by zero\") else ok(a / b)\n\nfn main() -> Unit = {\n  let r = safe_div(10, 2)\n  match r {\n    ok(v) => println(int.to_string(v)),\n    err(e) => println(e),\n  }\n  let s = safe_div(1, 0)\n  match s {\n    ok(v) => println(int.to_string(v)),\n    err(e) => println(e),\n  }\n}\n"),
+    // ── #4006 family I: top-level state in storage slots before main ──
+    ("top_let_div_eager", "let BAD = 1 / 0\nfn main() -> Unit = {\n  println(\"never reached\")\n}\n"),
+    ("top_let_call", "fn mk() -> Int = 3\nlet X = mk()\nfn main() -> Unit = {\n  println(int.to_string(X))\n}\n"),
+    ("top_var", "var COUNT = 0\nfn main() -> Unit = {\n  println(int.to_string(COUNT))\n}\n"),
+    ("top_var_writes", "var COUNT = 1\nvar RATIO = 0.5\n\neffect fn bump() -> Unit = {\n  COUNT = COUNT * 3\n  RATIO = RATIO + 1.25\n}\n\neffect fn main() -> Unit = {\n  bump()!\n  bump()!\n  println(int.to_string(COUNT))\n  println(float.to_string(RATIO))\n}\n"),
+    // ── #4006 family B: a scalar Option rides Option<i64> ──
+    ("option_scalar", "fn find(x: Int) -> Int? = if x > 0 then some(x * 2) else none\n\nfn get(o: Int?) -> Int = o ?? 0 - 1\n\nfn main() -> Unit = {\n  match find(3) {\n    some(v) => println(int.to_string(v)),\n    none => println(\"none\"),\n  }\n  println(int.to_string(get(find(-4))))\n  println(int.to_string(get(some(11))))\n}\n"),
+    // ── #4006 family C: scalar-Ok Results past Int, and Result[String, String] ──
+    ("result_float_unit", "fn half(x: Float) -> Result[Float, String] = if x > 0.0 then ok(x / 2.0) else err(\"neg\")\n\nfn check(x: Int) -> Result[Unit, String] = if x > 0 then ok(()) else err(\"bad\")\n\nfn main() -> Unit = {\n  match half(3.0) {\n    ok(v) => println(float.to_string(v)),\n    err(e) => println(e),\n  }\n  match check(0) {\n    ok(_) => println(\"fine\"),\n    err(e) => println(e),\n  }\n}\n"),
+    ("result_string_ok", "fn g(x: Int) -> Result[String, String] = if x > 0 then ok(\"pos \" + int.to_string(x)) else err(\"neg\")\n\nfn show(r: Result[String, String]) -> String = match r {\n  ok(s) => \"ok:\" + s,\n  err(e) => \"err:\" + e,\n}\n\nfn main() -> Unit = {\n  println(show(g(3)))\n  println(show(g(0)))\n  println(show(ok(\"lit\")))\n}\n"),
     // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
     //    desugar's abort tail now renders on the native v1 rung ──
     ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
@@ -229,23 +239,17 @@ fn out_of_subset_walls_honestly() {
         ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006: a top-level let runs EAGERLY before main; one whose
-        // initializer can abort (or calls) must not be materialized lazily
-        // at its uses, so it walls. A mutable top-level var walls too.
-        ("top_let_div_eager", "let BAD = 1 / 0
+        // #4006 family I: top-level state lives in native storage slots now,
+        // a SCALAR slot only. A heap-typed var or eager let still walls.
+        ("top_var_heap", "var LOG = \"\"
 fn main() -> Unit = {
-  println(\"never reached\")
+  LOG = LOG + \"x\"
+  println(LOG)
 }
 "),
-        ("top_let_call", "fn mk() -> Int = 3
-let X = mk()
+        ("top_let_heap_call", "let S = int.to_string(3)
 fn main() -> Unit = {
-  println(int.to_string(X))
-}
-"),
-        ("top_var", "var COUNT = 0
-fn main() -> Unit = {
-  println(int.to_string(COUNT))
+  println(S)
 }
 "),
         // #4006 / C-131: `list.push` lowers to `__list_concat(xs, [x])`. The

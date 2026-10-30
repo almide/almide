@@ -42,10 +42,12 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Rewrite every recognized Result window in `f`. `result_fns` names the
 /// functions whose (declared) return is a native-carrier Result — their
 /// `CallFn` dsts seed the consumer-side value tracking.
-pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
+pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>, res_params: &[ValueId]) {
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
+    // A param declared as a carrier Result (#4006 family C) is one.
+    t.res_vals.extend(res_params.iter().copied());
 
     for op in ops {
         match &op {

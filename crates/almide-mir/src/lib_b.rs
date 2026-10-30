@@ -86,6 +86,40 @@ pub enum PrimKind {
     /// carrier BIRTH ([`PrimKind::births_native_carrier`]): a fresh owned
     /// object, released by the carrier's own kept `Drop`/`Consume` (#4349).
     ResCopy,
+    /// ── NATIVE-ONLY Option carrier prims (#4006 family B) ────────────────
+    /// Inserted exclusively by `native_option_rewrite` (never by the shared
+    /// lowering, never seen by the wasm renderer): a scalar Option's
+    /// `Init::OptSome` / `Init::OptNone` block and its tag/payload read
+    /// windows, rendered as a Rust `Option<i64>` local (`NTy::Opt`).
+    /// `Some(args[0])` — args[0] is the scalar payload (a Float as its bits).
+    OptMakeSome,
+    /// `None`.
+    OptMakeNone,
+    /// `dst = args[0].is_some() as i64` — the block's length word (1 = Some).
+    OptTag,
+    /// `dst = the Some payload` (scalar); 0 on the None side (unreached: the
+    /// tag dispatch guards it).
+    OptPayload,
+    /// `dst = args[0]` — a copy of a minted carrier (the `Dup` the shared
+    /// lowering emits when an Option outlives a statement); no ownership event.
+    OptCopy,
+    /// ── NATIVE-ONLY String-Ok Result carrier prims (#4006 family C) ──────
+    /// Inserted exclusively by `native_result_str_rewrite`: `dst =
+    /// Ok(args[0].clone())` — args[0] is the payload String (its own
+    /// Alloc/Consume accounting untouched); dst is a `Result<String, String>`.
+    ResStrMake,
+    /// `args[0]`'s payload moves to the Err side when `args[1] != 0` (the
+    /// block's tag word); no dst, no ownership event.
+    ResStrSetTag,
+    /// ── NATIVE-ONLY storage-slot prims (#4006 family I) ──────────────────
+    /// Inserted exclusively by `native_slot_rewrite`: a scalar `Load8` /
+    /// `Store8` through a mutable module-level binding's slot address
+    /// (`mg_slot_addr(slot)`), rendered as a load / store of the slot's own
+    /// `static` (an `AtomicI64` holding the MIR scalar, a Float as its bits).
+    /// `dst = slot`.
+    NativeSlotLoad { slot: u32 },
+    /// `slot = args[0]`.
+    NativeSlotStore { slot: u32 },
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no

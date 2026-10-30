@@ -244,6 +244,8 @@ pub(crate) fn owned_ty(t: NTy) -> String {
         NTy::Vec | NTy::VecRef => "Vec<i64>".into(),
         NTy::VecStr | NTy::VecStrRef => "Vec<AlmideString>".into(),
         NTy::Res => "Result<i64, AlmideString>".into(),
+        NTy::Opt => "Option<i64>".into(),
+        NTy::ResStr => "Result<AlmideString, AlmideString>".into(),
         NTy::Rec(i) | NTy::RecRef(i) => struct_name(i),
     }
 }

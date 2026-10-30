@@ -92,12 +92,7 @@ fn native_sig_subset_check(
     // T1-3: Result[scalar, String] returns ride a dedicated native
     // carrier (NTy::Res — Rust Result<i64, String>). String-Ok payloads
     // stay walled (their tag/payload windows are ambiguous with Err's).
-    let is_native_result = |t: &Ty| {
-        matches!(t, Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2
-                && matches!(a[0], Ty::Int | Ty::Bool)
-                && matches!(a[1], Ty::String))
-    };
+    let is_native_result = is_native_result_ty;
     // #4006 List[String] slab: an owned `Vec<AlmideString>` / a borrowed
     // `&[AlmideString]` (the slot block's handles, rendered by the address
     // algebra in render_native_addr.rs).
@@ -113,6 +108,9 @@ fn native_sig_subset_check(
     };
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+            || is_scalar_option(t)
+            || is_native_result(t)
+            || is_string_result_ty(t)
             || is_scalar_list(t)
             || is_str_list(t)
             || is_struct_record(t)
@@ -166,6 +164,135 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
 /// T1-3: rewrite the stereotyped Result block windows onto the native
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
+/// The synthesized slot initializer's name: the shared lowering already
+/// knows it (an assignment inside it skips the old-value take of a heap slot).
+const SLOT_INIT: &str = "__mg_init";
+
+/// `__mg_init`: every slot-held top-level binding (a mutable `var`, or a `let`
+/// that must run eagerly) assigned its initializer, in declaration order,
+/// through the same slot-routed assignment user code uses. `None` when the
+/// program holds no such binding.
+fn synthesize_slot_init(ir: &almide_ir::IrProgram) -> Option<almide_ir::IrFunction> {
+    let stmts: Vec<almide_ir::IrStmt> = ir
+        .top_lets
+        .iter()
+        .filter(|tl| tl.mutable)
+        .map(|tl| almide_ir::IrStmt {
+            kind: almide_ir::IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+            span: None,
+        })
+        .collect();
+    if stmts.is_empty() {
+        return None;
+    }
+    let body = almide_ir::IrExpr {
+        kind: almide_ir::IrExprKind::Block { stmts, expr: None },
+        ty: almide_lang::types::Ty::Unit,
+        span: Default::default(),
+        def_id: None,
+    };
+    Some(almide_ir::IrFunction {
+        name: almide_lang::intern::sym(SLOT_INIT),
+        params: vec![],
+        ret_ty: almide_lang::types::Ty::Unit,
+        body,
+        is_effect: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        module_origin: None,
+        mutated_params: vec![],
+    })
+}
+
+/// A `Result` whose Ok payload is a native scalar (Int, Bool, Float as its
+/// bits, Unit as 0) and whose Err is a String: the T1-3 carrier
+/// `Result<i64, AlmideString>` (#4006 family C widened it past Int | Bool).
+fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float | Ty::Unit)
+            && matches!(a[1], Ty::String))
+}
+
+/// `Result[String, String]`: the String-Ok carrier `Result<AlmideString,
+/// AlmideString>` (#4006 family C).
+fn is_string_result_ty(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String))
+}
+
+/// #4006 family C: rewrite every String-Ok Result window onto its carrier.
+fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    let fns: std::collections::BTreeSet<String> = ir
+        .functions
+        .iter()
+        .filter(|f| is_string_result_ty(&f.ret_ty))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    for f in functions.iter_mut() {
+        let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_string_result_ty(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params);
+    }
+}
+
+/// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
+/// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
+fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float))
+}
+
+/// #4006 family B: rewrite every scalar-Option window onto the native
+/// carrier prims. The Option values are seeded from the declared types: a
+/// call to a fn returning a scalar Option, and a param declared as one.
+fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    let option_fns: std::collections::BTreeSet<String> = ir
+        .functions
+        .iter()
+        .filter(|f| is_scalar_option(&f.ret_ty))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    for f in functions.iter_mut() {
+        let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_scalar_option(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params);
+    }
+}
+
 fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
     rewrite_native_result_windows_over(ir.functions.iter(), functions)
 }
@@ -180,14 +307,10 @@ fn rewrite_native_result_windows_over<'a>(
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
 // sees these ops. Runs BEFORE verification/render (both are downstream).
 {
-    use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
     let result_fns: std::collections::BTreeSet<String> = decls
         .filter(|f| {
-            matches!(&f.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2
-                    && matches!(a[0], Ty::Int | Ty::Bool)
-                    && matches!(a[1], Ty::String))
+            is_native_result_ty(&f.ret_ty)
                 // A LIFTED effect fn (declared `-> Int|Bool`, `effect`) has
                 // the same wrapped carrier ABI on this leg — the native
                 // pipeline runs no never-err strip, so every lifted call
@@ -203,8 +326,20 @@ fn rewrite_native_result_windows_over<'a>(
         })
         .map(|f| f.name.as_str().to_string())
         .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
-        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns);
+        let res_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_native_result_ty(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params);
     }
 }
 }
@@ -227,13 +362,8 @@ fn native_sig_kind(
         Ty::String => Some(NativeSigKind::Str),
         // T1-3: the native Result carrier (return position only — the
         // param gate rejects Result params before this table is read).
-        Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2
-                && matches!(a[0], Ty::Int | Ty::Bool)
-                && matches!(a[1], Ty::String) =>
-        {
-            Some(NativeSigKind::Res)
-        }
+        t if is_native_result_ty(t) => Some(NativeSigKind::Res),
+        t if is_string_result_ty(t) => Some(NativeSigKind::ResStr),
         Ty::Applied(TypeConstructorId::List, a)
             if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
         {
@@ -242,6 +372,8 @@ fn native_sig_kind(
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => {
             Some(NativeSigKind::ListStr)
         }
+        // #4006 family B: an Option of a scalar rides the `Option<i64>` carrier.
+        t if is_scalar_option(t) => Some(NativeSigKind::Opt),
         // An all-scalar record travels as its slot block (see sig_ok).
         Ty::Named(n, args)
             if args.is_empty()
@@ -368,7 +500,10 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     }
     crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
-    let ir = source_to_ir_with(source, &[])?;
+    let ir = {
+        let _slots = SlotHeldGlobalsGuard::set(true);
+        source_to_ir_with(source, &[])?
+    };
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     require_native_concurrency_support(&ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
@@ -396,27 +531,29 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
             "native: multi-module program — outside rung 1".into(),
         ));
     }
-    // #4006: an immutable top-level `let` lowers the way the witness path
-    // threads it — each reference materializes the CONST initializer
-    // (`value_or_global`), and a computed one walls in the lowering. A
-    // mutable `var` lives in a storage slot the native render has no
-    // address for, so it walls here.
-    if ir.top_lets.iter().any(|tl| tl.mutable) {
-        return Err(LowerError::Unsupported(
-            "native: a mutable top-level var — outside the native rungs".into(),
-        ));
-    }
-    // Top-level lets are evaluated EAGERLY, at program start, before `main`
-    // (top_let_div_eager: an unused `let X = 1 / 0` aborts). Materializing at
-    // each use is lazy, so it is only faithful for an initializer that can
-    // neither fail nor be observed: literals, other top-level lets, and
-    // operators that cannot abort (no integer `/`, `%` or `^`, no call).
+    // #4006 family I: top-level state lives in storage slots initialised
+    // before `main`. A mutable `var` already has a slot (the lowering routes
+    // its reads and writes through `mg_slot_addr`). An immutable `let` whose
+    // initializer can fail or calls must run EAGERLY, at program start
+    // (top_let_div_eager: an unused `let X = 1 / 0` aborts), so it gets a slot
+    // too and is evaluated once, in declaration order, by the synthesized
+    // `__mg_init` that `main` calls first. A total, call-free initializer
+    // (literals, other top-level lets, operators that cannot abort) stays
+    // materialized at each use: it can neither fail nor be observed.
+    let mut ir = ir;
     let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
-    if let Some(tl) = ir.top_lets.iter().find(|tl| !total_const_init(&tl.value, &top_vars)) {
-        return Err(LowerError::at(
-            tl.value.span,
-            "native: a top-level let whose initializer can fail or calls — it must run eagerly, before main",
-        ));
+    let mut eager = false;
+    for tl in ir.top_lets.iter_mut() {
+        if !tl.mutable && !total_const_init(&tl.value, &top_vars) {
+            tl.mutable = true;
+            eager = true;
+        }
+    }
+    if eager {
+        crate::lower::install_effect_abi_facts(&ir);
+    }
+    if let Some(init) = synthesize_slot_init(&ir) {
+        ir.functions.push(init);
     }
     let globals: std::collections::HashMap<_, _> = ir.top_lets.iter().map(|tl| (tl.var, tl.ty.clone())).collect();
     let global_inits: std::collections::HashMap<_, _> =
@@ -453,6 +590,17 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         &mut functions,
     );
+    rewrite_native_result_str_windows(&ir, &mut functions);
+    rewrite_native_option_windows(&ir, &mut functions);
+    crate::native_slot_rewrite::rewrite_slot_ops(&mut functions, crate::lower::mutable_global_slot_count());
+    if functions.iter().any(|f| f.name == SLOT_INIT) {
+        if let Some(main) = functions.iter_mut().find(|f| f.name == "main") {
+            main.ops.insert(
+                0,
+                crate::Op::CallFn { dst: None, name: SLOT_INIT.to_string(), args: vec![], result: None },
+            );
+        }
+    }
     if !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),

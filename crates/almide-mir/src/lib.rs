@@ -49,6 +49,9 @@ mod render_native_str;
 mod render_native_op_families;
 mod render_native_shims;
 pub mod native_floor;
+pub mod native_option_rewrite;
+pub mod native_result_str_rewrite;
+pub mod native_slot_rewrite;
 
 use std::collections::{BTreeMap, BTreeSet};
 

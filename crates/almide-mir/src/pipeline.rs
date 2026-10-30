@@ -496,7 +496,12 @@ fn program_to_ir_with(
     crate::lower::fill_record_defaults(&mut ir);
     // Pure call-bearing GLOBAL inits inline at their use sites (the lazy-static value
     // semantics — see inline_pure_call_globals; shared with classify: desugar-before-both).
-    crate::lower::inline_pure_call_globals(&mut ir);
+    // The native render holds every call-bearing global in a storage slot,
+    // evaluated once before main (#4006 family I), so it takes no inlining:
+    // an inlined copy re-runs the initializer (and its prints) at each use.
+    if !SLOT_HELD_GLOBALS.with(|c| c.get()) {
+        crate::lower::inline_pure_call_globals(&mut ir);
+    }
     // #806 step 2: small pure-scalar fns inline as reduced expressions at their
     // call sites (shared with classify: desugar-before-both).
     crate::lower::inline_small_scalar_fns(&mut ir);
@@ -636,3 +641,28 @@ pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Prog
 
 
 include!("pipeline_tail.rs");
+
+thread_local! {
+    /// Set while the native render builds its IR: see [`SlotHeldGlobalsGuard`].
+    static SLOT_HELD_GLOBALS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While alive, IR construction leaves call-bearing top-level initializers in
+/// place instead of inlining them at their uses: the native render evaluates
+/// each once, in declaration order, into its storage slot (#4006 family I),
+/// the way the wasm leg evaluates them before main. Restores the previous
+/// mode on drop.
+#[must_use = "the guard restores the previous mode when dropped"]
+pub(crate) struct SlotHeldGlobalsGuard(bool);
+
+impl SlotHeldGlobalsGuard {
+    pub(crate) fn set(on: bool) -> Self {
+        Self(SLOT_HELD_GLOBALS.with(|c| c.replace(on)))
+    }
+}
+
+impl Drop for SlotHeldGlobalsGuard {
+    fn drop(&mut self) {
+        SLOT_HELD_GLOBALS.with(|c| c.set(self.0));
+    }
+}

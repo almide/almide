@@ -90,6 +90,11 @@ pub(crate) fn is_mutable_global(var: almide_ir::VarId) -> bool {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().contains_key(&var.0))
 }
 
+/// How many storage slots the program's mutable module-level bindings hold.
+pub(crate) fn mutable_global_slot_count() -> u32 {
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().values().map(|(i, _)| i + 1).max().unwrap_or(0))
+}
+
 /// The (slot index, declared Ty) of a mutable module-level `var`, if `var` is one.
 pub(crate) fn mutable_global_info(var: almide_ir::VarId) -> Option<(u32, Ty)> {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().get(&var.0).cloned())
