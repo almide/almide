@@ -38,7 +38,15 @@ fn self_host_source_to_ir(
 
 /// Link every registry body the program (transitively) calls. Returns the
 /// linked sources, for the signature table and the Result rewrite.
-fn link_native_self_host(functions: &mut Vec<crate::MirFunction>) -> Result<Vec<LinkedSelfHost>, LowerError> {
+fn link_native_self_host(
+    functions: &mut Vec<crate::MirFunction>,
+    user_ir: &almide_ir::IrProgram,
+) -> Result<Vec<LinkedSelfHost>, LowerError> {
+    // A name clash walls at the user fn that holds the name.
+    let clash = |name: &str| {
+        let span = user_ir.functions.iter().find(|f| f.name.as_str() == name).and_then(|f| f.body.span);
+        LowerError::at(span, format!("native: the self-host body `{name}` shares its name with a user fn"))
+    };
     use std::collections::{BTreeMap, BTreeSet};
     // call name → (source, impl name); impl name → source.
     // A call the native runtime floor already serves keeps that route.
@@ -69,9 +77,7 @@ fn link_native_self_host(functions: &mut Vec<crate::MirFunction>) -> Result<Vec<
                 let (src, impl_fn) = match by_call.get(name.as_str()) {
                     Some(&(src, impl_fn)) => {
                         if user_names.contains(impl_fn) {
-                            return Err(LowerError::Unsupported(format!(
-                                "native: the self-host body `{impl_fn}` shares its name with a user fn"
-                            )));
+                            return Err(clash(impl_fn));
                         }
                         *name = impl_fn.to_string();
                         (src, impl_fn.to_string())
@@ -97,16 +103,12 @@ fn link_native_self_host(functions: &mut Vec<crate::MirFunction>) -> Result<Vec<
                 continue;
             }
             if user_names.contains(&impl_fn) {
-                return Err(LowerError::Unsupported(format!(
-                    "native: the self-host body `{impl_fn}` shares its name with a user fn"
-                )));
+                return Err(clash(&impl_fn));
             }
             let at = match linked_srcs.get(src) {
                 Some(&i) => i,
                 None => {
-                    let ir = self_host_source_to_ir(src, entries_of[src]).map_err(|e| {
-                        LowerError::Unsupported(format!("native: self-host source of `{impl_fn}` does not lower: {e}"))
-                    })?;
+                    let ir = self_host_source_to_ir(src, entries_of[src])?;
                     let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
                     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
                     linked.push(LinkedSelfHost { ir, record_layouts, variant_layouts });
@@ -116,9 +118,9 @@ fn link_native_self_host(functions: &mut Vec<crate::MirFunction>) -> Result<Vec<
             };
             let sh = &linked[at];
             let Some(func) = sh.ir.functions.iter().find(|g| g.name.as_str() == impl_fn) else {
-                return Err(LowerError::Unsupported(format!(
-                    "native: the self-host source declares no body `{impl_fn}`"
-                )));
+                // Left unresolved: the render walls on the call itself.
+                done.insert(impl_fn);
+                continue;
             };
             crate::render_native_rec::extend_with(
                 &func.params.iter().map(|p| p.ty.clone()).chain(std::iter::once(func.ret_ty.clone())).collect::<Vec<_>>(),
@@ -131,13 +133,10 @@ fn link_native_self_host(functions: &mut Vec<crate::MirFunction>) -> Result<Vec<
                 &sh.record_layouts,
                 &sh.variant_layouts,
             )
-            .map_err(|e| LowerError::Unsupported(format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
+            .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
             for g in &all {
                 if user_names.contains(&g.name) {
-                    return Err(LowerError::Unsupported(format!(
-                        "native: the self-host body `{}` shares its name with a user fn",
-                        g.name
-                    )));
+                    return Err(clash(&g.name));
                 }
                 done.insert(g.name.clone());
             }

@@ -440,7 +440,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         functions.extend(all);
     }
     // #4006: the registry bodies the program calls, linked as certified MIR.
-    let linked = link_native_self_host(&mut functions)?;
+    let linked = link_native_self_host(&mut functions, &ir)?;
     if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
         return Err(LowerError::Unsupported(format!(
             "native: fn `{}` passes a heap value to its own tail call — no loop conversion on this render (#3550)",
