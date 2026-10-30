@@ -513,6 +513,13 @@ pub fn check_rc(
         let temp_arg: Vec<bool> = (0..takers.len())
             .map(|t| !owned_at(&names_through(bodies, imports, b, &judged, &args[t], 2), takers[t].0))
             .collect();
+        // #4278 B1: a release read through a hold a routine's or an arm's
+        // `h` move names, inside that move's window, is that hold's credit:
+        // a temporary's unnamed event never takes it.
+        let hold_claimed: Vec<bool> = calls
+            .iter()
+            .map(|(k, kind, names)| *kind == 'd' && held_at.iter().any(|&(l, a, z)| a <= *k && *k <= z && names.contains(&l)))
+            .collect();
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
                 let t = i - nc;
@@ -574,7 +581,7 @@ pub fn check_rc(
                 // A temporary's event logged inside an arm or routine window
                 // records an instruction emitted inside it: it takes a call
                 // in that window, never a release elsewhere it does not own.
-                (kind, None) => k == kind && evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z),
+                (kind, None) => k == kind && !hold_claimed[i] && evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z),
             }
         };
         let order: Vec<usize> = (0..evs.len())
@@ -683,11 +690,8 @@ pub fn check_rc(
             false
         }
         let fallback_call = |i: usize| i >= nc || fallback(i);
-        // A call a move can take waits for the moves' absorption below: it
-        // has a reading of its own, so it never pulls an event off a call
-        // that has none.
         for c in 0..nc {
-            if owner[c].is_none() && !fallback(c) && !move_fits[c] {
+            if owner[c].is_none() && !fallback(c) {
                 let mut seen = vec![false; evs.len()];
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
             }
