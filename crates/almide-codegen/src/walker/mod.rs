@@ -582,6 +582,9 @@ fn render_fn_safe_name(
 /// single-file and module layouts. A no-op off unix, and under Miri, which
 /// cannot call `signal` and runs the generated crate to find UB in the
 /// runtime's `unsafe` (#4009).
+// SAFETY: (of the emitted call) signal(2) is declared with its C prototype
+// (an int and a pointer-sized handler, returning one), and called with
+// SIGPIPE and SIG_DFL (0): no handler address of ours is handed over.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
 /// Call-stack exhaustion as the defined abort (C-196): replace std's

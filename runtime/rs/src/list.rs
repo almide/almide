@@ -668,7 +668,7 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
         true
     };
     let take: &(dyn Fn() -> bool + Sync + '_) = &take;
-    // SAFETY (the lifetime erasure): a helper calls `take` only from inside
+    // SAFETY: (the lifetime erasure) a helper calls `take` only from inside
     // the gate, which it can enter only while the gate is published; this
     // function withdraws it and waits until no helper is inside before it
     // returns — so no call outlives the borrow. Written before publishing.

@@ -10,6 +10,9 @@ pub struct AlmideBox<T> {
     almide_m: std::marker::PhantomData<T>,
 }
 
+// SAFETY: an AlmideBox uniquely owns its heap cell, as Box<T> does (new leaks a
+// fresh Box, into_inner and Drop free it once, Clone makes a new cell), so it
+// may cross or be shared between threads exactly when T may.
 unsafe impl<T: Send> Send for AlmideBox<T> {}
 unsafe impl<T: Sync> Sync for AlmideBox<T> {}
 
@@ -22,6 +25,8 @@ impl<T> AlmideBox<T> {
     #[inline]
     pub fn into_inner(self) -> T {
         let me = std::mem::ManuallyDrop::new(self);
+        // SAFETY: almide_p came from Box::leak in new / clone; ManuallyDrop keeps
+        // Drop from freeing it a second time.
         unsafe { *std::boxed::Box::from_raw(me.almide_p.as_ptr()) }
     }
 }
@@ -59,6 +64,8 @@ impl<T> std::ops::Deref for AlmideBox<T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
+        // SAFETY: almide_p is a live, initialised cell owned by self (new writes it,
+        // clone's step writes it before clone returns); the borrow is tied to &self.
         unsafe { self.almide_p.as_ref() }
     }
 }
@@ -66,12 +73,16 @@ impl<T> std::ops::Deref for AlmideBox<T> {
 impl<T> std::ops::DerefMut for AlmideBox<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
+        // SAFETY: as deref, and &mut self is the only path to the cell.
         unsafe { self.almide_p.as_mut() }
     }
 }
 
 /// One queued step of a deep walk: the operand addresses and the
 /// monomorphic function that finishes it.
+// SAFETY: (the three step types): each pairs an address with the one
+// monomorphic fn that reads it as its own T; the steps are built only below,
+// from live cells, and each is run exactly once by the outermost walk.
 type AlmideBoxDropStep = (*mut u8, unsafe fn(*mut u8));
 type AlmideBoxCloneStep = (*const u8, *mut u8, unsafe fn(*const u8, *mut u8));
 type AlmideBoxEqStep = (*const u8, *const u8, unsafe fn(*const u8, *const u8) -> bool);
@@ -91,6 +102,7 @@ impl<Q: 'static> Drop for AlmideBoxQueueReset<Q> {
     }
 }
 
+// SAFETY: callers pass an AlmideBox<T>'s cell (a leaked Box<T>), once.
 unsafe fn almide_box_free<T>(p: *mut u8) {
     drop(std::boxed::Box::from_raw(p as *mut T));
 }
@@ -100,19 +112,27 @@ impl<T> Drop for AlmideBox<T> {
         let step: AlmideBoxDropStep = (self.almide_p.as_ptr() as *mut u8, almide_box_free::<T>);
         let running = ALMIDE_BOX_DROP_Q.with(|q| q.get());
         if !running.is_null() {
+            // SAFETY: a non-null slot is &mut work of the outer drop on this thread,
+            // live until its _reset nulls the slot; the outer drop is suspended in
+            // the f(p) call that led here, so no other reference to work is used.
             unsafe { (*running).push(step) };
             return;
         }
         let mut work: Vec<AlmideBoxDropStep> = Vec::new();
         ALMIDE_BOX_DROP_Q.with(|q| q.set(&mut work));
         let _reset = AlmideBoxQueueReset(&ALMIDE_BOX_DROP_Q);
+        // SAFETY: step is this box's own cell with almide_box_free::<T>; Drop runs
+        // once per box, and the queued steps are popped (taken) once each.
         unsafe { (step.1)(step.0) };
         while let Some((p, f)) = work.pop() {
+            // SAFETY: a step a nested drop queued: its own cell and free fn, popped once.
             unsafe { f(p) };
         }
     }
 }
 
+// SAFETY: callers pass a live T as src and a fresh, uninitialised cell
+// sized and aligned for T as dst, which this initialises once.
 unsafe fn almide_box_clone_into<T: Clone>(src: *const u8, dst: *mut u8) {
     std::ptr::write(dst as *mut T, (*(src as *const T)).clone());
 }
@@ -125,13 +145,18 @@ impl<T: Clone> Clone for AlmideBox<T> {
         let step: AlmideBoxCloneStep = (self.almide_p.as_ptr() as *const u8, cell.as_ptr() as *mut u8, almide_box_clone_into::<T>);
         let running = ALMIDE_BOX_CLONE_Q.with(|q| q.get());
         if !running.is_null() {
+            // SAFETY: as in Drop: the slot is the outer clone's &mut work, live and
+            // not otherwise used while this inner clone runs.
             unsafe { (*running).push(step) };
         } else {
             let mut work: Vec<AlmideBoxCloneStep> = Vec::new();
             ALMIDE_BOX_CLONE_Q.with(|q| q.set(&mut work));
             let _reset = AlmideBoxQueueReset(&ALMIDE_BOX_CLONE_Q);
+            // SAFETY: step.0 is self's live cell, step.1 the fresh cell above, written
+            // once here; each queued step is popped and run once before return.
             unsafe { (step.2)(step.0, step.1) };
             while let Some((s, d, f)) = work.pop() {
+                // SAFETY: a step a nested clone queued: its live source and fresh cell, popped once.
                 unsafe { f(s, d) };
             }
         }
@@ -139,6 +164,7 @@ impl<T: Clone> Clone for AlmideBox<T> {
     }
 }
 
+// SAFETY: callers pass two live T cells, borrowed for the call.
 unsafe fn almide_box_eq_at<T: PartialEq>(a: *const u8, b: *const u8) -> bool {
     *(a as *const T) == *(b as *const T)
 }
@@ -151,16 +177,20 @@ impl<T: PartialEq> PartialEq for AlmideBox<T> {
         let step: AlmideBoxEqStep = (self.almide_p.as_ptr() as *const u8, other.almide_p.as_ptr() as *const u8, almide_box_eq_at::<T>);
         let running = ALMIDE_BOX_EQ_Q.with(|q| q.get());
         if !running.is_null() {
+            // SAFETY: as in Drop: the slot is the outer == call's &mut work.
             unsafe { (*running).push(step) };
             return true;
         }
         let mut work: Vec<AlmideBoxEqStep> = Vec::new();
         ALMIDE_BOX_EQ_Q.with(|q| q.set(&mut work));
         let _reset = AlmideBoxQueueReset(&ALMIDE_BOX_EQ_Q);
+        // SAFETY: both cells belong to self / other, borrowed for this call, which
+        // outlives every queued step (drained below before return).
         if !unsafe { (step.2)(step.0, step.1) } {
             return false;
         }
         while let Some((a, b, f)) = work.pop() {
+            // SAFETY: a step a nested == queued: two cells inside self / other, still borrowed.
             if !unsafe { f(a, b) } {
                 return false;
             }
@@ -209,6 +239,7 @@ impl<T: AlmideRepr> AlmideRepr for AlmideBox<T> {
 pub enum AlmideReprPart {
     Lit(&'static str),
     Text(String),
+    // SAFETY: built only by almide_repr_node from a &T alive for the walk.
     Node(*const u8, unsafe fn(*const u8, &mut Vec<AlmideReprPart>)),
 }
 
@@ -217,6 +248,7 @@ pub trait AlmideReprNode {
     fn almide_repr_parts(&self, out: &mut Vec<AlmideReprPart>);
 }
 
+// SAFETY: callers pass the address almide_repr_node took from a live &T.
 unsafe fn almide_repr_node_at<T: AlmideReprNode>(p: *const u8, out: &mut Vec<AlmideReprPart>) {
     (*(p as *const T)).almide_repr_parts(out)
 }
@@ -239,6 +271,8 @@ pub fn almide_repr_walk<T: AlmideReprNode>(x: &T) -> String {
             AlmideReprPart::Lit(s) => out.push_str(s),
             AlmideReprPart::Text(s) => out.push_str(&s),
             AlmideReprPart::Node(p, f) => {
+                // SAFETY: p, f came from almide_repr_node on a part of x, which is borrowed
+                // for the whole walk, so p is still a live T.
                 unsafe { f(p, &mut level) };
                 stack.extend(level.drain(..).rev());
             }

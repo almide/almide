@@ -103,6 +103,9 @@ mod almide_stack_guard {
         for (slot, &sig) in [SIGSEGV, sys::SIGBUS].iter().enumerate() {
             let act = sys::SigAction::new(on_fault as extern "C" fn(i32, *mut u8, *mut u8) as usize, sys::SA_SIGINFO | sys::SA_ONSTACK);
             let mut old = sys::SigAction::new(0, 0);
+            // SAFETY: `act` and `old` are live sys::SigAction values laid out as this
+            // target's `struct sigaction` (the per-OS `sys` module); the handler is an
+            // `extern "C" fn(i32, *mut u8, *mut u8)`, the SA_SIGINFO shape.
             if unsafe { sigaction(sig, &act, &mut old) } == 0 {
                 PREV[slot].0.store(old.handler, Ordering::SeqCst);
                 PREV[slot].1.store(old.flags as u32 as usize, Ordering::SeqCst);
@@ -116,6 +119,9 @@ mod almide_stack_guard {
             return;
         }
         let mut attr = [0u64; 16];
+        // SAFETY: `attr` is 128 zeroed bytes, more than pthread_attr_t on glibc and
+        // musl (at most 64 bytes); every out-pointer is a live local; destroy runs after a
+        // successful getattr, the only path that reaches it.
         unsafe {
             if sys::pthread_getattr_np(sys::pthread_self(), attr.as_mut_ptr()) != 0 {
                 return;
@@ -139,13 +145,18 @@ mod almide_stack_guard {
     }
     #[cfg(target_os = "macos")]
     fn bounds() -> Option<(usize, usize)> {
+        // SAFETY: no arguments; pthread_self cannot fail.
         let t = unsafe { sys::pthread_self() };
+        // SAFETY: `t` is the calling thread, alive for the call; these two read its
+        // descriptor without locking or allocating (async-signal-safe in practice).
         let top = unsafe { sys::pthread_get_stackaddr_np(t) };
+        // SAFETY: as above.
         let size = unsafe { sys::pthread_get_stacksize_np(t) };
         if top == 0 || size == 0 || size > top { None } else { Some((top - size, 0)) }
     }
     pub fn raw_write(fd: i32, mut bytes: &[u8]) {
         while !bytes.is_empty() {
+            // SAFETY: `bytes` is a live slice; write(2) reads at most bytes.len() of it.
             let n = unsafe { write(fd, bytes.as_ptr().cast(), bytes.len()) };
             if n <= 0 {
                 return;
@@ -154,15 +165,20 @@ mod almide_stack_guard {
         }
     }
     extern "C" fn on_fault(sig: i32, info: *mut u8, ctx: *mut u8) {
+        // SAFETY: the kernel calls this SA_SIGINFO handler with `info` pointing at a
+        // siginfo_t, whose si_addr sits at ADDR_OFFSET (16 on Linux, 24 on macOS)
+        // inside the struct; read_unaligned makes no alignment claim.
         let addr = unsafe { std::ptr::read_unaligned(info.add(sys::ADDR_OFFSET) as *const usize) };
         if let Some((low, guard)) = bounds() {
             let margin = MARGIN.max(guard);
             if addr >= low.saturating_sub(margin) && addr < low.saturating_add(margin) {
                 if FIRED.swap(true, Ordering::SeqCst) {
+                    // SAFETY: pause takes nothing and touches no memory.
                     loop { unsafe { pause(); } }
                 }
                 super::almide_stack_guard_stdout();
                 raw_write(2, MSG);
+                // SAFETY: _exit takes any int, never returns, and is async-signal-safe.
                 unsafe { _exit(1) }
             }
         }
@@ -170,9 +186,13 @@ mod almide_stack_guard {
         let (handler, flags) = (PREV[slot].0.load(Ordering::SeqCst), PREV[slot].1.load(Ordering::SeqCst));
         if handler > 1 {
             if flags & sys::SA_SIGINFO as u32 as usize != 0 {
+                // SAFETY: `handler` > 1 is the sa_handler sigaction() returned for this
+                // signal (not SIG_DFL / SIG_IGN), and its SA_SIGINFO flag says it has the
+                // three-argument shape; usize and fn pointers are the same size.
                 let f: extern "C" fn(i32, *mut u8, *mut u8) = unsafe { std::mem::transmute(handler) };
                 f(sig, info, ctx);
             } else {
+                // SAFETY: as above, without SA_SIGINFO: the one-argument shape.
                 let f: extern "C" fn(i32) = unsafe { std::mem::transmute(handler) };
                 f(sig);
             }
@@ -181,6 +201,7 @@ mod almide_stack_guard {
         // No handler before ours: restore the default and return, so the
         // faulting instruction re-runs and takes the default action.
         let dfl = sys::SigAction::new(0, 0);
+        // SAFETY: `dfl` is a live SigAction for SIG_DFL; a null `old` is allowed.
         unsafe { sigaction(sig, &dfl, std::ptr::null_mut()); }
     }
 }
