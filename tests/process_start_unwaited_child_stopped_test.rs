@@ -19,11 +19,16 @@ fn almide() -> String {
 
 /// `(stdout, stderr without the `[almide]` banner lines, exit code, wall time)`.
 fn run(source: &str) -> (String, String, Option<i32>, Duration) {
+    run_on(source, &[])
+}
+
+/// [`run`] with extra `almide run` flags (`--target wasm`: the embedded host).
+fn run_on(source: &str, extra: &[&str]) -> (String, String, Option<i32>, Duration) {
     let dir = tempfile::tempdir().expect("tempdir");
     let file = dir.path().join("exit_children.almd");
     std::fs::write(&file, source).expect("write source");
     let start = Instant::now();
-    let out = Command::new(almide()).arg("run").arg(&file).output().expect("run almide");
+    let out = Command::new(almide()).arg("run").arg(&file).args(extra).output().expect("run almide");
     let elapsed = start.elapsed();
     let stderr: String = String::from_utf8_lossy(&out.stderr)
         .lines()
@@ -139,4 +144,48 @@ fn the_c437_fixture_sees_every_route_stop_the_child() {
         "stderr: {stderr}"
     );
     assert!(elapsed < Duration::from_secs(20), "an exit waited for its child: {elapsed:?}");
+}
+
+/// #4347 / #4348: the embedded wasm host (`almide run --target wasm`) stops
+/// the run's unwaited children at its end on every route native does, with
+/// the same exit code and stderr.
+#[test]
+fn the_embedded_wasm_host_stops_an_unwaited_child_on_every_exit_route() {
+    let routes = [
+        ("return", "", "", Some(0), ""),
+        ("exit", "", "  process.exit(3)\n", Some(3), ""),
+        ("error", "effect fn fail() -> Int = err(\"boom\")\n\n", "  let n = fail()!\n  println(int.to_string(n))\n", Some(1), "Error: boom\n"),
+    ];
+    for (route, head, tail, want_code, want_err) in routes {
+        let (stdout, stderr, code, elapsed) = run_on(
+            &format!(
+                "import process\n\n{head}effect fn main() -> Unit = {{\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n{tail}}}\n"
+            ),
+            &["--target", "wasm"],
+        );
+        assert_eq!(code, want_code, "{route}: stdout: {stdout}\nstderr: {stderr}");
+        assert_eq!(stderr, want_err, "{route}");
+        assert_gone(pid_of(&stdout, "child"), &format!("wasm leg, {route}"));
+        assert!(elapsed < Duration::from_secs(20), "{route}: the exit waited for the child: {elapsed:?}");
+    }
+}
+
+/// The C-445 fixture on both legs: run with a route and `pid`, it prints the
+/// pid of the child it leaves running; after `almide run` ends the pid must
+/// be gone, native and embedded wasm alike.
+#[test]
+fn the_embedded_cross_fixture_sees_both_legs_stop_the_child() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/spec/embedded_cross/process_start_run_end_stops_children.almd");
+    for leg in [&[][..], &["--target", "wasm"][..]] {
+        for (route, want_code) in [("return", Some(0)), ("exit", Some(3)), ("error", Some(1))] {
+            let start = Instant::now();
+            let out = Command::new(almide()).arg("run").arg(fixture).args(leg).arg("--").arg(route).arg("pid").output().expect("run almide");
+            let elapsed = start.elapsed();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert_eq!(out.status.code(), want_code, "{leg:?} {route}: stdout: {stdout}\nstderr: {}", String::from_utf8_lossy(&out.stderr));
+            assert!(stdout.contains("child running: true"), "{leg:?} {route}: {stdout}");
+            assert_gone(pid_of(&stdout, "pid"), &format!("{leg:?} {route}"));
+            assert!(elapsed < Duration::from_secs(60), "{leg:?} {route}: the exit waited for the child: {elapsed:?}");
+        }
+    }
 }

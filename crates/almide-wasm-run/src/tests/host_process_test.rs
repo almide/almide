@@ -7,8 +7,24 @@ use super::{call, cells, dispatch, link_spawn_import, set_allowlist, ProcTable};
 /// The allowlist is process-wide; these tests set it one at a time.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Where [`guest_calling`] asks for the result cell.
+const RET: i32 = 1024;
+
 /// The `start` children these tests make.
 static TABLE: ProcTable = std::sync::Mutex::new(Vec::new());
+
+/// A p1 artifact's host: the run's output and its children (#4347).
+#[derive(Default)]
+struct P1Run {
+    out: Vec<u8>,
+    children: super::RunChildren,
+}
+
+impl super::SpawnHost for P1Run {
+    fn spawn_children(&self) -> &super::RunChildren {
+        &self.children
+    }
+}
 
 fn frame(items: &[&str]) -> String {
     items.iter().map(|s| format!("{}\n{s}", s.chars().count())).collect()
@@ -94,6 +110,12 @@ fn the_fs_call_form_packs_status_and_length() {
 /// A guest that imports `almide:process/spawn.call` in its canonical form,
 /// exports `memory` and a bump `cabi_realloc`, and calls `exec` on `echo`.
 fn guest() -> Vec<u8> {
+    guest_calling(0, b"echo", b"2\nhi")
+}
+
+/// The guest above for any WIT case: `a` at 0, `b` at 256, the result cell
+/// at [`RET`].
+fn guest_calling(case: i32, a: &[u8], b: &[u8]) -> Vec<u8> {
     use wasm_encoder::{
         CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
         GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module, TypeSection, ValType,
@@ -111,7 +133,7 @@ fn guest() -> Vec<u8> {
     let mut mem = MemorySection::new();
     mem.memory(MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
     let mut globals = GlobalSection::new();
-    globals.global(GlobalType { val_type: i32t, mutable: true, shared: false }, &ConstExpr::i32_const(1024));
+    globals.global(GlobalType { val_type: i32t, mutable: true, shared: false }, &ConstExpr::i32_const(2048));
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
     exports.export("cabi_realloc", ExportKind::Func, 1);
@@ -121,20 +143,20 @@ fn guest() -> Vec<u8> {
     realloc.instructions().global_get(0).global_get(0).local_get(3).i32_add().global_set(0).end();
     code.function(&realloc);
     let mut run = Function::new([]);
-    // op 0 = exec; a = "echo" at 0, b = frame ["hi"] at 16; retptr 64.
+    assert!(a.len() <= 256 && b.len() <= RET as usize - 256);
     run.instructions()
+        .i32_const(case)
         .i32_const(0)
-        .i32_const(0)
-        .i32_const(4)
-        .i32_const(16)
-        .i32_const(4)
-        .i32_const(64)
+        .i32_const(a.len() as i32)
+        .i32_const(256)
+        .i32_const(b.len() as i32)
+        .i32_const(RET)
         .call(0)
         .end();
     code.function(&run);
     let mut data = DataSection::new();
-    data.active(0, &ConstExpr::i32_const(0), b"echo".iter().copied());
-    data.active(0, &ConstExpr::i32_const(16), b"2\nhi".iter().copied());
+    data.active(0, &ConstExpr::i32_const(0), a.iter().copied());
+    data.active(0, &ConstExpr::i32_const(256), b.iter().copied());
     let mut m = Module::new();
     m.section(&types).section(&imports).section(&funcs).section(&mem).section(&globals);
     m.section(&exports).section(&code).section(&data);
@@ -149,12 +171,12 @@ fn the_canonical_import_lands_the_answer_through_cabi_realloc() {
     let module = wasmtime::Module::new(&engine, guest()).expect("guest validates");
     let mut linker = wasmtime::Linker::new(&engine);
     link_spawn_import(&mut linker).expect("link");
-    let mut store = wasmtime::Store::new(&engine, ());
+    let mut store = wasmtime::Store::new(&engine, P1Run::default());
     let inst = linker.instantiate(&mut store, &module).expect("instantiate");
     inst.get_typed_func::<(), ()>(&mut store, "run").expect("run export").call(&mut store, ()).expect("run");
     let mem = inst.get_memory(&mut store, "memory").expect("memory");
     let mut cell = [0u8; 12];
-    mem.read(&store, 64, &mut cell).expect("result cell");
+    mem.read(&store, RET as usize, &mut cell).expect("result cell");
     assert_eq!(cell[0], 0, "ok discriminant");
     let word = |at: usize| u32::from_le_bytes([cell[at], cell[at + 1], cell[at + 2], cell[at + 3]]) as usize;
     let (ptr, len) = (word(4), word(8));
@@ -291,13 +313,13 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
 
     let engine = wasmtime::Engine::default();
     let module = wasmtime::Module::new(&engine, &p1).expect("artifact validates");
-    let mut linker = wasmtime::Linker::<Vec<u8>>::new(&engine);
+    let mut linker = wasmtime::Linker::<P1Run>::new(&engine);
     link_spawn_import(&mut linker).expect("link");
     linker
         .func_wrap(
             "wasi_snapshot_preview1",
             "fd_write",
-            |mut caller: wasmtime::Caller<'_, Vec<u8>>, _fd: i32, iovs: i32, n: i32, nwritten: i32| -> i32 {
+            |mut caller: wasmtime::Caller<'_, P1Run>, _fd: i32, iovs: i32, n: i32, nwritten: i32| -> i32 {
                 let mem = caller.get_export("memory").and_then(|e| e.into_memory()).expect("memory");
                 let mut total = 0u32;
                 for k in 0..n as u32 {
@@ -306,7 +328,7 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
                     let (ptr, len) = (u32::from_le_bytes([iov[0], iov[1], iov[2], iov[3]]), u32::from_le_bytes([iov[4], iov[5], iov[6], iov[7]]));
                     let mut buf = vec![0u8; len as usize];
                     mem.read(&caller, ptr as usize, &mut buf).expect("bytes");
-                    caller.data_mut().extend_from_slice(&buf);
+                    caller.data_mut().out.extend_from_slice(&buf);
                     total += len;
                 }
                 mem.write(&mut caller, nwritten as usize, &total.to_le_bytes()).expect("nwritten");
@@ -319,10 +341,10 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
             Err(wasmtime::Error::msg(format!("proc_exit({code})")))
         })
         .expect("proc_exit");
-    let mut store = wasmtime::Store::new(&engine, Vec::new());
+    let mut store = wasmtime::Store::new(&engine, P1Run::default());
     let inst = linker.instantiate(&mut store, &module).expect("a host with the import instantiates it");
     inst.get_typed_func::<(), ()>(&mut store, "_start").expect("_start").call(&mut store, ()).expect("runs");
-    assert_eq!(String::from_utf8(store.data().clone()).expect("utf-8"), "0\n2\nhi\n");
+    assert_eq!(String::from_utf8(store.data().out.clone()).expect("utf-8"), "0\n2\nhi\n");
 
     // A stock host: the two preview-1 calls, no almide:process/spawn.
     let mut stock = wasmtime::Linker::<()>::new(&engine);
@@ -376,4 +398,45 @@ fn the_run_end_stops_an_unwaited_child() {
     assert_eq!(call(147, &h, "", &|| {}, &t).as_deref(), Ok("1"));
     let gone = std::process::Command::new("sh").arg("-c").arg(format!("kill -0 {pid} 2>/dev/null")).status().expect("sh");
     assert!(!gone.success(), "the child outlived the run");
+}
+
+/// Whether a process `pid` exists (`kill -0`, the shell builtin).
+fn alive(pid: i64) -> bool {
+    std::process::Command::new("sh").arg("-c").arg(format!("kill -0 {pid} 2>/dev/null")).status().is_ok_and(|s| s.success())
+}
+
+/// #4347: on the p1-artifact route (the canonical `almide:process/spawn`
+/// import a stock artifact carries), a `process.start` child neither waited
+/// on nor stopped is stopped when the run ends, as the embedded lane and
+/// native stop theirs (C-437). The run's end is its store being dropped.
+#[test]
+fn the_p1_import_route_stops_its_children_when_the_run_ends() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    set_allowlist(None);
+    let engine = wasmtime::Engine::default();
+    // WIT case 11 = `start` (op 146): `sleep 30`, no timeout.
+    let module = wasmtime::Module::new(&engine, guest_calling(11, b"sleep", frame(&["0", "", "", "30"]).as_bytes())).expect("guest validates");
+    let mut linker = wasmtime::Linker::new(&engine);
+    link_spawn_import(&mut linker).expect("link");
+    let mut store = wasmtime::Store::new(&engine, P1Run::default());
+    let inst = linker.instantiate(&mut store, &module).expect("instantiate");
+    inst.get_typed_func::<(), ()>(&mut store, "run").expect("run export").call(&mut store, ()).expect("run");
+    let mem = inst.get_memory(&mut store, "memory").expect("memory");
+    let mut cell = [0u8; 12];
+    mem.read(&store, RET as usize, &mut cell).expect("result cell");
+    assert_eq!(cell[0], 0, "start answered ok");
+    let pid = {
+        let t = store.data().children.lock().unwrap_or_else(|p| p.into_inner());
+        t.first().and_then(|c| c.as_ref()).expect("the run's table holds the child").pid()
+    };
+    assert!(alive(pid), "the child {pid} runs while the run does");
+    drop(store);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while alive(pid) {
+        if std::time::Instant::now() >= until {
+            let _ = std::process::Command::new("sh").arg("-c").arg(format!("kill -9 {pid} 2>/dev/null")).status();
+            panic!("the p1 route's unwaited child {pid} outlived the run (#4347)");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }

@@ -1,0 +1,37 @@
+// @contract: C-445
+// A `process.start` child the program neither waited on nor stopped is
+// stopped when the run ends, on the embedded wasm host as on native (C-437):
+// main returns, `process.exit`, or an effect error ends main
+// (almide/almide#4347, #4348).
+//
+// Run with no arguments, both legs print the same line: the child is running
+// when the program reaches its exit, and main returns. Run with a route
+// (`return`, `exit` or `error`) and then `pid`, it also prints the child's
+// pid and exits by that route; tests/process_start_unwaited_child_stopped_test.rs
+// in almide/almide runs every route on native and on `--target wasm` and
+// asks, after `almide run` has ended, whether that pid still exists. A
+// stopped child has been reaped by the host that started it, so it is gone
+// at once. Pids are host values, so the plain run never prints one.
+import process
+import env
+
+effect fn fail() -> Int = err("boom")
+
+effect fn main() -> Unit = {
+  let argv = env.args()
+  let c = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
+  let running = match process.poll(c)! {
+    none => "true",
+    some(_) => "false",
+  }
+  println("child running: ${running}")
+  match list.get(argv, 1) {
+    some("pid") => println("pid ${process.child_pid(c)!}"),
+    _ => (),
+  }
+  match list.get(argv, 0) ?? "return" {
+    "exit" => process.exit(3),
+    "error" => println(int.to_string(fail()!)),
+    _ => (),
+  }
+}

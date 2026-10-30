@@ -148,37 +148,39 @@ pub(crate) const PROC_LEAVES: &[(&str, i32)] = &[
 /// (case index = op − 135; 91..=145 belong to other families). Same shape as
 /// the leaves above — two text operands, an ok(text) / err(text) answer —
 /// with the child's host handle in a.
-pub(crate) const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = 146..=151;
+pub(crate) const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = crate::host_ops::PROC_CHILD;
 /// The `start` child's op for a `__proc_*` leaf (one name per arm: dispatch).
 pub(crate) fn proc_child_op(name: &str) -> Option<i32> {
-    Some(match name {
-        "__proc_start" => 146,
-        "__proc_poll" => 147,
-        "__proc_wait" => 148,
-        "__proc_stop" => 149,
-        "__proc_read_new" => 150,
-        "__proc_child_pid" => 151,
+    let k = match name {
+        "__proc_start" => 0,
+        "__proc_poll" => 1,
+        "__proc_wait" => 2,
+        "__proc_stop" => 3,
+        "__proc_read_new" => 4,
+        "__proc_child_pid" => 5,
         _ => return None,
-    })
+    };
+    Some(*PROC_CHILD_OPS.start() + k)
 }
-const _: () = assert!(*PROC_CHILD_OPS.start() == 146 && *PROC_CHILD_OPS.end() == 151);
+const _: () = assert!(*PROC_CHILD_OPS.end() - *PROC_CHILD_OPS.start() == 5);
 /// The tcp family (#3620, the net/tcp design step 2): ops 91..=103, one per
 /// `__net_*` leaf in stdlib/net_wasm.almd, two operands and an ok / err
 /// answer. The embedded host serves them (net_host.rs) with native's core; a
 /// stock artifact does not (the p1 op set omits them), until the p3 route.
-pub(crate) const OP_NET_LISTEN: i32 = 91;
-pub(crate) const OP_NET_ACCEPT: i32 = 92;
-pub(crate) const OP_NET_CONNECT: i32 = 93;
-pub(crate) const OP_NET_READ: i32 = 94;
-pub(crate) const OP_NET_READ_EXACT: i32 = 95;
-pub(crate) const OP_NET_READ_TIMEOUT: i32 = 96;
-pub(crate) const OP_NET_WRITE: i32 = 97;
-pub(crate) const OP_NET_AVAILABLE: i32 = 98;
-pub(crate) const OP_NET_SET_TIMEOUT: i32 = 99;
-pub(crate) const OP_NET_CLOSE: i32 = 100;
-pub(crate) const OP_NET_CLOSE_LISTENER: i32 = 101;
-pub(crate) const OP_NET_IS_OPEN: i32 = 102;
-pub(crate) const OP_NET_LOCAL_PORT: i32 = 103;
+pub(crate) const OP_NET_LISTEN: i32 = crate::host_ops::nth(crate::host_ops::TCP, 0);
+pub(crate) const OP_NET_ACCEPT: i32 = crate::host_ops::nth(crate::host_ops::TCP, 1);
+pub(crate) const OP_NET_CONNECT: i32 = crate::host_ops::nth(crate::host_ops::TCP, 2);
+pub(crate) const OP_NET_READ: i32 = crate::host_ops::nth(crate::host_ops::TCP, 3);
+pub(crate) const OP_NET_READ_EXACT: i32 = crate::host_ops::nth(crate::host_ops::TCP, 4);
+pub(crate) const OP_NET_READ_TIMEOUT: i32 = crate::host_ops::nth(crate::host_ops::TCP, 5);
+pub(crate) const OP_NET_WRITE: i32 = crate::host_ops::nth(crate::host_ops::TCP, 6);
+pub(crate) const OP_NET_AVAILABLE: i32 = crate::host_ops::nth(crate::host_ops::TCP, 7);
+pub(crate) const OP_NET_SET_TIMEOUT: i32 = crate::host_ops::nth(crate::host_ops::TCP, 8);
+pub(crate) const OP_NET_CLOSE: i32 = crate::host_ops::nth(crate::host_ops::TCP, 9);
+pub(crate) const OP_NET_CLOSE_LISTENER: i32 = crate::host_ops::nth(crate::host_ops::TCP, 10);
+pub(crate) const OP_NET_IS_OPEN: i32 = crate::host_ops::nth(crate::host_ops::TCP, 11);
+pub(crate) const OP_NET_LOCAL_PORT: i32 = crate::host_ops::nth(crate::host_ops::TCP, 12);
+const _: () = assert!(OP_NET_LOCAL_PORT == *crate::host_ops::TCP.end());
 /// `testing.assert_aborts` (ADR-0029): the private abort-site pair, served by
 /// the embedded host only and only in test builds. 117 runs site `k` (a_len)
 /// on a fresh instance of the same module and answers the frames [status,

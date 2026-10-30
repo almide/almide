@@ -28,31 +28,34 @@ use crate::fs_meta::{
     OP_NET_WRITE,
 };
 use crate::*;
+use crate::host_ops;
 
 /// The unix-socket and shm family's ops (interim; see the module doc).
-const OP_UNIX_CONNECT: i32 = 104;
-const OP_UNIX_LISTEN: i32 = 105;
-const OP_UNIX_ACCEPT: i32 = 106;
-const OP_UNIX_SEND: i32 = 107;
-const OP_UNIX_RECV: i32 = 108;
-const OP_UNIX_TAKE_FDS: i32 = 109;
-const OP_UNIX_POLL: i32 = 110;
-const OP_UNIX_WAIT: i32 = 111;
-const OP_UNIX_CLOSE: i32 = 112;
-const OP_SHM_CREATE: i32 = 113;
-const OP_SHM_RESIZE: i32 = 114;
-const OP_SHM_WRITE: i32 = 115;
-const OP_SHM_READ: i32 = 116;
+const OP_UNIX_CONNECT: i32 = host_ops::nth(host_ops::UNIX_SHM, 0);
+const OP_UNIX_LISTEN: i32 = host_ops::nth(host_ops::UNIX_SHM, 1);
+const OP_UNIX_ACCEPT: i32 = host_ops::nth(host_ops::UNIX_SHM, 2);
+const OP_UNIX_SEND: i32 = host_ops::nth(host_ops::UNIX_SHM, 3);
+const OP_UNIX_RECV: i32 = host_ops::nth(host_ops::UNIX_SHM, 4);
+const OP_UNIX_TAKE_FDS: i32 = host_ops::nth(host_ops::UNIX_SHM, 5);
+const OP_UNIX_POLL: i32 = host_ops::nth(host_ops::UNIX_SHM, 6);
+const OP_UNIX_WAIT: i32 = host_ops::nth(host_ops::UNIX_SHM, 7);
+const OP_UNIX_CLOSE: i32 = host_ops::nth(host_ops::UNIX_SHM, 8);
+const OP_SHM_CREATE: i32 = host_ops::nth(host_ops::UNIX_SHM, 9);
+const OP_SHM_RESIZE: i32 = host_ops::nth(host_ops::UNIX_SHM, 10);
+const OP_SHM_WRITE: i32 = host_ops::nth(host_ops::UNIX_SHM, 11);
+const OP_SHM_READ: i32 = host_ops::nth(host_ops::UNIX_SHM, 12);
+const _: () = assert!(OP_SHM_READ == *host_ops::UNIX_SHM.end());
 
 /// The udp and name-lookup ops (#4306): the embedded host serves them with
 /// the net core (crates/almide-wasm-run/src/net_host.rs); a stock artifact
 /// does not (the p1 op set omits them) until the wasi:sockets route.
-const OP_UDP_BIND: i32 = 140;
-const OP_UDP_LOCAL_PORT: i32 = 141;
-const OP_UDP_SEND_TO: i32 = 142;
-const OP_UDP_RECV_FROM: i32 = 143;
-const OP_UDP_CLOSE: i32 = 144;
-const OP_LOOKUP_HOST: i32 = 145;
+const OP_UDP_BIND: i32 = host_ops::nth(host_ops::UDP, 0);
+const OP_UDP_LOCAL_PORT: i32 = host_ops::nth(host_ops::UDP, 1);
+const OP_UDP_SEND_TO: i32 = host_ops::nth(host_ops::UDP, 2);
+const OP_UDP_RECV_FROM: i32 = host_ops::nth(host_ops::UDP, 3);
+const OP_UDP_CLOSE: i32 = host_ops::nth(host_ops::UDP, 4);
+const OP_LOOKUP_HOST: i32 = host_ops::nth(host_ops::UDP, 5);
+const _: () = assert!(OP_LOOKUP_HOST == *host_ops::UDP.end());
 
 /// The ops whose b operand is the Bytes to send.
 const SENDS_BYTES: [i32; 4] = [OP_NET_WRITE, OP_UNIX_SEND, OP_SHM_WRITE, OP_UDP_SEND_TO];

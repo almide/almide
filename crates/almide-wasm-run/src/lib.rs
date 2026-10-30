@@ -12,6 +12,9 @@ mod net_unix_host;
 #[cfg(test)]
 #[path = "tests/http_host_test.rs"]
 mod http_host_test;
+#[cfg(test)]
+#[path = "tests/host_ops_test.rs"]
+mod host_ops_test;
 pub(crate) mod component_alloc;
 pub mod component_availability;
 mod component_host;
@@ -19,7 +22,7 @@ mod component_host;
 pub use component_host::run_component;
 /// The private `almide:process/spawn` capability (#2589, ADR-0025): the
 /// `[permissions] proc` bound and the canonical-ABI import.
-pub use host_process::{link_spawn_import, set_allowlist as set_proc_allowlist};
+pub use host_process::{link_spawn_import, set_allowlist as set_proc_allowlist, RunChildren, SpawnHost};
 /// `[permissions] fs` (#4022): the directories the embedded host may touch,
 /// and the preopens of its p3 component host.
 pub use host_fs_scope::{scope as fs_scope, set_scope as set_fs_scope};
