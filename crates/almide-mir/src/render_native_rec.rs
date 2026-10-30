@@ -191,10 +191,31 @@ pub(crate) fn struct_defs() -> String {
     })
 }
 
+/// The table key of a tuple type (its spelled form).
+pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {
+    format!("{t:?}")
+}
+
+/// Every tuple type in `t`, outermost first.
+pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_lang::types::Ty>) {
+    use almide_lang::types::Ty;
+    match t {
+        Ty::Tuple(es) => {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
+            es.iter().for_each(|e| collect_tuples(e, out));
+        }
+        Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
+        _ => {}
+    }
+}
+
 /// Derive the generated types from the declared record and variant layouts.
 pub(crate) fn derive_records(
     layouts: &crate::lower::RecordLayouts,
     variants: &crate::lower::VariantLayouts,
+    tuples: &[almide_lang::types::Ty],
 ) -> Vec<RecDecl> {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
@@ -213,6 +234,13 @@ pub(crate) fn derive_records(
             decls.insert(n.clone(), (true, cases));
         }
     }
+    // A tuple type the program declares in a signature is an anonymous record:
+    // the same uniform slots, keyed by its spelled type.
+    for t in tuples {
+        if let Ty::Tuple(es) = t {
+            decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
+        }
+    }
     // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
     let scalar = |n: &str| decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
     let mut set: BTreeSet<String> = decls.keys().filter(|n| !scalar(n)).cloned().collect();
@@ -225,6 +253,7 @@ pub(crate) fn derive_records(
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => NTy::VecStr,
             Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
+            Ty::Tuple(_) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             _ => return None,
         }))
     };
