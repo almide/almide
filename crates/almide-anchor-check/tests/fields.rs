@@ -178,3 +178,24 @@ fn a_read_only_call_between_the_test_and_the_re_load_is_accepted() -> Result<(),
 fn a_writing_call_between_the_test_and_the_re_load_is_refused() {
     assert!(nested_call("i32.const 0 i32.const 1 i32.store").unwrap_err().contains("tag test"));
 }
+
+#[test]
+fn a_callee_whose_only_write_is_a_call_that_never_returns_is_read_only() -> Result<(), String> {
+    // `$alloc` stores nothing here but stands for any callee: a call followed
+    // by `unreachable` cannot return into the caller's window.
+    let callee = "i32.const 0 i32.load drop i32.const 1 call $writer unreachable";
+    let bytes = wat::parse_str(format!(
+        r#"(module (memory 1)
+             (func $alloc (param i32) (result i32) i32.const 64)
+             (func $main (local i32 i32 i64) {})
+             (func $callee {callee})
+             (func $writer (param i32) i32.const 0 i32.const 1 i32.store))"#,
+        nested("call $callee")
+    ))
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    check_fields(&bodies, 0, 0, "L4 c0 n2 z8 o0 w4;L4 c1 n2 z16 o0 w4 o8 w8;a4 c1 f1", "-;-;1:21", &mut r)?;
+    assert_eq!(r.field_guarded, 1);
+    Ok(())
+}

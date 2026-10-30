@@ -781,7 +781,8 @@ pub(crate) fn may_write_memory(op: &Op<'_>) -> bool {
 /// whose instructions may write memory except calls of such functions (the
 /// greatest fixpoint, so read-only recursion stays read-only). An imported
 /// function, an indirect call and anything `may_write_memory` names are
-/// writes.
+/// writes — except a call followed by `unreachable`: whatever it writes, the
+/// function never returns past it (the run ends in the callee or traps).
 pub(crate) fn readonly_calls(bodies: &[Body<'_>], imports: u32) -> HashSet<u32> {
     let mut ro = vec![true; bodies.len()];
     loop {
@@ -790,7 +791,9 @@ pub(crate) fn readonly_calls(bodies: &[Body<'_>], imports: u32) -> HashSet<u32> 
             if !ro[i] {
                 continue;
             }
-            let writes = bodies[i].ops.iter().any(|op| match op {
+            let ops = &bodies[i].ops;
+            let writes = ops.iter().enumerate().any(|(k, op)| match op {
+                Op::Call { .. } if matches!(ops.get(k + 1), Some(Op::Unreachable)) => false,
                 Op::Call { function_index } | Op::ReturnCall { function_index } => {
                     function_index.checked_sub(imports).and_then(|d| ro.get(d as usize).copied()) != Some(true)
                 }
