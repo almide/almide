@@ -464,9 +464,46 @@ fn runtime_index() -> &'static RuntimeIndex {
         let prelude: &'static str = Box::leak(almide_codegen::emit_runtime_crate().into_boxed_str());
         let mut defined: BTreeSet<&'static str> = defined_names(prelude);
         let mut trait_methods = trait_method_names(prelude);
+        let mut runtime_traits: BTreeSet<&'static str> = BTreeSet::new();
         for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
             defined.extend(defined_names(src));
             trait_methods.extend(trait_method_names(src));
+            runtime_traits.extend(trait_names(src));
+        }
+        // A trait the prelude alone defines travels whole: its declaration and
+        // every prelude impl of it, taken by any of its methods or its name.
+        // (An impl a runtime module adds is not taken, so a body that reaches
+        // the method through such a type fails the compile gate, never a
+        // user's build.)
+        let traits: Vec<_> = prelude_traits(prelude)
+            .into_iter()
+            .filter(|(name, ..)| !runtime_traits.contains(name) && !items.contains_key(name))
+            .collect();
+        for (name, decl, _, methods) in &traits {
+            items.insert(name, RtItem { text: decl });
+            for m in methods {
+                trait_methods.remove(m);
+                items.entry(m).or_insert(RtItem { text: decl });
+            }
+        }
+        // An impl for a type the header cannot carry (it reaches such a
+        // name) stays behind: no carried body holds a value of that type.
+        let provisional = RuntimeIndex { items, defined, trait_methods };
+        let mut taken: Vec<(&'static str, &'static str, Vec<&'static str>)> = Vec::new();
+        for (name, decl, impls, methods) in traits {
+            let mut whole = String::from(decl);
+            for imp in impls.into_iter().filter(|imp| references_in(&provisional, imp).is_ok()) {
+                whole.push('\n');
+                whole.push_str(imp);
+            }
+            taken.push((name, &*Box::leak(whole.into_boxed_str()), methods));
+        }
+        let RuntimeIndex { mut items, defined, trait_methods } = provisional;
+        for (name, whole, methods) in taken {
+            items.insert(name, RtItem { text: whole });
+            for m in methods {
+                items.insert(m, RtItem { text: whole });
+            }
         }
         RuntimeIndex { items, defined, trait_methods }
     })
@@ -640,8 +677,11 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
 /// is not an item we can take along (a type, a macro, a module, a prelude
 /// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
 fn references(text: &str) -> Result<Vec<String>, String> {
+    references_in(runtime_index(), text)
+}
+
+fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
     let toks = lex(text);
-    let rt = runtime_index();
     let header = header_items();
     let mut out = Vec::new();
     let mut locals: BTreeSet<&str> = BTreeSet::new();
@@ -654,6 +694,10 @@ fn references(text: &str) -> Result<Vec<String>, String> {
         let next = toks.get(i + 1).map(|t| t.text);
         if prev == Some(".") && rt.trait_methods.contains(s) {
             return Err(s.to_string()); // a method of the runtime's own traits
+        }
+        if prev == Some(".") && rt.items.contains_key(s) && !rt.defined.contains(s) {
+            out.push(s.to_string()); // a method of a prelude trait that travels whole
+            continue;
         }
         if matches!(prev, Some("." | "::" | "'")) {
             continue; // a method, a field, a path tail, a lifetime
@@ -718,6 +762,49 @@ fn defined_names(src: &str) -> BTreeSet<&str> {
 }
 
 /// The fn names the top-level `trait` items of `src` declare.
+/// The traits `src` defines at its top level.
+fn trait_names(src: &str) -> BTreeSet<&str> {
+    top_level_items(src)
+        .into_iter()
+        .filter(|(kind, name, text, _)| *kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != *name).any(|t| t.text == "trait"))
+        .map(|(_, name, _, _)| name)
+        .collect()
+}
+
+/// Each trait `src` defines at its top level (with no `#[cfg]`), as (name,
+/// its declaration, every top-level impl of it in `src`, its method names).
+#[allow(clippy::type_complexity)]
+fn prelude_traits(src: &'static str) -> Vec<(&'static str, &'static str, Vec<&'static str>, Vec<&'static str>)> {
+    let toks = lex(src);
+    // Top-level impls: `impl … Trait for …` → the trait name before `for`.
+    let mut impls: BTreeMap<&'static str, Vec<&'static str>> = BTreeMap::new();
+    let mut i = 0;
+    while i < toks.len() {
+        if toks[i].depth == 0 && toks[i].text == "impl" {
+            let end = item_end(&toks, i);
+            let for_at = (i..end).find(|&k| toks[k].text == "for" && toks[k].depth == 0);
+            if let Some(f) = for_at.filter(|f| *f > i + 1) {
+                let tr = toks[f - 1].text;
+                let end_off = toks.get(end).map(|t| t.off + t.text.len()).unwrap_or(src.len());
+                impls.entry(tr).or_default().push(&src[toks[i].off..end_off]);
+            }
+            i = end + 1;
+            continue;
+        }
+        i += 1;
+    }
+    let mut out = Vec::new();
+    for (kind, name, text, attributed) in top_level_items(src) {
+        let ltoks = lex(text);
+        if kind != ItemKind::Other || attributed || !ltoks.iter().take_while(|t| t.text != name).any(|t| t.text == "trait") {
+            continue;
+        }
+        let methods: Vec<&'static str> = ltoks.windows(2).filter(|w| w[0].text == "fn").map(|w| w[1].text).collect();
+        out.push((name, text, impls.get(name).cloned().unwrap_or_default(), methods));
+    }
+    out
+}
+
 fn trait_method_names(src: &str) -> BTreeSet<&str> {
     let mut out = BTreeSet::new();
     for (kind, name, text, _) in top_level_items(src) {
