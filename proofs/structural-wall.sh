@@ -146,8 +146,8 @@ for f in os.listdir(out):
                 tot[k] += int(v)
 if tot["operands"] != tot["accesses"]:
     sys.exit(f"STRUCTURAL WALL FAIL: {tot['accesses']} located access(es) but {tot['operands']} held to their guard's operands")
-rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed")
-rk = ["frames", "events", "calls", "pre_abort", "rebind", "judges", "arm", "routine", "element", "consumed"]
+rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed")
+rk = ["frames", "events", "calls", "rebind", "judges", "arm", "routine", "element", "consumed"]
 rc = dict.fromkeys(rk, 0)
 for f in os.listdir(out):
     if f.endswith(".anchor"):
@@ -158,7 +158,7 @@ for f in os.listdir(out):
             rc[k] += int(v)
 print(f"  [rc] RC OK on every artifact: {rc['frames']} frame(s), {rc['events']} event(s) matched to {rc['calls']} call(s); counted (#4278): "
       f"{rc['arm']} arm-internal, {rc['routine']} routine-internal, {rc['element']} element, {rc['consumed']} consumed; "
-      f"{rc['pre_abort']} before an abort, {rc['rebind']} rebind(s) with no instruction, {rc['judges']} judge(s) with no rebind")
+      f"{rc['rebind']} rebind(s) with no instruction, {rc['judges']} judge(s) with no rebind")
 print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
       f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes, every access's guard operands to it; unlocated (dead bodies): "
       f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")

@@ -9,9 +9,12 @@
 //! kind. A call in dead code (after an unconditional branch in its block) is
 //! not live. A call on a path that aborts (in an aborting arm, or a release
 //! whose block then reaches `unreachable` through only calls, constants and
-//! local reads) is matched like any other; left over, it is counted
-//! (`pre_abort`), not refused — the process ends there, and the witness does
-//! not record every such release (#4278).
+//! local reads) is matched like any other, and left over it is REFUSED like
+//! any other: under `http.serve` an abort ends only the request, not the
+//! instance, so a release the emitter performs before an abort is a recorded
+//! event, never a trusted class (sec-b2, 2026-10-30). What an aborting path
+//! leaves unreleased is the abort terminal's; the serve hosts take it back
+//! (tests/http_serve_abort_reuse_test.rs).
 //!
 //! An owner rebind's release of the old block (`o`, the recorder's DecOld)
 //! and a variable's release (`d` on a local) is a release call, or happens
@@ -106,7 +109,6 @@ pub struct RcReport {
     pub frames: usize,
     pub events: usize,
     pub calls: usize,
-    pub pre_abort: usize,
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
     pub arm_internal: usize,
@@ -360,8 +362,8 @@ pub fn check_rc(
         let fl = Flow::new(b, HashSet::new());
         let dead = dead(b);
         // The live RC calls: (instruction, kind, the locals its argument was
-        // read through). Those on a path that aborts take part in matching;
-        // left over, they are counted, not refused (#4278).
+        // read through). Those on a path that aborts take part in matching
+        // and are tried after the others; left over, they are refused.
         let mut calls: Vec<(usize, char, Vec<u32>)> = Vec::new();
         // Calls whose argument is a value loaded out of a heap block's slot.
         let mut elements: HashSet<usize> = HashSet::new();
@@ -614,8 +616,8 @@ pub fn check_rc(
         // has no such reading), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // More generally: a call that has a reading of its own when left over
-        // (an arm's or routine's, a replaced element's, one before an abort)
-        // is tried after the calls that have none.
+        // (an arm's or routine's, a replaced element's) is tried after the
+        // calls that have none, and so is one before an abort.
         let fallback = |i: usize| {
             if i >= live {
                 return true;
@@ -889,8 +891,6 @@ pub fn check_rc(
                 &mut rep.routine_internal
             } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
                 &mut rep.element
-            } else if aborting.contains(&k) {
-                &mut rep.pre_abort
             } else {
                 continue;
             };
