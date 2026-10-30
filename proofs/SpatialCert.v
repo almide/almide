@@ -563,7 +563,7 @@ Corollary for_loop_reads_spatial : forall m bs e t o,
   Spatial (program_trace m bs t) /\ WellTyped (program_trace m bs t).
 Proof.
   intros m bs e t o Hwf Hbs Hi Hrun.
-  exact (accepts_spatial m bs e _ t o Hwf Hbs eq_refl Hi Hrun).
+  exact (accepts_spatial m bs e _ t o Hwf Hbs accepts_for_loop Hi Hrun).
 Qed.
 Print Assumptions for_loop_reads_spatial.
 
