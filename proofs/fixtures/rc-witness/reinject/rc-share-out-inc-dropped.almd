@@ -1,0 +1,13 @@
+// #4278 drill: an arm's share-out. `value.merge` of a non-object answers with
+// its second argument's block as its owned result, after an rc_inc on it; the
+// recorder logs that as the share-out `s` on `b`. The emitter drops the inc
+// while the event stays: the ownership witness is unchanged and accepted, and
+// only the shipped calls show the share has no +1 behind it.
+import json
+
+effect fn main() -> Unit = {
+  let a = value.int(1)
+  let b = value.int(2)
+  let m = value.merge(a, b)
+  println(json.stringify(m))
+}

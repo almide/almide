@@ -33,6 +33,7 @@ Definition wasm_pattern (o : Op) : string :=
   | MoveOut => ""                 (* eager: move is a pointer pass, no instruction *)
   | Reuse   => ""                 (* eager: no reuse; the perceus renderer emits rc_dec/reuse *)
   | Borrow  => ""                 (* a borrow reads through the handle — no RC instruction *)
+  | ShareOut => "call $list_copy" (* an arm's share-out is an alias of its argument: an eager COPY *)
   end.
 
 Definition is_release (o : Op) : bool :=

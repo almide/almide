@@ -402,7 +402,8 @@ fn one_line(s: &str) -> String {
 /// The bundle text. `artifact` is `(sha256 hex, path)` of the shipped file
 /// the witnesses describe: present, the bundle is version 2 and
 /// almide-verify recomputes the digest from that file and rejects a
-/// mismatch; absent, version 1.
+/// mismatch; absent, version 1. A bundle whose ownership witness carries an
+/// arm share-out `s` (#4278) is version 3 either way.
 pub fn render(
     producer: &str,
     source: &str,
@@ -410,10 +411,15 @@ pub fn render(
     records: &[Record],
     uncertified: &[(String, String)],
 ) -> String {
-    let mut out = match artifact {
-        None => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
-        Some((hex, path)) => format!(
-            "almide-certificate-bundle 2\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
+    // Version 3 (#4278): an ownership witness carries an arm share-out `s`,
+    // which a reader before version 3 must refuse rather than skip.
+    let share_out = records.iter().any(|r| r.property == "ownership" && r.bytes.contains(['s', 'S']));
+    let mut out = match (artifact, share_out) {
+        (None, false) => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
+        (None, true) => format!("almide-certificate-bundle 3\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
+        (Some((hex, path)), _) => format!(
+            "almide-certificate-bundle {}\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
+            if share_out { 3 } else { 2 },
             one_line(producer),
             one_line(source),
             one_line(path)

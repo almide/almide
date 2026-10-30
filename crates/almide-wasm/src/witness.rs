@@ -53,7 +53,10 @@
 //!   `a` = a +1 backed by a real `rc_inc` (the borrowed-rhs bind share);
 //!   `d` = a −1 backed by a real `$dec_flat` (epilogue release, dec-old);
 //!   `b` = a +0 read of the block a local holds (#3259), which the checker
-//!         rejects at count 0 (a read after the release).
+//!         rejects at count 0 (a read after the release);
+//!   `s` = an arm's share-out (#4278): a +0 on the argument's line backed by
+//!         the real `rc_inc` the arm makes before it answers with that block
+//!         as its owned result — the +1 is the result line's `i`.
 //! Balance (every prefix nonnegative, every stream ending at zero) is
 //! re-checked here by `balanced` — the Rust mirror of the proven rule —
 //! and the certificate text is byte-compatible with the extracted checker
@@ -180,8 +183,8 @@ impl WitnessRecorder {
         if !self.branches.dead() {
             // #4277: a live rc_inc / release, for the byte check.
             match ev {
-                Ev::Op(_, c @ ('a' | 'd')) => crate::witness::rc::event(c, None),
-                Ev::LOp(l, c @ ('a' | 'd' | 'm')) => crate::witness::rc::event(c, Some(l)),
+                Ev::Op(_, c @ ('a' | 'd' | 's')) => crate::witness::rc::event(c, None),
+                Ev::LOp(l, c @ ('a' | 'd' | 'm' | 's')) => crate::witness::rc::event(c, Some(l)),
                 // An owner rebind's release of the old block: by a release
                 // call, or inside the copy-on-write judge that rebinds it (#4278).
                 Ev::DecOld(l) => crate::witness::rc::event('o', Some(l)),
@@ -558,6 +561,24 @@ impl WitnessRecorder {
         self.ops(o, ops);
     }
 
+    /// #4278: an arm's SHARE-OUT — on this path the arm answers with its
+    /// argument's block as its owned result, after an `rc_inc` on it. The
+    /// +1 is the result's credit (its line is born `i` by the consumer), so
+    /// the argument's line records `s`: +0 there, a liveness probe on an
+    /// owned line, and the RC byte check holds it to the `rc_inc` inside the
+    /// arm's window read through `local`. `None`: the argument is no frame
+    /// variable (a temporary, a view, a global) — its own line takes the `s`.
+    pub fn arm_share_out(&mut self, local: Option<u32>) -> bool {
+        match local {
+            Some(l) => self.held_ops(l, "s"),
+            None => {
+                let o = self.view_obj();
+                self.ops(o, "s");
+                true
+            }
+        }
+    }
+
     /// The share a borrowed `!` carrier takes before it propagates.
     pub fn share_local(&mut self, local: u32) -> bool {
         self.held_ops(local, "a")
@@ -600,7 +621,8 @@ impl WitnessRecorder {
         for ev in &self.log {
             if let Ev::Op(_, c) | Ev::LOp(_, c) = ev {
                 match c {
-                    'a' => n.0 += 1,
+                    // A share-out (#4278) is an `rc_inc` too.
+                    'a' | 's' => n.0 += 1,
                     'd' => n.1 += 1,
                     'i' => n.2 += 1,
                     _ => {}
@@ -640,6 +662,8 @@ pub fn balanced(cert: &str) -> bool {
                 'i' | 'a' => bal += 1,
                 'd' | 'm' => bal -= 1,
                 'b' if bal > 0 => {}
+                // #4278: an arm's share-out moves no count on its line.
+                's' => {}
                 _ => return false,
             }
             if bal < 0 {
