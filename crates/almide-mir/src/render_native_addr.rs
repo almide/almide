@@ -98,6 +98,11 @@ impl AddrState {
             .iter()
             .filter_map(|op| match op {
                 Op::Alloc { dst, init: Init::DynList { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                // A scalar-only constructor of a heap variant is built as a slot list.
+                Op::ListLit { dst, .. } => alloc_rec
+                    .get(dst)
+                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some())
+                    .map(|i| (*dst, *i)),
                 _ => None,
             })
             .collect();
@@ -151,6 +156,31 @@ fn is_list_block(t: NTy) -> bool {
 fn rec_slot(a: &Addr) -> Option<usize> {
     let (h, w) = (i64::from(BLOCK_HEADER), i64::from(SLOT_SIZE));
     (a.idx.is_none() && a.off >= h && (a.off - h) % w == 0).then(|| ((a.off - h) / w) as usize)
+}
+
+/// An enum's read of payload slot `k` as `want` (`None`: a heap kind, when it
+/// is the only heap kind the slot holds), or the tag at slot 0.
+fn enum_read(i: u16, k: usize, scalar: bool) -> Option<(String, NTy)> {
+    use crate::render_native_rec::{enum_slot_kinds, kind_suffix};
+    if k == 0 {
+        return scalar.then(|| ("tag()".to_string(), NTy::I64));
+    }
+    let kinds = enum_slot_kinds(i, k);
+    if scalar {
+        return kinds.contains(&NTy::I64).then(|| (format!("s{k}_i()"), NTy::I64));
+    }
+    let heap: Vec<NTy> = kinds.into_iter().filter(|t| *t != NTy::I64).collect();
+    match heap.as_slice() {
+        [one] => Some((format!("s{k}_{}()", kind_suffix(*one)), *one)),
+        _ => None,
+    }
+}
+
+fn is_enum(t: Option<NTy>) -> Option<u16> {
+    match t {
+        Some(NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::enum_cases(i).map(|_| i),
+        _ => None,
+    }
 }
 
 /// The owned copy of a heap value `code` of kind `t` (for a field write).
@@ -280,6 +310,13 @@ pub(crate) fn render_addr_op(
                 line!("let mut {}: i64 = {}.len() as i64;", var(*d), var(ad.base));
                 return Ok(true);
             }
+            if let (8, Some(i), Some(k)) = (*width, is_enum(bt), rec_slot(&ad)) {
+                if let Some((acc, t)) = enum_read(i, k, true) {
+                    tys.insert(*d, t);
+                    line!("let mut {}: i64 = {}.{acc};", var(*d), var(ad.base));
+                    return Ok(true);
+                }
+            }
             if let (8, Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (*width, bt, rec_slot(&ad)) {
                 if crate::render_native_rec::rec_field(i, k) == Some(NTy::I64) {
                     tys.insert(*d, NTy::I64);
@@ -298,6 +335,14 @@ pub(crate) fn render_addr_op(
         }
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
             let ad = st.addrs[&args[0]];
+            if let (Some(i), Some(k)) = (is_enum(ty(tys, &ad.base)), rec_slot(&ad)) {
+                let Some((acc, t)) = enum_read(i, k, false) else {
+                    return Err(wall("native: a heap read of an enum slot of several heap kinds"));
+                };
+                tys.insert(*d, t);
+                line!("let mut {}: {} = {}.{acc};", var(*d), crate::render_native_rec::owned_ty(t), var(ad.base));
+                return Ok(true);
+            }
             if let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
                 if let Some(f) = crate::render_native_rec::rec_field(i, k).filter(|f| *f != NTy::I64) {
                     tys.insert(*d, f);
@@ -327,6 +372,33 @@ pub(crate) fn render_addr_op(
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 && st.addrs.contains_key(&args[0]) => {
             let ad = st.addrs[&args[0]];
             let v = args[1];
+            if let (Some(i), Some(NTy::Rec(_)), Some(k)) = (is_enum(ty(tys, &ad.base)), ty(tys, &ad.base), rec_slot(&ad)) {
+                use crate::render_native_rec::{enum_slot_kinds, kind_suffix, struct_name};
+                let b = var(ad.base);
+                if k == 0 {
+                    if st.addrs.contains_key(&v) || ty(tys, &v) != Some(NTy::I64) {
+                        return Err(wall("native: a non-scalar enum tag"));
+                    }
+                    line!("{b} = {}::with_tag({});", struct_name(i), var(v));
+                    return Ok(true);
+                }
+                let kinds = enum_slot_kinds(i, k);
+                match (st.addrs.get(&v).copied(), ty(tys, &v)) {
+                    (None, Some(NTy::I64)) if kinds.contains(&NTy::I64) => line!("{b}.set_s{k}_i({});", var(v)),
+                    (None, Some(NTy::F64)) if kinds.contains(&NTy::I64) => line!("{b}.set_s{k}_i({}.to_bits() as i64);", var(v)),
+                    (Some(sv), _) if sv.off == 0 && sv.idx.is_none() => {
+                        let g = ty(tys, &sv.base).ok_or_else(|| wall("native: an untyped enum payload"))?;
+                        let fits: Vec<NTy> = kinds.into_iter().filter(|f| field_accepts(*f, g)).collect();
+                        let [f] = fits.as_slice() else {
+                            return Err(wall(format!("native: a {g:?} payload fits no single kind of an enum slot")));
+                        };
+                        let rhs = owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned enum payload"))?;
+                        line!("{b}.set_s{k}_{}({rhs});", kind_suffix(*f));
+                    }
+                    (_, g) => return Err(wall(format!("native: a {g:?} value stored into an enum slot"))),
+                }
+                return Ok(true);
+            }
             if let (Some(NTy::Rec(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
                 let field = crate::render_native_rec::rec_field(i, k)
                     .ok_or_else(|| wall("native: a store past a record's last field"))?;
@@ -383,6 +455,25 @@ pub(crate) fn render_addr_op(
             let i = st.alloc_rec[dst];
             tys.insert(*dst, NTy::Rec(i));
             line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
+            return Ok(true);
+        }
+        Op::ListGetScalar { dst, list, idx } if is_enum(ty(tys, list)).is_some() => {
+            let (Some(i), Some(&k)) = (is_enum(ty(tys, list)), st.consts.get(idx)) else {
+                return Err(wall("native: an enum slot read at a computed slot"));
+            };
+            let (acc, _) = enum_read(i, k as usize, true).ok_or_else(|| wall("native: a scalar read of a heap enum slot"))?;
+            tys.insert(*dst, NTy::I64);
+            line!("let mut {}: i64 = {}.{acc};", var(*dst), var(*list));
+            return Ok(true);
+        }
+        Op::ListLit { dst, elems } if st.alloc_rec.contains_key(dst) => {
+            let i = st.alloc_rec[dst];
+            if elems.iter().any(|e| ty(tys, e) != Some(NTy::I64)) {
+                return Err(wall("native: a heap element in an enum slot list"));
+            }
+            tys.insert(*dst, NTy::Rec(i));
+            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+            line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst), n = crate::render_native_rec::struct_name(i));
             return Ok(true);
         }
         Op::ListGetScalar { dst, list, idx } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {

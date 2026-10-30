@@ -370,7 +370,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     // #4006 A5: the generated record structs, derived from the declared layouts.
-    let _records = crate::render_native_rec::install(crate::render_native_rec::derive_records(&record_layouts));
+    let _records = crate::render_native_rec::install(crate::render_native_rec::derive_records(&record_layouts, &variant_layouts));
     if !ir.modules.is_empty() {
         return Err(LowerError::Unsupported(
             "native: multi-module program — outside rung 1".into(),
