@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 123 of 1005
+# rendered: 130 of 1005
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/assert_abort_eq.almd
 spec/wasm_cross/assert_abort_msg.almd
@@ -50,6 +50,7 @@ spec/wasm_cross/gleam_precedence_unary.almd
 spec/wasm_cross/global_in_both_arms.almd
 spec/wasm_cross/global_in_shortcircuit_operand.almd
 spec/wasm_cross/grain_functions.almd
+spec/wasm_cross/grain_pattern_destructure.almd
 spec/wasm_cross/grouping_unary.almd
 spec/wasm_cross/guard_else_exit_code.almd
 spec/wasm_cross/heap_result_err_interp.almd
@@ -87,6 +88,7 @@ spec/wasm_cross/panic_abort_positions.almd
 spec/wasm_cross/panic_value_arm.almd
 spec/wasm_cross/pipe_compose_forms.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
+spec/wasm_cross/positional_variant_field_literal.almd
 spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 spec/wasm_cross/r5_mod_producer_variant.almd
 spec/wasm_cross/r5_wasm_tuple_variant_pattern.almd
@@ -96,6 +98,7 @@ spec/wasm_cross/range_exclusive_end_at_min.almd
 spec/wasm_cross/range_materialize_oom.almd
 spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/record_default_field_omitted.almd
+spec/wasm_cross/record_variant_field_literal.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
 spec/wasm_cross/ref_int_min_div_abort.almd
@@ -120,6 +123,10 @@ spec/wasm_cross/tm_record_fn_pass.almd
 spec/wasm_cross/tm_record_interp.almd
 spec/wasm_cross/tm_record_lit_print.almd
 spec/wasm_cross/tm_record_shadow_drop.almd
+spec/wasm_cross/tm_variant_eq.almd
+spec/wasm_cross/tm_variant_fn_pass.almd
+spec/wasm_cross/tm_variant_lit_print.almd
+spec/wasm_cross/tm_variant_shadow_drop.almd
 spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/tuple_single.almd
 spec/wasm_cross/unwrap_in_if_arm.almd
