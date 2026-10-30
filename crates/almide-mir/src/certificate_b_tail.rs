@@ -303,6 +303,8 @@ impl CertScan {
                 self.note_view(dst, first);
             }
             PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
+            // A native Result carrier read dereferences the carrier (#4349).
+            k if k.reads_native_carrier() => self.probe_address(first),
             PrimKind::Handle => {
                 self.child_handle(dst, first);
                 self.note_view(dst, first);

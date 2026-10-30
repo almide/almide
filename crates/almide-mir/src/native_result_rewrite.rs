@@ -27,9 +27,12 @@
 //! verification/render. Ownership accounting is preserved: the Err STRING's
 //! `Alloc`/`Consume` pair stays (the carrier clones; `Init::ResErrStr`'s move
 //! contract keeps the same `i…m` shape on both legs); the semantic Alloc
-//! itself becomes the prim (the carrier value is scalar-like to the verifier);
-//! a `CallFn` heap result keeps its `Some(Ptr)` birth and its `DropListStr`
-//! release.
+//! itself becomes the prim, which the verifier and the certificate count as
+//! alloc-class (`i`), and the carrier KEEPS its releases (`Drop`/`DropListStr`/
+//! `Consume`) — a minted carrier's post-rewrite accounting is the pre-rewrite
+//! accounting the wasm leg proves (#4349: dropping it left the carrier with no
+//! object, so every borrowing use of it read as a use-after-free); a `CallFn`
+//! heap result keeps its `Some(Ptr)` birth and its `DropListStr` release.
 //!
 //! The wasm leg never sees any of this — zero risk to the proven leg.
 
@@ -77,9 +80,7 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
                 t.res_vals.insert(dst);
                 t.minted.insert(dst);
             }
-            Op::Dup { src: v, .. } | Op::Drop { v } | Op::DropListStr { v } if t.minted.contains(v) => {
-                t.track_minted_copy(op, &mut out)
-            }
+            Op::Dup { src: v, .. } if t.minted.contains(v) => t.track_minted_copy(op, &mut out),
             Op::Prim {
                 kind: PrimKind::Handle,
                 dst: Some(_),
@@ -98,9 +99,10 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
             } if args.len() == 1 && t.res_addrs.contains_key(&args[0]) => {
                 t.track_res_load(op, &mut out);
             }
-            // A Consume of a rewritten result value: the carrier is
-            // scalar-like to the verifier (no object) — drop the op.
-            Op::Consume { v } if t.res_vals.contains(v) => {}
+            // A Consume of a CALL-result carrier: dropped, as before. A MINTED
+            // carrier's Consume stays — it is the move-out that balances its
+            // alloc-class birth (#4349).
+            Op::Consume { v } if t.res_vals.contains(v) && !t.minted.contains(v) => {}
             Op::CallFn {
                 dst: Some(d), name, ..
             } if result_fns.contains(name) => {
@@ -210,10 +212,11 @@ impl ResultWindowTracker {
         }
     }
 
-    /// A `Dup` or a release of a MINTED carrier (#3669). The shared lowering
-    /// dups a Result that outlives a statement (a metered region's value
-    /// across its `budget_exit`) and releases the original; a minted carrier
-    /// has no object, so the dup becomes a carrier copy and the release goes.
+    /// A `Dup` of a MINTED carrier (#3669). The shared lowering dups a Result
+    /// that outlives a statement (a metered region's value across its
+    /// `budget_exit`) and releases the original. The native carrier is a Rust
+    /// value, so the dup becomes a carrier copy — a fresh alloc-class object to
+    /// the verifier — and each release stays on its own carrier (#4349).
     fn track_minted_copy(&mut self, op: Op, out: &mut Vec<Op>) {
         if let Op::Dup { dst, src } = op {
             out.push(Op::Prim { kind: PrimKind::ResCopy, dst: Some(dst), args: vec![src] });
