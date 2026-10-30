@@ -430,7 +430,7 @@ pub fn check_rc(
         // A routine's HOLD move (`h<local>@<from>-<to>`: a credit moved into
         // the routine through a pooled hold local) names that local only
         // inside its window — the slot is reused for other values outside it.
-        let witnessed: HashSet<u32> = evs.iter().filter(|e| e.0 != 'h').filter_map(|e| e.1).collect();
+        let witnessed: HashSet<u32> = evs.iter().filter(|e| !matches!(e.0, 'h' | 'r')).filter_map(|e| e.1).collect();
         let held_at: Vec<(u32, usize, usize)> = (0..evs.len())
             .filter(|&e| evs[e].0 == 'h')
             .filter_map(|e| Some((evs[e].1?, evwin[e]?.0, evwin[e]?.1)))
@@ -551,6 +551,15 @@ pub fn check_rc(
                         && l.is_none_or(|l| {
                             names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l)))
                         })
+                }
+                // #4278 B1: a container slot's replaced occupant (`r-@<window>`):
+                // a release inside its window on a value loaded out of a slot
+                // that a later store overwrites.
+                ('r', _) => {
+                    k == 'd'
+                        && evwin[e].is_some_and(|(a, z)| a <= calls[i].0 && calls[i].0 <= z)
+                        && elements.contains(&calls[i].0)
+                        && replaces(&fl, b, calls[i].0)
                 }
                 // A C-319 cell variable's events name its local; a call on
                 // the block the cell holds reads through it (`CELL_HOLDER | l`).
@@ -857,6 +866,19 @@ pub fn check_rc(
             };
             *slot += 1;
             used[i] = true;
+            if EXPLAIN.load(std::sync::atomic::Ordering::Relaxed) {
+                // Diagnosis only: where each counted call is.
+                let class = if !frame_owned && inside(&windows[0], k) {
+                    "arm-internal"
+                } else if !frame_owned && inside(&windows[1], k) {
+                    "routine-internal"
+                } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
+                    "element"
+                } else {
+                    "before-abort"
+                };
+                eprintln!("counted {class}: function {pos} {}@{} on {:?}", calls[i].1, k, calls[i].2);
+            }
         }
         let extra: Vec<String> = (0..live)
             .filter(|&i| !used[i] && calls[i].1 != 'j')
