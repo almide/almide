@@ -1,12 +1,16 @@
 // #4277 drill: a routine's hold move is recorded against the window after
 // the one it was moved into. The ownership witness is unchanged; the first
-// routine's release of the key it was handed (the key is present) has no
-// hold move of its own window, so the RC byte check must refuse it.
+// set's release of the key share it was handed (the key is present) has no
+// hold move of its own window and is read through the frame variable `k`,
+// so the RC byte check must refuse it. (A hold carrying only a temporary's
+// credit is the routine's own when its event is lost: counted
+// routine-internal, the #4278 debt — the drill shows a misplaced hold move
+// never hides a FRAME credit.)
 effect fn main() -> Unit = {
-  var m: Map[String, Int] = ["a": 1, "b": 2]
+  var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
   let k = string.repeat("a", 1)
-  m[k] = 3
+  m = map.set(m, k, 3)
   let j = string.repeat("b", 1)
-  m[j] = 4
+  m = map.set(m, j, 4)
   println("${int.to_string(map.len(m))} ${k} ${j}")
 }

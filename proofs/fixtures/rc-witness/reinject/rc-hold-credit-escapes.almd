@@ -1,13 +1,14 @@
 // #4277 drill: a routine's hold carries a frame variable's credit (the share
-// `m[k] = v` takes on the key `k`), and the emitter releases that hold again
-// PAST the routine's window with no event. The ownership witness is
-// unchanged. A hold move's name is scoped to its window (`h<local>@window`),
-// so the hold slot alone no longer makes the call the frame's; the value it
-// releases is still read through `k`, a frame variable, so the RC byte check
-// must refuse it — window scoping never hides a frame credit.
+// `map.set(m, k, v)` takes on the key `k`, moved into the judged set through
+// its hold, `h<local>@window`), and the emitter releases that hold again PAST
+// the routine's window with no event. The ownership witness is unchanged. A
+// hold move's name is scoped to its window, so the hold slot alone no longer
+// makes the call the frame's; the value it releases is still read through
+// `k`, a frame variable, so the RC byte check must refuse it — window scoping
+// never hides a frame credit.
 effect fn main() -> Unit = {
-  var m: Map[String, Int] = ["a": 1]
+  var m: Map[String, Int] = map.from_list([("a", 1)])
   let k = string.repeat("a", 1)
-  m[k] = 2
+  m = map.set(m, k, 2)
   println("${int.to_string(map.len(m))} ${k}")
 }
