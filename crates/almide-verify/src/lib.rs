@@ -16,6 +16,7 @@
 //! | `call-modes`      | `CallModes.check_modes_cert`               | every call site's modes equal its callee's signature |
 //! | `bounds`          | `BoundsCert.check_bounds_cert`             | every list access is preceded, on every path, by a check of its slot with no change since |
 //! | `init`            | `InitCert.check_init_cert`                 | every construction site stores every slot of its block, and none past it |
+//! | `fields`          | `FieldCert.check_fields_cert`              | every layout's fields fit its payload; every record / tuple / variant site stores each field of its layout; every field access names a declared field; every tag read is field 0 of each case |
 //!
 //! WHAT IS PROVEN AND WHAT IS NOT. The Coq functions carry the soundness
 //! theorems; this crate does not — it is a second implementation of the same
@@ -27,6 +28,7 @@
 
 pub mod bundle;
 mod bounds;
+mod fields;
 mod init;
 mod modes;
 mod nat;
@@ -39,7 +41,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The witness formats this version reads.
 pub const FORMATS: &str =
-    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, bundle v1 and v2 (artifact sha256)";
+    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, fields v1, bundle v1 and v2 (artifact sha256)";
 
 /// A flight-grade property a witness certifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,10 +53,11 @@ pub enum Property {
     CallModes,
     Bounds,
     Init,
+    Fields,
 }
 
 impl Property {
-    pub const ALL: [Property; 7] = [
+    pub const ALL: [Property; 8] = [
         Property::Ownership,
         Property::Names,
         Property::Caps,
@@ -62,6 +65,7 @@ impl Property {
         Property::CallModes,
         Property::Bounds,
         Property::Init,
+        Property::Fields,
     ];
 
     /// The name used on the command line and in bundles — the same mode names
@@ -75,6 +79,7 @@ impl Property {
             Property::CallModes => "call-modes",
             Property::Bounds => "bounds",
             Property::Init => "init",
+            Property::Fields => "fields",
         }
     }
 
@@ -92,5 +97,6 @@ pub fn check(property: Property, witness: &[u8]) -> bool {
         Property::CallModes => modes::check_modes_cert(witness),
         Property::Bounds => bounds::check_bounds_cert(witness),
         Property::Init => init::check_init_cert(witness),
+        Property::Fields => fields::check_fields_cert(witness),
     }
 }

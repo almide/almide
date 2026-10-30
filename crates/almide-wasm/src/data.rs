@@ -254,12 +254,14 @@ impl Emitter<'_> {
                 }
                 let hold = self.hold_i32()?;
                 self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hold);
-                for (el, (fty, off)) in elements.iter().zip(def.fields) {
+                let site = self.fw_site(ty, None);
+                for (k, (el, (fty, off))) in elements.iter().zip(def.fields).enumerate() {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(fty))?;
                     self.rc_share_guard(el, fty);
                     self.witness_store(el, fty);
                     self.store_ty_slot(fty, off);
+                    self.fw_store(site, k);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -276,6 +278,7 @@ impl Emitter<'_> {
                     return unsup("tuple-index-oob");
                 };
                 self.load_ty_slot(fty, off);
+                self.fw_field(ty, None, *index);
                 fty
             }
             // Record literal: alloc + store each field at its packed offset.
@@ -294,20 +297,22 @@ impl Emitter<'_> {
                 }
                 let mut slots = Vec::new();
                 for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                    match def.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                        Some(k) => slots.push((def.fields[k].ty, def.fields[k].offset, k)),
                         None => return unsup("anon-record-unknown-field"),
                     }
                 }
                 let size = def.size;
                 let hold = self.hold_i32()?;
                 self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                let site = self.fw_site(ty, None);
+                for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
                     self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
+                    self.fw_store(site, k);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -329,13 +334,14 @@ impl Emitter<'_> {
                 let NamedDef::Record(def) = &self.types.def(ti) else {
                     return unsup("member-of-variant");
                 };
-                let Some(fi) = def.fields.iter().find(|fi| fi.name == field.as_str()) else {
+                let Some(pos) = def.fields.iter().position(|fi| fi.name == field.as_str()) else {
                     return unsup("record-unknown-field");
                 };
-                let (fty, off) = (fi.ty, fi.offset);
+                let (fty, off) = (def.fields[pos].ty, def.fields[pos].offset);
                 // #3406: a dying spread base's field read may move its slot.
-                if !self.try_take_slot(e, fty)? {
+                if !self.try_take_slot(e, fty, (ty, pos))? {
                     self.load_ty_slot(fty, off);
+                    self.fw_field(ty, None, pos);
                 }
                 fty
             }
@@ -371,8 +377,8 @@ impl Emitter<'_> {
                 };
                 let mut slots = Vec::new();
                 for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                    match def.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                        Some(k) => slots.push((def.fields[k].ty, def.fields[k].offset, k)),
                         None => return unsup("record-unknown-field"),
                     }
                 }
@@ -396,16 +402,19 @@ impl Emitter<'_> {
                     }
                     self.f.instructions().call(copy).local_set(hold);
                 }
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
                     // The overwritten field's credit goes with it.
                     if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-                        self.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                        self.f.instructions().local_get(hold).i32_load(slot_memarg(off));
+                        self.fw_field(ty, None, k);
+                        self.f.instructions().call(dec);
                     }
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
                     self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
+                    self.fw_field(ty, None, k);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -441,32 +450,30 @@ impl Emitter<'_> {
                     };
                     let mut slots = Vec::new();
                     for (fname, _) in fields {
-                        match c.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                            Some(fi) => slots.push((fi.ty, fi.offset)),
+                        match c.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                            Some(k) => slots.push((c.fields[k].ty, c.fields[k].offset, k)),
                             None => return unsup("record-case-unknown-field"),
                         }
                     }
                     // Omitted case fields lower their DECL DEFAULTS —
                     // the record path's exact discipline, variant-shaped.
                     let mut defaults = Vec::new();
-                    for fi in c.fields.iter() {
+                    for (k, fi) in c.fields.iter().enumerate() {
                         if fields.iter().any(|(fname, _)| fi.name == fname.as_str()) {
                             continue;
                         }
                         let Some(d) = &fi.default else {
                             return unsup("record-case-missing-field");
                         };
-                        defaults.push((fi.ty, fi.offset, d.clone()));
+                        defaults.push((fi.ty, fi.offset, d.clone(), k));
                     }
                     let (size, tag) = (c.size, c.tag);
+                    let case = v.cases.iter().position(|x| x.name == cname.as_str());
                     let hold = self.hold_i32()?;
-                    self.f
-                        .instructions()
-                        .i32_const(size as i32)
-                        .call(F_ALLOC)
-                        .local_tee(hold)
-                        .i32_const(tag as i32)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_tee(hold);
+                    let site = self.fw_site(ty, case);
+                    self.f.instructions().i32_const(tag as i32).i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_store(site, 0);
                     // Every handle store into a block takes the RC-3 share
                     // guard, exactly as the record branch below does. Without
                     // it a `let`-bound list moved into a case payload was
@@ -475,20 +482,22 @@ impl Emitter<'_> {
                     // case held a dangling block — `Supported { matched:
                     // checked }` printed freed memory where native printed
                     // the elements (#2133).
-                    for (fty, off, d) in defaults {
+                    for (fty, off, d, k) in defaults {
                         self.f.instructions().local_get(hold);
                         self.witness_record_default(&d);
                         self.lower(&d, Some(fty))?;
                         self.rc_share_guard(&d, fty);
                         self.witness_store(&d, fty);
                         self.store_ty_slot(fty, off);
+                        self.fw_store(site, k + 1);
                     }
-                    for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
                         self.f.instructions().local_get(hold);
                         self.lower(fexpr, Some(fty))?;
                         self.rc_share_guard(fexpr, fty);
                         self.witness_store(fexpr, fty);
                         self.store_ty_slot(fty, off);
+                        self.fw_store(site, k + 1);
                     }
                     self.f.instructions().local_get(hold);
                     self.release_i32();
@@ -501,8 +510,8 @@ impl Emitter<'_> {
                 // (name → (offset, ty)) resolved up front to end the borrow.
                 let mut slots = Vec::new();
                 for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                    match def.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                        Some(k) => slots.push((def.fields[k].ty, def.fields[k].offset, k)),
                         None => return unsup("record-unknown-field"),
                     }
                 }
@@ -510,31 +519,34 @@ impl Emitter<'_> {
                 // literal's own fields, preserving the literal's effect
                 // order); omitted with no default is a checker miss.
                 let mut defaults = Vec::new();
-                for fi in def.fields.iter() {
+                for (k, fi) in def.fields.iter().enumerate() {
                     if fields.iter().any(|(fname, _)| fi.name == fname.as_str()) {
                         continue;
                     }
                     let Some(d) = &fi.default else {
                         return unsup("record-missing-field");
                     };
-                    defaults.push((fi.ty, fi.offset, d.clone()));
+                    defaults.push((fi.ty, fi.offset, d.clone(), k));
                 }
                 let hold = self.hold_i32()?;
                 self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                let site = self.fw_site(ty, None);
+                for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
                     self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
+                    self.fw_store(site, k);
                 }
-                for (fty, off, d) in defaults {
+                for (fty, off, d, k) in defaults {
                     self.f.instructions().local_get(hold);
                     self.witness_record_default(&d);
                     self.lower(&d, Some(fty))?;
                     self.rc_share_guard(&d, fty);
                     self.witness_store(&d, fty);
                     self.store_ty_slot(fty, off);
+                    self.fw_store(site, k);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();

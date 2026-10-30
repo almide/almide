@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -536,7 +536,8 @@
+                     self.lower(fexpr, Some(fty))?;
+                     self.rc_share_guard(fexpr, fty);
+                     self.witness_store(fexpr, fty);
+-                    self.store_ty_slot(fty, off);
++                    // RE-INJECTED (#4279 drill): field 0 is stored into field 1 slot.
++                    self.store_ty_slot(fty, if k == 0 { off + 8 } else { off });
+                     self.fw_store(site, k);
+                 }
+                 for (fty, off, d, k) in defaults {

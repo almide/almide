@@ -238,13 +238,14 @@ impl Emitter<'_> {
                     return unsup("pattern:tuple-arity");
                 }
                 self.f.instructions().i32_const(1);
-                for (ep, (fty, off)) in elements.iter().zip(fields) {
+                for (k, (ep, (fty, off))) in elements.iter().zip(fields).enumerate() {
                     if pattern_irrefutable(ep) {
                         continue;
                     }
                     self.f.instructions().if_(BlockType::Result(ValType::I32));
                     self.f.instructions().local_get(scr);
                     self.load_ty_slot(fty, off);
+                    self.fw_field(subj_ty, None, k);
                     self.test_nested(ep, fty)?;
                     self.f.instructions().else_().i32_const(0).end();
                 }
@@ -262,12 +263,10 @@ impl Emitter<'_> {
                         let Some(c) = v.cases.iter().find(|c| c.name == name.as_str()) else {
                             return unsup(&format!("pattern:case-unknown:{name}"));
                         };
-                        self.f
-                            .instructions()
-                            .local_get(scr)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(c.tag as i32)
-                            .i32_eq();
+                        let tag = c.tag;
+                        self.f.instructions().local_get(scr).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                        self.fw_tag(subj_ty);
+                        self.f.instructions().i32_const(tag as i32).i32_eq();
                     }
                     _ => {
                         self.f.instructions().i32_const(1);
@@ -282,13 +281,16 @@ impl Emitter<'_> {
                     return Ok(());
                 }
                 let layout = self.record_pattern_layout(name, ti)?;
+                let case = self.fw_case(subj_ty, name);
                 for (fname, fpat) in refutable {
-                    let Some(&(_, fty, off)) = layout.iter().find(|(n, ..)| n == fname) else {
+                    let Some(pos) = layout.iter().position(|(n, ..)| n == fname) else {
                         return unsup("pattern:record-unknown-field");
                     };
+                    let (fty, off) = (layout[pos].1, layout[pos].2);
                     self.f.instructions().if_(BlockType::Result(ValType::I32));
                     self.f.instructions().local_get(scr);
                     self.load_ty_slot(fty, off);
+                    self.fw_field(subj_ty, case, pos);
                     self.test_nested(fpat, fty)?;
                     self.f.instructions().else_().i32_const(0).end();
                 }
@@ -375,21 +377,21 @@ impl Emitter<'_> {
                 if args.len() != fields.len() {
                     return unsup("pattern:ctor-arity");
                 }
+                let subj_ty = SliceTy::Named(ti);
+                let case = self.fw_case(subj_ty, name);
                 // tag test, then AND in each refutable field pattern
                 // (recursive — nested constructors compose).
-                self.f
-                    .instructions()
-                    .local_get(scr)
-                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                    .i32_const(tag as i32)
-                    .i32_eq();
-                for (ap, (fty, off)) in args.iter().zip(fields) {
+                self.f.instructions().local_get(scr).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                self.fw_tag(subj_ty);
+                self.f.instructions().i32_const(tag as i32).i32_eq();
+                for (k, (ap, (fty, off))) in args.iter().zip(fields).enumerate() {
                     if pattern_irrefutable(ap) {
                         continue;
                     }
                     self.f.instructions().if_(BlockType::Result(ValType::I32));
                     self.f.instructions().local_get(scr);
                     self.load_ty_slot(fty, off);
+                    self.fw_field(subj_ty, case, k);
                     self.test_nested(ap, fty)?;
                     self.f.instructions().else_().i32_const(0).end();
                 }
@@ -492,7 +494,7 @@ impl Emitter<'_> {
                 if def.fields.len() != elements.len() {
                     return unsup("pattern:tuple-arity");
                 }
-                for (ep, (fty, off)) in elements.iter().zip(def.fields) {
+                for (k, (ep, (fty, off))) in elements.iter().zip(def.fields).enumerate() {
                     match ep {
                         IrPattern::Wildcard | IrPattern::Literal { .. } => {}
                         IrPattern::Bind { var, .. } => {
@@ -501,6 +503,7 @@ impl Emitter<'_> {
                             };
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(subj_ty, None, k);
                             self.f.instructions().local_set(idx);
                         }
                         // Any other pattern form composes through the
@@ -509,6 +512,7 @@ impl Emitter<'_> {
                         other => {
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(subj_ty, None, k);
                             self.bind_nested(other, fty)?;
                         }
                     }
@@ -605,7 +609,8 @@ impl Emitter<'_> {
                     };
                     c.fields.iter().map(|f| (f.ty, f.offset)).collect()
                 };
-                for (ap, (fty, off)) in args.iter().zip(fields) {
+                let case = self.fw_case(subj_ty, name);
+                for (k, (ap, (fty, off))) in args.iter().zip(fields).enumerate() {
                     match ap {
                         IrPattern::Wildcard | IrPattern::Literal { .. } => {}
                         IrPattern::Bind { var, .. } => {
@@ -614,11 +619,13 @@ impl Emitter<'_> {
                             };
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(subj_ty, case, k);
                             self.f.instructions().local_set(idx);
                         }
                         nested => {
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(subj_ty, case, k);
                             self.bind_nested(nested, fty)?;
                         }
                     }
@@ -641,11 +648,12 @@ impl Emitter<'_> {
                     return unsup("pattern:record-on-non-named");
                 };
                 let finfo = self.record_pattern_layout(name, ti)?;
+                let case = self.fw_case(subj_ty, name);
                 for fp in fields {
-                    let Some((_, fty, off)) = finfo
+                    let Some((pos, fty, off)) = finfo
                         .iter()
-                        .find(|(n, ..)| *n == fp.name)
-                        .map(|(_, t, o)| ((), *t, *o))
+                        .position(|(n, ..)| *n == fp.name)
+                        .map(|k| (k, finfo[k].1, finfo[k].2))
                     else {
                         return unsup("pattern:record-unknown-field");
                     };
@@ -658,6 +666,7 @@ impl Emitter<'_> {
                             };
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(subj_ty, case, pos);
                             self.f.instructions().local_set(idx);
                         }
                         // A nested pattern (a constructor, `some(..)`, a
@@ -666,6 +675,7 @@ impl Emitter<'_> {
                         Some(other) => {
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(subj_ty, case, pos);
                             self.bind_nested(other, fty)?;
                         }
                     }

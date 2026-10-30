@@ -704,6 +704,7 @@ pub fn start_collecting() {
     crate::witness::modes::start();
     crate::witness::bounds::start();
     crate::witness::init::start();
+    crate::witness::fields::start();
     crate::witness::anchor::start();
     crate::witness::rc::start();
     crate::witness::decls::start();
@@ -732,6 +733,14 @@ pub use init::take as take_init;
 /// The init witness sink (split for the file budget).
 #[path = "witness_init.rs"]
 pub(crate) mod init;
+
+/// The fields witness of every emission pass (#4013, #4279,
+/// witness_fields.rs): `(pass, items)`, for `almide-verify fields`.
+pub use fields::take as take_fields;
+
+/// The fields witness sink (split for the file budget).
+#[path = "witness_fields.rs"]
+pub(crate) mod fields;
 
 /// Where the ownership witness's RC events are (#4277, witness_rc.rs).
 #[path = "witness_rc.rs"]

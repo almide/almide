@@ -1,0 +1,1 @@
+ANCHORS REJECT: fields item 3 `a1 c0 f1`: a: the case-0 field read is not under its tag test: no enclosing test of tag 0 on its address Def(6, 14, Def(0, 12, Def(9, 8, Call { site: 1, args: [Const(16)] })))

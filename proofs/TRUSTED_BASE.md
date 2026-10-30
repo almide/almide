@@ -236,6 +236,10 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `reorder_memory_safe` | InitCert.v | Closed under the global context |
 | `check_init_cert_sound` | InitCert.v | Closed under the global context |
 | `fill_window` | InitCert.v | Closed under the global context |
+| `rsite_window` | FieldCert.v | Closed under the global context |
+| `ftrace_safe` | FieldCert.v | Closed under the global context |
+| `fields_memory_safe` | FieldCert.v | Closed under the global context |
+| `check_fields_cert_sound` | FieldCert.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -310,6 +314,59 @@ discipline, and that a site's block stays private until its last store. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
+
+**Record, tuple and variant fields (#4013 TYPE clause, #4279).** A field is
+read and written at a CONSTANT offset with no check, so it is in bounds and
+initialized exactly when its block was built with the layout the access
+assumes. `FieldCert.v` adds the layout-typed construction site and the field
+access as a third per-build certificate, `fields`: a layout table (per kind —
+a record or tuple, or one case of a variant — its payload size and each
+field's offset and width, a variant case's field 0 its tag word), sites that
+must store every field of their kind, accesses that must name a declared
+field, and tag reads that must be field 0 of every case. `rsite_window` proves
+an accepted site's window MemorySafe and leaves its block of the layout with
+every field initialized; `ftrace_safe` proves every event on a block of a
+recorded kind MemorySafe in a trace whose allocations of such blocks are
+accepted sites and whose loads and stores of them name declared fields of
+their kind, given TEMPORAL; `fields_memory_safe` composes that with the other
+certificates' clauses for every other block into `MemorySafe`;
+`check_fields_cert_sound` puts the byte parser inside the proof (driver mode
+`fields`). The structural leg emits the witness per build
+(crates/almide-wasm/src/witness_fields.rs) for record, tuple and variant
+literals and constructors, member and positional reads, a dying read's slot
+take, pattern tests and binds and spread overwrites, and
+`almide-anchor-check` holds every located event to the shipped bytes against
+the SAME layout table: the allocation's payload size, each store's and each
+access's width and offset, a variant site's tag store of its own case, and
+each variant CASE field's read to a tag test of its own address that
+guards it (an enclosing `if` whose condition implies `tag == C`, the address
+the same variable or the same field re-loaded with nothing that may write
+memory between; a call only when the callee's body writes none, a fixpoint
+over the module). On the 1000-fixture certified corpus (GCE, ba31c7646): 1000/1000
+`fields` witnesses accepted by all three verdicts and FIELDS OK on every
+artifact — 3998 sites / 8636 stores, 5390 field accesses (552 variant case
+fields held to their tag test), 614 tag reads. TRUSTED: that a block's static type is its layout (the
+representation, trusted already for the bounds and init witnesses; the IR is
+cast-free and FieldAssign is refused),
+and the one row #4279 adds (owner ruling, 2026-10-30):
+
+> **TRUSTED (#4279): nothing rewrites a variant block's tag word after its
+> construction window.**
+> Scope: only the case a variant CASE-FIELD read relies on. Both ends are
+> checked on the bytes: the construction site records its tag store as field
+> 0 and `almide-anchor-check` requires that store to store the site's own case
+> constant; every recorded case-field read must sit under a tag test of its
+> own address for that case (`operands.rs` `case_guarded`). What is trusted is
+> only the span between them — that no instruction stores to the tag word in
+> between — because the heap model (`MemorySafe.v`) carries no values. Tag
+> reads themselves need no such row: field 0 is the tag word in every case
+> (`ITag`). The drill `case-field-unguarded` (scripts/witness-reinject.sh
+> anchors) moves a case field's read above its test and must read ANCHORS
+> REJECT.
+
+The runtime's own routines over these blocks (typed drop, copy,
+equality, comparison, display bodies) record nothing yet (#4278), and a
+nullary case is a static pool block outside the allocation model.
 
 **The native leg (#4006).** For the programs the verified native renderer
 renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`

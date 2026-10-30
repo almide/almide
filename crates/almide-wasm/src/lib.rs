@@ -121,6 +121,7 @@ pub mod host_ops;
 pub mod witness;
 pub mod cert_project;
 mod witness_hooks;
+mod field_witness;
 mod witness_unwrap;
 mod calls;
 mod http_call;

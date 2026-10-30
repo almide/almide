@@ -1,0 +1,12 @@
+// #4279 drill: a variant constructor never stores its tag word; the fields
+// witness's site then lacks `s0` and the checker must reject.
+type Shape = | Circle(Int) | Square(Int)
+
+effect fn main() -> Unit = {
+  let s = Square(5)
+  let r = match s {
+    Circle(a) => a,
+    Square(b) => b + 1,
+  }
+  println("${r}")
+}

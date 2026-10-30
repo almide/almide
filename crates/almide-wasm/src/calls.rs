@@ -402,6 +402,9 @@ impl Emitter<'_> {
             let NamedDef::Variant(v) = &self.types.def(ti) else {
                 return unsup("ctor-of-record");
             };
+            if v.cases.get(ci as usize).is_none() {
+                return unsup("ctor-case");
+            }
             let c = &v.cases[ci as usize];
             let fs: Vec<(SliceTy, u32)> = c.fields.iter().map(|f| (f.ty, f.offset)).collect();
             (c.size, c.tag, fs)
@@ -427,12 +430,11 @@ impl Emitter<'_> {
         // at compile time and the bump is inlined, `$alloc` only for a
         // reuse / grow (alloc_inline.rs, #2318).
         self.emit_alloc_fixed(size, hold);
-        self.f
-            .instructions()
-            .local_tee(hold)
-            .i32_const(tag as i32)
-            .i32_store(slot_memarg(almide_layout::SUM_TAG));
-        for (a, (fty, off)) in args.iter().zip(fields) {
+        self.f.instructions().local_tee(hold);
+        let site = self.fw_site(SliceTy::Named(ti), Some(ci as usize));
+        self.f.instructions().i32_const(tag as i32).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_store(site, 0);
+        for (k, (a, (fty, off))) in args.iter().zip(fields).enumerate() {
             self.f.instructions().local_get(hold);
             self.lower(a, Some(fty))?;
             // RC-3: a variant payload retaining a borrowed droppable
@@ -441,6 +443,7 @@ impl Emitter<'_> {
             self.rc_share_guard(a, fty);
             self.witness_store(a, fty);
             self.store_ty_slot(fty, off);
+            self.fw_store(site, k + 1);
         }
         self.f.instructions().local_get(hold);
         self.release_i32();

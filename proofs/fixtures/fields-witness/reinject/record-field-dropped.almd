@@ -1,0 +1,8 @@
+// #4279 drill: a record literal never stores its last field; the fields
+// witness's site then lacks `s1` and the checker must reject.
+type P = { x: Int, y: Int }
+
+effect fn main() -> Unit = {
+  let p = P { x: 3, y: 4 }
+  println("${p.x}")
+}

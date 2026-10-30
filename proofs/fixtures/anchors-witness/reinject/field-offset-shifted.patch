@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -340,7 +340,8 @@
+                 let (fty, off) = (def.fields[pos].ty, def.fields[pos].offset);
+                 // #3406: a dying spread base's field read may move its slot.
+                 if !self.try_take_slot(e, fty, (ty, pos))? {
+-                    self.load_ty_slot(fty, off);
++                    // RE-INJECTED (#4279 drill): the read lands one slot past its field.
++                    self.load_ty_slot(fty, off + 8);
+                     self.fw_field(ty, None, pos);
+                 }
+                 fty

@@ -24,6 +24,22 @@ impl Nat {
         self.0.is_empty() || self.0 == b"1"
     }
 
+    /// `self + other`, exact (FieldCert.v's `fits` adds an offset and a width).
+    pub(crate) fn add(&self, other: &Nat) -> Nat {
+        let (a, b) = (&self.0, &other.0);
+        let mut out = Vec::with_capacity(a.len().max(b.len()) + 1);
+        let (mut i, mut j, mut carry) = (a.len(), b.len(), 0u8);
+        while i > 0 || j > 0 || carry > 0 {
+            let x = if i > 0 { i -= 1; a[i] - b'0' } else { 0 };
+            let y = if j > 0 { j -= 1; b[j] - b'0' } else { 0 };
+            let d = x + y + carry;
+            out.push(b'0' + d % 10);
+            carry = d / 10;
+        }
+        out.reverse();
+        Nat::from_digits(&out)
+    }
+
     /// The value as an index, if it fits (a larger value is out of range of
     /// any list this verifier can hold).
     pub(crate) fn as_index(&self) -> Option<usize> {
@@ -113,6 +129,14 @@ mod tests {
     fn split_semi_keeps_empty_segments() {
         assert_eq!(split_semi(b""), vec![&b""[..]]);
         assert_eq!(split_semi(b"a;"), vec![&b"a"[..], &b""[..]]);
+    }
+
+    #[test]
+    fn add_is_exact_past_any_machine_word() {
+        assert_eq!(n("0").add(&n("0")), n("0"));
+        assert_eq!(n("8").add(&n("4")), n("12"));
+        assert_eq!(n("999").add(&n("1")), n("1000"));
+        assert_eq!(n("99999999999999999999999").add(&n("1")), n("100000000000000000000000"));
     }
 
     #[test]
