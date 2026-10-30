@@ -516,7 +516,7 @@ fn lower_function_all_impl(
 }
 
 mod binds;
-mod layout;
+pub(crate) mod layout;
 mod tail;
 mod control;
 mod calls;

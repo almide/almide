@@ -98,9 +98,16 @@ fn native_sig_subset_check(
                 && matches!(a[0], Ty::Int | Ty::Bool)
                 && matches!(a[1], Ty::String))
     };
+    // #4006 List[String] slab: an owned `Vec<AlmideString>` / a borrowed
+    // `&[AlmideString]` (the slot block's handles, rendered by the address
+    // algebra in render_native_addr.rs).
+    let is_str_list = |t: &Ty| {
+        matches!(t, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
+    };
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
             || is_scalar_list(t)
+            || is_str_list(t)
             || is_scalar_record(t)
             || is_flat_variant(t)
             || is_scalar_fn(t)
@@ -216,6 +223,9 @@ fn native_sig_kind(
             if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
         {
             Some(NativeSigKind::ListI64)
+        }
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => {
+            Some(NativeSigKind::ListStr)
         }
         // An all-scalar record travels as its slot block (see sig_ok).
         Ty::Named(n, args)

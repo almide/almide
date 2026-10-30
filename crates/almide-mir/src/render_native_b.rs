@@ -143,10 +143,13 @@ pub(crate) fn render_set_local(
         NTy::Vec => format!("{}.clone()", var(*src)),
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
         NTy::Res => format!("{}.clone()", var(*src)),
+        NTy::VecStr => format!("{}.clone()", var(*src)),
+        NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
     };
     let store_t = match t {
         NTy::StrRef => NTy::Str,
         NTy::VecRef => NTy::Vec,
+        NTy::VecStrRef => NTy::VecStr,
         other => other,
     };
     if let Some(prev) = tys.get(local) {
@@ -240,6 +243,7 @@ fn declared_param_want(
         Some(NativeSigKind::I64) => NTy::I64,
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
+        Some(NativeSigKind::ListStr) => NTy::VecStrRef,
         Some(NativeSigKind::F64) => NTy::F64,
         Some(NativeSigKind::Res) => {
             return Err(wall("native: Result-typed param — outside the rung subset"))
@@ -269,6 +273,11 @@ fn user_arg_in_declared_mode(
             }
             Ok(code)
         }
+        NTy::VecStrRef | NTy::VecStr => match got {
+            NTy::VecStr => Ok(format!("&{code}")),
+            NTy::VecStrRef => Ok(code),
+            _ => Err(wall(format!("native: non-string-list arg to List[String] param of `{name}`"))),
+        },
         NTy::VecRef | NTy::Vec => {
             if !got.is_veccy() {
                 return Err(wall(format!(
@@ -315,6 +324,7 @@ fn bind_user_fn_result(
             // Its KIND comes from the callee's declared return.
             let t = match callee_sig.and_then(|(_, r)| *r) {
                 Some(NativeSigKind::ListI64) => NTy::Vec,
+                Some(NativeSigKind::ListStr) => NTy::VecStr,
                 Some(NativeSigKind::Str) => NTy::Str,
                 Some(NativeSigKind::I64) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
@@ -327,6 +337,7 @@ fn bind_user_fn_result(
                 NTy::Vec => "Vec<i64>",
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, AlmideString>",
+                NTy::VecStr => "Vec<AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
@@ -375,6 +386,7 @@ fn render_closed_shim_call(
             let ty_name = match t {
                 NTy::Str => "AlmideString",
                 NTy::Vec => "Vec<i64>",
+                NTy::VecStr => "Vec<AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, call);
@@ -410,6 +422,11 @@ fn shim_arg_in_declared_mode(
         NTy::VecRef | NTy::Vec => match got {
             NTy::Vec => Ok(format!("&{code}")),
             NTy::VecRef => Ok(code),
+            _ => Err(wall(format!("native: shim `{name}` arg type mismatch"))),
+        },
+        NTy::VecStrRef | NTy::VecStr => match got {
+            NTy::VecStr => Ok(format!("&{code}")),
+            NTy::VecStrRef => Ok(code),
             _ => Err(wall(format!("native: shim `{name}` arg type mismatch"))),
         },
         _ => {
@@ -647,6 +664,11 @@ fn render_else(
                 NTy::Res,
                 format!("{}.clone()", var(v)),
             ),
+            NTy::VecStr | NTy::VecStrRef => (
+                format!("let mut {}: Vec<AlmideString> = Vec::new();", var(*d)),
+                NTy::VecStr,
+                if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
+            ),
         };
         *out = out.replacen(marker.as_str(), &decl, 1);
         tys.insert(*d, join_t);
@@ -696,10 +718,13 @@ fn render_end_if(
             NTy::Vec => format!("{}.clone()", var(v)),
             NTy::VecRef => format!("{}.to_vec()", var(v)),
             NTy::Res => format!("{}.clone()", var(v)),
+            NTy::VecStr => format!("{}.clone()", var(v)),
+            NTy::VecStrRef => format!("{}.to_vec()", var(v)),
         };
         let arm_t = match t {
             NTy::StrRef => NTy::Str,
             NTy::VecRef => NTy::Vec,
+            NTy::VecStrRef => NTy::VecStr,
             other => other,
         };
         if arm_t != join_t {

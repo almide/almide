@@ -46,6 +46,11 @@ pub(crate) enum NTy {
     /// An OWNED `Result<i64, String>` local — the T1-3 native Result carrier
     /// (produced by the `native_result_rewrite` prims / a Res-returning call).
     Res,
+    /// An OWNED `Vec<AlmideString>` local — a `List[String]` slot block (#4006
+    /// List[String] slab), built and read through `render_native_addr`.
+    VecStr,
+    /// A BORROWED `&[AlmideString]` — a `List[String]` fn param.
+    VecStrRef,
 }
 
 impl NTy {
@@ -68,6 +73,8 @@ pub enum NativeSigKind {
     F64,
     /// `Result<i64, String>` — the T1-3 native Result carrier (returns only).
     Res,
+    /// `List[String]` — `&[AlmideString]` in, `Vec<AlmideString>` out.
+    ListStr,
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -103,6 +110,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
+        NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
     }
 }
 
@@ -280,6 +288,7 @@ fn seed_param_ntys(
     for (i, p) in func.params.iter().enumerate() {
         let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
             Some(NativeSigKind::ListI64) => NTy::VecRef,
+            Some(NativeSigKind::ListStr) => NTy::VecStrRef,
             Some(NativeSigKind::Str) => NTy::StrRef,
             Some(NativeSigKind::I64) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
@@ -324,6 +333,7 @@ fn render_fn(
     let used = native_used_values(func);
     // #3532: the if-as-value joins realized as a borrow of the selected value.
     let borrows = crate::borrow_join::borrow_joins(func);
+    let mut addrs = crate::render_native_addr::AddrState::new(func);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         used_shims.push(STACK_GUARD_GLUE_SHIM);
@@ -341,6 +351,11 @@ fn render_fn(
         if let Some(append) = crate::render_native_append::str_self_append(func, i, &tys) {
             line!("{append}");
             ops.nth(1);
+            continue;
+        }
+        // #4006 List[String] slab: the slot-address algebra (used handles,
+        // address arithmetic, header/slot loads and stores, DynList allocs).
+        if crate::render_native_addr::render_addr_op(op, &used, &mut addrs, &mut tys, &mut out, indent)? {
             continue;
         }
         match op {
@@ -505,6 +520,7 @@ fn finish_native_fn(
             Some(NTy::Str | NTy::StrRef) => "return AlmideString::new();",
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
+            Some(NTy::VecStr | NTy::VecStrRef) => "return Vec::new();",
         };
         out = out.replace(CUT_RET_MARKER, cut_ret);
     }
@@ -515,9 +531,9 @@ fn finish_native_fn(
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res => var(v),
+        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr => var(v),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
-        NTy::VecRef => format!("{}.to_vec()", var(v)),
+        NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
     }
 }
 
@@ -558,6 +574,7 @@ fn render_native_fn_sig(
             let spelled = match t {
                 NTy::StrRef | NTy::Str => "&str",
                 NTy::VecRef | NTy::Vec => "&[i64]",
+                NTy::VecStrRef | NTy::VecStr => "&[AlmideString]",
                 NTy::I64 => "i64",
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, AlmideString>",
@@ -580,6 +597,7 @@ fn render_native_fn_sig(
             Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
             Some(NTy::F64) => " -> f64".to_string(),
             Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
+            Some(NTy::VecStr | NTy::VecStrRef) => " -> Vec<AlmideString>".to_string(),
             None => return Err(wall("native: return value untyped")),
         },
     };
@@ -748,12 +766,12 @@ fn render_native_drop_op(
         // loop-carried handle). `verify_ownership` above certified balance.
         // A borrow join (#3532) holds a reference: its borrow simply ends.
         Op::Drop { v } | Op::DropListStr { v }
-            if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) =>
+            if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef)) =>
         {
             line!("// drop: borrowed join, scope-end");
         }
         Op::Drop { v } => {
-            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
+            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef)) {
                 return Err(wall(
                     "native: Drop of a borrowed param — MIR call-mode violation",
                 ));
@@ -768,9 +786,11 @@ fn render_native_drop_op(
         Op::DropListStr { v } => {
             match tys.get(v) {
                 Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
+                // A List[String] block: Rust's Vec drop frees every element String.
+                Some(NTy::VecStr) => line!("// drop(string list): scope-end"),
                 // The T1-3 Result carrier frees like any owned Rust value.
                 Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
-                Some(NTy::VecRef) => {
+                Some(NTy::VecRef | NTy::VecStrRef) => {
                     return Err(wall(
                         "native: DropListStr of a borrowed param — MIR call-mode violation",
                     ))
@@ -835,6 +855,14 @@ pub(crate) fn render_dup(
         NTy::F64 => {
             tys.insert(*dst, NTy::F64);
             line!("let mut {} = {};", var(*dst), var(*src));
+        }
+        NTy::VecStr => {
+            tys.insert(*dst, NTy::VecStr);
+            line!("let mut {} = {}.clone();", var(*dst), var(*src));
+        }
+        NTy::VecStrRef => {
+            tys.insert(*dst, NTy::VecStr);
+            line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
         }
     }
     Ok(())

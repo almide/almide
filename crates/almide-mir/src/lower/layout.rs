@@ -36,6 +36,8 @@ use almide_lang::types::Ty;
 /// LIST_HEADER` (private there) — the data area starts here, where the existing
 /// scalar-tuple machinery (`binds.rs`) already stores its first slot.
 pub(crate) const BLOCK_HEADER: u32 = 12;
+/// Byte offset of the `len` word inside that header (`[rc@0][len@4][cap@8]`).
+pub(crate) const BLOCK_LEN_OFFSET: u32 = 4;
 /// One i64 slot per field, matching the i64 list-element size and the IntList /
 /// scalar-tuple materialization.
 pub(crate) const SLOT_SIZE: u32 = 8;
