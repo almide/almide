@@ -422,7 +422,7 @@ impl<'a> Ctx<'_, 'a> {
             b,
             at.op - 2,
             &[
-                &|o| matches!(o, Op::I64GeU | Op::I32Eqz),
+                &|o| matches!(o, Op::I64GeU | Op::I32Eqz | Op::I32GeU),
                 &|o| {
                     matches!(
                         o,

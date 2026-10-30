@@ -734,8 +734,12 @@ fn count_of(t: &T) -> Option<((&T, usize), i64)> {
     Some((len(l)?, cst(s)?))
 }
 
-/// `len(B) / S` as an i32 count (a loop's captured count, #4280).
+/// `len(B) / S` as an i32 count (a loop's captured count, #4280), or
+/// `len(B)` itself: a string's byte count, slots of one byte (#4281).
 fn count_of32(t: &T) -> Option<((&T, usize), i64)> {
+    if let Some(l) = len(t) {
+        return Some((l, 1));
+    }
     let [l, s] = op(t, "i32.div_u")? else { return None };
     Some((len(l)?, cst(s)?))
 }
@@ -819,21 +823,27 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             fl.same_count(cb, ab, count_at, acc)
         }
         Op::I32GeU => {
-            // The loop exit test (#4280): its `br_if` must dominate too.
-            if !fl.dominates(cmp + 1, acc) {
+            // The loop exit test (#4280): its `br_if` must dominate too. The
+            // other i32 shape is a guard opening an aborting `if` (#4281,
+            // lib.rs `check_guard`), which the compare's dominance covers.
+            if matches!(fl.b.ops.get(cmp + 1), Some(Op::BrIf { .. })) && !fl.dominates(cmp + 1, acc) {
                 return Err("the exit test's br_if does not dominate the access".into());
             }
             let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
             let ((cb, count_at), s) = count_of32(&cnt).ok_or_else(|| format!("the exit test's right operand is not a list's count: {cnt:?}"))?;
-            let Some([ab, scaled]) = op(&addr, "i32.add") else {
-                return Err(format!("the access's address is not block + scaled counter: {addr:?}"));
-            };
-            let (ai, s2) = match op(scaled, "i32.mul") {
-                Some([i, c]) => match cst(c) {
-                    Some(s2) => (i, s2),
-                    None => return Err(format!("the access's counter is not scaled by a constant: {scaled:?}")),
+            // A one-byte slot: `B + I`, or `B` alone for byte 0.
+            let zero = T::Const(0);
+            let (ab, ai, s2) = match op(&addr, "i32.add") {
+                Some([ab, scaled]) => match op(scaled, "i32.mul") {
+                    Some([i, c]) => match cst(c) {
+                        Some(s2) => (ab, i, s2),
+                        None => return Err(format!("the access's counter is not scaled by a constant: {scaled:?}")),
+                    },
+                    _ if s == 1 => (ab, scaled, 1),
+                    _ => return Err(format!("the access's counter is not scaled: {scaled:?}")),
                 },
-                _ => return Err(format!("the access's counter is not scaled: {scaled:?}")),
+                None if s == 1 => (&addr, &zero, 1),
+                None => return Err(format!("the access's address is not block + scaled counter: {addr:?}")),
             };
             if s <= 0 || s2 != s {
                 return Err(format!("the exit test counts slots of {s} bytes, the access scales by {s2}"));
