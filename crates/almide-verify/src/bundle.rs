@@ -32,6 +32,11 @@
 //! read with the new meaning; and a reader that predates version 3 refuses the
 //! magic, never folds a share-out as a skipped byte.
 //!
+//! Version 4 (#4278, B1) is version 3 that may carry `rc-sig` records: a
+//! runtime helper's own certificate — its declared per-parameter modes and
+//! its body's lines (proofs/HelperSig.v). An `rc-sig` record in a bundle
+//! before version 4 is refused.
+//!
 //! A `witness` record's bytes are followed by exactly one `\n`. The length
 //! prefix, not a delimiter, ends the witness, so no witness byte can be
 //! mistaken for framing. Metadata is echoed and never trusted: nothing a
@@ -48,6 +53,8 @@ pub const MAGIC: &str = "almide-certificate-bundle 1";
 pub const MAGIC_V2: &str = "almide-certificate-bundle 2";
 /// The first line of a version-3 bundle (version 2 + the share-out `s`).
 pub const MAGIC_V3: &str = "almide-certificate-bundle 3";
+/// The first line of a version-4 bundle (version 3 + `rc-sig` records).
+pub const MAGIC_V4: &str = "almide-certificate-bundle 4";
 
 /// The shipped file a version-2 bundle's witnesses describe.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,7 +241,8 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
         Some(MAGIC) => 1,
         Some(MAGIC_V2) => 2,
         Some(MAGIC_V3) => 3,
-        Some(other) => return Err(r.err(format!("expected `{MAGIC}`, `{MAGIC_V2}` or `{MAGIC_V3}`, found `{other}`"))),
+        Some(MAGIC_V4) => 4,
+        Some(other) => return Err(r.err(format!("expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}` or `{MAGIC_V4}`, found `{other}`"))),
         None => return Err(r.err("the bundle is empty")),
     };
     let mut bundle = Bundle::default();
@@ -246,6 +254,9 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
                 let bytes = r.take_witness(len)?;
                 if version < 3 && property == Property::Ownership && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b's')) {
                     return Err(r.err("a share-out `s` in an ownership witness of a bundle before version 3"));
+                }
+                if version < 4 && property == Property::RcSig {
+                    return Err(r.err("an `rc-sig` record in a bundle before version 4"));
                 }
                 bundle.witnesses.push(Witness { property, function, bytes });
             }

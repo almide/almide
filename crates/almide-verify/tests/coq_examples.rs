@@ -226,3 +226,24 @@ fn init_examples() {
         ],
     );
 }
+
+#[test]
+fn helper_sig_examples() {
+    // HelperSig.v (#4278, B1): a helper's own certificate, judged from the
+    // entry count each declared mode states.
+    verdicts(
+        Property::RcSig,
+        &[
+            ("1 1|{mx|}d\nm", true),
+            ("0 1|{mx|}d\nm", false),
+            ("1|", false),
+            ("0|", true),
+            ("1|{d|}", false),
+            ("0|\nim", true),
+            ("0|\ni", false),
+            ("0|s", true),
+            ("2|d", false),
+            ("1 1|d", false),
+        ],
+    );
+}
