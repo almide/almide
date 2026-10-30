@@ -128,6 +128,68 @@ pub(crate) fn carrier_values(
     ty
 }
 
+/// A payload read the match lowering hoists above its tag test (both arms'
+/// binders are read before the `if`) → the side its uses select: `true` =
+/// the then-arm (tag 1, Err). Read off where the value is used: every use
+/// inside one arm of an `if` that tests the same block's tag word.
+pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
+    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+    let mut at: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
+    let mut tags: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut reads: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut sides: BTreeMap<ValueId, Option<bool>> = BTreeMap::new();
+    let mut arms: Vec<(Option<ValueId>, bool)> = Vec::new();
+    for op in &func.ops {
+        // Uses first: a read used under a tag test of its own block.
+        let mut used = Vec::new();
+        crate::mir_ops::op_reads(op, &mut used);
+        for v in used {
+            let Some(root) = reads.get(&v) else { continue };
+            let side = arms.iter().rev().find(|(r, _)| *r == Some(*root)).map(|(_, then)| *then);
+            let e = sides.entry(v).or_insert(side);
+            if *e != side {
+                *e = None;
+            }
+        }
+        match op {
+            Op::ConstInt { dst, value } => {
+                consts.insert(*dst, *value);
+            }
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
+                at.insert(*d, (args[0], 0));
+            }
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
+                if let (Some(&(r, o)), Some(c)) = (at.get(a), consts.get(b)) {
+                    at.insert(*dst, (r, o + c));
+                }
+            }
+            Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } if args.len() == 1 => {
+                if let Some(&(r, RESULT_TAG_OFFSET)) = at.get(&args[0]) {
+                    tags.insert(*d, r);
+                }
+            }
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
+                if let Some(&(r, o)) = at.get(&args[0]) {
+                    if o == i64::from(BLOCK_HEADER) && arms.iter().all(|(t, _)| *t != Some(r)) {
+                        reads.insert(*d, r);
+                    }
+                }
+            }
+            Op::IfThen { cond, .. } => arms.push((tags.get(cond).copied(), true)),
+            Op::Else { .. } => {
+                if let Some(a) = arms.last_mut() {
+                    a.1 = false;
+                }
+            }
+            Op::EndIf { .. } => {
+                arms.pop();
+            }
+            _ => {}
+        }
+    }
+    sides.into_iter().filter_map(|(v, s)| s.map(|s| (v, s))).collect()
+}
+
 /// The carrier index of a value's kind.
 fn carrier_of(t: Option<NTy>) -> Option<u16> {
     match t {
@@ -232,11 +294,19 @@ pub(super) fn render_carrier_op(
                 let (o, e) = result_payloads(i)?;
                 // The arm of the innermost tag test of this Result, if any.
                 let arm = st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
-                match arm {
-                    Some(true) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
-                    Some(false) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),
-                    None if o == e => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
-                    None => return Some(Err(wall("native: a Result payload read outside its tag test"))),
+                match (arm, st.hoisted.get(d).copied()) {
+                    (Some(true), _) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
+                    (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),
+                    (None, _) if o == e => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
+                    // Read above the tag test, used under one side of it: the
+                    // other side's read is never used, so it is a Default.
+                    (None, Some(true)) if has_default(e) => {
+                        (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => Default::default() }}"))
+                    }
+                    (None, Some(false)) if has_default(o) => {
+                        (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => Default::default() }}"))
+                    }
+                    _ => return Some(Err(wall("native: a Result payload read outside its tag test"))),
                 }
             };
             if read.0 == NTy::I64 {
