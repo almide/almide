@@ -380,6 +380,11 @@ fn render_fn(
             ops.nth(1);
             continue;
         }
+        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys) {
+            line!("{append}");
+            ops.nth(1);
+            continue;
+        }
         // #4006 List[String] slab: the slot-address algebra (used handles,
         // address arithmetic, header/slot loads and stores, DynList allocs).
         if crate::render_native_addr::render_addr_op(op, &used, &mut addrs, &mut tys, &mut out, indent)? {

@@ -54,6 +54,7 @@ pub mod native_floor;
 pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
+mod native_list_ops;
 
 use std::collections::{BTreeMap, BTreeSet};
 

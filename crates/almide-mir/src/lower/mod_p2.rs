@@ -90,6 +90,12 @@ pub(crate) fn is_mutable_global(var: almide_ir::VarId) -> bool {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().contains_key(&var.0))
 }
 
+/// The list `+` operator's MIR spelling over scalar-element lists (a call to
+/// the self-hosted byte-copy body; the native render renders it itself).
+pub(crate) const LIST_CONCAT: &str = "__list_concat";
+/// The list `+` operator over owned heap elements (the rc-incrementing body).
+pub(crate) const LIST_CONCAT_RC: &str = "__list_concat_rc";
+
 /// How many storage slots the program's mutable module-level bindings hold.
 pub(crate) fn mutable_global_slot_count() -> u32 {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().values().map(|(i, _)| i + 1).max().unwrap_or(0))
