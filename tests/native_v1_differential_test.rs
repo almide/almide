@@ -120,6 +120,11 @@ const CORPUS: &[(&str, &str)] = &[
     // ── #4006: declared-floor list and string calls ──
     ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  let ys = list.reverse(xs)\n  println(int.to_string(list.len(ys)))\n}\n"),
     ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
+    // ── #4006: heap Option / Result carriers, typed from the declarations ──
+    ("option_string", "fn find(x: Int) -> String? = if x > 0 then some(\"p\" + int.to_string(x)) else none\n\nfn show(o: String?) -> String = match o {\n  some(s) => \"got \" + s,\n  none => \"none\",\n}\n\nfn main() -> Unit = {\n  println(show(find(3)))\n  println(show(find(-1)))\n  let d = find(0) ?? \"dflt\"\n  println(d)\n}\n"),
+    ("result_record", "type P = { name: String, n: Int }\n\nfn mk(x: Int) -> Result[P, String] = if x > 0 then ok({ name: \"a\", n: x }) else err(\"neg\")\n\nfn say(r: Result[P, String]) -> String = match r {\n  ok(p) => p.name + int.to_string(p.n),\n  err(e) => e,\n}\n\nfn main() -> Unit = {\n  println(say(mk(2)))\n  println(say(mk(-2)))\n}\n"),
+    // The same one-slot block as `some(s)`, declared a list: stays a list.
+    ("one_string_list", "fn one(s: String) -> List[String] = [s]\n\nfn main() -> Unit = {\n  let xs = one(\"solo\")\n  println(xs[0])\n  println(int.to_string(list.len(xs)))\n}\n"),
     // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
     //    desugar's abort tail now renders on the native v1 rung ──
     ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
