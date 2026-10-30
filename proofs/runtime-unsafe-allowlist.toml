@@ -45,9 +45,9 @@ reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_box_body.rs"
-count = 25
+count = 23
 class = "emitted-prelude"
-reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its new / into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it"
+reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it. #4342: new and clone take the cell pointer from NonNull::from(Box::leak) (safe; 0.99-1.04x on binarytrees / treealloc with the region window off, a 200 000-long variant chain and a depth-18 recursive record tree, GCE Intel n2 and AMD n2d, 2026-10-30). A plain Box<T> in its place is not a replacement: its drop, clone and == recurse once per level and overflow the native stack on the 200 000-long chains (#4250, #4252), so the queues and their raw pointers stay"
 
 [[file]]
 path = "crates/almide-codegen/src/prelude_region.rs"
