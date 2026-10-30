@@ -188,6 +188,7 @@ fn push_closure_dispatch_tables(
     out: &mut String,
     user_fns: &BTreeMap<&str, &MirFunction>,
     fn_rets: &BTreeMap<String, Option<NTy>>,
+    sigs: &NativeSigs,
 ) {
     let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
     let lambda_names = user_fns
@@ -196,6 +197,10 @@ fn push_closure_dispatch_tables(
         .filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambda_names.enumerate() {
         if fn_rets.get(name) != Some(&Some(NTy::I64)) {
+            continue;
+        }
+        // A heap-param lambda dispatches through its signature's typed table.
+        if sigs.get(name).is_some_and(|(ps, _)| ps.iter().skip(1).any(|k| *k != NativeSigKind::I64)) {
             continue;
         }
         let arity = user_fns[name].params.len().saturating_sub(1);
@@ -274,7 +279,8 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     // i64-returning lambda gets an arm — a heap-returning one is reachable only
     // through a CallIndirect with a heap result, which walls above, so its
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
-    push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets);
+    push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
+    crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
     Ok(out)
 }
 
@@ -378,6 +384,14 @@ fn render_fn(
         // address arithmetic, header/slot loads and stores, DynList allocs).
         if crate::render_native_addr::render_addr_op(op, &used, &mut addrs, &mut tys, &mut out, indent)? {
             continue;
+        }
+        // #4006 family G: a closure call with a heap arg or result.
+        if let Op::CallIndirect { dst, table_idx, args, result } = op {
+            if crate::render_native_closure::render_typed_call_indirect(
+                dst, table_idx, args, result, sigs, &mut tys, &mut out, indent,
+            )? {
+                continue;
+            }
         }
         match op {
             Op::Prim {

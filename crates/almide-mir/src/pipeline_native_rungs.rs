@@ -84,6 +84,7 @@ fn native_sig_subset_check(
     // and the return scalar) travels as its env block (`Vec<i64>`: [fnidx,
     // drop-header, captures…]); invocation dispatches through the generated
     // `__almd_ci_*` tables. Heap-param/-return closures stay wasm-only.
+    let is_typed_fn = |t: &Ty| matches!(t, Ty::Fn { .. }) && native_sig_kind(t, record_layouts, variant_layouts).is_some();
     let is_scalar_fn = |t: &Ty| {
         matches!(t, Ty::Fn { is_effect: _, params, ret }
             if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
@@ -117,6 +118,7 @@ fn native_sig_subset_check(
             || is_scalar_record(t)
             || is_flat_variant(t)
             || is_scalar_fn(t)
+            || is_typed_fn(t)
     };
     let sig_ok_ret = |t: &Ty| sig_ok(t) || is_native_result(t);
     for p in &func.params {
@@ -401,6 +403,14 @@ fn native_sig_kind(
         {
             Some(NativeSigKind::ListI64)
         }
+        // #4006 family G: a closure of typed params and result rides the same
+        // env block; its call dispatches by signature.
+        Ty::Fn { is_effect: false, params, ret }
+            if params.iter().all(|p| native_sig_kind(p, record_layouts, variant_layouts).is_some())
+                && (matches!(**ret, Ty::Unit) || native_sig_kind(ret, record_layouts, variant_layouts).is_some()) =>
+        {
+            Some(NativeSigKind::ListI64)
+        }
         Ty::Named(n, args) if args.is_empty() => crate::render_native_rec::rec_index(n.as_str()).map(NativeSigKind::Rec),
         Ty::Bytes => Some(NativeSigKind::Rec(crate::render_native_rec::bytes_index())),
         Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) => {
@@ -460,6 +470,28 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
         if !f.name.starts_with("__lambda_") {
             continue;
         }
+        // #4006 family G: a lambda with a heap param or a heap result is typed
+        // from its declared signature (recorded at the lift).
+        if let Some((ptys, rty)) = crate::lambda_sigs::get(&f.name) {
+            let heap = f.params[1..].iter().any(|p| !matches!(p.repr, crate::Repr::Scalar { .. }))
+                || crate::lower::is_heap_ty(&rty);
+            if heap && ptys.len() + 1 == f.params.len() {
+                // A kind with no native spelling falls through to the scalar
+                // slab below, which walls a heap param as before.
+                let ps: Option<Vec<_>> = ptys.iter().map(|t| native_sig_kind(t, record_layouts, variant_layouts)).collect();
+                let ret = if matches!(rty, almide_lang::types::Ty::Unit) {
+                    Some(None)
+                } else {
+                    native_sig_kind(&rty, record_layouts, variant_layouts).map(Some)
+                };
+                if let (Some(ps), Some(ret)) = (ps, ret) {
+                    let mut all = vec![crate::render_native::NativeSigKind::ListI64];
+                    all.extend(ps);
+                    sigs.insert(f.name.clone(), (all, ret));
+                    continue;
+                }
+            }
+        }
         let mut ps = vec![crate::render_native::NativeSigKind::ListI64];
         for p in &f.params[1..] {
             match p.repr {
@@ -501,6 +533,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         }
     }
     crate::charge_probe::reset_budget_used();
+    crate::lambda_sigs::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
