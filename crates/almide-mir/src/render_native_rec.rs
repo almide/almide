@@ -24,6 +24,8 @@ pub(crate) struct RecDecl {
     pub name: String,
     pub fields: Vec<NTy>,
     pub cases: Option<Vec<(u32, Vec<NTy>)>>,
+    /// A list type of generated or nested-list elements: `Vec<elem>`.
+    pub list_of: Option<NTy>,
 }
 
 thread_local! {
@@ -48,7 +50,12 @@ pub(crate) fn rec_index(name: &str) -> Option<u16> {
 }
 
 pub(crate) fn rec_field(i: u16, k: usize) -> Option<NTy> {
-    RECS.with(|r| r.borrow().get(i as usize).filter(|d| d.cases.is_none()).and_then(|d| d.fields.get(k).copied()))
+    RECS.with(|r| r.borrow().get(i as usize).filter(|d| d.cases.is_none() && d.list_of.is_none()).and_then(|d| d.fields.get(k).copied()))
+}
+
+/// The element kind of a generated list type (`None` for a struct or enum).
+pub(crate) fn list_elem(i: u16) -> Option<NTy> {
+    RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.list_of))
 }
 
 /// The cases of a generated enum (`None` for a struct).
@@ -96,7 +103,10 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
         }
     }
     out.push_str("}\n");
-    out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({}) }}\n}}\n", cases[0].0));
+    // Default is a case with no generated-type field, so a recursive enum's
+    // default terminates (derive_records keeps only enums that have one).
+    let leaf = cases.iter().find(|(_, fs)| !fs.iter().any(|f| matches!(f, NTy::Rec(_)))).map_or(cases[0].0, |c| c.0);
+    out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
     // with_tag: the constructor at `t` with default payloads.
     out.push_str("    fn with_tag(t: i64) -> Self {\n        match t {\n");
@@ -177,6 +187,10 @@ pub(crate) fn struct_defs() -> String {
     RECS.with(|r| {
         let mut out = String::new();
         for (i, d) in r.borrow().iter().enumerate() {
+            if let Some(e) = d.list_of {
+                out.push_str(&format!("/// list `{}`\ntype {} = Vec<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
+                continue;
+            }
             if let Some(cases) = &d.cases {
                 out.push_str(&enum_def(i as u16, d, cases));
                 continue;
@@ -196,8 +210,10 @@ pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {
     format!("{t:?}")
 }
 
-/// Every tuple type in `t`, outermost first.
+/// Every tuple type and every list type of non-scalar, non-string elements
+/// in `t`, outermost first.
 pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_lang::types::Ty>) {
+    use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
     match t {
         Ty::Tuple(es) => {
@@ -205,6 +221,12 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
                 out.push(t.clone());
             }
             es.iter().for_each(|e| collect_tuples(e, out));
+        }
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+            if !matches!(a[0], Ty::Int | Ty::Bool | Ty::String) && !out.contains(t) {
+                out.push(t.clone());
+            }
+            a.iter().for_each(|e| collect_tuples(e, out));
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
         _ => {}
@@ -236,9 +258,14 @@ pub(crate) fn derive_records(
     }
     // A tuple type the program declares in a signature is an anonymous record:
     // the same uniform slots, keyed by its spelled type.
+    let mut lists: BTreeSet<String> = BTreeSet::new();
     for t in tuples {
         if let Ty::Tuple(es) = t {
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
+        }
+        if let Ty::Applied(TypeConstructorId::List, a) = t {
+            decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
+            lists.insert(tuple_key(t));
         }
     }
     // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
@@ -253,7 +280,7 @@ pub(crate) fn derive_records(
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => NTy::VecStr,
             Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
-            Ty::Tuple(_) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
+            Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             _ => return None,
         }))
     };
@@ -269,7 +296,7 @@ pub(crate) fn derive_records(
     let edges: BTreeMap<String, Vec<String>> = set
         .iter()
         .map(|n| {
-            let e = if decls[n].0 { Vec::new() } else { fields_of(n).iter().filter_map(|t| kind(t, &set)?.err()).collect() };
+            let e = if decls[n].0 || lists.contains(n) { Vec::new() } else { fields_of(n).iter().filter_map(|t| kind(t, &set)?.err()).collect() };
             (n.clone(), e)
         })
         .collect();
@@ -286,7 +313,11 @@ pub(crate) fn derive_records(
         }
         false
     };
-    let cyclic: BTreeSet<String> = set.iter().filter(|n| reaches_self(n)).cloned().collect();
+    // An enum needs a case with no aggregate field to be its finite Default.
+    let no_leaf = |n: &String| {
+        decls[n].0 && !decls[n].1.iter().any(|(_, fs)| fs.iter().all(|t| matches!(kind(t, &set), Some(Ok(_)))))
+    };
+    let cyclic: BTreeSet<String> = set.iter().filter(|n| reaches_self(n) || no_leaf(n)).cloned().collect();
     set.retain(|n| !cyclic.contains(n));
     loop {
         let before = set.len();
@@ -305,14 +336,18 @@ pub(crate) fn derive_records(
         .iter()
         .map(|n| {
             let (is_enum, cases) = &decls[n];
+            if lists.contains(n) {
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])) };
+            }
             if *is_enum {
                 RecDecl {
                     name: n.clone(),
                     fields: Vec::new(),
                     cases: Some(cases.iter().map(|(t, fs)| (*t, fs.iter().map(spell).collect())).collect()),
+                    list_of: None,
                 }
             } else {
-                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None }
+                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None }
             }
         })
         .collect()

@@ -107,7 +107,8 @@ fn native_sig_subset_check(
     // #4006 A5: a record with heap fields that has a generated struct.
     let is_struct_record = |t: &Ty| {
         matches!(t, Ty::Named(n, args) if args.is_empty() && crate::render_native_rec::rec_index(n.as_str()).is_some())
-            || (matches!(t, Ty::Tuple(_)) && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
+            || (matches!(t, Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _))
+                && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
     };
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
@@ -266,7 +267,9 @@ fn native_sig_kind(
             Some(NativeSigKind::ListI64)
         }
         Ty::Named(n, args) if args.is_empty() => crate::render_native_rec::rec_index(n.as_str()).map(NativeSigKind::Rec),
-        Ty::Tuple(_) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
+        Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) => {
+            crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec)
+        }
         _ => None,
     }
 }
@@ -380,6 +383,9 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         }
         for (_, fs) in record_layouts.values() {
             fs.iter().for_each(|(_, t)| crate::render_native_rec::collect_tuples(t, &mut ts));
+        }
+        for l in variant_layouts.by_type.values() {
+            l.cases.iter().flat_map(|c| c.fields.iter()).for_each(|(_, t)| crate::render_native_rec::collect_tuples(t, &mut ts));
         }
         ts
     }));
