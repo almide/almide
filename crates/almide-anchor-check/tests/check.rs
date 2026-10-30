@@ -1,7 +1,7 @@
 //! The checker over hand-written modules: each shape it accepts, and for
 //! each, the one-instruction change it must refuse.
 
-use almide_anchor_check::{check_bounds, check_init, check_rc, decode, At, RcReport, Report};
+use almide_anchor_check::{check_bounds, check_bounds_held, check_init, check_rc, decode, At, RcReport, Report};
 
 /// Function 0 is `$alloc`; function 1 is the subject, its body `body`.
 fn module(locals: &str, body: &str) -> Vec<u8> {
@@ -388,6 +388,69 @@ fn an_exit_counting_another_list_is_refused() {
 fn a_read_past_the_first_slot_under_an_exit_test_is_refused() {
     let body = FOR.replace("i64.load offset=12", "i64.load offset=20");
     assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("payload"));
+}
+
+#[test]
+fn a_call_handed_the_list_in_a_returning_arm_does_not_count() -> Result<(), String> {
+    // The loop head's fuel exit: release the list and return. Indices: the
+    // arm is 10..15, the exit test's br_if 19, the load 25.
+    let body = FOR.replace(
+        "(block (loop\n",
+        "(block (loop\n    global.get 0 (if (then local.get 0 call $alloc drop return))\n",
+    );
+    let module = |b: &str| -> Result<Report, String> {
+        let bytes = wat::parse_str(format!(
+            r#"(module (memory 1) (global (mut i32) (i32.const 0))
+                 (func $alloc (param i32) (result i32) i32.const 64)
+                 (func $main (local i32 i32 i32 i32) {b}))"#
+        ))
+        .expect("wat");
+        let bodies = decode(&bytes)?;
+        let mut r = Report::default();
+        check_bounds(&bodies, "e0 a0", "1:19 1:25", &[], &mut r).map(|()| r)
+    };
+    assert_eq!(module(&body)?.bounds_operands, 1);
+    // The same call where the path falls through is handed the list.
+    let falls = body.replace("drop return))", "drop))");
+    let bytes = wat::parse_str(format!(
+        r#"(module (memory 1) (global (mut i32) (i32.const 0))
+             (func $alloc (param i32) (result i32) i32.const 64)
+             (func $main (local i32 i32 i32 i32) {falls}))"#
+    ))
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    assert!(check_bounds(&bodies, "e0 a0", "1:18 1:24", &[], &mut r).unwrap_err().contains("handed"));
+    Ok(())
+}
+
+#[test]
+fn a_call_handed_a_held_list_inside_the_loop_is_accepted() -> Result<(), String> {
+    // The hold (`call` at 1) takes +1 on the list before its count is read;
+    // the body hands the list to a call after the exit test (br_if at 15),
+    // and the load is at 24.
+    let body = format!(
+        "local.get 0 call $alloc drop\n{}",
+        FOR.replace("br_if 1\n", "br_if 1 local.get 0 call $alloc drop\n")
+    );
+    let bytes = module("(local i32 i32 i32 i32)", &body);
+    let bodies = decode(&bytes)?;
+    let held = |holds: &[At]| {
+        let mut r = Report::default();
+        check_bounds_held(&bodies, "e0 a0", "1:15 1:24", &[], holds, &mut r).map(|()| r)
+    };
+    assert_eq!(held(&[At { func: 1, op: 1 }])?.bounds_operands, 1);
+    // Unheld, the same call is handed the list.
+    assert!(held(&[]).unwrap_err().contains("handed"));
+    // A hold on another block does not cover it.
+    let other = body.replacen("local.get 0 call $alloc drop", "local.get 3 call $alloc drop", 1);
+    let bytes = module("(local i32 i32 i32 i32)", &other);
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    assert!(check_bounds_held(&bodies, "e0 a0", "1:15 1:24", &[], &[At { func: 1, op: 1 }], &mut r)
+        .unwrap_err()
+        .contains("handed"));
+    Ok(())
 }
 
 #[test]

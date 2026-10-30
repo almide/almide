@@ -36,6 +36,11 @@
 //! to the access no call other than a judge is handed the block and no store
 //! writes its count word.
 //!
+//! An `if` with no `else` that ends in `return` and holds no branch never
+//! falls through either: what it calls or writes is not "between" a count's
+//! read and the access (the fuel-exhaustion exit a loop head releases its
+//! lists on, #4280).
+//!
 //! Dominance is structural: the path from a read to a later one may leave
 //! a `block` or `loop` by falling out of it (unless a branch before the read
 //! lands at that block's end), never an `if`.
@@ -47,7 +52,16 @@
 //! `else`, ending in `unreachable`) never falls through and is not
 //! "between".
 //!
+//! HELD (#4280): a list `for` loop takes +1 on its subject before reading
+//! its count, a call the producer records as a HOLD. When a recorded hold on
+//! the counted block dominates the count's read, a call handed the list
+//! between the count and the access is accepted: the block is shared, and a
+//! shared block is never written or resized in place. A write of the list's
+//! variable and a store of its count word still reject.
+//!
 //! TRUSTED: that a recorded judge site calls a copy-on-write judge; that a
+//! recorded hold calls rc_inc and the routines honour the copy-on-write
+//! contract (a block with a second holder is never resized in place); that a
 //! call changes a block's count only when it is handed the block (a block
 //! another local aliases is shared, so no routine shrinks it in place); the
 //! block layout (`LEN` at 4, payload at 12, almide-layout).
@@ -224,14 +238,21 @@ pub(crate) struct Flow<'b, 'a> {
     parent: Vec<Option<usize>>,
     /// Inside an aborting `if` (no `else`, ends in `unreachable`).
     abort_arm: Vec<bool>,
+    /// Inside a returning `if` (no `else`, ends in `return`, no branch
+    /// inside it): a path through it leaves the function (#4280).
+    ret_arm: Vec<bool>,
     /// The recorded copy-on-write judge call sites of this function.
     judges: HashSet<usize>,
+    /// The recorded loop holds (#4280): calls that take +1 on a list a
+    /// `for` loop then iterates.
+    holds: HashSet<usize>,
 }
 
 impl<'b, 'a> Flow<'b, 'a> {
     pub(crate) fn new(b: &'b Body<'a>, judges: HashSet<usize>) -> Self {
         let n = b.ops.len();
         let (mut close, mut parent, mut abort_arm) = (vec![usize::MAX; n], vec![None; n], vec![false; n]);
+        let mut ret_arm = vec![false; n];
         let mut stack: Vec<usize> = Vec::new();
         let mut has_else = vec![false; n];
         for (i, op) in b.ops.iter().enumerate() {
@@ -260,8 +281,37 @@ impl<'b, 'a> Flow<'b, 'a> {
             {
                 abort_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
             }
+            if matches!(b.ops[s], Op::If { .. })
+                && !has_else[s]
+                && close[s] != usize::MAX
+                && close[s] > s + 1
+                && matches!(b.ops[close[s] - 1], Op::Return)
+                && !(s + 1..close[s]).any(|k| matches!(b.ops[k], Op::Br { .. } | Op::BrIf { .. } | Op::BrTable { .. }))
+            {
+                ret_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
+            }
         }
-        Flow { b, close, parent, abort_arm, judges }
+        Flow { b, close, parent, abort_arm, ret_arm, judges, holds: HashSet::new() }
+    }
+
+    /// This function's recorded loop holds.
+    pub(crate) fn with_holds(mut self, holds: HashSet<usize>) -> Self {
+        self.holds = holds;
+        self
+    }
+
+    /// A recorded hold took +1 on the block `x` before its count was read
+    /// at `count_at` (it dominates the read): while the loop runs the block
+    /// has a second holder, and under the copy-on-write contract no routine
+    /// writes or resizes a shared block in place.
+    fn held(&self, x: &T, count_at: usize) -> bool {
+        self.holds.iter().any(|&h| {
+            h < self.b.ops.len()
+                && matches!(self.b.ops[h], Op::Call { .. })
+                && self.b.args[h].len() == 1
+                && self.dominates(h, count_at)
+                && self.same(&self.arg(h, 0, FUEL), x)
+        })
     }
 
     /// Inside an aborting `if` (module header).
@@ -594,7 +644,13 @@ impl<'b, 'a> Flow<'b, 'a> {
             return Err("the block's first read does not dominate the access".into());
         }
         let counted: HashSet<usize> = self.window(count_at, acc).into_iter().collect();
+        let held = self.held(x, count_at);
         for k in self.window(from, acc) {
+            // A returning arm leaves the function: nothing it does reaches
+            // the access (a loop's fuel exhaustion releases and returns).
+            if self.ret_arm[k] {
+                continue;
+            }
             let ins = &self.b.ops[k];
             if let Some(src) = src {
                 if self.writes(k, src) {
@@ -612,7 +668,7 @@ impl<'b, 'a> Flow<'b, 'a> {
             }
             if matches!(ins, Op::Call { .. } | Op::CallIndirect { .. }) && !self.judges.contains(&k) {
                 let n = self.b.args[k].len();
-                if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) {
+                if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) && !held {
                     return Err(format!("instruction {k} ({ins:?}) is handed the list between the check and the access"));
                 }
             }

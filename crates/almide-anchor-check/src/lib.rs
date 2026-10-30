@@ -49,7 +49,8 @@
 //! file's optional `judges` line locates those judge calls.
 //!
 //! TRUSTED: that `alloc <index>` names `$alloc`, that a recorded judge site
-//! calls a copy-on-write judge, and the representation R (init); the rest of
+//! calls a copy-on-write judge, that a recorded loop hold calls rc_inc
+//! (#4280), and the representation R (init); the rest of
 //! operands.rs's TRUSTED list.
 
 use wasmparser::{BlockType, Operator as Op};
@@ -556,6 +557,19 @@ pub fn check_bounds(
     judges: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
+    check_bounds_held(bodies, bounds, anch, judges, &[], rep)
+}
+
+/// [`check_bounds`] with the located loop HOLDS (#4280): each a `call` that
+/// takes +1 on a list a `for` loop iterates, before the loop.
+pub fn check_bounds_held(
+    bodies: &[Body<'_>],
+    bounds: &str,
+    anch: &str,
+    judges: &[At],
+    holds: &[At],
+    rep: &mut Report,
+) -> Result<(), String> {
     let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
     let ctx = Ctx {
         bodies,
@@ -616,6 +630,7 @@ pub fn check_bounds(
                             let flow = flows.entry(at.func).or_insert_with(|| {
                                 let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
                                 operands::Flow::new(&bodies[at.func], js)
+                                    .with_holds(holds.iter().filter(|h| h.func == at.func).map(|h| h.op).collect())
                             });
                             operands::loop_exit(flow, at.op)
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
@@ -634,6 +649,7 @@ pub fn check_bounds(
                             let flow = flows.entry(at.func).or_insert_with(|| {
                                 let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
                                 operands::Flow::new(&bodies[at.func], js)
+                                    .with_holds(holds.iter().filter(|h| h.func == at.func).map(|h| h.op).collect())
                             });
                             let (c, cmp) = c;
                             operands::covers(flow, cmp, at.op)
@@ -698,6 +714,11 @@ pub type RcLines = (
 /// judge, and an access a judge sits in front of is then refused); so are
 /// the `rcfns` / `rc` pair (measurement-gated, #4277).
 pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option<RcLines>), String> {
+    parse_anchors_held(text).map(|(a, i, b, j, _, r)| (a, i, b, j, r))
+}
+
+/// [`parse_anchors`] and the optional `holds` line after `judges` (#4280).
+pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, Vec<At>, Option<RcLines>), String> {
     let mut lines = text.lines();
     if lines.next() != Some("almide-anchors 1") {
         return Err("anchors: not an `almide-anchors 1` file".into());
@@ -776,14 +797,35 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option
             v
         }
     };
-    Ok((alloc, init, bounds, judges, rc_lines))
+    let holds = match lines.next() {
+        None => Vec::new(),
+        Some(l) => {
+            let rest = if l == "holds" {
+                ""
+            } else {
+                l.strip_prefix("holds ")
+                    .ok_or_else(|| format!("anchors: expected `holds`, read `{l}`"))?
+            };
+            let mut v = Vec::new();
+            for t in rest.split_whitespace() {
+                if let Some(at) = parse_at(t)? {
+                    v.push(at);
+                }
+            }
+            v
+        }
+    };
+    if let Some(l) = lines.next() {
+        return Err(format!("anchors: unexpected line `{l}`"));
+    }
+    Ok((alloc, init, bounds, judges, holds, rc_lines))
 }
 
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
 /// anchor file (whose `alloc` is a function index, as a `call` names it).
 pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String> {
     let bodies = decode(wasm)?;
-    let (alloc, ia, ba, judges, rc_lines) = parse_anchors(anchors)?;
+    let (alloc, ia, ba, judges, holds, rc_lines) = parse_anchors_held(anchors)?;
     let mut rep = Report::default();
     check_init(
         &bodies,
@@ -792,7 +834,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
+    check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
     if let Some((inc, decs, frames, arms, routines)) = rc_lines {
         let mut r = RcReport::default();
         check_rc(&bodies, function_imports(wasm), inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
