@@ -196,8 +196,9 @@ impl Emitter<'_> {
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
-        // #4277: a fresh key's credit moves into this routine through `kh`;
-        // the set releases it there when the key is already present.
+        // #4277: a fresh key's credit moves into this routine through `kh`
+        // (`h<kh>`; a Var key's share is that variable's move, `m`); the set
+        // releases it there when the key is already present.
         if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
             self.witness_rc_hold_move(kh);
         }

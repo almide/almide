@@ -531,13 +531,21 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
-        if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+        match dying {
+            Some((id, idx, _)) => self.empty_dying(id, idx),
+            // #4277: an owned temporary receiver's credit moves into this
+            // routine through `mh`; the judged set releases it there when the
+            // block is shared and it copies.
+            None => self.witness_rc_hold_move(mh),
         }
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        // A fresh key's credit moves in through `kh` (map_inplace.rs, the same set).
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         let vh = self.hold_for(v)?;
         self.lower_arg(value, Some(v), ArgMode::Retain)?;
         self.f.instructions().local_set(vh);

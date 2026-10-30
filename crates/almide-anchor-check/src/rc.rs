@@ -39,6 +39,13 @@
 //! call whose argument was read through that global, or loaded out of the
 //! block cell local `l` holds.
 //!
+//! A routine's HOLD move (`h<local>@<from>-<to>`: a credit moved into a
+//! compound routine through one of the emitter's pooled hold locals) is
+//! matched like a move, but its local is named only inside its window: the
+//! slot holds other values elsewhere, so outside the window a call on it is
+//! not the frame's credit for that reason alone (a value read through a frame
+//! variable still is — the rc-hold-credit-escapes drill).
+//!
 //! A variable's recorded release (or +1) with no RC call of its own matches
 //! a call inside a stdlib arm's or a compound routine's window that takes
 //! the variable as an argument — the arm or routine consumes it, or takes
@@ -79,6 +86,12 @@ use crate::operands::{chain, Flow, Src, FUEL};
 /// (or counted class) that took it. Diagnosis output only; the verdict is
 /// the same.
 pub static EXPLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A move event: a variable's credit (`m`) or a routine hold's (`h`) handed
+/// into an arm's or a routine's window.
+fn is_move(c: char) -> bool {
+    matches!(c, 'm' | 'h')
+}
 
 /// What the RC check saw.
 #[derive(Default, Debug)]
@@ -446,7 +459,19 @@ pub fn check_rc(
         // Every variable the frame's events name: an arm's, a routine's or a
         // container's own RC never touches one of these (that would be the
         // frame's credit, which its events must account).
-        let witnessed: HashSet<u32> = evs.iter().filter_map(|e| e.1).collect();
+        // A routine's HOLD move (`h<local>@<from>-<to>`: a credit moved into
+        // the routine through a pooled hold local) names that local only
+        // inside its window — the slot is reused for other values outside it.
+        let witnessed: HashSet<u32> = evs.iter().filter(|e| e.0 != 'h').filter_map(|e| e.1).collect();
+        let held_at: Vec<(u32, usize, usize)> = (0..evs.len())
+            .filter(|&e| evs[e].0 == 'h')
+            .filter_map(|e| Some((evs[e].1?, evwin[e]?.0, evwin[e]?.1)))
+            .collect();
+        // Does a value read through `names` at instruction `k` carry a credit
+        // the frame's events account?
+        let owned_at = |names: &[u32], k: usize| {
+            names.iter().any(|n| witnessed.contains(n) || held_at.iter().any(|&(l, a, z)| l == *n && a <= k && k <= z))
+        };
         // Events to calls: a MAXIMUM matching, each call taking at most one
         // event, so the result never depends on the order the recorder logged
         // events in (an alias's reads name several variables; a first-fit
@@ -515,7 +540,7 @@ pub fn check_rc(
                 })[t]
         };
         let temp_arg: Vec<bool> = (0..takers.len())
-            .map(|t| !names_through(bodies, imports, b, &judged, &args[t], 2).iter().any(|n| witnessed.contains(n)))
+            .map(|t| !owned_at(&names_through(bodies, imports, b, &judged, &args[t], 2), takers[t].0))
             .collect();
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
@@ -538,7 +563,7 @@ pub fn check_rc(
                 ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
                 // The arm or routine the credit moved into, or one enclosing
                 // it (a callback's move released by the fold that called it).
-                ('m', Some(l)) => {
+                (c, Some(l)) if is_move(c) => {
                     k == 'd'
                         && names_of.contains(&l)
                         && evwin[e].is_some_and(|(a, z)| {
@@ -546,7 +571,7 @@ pub fn check_rc(
                                 || (a <= calls[i].0 && calls[i].0 <= z)
                         })
                 }
-                ('m', None) => false,
+                (c, None) if is_move(c) => false,
                 // A C-319 cell variable's events name its local; a call on
                 // the block the cell holds reads through it (`CELL_HOLDER | l`).
                 // Both are that variable's credit, matched one to one.
@@ -562,8 +587,8 @@ pub fn check_rc(
         };
         let order: Vec<usize> = (0..evs.len())
             .filter(|&e| evs[e].0 == 'o')
-            .chain((0..evs.len()).filter(|&e| !matches!(evs[e].0, 'o' | 'm')))
-            .chain((0..evs.len()).filter(|&e| evs[e].0 == 'm'))
+            .chain((0..evs.len()).filter(|&e| evs[e].0 != 'o' && !is_move(evs[e].0)))
+            .chain((0..evs.len()).filter(|&e| is_move(evs[e].0)))
             .collect();
         // A call inside an arm or routine window is tried after those
         // outside (left over, it is that arm's or routine's own; one outside
@@ -577,7 +602,7 @@ pub fn check_rc(
                 return true;
             }
             let k = calls[i].0;
-            let frame_owned = calls[i].2.iter().any(|n| witnessed.contains(n));
+            let frame_owned = owned_at(&calls[i].2, k);
             (!frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)))))
                 || aborting.contains(&k)
         };
@@ -618,7 +643,7 @@ pub fn check_rc(
         // own call onto a consuming argument — that would trade an instruction
         // the frame's events account for a trusted `consumed` reading.
         for &e in &order {
-            if owner.contains(&Some(e)) || evs[e].0 == 'm' {
+            if owner.contains(&Some(e)) || is_move(evs[e].0) {
                 continue;
             }
             let mut seen = vec![false; owner.len()];
@@ -666,13 +691,13 @@ pub fn check_rc(
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
             }
         }
-        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| evs[e].0 == 'm' && fits(e, i))).collect();
+        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| is_move(evs[e].0) && fits(e, i))).collect();
         let or_move = |i: usize| fallback_call(i) || move_fits[i];
         for round in 0..2 {
             // A move's credit is released by the arm on some of its paths: one
             // release per path. Releases of it that no run passes through two of
             // (the two arms of one `if`) are all that one move's.
-            for e in (0..evs.len()).filter(|&e| evs[e].0 == 'm') {
+            for e in (0..evs.len()).filter(|&e| is_move(evs[e].0)) {
                 let mut held: Vec<usize> = (0..nc).filter(|&i| owner[i] == Some(e)).collect();
                 for &i in by_pref.iter().filter(|&&i| i < nc) {
                     if owner[i].is_none() && fits(e, i) && held.iter().all(|&h| fl.exclusive(calls[h].0, calls[i].0)) {
@@ -820,7 +845,7 @@ pub fn check_rc(
             }
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
-                ('m', _) => {}
+                (c, _) if is_move(c) => {}
                 // The every-path rule (adopted 2026-10-28): a callee that
                 // takes the parameter on some paths but not all is refused.
                 (k @ ('a' | 'd'), Some(l)) if (0..takers.len()).any(|t| holds(l, t) && verdict(takers[t].2, takers[t].1) == (true, false)) => {
@@ -838,7 +863,7 @@ pub fn check_rc(
             let k = calls[i].0;
             // A frame variable's credit is never an arm's, a routine's or an
             // element's: such a call stays unaccounted.
-            let frame_owned = calls[i].2.iter().any(|n| witnessed.contains(n));
+            let frame_owned = owned_at(&calls[i].2, k);
             let slot = if !frame_owned && inside(&windows[0], k) {
                 &mut rep.arm_internal
             } else if !frame_owned && inside(&windows[1], k) {

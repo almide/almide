@@ -24,6 +24,11 @@
 #      proofs/poisoned-certs/<property>/<issue>-<name>.cert, the copy
 #      proofs/structural-wall.sh has all three verdicts reject on every
 #      trust-spine run (REINJECT_UPDATE=1 rewrites the copy).
+# An rc drill with a <name>.count file is a COUNT drill instead: re-injected,
+# the frame must still be ACCEPTED with exactly the named class moved by the
+# named delta (e.g. `routine-internal +1`) and every other count unchanged —
+# a lost event that degrades to a counted class, never to an accepted frame
+# credit (the hold-move window, #4278's routine-internal debt).
 # A patch that no longer applies fails this script too: regenerate it
 # against the current emitter rather than letting the drill go stale.
 #
@@ -134,6 +139,7 @@ build || { echo "FAIL: the unpatched tree does not build"; exit 2; }
 fail=0
 for name in "${names[@]}"; do
   v=$(verdict "$name")
+  cp "$wt/witness.w" "$wt/control.w" 2>/dev/null
   if [ "$v" != 0 ]; then
     echo "FAIL $name: CONTROL — unpatched, the $PROP witness is not accepted (verdict $v): $(head -c 200 "$wt/witness.w" 2>/dev/null) $(head -3 "$wt/producer.err")"
     fail=1; continue
@@ -146,6 +152,33 @@ for name in "${names[@]}"; do
     echo "FAIL $name: the re-injected emitter does not build"; fail=1; git -C "$wt" checkout -q -- .; continue
   fi
   v=$(verdict "$name")
+  if [ "$PROP" = rc ] && [ -f "$DIR/$name.count" ]; then
+    # The count drill: accepted, the one class moved by its delta, the rest equal.
+    read -r cls delta < "$DIR/$name.count"
+    got=$(python3 -c '
+import re, sys
+keys = ["before an abort", "rebind", "judge", "arm-internal", "routine-internal", "element", "consumed"]
+def counts(p):
+    t = open(p).read()
+    m = re.search(r"(\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed", t)
+    return dict(zip(keys, map(int, m.groups()))) if m else None
+a, b = counts(sys.argv[1]), counts(sys.argv[2])
+if a is None or b is None:
+    print("no-rc-ok"); sys.exit()
+d = {k: b[k] - a[k] for k in keys}
+want = dict.fromkeys(keys, 0); want[sys.argv[3]] = int(sys.argv[4])
+print("ok" if d == want else "moved " + " ".join(f"{k}{v:+d}" for k, v in d.items() if v))
+' "$wt/control.w" "$wt/witness.w" "$cls" "$delta")
+    if [ "$v" = 0 ] && [ "$got" = ok ]; then
+      echo "ok   $name: control accepted; re-injected, still accepted with $cls $delta and every other count unchanged"
+    else
+      echo "FAIL $name: a count drill wants acceptance with $cls $delta only (verdict $v, $got): $(head -c 200 "$wt/witness.w")"
+      fail=1
+    fi
+    git -C "$wt" checkout -q -- .
+    build >/dev/null 2>&1
+    continue
+  fi
   pinned="$ROOT/proofs/poisoned-certs/$PROP/$ISSUE-$name.cert"
   # The anchors drill pins the checker's REJECT line (no certificate format
   # of its own: the witnesses it judges are the accepted ones).

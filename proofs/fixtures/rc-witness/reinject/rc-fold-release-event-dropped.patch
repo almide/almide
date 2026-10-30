@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
+index d06182a66..e632a9be4 100644
+--- a/crates/almide-wasm/src/witness_hooks.rs
++++ b/crates/almide-wasm/src/witness_hooks.rs
+@@ -703,9 +703,8 @@ impl Emitter<'_> {
+             self.witness_decline("fold-acc:flat");
+             return;
+         }
+-        if let Some(w) = self.witness.as_mut() {
+-            w.iteration_release(acc);
+-        }
++        // RE-INJECTED (#4277 drill): the accumulator's release keeps its `$dec`; its event is dropped.
++        let _ = acc;
+         self.witness_store(body, ty);
+     }
+ 
