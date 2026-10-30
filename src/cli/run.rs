@@ -233,7 +233,7 @@ pub(crate) fn build_native_cached(
 }
 
 /// Where the content digest of a cached binary is kept (#4180).
-fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
+pub(super) fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
     let mut name = bin.file_name().unwrap_or_default().to_os_string();
     name.push(".sha256");
     bin.with_file_name(name)
@@ -255,7 +255,7 @@ pub(crate) fn cached_binary_intact(bin: &std::path::Path) -> bool {
 
 /// Record the digest of the binary just installed at `bin`, through a staged
 /// file and a rename like the binary itself.
-fn record_binary_digest(bin: &std::path::Path) -> Result<(), String> {
+pub(super) fn record_binary_digest(bin: &std::path::Path) -> Result<(), String> {
     let digest = file_sha256(bin).ok_or_else(|| format!("cannot read the built binary {}", bin.display()))?;
     let path = binary_digest_path(bin);
     let staged = path.with_extension(format!("stage-{}", std::process::id()));
@@ -493,7 +493,12 @@ pub struct RunArgs<'a> {
 }
 
 pub fn cmd_run(args: RunArgs) {
-    let RunArgs { file, program_args, target, verified, time_report, .. } = args;
+    let RunArgs { file, program_args, target, verified, time_report, no_check, .. } = args;
+    let wasm_leg = matches!(target, Some("wasm" | "wasm32" | "wasi"));
+    if (wasm_leg || matches!(target, None | Some("rust" | "native"))) && declares_no_main(file) {
+        run_mainless(file, wasm_leg, no_check);
+        std::process::exit(0);
+    }
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
         None | Some("rust") | Some("native") => cmd_run_native(&args),
@@ -513,6 +518,33 @@ pub fn cmd_run(args: RunArgs) {
         }
     };
     std::process::exit(code);
+}
+
+/// Does `file` parse and declare no `main`? A file that does not parse is
+/// left to the leg's own compile, which reports the parse error.
+fn declares_no_main(file: &str) -> bool {
+    let (program, _, parse_errors) = crate::parse_file(file);
+    parse_errors.is_empty()
+        && !program
+            .decls
+            .iter()
+            .any(|d| matches!(d, crate::ast::Decl::Fn { name, .. } if name.as_str() == "main"))
+}
+
+/// `almide run` on a file without `main`: both legs run its `test` blocks,
+/// exactly as `almide test <file> --target <leg>` does — the same verdicts,
+/// the same count line, and the zero rule's exit 5 when the file has no
+/// `test` block either (there was nothing to run, #2204). The native leg used
+/// to exec the raw libtest harness and the wasm leg refused the file; one
+/// behaviour now holds on both. Returns only when every test passed.
+fn run_mainless(file: &str, wasm_leg: bool, no_check: bool) {
+    let leg = if wasm_leg { "wasm" } else { "rust" };
+    err(&format!("note: {file} declares no `main`; running its test blocks (as `almide test {file} --target {leg}`)"));
+    if wasm_leg {
+        super::cmd_test_wasm(file, None, false, false);
+    } else {
+        super::cmd_test(file, no_check, None, false, false);
+    }
 }
 
 /// The preopen strategy per host OS (#1066). Unix mirrors native absolute
