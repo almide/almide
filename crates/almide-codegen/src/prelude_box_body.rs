@@ -108,6 +108,7 @@ impl<Q: 'static> Drop for AlmideBoxQueueReset<Q> {
 /// slot holds under Stacked Borrows, so the next nested push was undefined
 /// behaviour Miri reported on every deep recursive-type program.
 /// `Some(step)` back means no walk is running: the caller starts one.
+#[inline(always)]
 fn almide_box_q_push<Q: 'static>(slot: &'static std::thread::LocalKey<std::cell::Cell<*mut Vec<Q>>>, step: Q) -> Option<Q> {
     let w = slot.with(|q| q.get());
     // SAFETY: a non-null slot is the &mut work of the outer walk on this thread, live until its reset nulls the slot; that walk is suspended in the call that led here and reaches work only through this same pointer.
@@ -118,6 +119,7 @@ fn almide_box_q_push<Q: 'static>(slot: &'static std::thread::LocalKey<std::cell:
 }
 
 /// The outer walk's next step, popped through the slot's pointer.
+#[inline(always)]
 fn almide_box_q_pop<Q: 'static>(slot: &'static std::thread::LocalKey<std::cell::Cell<*mut Vec<Q>>>) -> Option<Q> {
     let w = slot.with(|q| q.get());
     // SAFETY: as in almide_box_q_push; called by the outer walk between steps, when no nested call holds the queue.
