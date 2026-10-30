@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/string_scan.rs b/crates/almide-wasm/src/string_scan.rs
+--- a/crates/almide-wasm/src/string_scan.rs
++++ b/crates/almide-wasm/src/string_scan.rs
+@@ -249,7 +249,8 @@
+         i.i32_const(0).call(F_ALLOC).local_set(hacc);
+         i.i32_const(0).local_set(hk);
+         i.block(BlockType::Empty).loop_(BlockType::Empty);
+-        i.local_get(hk).local_get(hl).i32_ge_u().br_if(1);
++        // RE-INJECTED (#4281 drill): the cursor may reach the len word.
++        i.local_get(hk).local_get(hl).i32_gt_u().br_if(1);
+         let site = self.str_loop_exit();
+         // w = 1 + (b>=0xC0) + (b>=0xE0) + (b>=0xF0)
+         self.str_loop_byte(site, hs, hk);
