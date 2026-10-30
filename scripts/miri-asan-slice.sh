@@ -49,7 +49,7 @@ case "$rot" in ''|*[!0-9]*) echo "::error::miri-asan-slice: MIRI_ASAN_ROTATION=$
 # ci_slice_offset reads the seed's leading hex digits, so the counter in hex
 # makes the offset rot % k (a counter below 16^7; reduce it first so it stays one).
 seed="$(printf '%x' $(( rot % (k * 1000000) )))"
-list="$(mktemp)"; trap 'rm -f "$list"' EXIT
+list="$(mktemp)"
 ls spec/wasm_cross/*.almd | ALMIDE_CI_SLICE="$k" ALMIDE_CI_SEED="$seed" ci_slice_filter "$tool-slice" > "$list" || {
   echo "::error::miri-asan-slice: the slice could not be selected (see above)"; exit 2; }
 for f in "${always[@]}"; do
@@ -57,4 +57,6 @@ for f in "${always[@]}"; do
   echo "$f" >> "$list"
 done
 echo "$tool-slice: rotation $rot, offset $(( rot % k )) of $k; $(grep -c . "$list") program(s), the fixed ones: ${always[*]}"
-xargs bash "$runner" < "$list"
+mapfile -t files < "$list"; rm -f "$list"
+# One invocation (one control), and its exit code is the job's: 1 on a UB / ASAN verdict.
+exec bash "$runner" "${files[@]}"
