@@ -43,6 +43,7 @@ pub mod pipeline;
 pub mod purity;
 pub mod render_native;
 mod render_native_addr;
+mod render_native_rec;
 mod render_native_append;
 mod render_native_str;
 mod render_native_op_families;

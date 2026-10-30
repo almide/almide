@@ -145,11 +145,13 @@ pub(crate) fn render_set_local(
         NTy::Res => format!("{}.clone()", var(*src)),
         NTy::VecStr => format!("{}.clone()", var(*src)),
         NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
+        NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(*src)),
     };
     let store_t = match t {
         NTy::StrRef => NTy::Str,
         NTy::VecRef => NTy::Vec,
         NTy::VecStrRef => NTy::VecStr,
+        NTy::RecRef(i) => NTy::Rec(i),
         other => other,
     };
     if let Some(prev) = tys.get(local) {
@@ -244,6 +246,7 @@ fn declared_param_want(
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::ListStr) => NTy::VecStrRef,
+        Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),
         Some(NativeSigKind::F64) => NTy::F64,
         Some(NativeSigKind::Res) => {
             return Err(wall("native: Result-typed param — outside the rung subset"))
@@ -277,6 +280,11 @@ fn user_arg_in_declared_mode(
             NTy::VecStr => Ok(format!("&{code}")),
             NTy::VecStrRef => Ok(code),
             _ => Err(wall(format!("native: non-string-list arg to List[String] param of `{name}`"))),
+        },
+        NTy::RecRef(i) | NTy::Rec(i) => match got {
+            NTy::Rec(j) if j == i => Ok(format!("&{code}")),
+            NTy::RecRef(j) if j == i => Ok(code),
+            _ => Err(wall(format!("native: arg of another type to a record param of `{name}`"))),
         },
         NTy::VecRef | NTy::Vec => {
             if !got.is_veccy() {
@@ -325,6 +333,7 @@ fn bind_user_fn_result(
             let t = match callee_sig.and_then(|(_, r)| *r) {
                 Some(NativeSigKind::ListI64) => NTy::Vec,
                 Some(NativeSigKind::ListStr) => NTy::VecStr,
+                Some(NativeSigKind::Rec(i)) => NTy::Rec(i),
                 Some(NativeSigKind::Str) => NTy::Str,
                 Some(NativeSigKind::I64) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
@@ -332,14 +341,7 @@ fn bind_user_fn_result(
                 None => repr_nty(r, false)?,
             };
             tys.insert(*d, t);
-            let ty_name = match t {
-                NTy::Str => "AlmideString",
-                NTy::Vec => "Vec<i64>",
-                NTy::F64 => "f64",
-                NTy::Res => "Result<i64, AlmideString>",
-                NTy::VecStr => "Vec<AlmideString>",
-                _ => "i64",
-            };
+            let ty_name = crate::render_native_rec::owned_ty(t);
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
         }
         (None, _) => line!("{rendered};"),
@@ -669,6 +671,11 @@ fn render_else(
                 NTy::VecStr,
                 if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
             ),
+            NTy::Rec(i) | NTy::RecRef(i) => (
+                format!("let mut {}: {} = Default::default();", var(*d), crate::render_native_rec::struct_name(i)),
+                NTy::Rec(i),
+                format!("{}.clone()", var(v)),
+            ),
         };
         *out = out.replacen(marker.as_str(), &decl, 1);
         tys.insert(*d, join_t);
@@ -720,11 +727,13 @@ fn render_end_if(
             NTy::Res => format!("{}.clone()", var(v)),
             NTy::VecStr => format!("{}.clone()", var(v)),
             NTy::VecStrRef => format!("{}.to_vec()", var(v)),
+            NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(v)),
         };
         let arm_t = match t {
             NTy::StrRef => NTy::Str,
             NTy::VecRef => NTy::Vec,
             NTy::VecStrRef => NTy::VecStr,
+            NTy::RecRef(i) => NTy::Rec(i),
             other => other,
         };
         if arm_t != join_t {

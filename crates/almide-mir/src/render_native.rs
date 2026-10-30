@@ -51,6 +51,10 @@ pub(crate) enum NTy {
     VecStr,
     /// A BORROWED `&[AlmideString]` — a `List[String]` fn param.
     VecStrRef,
+    /// An OWNED generated record struct (`render_native_rec`, by table index).
+    Rec(u16),
+    /// A BORROWED `&AlmdRecN` — a heap-record fn param.
+    RecRef(u16),
 }
 
 impl NTy {
@@ -75,6 +79,8 @@ pub enum NativeSigKind {
     Res,
     /// `List[String]` — `&[AlmideString]` in, `Vec<AlmideString>` out.
     ListStr,
+    /// A heap record — `&AlmdRecN` in, `AlmdRecN` out (`render_native_rec`).
+    Rec(u16),
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -111,6 +117,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
         NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
+        NTy::Rec(_) | NTy::RecRef(_) => unreachable!("as_str_arg on a record"),
     }
 }
 
@@ -239,6 +246,7 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
          #![allow(unused_variables, unused_mut, unreachable_code, dead_code, non_snake_case, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n",
     );
     out.push_str(&crate::render_native_str::almide_string_alias());
+    out.push_str(&crate::render_native_rec::struct_defs());
     used_shims.sort();
     used_shims.dedup();
     for s in used_shims {
@@ -289,6 +297,7 @@ fn seed_param_ntys(
         let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
             Some(NativeSigKind::ListI64) => NTy::VecRef,
             Some(NativeSigKind::ListStr) => NTy::VecStrRef,
+            Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),
             Some(NativeSigKind::Str) => NTy::StrRef,
             Some(NativeSigKind::I64) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
@@ -333,7 +342,7 @@ fn render_fn(
     let used = native_used_values(func);
     // #3532: the if-as-value joins realized as a borrow of the selected value.
     let borrows = crate::borrow_join::borrow_joins(func);
-    let mut addrs = crate::render_native_addr::AddrState::new(func);
+    let mut addrs = crate::render_native_addr::AddrState::new(func, sigs);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         used_shims.push(STACK_GUARD_GLUE_SHIM);
@@ -521,6 +530,7 @@ fn finish_native_fn(
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
             Some(NTy::VecStr | NTy::VecStrRef) => "return Vec::new();",
+            Some(NTy::Rec(_) | NTy::RecRef(_)) => "return Default::default();",
         };
         out = out.replace(CUT_RET_MARKER, cut_ret);
     }
@@ -531,7 +541,8 @@ fn finish_native_fn(
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr => var(v),
+        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) => var(v),
+        NTy::RecRef(_) => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
     }
@@ -572,12 +583,13 @@ fn render_native_fn_sig(
         .map(|p| {
             let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
             let spelled = match t {
-                NTy::StrRef | NTy::Str => "&str",
-                NTy::VecRef | NTy::Vec => "&[i64]",
-                NTy::VecStrRef | NTy::VecStr => "&[AlmideString]",
-                NTy::I64 => "i64",
-                NTy::F64 => "f64",
-                NTy::Res => "Result<i64, AlmideString>",
+                NTy::StrRef | NTy::Str => "&str".to_string(),
+                NTy::VecRef | NTy::Vec => "&[i64]".to_string(),
+                NTy::VecStrRef | NTy::VecStr => "&[AlmideString]".to_string(),
+                NTy::RecRef(i) | NTy::Rec(i) => format!("&{}", crate::render_native_rec::struct_name(i)),
+                NTy::I64 => "i64".to_string(),
+                NTy::F64 => "f64".to_string(),
+                NTy::Res => "Result<i64, AlmideString>".to_string(),
             };
             let mut_prefix = if reassigned.contains(&p.value) {
                 "mut "
@@ -598,6 +610,7 @@ fn render_native_fn_sig(
             Some(NTy::F64) => " -> f64".to_string(),
             Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
             Some(NTy::VecStr | NTy::VecStrRef) => " -> Vec<AlmideString>".to_string(),
+            Some(NTy::Rec(i) | NTy::RecRef(i)) => format!(" -> {}", crate::render_native_rec::struct_name(*i)),
             None => return Err(wall("native: return value untyped")),
         },
     };
@@ -693,7 +706,7 @@ fn render_native_flow_op(
         }};
     }
     match op {
-        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } => {
+        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } | Op::DropWrapperRec { .. } => {
             return render_native_drop_op(op, borrows, tys, out, *indent)
         }
         // Pure ownership bookkeeping — no native code.
@@ -754,6 +767,10 @@ fn render_native_drop_op(
         // no nested, no closure slots to free). A non-Vec value here would be a
         // heap-capturing block (prim-built) — its OWNING fn walls on the prims
         // long before this drop renders.
+        // A generated record struct frees at scope end, like any owned Rust value.
+        Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } if matches!(tys.get(v), Some(NTy::Rec(_))) => {
+            line!("// drop(record): scope-end");
+        }
         Op::DropVariant { v, ty } if ty.as_str() == "closure" => match tys.get(v) {
             Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
             other => {
@@ -766,12 +783,12 @@ fn render_native_drop_op(
         // loop-carried handle). `verify_ownership` above certified balance.
         // A borrow join (#3532) holds a reference: its borrow simply ends.
         Op::Drop { v } | Op::DropListStr { v }
-            if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef)) =>
+            if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) =>
         {
             line!("// drop: borrowed join, scope-end");
         }
         Op::Drop { v } => {
-            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef)) {
+            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
                 return Err(wall(
                     "native: Drop of a borrowed param — MIR call-mode violation",
                 ));
@@ -788,9 +805,10 @@ fn render_native_drop_op(
                 Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
                 // A List[String] block: Rust's Vec drop frees every element String.
                 Some(NTy::VecStr) => line!("// drop(string list): scope-end"),
+                Some(NTy::Rec(_)) => line!("// drop(record): scope-end"),
                 // The T1-3 Result carrier frees like any owned Rust value.
                 Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
-                Some(NTy::VecRef | NTy::VecStrRef) => {
+                Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => {
                     return Err(wall(
                         "native: DropListStr of a borrowed param — MIR call-mode violation",
                     ))
@@ -863,6 +881,10 @@ pub(crate) fn render_dup(
         NTy::VecStrRef => {
             tys.insert(*dst, NTy::VecStr);
             line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
+        }
+        NTy::Rec(i) | NTy::RecRef(i) => {
+            tys.insert(*dst, NTy::Rec(i));
+            line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
     }
     Ok(())

@@ -54,10 +54,53 @@ pub(crate) struct AddrState {
     /// Values read as an address operand (address arithmetic, a slot or
     /// header access). A block's handle joins the algebra only as one of these.
     addr_operands: BTreeSet<ValueId>,
+    /// DynList allocs whose declared type is a generated record struct, read
+    /// from the type-bearing ops that consume them (a typed drop, a return, an
+    /// argument to a user fn) — the declarations, never the slot contents.
+    alloc_rec: BTreeMap<ValueId, u16>,
 }
 
 impl AddrState {
-    pub(crate) fn new(func: &MirFunction) -> Self {
+    pub(crate) fn new(func: &MirFunction, sigs: &crate::render_native::NativeSigs) -> Self {
+        use crate::render_native::NativeSigKind;
+        let rec_kind = |k: Option<&NativeSigKind>| match k {
+            Some(NativeSigKind::Rec(i)) => Some(*i),
+            _ => None,
+        };
+        let own_ret = rec_kind(sigs.get(func.name.as_str()).and_then(|(_, r)| r.as_ref()));
+        let mut alloc_rec: BTreeMap<ValueId, u16> = BTreeMap::new();
+        let mut note = |v: ValueId, i: Option<u16>| {
+            if let Some(i) = i {
+                alloc_rec.entry(v).or_insert(i);
+            }
+        };
+        if let Some(r) = func.ret {
+            note(r, own_ret);
+        }
+        for op in &func.ops {
+            match op {
+                Op::DropVariant { v, ty } => note(*v, crate::render_native_rec::rec_index(ty)),
+                Op::Return { val: Some(v) } => note(*v, own_ret),
+                Op::CallFn { name, args, .. } => {
+                    if let Some((ps, _)) = sigs.get(name.as_str()) {
+                        for (a, k) in args.iter().zip(ps) {
+                            if let crate::CallArg::Handle(v) = a {
+                                note(*v, rec_kind(Some(k)));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let alloc_rec = func
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Alloc { dst, init: Init::DynList { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                _ => None,
+            })
+            .collect();
         let reassigned = func
             .ops
             .iter()
@@ -91,12 +134,45 @@ impl AddrState {
                 _ => {}
             }
         }
-        AddrState { addr_operands, consts: BTreeMap::new(), scaled: BTreeSet::new(), addrs: BTreeMap::new(), reassigned, stored }
+        AddrState { alloc_rec, addr_operands, consts: BTreeMap::new(), scaled: BTreeSet::new(), addrs: BTreeMap::new(), reassigned, stored }
     }
 }
 
 fn is_block(t: NTy) -> bool {
+    matches!(t, NTy::Vec | NTy::VecRef | NTy::VecStr | NTy::VecStrRef | NTy::Rec(_) | NTy::RecRef(_))
+}
+
+/// A list block (has a length), as opposed to a record struct.
+fn is_list_block(t: NTy) -> bool {
     matches!(t, NTy::Vec | NTy::VecRef | NTy::VecStr | NTy::VecStrRef)
+}
+
+/// The record field a whole-slot address names (no index term).
+fn rec_slot(a: &Addr) -> Option<usize> {
+    let (h, w) = (i64::from(BLOCK_HEADER), i64::from(SLOT_SIZE));
+    (a.idx.is_none() && a.off >= h && (a.off - h) % w == 0).then(|| ((a.off - h) / w) as usize)
+}
+
+/// The owned copy of a heap value `code` of kind `t` (for a field write).
+fn owned_from(code: &str, t: NTy) -> Option<String> {
+    Some(match t {
+        NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => format!("std::mem::take(&mut {code})"),
+        NTy::StrRef => format!("AlmideString::from({code})"),
+        NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),
+        NTy::RecRef(_) => format!("{code}.clone()"),
+        _ => return None,
+    })
+}
+
+/// A field of kind `field` accepts a value of kind `got`.
+fn field_accepts(field: NTy, got: NTy) -> bool {
+    match field {
+        NTy::Str => matches!(got, NTy::Str | NTy::StrRef),
+        NTy::Vec => matches!(got, NTy::Vec | NTy::VecRef),
+        NTy::VecStr => matches!(got, NTy::VecStr | NTy::VecStrRef),
+        NTy::Rec(i) => matches!(got, NTy::Rec(j) | NTy::RecRef(j) if j == i),
+        _ => false,
+    }
 }
 
 /// The Rust index expression of the slot `a` names, or `None` when `a` is
@@ -140,7 +216,7 @@ pub(crate) fn render_addr_op(
             let x = args[0];
             match ty(tys, &x) {
                 Some(t)
-                    if (is_block(t) && st.addr_operands.contains(d))
+                    if (is_block(t) && (st.addr_operands.contains(d) || st.stored.contains(d)))
                         || (matches!(t, NTy::Str | NTy::StrRef) && st.stored.contains(d)) =>
                 {
                     if st.reassigned.contains(&x) {
@@ -182,7 +258,7 @@ pub(crate) fn render_addr_op(
         Op::Prim { kind: PrimKind::ElemAddr, dst: Some(d), args } if args.len() == 2 => {
             let (h, i) = (args[0], args[1]);
             let Some(ad) = st.addrs.get(&h).copied() else { return Ok(false) };
-            if ad.off != 0 || ad.idx.is_some() || !ty(tys, &ad.base).is_some_and(is_block) {
+            if ad.off != 0 || ad.idx.is_some() || !ty(tys, &ad.base).is_some_and(is_list_block) {
                 return Err(wall("native: ElemAddr off a non-block address"));
             }
             if ty(tys, &i) != Some(NTy::I64) {
@@ -199,10 +275,17 @@ pub(crate) fn render_addr_op(
         Op::Prim { kind: PrimKind::Load { width }, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
             let ad = st.addrs[&args[0]];
             let bt = ty(tys, &ad.base);
-            if *width == 4 && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() && bt.is_some_and(is_block) {
+            if *width == 4 && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() && bt.is_some_and(is_list_block) {
                 tys.insert(*d, NTy::I64);
                 line!("let mut {}: i64 = {}.len() as i64;", var(*d), var(ad.base));
                 return Ok(true);
+            }
+            if let (8, Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (*width, bt, rec_slot(&ad)) {
+                if crate::render_native_rec::rec_field(i, k) == Some(NTy::I64) {
+                    tys.insert(*d, NTy::I64);
+                    line!("let mut {}: i64 = {}.f{k};", var(*d), var(ad.base));
+                    return Ok(true);
+                }
             }
             if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
                 if let Some(ix) = slot_index(&ad) {
@@ -215,6 +298,18 @@ pub(crate) fn render_addr_op(
         }
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
             let ad = st.addrs[&args[0]];
+            if let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
+                if let Some(f) = crate::render_native_rec::rec_field(i, k).filter(|f| *f != NTy::I64) {
+                    tys.insert(*d, f);
+                    line!(
+                        "let mut {}: {} = {}.f{k}.clone();",
+                        var(*d),
+                        crate::render_native_rec::owned_ty(f),
+                        var(ad.base)
+                    );
+                    return Ok(true);
+                }
+            }
             match (ty(tys, &ad.base), slot_index(&ad)) {
                 (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
                     // A borrowed alias in MIR; an owned copy here has the same
@@ -232,6 +327,22 @@ pub(crate) fn render_addr_op(
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 && st.addrs.contains_key(&args[0]) => {
             let ad = st.addrs[&args[0]];
             let v = args[1];
+            if let (Some(NTy::Rec(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
+                let field = crate::render_native_rec::rec_field(i, k)
+                    .ok_or_else(|| wall("native: a store past a record's last field"))?;
+                let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
+                    (NTy::I64, None, Some(NTy::I64)) => var(v),
+                    (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
+                    (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
+                        Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
+                            .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
+                        g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+                    },
+                    (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+                };
+                line!("{}.f{k} = {rhs};", var(ad.base));
+                return Ok(true);
+            }
             let Some(ix) = slot_index(&ad) else {
                 return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
             };
@@ -266,6 +377,33 @@ pub(crate) fn render_addr_op(
                 var(*dst),
                 var(*len)
             );
+            return Ok(true);
+        }
+        Op::Alloc { dst, init: Init::DynList { .. }, .. } if st.alloc_rec.contains_key(dst) => {
+            let i = st.alloc_rec[dst];
+            tys.insert(*dst, NTy::Rec(i));
+            line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
+            return Ok(true);
+        }
+        Op::ListGetScalar { dst, list, idx } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {
+            let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(&k)) = (ty(tys, list), st.consts.get(idx)) else {
+                return Err(wall("native: a record field read at a computed slot"));
+            };
+            if crate::render_native_rec::rec_field(i, k as usize) != Some(NTy::I64) {
+                return Err(wall("native: a scalar read of a heap record field"));
+            }
+            tys.insert(*dst, NTy::I64);
+            line!("let mut {}: i64 = {}.f{k};", var(*dst), var(*list));
+            return Ok(true);
+        }
+        Op::ListSetScalar { list, idx, val } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {
+            let (Some(NTy::Rec(i)), Some(&k)) = (ty(tys, list), st.consts.get(idx)) else {
+                return Err(wall("native: a record field write on a borrowed record or at a computed slot"));
+            };
+            if crate::render_native_rec::rec_field(i, k as usize) != Some(NTy::I64) || ty(tys, val) != Some(NTy::I64) {
+                return Err(wall("native: a scalar write of a heap record field"));
+            }
+            line!("{}.f{k} = {};", var(*list), var(*val));
             return Ok(true);
         }
         Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
