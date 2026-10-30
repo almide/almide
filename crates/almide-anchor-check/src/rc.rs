@@ -48,21 +48,25 @@
 //!
 //! A variable's recorded release (or +1) with no RC call of its own matches
 //! a call inside a stdlib arm's or a compound routine's window that takes
-//! the variable as an argument — the arm or routine consumes it, or takes
-//! the +1 its argument guard prepays — counted (`consumed`).
+//! the variable as an argument, when the callee's SIGNATURE declares that
+//! parameter consumed (#4278 B1, `signed`): a runtime helper's builder
+//! declares, per parameter, borrow or consume on every path, and logs its
+//! body's events (almide-wasm `helper_sig.rs`). The declaration is the
+//! bundle's `rc-sig` record — the proven checker, the Rocq kernel and
+//! almide-verify hold it to the helper's lines (proofs/HelperSig.v,
+//! `check_sig_cert_sound`), and this check holds those events to the
+//! helper's shipped body like any frame's (`rchelpers` places each). A
+//! callee with no signature consumes nothing: the release stays unmatched.
+//! The consumption is no longer read off the callee's bytes (the every-path
+//! reading of 2026-10-28, which a body could satisfy by a path the reading
+//! misjudged): a signature that lies about its body is refused by the
+//! checker of that body, not trusted here.
 //!
 //! The windows and the element class are confined (sec-rows-2-3-4, the
 //! drills of proofs/fixtures/rc-witness/reinject/): a leftover call counts
 //! as an arm's, a routine's or an element's only if its argument names no
-//! variable the frame's events name; an element release only if a later
-//! store writes the same slot; and a release or +1 counts as `consumed` only
-//! by a call inside an arm or routine window whose callee's own body takes
-//! ownership of that parameter on EVERY path to its exits (a callee that
-//! takes it on some paths only is refused — the every-path rule, adopted
-//! 2026-10-28). When a runtime routine fails that rule the routine is the
-//! bug and is fixed, never the rule: `$list_push` and `$bytes_push` released
-//! their outgrown block only when uniquely owned, and now release it on
-//! every grow path.
+//! variable the frame's events name; and an element release only if a later
+//! store writes the same slot.
 //!
 //! An arm that answers with its ARGUMENT's block as its owned result on
 //! some path (`if c { rc_inc(p); p } else { fresh }`) states it per site: the
@@ -71,10 +75,11 @@
 //! that arm's own window read through the argument — a named event, never a
 //! counted class.
 //!
-//! The four counted classes (arm-internal, routine-internal, element,
-//! consumed) are debts to #4278's per-helper certificates — a declared
-//! per-path effect for each helper, checked against its body. They may only
+//! The three counted classes left (arm-internal, routine-internal, element)
+//! are debts to #4278's per-window certificates — a declared per-path effect
+//! for each arm and routine window, checked against its body. They may only
 //! shrink; a new trusted class is an owner decision, not a checker edit.
+//! (The fourth, `consumed`, was retired by the helper signatures above.)
 //!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
@@ -112,7 +117,8 @@ pub struct RcReport {
     pub arm_internal: usize,
     pub routine_internal: usize,
     pub element: usize,
-    pub consumed: usize,
+    /// Releases (or +1s) a callee's checked signature consumes (#4278 B1).
+    pub signed: usize,
 }
 
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
@@ -245,12 +251,6 @@ fn names(arg: &crate::operands::T) -> Vec<u32> {
     v
 }
 
-/// How function `f` takes ownership of its parameter `j`: `(some, all)` —
-/// on some path, and on every path to an exit. A path takes it by releasing
-/// it, storing it into a block, returning it, or handing it to a callee that
-/// takes it on every path (followed `depth` calls deep). An exit is covered
-/// when it returns or tail-passes the parameter, or a taking instruction
-/// dominates it. An imported function takes nothing.
 /// Callee `f` hands its parameter `j` back as its result on some path.
 fn returns_param(bodies: &[Body<'_>], imports: u32, f: u32, j: u32) -> bool {
     let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return false };
@@ -290,46 +290,6 @@ fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, judged: &HashS
     v
 }
 
-fn takes(bodies: &[Body<'_>], imports: u32, releases: &HashSet<u32>, f: u32, j: u32, depth: u32) -> (bool, bool) {
-    if depth == 0 {
-        return (false, false);
-    }
-    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return (false, false) };
-    let fl = Flow::new(b, HashSet::new());
-    let dead = dead(b);
-    let last = b.ops.len().saturating_sub(1);
-    let names_j = |k: usize, a: usize| names(&fl.arg(k, a, FUEL)).contains(&j);
-    let mut points: Vec<usize> = Vec::new();
-    let mut exits: Vec<(usize, bool)> = Vec::new();
-    for (k, op) in b.ops.iter().enumerate() {
-        if dead[k] {
-            continue;
-        }
-        match op {
-            Op::Call { function_index: g } => {
-                if (0..b.args[k].len()).any(|a| {
-                    names_j(k, a) && (releases.contains(g) || takes(bodies, imports, releases, *g, a as u32, depth - 1).1)
-                }) {
-                    points.push(k);
-                }
-            }
-            Op::ReturnCall { function_index: g } => {
-                let passes = (0..b.args[k].len()).any(|a| {
-                    names_j(k, a) && (releases.contains(g) || takes(bodies, imports, releases, *g, a as u32, depth - 1).1)
-                });
-                exits.push((k, passes));
-            }
-            Op::Return => exits.push((k, (0..b.args[k].len()).any(|a| names_j(k, a)))),
-            Op::End if k == last => exits.push((k, (0..b.args[k].len()).any(|a| names_j(k, a)))),
-            o if store_width(o).is_some() && names_j(k, 1) => points.push(k),
-            _ => {}
-        }
-    }
-    let some = !points.is_empty() || exits.iter().any(|e| e.1);
-    let all = !exits.is_empty() && exits.iter().all(|&(e, ret)| ret || points.iter().any(|&c| fl.dominates(c, e)));
-    (some, all)
-}
-
 /// The release at `k` of a value loaded out of a slot replaces it: a later
 /// store writes the same slot (the container's element is swapped, its old
 /// credit released).
@@ -352,6 +312,7 @@ pub fn check_rc(
     judges: &[crate::At],
     frames: &[(usize, String)],
     windows: &[Vec<(usize, usize, usize)>; 2],
+    sigs: &HashMap<u32, Vec<bool>>,
     rep: &mut RcReport,
 ) -> Result<(), String> {
     for (pos, events) in frames {
@@ -508,10 +469,9 @@ pub fn check_rc(
         // - a named `a` / `d` may instead be an arm's or a routine's
         //   consumption of the variable: a call INSIDE an arm or routine
         //   window (no RC call itself) takes the variable's value at that
-        //   call as argument `j`, and the callee's own body takes ownership
-        //   of parameter `j` on every path (releases, stores, returns or
-        //   passes it on). Each such argument is one node of the matching,
-        //   so it accounts for ONE event.
+        //   call as argument `j`, and the callee's checked signature
+        //   declares parameter `j` consumed (#4278 B1). Each such argument
+        //   is one node of the matching, so it accounts for ONE event.
         let nc = calls.len();
         let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         let rc_call: HashSet<usize> = calls.iter().map(|c| c.0).collect();
@@ -525,10 +485,11 @@ pub fn check_rc(
                 takers.push((k, j, *g));
             }
         }
-        let verdicts: std::cell::RefCell<std::collections::HashMap<(u32, usize), (bool, bool)>> = Default::default();
-        let verdict = |g: u32, j: usize| -> (bool, bool) {
-            *verdicts.borrow_mut().entry((g, j)).or_insert_with(|| takes(bodies, imports, releases, g, j as u32, 4))
-        };
+        // A callee consumes its parameter `j` exactly when its checked
+        // signature declares it (#4278 B1): the bundle's `rc-sig` record,
+        // which the proven checker holds to the callee's own body. A callee
+        // with no signature consumes nothing here.
+        let consumes = |g: u32, j: usize| sigs.get(&g).is_some_and(|m| m.get(j) == Some(&true));
         // Per variable a named event carries, which consuming arguments hold
         // its value at their call (computed once per variable: a term per
         // argument, compared against the variable's value there).
@@ -553,14 +514,14 @@ pub fn check_rc(
             if i >= nc {
                 let t = i - nc;
                 return match evs[e] {
-                    ('a' | 'd', Some(l)) => holds(l, t) && verdict(takers[t].2, takers[t].1).1,
+                    ('a' | 'd', Some(l)) => holds(l, t) && consumes(takers[t].2, takers[t].1),
                     // A temporary's event logged inside an arm or routine
                     // window: that window's call taking a temporary (no frame
                     // variable) on every path.
                     ('a' | 'd', None) => {
                         evwin[e].is_some_and(|(a, z)| a <= takers[t].0 && takers[t].0 <= z)
                             && temp_arg[t]
-                            && verdict(takers[t].2, takers[t].1).1
+                            && consumes(takers[t].2, takers[t].1)
                     }
                     _ => false,
                 };
@@ -660,7 +621,7 @@ pub fn check_rc(
         // A move is not re-routed here: it may take nothing (its arm or
         // routine keeps the credit), so it never displaces a release from its
         // own call onto a consuming argument — that would trade an instruction
-        // the frame's events account for a trusted `consumed` reading.
+        // the frame's events account for a signed consumption.
         for &e in &order {
             if owner.contains(&Some(e)) || is_move(evs[e].0) {
                 continue;
@@ -857,7 +818,7 @@ pub fn check_rc(
         for i in 0..nc {
             used[i] = owner[i].is_some();
         }
-        rep.consumed += owner[nc..].iter().filter(|o| o.is_some()).count();
+        rep.signed += owner[nc..].iter().filter(|o| o.is_some()).count();
         for (e, &(kind, local)) in evs.iter().enumerate() {
             if got[e] {
                 continue;
@@ -865,10 +826,10 @@ pub fn check_rc(
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
                 (c, _) if is_move(c) => {}
-                // The every-path rule (adopted 2026-10-28): a callee that
-                // takes the parameter on some paths but not all is refused.
-                (k @ ('a' | 'd'), Some(l)) if (0..takers.len()).any(|t| holds(l, t) && verdict(takers[t].2, takers[t].1) == (true, false)) => {
-                    unmatched.push(format!("{k}{l} (its consuming callee takes it on some paths only)"))
+                // A window's callee that holds the variable but declares no
+                // consuming signature for that parameter (#4278 B1).
+                (k @ ('a' | 'd'), Some(l)) if (0..takers.len()).any(|t| holds(l, t)) => {
+                    unmatched.push(format!("{k}{l} (no callee in its window declares that it consumes it)"))
                 }
                 (k, Some(l)) => unmatched.push(format!("{k}{l}")),
                 (k, None) => unmatched.push(format!("{k}-")),
