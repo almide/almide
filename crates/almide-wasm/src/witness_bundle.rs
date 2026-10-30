@@ -82,7 +82,7 @@ fn records_inner(
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
-    let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids) = super::rc::take(pass);
+    let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -104,6 +104,11 @@ fn records_inner(
     if let Some((_, w)) = modes.into_iter().find(|(p, _)| *p == pass) {
         records.push(Record { property: "call-modes", function: "(program)".into(), bytes: w });
     }
+    // #4278 B1: each shipped runtime helper's own certificate, named by its
+    // emitted function index (the anchor file's `rchelpers` line places it).
+    for (f, record, _) in &rc_helpers {
+        records.push(Record { property: "rc-sig", function: format!("${f}"), bytes: record.clone() });
+    }
     // A pass with no index access records no stretch; its witness is the
     // empty program, which the checker accepts vacuously.
     let pick = |v: Vec<(usize, String)>| v.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -124,7 +129,7 @@ fn records_inner(
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
         locate.text(&pick(judge_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids, &rc_helpers)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -166,7 +171,14 @@ fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::
 /// ```text
 /// rcfns <inc index | -> <release index> ...
 /// rc <position>|<events>;...
+/// rcarms <position>:<from>-<to> ...
+/// rcroutines <position>:<from>-<to> ...
+/// rchelpers <position>:$<emitted index> ...
 /// ```
+///
+/// A signed runtime helper's body (#4278 B1) is an `rc` frame like any
+/// other, and `rchelpers` names, per such body, the bundle's `rc-sig`
+/// record that declares it.
 ///
 /// An `m<local>#<window id>` event (a credit moved into an arm or a routine)
 /// renders as `m<local>@<from>-<to>`: that window's instruction ordinals.
@@ -180,6 +192,7 @@ fn rc_lines(
     arms: &[(u64, usize, usize)],
     routines: &[(u64, usize, usize)],
     window_ids: &std::collections::HashMap<u64, (u64, usize, usize)>,
+    helpers: &[(u32, String, String)],
 ) -> Result<String, String> {
     use crate::cert_project as cp;
     let (ei, si) = (
@@ -189,7 +202,7 @@ fn rc_lines(
     let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
     let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
     let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
-    let rc: Vec<String> = frames
+    let mut rc: Vec<String> = frames
         .iter()
         .filter_map(|(k, ev)| {
             let ev: Vec<String> = ev
@@ -214,6 +227,14 @@ fn rc_lines(
             locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
         })
         .collect();
+    let mut signed: Vec<String> = Vec::new();
+    for (f, _, ev) in helpers {
+        if let Some(j) = ship(*f) {
+            let pos = j - si;
+            rc.push(format!("{pos}|{ev}"));
+            signed.push(format!("{pos}:${f}"));
+        }
+    }
     let windows = |w: &[(u64, usize, usize)]| -> String {
         w.iter()
             .filter_map(|&(k, a, b)| locate.window(k, a, b).map(|(j, x, y)| format!("{j}:{x}-{y}")))
@@ -221,11 +242,12 @@ fn rc_lines(
             .join(" ")
     };
     Ok(format!(
-        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\n",
+        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\nrchelpers {}\n",
         decs.join(" "),
         rc.join(";"),
         windows(arms),
-        windows(routines)
+        windows(routines),
+        signed.join(" ")
     ))
 }
 
@@ -411,12 +433,14 @@ pub fn render(
     // Version 3 (#4278): an ownership witness carries an arm share-out `s`,
     // which a reader before version 3 must refuse rather than skip.
     let share_out = records.iter().any(|r| r.property == "ownership" && r.bytes.contains(['s', 'S']));
-    let mut out = match (artifact, share_out) {
-        (None, false) => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
-        (None, true) => format!("almide-certificate-bundle 3\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
-        (Some((hex, path)), _) => format!(
+    // Version 4 (#4278, B1): a runtime helper's own certificate (`rc-sig`).
+    let helper_sig = records.iter().any(|r| r.property == "rc-sig");
+    let mut out = match (artifact, share_out, helper_sig) {
+        (None, false, false) => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
+        (None, _, sig) => format!("almide-certificate-bundle {}\nproducer {}\nsource {}\n", if sig { 4 } else { 3 }, one_line(producer), one_line(source)),
+        (Some((hex, path)), _, _) => format!(
             "almide-certificate-bundle {}\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
-            if share_out { 3 } else { 2 },
+            if helper_sig { 4 } else if share_out { 3 } else { 2 },
             one_line(producer),
             one_line(source),
             one_line(path)
