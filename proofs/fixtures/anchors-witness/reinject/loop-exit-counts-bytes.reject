@@ -1,1 +1,1 @@
-ANCHORS REJECT: bounds stretch 0: `a0` against its check at 5:32: the exit test counts slots of 1 bytes, the access scales by 8
+ANCHORS REJECT: bounds stretch 0: `a0` against its check at 6:36: the exit test counts slots of 1 bytes, the access scales by 8
