@@ -488,7 +488,8 @@ impl Emitter<'_> {
                         return Ok(());
                     }
                 }
-                let elem = match self.lower(iterable, None)? {
+                let iter_ty = self.lower(iterable, None)?;
+                let elem = match iter_ty {
                     SliceTy::List(h) => self.types.el(h),
                     // `for (k, v) in map` — walk the insertion-ordered
                     // entry blocks (the same layout map.fold walks).
@@ -584,9 +585,32 @@ impl Emitter<'_> {
                     return unsup("forin-var-ty");
                 }
                 let stride = elem.slot_size();
+                // #4351 / #4280: the loop holds the list across the body, as
+                // the map loop does (#1219). A borrowed subject takes +1, so
+                // a write or resize of it in the body (`xs[i] = v`,
+                // `xs = xs + [x]`) finds the block shared and copies: the
+                // loop reads the value it started on, as the native leg
+                // does, and the block's count cannot change under the exit
+                // test. An owned subject is the cursor's own credit. The +1
+                // is recorded as a HOLD for almide-anchor-check.
+                let owned = self.rc_owned_result(iterable);
+                if !owned {
+                    let scr = self.scr_i32_local;
+                    self.f.instructions().local_set(scr).local_get(scr).call(crate::F_INC);
+                    crate::witness::bounds::hold(self.f);
+                    self.f.instructions().local_get(scr);
+                }
+                let drop_list = self.dec_fn_of(iter_ty);
                 let base = self.hold_i32()?;
                 let count = self.hold_i32()?;
                 let cur = self.hold_i32()?;
+                if let Some(w) = self.witness.as_mut() {
+                    w.cursor_take(owned, base);
+                }
+                // #3374: a frame credit for the body's duration, so every exit
+                // edge out of the body releases it through its exit plan.
+                self.rc_owned.insert(base);
+                self.owned_ty.insert(base, iter_ty);
                 self.f.instructions().local_set(base);
                 self.f
                     .instructions()
@@ -599,7 +623,11 @@ impl Emitter<'_> {
                     .local_set(cur);
                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                 self.emit_det_charge_const(1);
+                // #4280: the exit test guards the element read below; the
+                // bounds witness records the pair as a stretch of its own.
+                let site = crate::witness::bounds::loop_header();
                 self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
+                crate::witness::bounds::exit(site, self.f);
                 self.f
                     .instructions()
                     .local_get(base)
@@ -609,6 +637,10 @@ impl Emitter<'_> {
                     .i32_add();
                 self.witness_loop_open();
                 self.load_ty_slot(elem, 0);
+                crate::witness::bounds::access(site, false, self.f);
+                if site.is_some() {
+                    crate::witness::bounds::close();
+                }
                 self.f.instructions().local_set(var_idx);
                 self.witness_view_local(var_idx, elem);
                 // for (a, b) in pairs — the loop var holds the tuple base;
@@ -642,6 +674,12 @@ impl Emitter<'_> {
                     .br(0)
                     .end()
                     .end();
+                self.rc_owned.remove(&base);
+                self.owned_ty.remove(&base);
+                self.f.instructions().local_get(base).call(drop_list);
+                if let Some(w) = self.witness.as_mut() {
+                    w.cursor_release(base);
+                }
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

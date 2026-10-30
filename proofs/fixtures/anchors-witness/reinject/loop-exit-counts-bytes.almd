@@ -1,0 +1,12 @@
+// #4280 operands drill: a `for` loop captures its count in BYTES rather than
+// slots, so the exit test lets the counter run past the last element. The
+// test, its branch and the load are all where the witness says (the proven
+// checker and the shape check accept); only the operands show the count.
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  var s = 0
+  for x in xs {
+    s = s + x
+  }
+  println("${s}")
+}
