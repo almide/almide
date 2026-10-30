@@ -42,8 +42,10 @@
 # certified frame against the ownership witness's recorded events (the anchor
 # file's `rc` lines), and every recorded event against a call; a call or an
 # event left over, or a check past the binary's deadline, is ANCHORS REJECT.
-# Its four counted classes (arm-internal, routine-internal, element,
-# consumed — the #4278 debts) are totalled per run below.
+# Its counted classes (arm-internal, routine-internal, element — the #4278
+# debts) are totalled per run below, and so are the consumptions a runtime
+# helper's checked signature accounts (`signed`, #4278 B1: no longer a
+# trusted class — each helper's own `rc-sig` record is judged below).
 #
 # Every witness is judged by THREE independent verdicts, and all three must
 # agree: the checker extracted from the Coq proof (proofs/checker), the Rocq
@@ -146,8 +148,8 @@ for f in os.listdir(out):
                 tot[k] += int(v)
 if tot["operands"] != tot["accesses"]:
     sys.exit(f"STRUCTURAL WALL FAIL: {tot['accesses']} located access(es) but {tot['operands']} held to their guard's operands")
-rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed")
-rk = ["frames", "events", "calls", "pre_abort", "rebind", "judges", "arm", "routine", "element", "consumed"]
+rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) signed")
+rk = ["frames", "events", "calls", "pre_abort", "rebind", "judges", "arm", "routine", "element", "signed"]
 rc = dict.fromkeys(rk, 0)
 for f in os.listdir(out):
     if f.endswith(".anchor"):
@@ -157,7 +159,7 @@ for f in os.listdir(out):
         for k, v in zip(rk, m.groups()):
             rc[k] += int(v)
 print(f"  [rc] RC OK on every artifact: {rc['frames']} frame(s), {rc['events']} event(s) matched to {rc['calls']} call(s); counted (#4278): "
-      f"{rc['arm']} arm-internal, {rc['routine']} routine-internal, {rc['element']} element, {rc['consumed']} consumed; "
+      f"{rc['arm']} arm-internal, {rc['routine']} routine-internal, {rc['element']} element; {rc['signed']} signed consumption(s); "
       f"{rc['pre_abort']} before an abort, {rc['rebind']} rebind(s) with no instruction, {rc['judges']} judge(s) with no rebind")
 print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
       f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes, every access's guard operands to it; unlocated (dead bodies): "
@@ -193,7 +195,7 @@ import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
-      "bounds": "check_bounds_cert", "init": "check_init_cert"}
+      "bounds": "check_bounds_cert", "init": "check_init_cert", "rc-sig": "check_sig_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -282,7 +284,7 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
