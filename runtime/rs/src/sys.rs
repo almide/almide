@@ -22,8 +22,20 @@
 mod almide_rt_sys_ffi {
     #[cfg(unix)]
     mod c {
+        /// `struct timespec` on the 64-bit targets thread_cpu_ns serves.
+        #[repr(C)]
+        pub struct Timespec { pub sec: i64, pub nsec: i64 }
+        // `clockid_t` is `int` on Linux and an unsigned enum on macOS. Declaring
+        // it i32 on both passed the same bits, but a foreign signature that does
+        // not match the real one is UB, and Miri reports it (#4009).
+        #[cfg(target_os = "macos")]
+        pub type ClockId = u32;
+        #[cfg(not(target_os = "macos"))]
+        pub type ClockId = i32;
         // SAFETY: each declaration is the libc prototype on Linux and macOS
-        // (pthread_t, sighandler_t as pointer-width integers; pid_t, int i32).
+        // (pthread_t, sighandler_t as pointer-width integers; pid_t, int i32;
+        // clock_gettime with this target's clockid_t, declared only where
+        // Timespec is the real 64-bit layout; getentropy as POSIX.1-2024).
         unsafe extern "C" {
             pub fn signal(sig: i32, handler: usize) -> usize;
             pub fn pthread_self() -> usize;
@@ -31,6 +43,9 @@ mod almide_rt_sys_ffi {
             pub fn _exit(code: i32) -> !;
             pub fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
             pub fn kill(pid: i32, sig: i32) -> i32;
+            pub fn getentropy(buf: *mut u8, buflen: usize) -> i32;
+            #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+            pub fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
         }
     }
 
@@ -118,24 +133,12 @@ mod almide_rt_sys_ffi {
     /// if the clock cannot be read.
     #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
     pub fn thread_cpu_ns() -> Option<u64> {
-        #[repr(C)]
-        struct Timespec { sec: i64, nsec: i64 }
-        // `clockid_t` is `int` on Linux and an unsigned enum on macOS. Declaring
-        // it i32 on both passed the same bits, but a foreign signature that does
-        // not match the real one is UB, and Miri reports it (#4009).
-        #[cfg(target_os = "macos")]
-        type ClockId = u32;
-        #[cfg(not(target_os = "macos"))]
-        type ClockId = i32;
-        // SAFETY: clock_gettime's prototype, with this target's clockid_t (above).
-        unsafe extern "C" {
-            fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
-        }
+        use c::{ClockId, Timespec};
         const CLOCK: ClockId = if cfg!(target_os = "linux") { 3 } else { 16 };
         let mut ts = Timespec { sec: 0, nsec: 0 };
         // SAFETY: `ts` is a live, writable timespec (two 64-bit fields on both
         // 64-bit targets) for the whole call.
-        if unsafe { clock_gettime(CLOCK, &mut ts) } != 0 {
+        if unsafe { c::clock_gettime(CLOCK, &mut ts) } != 0 {
             return None;
         }
         Some((ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64))
@@ -150,13 +153,9 @@ mod almide_rt_sys_ffi {
     /// refuses with EIO); the caller aborts rather than hand back fewer bytes.
     #[cfg(unix)]
     pub fn fill_entropy(chunk: &mut [u8]) -> bool {
-        // SAFETY: the declaration is getentropy's POSIX.1-2024 prototype.
-        unsafe extern "C" {
-            fn getentropy(buf: *mut u8, buflen: usize) -> i32;
-        }
         // SAFETY: `chunk` is one live &mut [u8]; getentropy writes at most
         // chunk.len() bytes of it.
-        unsafe { getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
+        unsafe { c::getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
     }
 
     #[cfg(windows)]
