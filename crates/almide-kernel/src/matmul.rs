@@ -67,6 +67,11 @@ fn accumulate_tile(a: &[f64], k: usize, b: &[f64], n: usize, out: &mut [f64], ti
 /// into all 4 C rows (B reuse), broadcasting one A element per row. This is BLAS's
 /// register-blocking core — C stays in registers across k, memory traffic is just
 /// A column + B row. Ragged edges (m%4, n%4) fall back to scalar.
+///
+/// # Safety
+/// The CPU has AVX2 and FMA, and `a`, `b`, `out` hold at least `m*k`, `k*n`,
+/// `m*n` elements: every unchecked load and store indexes below those bounds
+/// (rows `i0..i0+4 <= m`, columns `j0..j0+4 <= n`, `kk < k`).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 unsafe fn matmul_register_tiled(a: &[f64], m: usize, k: usize, b: &[f64], n: usize, out: &mut [f64]) {
@@ -114,9 +119,18 @@ fn scalar_edges(a: &[f64], b: &[f64], out: &mut [f64], d: Dims, mt: usize, nt: u
 
 /// Per-target dispatch.
 pub fn matmul(a: &[f64], m: usize, k: usize, b: &[f64], n: usize, out: &mut [f64]) {
+    // #4007: the tiled kernel indexes unchecked, so this safe entry holds the
+    // shapes it relies on (one compare per call, not per cell).
+    let fits = |len: usize, r: usize, c: usize| r.checked_mul(c).is_some_and(|need| len >= need);
+    assert!(
+        fits(a.len(), m, k) && fits(b.len(), k, n) && fits(out.len(), m, n),
+        "matmul: operand shorter than its shape"
+    );
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            // SAFETY: both features detected just now; the assert above
+            // gives the kernel's length precondition.
             return unsafe { matmul_register_tiled(a, m, k, b, n, out) };
         }
     }
