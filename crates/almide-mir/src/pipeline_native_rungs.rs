@@ -148,6 +148,53 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
 /// T1-3: rewrite the stereotyped Result block windows onto the native
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
+/// The synthesized slot initializer's name: the shared lowering already
+/// knows it (an assignment inside it skips the old-value take of a heap slot).
+const SLOT_INIT: &str = "__mg_init";
+
+/// `__mg_init`: every slot-held top-level binding (a mutable `var`, or a `let`
+/// that must run eagerly) assigned its initializer, in declaration order,
+/// through the same slot-routed assignment user code uses. `None` when the
+/// program holds no such binding.
+fn synthesize_slot_init(ir: &almide_ir::IrProgram) -> Option<almide_ir::IrFunction> {
+    let stmts: Vec<almide_ir::IrStmt> = ir
+        .top_lets
+        .iter()
+        .filter(|tl| tl.mutable)
+        .map(|tl| almide_ir::IrStmt {
+            kind: almide_ir::IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+            span: None,
+        })
+        .collect();
+    if stmts.is_empty() {
+        return None;
+    }
+    let body = almide_ir::IrExpr {
+        kind: almide_ir::IrExprKind::Block { stmts, expr: None },
+        ty: almide_lang::types::Ty::Unit,
+        span: Default::default(),
+        def_id: None,
+    };
+    Some(almide_ir::IrFunction {
+        name: almide_lang::intern::sym(SLOT_INIT),
+        params: vec![],
+        ret_ty: almide_lang::types::Ty::Unit,
+        body,
+        is_effect: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        module_origin: None,
+        mutated_params: vec![],
+    })
+}
+
 /// A `Result` whose Ok payload is a native scalar (Int, Bool, Float as its
 /// bits, Unit as 0) and whose Err is a String: the T1-3 carrier
 /// `Result<i64, AlmideString>` (#4006 family C widened it past Int | Bool).
@@ -201,7 +248,6 @@ fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
 // sees these ops. Runs BEFORE verification/render (both are downstream).
 {
-    use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
     let result_fns: std::collections::BTreeSet<String> = ir
         .functions
@@ -400,27 +446,29 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
             "native: multi-module program — outside rung 1".into(),
         ));
     }
-    // #4006: an immutable top-level `let` lowers the way the witness path
-    // threads it — each reference materializes the CONST initializer
-    // (`value_or_global`), and a computed one walls in the lowering. A
-    // mutable `var` lives in a storage slot the native render has no
-    // address for, so it walls here.
-    if ir.top_lets.iter().any(|tl| tl.mutable) {
-        return Err(LowerError::Unsupported(
-            "native: a mutable top-level var — outside the native rungs".into(),
-        ));
-    }
-    // Top-level lets are evaluated EAGERLY, at program start, before `main`
-    // (top_let_div_eager: an unused `let X = 1 / 0` aborts). Materializing at
-    // each use is lazy, so it is only faithful for an initializer that can
-    // neither fail nor be observed: literals, other top-level lets, and
-    // operators that cannot abort (no integer `/`, `%` or `^`, no call).
+    // #4006 family I: top-level state lives in storage slots initialised
+    // before `main`. A mutable `var` already has a slot (the lowering routes
+    // its reads and writes through `mg_slot_addr`). An immutable `let` whose
+    // initializer can fail or calls must run EAGERLY, at program start
+    // (top_let_div_eager: an unused `let X = 1 / 0` aborts), so it gets a slot
+    // too and is evaluated once, in declaration order, by the synthesized
+    // `__mg_init` that `main` calls first. A total, call-free initializer
+    // (literals, other top-level lets, operators that cannot abort) stays
+    // materialized at each use: it can neither fail nor be observed.
+    let mut ir = ir;
     let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
-    if let Some(tl) = ir.top_lets.iter().find(|tl| !total_const_init(&tl.value, &top_vars)) {
-        return Err(LowerError::at(
-            tl.value.span,
-            "native: a top-level let whose initializer can fail or calls — it must run eagerly, before main",
-        ));
+    let mut eager = false;
+    for tl in ir.top_lets.iter_mut() {
+        if !tl.mutable && !total_const_init(&tl.value, &top_vars) {
+            tl.mutable = true;
+            eager = true;
+        }
+    }
+    if eager {
+        crate::lower::install_effect_abi_facts(&ir);
+    }
+    if let Some(init) = synthesize_slot_init(&ir) {
+        ir.functions.push(init);
     }
     let globals: std::collections::HashMap<_, _> = ir.top_lets.iter().map(|tl| (tl.var, tl.ty.clone())).collect();
     let global_inits: std::collections::HashMap<_, _> =
@@ -453,6 +501,15 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     }
     rewrite_native_result_windows(&ir, &mut functions);
     rewrite_native_option_windows(&ir, &mut functions);
+    crate::native_slot_rewrite::rewrite_slot_ops(&mut functions, crate::lower::mutable_global_slot_count());
+    if functions.iter().any(|f| f.name == SLOT_INIT) {
+        if let Some(main) = functions.iter_mut().find(|f| f.name == "main") {
+            main.ops.insert(
+                0,
+                crate::Op::CallFn { dst: None, name: SLOT_INIT.to_string(), args: vec![], result: None },
+            );
+        }
+    }
     if !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),

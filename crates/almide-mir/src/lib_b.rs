@@ -102,6 +102,15 @@ pub enum PrimKind {
     /// `dst = args[0]` — a copy of a minted carrier (the `Dup` the shared
     /// lowering emits when an Option outlives a statement); no ownership event.
     OptCopy,
+    /// ── NATIVE-ONLY storage-slot prims (#4006 family I) ──────────────────
+    /// Inserted exclusively by `native_slot_rewrite`: a scalar `Load8` /
+    /// `Store8` through a mutable module-level binding's slot address
+    /// (`mg_slot_addr(slot)`), rendered as a load / store of the slot's own
+    /// `static` (an `AtomicI64` holding the MIR scalar, a Float as its bits).
+    /// `dst = slot`.
+    NativeSlotLoad { slot: u32 },
+    /// `slot = args[0]`.
+    NativeSlotStore { slot: u32 },
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no

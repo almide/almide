@@ -244,6 +244,34 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 var(args[0])
             );
         }
+        // ── #4006 family I: a scalar storage slot (native_slot_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::NativeSlotLoad { slot },
+            dst: Some(d),
+            ..
+        } => {
+            used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = ALMD_SLOT_{}.load(std::sync::atomic::Ordering::Relaxed);", var(*d), slot);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::NativeSlotStore { slot },
+            args,
+            ..
+        } => {
+            // The slot holds the MIR scalar: a Float as its bits.
+            let v = match tys.get(&args[0]) {
+                Some(NTy::I64) => var(args[0]),
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                other => {
+                    return Err(wall(format!(
+                        "native: a non-scalar value stored into a storage slot ({other:?})"
+                    )))
+                }
+            };
+            used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
+            line!("ALMD_SLOT_{}.store({}, std::sync::atomic::Ordering::Relaxed);", slot, v);
+        }
         // ── #4006 family B: the native scalar-Option carrier (native_option_rewrite) ──
         Op::Prim {
             kind: crate::PrimKind::OptMakeSome,
