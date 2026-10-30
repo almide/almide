@@ -492,7 +492,7 @@ impl Emitter<'_> {
             .i32_add()
             .local_get(val);
         if share {
-            self.share_handle_top(ty);
+            self.arm_share_handle_top(ty);
         }
         self.store_ty_slot_raw(ty);
         let mut i = self.f.instructions();

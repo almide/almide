@@ -160,7 +160,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(side, almide_layout::SUM_FIELD);
                 // The payload copied out is a SHARE (+1): the new block's
                 // typed drop releases it, the source keeps its own.
-                self.share_handle_top(side);
+                self.arm_share_handle_top(side);
                 self.store_ty_slot(side, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
@@ -226,7 +226,7 @@ impl Emitter<'_> {
         // Each payload copied out is a SHARE (+1), as in `option.zip`: the
         // output lists' drops release them, the input results keep their own.
         self.load_ty_slot(t, almide_layout::SUM_FIELD);
-        self.share_handle_top(t);
+        self.arm_share_handle_top(t);
         self.store_ty_slot(t, 0);
         {
             let mut i = self.f.instructions();
@@ -236,7 +236,7 @@ impl Emitter<'_> {
             i.local_get(hr);
         }
         self.load_ty_slot(e, almide_layout::SUM_FIELD);
-        self.share_handle_top(e);
+        self.arm_share_handle_top(e);
         self.store_ty_slot(e, 0);
         {
             let mut i = self.f.instructions();
@@ -556,11 +556,11 @@ impl Emitter<'_> {
                 // under the tuple, and a let-bound one was released twice.
                 self.f.instructions().local_get(hla);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
-                self.share_handle_top(a);
+                self.arm_share_handle_top(a);
                 self.store_ty_slot(a, aoff);
                 self.f.instructions().local_get(hp).local_get(hlb);
                 self.load_ty_slot(b, almide_layout::OPTION_FIELD);
-                self.share_handle_top(b);
+                self.arm_share_handle_top(b);
                 self.store_ty_slot(b, boff);
                 // the tuple base doubles as the some-payload: a tuple-typed
                 // some stores the BLOCK ADDRESS at OPTION_FIELD
@@ -600,7 +600,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 // The payload copied out is a SHARE (+1): the new block's
                 // typed drop releases it, the source keeps its own.
-                self.share_handle_top(a);
+                self.arm_share_handle_top(a);
                 self.store_ty_slot(a, 0);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();

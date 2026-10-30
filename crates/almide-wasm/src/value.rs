@@ -180,6 +180,9 @@ impl Emitter<'_> {
             i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD));
             if owned[k] {
                 i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+                let _ = i;
+                self.arm_share_stored();
+                i = self.f.instructions();
             }
         }
         i.call(merge).local_set(ho);
@@ -236,10 +239,16 @@ impl Emitter<'_> {
         i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD));
         if owned[0] {
             i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+            let _ = i;
+            self.arm_share_stored();
+            i = self.f.instructions();
         }
         i.local_get(hk);
         if owned[1] {
             i.local_get(hk).call(F_INC);
+            let _ = i;
+            self.arm_share_stored();
+            i = self.f.instructions();
         }
         i.call(sel).local_set(ho);
         box_object(&mut i, ho, hp);
@@ -491,7 +500,7 @@ impl Emitter<'_> {
         // The Value keeps its interior: the Result's payload is a SHARE of
         // it (+1), released by the Result's typed drop (#2010 stage 2c —
         // `value.as_array` twice on one Value freed its array).
-        self.share_handle_top(payload);
+        self.arm_share_handle_top(payload);
         self.store_ty_slot(payload, almide_layout::SUM_FIELD);
         let mut i = self.f.instructions();
         i.else_();
@@ -637,12 +646,19 @@ impl Emitter<'_> {
                 i.i32_store(m_pay);
                 i.local_get(hk).call(F_DEC_FLAT);
                 i.local_get(he).call(F_DEC_FLAT);
+                let _ = i;
+                self.arm_temp_released();
+                self.arm_temp_released();
+                let mut i = self.f.instructions();
                 i.else_();
                 i.local_get(hr).i32_const(0).i32_store(m_tag);
                 // The object keeps the field's Value: the ok payload is a
                 // share of it (#2010 item 5 — the Result's typed drop
                 // releases it).
                 i.local_get(hv).call(F_INC);
+                let _ = i;
+                self.arm_share_stored();
+                let mut i = self.f.instructions();
                 i.local_get(hr).local_get(hv).i32_store(m_pay);
                 i.end();
                 i.end();

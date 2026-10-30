@@ -81,7 +81,7 @@ impl Emitter<'_> {
         for (hold, ty, off) in [(kh, k, koff), (vh, v, voff)] {
             self.f.instructions().local_get(cur).i32_const(off as i32).i32_add();
             self.load_ty_slot_at(ty);
-            self.share_handle_top(ty);
+            self.arm_share_handle_top(ty);
             self.f.instructions().local_set(hold);
         }
         self.emit_map_set_judged(mh, kh, vh, (k, v), fns)?;

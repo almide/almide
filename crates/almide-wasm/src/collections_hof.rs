@@ -263,7 +263,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hw).i32_const(okoff as i32).i32_add();
         self.f.instructions().local_get(hcur).i32_const(koff as i32).i32_add();
         self.load_ty_slot_at(k);
-        self.share_handle_top(k);
+        self.arm_share_handle_top(k);
         self.store_ty_slot_at(k);
         self.f.instructions().local_get(hw).i32_const(ovoff as i32).i32_add();
         let got = self.lower(body, Some(b_ty))?;
@@ -671,7 +671,7 @@ impl Emitter<'_> {
             i.local_get(params[0]);
         }
         // the group list co-owns the element it copied out of xs
-        self.share_handle_top(elem);
+        self.arm_share_handle_top(elem);
         if elem.val_type() == wasm_encoder::ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
@@ -686,7 +686,7 @@ impl Emitter<'_> {
             i.i32_const(0).call(F_ALLOC);
             i.local_get(params[0]);
         }
-        self.share_handle_top(elem);
+        self.arm_share_handle_top(elem);
         if elem.val_type() == wasm_encoder::ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
@@ -704,7 +704,7 @@ impl Emitter<'_> {
             i.local_get(hkey);
         }
         if !key_owned {
-            self.share_handle_top(kt);
+            self.arm_share_handle_top(kt);
         }
         self.store_ty_slot_at(kt);
         {

@@ -419,7 +419,7 @@ impl Emitter<'_> {
         } else {
             self.f.instructions().local_get(hacc).local_get(hv);
             if !owned {
-                self.share_handle_top(b_ty);
+                self.arm_share_handle_top(b_ty);
             }
             if b_ty.val_type() == wasm_encoder::ValType::F64 {
                 self.f.instructions().i64_reinterpret_f64();
@@ -729,7 +729,7 @@ impl Emitter<'_> {
                     .local_get(xh);
                 // The member handle copied into the set takes +1: the set
                 // releases it through its typed drop (#2010 Map stage b).
-                self.share_handle_top(e);
+                self.arm_share_handle_top(e);
                 self.store_ty_slot_raw(e);
                 {
                     let mut i = self.f.instructions();

@@ -90,12 +90,12 @@ impl Emitter<'_> {
             self.load_ty_slot(ea, 0);
             // Handles copied into the pair block take +1 (the pair's typed
             // drop releases them, #2010 stage 2c).
-            self.share_handle_top(ea);
+            self.arm_share_handle_top(ea);
             self.store_ty_slot(ea, def.fields[0].1);
             self.f.instructions().local_get(hp);
             self.f.instructions().local_get(hb).local_get(hi).i32_const(sb).i32_mul().i32_add();
             self.load_ty_slot(eb, 0);
-            self.share_handle_top(eb);
+            self.arm_share_handle_top(eb);
             self.store_ty_slot(eb, def.fields[1].1);
             self.f.instructions().local_get(hp);
             self.release_i32();
