@@ -533,7 +533,17 @@ fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global
     }
 }
 
-fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
+/// A per-program helper's body, with the RC signature its builder declared
+/// (#4278 B1; `None`: it declares none).
+fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> (Function, Option<HelperSig>) {
+    if let Helper::CowElems { inc_elems } = h {
+        let (f, sig) = runtime_alloc::emit_cow_elems(*inc_elems);
+        return (f, Some(sig));
+    }
+    (helper_body_unsigned(h, work, helper_snapshot, hpos), None)
+}
+
+fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
     match h {
     Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
         work.helper_base.get(),
@@ -621,7 +631,10 @@ pub(crate) fn resolve_extras(
             _ => crate::fan::js_async::helper_result(h).unwrap_or_else(|| runtime_alloc::helper_result(h)),
         };
         let ti = work.itype(params, ret);
-        let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);
+        let (f, sig) = helper_body(h, work, helper_snapshot.as_slice(), hpos);
+        if let Some(sig) = &sig {
+            crate::witness::rc::helper(extra_base + extra_fns.len() as u32, sig);
+        }
         extra_fns.push((ti, f));
     }
     let mut entry_fn_indices: Vec<u32> = Vec::new();
