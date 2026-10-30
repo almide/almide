@@ -46,6 +46,18 @@ impl Emitter<'_> {
         }
     }
 
+    /// The arm releases the credit a `Retain` argument `arg` moved into it.
+    /// A frame variable's credit moved in as that variable's `m` event, which
+    /// takes this release; an owned temporary's moved in as its line's `m`
+    /// (`im`) with no RC event, so the release is logged here — a
+    /// temporary's `d-` held to a release inside this arm's window, with no
+    /// further line (the temporary's own line already ends in the move).
+    pub(crate) fn arm_retained_released(&mut self, arg: &almide_ir::IrExpr) {
+        if self.witness.as_ref().is_some_and(|w| !w.dead()) && self.witness_src_local(arg).is_none() {
+            crate::witness::rc::event('d', None);
+        }
+    }
+
     /// [`Emitter::share_handle_top`], logged as the arm's share handed on.
     pub(crate) fn arm_share_handle_top(&mut self, t: SliceTy) {
         if self.elem_is_handle(t) {

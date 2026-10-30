@@ -88,6 +88,7 @@ impl Emitter<'_> {
                 // err side hands it back), released with its payload.
                 let dec_in = self.dec_fn_of(SliceTy::Result(o, er));
                 self.f.instructions().local_get(hs).call(dec_in);
+                self.arm_retained_released(r);
                 self.f.instructions().end();
                 self.witness_once_arm();
                 self.witness_once_close();
@@ -323,6 +324,7 @@ impl Emitter<'_> {
                 // released here with its payload.
                 let dec_in = self.dec_fn_of(SliceTy::Result(o, er));
                 self.f.instructions().local_get(hs).call(dec_in);
+                self.arm_retained_released(r);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
@@ -517,6 +519,7 @@ impl Emitter<'_> {
                     i.end();
                     i.end();
                 }
+                self.arm_retained_released(o_arg);
                 self.release_i32();
                 // kept = the INPUT block: retained in, owned out (see result.map).
                 Some(Lowered::owned(got))
