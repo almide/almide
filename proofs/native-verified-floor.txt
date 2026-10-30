@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 130 of 1005
+# rendered: 133 of 1005
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/assert_abort_eq.almd
 spec/wasm_cross/assert_abort_msg.almd
@@ -51,6 +51,7 @@ spec/wasm_cross/global_in_both_arms.almd
 spec/wasm_cross/global_in_shortcircuit_operand.almd
 spec/wasm_cross/grain_functions.almd
 spec/wasm_cross/grain_pattern_destructure.almd
+spec/wasm_cross/grain_pattern_guards.almd
 spec/wasm_cross/grouping_unary.almd
 spec/wasm_cross/guard_else_exit_code.almd
 spec/wasm_cross/heap_result_err_interp.almd
@@ -80,6 +81,7 @@ spec/wasm_cross/licm_zero_trip_hoist.almd
 spec/wasm_cross/literal_int_forms.almd
 spec/wasm_cross/literal_unit.almd
 spec/wasm_cross/loop_break_continue.almd
+spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mutual_tail_recursion.almd
 spec/wasm_cross/nested_tuple_destructure.almd
@@ -123,6 +125,7 @@ spec/wasm_cross/tm_record_fn_pass.almd
 spec/wasm_cross/tm_record_interp.almd
 spec/wasm_cross/tm_record_lit_print.almd
 spec/wasm_cross/tm_record_shadow_drop.almd
+spec/wasm_cross/tm_tuple2_fn_pass.almd
 spec/wasm_cross/tm_variant_eq.almd
 spec/wasm_cross/tm_variant_fn_pass.almd
 spec/wasm_cross/tm_variant_lit_print.almd
