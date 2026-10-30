@@ -48,6 +48,8 @@ pub(crate) enum FloorParam {
     Str,
     /// `List[E]` — the runtime borrows a slice (`&[T]` / `&Vec<T>`).
     List(ListElem),
+    /// `Bytes` — the runtime borrows its `Vec<u8>` (`&Vec<u8>` / `&[u8]`).
+    Bytes,
 }
 
 /// A declared list's element type.
@@ -72,6 +74,10 @@ pub(crate) enum FloorRet {
     Res,
     /// `List[Int]` — an owned `Vec<i64>`.
     ListInt,
+    /// `List[String]` — a runtime `Vec<String>`, rebound as `Vec<AlmideString>`.
+    ListStr,
+    /// `Bytes` — the runtime's own `Vec<u8>`.
+    Bytes,
 }
 
 /// One declared floor function.
@@ -201,6 +207,7 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "Bool" => Some(FloorParam::Bool),
             "Float" => Some(FloorParam::Float),
             "String" => Some(FloorParam::Str),
+            "Bytes" => Some(FloorParam::Bytes),
             _ => None,
         },
         TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => {
@@ -224,6 +231,7 @@ fn floor_ret(t: &TypeExpr) -> Option<FloorRet> {
             "Bool" => Some(FloorRet::Bool),
             "Float" => Some(FloorRet::Float),
             "String" => Some(FloorRet::Str),
+            "Bytes" => Some(FloorRet::Bytes),
             _ => None,
         },
         TypeExpr::Generic { name, args } if name.as_str() == "Result" && args.len() == 2 => {
@@ -233,7 +241,11 @@ fn floor_ret(t: &TypeExpr) -> Option<FloorRet> {
                 .map(|_| FloorRet::Res)
         }
         TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => {
-            (simple(&args[0])? == "Int").then_some(FloorRet::ListInt)
+            match simple(&args[0])? {
+                "Int" => Some(FloorRet::ListInt),
+                "String" => Some(FloorRet::ListStr),
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -250,6 +262,7 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Bool => r == "bool",
         FloorParam::Float => r == "f64",
         FloorParam::Str => r == "&str",
+        FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
         FloorParam::List(elem) => {
             let inner = r
                 .strip_prefix("&[")
@@ -279,6 +292,8 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Float => t == "f64",
         FloorRet::Str => string(&t),
         FloorRet::ListInt => t == "Vec<i64>",
+        FloorRet::ListStr => t == "Vec<String>",
+        FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Res => t
             .strip_prefix("Result<")
             .and_then(|x| x.strip_suffix('>'))
@@ -755,9 +770,12 @@ use crate::render_native::{as_f64_arg, as_str_arg, wall, NTy};
 /// carries, when its element kind is the declared one.
 fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
     let int_list = matches!(elem, ListElem::Int | ListElem::Any);
+    let str_list = matches!(elem, ListElem::Str | ListElem::Any);
     match got {
         NTy::Vec if int_list => Some(format!("&{code}")),
         NTy::VecRef if int_list => Some(code.to_string()),
+        NTy::VecStr if str_list => Some(format!("&{code}")),
+        NTy::VecStrRef if str_list => Some(code.to_string()),
         _ => None,
     }
 }
@@ -779,6 +797,11 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
                 .then(|| as_str_arg(code, *got))
                 .ok_or_else(mismatch)?,
             FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
+            FloorParam::Bytes => match got {
+                NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
+                NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.clone(),
+                _ => return Err(mismatch()),
+            },
         });
     }
     let call = format!("{}({})", f.symbol, rendered.join(", "));
@@ -793,5 +816,10 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
             Some(NTy::Res),
         ),
         FloorRet::ListInt => (call, Some(NTy::Vec)),
+        FloorRet::Bytes => (call, Some(NTy::Rec(crate::render_native_rec::bytes_index()))),
+        FloorRet::ListStr => (
+            format!("({call}).into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()"),
+            Some(NTy::VecStr),
+        ),
     })
 }

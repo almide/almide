@@ -380,13 +380,7 @@ fn render_declared_floor_call(
     match (dst, ret) {
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
-            let ty_name = match t {
-                NTy::Str => "AlmideString",
-                NTy::Vec => "Vec<i64>",
-                NTy::F64 => "f64",
-                NTy::Res => "Result<i64, AlmideString>",
-                _ => "i64",
-            };
+            let ty_name = crate::render_native_rec::owned_ty(t);
             writeln!(out, "let mut {}: {} = {};", var(*d), ty_name, expr).unwrap();
         }
         (None, _) => writeln!(out, "{expr};").unwrap(),

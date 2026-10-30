@@ -107,6 +107,7 @@ fn native_sig_subset_check(
     // #4006 A5: a record with heap fields that has a generated struct.
     let is_struct_record = |t: &Ty| {
         matches!(t, Ty::Named(n, args) if args.is_empty() && crate::render_native_rec::rec_index(n.as_str()).is_some())
+            || matches!(t, Ty::Bytes)
             || (matches!(t, Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _))
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
     };
@@ -267,6 +268,7 @@ fn native_sig_kind(
             Some(NativeSigKind::ListI64)
         }
         Ty::Named(n, args) if args.is_empty() => crate::render_native_rec::rec_index(n.as_str()).map(NativeSigKind::Rec),
+        Ty::Bytes => Some(NativeSigKind::Rec(crate::render_native_rec::bytes_index())),
         Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) => {
             crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec)
         }

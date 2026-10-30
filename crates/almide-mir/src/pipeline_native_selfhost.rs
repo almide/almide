@@ -55,7 +55,7 @@ fn link_native_self_host(
     for (src, pairs) in crate::mir_ops::self_host_runtime() {
         entries_of.entry(*src).or_insert(*pairs);
         for (impl_fn, call) in pairs.iter() {
-            if crate::render_native_shims::shim(call).is_none() {
+            if crate::render_native_shims::shim(call).is_none() && crate::native_floor::declared(call).is_none() {
                 by_call.entry(*call).or_insert((*src, *impl_fn));
             }
         }

@@ -26,6 +26,31 @@ pub(crate) struct RecDecl {
     pub cases: Option<Vec<(u32, Vec<NTy>)>>,
     /// A list type of generated or nested-list elements: `Vec<elem>`.
     pub list_of: Option<NTy>,
+    /// A builtin with a fixed runtime spelling (`Bytes` is `Vec<u8>`, the v0
+    /// runtime's own representation, so floor bodies take it as is).
+    pub alias: Option<&'static str>,
+}
+
+/// The table key of the builtin `Bytes` type.
+pub(crate) const BYTES_KEY: &str = "Ty::Bytes";
+
+/// The index of `Bytes`, appended on first use. It is always the last entry
+/// it joins, so no earlier index moves; the header is assembled after the
+/// bodies render, so a body may be the first user.
+pub(crate) fn bytes_index() -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
+            return i as u16;
+        }
+        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>") });
+        (r.len() - 1) as u16
+    })
+}
+
+/// `t` is the generated `Bytes` type.
+pub(crate) fn is_bytes(t: NTy) -> bool {
+    matches!(t, NTy::Rec(i) | NTy::RecRef(i) if rec_index(BYTES_KEY) == Some(i))
 }
 
 /// The declarations one render derives from: (record layouts, variant
@@ -92,7 +117,7 @@ pub(crate) fn rec_index(name: &str) -> Option<u16> {
 }
 
 pub(crate) fn rec_field(i: u16, k: usize) -> Option<NTy> {
-    RECS.with(|r| r.borrow().get(i as usize).filter(|d| d.cases.is_none() && d.list_of.is_none()).and_then(|d| d.fields.get(k).copied()))
+    RECS.with(|r| r.borrow().get(i as usize).filter(|d| d.cases.is_none() && d.list_of.is_none() && d.alias.is_none()).and_then(|d| d.fields.get(k).copied()))
 }
 
 /// The element kind of a generated list type (`None` for a struct or enum).
@@ -229,6 +254,10 @@ pub(crate) fn struct_defs() -> String {
     RECS.with(|r| {
         let mut out = String::new();
         for (i, d) in r.borrow().iter().enumerate() {
+            if let Some(a) = d.alias {
+                out.push_str(&format!("type {} = {a};\n\n", struct_name(i as u16)));
+                continue;
+            }
             if let Some(e) = d.list_of {
                 out.push_str(&format!("/// list `{}`\ntype {} = Vec<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
                 continue;
@@ -271,6 +300,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             a.iter().for_each(|e| collect_tuples(e, out));
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
+        Ty::Bytes if !out.contains(t) => out.push(t.clone()),
         _ => {}
     }
 }
@@ -301,6 +331,7 @@ pub(crate) fn derive_records(
     // A tuple type the program declares in a signature is an anonymous record:
     // the same uniform slots, keyed by its spelled type.
     let mut lists: BTreeSet<String> = BTreeSet::new();
+    let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
     for t in tuples {
         if let Ty::Tuple(es) = t {
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
@@ -323,6 +354,7 @@ pub(crate) fn derive_records(
             Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
             Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
+            Ty::Bytes if uses_bytes => return Some(Err(BYTES_KEY.to_string())),
             _ => return None,
         }))
     };
@@ -368,7 +400,10 @@ pub(crate) fn derive_records(
             break;
         }
     }
-    let names: Vec<String> = set.iter().cloned().collect();
+    let mut names: Vec<String> = set.iter().cloned().collect();
+    if uses_bytes {
+        names.push(BYTES_KEY.to_string());
+    }
     let spell = |t: &Ty| match kind(t, &set) {
         Some(Ok(k)) => k,
         Some(Err(m)) => NTy::Rec(names.iter().position(|x| *x == m).expect("kept") as u16),
@@ -377,9 +412,12 @@ pub(crate) fn derive_records(
     names
         .iter()
         .map(|n| {
+            if n == BYTES_KEY {
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>") };
+            }
             let (is_enum, cases) = &decls[n];
             if lists.contains(n) {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])) };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None };
             }
             if *is_enum {
                 RecDecl {
@@ -387,9 +425,10 @@ pub(crate) fn derive_records(
                     fields: Vec::new(),
                     cases: Some(cases.iter().map(|(t, fs)| (*t, fs.iter().map(spell).collect())).collect()),
                     list_of: None,
+                    alias: None,
                 }
             } else {
-                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None }
+                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None }
             }
         })
         .collect()
