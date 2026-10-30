@@ -1,66 +1,57 @@
 //! String byte reads in user code (#4281), each recorded in the bounds
-//! witness with the test that keeps it inside its block, so the proven
-//! bounds checker (`BoundsCert`, W = 1) and almide-anchor-check
-//! (operands.rs `covers`, the one-byte stride) hold it the way they hold a
-//! list element:
+//! witness with the test that ALREADY keeps it inside its block — no test
+//! is added for the record — so the proven bounds checker (`BoundsCert`,
+//! W = 1) and almide-anchor-check (operands.rs `covers`, the one-byte
+//! stride) hold it the way they hold a list element:
 //!
-//! - a byte loop's exit test `k >=u n; br_if 1` with `n` the string's
-//!   `len` word (captured or re-read), then the read `s + k` at the payload:
-//!   `e N a N`, the shape of a `for` loop's element read (#4280);
-//! - any other read: a guard `idx >=u len(s)` opening an `if` that aborts,
-//!   then the read `s + idx` (or `s` for byte 0): `c N a N`. The guard is
-//!   never taken where it is emitted (each sits behind the surface's own
-//!   test); it is the test the byte check can read.
+//! - a byte loop's exit test `k >=u n; br_if 1`, then the read `s + k` at
+//!   the payload: `e N a N`, the shape of a `for` loop's element read
+//!   (#4280). `n` is the string's `len` word (captured or re-read), or a
+//!   count an enclosing test bounds by it (`n >u len(s)` / `len(s) != n`,
+//!   the read in that test's `else`);
+//! - the surface's own test opening an `if` whose `else` holds the read:
+//!   `idx >=u len(s)` (the read `s + idx`) or `len(s) == 0` (the read of
+//!   byte 0): `c N a N`, the `c` anchored at that `if`.
 //!
 //! The string routines' own bodies (equality, concat, the UTF-8 helpers,
 //! the search table) are runtime routines: their reads belong to #4278's
-//! per-helper certificates and record nothing here.
-
-use wasm_encoder::BlockType;
+//! per-helper certificates and record nothing here. A user-code read whose
+//! bound takes more than one of these facts (a suffix compare at
+//! `len(s) - len(p) + k`, a backward walk, a read at `k - 1`) records
+//! nothing either: it is listed, uncounted by this mechanism, in
+//! docs/TRUSTED_BASE.md.
 
 use crate::emitter::Emitter;
 use crate::string_scan::str_byte;
 use crate::witness::bounds;
-use crate::*;
 
 impl Emitter<'_> {
-    /// The guarded read of byte `idx` (`None`: byte 0) of the string in
-    /// local `s`; the byte is left on the stack as an i32.
-    pub(crate) fn str_guarded_byte(&mut self, s: u32, idx: Option<u32>) {
+    /// The surface's own test just opened its `if` (`idx >=u len(s)` or
+    /// `len(s) == 0`, the read below to come in its `else`): the slot that
+    /// read is recorded under.
+    pub(crate) fn str_test(&mut self) -> Option<bounds::Site> {
         let site = bounds::site(None);
-        {
-            let mut i = self.f.instructions();
-            match idx {
-                Some(x) => i.local_get(x),
-                None => i.i32_const(0),
-            };
-            i.local_get(s).i32_load(len_memarg()).i32_ge_u().if_(BlockType::Empty).i32_const(0);
-        }
         bounds::check(site, self.f);
-        {
-            let mut i = self.f.instructions();
-            i.drop().unreachable().end();
-            i.local_get(s);
-            if let Some(x) = idx {
-                i.local_get(x).i32_add();
-            }
-            i.i32_load8_u(str_byte());
-        }
-        bounds::access(site, false, self.f);
+        site
     }
 
-    /// The exit test `k >=u n; br_if 1` of a byte loop over a string's
-    /// `len` was just emitted: the slot its read below is recorded under.
+    /// The exit test `k >=u n; br_if 1` of a byte loop was just emitted: a
+    /// slot a read below it is recorded under (one per string it reads).
     pub(crate) fn str_loop_exit(&mut self) -> Option<bounds::Site> {
         let site = bounds::site(None);
         bounds::exit(site, self.f);
         site
     }
 
-    /// The read `s + k` of the byte loop whose exit test `site` recorded;
-    /// the byte is left on the stack as an i32.
-    pub(crate) fn str_loop_byte(&mut self, site: Option<bounds::Site>, s: u32, k: u32) {
-        self.f.instructions().local_get(s).local_get(k).i32_add().i32_load8_u(str_byte());
+    /// The read `s + k` (`None`: byte 0, `s`) under the test `site`
+    /// recorded; the byte is left on the stack as an i32.
+    pub(crate) fn str_byte_at(&mut self, site: Option<bounds::Site>, s: u32, k: Option<u32>) {
+        let mut i = self.f.instructions();
+        i.local_get(s);
+        if let Some(k) = k {
+            i.local_get(k).i32_add();
+        }
+        i.i32_load8_u(str_byte());
         bounds::access(site, false, self.f);
     }
 }
