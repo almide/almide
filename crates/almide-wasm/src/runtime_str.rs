@@ -163,10 +163,17 @@ pub(crate) fn emit_str_replace() -> Function {
 /// alloc rounds up to its 16<<class slab, the slack absorbs the next
 /// appends in place, and each spill doubles the class. `src` is borrowed
 /// (F_CONCAT's contract); `dst`'s ownership transfers through the call.
-pub(crate) fn emit_str_append() -> Function {
+pub(crate) fn emit_str_append() -> (Function, crate::helper_sig::HelperSig) {
+    use crate::helper_sig::{HelperSig, Mode};
     // params: 0=dst, 1=src; locals: 2=la, 3=lb, 4=out, 5=p, 6=q, 7=end,
     // 8=want
     let (dst, src, la, lb, out) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    // #4278 B1: the accumulator is consumed on every path (appended in
+    // place and returned, or released once outgrown); the appended string
+    // is only read.
+    let mut sig = HelperSig::new(&[Mode::C, Mode::B]);
+    let fresh = sig.object(None);
+    let d = dst as usize;
     let (p, q, endp, want) = (5u32, 6u32, 7u32, 8u32);
     let payload = almide_layout::PAYLOAD as i32;
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
@@ -184,6 +191,7 @@ pub(crate) fn emit_str_append() -> Function {
     i.local_get(dst).i32_load(word(almide_layout::CAP.offset)).i32_le_u();
     i.i32_and();
     i.if_(BlockType::Empty);
+    sig.branch();
     {
         // dst[la..la+lb] = src[0..lb] — byte loop under 16 (the tiny-copy
         // rule F_CONCAT measured), memory.copy else.
@@ -205,8 +213,12 @@ pub(crate) fn emit_str_append() -> Function {
         i.end();
         i.local_get(dst).local_get(la).local_get(lb).i32_add().i32_store(len_memarg());
         i.local_get(dst).return_();
+        sig.op(d, 'm');
+        sig.exit();
     }
     i.end();
+    sig.arm();
+    sig.join();
     // #2117: above the largest size class $alloc stops rounding up, so a
     // grown block comes back with cap == len and the window above can
     // never fire again — every further append reallocated the whole
@@ -223,6 +235,7 @@ pub(crate) fn emit_str_append() -> Function {
     i.local_get(dst).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq();
     i.i32_and();
     i.if_(BlockType::Empty);
+    sig.branch();
     {
         // want = max(la + lb, cap * 2); a cap whose double wraps reads as
         // 0 under the unsigned compare and falls back to the exact size,
@@ -232,6 +245,7 @@ pub(crate) fn emit_str_append() -> Function {
         i.local_get(la).local_get(lb).i32_add().local_set(want);
         i.end();
         i.local_get(want).call(F_ALLOC).local_set(out);
+        sig.op(fresh, 'i');
         i.local_get(out).i32_const(payload).i32_add();
         i.local_get(dst).i32_const(payload).i32_add();
         i.local_get(la);
@@ -244,14 +258,23 @@ pub(crate) fn emit_str_append() -> Function {
         // is the concatenation.
         i.local_get(out).local_get(la).local_get(lb).i32_add().i32_store(len_memarg());
         i.local_get(dst).call(F_DEC_FLAT);
+        sig.rc(d, 'd');
         i.local_get(out).return_();
+        sig.op(fresh, 'm');
+        sig.exit();
     }
     i.end();
+    sig.arm();
+    sig.join();
     // Outgrown (or shared, or static): fresh concat, release the old
     // accumulator ($dec_flat guards static addresses itself).
     i.local_get(dst).local_get(src).call(F_CONCAT).local_set(out);
+    sig.op(fresh, 'i');
     i.local_get(dst).call(F_DEC_FLAT);
+    sig.rc(d, 'd');
     i.local_get(out);
+    sig.op(fresh, 'm');
     i.end();
-    f
+    let _ = src;
+    (f, sig)
 }

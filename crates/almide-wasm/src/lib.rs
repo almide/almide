@@ -102,6 +102,8 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 mod bytes;
 mod bytes_append;
 mod kmp;
+/// #4278 B1: a runtime helper's declared RC signature and its body's log.
+pub(crate) mod helper_sig;
 mod fan_par;
 pub mod decline_site;
 mod imports;
