@@ -121,7 +121,7 @@ verdict() {
         # own certificate's to catch: almide-verify REJECTS its `rc-sig`
         # record (the proven checker and the Rocq kernel judge the same
         # record on every structural-wall run). Its REJECT line is pinned.
-        if [ -f "$DIR/$1.sig" ] && grep '^REJECT rc-sig ' "$wt/verify.out" > "$wt/witness.w"; then
+        if [ -f "$DIR/$1.sig" ] && grep -E '^REJECT +rc-sig ' "$wt/verify.out" > "$wt/witness.w"; then
           echo 1; return
         fi
         echo "bundle-rejected"; return ;;
