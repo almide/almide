@@ -147,11 +147,53 @@ impl AddrState {
                 break;
             }
         }
+        // An untyped list block whose every stored element has one generated
+        // kind (a typed aggregate, or a scalar list) is a list of that kind.
+        let scalar_lists: BTreeSet<ValueId> = func
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ListLit { dst, .. } | Op::Alloc { dst, init: Init::IntList(_), .. } => Some(*dst),
+                _ => None,
+            })
+            .collect();
+        let blocks: Vec<ValueId> = func
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } if !alloc_rec.contains_key(dst) => Some(*dst),
+                _ => None,
+            })
+            .collect();
+        for r in blocks {
+            let mut kinds: Vec<NTy> = Vec::new();
+            for op in &func.ops {
+                let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
+                let (Some(&(root, _)), Some(&src)) = (base_of.get(&args[0]), handle_of.get(&args[1])) else { continue };
+                if root != r {
+                    continue;
+                }
+                let k = match alloc_rec.get(&src) {
+                    Some(j) => NTy::Rec(*j),
+                    None if scalar_lists.contains(&src) => NTy::Vec,
+                    None => {
+                        kinds.clear();
+                        break;
+                    }
+                };
+                if !kinds.contains(&k) {
+                    kinds.push(k);
+                }
+            }
+            if let [k] = kinds.as_slice() {
+                alloc_rec.insert(r, crate::render_native_rec::list_type_of(*k));
+            }
+        }
         let alloc_rec = func
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::DynList { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
                 // A scalar-only constructor of a heap variant is built as a slot list.
                 Op::ListLit { dst, .. } => alloc_rec
                     .get(dst)
@@ -523,7 +565,7 @@ pub(crate) fn render_addr_op(
                 }
             }
         }
-        Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
+        Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
             tys.insert(*dst, NTy::VecStr);
             line!(
                 "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
@@ -532,7 +574,7 @@ pub(crate) fn render_addr_op(
             );
             return Ok(true);
         }
-        Op::Alloc { dst, init: Init::DynList { len }, .. }
+        Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. }
             if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some()) =>
         {
             let i = st.alloc_rec[dst];

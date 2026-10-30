@@ -56,6 +56,26 @@ pub(crate) fn bytes_index() -> u16 {
     })
 }
 
+/// The generated list type of `e` elements, appended on first use (at the
+/// end, like `Bytes`, so no earlier index moves).
+pub(crate) fn list_type_of(e: NTy) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.list_of == Some(e)) {
+            return i as u16;
+        }
+        r.push(RecDecl {
+            name: format!("List<{e:?}>"),
+            fields: Vec::new(),
+            cases: None,
+            list_of: Some(e),
+            alias: None,
+            default_tag: None,
+        });
+        (r.len() - 1) as u16
+    })
+}
+
 /// `t` is the generated `Bytes` type.
 pub(crate) fn is_bytes(t: NTy) -> bool {
     matches!(t, NTy::Rec(i) | NTy::RecRef(i) if rec_index(BYTES_KEY) == Some(i))
