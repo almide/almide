@@ -79,6 +79,27 @@ pub(crate) fn runtime_reexports(bodies: &str) -> String {
     out
 }
 
+/// What a scan of one module level collects.
+#[derive(Default)]
+struct Acc {
+    out: Vec<TopItem>,
+    /// Each local `mod`'s items, for a `use m::*` glob.
+    mods: Vec<(String, Vec<TopItem>)>,
+    globs: Vec<(String, Vis, Vec<String>)>,
+    /// Each local `macro_rules!`: [`Scan::macro_items`].
+    macros: Vec<(String, Vec<(usize, Vis)>)>,
+    /// Top-level invocations of a macro that is not local.
+    unresolved: Vec<String>,
+}
+
+/// The macros invoked at the top level of `src` whose items the scanner
+/// cannot see (not a local `macro_rules!`, not `thread_local!`).
+pub(crate) fn unresolved_top_level_macros(src: &str) -> Vec<String> {
+    let mut lexer = rust_idents::tokens(src);
+    let toks: Vec<Tok> = std::iter::from_fn(|| lexer.next_token()).collect();
+    Scan { src, toks: &toks }.scan(0, toks.len()).unresolved
+}
+
 struct Scan<'s, 't> {
     src: &'s str,
     toks: &'t [Tok<'s>],
@@ -166,9 +187,11 @@ impl<'s> Scan<'s, '_> {
     }
 
     fn items(&self, start: usize, end: usize) -> Vec<TopItem> {
-        let mut out = Vec::new();
-        let mut mods: Vec<(String, Vec<TopItem>)> = Vec::new();
-        let mut globs: Vec<(String, Vis, Vec<String>)> = Vec::new();
+        self.scan(start, end).out
+    }
+
+    fn scan(&self, start: usize, end: usize) -> Acc {
+        let mut acc = Acc::default();
         let mut cfgs: Vec<String> = Vec::new();
         let mut i = start;
         while i < end {
@@ -184,74 +207,143 @@ impl<'s> Scan<'s, '_> {
             }
             let (vis, j) = self.visibility(i, end);
             let j = self.qualifiers(j);
-            let next = self.item(j, end, vis, &mut cfgs, &mut out, &mut mods, &mut globs);
+            let next = self.item(j, end, vis, &cfgs, &mut acc);
             cfgs.clear();
             i = next.max(i + 1);
         }
-        for (path, vis, cfgs) in globs {
-            let Some((_, inner)) = mods.iter().find(|(m, _)| *m == path) else { continue };
-            for it in inner.iter().filter(|it| it.vis != Vis::Private) {
-                let vis = if vis == Vis::Pub && it.vis == Vis::Pub { Vis::Pub } else { vis.min_crate() };
-                out.push(TopItem { name: it.name.clone(), vis, cfgs: [cfgs.clone(), it.cfgs.clone()].concat() });
-            }
+        for (path, vis, cfgs) in std::mem::take(&mut acc.globs) {
+            let Some((_, inner)) = acc.mods.iter().find(|(m, _)| *m == path) else { continue };
+            let found: Vec<TopItem> = inner
+                .iter()
+                .filter(|it| it.vis != Vis::Private)
+                .map(|it| {
+                    let vis = if vis == Vis::Pub && it.vis == Vis::Pub { Vis::Pub } else { vis.min_crate() };
+                    TopItem { name: it.name.clone(), vis, cfgs: [cfgs.clone(), it.cfgs.clone()].concat() }
+                })
+                .collect();
+            acc.out.extend(found);
         }
-        out
+        acc
     }
 
     /// Record what the item at `j` binds; the index past it.
-    #[allow(clippy::too_many_arguments)]
-    fn item(
-        &self,
-        j: usize,
-        end: usize,
-        vis: Vis,
-        cfgs: &mut Vec<String>,
-        out: &mut Vec<TopItem>,
-        mods: &mut Vec<(String, Vec<TopItem>)>,
-        globs: &mut Vec<(String, Vis, Vec<String>)>,
-    ) -> usize {
+    fn item(&self, j: usize, end: usize, vis: Vis, cfgs: &[String], acc: &mut Acc) -> usize {
         let item_end = self.item_end(j, end);
-        match self.tok(j) {
-            "fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static" | "mod" => {
+        match (self.tok(j), self.tok(j + 1)) {
+            ("fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static" | "mod", _) => {
                 let k = if self.tok(j + 1) == "mut" { j + 2 } else { j + 1 };
                 let name = self.tok(k);
                 if self.tok(j) == "mod" {
                     if let Some(open) = self.body_open(k, end) {
                         let close = self.group_end(open, end);
-                        mods.push((name.to_string(), self.items(open + 1, close - 1)));
+                        acc.mods.push((name.to_string(), self.items(open + 1, close - 1)));
                     }
                 }
                 if self.is_ident(k) && name != "_" {
-                    out.push(TopItem { name: name.to_string(), vis, cfgs: cfgs.clone() });
+                    acc.out.push(TopItem { name: name.to_string(), vis, cfgs: cfgs.to_vec() });
                 }
                 item_end
             }
-            "use" => {
-                self.use_names(j + 1, item_end, vis, cfgs, out, globs);
+            ("use", _) => {
+                self.use_names(j + 1, item_end, vis, cfgs, acc);
                 item_end
             }
-            "extern" if self.tok(j + 1) == "{" => {
+            ("extern", "{") => {
                 let close = self.group_end(j + 1, end);
                 for mut it in self.items(j + 2, close - 1) {
-                    it.cfgs = [cfgs.clone(), it.cfgs].concat();
-                    out.push(it);
+                    it.cfgs = [cfgs.to_vec(), it.cfgs].concat();
+                    acc.out.push(it);
                 }
                 close
             }
-            "thread_local" if self.tok(j + 1) == "!" => {
-                let close = self.group_end(j + 2, end);
-                let mut k = j + 3;
-                while k < close {
-                    let (svis, s) = self.visibility(k, close);
-                    if self.tok(s) == "static" && self.is_ident(s + 1) {
-                        out.push(TopItem { name: self.tok(s + 1).to_string(), vis: svis, cfgs: cfgs.clone() });
-                    }
-                    k = self.item_end(s, close).max(k + 1);
-                }
-                close
+            ("thread_local", "!") => self.thread_local(j, end, cfgs, acc),
+            ("macro_rules", "!") => {
+                let def = self.macro_items(j + 3, item_end);
+                acc.macros.push((self.tok(j + 2).to_string(), def));
+                item_end
+            }
+            (name, "!") if self.is_ident(j) => {
+                self.macro_call(name, j + 2, item_end, cfgs, acc);
+                item_end
             }
             _ => item_end,
         }
+    }
+
+    fn thread_local(&self, j: usize, end: usize, cfgs: &[String], acc: &mut Acc) -> usize {
+        let close = self.group_end(j + 2, end);
+        let mut k = j + 3;
+        while k < close {
+            let (svis, s) = self.visibility(k, close);
+            if self.tok(s) == "static" && self.is_ident(s + 1) {
+                acc.out.push(TopItem { name: self.tok(s + 1).to_string(), vis: svis, cfgs: cfgs.to_vec() });
+            }
+            k = self.item_end(s, close).max(k + 1);
+        }
+        close
+    }
+
+    /// A local `macro_rules!` body (`from..end`): for each item its
+    /// transcriber declares under a `$param` name (`pub fn $name(…)`), the
+    /// position of that `ident` fragment among the matcher's fragments, and
+    /// the item's visibility.
+    fn macro_items(&self, from: usize, end: usize) -> Vec<(usize, Vis)> {
+        let mut params: Vec<&str> = Vec::new();
+        let mut out = Vec::new();
+        for i in from..end {
+            if self.tok(i) == "$" && self.tok(i + 2) == ":" && self.is_ident(i + 1) {
+                params.push(self.tok(i + 1));
+            }
+            let declares = matches!(self.tok(i), "fn" | "struct" | "enum" | "const" | "static" | "type");
+            if declares && self.tok(i + 1) == "$" {
+                if let Some(pos) = params.iter().position(|p| *p == self.tok(i + 2)) {
+                    let vis = if i > 0 && self.tok(i - 1) == "pub" { Vis::Pub } else { Vis::Private };
+                    out.push((pos, vis));
+                }
+            }
+        }
+        out
+    }
+
+    /// A top-level invocation of macro `name` whose arguments are
+    /// `from..end`: the items a local `macro_rules!` declares from them. An
+    /// invocation of any other macro is recorded as unresolved, so the guard
+    /// test can refuse an item the scanner cannot see.
+    fn macro_call(&self, name: &str, from: usize, end: usize, cfgs: &[String], acc: &mut Acc) {
+        let Some((_, def)) = acc.macros.iter().find(|(m, _)| m == name) else {
+            acc.unresolved.push(name.to_string());
+            return;
+        };
+        let close = self.group_end(from, end);
+        let mut args: Vec<Vec<&str>> = vec![Vec::new()];
+        let mut i = from + 1;
+        while i + 1 < close {
+            match self.tok(i) {
+                "," => args.push(Vec::new()),
+                "(" | "[" | "{" => {
+                    let e = self.group_end(i, close);
+                    if let Some(a) = args.last_mut() {
+                        a.extend(self.toks[i..e].iter().map(|t| t.1));
+                    }
+                    i = e;
+                    continue;
+                }
+                t => {
+                    if let Some(a) = args.last_mut() {
+                        a.push(t);
+                    }
+                }
+            }
+            i += 1;
+        }
+        let found: Vec<TopItem> = def
+            .iter()
+            .filter_map(|(pos, vis)| match args.get(*pos).map(Vec::as_slice) {
+                Some([one]) => Some(TopItem { name: (*one).to_string(), vis: *vis, cfgs: cfgs.to_vec() }),
+                _ => None,
+            })
+            .collect();
+        acc.out.extend(found);
     }
 
     /// The names the use tree in `from..end` (up to its `;`) binds: each
@@ -263,8 +355,7 @@ impl<'s> Scan<'s, '_> {
         end: usize,
         vis: Vis,
         cfgs: &[String],
-        out: &mut Vec<TopItem>,
-        globs: &mut Vec<(String, Vis, Vec<String>)>,
+        acc: &mut Acc,
     ) {
         let leaf_end = |i: usize| matches!(self.tok(i), "," | "{" | "}" | ";" | "");
         let mut i = from;
@@ -280,10 +371,10 @@ impl<'s> Scan<'s, '_> {
                 if name == "*" {
                     let path: Vec<&str> = leaf.iter().copied().filter(|t| *t != ":" && *t != "*").collect();
                     if let [single] = path.as_slice() {
-                        globs.push(((*single).to_string(), vis, cfgs.to_vec()));
+                        acc.globs.push(((*single).to_string(), vis, cfgs.to_vec()));
                     }
                 } else if name != "_" && name != "self" {
-                    out.push(TopItem { name, vis, cfgs: cfgs.to_vec() });
+                    acc.out.push(TopItem { name, vis, cfgs: cfgs.to_vec() });
                 }
             }
             leaf.clear();
@@ -388,6 +479,30 @@ mod tests {
                 .collect();
             assert!(bad.is_empty(), "{render} runtime puts names a user item can spell at the crate root: {bad:?}");
         }
+    }
+
+    /// Every top-level macro invocation in the runtime and the prelude is one
+    /// the scanner can read (a local `macro_rules!`, `thread_local!`), so no
+    /// item reaches the crate root, or misses its re-export, unseen.
+    #[test]
+    fn every_top_level_macro_is_one_the_scanner_reads() {
+        let all: std::collections::HashSet<&str> =
+            crate::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().map(|(m, _)| *m).collect();
+        let mut bodies = crate::rust_runtime_modules(&all);
+        let open = bodies.find("use super::*;").expect("runtime module");
+        bodies = bodies[open..].to_string();
+        for (what, src) in [("runtime modules", bodies), ("prelude", crate::rust_runtime_prelude(false))] {
+            let unresolved = unresolved_top_level_macros(&src);
+            assert!(unresolved.is_empty(), "{what}: top-level macro invocations the item scanner cannot read: {unresolved:?}");
+        }
+    }
+
+    #[test]
+    fn local_macro_items_are_seen() {
+        let src = "macro_rules! gen { ($name:ident, $ty:ty) => { pub fn $name(x: $ty) -> $ty { x } }; }\ngen!(almide_rt_a, i64);\ngen!(almide_rt_b, u8);\n";
+        assert_eq!(names(src), vec![("almide_rt_a".to_string(), Vis::Pub), ("almide_rt_b".to_string(), Vis::Pub)]);
+        assert!(unresolved_top_level_macros(src).is_empty());
+        assert_eq!(unresolved_top_level_macros("other!(x);\n"), vec!["other".to_string()]);
     }
 
     /// The helpers that collided (#4345) stay inside the runtime module, and

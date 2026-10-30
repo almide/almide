@@ -872,11 +872,14 @@ mod tests {
     /// own spellings are admitted.
     #[test]
     fn user_spellings_never_land_in_the_runtime_item_space() {
-        let names = ["mk", "sha256", "request", "almide_abort", "almide_rt_list_len", "almide_fn_x",
-            "__lambda_1", "ALMIDE_STDOUT_BUF", "AlmideMatrix", "x", "N", "main"];
-        for n in names {
+        // A user fn name is a lower-case identifier.
+        for n in ["mk", "sha256", "request", "almide_abort", "almide_rt_list_len", "almide_fn_x", "__lambda_1", "x", "main"] {
             let rust_fn = crate::escape_user_fn_name(sym(n));
             assert!(!crate::is_runtime_item_name(rust_fn.as_str()), "user fn `{n}` reaches Rust as `{rust_fn}`, a runtime name");
+        }
+        // A global may be spelled in any case.
+        let names = ["mk", "almide_abort", "almide_fn_x", "ALMIDE_STDOUT_BUF", "AlmideMatrix", "x", "N"];
+        for n in names {
             for origin in [None, Some("cfg".to_string()), Some("a_b".to_string())] {
                 let vi = crate::VarInfo { name: sym(n), ty: Ty::Int, mutability: crate::Mutability::Let, span: None,
                     use_count: 0, module_origin: origin.clone(), synthetic: false };

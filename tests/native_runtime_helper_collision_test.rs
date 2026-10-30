@@ -53,7 +53,7 @@ fn user_fn_named_mk_builds_beside_matrix() {
     assert_builds_and_agrees(
         "mk",
         "fn mk(n: Int) -> Matrix =\n  matrix.from_lists(list.range(0, n) |> list.map((i) => list.range(0, n) |> list.map((j) => float.from(i + j))))\n\neffect fn main() -> Unit = {\n  let c = mk(3) * mk(3)\n  println(\"${matrix.to_lists(c)}\")\n}\n",
-        "[[5.0, 8.0, 11.0], [8.0, 14.0, 20.0], [11.0, 20.0, 29.0]]\n",
+        "[[5, 8, 11], [8, 14, 20], [11, 20, 29]]\n",
     );
 }
 
