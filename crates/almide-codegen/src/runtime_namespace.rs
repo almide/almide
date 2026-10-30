@@ -100,6 +100,14 @@ pub(crate) fn unresolved_top_level_macros(src: &str) -> Vec<String> {
     Scan { src, toks: &toks }.scan(0, toks.len()).unresolved
 }
 
+/// The `macro_rules!` macros `src` defines at its top level, each with the
+/// number of items its transcriber declares from a `$name` argument.
+pub(crate) fn top_level_macros(src: &str) -> Vec<(String, usize)> {
+    let mut lexer = rust_idents::tokens(src);
+    let toks: Vec<Tok> = std::iter::from_fn(|| lexer.next_token()).collect();
+    Scan { src, toks: &toks }.scan(0, toks.len()).macros.into_iter().map(|(m, d)| (m, d.len())).collect()
+}
+
 struct Scan<'s, 't> {
     src: &'s str,
     toks: &'t [Tok<'s>],
@@ -491,8 +499,14 @@ mod tests {
         let mut bodies = crate::rust_runtime_modules(&all);
         let open = bodies.find("use super::*;").expect("runtime module");
         bodies = bodies[open..].to_string();
-        for (what, src) in [("runtime modules", bodies), ("prelude", crate::rust_runtime_prelude(false))] {
-            let unresolved = unresolved_top_level_macros(&src);
+        // A prelude macro the runtime invokes is readable when it declares no
+        // item (`almide_into_str_leaf!` writes impls only).
+        let prelude = crate::rust_runtime_prelude(false);
+        let itemless: Vec<String> =
+            top_level_macros(&prelude).into_iter().filter(|(_, n)| *n == 0).map(|(m, _)| m).collect();
+        for (what, src) in [("runtime modules", bodies), ("prelude", prelude)] {
+            let mut unresolved = unresolved_top_level_macros(&src);
+            unresolved.retain(|m| !itemless.contains(m));
             assert!(unresolved.is_empty(), "{what}: top-level macro invocations the item scanner cannot read: {unresolved:?}");
         }
     }
