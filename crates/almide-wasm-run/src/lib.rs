@@ -12,6 +12,9 @@ mod net_unix_host;
 #[cfg(test)]
 #[path = "tests/http_host_test.rs"]
 mod http_host_test;
+#[cfg(test)]
+#[path = "tests/host_ops_test.rs"]
+mod host_ops_test;
 pub(crate) mod component_alloc;
 pub mod component_availability;
 mod component_host;

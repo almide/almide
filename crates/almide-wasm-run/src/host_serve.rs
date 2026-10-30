@@ -30,10 +30,11 @@ use almide_rt_core::http_server_core::{
     HTTP_SERVER_DEFAULT_LIMITS, HttpServerConn, HttpServerPool, HttpServerWatch, http_server_pool, http_server_signal, http_server_watch,
 };
 
-pub(crate) const OP_SERVE_BIND: i32 = 70;
-pub(crate) const OP_SERVE_NEXT: i32 = 71;
-pub(crate) const OP_SERVE_REPLY: i32 = 72;
-pub(crate) const OP_SERVE_RUN: i32 = 75;
+pub(crate) const OP_SERVE_BIND: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::SERVE, 0);
+pub(crate) const OP_SERVE_NEXT: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::SERVE, 1);
+pub(crate) const OP_SERVE_REPLY: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::SERVE, 2);
+const _: () = assert!(OP_SERVE_REPLY == *almide_wasm::host_ops::SERVE.end());
+pub(crate) const OP_SERVE_RUN: i32 = *almide_wasm::host_ops::SERVE_RUN.start();
 
 /// The run's connection pool and the connection whose response is pending.
 /// The pool (the shared core's, #4021) accepts and reads up to 64 connections

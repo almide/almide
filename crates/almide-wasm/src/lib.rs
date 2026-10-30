@@ -116,6 +116,8 @@ pub mod checked_alloc;
 mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
+/// The host op number space: every family's range, declared once (#4338).
+pub mod host_ops;
 pub mod witness;
 pub mod cert_project;
 mod witness_hooks;
