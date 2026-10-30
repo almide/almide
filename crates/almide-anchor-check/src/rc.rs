@@ -27,11 +27,13 @@
 //! accounts as the arm's handed-over credit): counted (`arm_internal`), not
 //! refused — the arm-certificate residue of #4278.
 //!
-//! Likewise an RC call left over inside a taken compound routine's window
-//! (`rcroutines`: an in-place append, string building, a map edit — every
-//! route the emitter takes through `Emitter::routine`) is that routine's own,
-//! counted (`routine_internal`). Each count is printed per build, apart from
-//! the other.
+//! A taken compound routine's window (`rcroutines`: an in-place append,
+//! string building, a map edit — every route the emitter takes through
+//! `Emitter::routine`) orders the matching (a call inside it is tried after
+//! those outside) but accounts nothing: an RC call left over inside it is
+//! refused like any other (#4278 B1 retired the `routine_internal` class —
+//! every such call is a logged event of the routine, a slot consume, or a
+//! consumption its callee's checked signature declares).
 //!
 //! A release of a value loaded out of a heap block's slot that a later store
 //! overwrites is the slot's consume (#4278 B1): the recorder logs it as an
@@ -80,16 +82,17 @@
 //! that arm's own window read through the argument — a named event, never a
 //! counted class.
 //!
-//! The two counted classes left (arm-internal, routine-internal) are debts
-//! to #4278's per-window certificates — a declared per-path effect for each
-//! arm and routine window, checked against its body. They may only shrink; a
-//! new trusted class is an owner decision, not a checker edit. (`consumed`
-//! was retired by the helper signatures, `element` by the slot consume.)
+//! The one counted class left (arm-internal) is a debt to #4278's per-arm
+//! certificates — a declared per-path effect for each arm window, checked
+//! against its body. It may only shrink; a new trusted class is an owner
+//! decision, not a checker edit. (`consumed` was retired by the helper
+//! signatures, `element` by the slot consume, `routine-internal` by the
+//! routines' own logged events.)
 //!
-//! TRUSTED (#4278, until its arm, routine and container certificates exist):
-//! that `rcfns` names every rc_inc and release routine; that an arm's own RC
-//! keeps the balance its ownership declaration states; and that a compound
-//! routine's own RC keeps the balance of the operation the witness records.
+//! TRUSTED (#4278, until its arm certificates exist): that `rcfns` names
+//! every rc_inc and release routine; and that an arm's own RC keeps the
+//! balance its ownership declaration states. (A compound routine's RC is no
+//! longer trusted: each of its calls is one of its logged events.)
 
 use std::collections::{HashMap, HashSet};
 
@@ -119,7 +122,6 @@ pub struct RcReport {
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
     pub arm_internal: usize,
-    pub routine_internal: usize,
     /// Releases (or +1s) a callee's checked signature consumes (#4278 B1).
     pub signed: usize,
 }
@@ -598,15 +600,16 @@ pub fn check_rc(
         // has no such reading), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // More generally: a call that has a reading of its own when left over
-        // (an arm's or routine's, one before an abort)
-        // is tried after the calls that have none.
+        // (an arm's, one before an abort) is tried after the calls that have
+        // none. A routine's window gives no such reading (#4278 B1): every RC
+        // call a routine emits is one of its logged events.
         let fallback = |i: usize| {
             if i >= live {
                 return true;
             }
             let k = calls[i].0;
             let frame_owned = owned_at(&calls[i].2, k);
-            (!frame_owned && in_window(k)) || aborting.contains(&k)
+            (!frame_owned && inside(&windows[0], k)) || aborting.contains(&k)
         };
         // A call a move (`m` / `h`) could take is tried after the others —
         // before any other preference (a hold's name makes its release read
@@ -874,8 +877,6 @@ pub fn check_rc(
             let frame_owned = owned_at(&calls[i].2, k);
             let slot = if !frame_owned && inside(&windows[0], k) {
                 &mut rep.arm_internal
-            } else if !frame_owned && inside(&windows[1], k) {
-                &mut rep.routine_internal
             } else if aborting.contains(&k) {
                 &mut rep.pre_abort
             } else {
@@ -887,8 +888,6 @@ pub fn check_rc(
                 // Diagnosis only: where each counted call is.
                 let class = if !frame_owned && inside(&windows[0], k) {
                     "arm-internal"
-                } else if !frame_owned && inside(&windows[1], k) {
-                    "routine-internal"
                 } else {
                     "before-abort"
                 };

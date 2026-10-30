@@ -520,14 +520,18 @@ fn a_write_inside_a_block_left_by_falling_through_still_defines_the_read() -> Re
 }
 
 #[test]
-fn routine_rc_is_counted_and_an_unlogged_element_release_refused() -> Result<(), String> {
+fn an_unlogged_routine_or_element_release_is_refused() -> Result<(), String> {
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
-    // Inside a taken routine's window.
+    // Inside a taken routine's window with no event: refused — the
+    // routine-internal class is retired (#4278 B1).
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
     let mut r = RcReport::default();
-    check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &Default::default(), &mut r)?;
-    assert_eq!((r.routine_internal, r.arm_internal), (1, 0));
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &Default::default(), &mut r).is_err());
+    // The same call inside an arm's window is still the arm's own.
+    let mut r = RcReport::default();
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![(1, 0, 2)], vec![]], &Default::default(), &mut r)?;
+    assert_eq!(r.arm_internal, 1);
     // A value loaded out of a block's slot and released, then the slot
     // rewritten: the slot's consume — an `r` event in the release's window
     // (#4278 B1). With no event it is refused: the element class is retired.

@@ -30,9 +30,9 @@
 # `rc-sig` record (pinned as its REJECT line).
 # An rc drill with a <name>.count file is a COUNT drill instead: re-injected,
 # the frame must still be ACCEPTED with exactly the named class moved by the
-# named delta (e.g. `routine-internal +1`) and every other count unchanged —
+# named delta (e.g. `arm-internal +1`) and every other count unchanged —
 # a lost event that degrades to a counted class, never to an accepted frame
-# credit (the hold-move window, #4278's routine-internal debt).
+# credit (#4278's arm-internal debt; none is left once that class retires).
 # A patch that no longer applies fails this script too: regenerate it
 # against the current emitter rather than letting the drill go stale.
 #
@@ -173,10 +173,10 @@ for name in "${names[@]}"; do
     read -r cls delta < "$DIR/$name.count"
     got=$(python3 -c '
 import re, sys
-keys = ["before an abort", "rebind", "judge", "arm-internal", "routine-internal", "signed"]
+keys = ["before an abort", "rebind", "judge", "arm-internal", "signed"]
 def counts(p):
     t = open(p).read()
-    m = re.search(r"(\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) signed", t)
+    m = re.search(r"(\d+) release\(s\) before an abort, (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) signed", t)
     return dict(zip(keys, map(int, m.groups()))) if m else None
 a, b = counts(sys.argv[1]), counts(sys.argv[2])
 if a is None or b is None:
