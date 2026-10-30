@@ -32,3 +32,5 @@ unmarked_promise 12750
 fan_async_overlap 17600
 # #3420: one Int-only hook reading guest memory at a data_ptr address.
 extern_data_ptr_lifetime 13100
+# #4353: a Region param of a dual @extern(wasm) + @extern(rust) binding, one hook.
+extern_region_dual_binding 6500
