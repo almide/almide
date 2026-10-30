@@ -40,6 +40,16 @@ fn reason_class(e: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(90).collect()
 }
 
+/// The callee of a "not in the native runtime floor" wall, if `e` is one.
+fn floor_callee(e: &str) -> Option<String> {
+    if !e.contains("native runtime floor") {
+        return None;
+    }
+    let start = e.find("call to `")? + "call to `".len();
+    let len = e[start..].find('`')?;
+    Some(e[start..start + len].to_string())
+}
+
 #[test]
 fn the_native_verified_floor_holds() {
     // The compiler recurses deeply in a debug build; the CLI runs on a big
@@ -62,6 +72,9 @@ fn check() {
     files.sort();
     let mut rendered = BTreeSet::new();
     let mut walls: BTreeMap<String, usize> = BTreeMap::new();
+    // The first-wall callees outside the native runtime floor, by name: the
+    // to-do list for the floor itself (family D of #4006).
+    let mut floor_callees: BTreeMap<String, usize> = BTreeMap::new();
     for p in &files {
         let rel = p.strip_prefix(root).expect("under the root").display().to_string();
         let src = std::fs::read_to_string(p).expect("read");
@@ -69,7 +82,13 @@ fn check() {
             Ok(_) => {
                 rendered.insert(rel);
             }
-            Err(e) => *walls.entry(reason_class(&e.to_string())).or_default() += 1,
+            Err(e) => {
+                let e = e.to_string();
+                if let Some(callee) = floor_callee(&e) {
+                    *floor_callees.entry(callee).or_default() += 1;
+                }
+                *walls.entry(reason_class(&e)).or_default() += 1
+            }
         }
     }
     let total = files.len();
@@ -78,6 +97,12 @@ fn check() {
     eprintln!("native verified render: {} of {total} spec/wasm_cross fixtures", rendered.len());
     for (reason, n) in hist.iter().take(15) {
         eprintln!("  {n:4}  {reason}");
+    }
+    let mut callees: Vec<_> = floor_callees.into_iter().collect();
+    callees.sort_by_key(|e| std::cmp::Reverse(e.1));
+    eprintln!("first-wall calls outside the native runtime floor, by callee:");
+    for (callee, n) in &callees {
+        eprintln!("  {n:4}  {callee}");
     }
 
     let floor_path = root.join(FLOOR);
