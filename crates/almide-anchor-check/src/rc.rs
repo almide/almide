@@ -877,7 +877,8 @@ pub fn check_rc(
                 } else {
                     "before-abort"
                 };
-                eprintln!("counted {class}: function {pos} {}@{} on {:?}", calls[i].1, k, calls[i].2);
+                let ctx: Vec<String> = b.ops[k.saturating_sub(6)..=k].iter().map(|o| format!("{o:?}")).collect();
+                eprintln!("counted {class}: function {pos} {}@{} on {:?} after {}", calls[i].1, k, calls[i].2, ctx.join("; "));
             }
         }
         let extra: Vec<String> = (0..live)
