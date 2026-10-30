@@ -112,27 +112,31 @@ fn run_within(mut cmd: Command, limit: Duration) -> Option<(Duration, i32, Strin
             let _ = child.wait();
             return None;
         }
-        std::thread::sleep(Duration::from_millis(5));
+        // 1 ms: the 1M-digit runs take ~10 ms, so a coarser poll is the error.
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
-/// Best of three native runs; panics on a wrong answer or a run past 20 s.
+/// One native run; panics on a wrong answer or a run past 20 s.
 fn native_time(dir: &Path, mode: &str, n: u64) -> Duration {
-    (0..3)
-        .map(|_| {
-            let mut cmd = Command::new(dir.join("lin"));
-            cmd.args([mode, &n.to_string()]);
-            let (took, code, out, err) = run_within(cmd, Duration::from_secs(20))
-                .unwrap_or_else(|| panic!("native {mode} {n} ran past 20 s — quadratic again?"));
-            assert_eq!(
-                (code, out.as_str()),
-                (0, expected(mode, n).as_str()),
-                "native {mode} {n}: {err}"
-            );
-            took
-        })
-        .min()
-        .unwrap()
+    let mut cmd = Command::new(dir.join("lin"));
+    cmd.args([mode, &n.to_string()]);
+    let (took, code, out, err) = run_within(cmd, Duration::from_secs(20))
+        .unwrap_or_else(|| panic!("native {mode} {n} ran past 20 s — quadratic again?"));
+    assert_eq!(
+        (code, out.as_str()),
+        (0, expected(mode, n).as_str()),
+        "native {mode} {n}: {err}"
+    );
+    took
+}
+
+/// Best of five runs at `n` and at `2n`, interleaved so a burst of load on a
+/// shared runner lands on both sizes rather than on one (#4340).
+fn native_pair(dir: &Path, mode: &str, n: u64) -> (Duration, Duration) {
+    (0..5).fold((Duration::MAX, Duration::MAX), |(a, b), _| {
+        (a.min(native_time(dir, mode, n)), b.min(native_time(dir, mode, 2 * n)))
+    })
 }
 
 fn has_wasmtime() -> bool {
@@ -202,10 +206,7 @@ fn fuel_needed(dir: &Path, mode: &str, n: u64) -> u64 {
 fn power_of_two_text_and_the_decimal_refusal_scale_linearly() {
     let dir = build("ratio");
     for mode in ["hex", "bin", "dec"] {
-        let (a, b) = (
-            native_time(&dir, mode, 1_000_000),
-            native_time(&dir, mode, 2_000_000),
-        );
+        let (a, b) = native_pair(&dir, mode, 1_000_000);
         let ratio = b.as_secs_f64() / a.as_secs_f64().max(1e-3);
         assert!(
             ratio < 3.0,

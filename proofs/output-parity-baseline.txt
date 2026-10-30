@@ -116,6 +116,7 @@ spec/programs/safe_parse_sum.almd
 spec/programs/sum_of_squares.almd
 spec/programs/validate_age.almd
 spec/stdlib/heredoc_test.almd
+spec/stdlib/list_mutable_test.almd
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
