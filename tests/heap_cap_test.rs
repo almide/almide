@@ -167,9 +167,9 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 
 /// #1857: a `let`-bound range read ONLY as a `for-in` head allocates nothing
 /// on native even when the program falls off the v1 trust-spine onto the v3
-/// codegen. The top-level `let` whose initializer is a CALL keeps the program
-/// off the v1 render (rung 1 admits a top-level let only when materializing
-/// it at its uses is faithful, and a call runs eagerly before main) — it used
+/// codegen. The String-typed top-level `let` whose initializer is a CALL keeps
+/// the program off the v1 render (an eager let needs a storage slot, and the
+/// native slots hold scalars only, #4006) — it used
 /// to be the `list.len` / index reads of `idx`, until `list.range` and
 /// `list.len` joined the native floor (#1869), and then a constant top-level
 /// let, until rung 1 admitted those (#4006) — so `main` renders through v3 —
@@ -179,12 +179,13 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 /// 0.7 s wasm, byte-identical). Under a 4 MiB ceiling that materialization is
 /// the deterministic OOM; the head-only deferral (`RangeCountingVarsPass`)
 /// is what makes this a green run.
-const WALLED_RANGE_PROBE: &str = r#"let bump = int.abs(0)
+const WALLED_RANGE_PROBE: &str = r#"let tag = int.to_string(0)
 
 effect fn main() -> Unit = {
   let idx = 0..<5
   println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
   let big = 0..<134217728
+  let bump = string.len(tag) - 1
   var e = 0
   for _i in big {
     e = e + 1 + bump
@@ -217,11 +218,13 @@ fn walled_head_only_range_allocates_nothing_natively() {
         String::from_utf8_lossy(&build.stderr)
     );
     let build_note = String::from_utf8_lossy(&build.stderr);
-    // The probe is only a witness while it actually walls v1: if rung 1 ever
-    // admits a top-level let initialized by a call, this program stops
+    // The probe is only a witness while it actually walls v1: if the native
+    // render ever gives a String eager let a slot, this program stops
     // exercising the v3 fallback and the gate must move to a shape that still
-    // does (it moved twice already: when `list.range` / `list.len` joined the
-    // floor — #1869 — and when constant top-level lets did — #4006).
+    // does (it moved three times already: when `list.range` / `list.len`
+    // joined the floor — #1869 — when constant top-level lets did, and when
+    // scalar eager lets got native storage slots — #4006; a String-typed
+    // eager let still walls).
     assert!(
         build_note.contains("verified native render walled"),
         "the walled-range probe no longer walls the v1 native render — pick a shape that does: {build_note}"
