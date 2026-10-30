@@ -927,7 +927,6 @@ pub(crate) fn render_int_binop(
         IntOp::Le => format!("({l} <= {r}) as i64"),
         IntOp::Gt => format!("({l} > {r}) as i64"),
         IntOp::Ge => format!("({l} >= {r}) as i64"),
-        other => return Err(wall(format!("native: int op {other:?} — outside the rung subset"))),
     })
 }
 
