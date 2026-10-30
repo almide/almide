@@ -53,11 +53,13 @@
 use wasmparser::{BlockType, Operator as Op};
 
 mod decode;
+mod fields;
 mod operands;
 pub mod rc;
 pub use rc::{check_rc, RcReport};
 use decode::{branch_target, is_load};
 pub use decode::{decode, function_imports, store_width, Body};
+pub use fields::check_fields;
 
 /// A located event: a defined function's position and an instruction index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +69,7 @@ pub struct At {
 }
 
 /// An anchor token: located, unlocated (`-`), or broken (anything else).
-fn parse_at(t: &str) -> Result<Option<At>, String> {
+pub(crate) fn parse_at(t: &str) -> Result<Option<At>, String> {
     if t == "-" {
         return Ok(None);
     }
@@ -105,6 +107,16 @@ pub struct Report {
     pub bounds_unlocated: usize,
     /// Located accesses whose guard's operands were held to them.
     pub bounds_operands: usize,
+    /// #4013 / #4279: the fields witness's located construction sites,
+    /// their field stores, field accesses (of which `field_guarded` are
+    /// variant case fields held to their tag test), tag reads, and events
+    /// in bodies that did not ship.
+    pub field_sites: usize,
+    pub field_stores: usize,
+    pub field_accesses: usize,
+    pub field_guarded: usize,
+    pub field_tags: usize,
+    pub field_unlocated: usize,
     /// #4277, when the anchor file carries `rc` lines.
     pub rc: Option<RcReport>,
 }
@@ -705,7 +717,8 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option
             .map_err(|_| "anchors: bad alloc index".to_string())?,
     };
     let (init, bounds) = (field("init")?, field("bounds")?);
-    let mut rest: Vec<&str> = lines.collect();
+    // The optional `fields` line (#4279) is read by `fields_anchors`.
+    let mut rest: Vec<&str> = lines.filter(|l| !(*l == "fields" || l.starts_with("fields "))).collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
     let rc_lines = match rc_at {
         None => None,
@@ -762,6 +775,15 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option
     Ok((alloc, init, bounds, judges, rc_lines))
 }
 
+/// The anchor file's `fields` line (#4279): one token per fields-witness
+/// event, `;` between items; empty when the file has none.
+pub fn fields_anchors(text: &str) -> String {
+    text.lines()
+        .find_map(|l| if l == "fields" { Some("") } else { l.strip_prefix("fields ") })
+        .unwrap_or("")
+        .to_string()
+}
+
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
 /// anchor file (whose `alloc` is a function index, as a `call` names it).
 pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String> {
@@ -776,6 +798,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &mut rep,
     )?;
     check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
+    check_fields(&bodies, alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines)) = rc_lines {
         let mut r = RcReport::default();
         check_rc(&bodies, function_imports(wasm), inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
