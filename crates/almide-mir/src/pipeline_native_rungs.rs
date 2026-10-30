@@ -120,6 +120,7 @@ fn native_sig_subset_check(
             || is_flat_variant(t)
             || is_scalar_fn(t)
             || is_typed_fn(t)
+            || native_sig_kind(t, record_layouts, variant_layouts).is_some()
     };
     let sig_ok_ret = |t: &Ty| sig_ok(t) || is_native_result(t);
     for p in &func.params {
@@ -376,6 +377,14 @@ fn native_sig_kind(
         }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => {
             Some(NativeSigKind::ListStr)
+        }
+        // #4006: the other all-scalar slot blocks — a List[Float] (each slot
+        // the f64 bits) and an all-scalar tuple — ride the same `Vec<i64>`.
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Float) => {
+            Some(NativeSigKind::ListI64)
+        }
+        Ty::Tuple(es) if !es.is_empty() && es.iter().all(|e| matches!(e, Ty::Int | Ty::Bool | Ty::Float)) => {
+            Some(NativeSigKind::ListI64)
         }
         // #4006 family B: an Option of a scalar rides the `Option<i64>` carrier.
         t if is_scalar_option(t) => Some(NativeSigKind::Opt),

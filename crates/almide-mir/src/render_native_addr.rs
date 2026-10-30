@@ -58,6 +58,8 @@ pub(crate) struct AddrState {
     /// from the type-bearing ops that consume them (a typed drop, a return, an
     /// argument to a user fn) — the declarations, never the slot contents.
     alloc_rec: BTreeMap<ValueId, u16>,
+    /// DynList allocs whose every stored element is a string.
+    str_lists: BTreeSet<ValueId>,
 }
 
 impl AddrState {
@@ -157,6 +159,15 @@ impl AddrState {
                 _ => None,
             })
             .collect();
+        let strings: BTreeSet<ValueId> = func
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Alloc { dst, init: Init::Str(_) | Init::DynStr { .. }, .. } => Some(*dst),
+                Op::CallFn { dst: Some(d), name, .. } if sigs.get(name.as_str()).is_some_and(|(_, r)| *r == Some(NativeSigKind::Str)) => Some(*d),
+                _ => None,
+            })
+            .collect();
         let blocks: Vec<ValueId> = func
             .ops
             .iter()
@@ -165,6 +176,7 @@ impl AddrState {
                 _ => None,
             })
             .collect();
+        let mut str_lists: BTreeSet<ValueId> = BTreeSet::new();
         for r in blocks {
             let mut kinds: Vec<NTy> = Vec::new();
             for op in &func.ops {
@@ -176,6 +188,7 @@ impl AddrState {
                 let k = match alloc_rec.get(&src) {
                     Some(j) => NTy::Rec(*j),
                     None if scalar_lists.contains(&src) => NTy::Vec,
+                    None if strings.contains(&src) => NTy::Str,
                     None => {
                         kinds.clear();
                         break;
@@ -185,8 +198,15 @@ impl AddrState {
                     kinds.push(k);
                 }
             }
-            if let [k] = kinds.as_slice() {
-                alloc_rec.insert(r, crate::render_native_rec::list_type_of(*k));
+            match kinds.as_slice() {
+                // A DynList filled with strings is a List[String] block.
+                [NTy::Str] => {
+                    str_lists.insert(r);
+                }
+                [k] => {
+                    alloc_rec.insert(r, crate::render_native_rec::list_type_of(*k));
+                }
+                _ => {}
             }
         }
         let alloc_rec = func
@@ -235,7 +255,7 @@ impl AddrState {
                 _ => {}
             }
         }
-        AddrState { alloc_rec, addr_operands, consts: BTreeMap::new(), scaled: BTreeSet::new(), addrs: BTreeMap::new(), reassigned, stored }
+        AddrState { str_lists, alloc_rec, addr_operands, consts: BTreeMap::new(), scaled: BTreeSet::new(), addrs: BTreeMap::new(), reassigned, stored }
     }
 }
 
@@ -631,6 +651,15 @@ pub(crate) fn render_addr_op(
                 return Err(wall("native: a scalar write of a heap record field"));
             }
             line!("{}.f{k} = {};", var(*list), var(*val));
+            return Ok(true);
+        }
+        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) && st.str_lists.contains(dst) => {
+            tys.insert(*dst, NTy::VecStr);
+            line!(
+                "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
+                var(*dst),
+                var(*len)
+            );
             return Ok(true);
         }
         Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
