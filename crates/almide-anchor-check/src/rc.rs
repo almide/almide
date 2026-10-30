@@ -13,8 +13,11 @@
 //! any other: under `http.serve` an abort ends only the request, not the
 //! instance, so a release the emitter performs before an abort is a recorded
 //! event, never a trusted class (sec-b2, 2026-10-30). What an aborting path
-//! leaves unreleased is the abort terminal's; the serve hosts take it back
-//! (tests/http_serve_abort_reuse_test.rs).
+//! leaves unreleased is the abort terminal's: no later request sees it
+//! (the embedded lane copies its snapshot back, a trapped p3 instance is never
+//! re-entered; tests/http_serve_cross_test.rs `aborting_requests_leave_no_
+//! block_live…`, tests/http_serve_export_test.rs `aborting_requests_leave_
+//! nothing…`).
 //!
 //! An owner rebind's release of the old block (`o`, the recorder's DecOld)
 //! and a variable's release (`d` on a local) is a release call, or happens
