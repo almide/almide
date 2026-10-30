@@ -23,6 +23,11 @@ almide-lang = { path = "../almide-lang" }
 almide-frontend = { path = "../almide-frontend" }
 almide-optimize = { path = "../almide-optimize" }
 almide-driver = { path = "../almide-driver" }
+# The v0 native runtime's embedded source (`RUST_RUNTIME_MODULES`) and its
+# prelude: the bodies the declared native floor renders verbatim
+# (`native_floor.rs`, #4006). Acyclic: almide-codegen does not depend on
+# almide-mir.
+almide-codegen = { path = "../almide-codegen" }
 
 [dev-dependencies]
 # The workspace-root `almide` binary crate's lib — reused ONLY by the org-sweep

@@ -194,6 +194,8 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         render_user_fn_call(call, callee, sigs, OpSink { tys, out, indent, used_shims })
     } else if let Some(shim_entry) = shim(name) {
         render_closed_shim_call(call, shim_entry, OpSink { tys, out, indent, used_shims })
+    } else if let Some(floor) = crate::native_floor::declared(name) {
+        render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -345,6 +347,41 @@ fn bind_user_fn_result(
 /// param list gates each arg, its source is pulled into `used_shims`, and the
 /// result binds by the shim's declared return. Extracted verbatim from
 /// `render_call_fn` (codopsy r2, #852).
+/// A stdlib call its declaration puts on the native floor (`@intrinsic`, a
+/// per-type signature, a runtime body the header can carry): the runtime
+/// body is rendered beside the program and called as v0 calls it.
+fn render_declared_floor_call(
+    call: NativeCall<'_>,
+    floor: &'static crate::native_floor::FloorFn,
+    s: OpSink<'_>,
+) -> Result<(), LowerError> {
+    let NativeCall { dst, name, args, .. } = call;
+    let OpSink { tys, out, indent, used_shims } = s;
+    let rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
+    let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered)?;
+    used_shims.push(crate::native_floor::FLOOR_HEADER);
+    used_shims.extend(floor.items.iter().copied());
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    match (dst, ret) {
+        (Some(d), Some(t)) => {
+            tys.insert(*d, t);
+            let ty_name = match t {
+                NTy::Str => "AlmideString",
+                NTy::Vec => "Vec<i64>",
+                NTy::F64 => "f64",
+                NTy::Res => "Result<i64, AlmideString>",
+                _ => "i64",
+            };
+            writeln!(out, "let mut {}: {} = {};", var(*d), ty_name, expr).unwrap();
+        }
+        (None, _) => writeln!(out, "{expr};").unwrap(),
+        (Some(_), None) => return Err(wall(format!("native: floor call `{name}` has no result"))),
+    }
+    Ok(())
+}
+
 fn render_closed_shim_call(
     call: NativeCall<'_>,
     shim_entry: (&'static [NTy], Option<NTy>, &'static str),
