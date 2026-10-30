@@ -520,21 +520,23 @@ fn a_write_inside_a_block_left_by_falling_through_still_defines_the_read() -> Re
 }
 
 #[test]
-fn routine_and_element_rc_are_counted_apart() -> Result<(), String> {
+fn routine_rc_is_counted_and_an_unlogged_element_release_refused() -> Result<(), String> {
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
     // Inside a taken routine's window.
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
     let mut r = RcReport::default();
     check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &Default::default(), &mut r)?;
-    assert_eq!((r.routine_internal, r.arm_internal, r.element), (1, 0, 0));
+    assert_eq!((r.routine_internal, r.arm_internal), (1, 0));
     // A value loaded out of a block's slot and released, then the slot
-    // rewritten: the container's element credit (the replaced element).
+    // rewritten: the slot's consume — an `r` event in the release's window
+    // (#4278 B1). With no event it is refused: the element class is retired.
     let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop local.get 0 local.get 1 i32.store offset=12");
     let bodies = decode(&bytes)?;
-    let mut r = RcReport::default();
-    check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![]], &Default::default(), &mut r)?;
-    assert_eq!(r.element, 1);
+    check_rc(&bodies, 0, None, &releases, &[], &[(1, "r-@0-2".into())], &[vec![], vec![]], &Default::default(), &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![]], &Default::default(), &mut RcReport::default()).is_err());
+    // An `r` event outside its release's window takes nothing.
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, "r-@3-6".into())], &[vec![], vec![]], &Default::default(), &mut RcReport::default()).is_err());
     // Released with no store to that slot after it, the slot still holds
     // the released block: refused.
     let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop");
@@ -557,7 +559,7 @@ fn an_if_whose_arms_both_yield_one_local_is_that_local() -> Result<(), String> {
 fn an_event_on_a_cell_holder_matches_the_release_of_its_occupant() -> Result<(), String> {
     // Local 0 holds a cell; its occupant is loaded at offset 12 and released.
     let r = rc("local.get 0 i32.load offset=12 call $alloc drop", &format!("d{}", 0xA000_0000u32))?;
-    assert_eq!((r.calls, r.element), (1, 0));
+    assert_eq!(r.calls, 1);
     assert!(rc("local.get 1 i32.load offset=12 call $alloc drop", &format!("d{}", 0xA000_0000u32)).is_err());
     Ok(())
 }

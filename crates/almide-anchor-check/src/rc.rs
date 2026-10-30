@@ -30,9 +30,15 @@
 //! Likewise an RC call left over inside a taken compound routine's window
 //! (`rcroutines`: an in-place append, string building, a map edit — every
 //! route the emitter takes through `Emitter::routine`) is that routine's own,
-//! counted (`routine_internal`); and one whose argument is a value loaded out
-//! of a heap block's slot is the container's element credit, counted
-//! (`element`). Each count is printed per build, apart from the others.
+//! counted (`routine_internal`). Each count is printed per build, apart from
+//! the other.
+//!
+//! A release of a value loaded out of a heap block's slot that a later store
+//! overwrites is the slot's consume (#4278 B1): the recorder logs it as an
+//! `r` event in the release's own window (almide-wasm `slot_release`), and
+//! it matches only a release inside that window on a loaded value whose slot
+//! a later store writes. The `element` class that used to count such calls
+//! is retired: an unlogged one is refused like any other leftover call.
 //!
 //! An event on an OUTER holder names it by the recorder's pseudo local (a
 //! global `0xC000_0000 | g`, a C-319 cell `0xA000_0000 | l`): it matches a
@@ -62,11 +68,10 @@
 //! misjudged): a signature that lies about its body is refused by the
 //! checker of that body, not trusted here.
 //!
-//! The windows and the element class are confined (sec-rows-2-3-4, the
-//! drills of proofs/fixtures/rc-witness/reinject/): a leftover call counts
-//! as an arm's, a routine's or an element's only if its argument names no
-//! variable the frame's events name; and an element release only if a later
-//! store writes the same slot.
+//! The windows are confined (sec-rows-2-3-4, the drills of
+//! proofs/fixtures/rc-witness/reinject/): a leftover call counts as an arm's
+//! or a routine's only if its argument names no variable the frame's events
+//! name.
 //!
 //! An arm that answers with its ARGUMENT's block as its owned result on
 //! some path (`if c { rc_inc(p); p } else { fresh }`) states it per site: the
@@ -75,17 +80,16 @@
 //! that arm's own window read through the argument — a named event, never a
 //! counted class.
 //!
-//! The three counted classes left (arm-internal, routine-internal, element)
-//! are debts to #4278's per-window certificates — a declared per-path effect
-//! for each arm and routine window, checked against its body. They may only
-//! shrink; a new trusted class is an owner decision, not a checker edit.
-//! (The fourth, `consumed`, was retired by the helper signatures above.)
+//! The two counted classes left (arm-internal, routine-internal) are debts
+//! to #4278's per-window certificates — a declared per-path effect for each
+//! arm and routine window, checked against its body. They may only shrink; a
+//! new trusted class is an owner decision, not a checker edit. (`consumed`
+//! was retired by the helper signatures, `element` by the slot consume.)
 //!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
-//! keeps the balance its ownership declaration states; that a compound
-//! routine's own RC keeps the balance of the operation the witness records;
-//! and that an element's RC keeps its container's credit invariant.
+//! keeps the balance its ownership declaration states; and that a compound
+//! routine's own RC keeps the balance of the operation the witness records.
 
 use std::collections::{HashMap, HashSet};
 
@@ -116,7 +120,6 @@ pub struct RcReport {
     pub judges_unmatched: usize,
     pub arm_internal: usize,
     pub routine_internal: usize,
-    pub element: usize,
     /// Releases (or +1s) a callee's checked signature consumes (#4278 B1).
     pub signed: usize,
 }
@@ -584,7 +587,7 @@ pub fn check_rc(
         // has no such reading), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // More generally: a call that has a reading of its own when left over
-        // (an arm's or routine's, a replaced element's, one before an abort)
+        // (an arm's or routine's, one before an abort)
         // is tried after the calls that have none.
         let fallback = |i: usize| {
             if i >= live {
@@ -592,8 +595,7 @@ pub fn check_rc(
             }
             let k = calls[i].0;
             let frame_owned = owned_at(&calls[i].2, k);
-            (!frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)))))
-                || aborting.contains(&k)
+            (!frame_owned && in_window(k)) || aborting.contains(&k)
         };
         // A call a move (`m` / `h`) could take is tried after the others: a
         // move is matched last and never displaces an event, so an unnamed
@@ -854,15 +856,13 @@ pub fn check_rc(
                 continue;
             }
             let k = calls[i].0;
-            // A frame variable's credit is never an arm's, a routine's or an
-            // element's: such a call stays unaccounted.
+            // A frame variable's credit is never an arm's or a routine's: such
+            // a call stays unaccounted.
             let frame_owned = owned_at(&calls[i].2, k);
             let slot = if !frame_owned && inside(&windows[0], k) {
                 &mut rep.arm_internal
             } else if !frame_owned && inside(&windows[1], k) {
                 &mut rep.routine_internal
-            } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
-                &mut rep.element
             } else if aborting.contains(&k) {
                 &mut rep.pre_abort
             } else {
@@ -876,8 +876,6 @@ pub fn check_rc(
                     "arm-internal"
                 } else if !frame_owned && inside(&windows[1], k) {
                     "routine-internal"
-                } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
-                    "element"
                 } else {
                     "before-abort"
                 };
