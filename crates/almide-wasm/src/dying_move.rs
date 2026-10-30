@@ -413,13 +413,19 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
+        // #4278 B1: the receiver's and a fresh key's credits move into the
+        // judged write through their holds (`try_map_set_owned`'s rule).
         if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         // `ih` ends up holding the value stored: init, or the callback's.
         let ih = self.hold_for(v)?;
         // An inert init (literals, reads, constructors of them) cannot trap
@@ -444,7 +450,7 @@ impl Emitter<'_> {
         self.rc_share_guard(body, v);
         self.witness_store(body, v);
         if !lazy {
-            self.emit_release_hold(ih, v);
+            self.arm_release_hold(ih, v, init);
         }
         self.f.instructions().local_set(ih);
         self.witness_once_arm();
@@ -484,13 +490,19 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
+        // #4278 B1: the receiver's and a fresh key's credits move into the
+        // judged write through their holds (`try_map_set_owned`'s rule).
         if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         let ih = self.hold_for(v)?;
         let (oh, eh) = (self.hold_i32()?, self.hold_i32()?);
         self.emit_map_scan_into(mh, kh, eh, (k, v), fns);
