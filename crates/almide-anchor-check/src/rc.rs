@@ -683,8 +683,11 @@ pub fn check_rc(
             false
         }
         let fallback_call = |i: usize| i >= nc || fallback(i);
+        // A call a move can take waits for the moves' absorption below: it
+        // has a reading of its own, so it never pulls an event off a call
+        // that has none.
         for c in 0..nc {
-            if owner[c].is_none() && !fallback(c) {
+            if owner[c].is_none() && !fallback(c) && !move_fits[c] {
                 let mut seen = vec![false; evs.len()];
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
             }
