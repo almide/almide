@@ -1,37 +1,52 @@
 diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
-index dc313186f..e24762309 100644
+index dc313186f..35d5492ec 100644
 --- a/crates/almide-wasm/src/calls_modules.rs
 +++ b/crates/almide-wasm/src/calls_modules.rs
-@@ -85,6 +85,10 @@ impl Emitter<'_> {
+@@ -80,11 +80,24 @@ impl Emitter<'_> {
+     ) -> Result<T, EmitError> {
+         let from = self.f.byte_len();
+         let window = crate::witness::rc::window_open();
++        // RE-INJECTED (#4277 drill)
++        let depth = crate::witness_hooks::ROUTINE_DEPTH.with(|d| {
++            d.set(d.get() + 1);
++            d.get()
++        });
+         let out = route(self);
++        crate::witness_hooks::ROUTINE_DEPTH.with(|d| d.set(depth - 1));
+         match &out {
              Ok(o) if taken(o) => crate::witness::rc::routine(window, from, self.f.byte_len()),
              _ => crate::witness::rc::window_dropped(window),
          }
 +        // RE-INJECTED (#4277 drill): the hold moved into this routine is released again past its window.
-+        if let Some(l) = crate::witness_hooks::LAST_HOLD.with(|c| c.take()) {
++        if let Some((l, d)) = crate::witness_hooks::LAST_HOLD.with(|c| c.get())
++            && d == depth
++        {
++            crate::witness_hooks::LAST_HOLD.with(|c| c.set(None));
 +            self.f.instructions().local_get(l).call(crate::F_DEC_FLAT);
 +        }
          out
      }
  
 diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
-index 185b5d9f8..a874d9724 100644
+index 185b5d9f8..9cab0e819 100644
 --- a/crates/almide-wasm/src/witness_hooks.rs
 +++ b/crates/almide-wasm/src/witness_hooks.rs
 @@ -548,6 +548,8 @@ impl Emitter<'_> {
      pub(crate) fn witness_rc_hold_move(&mut self, local: u32) {
          if self.witness.as_ref().is_some_and(|w| !w.dead()) {
              crate::witness::rc::event('h', Some(local));
-+            // RE-INJECTED (#4277 drill): remember the hold for a release past the window.
-+            LAST_HOLD.with(|c| c.set(Some(local)));
++            // RE-INJECTED (#4277 drill): remember the hold and the routine it moved into.
++            LAST_HOLD.with(|c| c.set(Some((local, ROUTINE_DEPTH.with(|d| d.get())))));
          }
      }
  
-@@ -823,3 +825,8 @@ fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
+@@ -823,3 +825,9 @@ fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
          P::Wildcard | P::Literal { .. } | P::None => {}
      }
  }
 +
 +thread_local! {
 +    // RE-INJECTED (#4277 drill)
-+    pub(crate) static LAST_HOLD: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
++    pub(crate) static LAST_HOLD: std::cell::Cell<Option<(u32, u32)>> = const { std::cell::Cell::new(None) };
++    pub(crate) static ROUTINE_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 +}

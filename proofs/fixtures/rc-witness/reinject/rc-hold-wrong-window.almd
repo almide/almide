@@ -1,16 +1,19 @@
-// #4277 drill: a routine's hold move is recorded against the window after
-// the one it was moved into. The ownership witness is unchanged; the first
-// set's release of the key share it was handed (the key is present) has no
-// hold move of its own window and is read through the frame variable `k`,
-// so the RC byte check must refuse it. (A hold carrying only a temporary's
-// credit is the routine's own when its event is lost: counted
-// routine-internal, the #4278 debt — the drill shows a misplaced hold move
-// never hides a FRAME credit.)
+// #4277 drill: a routine's hold move (`h<local>@window`, a credit moved into
+// a compound routine through a pooled hold local) is recorded against the
+// window after the one it was moved into. The ownership witness is
+// unchanged; the routine's release of that credit, inside its own window, is
+// read through frame variables no event of that window accounts, so the RC
+// byte check must refuse it. (`value.object` builds its map through the
+// judged set, whose fresh keys move in through their hold.)
+import json
+
 effect fn main() -> Unit = {
-  var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
-  let k = string.repeat("a", 1)
-  m = map.set(m, k, 3)
-  let j = string.repeat("b", 1)
-  m = map.set(m, j, 4)
-  println("${int.to_string(map.len(m))} ${k} ${j}")
+  let items = [
+    value.int(1),
+    value.object([("a", value.int(2))]),
+    value.int(3)
+  ]
+  let updated = list.set(items, 1, value.array([value.int(7), value.int(8)]))
+  println(json.stringify(value.array(updated)))
+  println(json.stringify(value.array(list.set(items, 0, value.string("x")))))
 }

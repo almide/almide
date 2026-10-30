@@ -1,14 +1,20 @@
-// #4277 drill: a routine's hold carries a frame variable's credit (the share
-// `map.set(m, k, v)` takes on the key `k`, moved into the judged set through
-// its hold, `h<local>@window`), and the emitter releases that hold again PAST
-// the routine's window with no event. The ownership witness is unchanged. A
-// hold move's name is scoped to its window, so the hold slot alone no longer
-// makes the call the frame's; the value it releases is still read through
-// `k`, a frame variable, so the RC byte check must refuse it — window scoping
-// never hides a frame credit.
+// #4277 drill: a routine's hold carries a credit read through frame variables
+// (`value.object`'s judged set: a key moved in through its hold,
+// `h<local>@window`), and the emitter releases that hold again PAST the
+// routine's window with no event. The ownership witness is unchanged. A hold
+// move's name is scoped to its window, so the hold slot alone no longer makes
+// the call the frame's; the value it releases is still read through frame
+// variables, so the RC byte check must refuse it — window scoping never hides
+// a frame credit.
+import json
+
 effect fn main() -> Unit = {
-  var m: Map[String, Int] = map.from_list([("a", 1)])
-  let k = string.repeat("a", 1)
-  m = map.set(m, k, 2)
-  println("${int.to_string(map.len(m))} ${k}")
+  let items = [
+    value.int(1),
+    value.object([("a", value.int(2))]),
+    value.int(3)
+  ]
+  let updated = list.set(items, 1, value.array([value.int(7), value.int(8)]))
+  println(json.stringify(value.array(updated)))
+  println(json.stringify(value.array(list.set(items, 0, value.string("x")))))
 }
