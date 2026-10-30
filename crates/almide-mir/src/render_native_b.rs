@@ -913,6 +913,14 @@ pub(crate) fn render_int_binop(
         IntOp::LeU => format!("(({l} as u64) <= ({r} as u64)) as i64"),
         IntOp::GtU => format!("(({l} as u64) > ({r} as u64)) as i64"),
         IntOp::GeU => format!("(({l} as u64) >= ({r} as u64)) as i64"),
+        // The bitwise floor: wasm's i64.and/or/xor and its shifts, whose count
+        // is taken mod 64 — `wrapping_sh*` masks the same six bits.
+        IntOp::And => format!("({l} & {r})"),
+        IntOp::Or => format!("({l} | {r})"),
+        IntOp::Xor => format!("({l} ^ {r})"),
+        IntOp::Shl => format!("{l}.wrapping_shl({r} as u32)"),
+        IntOp::Shr => format!("{l}.wrapping_shr({r} as u32)"),
+        IntOp::ShrU => format!("((({l} as u64).wrapping_shr({r} as u32)) as i64)"),
         IntOp::Eq => format!("({l} == {r}) as i64"),
         IntOp::Ne => format!("({l} != {r}) as i64"),
         IntOp::Lt => format!("({l} < {r}) as i64"),
