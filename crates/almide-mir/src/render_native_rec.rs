@@ -29,10 +29,18 @@ pub(crate) struct RecDecl {
     /// A builtin with a fixed runtime spelling (`Bytes` is `Vec<u8>`, the v0
     /// runtime's own representation, so floor bodies take it as is).
     pub alias: Option<&'static str>,
+    /// An enum's Default constructor: one whose aggregate fields are all
+    /// finite without it, so `Default` terminates.
+    pub default_tag: Option<u32>,
 }
 
 /// The table key of the builtin `Bytes` type.
 pub(crate) const BYTES_KEY: &str = "Ty::Bytes";
+
+/// `t` is a generic instance whose bound fields are all scalar.
+pub(crate) fn is_scalar_instance(t: &almide_lang::types::Ty) -> bool {
+    SCALAR_INSTANCES.with(|si| si.borrow().contains(&tuple_key(t)))
+}
 
 /// The index of `Bytes`, appended on first use. It is always the last entry
 /// it joins, so no earlier index moves; the header is assembled after the
@@ -43,7 +51,7 @@ pub(crate) fn bytes_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>") });
+        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None });
         (r.len() - 1) as u16
     })
 }
@@ -58,6 +66,9 @@ pub(crate) fn is_bytes(t: NTy) -> bool {
 type Inputs = (crate::lower::RecordLayouts, crate::lower::VariantLayouts, Vec<almide_lang::types::Ty>);
 
 thread_local! {
+    /// Generic instances whose bound fields are all scalar: they keep the
+    /// `Vec<i64>` slot convention, like a non-generic scalar record.
+    static SCALAR_INSTANCES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
     static RECS: RefCell<Vec<RecDecl>> = const { RefCell::new(Vec::new()) };
     static INPUTS: RefCell<Option<Inputs>> = const { RefCell::new(None) };
 }
@@ -104,6 +115,7 @@ impl Drop for RecGuard {
     fn drop(&mut self) {
         RECS.with(|r| r.borrow_mut().clear());
         INPUTS.with(|i| *i.borrow_mut() = None);
+        SCALAR_INSTANCES.with(|si| si.borrow_mut().clear());
     }
 }
 
@@ -172,7 +184,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     out.push_str("}\n");
     // Default is a case with no generated-type field, so a recursive enum's
     // default terminates (derive_records keeps only enums that have one).
-    let leaf = cases.iter().find(|(_, fs)| !fs.iter().any(|f| matches!(f, NTy::Rec(_)))).map_or(cases[0].0, |c| c.0);
+    let leaf = d.default_tag.unwrap_or(cases[0].0);
     out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
     // with_tag: the constructor at `t` with default payloads.
@@ -303,6 +315,13 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
         Ty::Bytes if !out.contains(t) => out.push(t.clone()),
+        // An instantiated generic record or variant: its own generated type.
+        Ty::Named(_, args) if !args.is_empty() => {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
+            args.iter().for_each(|e| collect_tuples(e, out));
+        }
         _ => {}
     }
 }
@@ -334,7 +353,14 @@ pub(crate) fn derive_records(
     // the same uniform slots, keyed by its spelled type.
     let mut lists: BTreeSet<String> = BTreeSet::new();
     let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
-    for t in tuples {
+    // A generic instance's bound fields may name further instances: close over them.
+    let mut work: Vec<Ty> = tuples.to_vec();
+    let mut seen_inst: BTreeSet<String> = BTreeSet::new();
+    while let Some(t) = work.pop() {
+        let t = &t;
+        if !seen_inst.insert(tuple_key(t)) {
+            continue;
+        }
         if let Ty::Tuple(es) = t {
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
         }
@@ -342,10 +368,47 @@ pub(crate) fn derive_records(
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
             lists.insert(tuple_key(t));
         }
+        // A generic instance: the declared layout with its type params bound.
+        if let Ty::Named(n, args) = t {
+            let bind = |gs: &[almide_lang::intern::Sym]| -> Option<std::collections::HashMap<almide_lang::intern::Sym, Ty>> {
+                (gs.len() == args.len()).then(|| gs.iter().cloned().zip(args.iter().cloned()).collect())
+            };
+            let sub = |b: &std::collections::HashMap<almide_lang::intern::Sym, Ty>, t: &Ty| almide_lang::types::substitute(t, b);
+            if args.is_empty() {
+                continue;
+            }
+            if let Some((gs, fs)) = layouts.get(n.as_str()) {
+                if let Some(b) = bind(gs) {
+                    let bound: Vec<Ty> = fs.iter().map(|(_, ft)| sub(&b, ft)).collect();
+                    bound.iter().for_each(|ft| collect_tuples(ft, &mut work));
+                    decls.entry(tuple_key(t)).or_insert((false, vec![(0, bound)]));
+                }
+            } else if let Some(l) = crate::lower::generic_variant_instantiation_name(n.as_str(), &args.iter().cloned().collect::<Vec<Ty>>())
+                .and_then(|inst| variants.by_type.get(&inst))
+                .filter(|l| l.generics.is_empty())
+            {
+                // The lowering registers a scalar-argument variant instance under
+                // its instantiation name, fields already bound.
+                let cases: Vec<(u32, Vec<Ty>)> =
+                    l.cases.iter().map(|c| (c.tag, c.fields.iter().map(|(_, ft)| ft.clone()).collect())).collect();
+                cases.iter().flat_map(|(_, fs)| fs.iter()).for_each(|ft| collect_tuples(ft, &mut work));
+                decls.entry(tuple_key(t)).or_insert((true, cases));
+            } else if let Some(l) = variants.by_type.get(n.as_str()) {
+                if let Some(b) = bind(&l.generics) {
+                    let cases: Vec<(u32, Vec<Ty>)> =
+                        l.cases.iter().map(|c| (c.tag, c.fields.iter().map(|(_, ft)| sub(&b, ft)).collect())).collect();
+                    cases.iter().flat_map(|(_, fs)| fs.iter()).for_each(|ft| collect_tuples(ft, &mut work));
+                    decls.entry(tuple_key(t)).or_insert((true, cases));
+                }
+            }
+        }
     }
     // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
     let scalar = |n: &str| decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
     let mut set: BTreeSet<String> = decls.keys().filter(|n| !scalar(n)).cloned().collect();
+    SCALAR_INSTANCES.with(|si| {
+        *si.borrow_mut() = decls.keys().filter(|n| n.starts_with("Named(") && scalar(n)).cloned().collect();
+    });
     // Some(Ok(kind)) | Some(Err(name of a generated type)) | None (no spelling).
     let kind = |t: &Ty, set: &BTreeSet<String>| -> Option<Result<NTy, String>> {
         Some(Ok(match t {
@@ -357,6 +420,8 @@ pub(crate) fn derive_records(
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
             Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             Ty::Bytes if uses_bytes => return Some(Err(BYTES_KEY.to_string())),
+            Ty::Named(_, args) if !args.is_empty() && set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
+            Ty::Named(_, args) if !args.is_empty() && scalar(&tuple_key(t)) => NTy::Vec,
             _ => return None,
         }))
     };
@@ -389,11 +454,39 @@ pub(crate) fn derive_records(
         }
         false
     };
-    // An enum needs a case with no aggregate field to be its finite Default.
-    let no_leaf = |n: &String| {
-        decls[n].0 && !decls[n].1.iter().any(|(_, fs)| fs.iter().all(|t| matches!(kind(t, &set), Some(Ok(_)))))
+    // A finite Default: a struct whose by-value aggregate fields all have
+    // one, an enum with a case whose aggregate fields all do (a list is
+    // empty by default). An enum with none has no finite value to start from.
+    // Rank = the round a type became finite; an enum's Default is a case
+    // whose aggregate fields all ranked strictly earlier, so it never recurses.
+    let mut rank: BTreeMap<String, usize> = BTreeMap::new();
+    let case_ok = |fs: &Vec<Ty>, below: usize, rank: &BTreeMap<String, usize>, set: &BTreeSet<String>| {
+        fs.iter().all(|t| match kind(t, set) {
+            Some(Err(m)) => lists.contains(&m) || m == BYTES_KEY || rank.get(&m).is_some_and(|r| *r < below),
+            _ => true,
+        })
     };
-    let cyclic: BTreeSet<String> = set.iter().filter(|n| reaches_self(n) || no_leaf(n)).cloned().collect();
+    for round in 0.. {
+        let snapshot = rank.clone();
+        for n in &set {
+            if snapshot.contains_key(n) {
+                continue;
+            }
+            let fin = lists.contains(n)
+                || if decls[n].0 {
+                    decls[n].1.iter().any(|(_, fs)| case_ok(fs, round, &snapshot, &set))
+                } else {
+                    case_ok(&decls[n].1[0].1, round, &snapshot, &set)
+                };
+            if fin {
+                rank.insert(n.clone(), round);
+            }
+        }
+        if rank.len() == snapshot.len() {
+            break;
+        }
+    }
+    let cyclic: BTreeSet<String> = set.iter().filter(|n| reaches_self(n) || !rank.contains_key(*n)).cloned().collect();
     set.retain(|n| !cyclic.contains(n));
     loop {
         let before = set.len();
@@ -415,14 +508,17 @@ pub(crate) fn derive_records(
         .iter()
         .map(|n| {
             if n == BYTES_KEY {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>") };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None };
             }
             let (is_enum, cases) = &decls[n];
             if lists.contains(n) {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None };
             }
             if *is_enum {
+                let r = rank[n];
+                let default_tag = cases.iter().find(|(_, fs)| case_ok(fs, r, &rank, &set)).map(|c| c.0);
                 RecDecl {
+                    default_tag,
                     name: n.clone(),
                     fields: Vec::new(),
                     cases: Some(cases.iter().map(|(t, fs)| (*t, fs.iter().map(spell).collect())).collect()),
@@ -430,7 +526,7 @@ pub(crate) fn derive_records(
                     alias: None,
                 }
             } else {
-                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None }
+                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None }
             }
         })
         .collect()
