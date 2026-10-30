@@ -83,13 +83,13 @@ reason = "the C-196 stack guard both native renders emit (module almide_stack_gu
 path = "crates/almide-kernel/src/matmul.rs"
 count = 2
 class = "emitted-prelude"
-reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342)."
+reason = "the AVX2 + FMA register-tiled matmul kernel and its call behind is_x86_feature_detected (the dead transpose-B AVX kernel left with #4342). kept (#4342): a safe 4x4 tile with f64::mul_add (bitwise the same product) measured 0.97-1.03x on matrix.mul at 64^3, 256^3, 512^3, 64x768x768 and 128x768x3072 in --release builds (x86-64-v3, where mul_add is an inline vfmadd), but 12.3x / 13.2x at 256^3 in a default (non-release) build, where mul_add is a libm fma call per cell; GCE AMD EPYC 7B13 (n2d) / Intel Xeon 2.8 GHz (n2), min of 7 pinned runs, Rust 1.96.0, 2026-10-30"
 
 [[file]]
 path = "crates/almide-kernel/src/transpose_f64.rs"
 count = 3
 class = "emitted-prelude"
-reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection"
+reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection. kept (#4342): the plain 8x8 tile in their place measured 1.26x / 1.30x on matrix.transpose of a 1024x1024 matrix and 1.18x / 1.17x on 512x768 (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30)"
 
 [[file]]
 path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
