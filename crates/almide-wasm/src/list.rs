@@ -349,6 +349,7 @@ impl Emitter<'_> {
         // hit kept it; `none` is NULL_ADDR, which the release no-ops).
         let h = self.hold_i32()?;
         self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(F_DEC_FLAT);
+        self.arm_temp_released();
         self.release_i32();
         Ok(Some(Lowered::scalar(BOOL)))
     }

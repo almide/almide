@@ -217,8 +217,15 @@ impl Emitter<'_> {
         i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().i64_extend_i32_u();
         i.i64_lt_s().i32_and().if_(BlockType::Empty);
         if let Some(dec) = old_dec {
-            i.local_get(hb).local_get(hn).i32_wrap_i64().i32_const(stride).i32_mul().i32_add();
-            i.i32_load(slot_memarg(0)).call(dec);
+            let _ = i;
+            // #4278 B1: the replaced element is the slot's consume (`r`).
+            self.slot_release(|em| {
+                let mut i = em.f.instructions();
+                i.local_get(hb).local_get(hn).i32_wrap_i64().i32_const(stride).i32_mul().i32_add();
+                i.i32_load(slot_memarg(0)).call(dec);
+                Ok(())
+            })?;
+            i = self.f.instructions();
         }
         i.local_get(hb)
             .local_get(hn)
@@ -386,6 +393,9 @@ impl Emitter<'_> {
             i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0)).call(dec);
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
+            let _ = i;
+            // #4278 B1: the dropped tail's credits are the arm's block's own.
+            self.arm_temp_released();
         }
         let mut i = self.f.instructions();
         i.local_get(hb).local_get(hend).i32_store(len_memarg());
@@ -538,7 +548,11 @@ impl Emitter<'_> {
         // +1 above) — #2977: every heap element `update` replaced leaked.
         if self.elem_is_handle(et) {
             let dec = self.dec_fn_of(et);
-            self.f.instructions().local_get(ha).i32_load(slot_memarg(0)).call(dec);
+            // #4278 B1: the replaced element is the slot's consume (`r`).
+            self.slot_release(|em| {
+                em.f.instructions().local_get(ha).i32_load(slot_memarg(0)).call(dec);
+                Ok(())
+            })?;
         }
         self.f.instructions().local_get(ha).local_get(hv);
         self.store_ty_slot(et, 0);

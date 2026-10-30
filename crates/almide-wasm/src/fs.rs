@@ -241,6 +241,9 @@ impl Emitter<'_> {
             // err path it is empty and nothing holds it.
             i.local_get(hlist).call(F_DEC_FLAT);
             i.local_get(herr);
+            let _ = i;
+            self.arm_temp_released();
+            let mut i = self.f.instructions();
             i.else_();
             i.i32_const(16).call(F_ALLOC).local_tee(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
             i.local_get(hs).local_get(hlist).i32_store(slot_memarg(almide_layout::SUM_FIELD));
@@ -356,6 +359,8 @@ impl Emitter<'_> {
         i.local_get(herr).i32_eqz().if_(BlockType::Empty);
         i.local_get(hraw).call(F_DEC_FLAT);
         i.end();
+        // #4278 B1: the scratch buffer is the arm's own temporary.
+        self.arm_temp_released();
     }
 
     /// Walk the u32-LE length-prefixed frames in the raw block (the
