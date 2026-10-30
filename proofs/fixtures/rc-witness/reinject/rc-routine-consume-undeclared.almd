@@ -1,5 +1,5 @@
 // #4278 B1 drill (a routine whose declaration lies about its body): the
-// judged map set takes an owned temporary receiver's credit through its hold
+// judged map set takes the receiver's credit (here an owned temporary's) through its hold
 // `mh` (`h<local>@window`) and releases it inside the routine's window when
 // the block is shared and copies. Re-injected, the routine no longer logs the
 // hold move — it declares no consumption of the receiver while its body
