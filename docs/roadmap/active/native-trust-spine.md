@@ -203,5 +203,11 @@
   `Err` and the CLI falls back to v0 (`src/cli/build.rs`).
 - `verify_ownership` runs on every lowered fn before render.
 - The differential gate corpus only grows; a rung ships WITH its corpus rows.
-- The shim floor is a CLOSED map (`render_native.rs::shim`) — additions are
-  trusted-floor changes and need a differential row in the same PR.
+- The runtime floor is DECLARED (#4006, family D): a stdlib fn joins it when
+  its `.almd` declaration is `@intrinsic("almide_rt_X")` with a signature in
+  the per-type map (`crates/almide-mir/src/native_floor.rs`), and the render
+  carries v0's own `almide_rt_X` body with the runtime items it reaches, so
+  the native output is v0's by construction. `tests/native_floor_compile_test.rs`
+  compiles every admitted body under the native header. The hand-written
+  `render_native_shims.rs::SHIMS` table is a legacy name list that only
+  shrinks (24 → 7 names); no row is added there.
