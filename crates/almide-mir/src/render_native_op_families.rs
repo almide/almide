@@ -206,8 +206,14 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             dst: Some(d),
             args,
         } => {
-            tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = {}.clone();", var(*d), var(args[0]));
+            // A copy of either carrier, typed as its source.
+            let t = match tys.get(&args[0]) {
+                Some(NTy::ResStr) => NTy::ResStr,
+                _ => NTy::Res,
+            };
+            let spelled = if t == NTy::ResStr { "Result<AlmideString, AlmideString>" } else { "Result<i64, AlmideString>" };
+            tys.insert(*d, t);
+            line!("let {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
         }
         Op::Prim {
             kind: crate::PrimKind::ResTag,
@@ -238,9 +244,52 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             // Result's object); "" on the Ok side (unreached — the tag
             // dispatch guards it).
             tys.insert(*d, NTy::StrRef);
+            if tys.get(&args[0]) == Some(&NTy::ResStr) {
+                // The String-Ok carrier keeps its payload in one slot on both
+                // sides; the tag dispatch decides which the program reads.
+                line!(
+                    "let {}: &str = match &{} {{ Ok(s) | Err(s) => s.as_str() }};",
+                    var(*d),
+                    var(args[0])
+                );
+            } else {
+                line!(
+                    "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
+                    var(*d),
+                    var(args[0])
+                );
+            }
+        }
+        // ── #4006 family C: the String-Ok Result carrier (native_result_str_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::ResStrMake,
+            dst: Some(d),
+            args,
+        } => {
+            let src = match tys.get(&args[0]) {
+                Some(NTy::Str) => format!("{}.clone()", var(args[0])),
+                Some(NTy::StrRef) => format!("AlmideString::from({})", var(args[0])),
+                other => {
+                    return Err(wall(format!(
+                        "native: a String-Ok Result over a non-String payload ({other:?})"
+                    )))
+                }
+            };
+            tys.insert(*d, NTy::ResStr);
+            line!("let mut {}: Result<AlmideString, AlmideString> = Ok({});", var(*d), src);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::ResStrSetTag,
+            args,
+            ..
+        } => {
+            if tys.get(&args[0]) != Some(&NTy::ResStr) || tys.get(&args[1]) != Some(&NTy::I64) {
+                return Err(wall("native: a String-Ok Result tag write outside its window"));
+            }
             line!(
-                "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
-                var(*d),
+                "if {} != 0 {{ if let Ok(s) = std::mem::replace(&mut {}, Ok(AlmideString::new())) {{ {} = Err(s); }} }}",
+                var(args[1]),
+                var(args[0]),
                 var(args[0])
             );
         }

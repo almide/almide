@@ -97,6 +97,7 @@ fn native_sig_subset_check(
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
             || is_scalar_option(t)
             || is_native_result(t)
+            || is_string_result_ty(t)
             || is_scalar_list(t)
             || is_scalar_record(t)
             || is_flat_variant(t)
@@ -207,6 +208,40 @@ fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
             && matches!(a[1], Ty::String))
 }
 
+/// `Result[String, String]`: the String-Ok carrier `Result<AlmideString,
+/// AlmideString>` (#4006 family C).
+fn is_string_result_ty(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String))
+}
+
+/// #4006 family C: rewrite every String-Ok Result window onto its carrier.
+fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    let fns: std::collections::BTreeSet<String> = ir
+        .functions
+        .iter()
+        .filter(|f| is_string_result_ty(&f.ret_ty))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    for f in functions.iter_mut() {
+        let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_string_result_ty(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params);
+    }
+}
+
 /// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
 /// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
 fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
@@ -306,6 +341,7 @@ fn native_sig_kind(
         // T1-3: the native Result carrier (return position only — the
         // param gate rejects Result params before this table is read).
         t if is_native_result_ty(t) => Some(NativeSigKind::Res),
+        t if is_string_result_ty(t) => Some(NativeSigKind::ResStr),
         Ty::Applied(TypeConstructorId::List, a)
             if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
         {
@@ -500,6 +536,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         )));
     }
     rewrite_native_result_windows(&ir, &mut functions);
+    rewrite_native_result_str_windows(&ir, &mut functions);
     rewrite_native_option_windows(&ir, &mut functions);
     crate::native_slot_rewrite::rewrite_slot_ops(&mut functions, crate::lower::mutable_global_slot_count());
     if functions.iter().any(|f| f.name == SLOT_INIT) {

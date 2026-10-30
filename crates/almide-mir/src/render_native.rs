@@ -50,6 +50,9 @@ pub(crate) enum NTy {
     /// family B; produced by the `native_option_rewrite` prims, an
     /// Opt-returning call, or an Option param). `Copy`: passed by value.
     Opt,
+    /// An OWNED `Result<AlmideString, AlmideString>` — the String-Ok Result
+    /// carrier (#4006 family C; `native_result_str_rewrite`).
+    ResStr,
 }
 
 impl NTy {
@@ -74,6 +77,8 @@ pub enum NativeSigKind {
     Res,
     /// `Option<i64>` — an Option of a scalar (Int, Bool, Float as bits).
     Opt,
+    /// `Result<AlmideString, AlmideString>` — a `Result[String, String]`.
+    ResStr,
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -110,6 +115,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
         NTy::Opt => unreachable!("as_str_arg on an Option carrier"),
+        NTy::ResStr => unreachable!("as_str_arg on a Result carrier"),
     }
 }
 
@@ -291,6 +297,7 @@ fn seed_param_ntys(
             Some(NativeSigKind::I64) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
             Some(NativeSigKind::Opt) => NTy::Opt,
+            Some(NativeSigKind::ResStr) => NTy::ResStr,
             // A carrier Result param (#4006 family C) arrives by value.
             Some(NativeSigKind::Res) => NTy::Res,
             None => repr_nty(&p.repr, true)?,
@@ -511,6 +518,7 @@ fn finish_native_fn(
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
             Some(NTy::Opt) => "return None;",
+            Some(NTy::ResStr) => "return Ok(AlmideString::new());",
         };
         out = out.replace(CUT_RET_MARKER, cut_ret);
     }
@@ -521,7 +529,7 @@ fn finish_native_fn(
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::Opt => var(v),
+        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::Opt | NTy::ResStr => var(v),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::VecRef => format!("{}.to_vec()", var(v)),
     }
@@ -568,6 +576,7 @@ fn render_native_fn_sig(
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, AlmideString>",
                 NTy::Opt => "Option<i64>",
+                NTy::ResStr => "Result<AlmideString, AlmideString>",
             };
             let mut_prefix = if reassigned.contains(&p.value) {
                 "mut "
@@ -588,6 +597,7 @@ fn render_native_fn_sig(
             Some(NTy::F64) => " -> f64".to_string(),
             Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
             Some(NTy::Opt) => " -> Option<i64>".to_string(),
+            Some(NTy::ResStr) => " -> Result<AlmideString, AlmideString>".to_string(),
             None => return Err(wall("native: return value untyped")),
         },
     };
@@ -779,6 +789,7 @@ fn render_native_drop_op(
                 // The T1-3 Result carrier frees like any owned Rust value.
                 Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
                 Some(NTy::Opt) => line!("// drop(option carrier): scope-end"),
+                Some(NTy::ResStr) => line!("// drop(result carrier): scope-end"),
                 Some(NTy::VecRef) => {
                     return Err(wall(
                         "native: DropListStr of a borrowed param — MIR call-mode violation",
@@ -848,6 +859,10 @@ pub(crate) fn render_dup(
         NTy::Opt => {
             tys.insert(*dst, NTy::Opt);
             line!("let mut {} = {};", var(*dst), var(*src));
+        }
+        NTy::ResStr => {
+            tys.insert(*dst, NTy::ResStr);
+            line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
     }
     Ok(())

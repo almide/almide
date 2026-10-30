@@ -102,6 +102,14 @@ pub enum PrimKind {
     /// `dst = args[0]` — a copy of a minted carrier (the `Dup` the shared
     /// lowering emits when an Option outlives a statement); no ownership event.
     OptCopy,
+    /// ── NATIVE-ONLY String-Ok Result carrier prims (#4006 family C) ──────
+    /// Inserted exclusively by `native_result_str_rewrite`: `dst =
+    /// Ok(args[0].clone())` — args[0] is the payload String (its own
+    /// Alloc/Consume accounting untouched); dst is a `Result<String, String>`.
+    ResStrMake,
+    /// `args[0]`'s payload moves to the Err side when `args[1] != 0` (the
+    /// block's tag word); no dst, no ownership event.
+    ResStrSetTag,
     /// ── NATIVE-ONLY storage-slot prims (#4006 family I) ──────────────────
     /// Inserted exclusively by `native_slot_rewrite`: a scalar `Load8` /
     /// `Store8` through a mutable module-level binding's slot address

@@ -144,6 +144,7 @@ pub(crate) fn render_set_local(
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
         NTy::Res => format!("{}.clone()", var(*src)),
         NTy::Opt => var(*src),
+        NTy::ResStr => format!("{}.clone()", var(*src)),
     };
     let store_t = match t {
         NTy::StrRef => NTy::Str,
@@ -245,6 +246,7 @@ fn declared_param_want(
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::F64) => NTy::F64,
         Some(NativeSigKind::Opt) => NTy::Opt,
+        Some(NativeSigKind::ResStr) => NTy::ResStr,
         Some(NativeSigKind::Res) => NTy::Res,
         None => repr_nty(&p.repr, true)?,
     })
@@ -270,6 +272,14 @@ fn user_arg_in_declared_mode(
                 )));
             }
             Ok(code)
+        }
+        NTy::ResStr => {
+            if got != NTy::ResStr {
+                return Err(wall(format!(
+                    "native: non-Result arg to Result param of `{name}`"
+                )));
+            }
+            Ok(format!("{code}.clone()"))
         }
         NTy::Res => {
             if got != NTy::Res {
@@ -338,6 +348,7 @@ fn bind_user_fn_result(
                 Some(NativeSigKind::F64) => NTy::F64,
                 Some(NativeSigKind::Res) => NTy::Res,
                 Some(NativeSigKind::Opt) => NTy::Opt,
+                Some(NativeSigKind::ResStr) => NTy::ResStr,
                 None => repr_nty(r, false)?,
             };
             tys.insert(*d, t);
@@ -347,6 +358,7 @@ fn bind_user_fn_result(
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, AlmideString>",
                 NTy::Opt => "Option<i64>",
+                NTy::ResStr => "Result<AlmideString, AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
@@ -707,6 +719,11 @@ fn render_else(
                 NTy::Opt,
                 var(v),
             ),
+            NTy::ResStr => (
+                format!("let mut {}: Result<AlmideString, AlmideString> = Ok(AlmideString::new());", var(*d)),
+                NTy::ResStr,
+                format!("{}.clone()", var(v)),
+            ),
         };
         *out = out.replacen(marker.as_str(), &decl, 1);
         tys.insert(*d, join_t);
@@ -757,6 +774,7 @@ fn render_end_if(
             NTy::VecRef => format!("{}.to_vec()", var(v)),
             NTy::Res => format!("{}.clone()", var(v)),
             NTy::Opt => var(v),
+            NTy::ResStr => format!("{}.clone()", var(v)),
         };
         let arm_t = match t {
             NTy::StrRef => NTy::Str,
@@ -782,7 +800,7 @@ pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
 /// a value that outlives the arm keeps `copy`.
 fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
     match t {
-        NTy::Str | NTy::Vec | NTy::Res if arm_own => var(v),
+        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr if arm_own => var(v),
         _ => copy,
     }
 }
