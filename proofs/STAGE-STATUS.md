@@ -13,21 +13,21 @@ by `scripts/gen-ledger-counts.sh` (a release step, or the answer to the nightly
 re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 
 <!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-10-21) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-10-31) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 > **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —
 > scalar-read 64 arms / 0 UNGUARDED;
-> platform-libm 4 sites classified. New entries cannot land unclassified.
+> platform-libm 1 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 940/957 fixtures cast a real 3-way vote (98%)** —
+> **Stage 2 (translation validation): 979/1003 fixtures cast a real 3-way vote (97%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
-> **Stage 3 (semantics freeze): 388/388 contracts spec-keyed; syntax-element coverage
+> **Stage 3 (semantics freeze): 439/439 contracts spec-keyed; syntax-element coverage
 > 73/73 sectioned (0 UNWRITTEN, shrink-only — the freeze precondition is 0).**
 >
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
 >
-> **Stage 5 (auditability): 19 release seal(s); 126 verification gates classified
+> **Stage 5 (auditability): 19 release seal(s); 145 verification gates classified
 > (0 UNVERIFIED under a shrink-only ceiling); TOR with 10 enforced rows;
 > gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**
 <!-- counts:generated:end -->
