@@ -1,4 +1,11 @@
-# WALLED-REAL BASELINE — EMPTY: the 2026-07-16 test-fn metric-surface expansion
+# WALLED-REAL BASELINE — the non-comment rows below are the current exclusions.
+# proofs/corpus-wall.sh compares that exact set to the MIR classifier; an empty
+# set is the target, not a claim made by this historical header. A new row is
+# a reviewed regression, with ownership checked by check-walled-real-growth.sh.
+# The dated zero-wall milestones and subsequent additions below are retained
+# as evidence, not as a replacement for the machine-readable rows.
+#
+# HISTORY (2026-07-16): the test-fn metric-surface expansion
 # (217 exposed walls) is fully burned down (217 -> 0, completed the same day; the
 # final classes were fan-settle eq operands, the optional-chain heap-field match,
 # the two-level record+field COW, closure chains, where-case unification, list.pop,
