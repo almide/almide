@@ -69,7 +69,7 @@ sequential spellings above (ADR-0028).
 
 | | Selects | Waits for | Stops |
 |---|---|---|---|
-| Almide `list.find_map(xs, (x) => f(x)?)` / `a() ?? b()` (was `fan.any`) | the lowest-index Ok; the `??` fallback if every element fails | until the winner is known, which requires every element *before* it to have failed | starts **no element after the winner** (audit §4, test `any_runs_nothing_after_the_winner…`). Elements before the winner have all run, with their effects kept. One exception: on wasm, an fs-read callback is prefetched, so every read is issued and the losers are dropped. |
+| Almide `list.find_map(xs, (x) => f(x)?)` / `a() ?? b()` (was `fan.any`) | the lowest-index Ok; the `??` fallback if every element fails | until the winner is known, which requires every element *before* it to have failed | starts **no element after the winner** (audit §4, test `any_runs_nothing_after_the_winner…`). Elements before the winner have all run, with their effects kept. The old `fan.any` fs-prefetch exception is not a property of the replacement `list.find_map` loop. |
 | Rayon `find_first` | the leftmost element matching the predicate | the whole split tree to settle | splits to the right of a found match are skipped "as soon as possible". Work already running on other threads finishes, so the predicate may run on elements past the answer. Pure predicates only by convention; there is no checker. |
 
 Almide's K1 is sequential-observable: the set of elements that ran is exactly
@@ -100,8 +100,8 @@ that ran is a timing-dependent superset of it.
 Only Almide has this. `fan.min` runs every arm, one after another, under
 the deterministic charge meter, and picks the Ok with the least spend; ties
 go to source/list order (audit §5). Nothing is saved by finding a cheap arm
-early: every arm runs to completion, or to the budget. An optional budget,
-applied per arm, cuts an arm at a charge site, and the arm is excluded. The
+early: every arm runs to completion, or to the budget. The required Compute clock argument supplies the per-arm budget; an arm cut
+at a charge site is excluded. The
 arm is pure, so nothing external had started. The answer is the same on
 every machine and, since #3778, on every target: both meters read the one
 charge table (a loop-free wrapper's entry is exempt, interpolation is free).

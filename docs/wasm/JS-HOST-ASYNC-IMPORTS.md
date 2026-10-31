@@ -173,7 +173,7 @@ almide: hooks.js.kv_get returned a Promise; mark its @extern with returns: promi
   whose value is a scalar or a fallible extern's Result over one. That covers
   three shapes: `fan.map(xs, (x) => hook(x))` for a fallible hook or
   `(x) => ok(hook(x))` for an infallible one, and a
-  `fan { hook(a); other(b) }` block whose every arm is such a call.
+  `fan { hook(a), other(b) }` block whose every arm is such a call.
 - Everything else stays sequential, one Suspending call per element: an
   element that computes its argument, calls a sync hook, or makes several
   calls one after another. Several calls need the element to suspend between
@@ -223,7 +223,7 @@ overlapped and 369 ms sequential.
 and a `Unit` hook. It marks nothing, so it needs no JSPI.
 
 A fixture with a marked extern needs a node with JSPI, so CI's JS host job runs
-Node 24 (setup-node resolves the latest 24.x, which is past 24.20). Locally a
+the pinned Node 24.22.1 (`.github/workflows/ci.yml`), with a JSPI feature probe. Locally a
 node without JSPI skips those fixtures with a warning.
 
 The parser's acceptance and refusals are `crates/almide-syntax/src/parser/test_attributes.rs`
