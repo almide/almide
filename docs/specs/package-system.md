@@ -8,7 +8,7 @@
 1. **Minimal Version Selection** — Always pick the minimum version that satisfies all constraints. No SAT solver. Deterministic, reproducible, fast. (Go Modules)
 2. **Strict module boundaries** — Code can only access modules it directly imports. Transitive dependencies are invisible. No phantom dependencies. (pnpm)
 3. **Type identity by (name, major)** — Two packages with the same `(name, major)` produce the same types. Different majors produce incompatible types. (Cargo)
-4. **Single source of truth** — `almide.toml` declares intent, `almide.lock` records exact commits. Lock file is always respected.
+4. **Single source of truth** — `almide.toml` declares intent, `almide.lock` records exact commits. A matching lock is respected; source changes require explicit re-locking and `--locked` refuses changes.
 5. **Future-proof for registry** — Current git-based system will be supplemented by an Almide package registry. Design decisions must not preclude this.
 
 ## 2. Package Identity
@@ -172,7 +172,7 @@ warning: unknown key `brnach` in dependency `foo` is ignored — it changes noth
 | top level | `[package]`, `[dependencies]`, `[native-deps]`, `[permissions]`, `[target]`, `[trust]` |
 | `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and are read by nothing (no warning) |
 | a `[dependencies]` entry (inline table, dotted keys or `[dependencies.<name>]`) | `git`, `tag`, `branch`, `version`, `path`, `subdir` |
-| `[permissions]` | `allow`, `proc`, `native` |
+| `[permissions]` | `allow`, `proc`, `native`, `fs` |
 | `[trust]` | `owners` |
 
 A dependency entry that is not a table, or names neither `git` nor `path`,
@@ -249,13 +249,11 @@ error: almide.toml:6: subdir `pkgs/ceangal` of dependency `ceangal` does not exi
   repository are two packages, walked separately for their own requirements and
   locked as two entries. `PkgId` (name, major) and MVS are unchanged — the name
   is still the package's own `[package] name`.
-- **One clone.** A `subdir` dependency's checkout is keyed by its source alone,
-  `~/.almide/cache/.repos/.src-<source>/<ref-or-commit>/`, so the packages of one
-  repository at one ref (or one locked commit) are one fetch and one directory;
-  each reads its own `subdir` inside it. (`.repos` starts with a dot, which no
-  package name can, so it never aliases a `<name>/` directory.) A dependency
-  without `subdir` keeps the name-keyed layout, so its cache entries stay valid;
-  it does not share a clone with a `subdir` dependency on the same repository.
+- **One clone.** Checkouts are source-keyed under
+  `~/.almide/cache/.sources/<encoded-source>/@/<ref-or-commit>/`.
+  Dependencies on the same source/ref share the checkout whether or not they
+  specify `subdir`; each reads its package directory within it. Older
+  `.repos/.src-<hash>` and name-keyed layouts are not reused (see §6.3).
 - **CLI.** `almide add <repo>[@<tag>] --subdir <dir>` names the package after
   the subdir's last component (`--subdir pkgs/ceangal` → `ceangal`); with
   `--git <url>` the first argument is the name. `add` fetches and checks the
@@ -479,7 +477,7 @@ category), the native code it brings and whether that code is granted:
 ```text
 nat = path ../nat
   version: 0.1.0
-  capabilities: Env, Fan, IO, Net, Rand, Time
+  capabilities: Abort, Env.read, Env.write, FS.read, FS.write, Fan, IO.stderr, IO.stdin, IO.stdout, Net.fetch, Net.listen, Proc, Rand, Time
   native code: native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2) (granted by [permissions].native)
 ```
 

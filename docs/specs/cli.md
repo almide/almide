@@ -99,7 +99,7 @@ key は構造レグが読むもの全部: 入口ファイルのパスとソー�
 
 **stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` /
 `io.write(io.stdout()!, …)` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
-ごとに flush、パイプやファイルならブロック単位。flush 点は終了時・panic 時・`main` が err を返した
+ごとに flush。パイプやファイルでも改行を含む書き込みは flush する。その他の flush 点は終了時・panic 時・`main` が err を返した
 時・子プロセス起動前・stdin 読み取り前、そして常に flush する `io.print`(`io.print("")` が明示
 flush)。stderr(`eprintln`)は無バッファなので、端末以外では stdout との相対順序は保たれない。
 詳細は [docs/stdlib/io.md](../stdlib/io.md)。
@@ -301,10 +301,10 @@ wasm レグは `almide` バイナリに組み込まれた wasmtime ホスト（`
 テスト: `tests/test_wasm_leg_runner_test.rs`
 
 スクラッチ成果物（CLI 経路で wasm レグが wasmtime に渡す `.wasm` モジュール）は実行ごとに固有の
-`$TMPDIR/almide-test-<pid>-<nonce>/` 配下に、ファイルの**絶対パス**のハッシュで命名して
+`<cache base>/test-run-<pid>-<nonce>/` 配下に、ファイルの**絶対パス**のハッシュで命名して
 置かれ、終了時に削除される（`ALMIDE_KEEP_SCRATCH=1` で残し、場所を stderr に出す）。
 同名ファイルの並列実行や別ディレクトリの同名ファイルがパスを共有することはない（#1877）。
-ネイティブ fallback のビルドキャッシュは `$TMPDIR/almide-test/native/` に永続（同じく絶対パス鍵）。
+ネイティブ fallback のビルドキャッシュは `<cache base>/test/native/` に永続（同じく絶対パス鍵）。
 
 この worker dir は**テストファイルの絶対パス 1 本につき 1 つ**で、それぞれが自分の `target/` を持つ。
 放置すると消えるものが無い（名前を変えたテスト、消した worktree、消えたブランチの分が残り続ける:
@@ -326,12 +326,12 @@ lock の下で「最後の使用が変わっていない」ことを再確認）
 この掃引は 1 分に 1 回（`native/.almide-size-stamp`）。既定の 4 GiB は、worktree 複数と並走
 エージェント 5 本の開発機で実測した 1 週間分の作業集合（worker 65 dir / 2.0 GB）の 2 倍。
 
-同じ規則が**ランタイム rlib キャッシュ** `<temp>/almide-rtlib-<key>/` にも効く(#2504)。
+同じ規則が**ランタイム rlib キャッシュ** `<cache base>/almide-rtlib-<key>/` にも効く(#2504)。
 この dir はランタイムソース × rustc バージョン × opt レベルごとに 1 つ作られ、コンパイラを
 ビルドし直すたび・ツールチェーンを上げるたびに新しい鍵になって古い方は二度とリンクされない
 （2026-09-22 に 31 dir / 102 MB を実測）。リンクのたびに rlib の mtime を更新し、7 日リンク
 されなかった dir を（自分が今使っている dir を除いて）空にする。掃引は 1 日 1 回、
-stamp は `<temp>/.almide-evict-stamp`。
+stamp は `<cache base>/.almide-evict-stamp`。
 
 テスト: `tests/test_scratch_race_test.rs`, `tests/run_cache_recovery_test.rs`
 
@@ -445,15 +445,16 @@ capability は deny-all から始まる。host に触れる stdlib 呼び出し�
 | `--allow` | 許可する module |
 |---|---|
 | `IO` | `io`, `fs` |
-| `Net` | `http`, `net` |
+| `Net` | `http`, `net`, `unix` |
 | `Env` | `env`, `args` |
 | `Time` | `datetime`, `duration` |
-| `Rand` | `random` |
+| `Rand` | `random`, `uuid` |
 | `Process` | `process` |
 
 `Fan` は無い。`fan.*` は critical profile の外にある(#1628)。この語彙は
-`almide.toml` の `[permissions].allow`(`IO` / `Net` / `Env` / `Time` / `Rand` / `Fan`、
-`docs/specs/effect-system.md` §8)とは別物で、`Process` と `Fan` が違う。
+`almide.toml` の `[permissions].allow` の leaf / parent capability 語彙とは別物。
+たとえば critical の `Process` に対し manifest は `Proc`、manifest には `Fan` もある。
+正確な leaf と parent 展開は `docs/specs/effect-system.md` §8 を参照。
 
 ```
 $ almide check rd.almd --profile critical
@@ -463,26 +464,15 @@ $ almide check rd.almd --profile critical --allow IO
 No errors found
 ```
 
-メモリ安全の保証の外にあるものは E100 になり、どの `--allow` でも通らない(#4008)。
-`ffi.*` の呼び出し、非推奨の `bytes` の生ポインタ関数(`as_ptr`・`as_mut_ptr`・
-`data_ptr`・`from_raw_ptr`・`copy_to_ptr`)の呼び出し、`@extern` fn の宣言の 3 つ。
-`--profile` 無しの check では同じプログラムが通る。
+`--profile critical` は `ffi.*` の memory-unsafe 呼び出しと `@extern` fn の
+宣言を E100 で拒否し、`--allow` では許可できない。通常モードでも `ffi` の
+使用は明示 import を要する。現在の surface は不透明な `Handle` と長さ・所有者を
+持つ `Region` であり、削除された `RawPtr` や `bytes.from_raw_ptr` を使う例ではない。
+詳細は [ffi](../stdlib/ffi.md) と `stdlib/ffi.almd`（ADR-0031）。
 
-```
-$ almide check raw.almd --profile critical --allow IO
-error[E100]: `bytes.from_raw_ptr` is outside the memory-safety guarantee and is not admissible under `--profile critical`
-```
-
-profile に関係なく、`almide build` は保証の外に出る場所を `Built` 行の末尾に出す
-(#4008)。挙げるのは `@extern` fn と、各宣言で最初に現れる生ポインタ(`RawPtr`
-の値)。型で判定するので、呼び出し・メソッド呼び出し・別名 import・関数値・引数の
-どの書き方でも出る。import した user module の中のものも出る。最初の 3 か所を挙げ、
-残りは件数で示す。保証の内側にあるプログラムの `Built` 行は変わらない。
-
-```
-$ almide build raw.almd
-Built raw — outside the memory-safety guarantee: a raw pointer in fn `main` (raw.almd:5)
-```
+profile に関係なく、`almide build` は `@extern` や foreign pointer の使用を
+`Built` 行に列挙する。これは保証境界の表示であって、その表示が無いだけで
+完全なメモリ安全性の証明が得られるという意味ではない。
 
 テスト: `tests/build_outside_guarantee_test.rs`
 
@@ -602,7 +592,7 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 | E009 | let/パラメータへの代入 |
 | E010 | 非網羅的 match |
 
-E001〜E030 + E420 の全コード解説は [../diagnostics/](../diagnostics/) を参照（上表は代表例）。
+診断コードの解説は [../diagnostics/](../diagnostics/) を参照（上表は代表例）。
 
 ---
 
@@ -890,7 +880,7 @@ almide apply src/calc.almd --with fix.patch --force               # 判定に関
 almide init
 ```
 
-生成���:
+生成物:
 
 ```
 almide.toml               [package] name, version, edition
@@ -1016,7 +1006,7 @@ almide deps
 #   native code: none
 # nat = path ../nat
 #   version: 0.1.0
-#   capabilities: Env, Fan, IO, Net, Rand, Time
+#   capabilities: Abort, Env.read, Env.write, FS.read, FS.write, Fan, IO.stderr, IO.stdin, IO.stdout, Net.fetch, Net.listen, Proc, Rand, Time
 #   native code: native/natval.rs; @extern fn `number` (src/mod.almd:2) (granted by [permissions].native)
 # ceangal = https://github.com/almide-graphics/ceangal2 (v0.1.0) subdir ceangal
 #   ...
@@ -1030,9 +1020,9 @@ almide deps
 
 ```bash
 almide dep-path bindgen
-# /Users/you/.almide/cache/bindgen/.src-2080cb5159116353/a629eded8d20/src
+# ~/.almide/cache/.sources/<encoded-source>/@/<commit>/src
 almide dep-path ceangal     # subdir 依存: 共有クローン内のパッケージディレクトリ
-# /Users/you/.almide/cache/.repos/.src-<source>/<commit>/ceangal/src
+# ~/.almide/cache/.sources/<encoded-source>/@/<commit>/ceangal/src
 ```
 
 用途: 依存パッケージの `.almd` ファイルを `process.exec("almide", ["run", path])` で実行する場合のパス取得。
@@ -1048,9 +1038,9 @@ almide dep-path ceangal     # subdir 依存: 共有クローン内のパッケ�
 | 依存キャッシュ | `~/.almide/cache/` |
 | インクリメンタルキャッシュ | `./.almide/cache/` |
 | コンパイルキャッシュ | `./target/compile/` |
-| native ビルドスクラッチ(#2500) | `ALMIDE_RUN_PROJECT_DIR`（既定 `<temp>/almide-run`）と `<temp>/almide-build-cdylib` |
-| `almide test` の worker dir(#2504) | `<temp>/almide-test/native/<key>/` を 1 つずつ |
-| ランタイム rlib(#2504) | `<temp>/almide-rtlib-<key>/` を 1 つずつ |
+| native ビルドスクラッチ(#2500) | `ALMIDE_RUN_PROJECT_DIR`（既定 `<cache base>/run`）と `<cache base>/build-cdylib` |
+| `almide test` の worker dir(#2504) | `<cache base>/test/native/<key>/` を 1 つずつ |
+| ランタイム rlib(#2504) | `<cache base>/almide-rtlib-<key>/` を 1 つずつ |
 
 **ビルドスクラッチの「空にする」は完了形の振る舞いであって、やり残しではない。** 各 dir の
 `.almide-build.lock` を取ってから中身を消す（進行中のビルドは完了してから消える）ので、
@@ -1118,7 +1108,10 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | コード | 意味 |
 |---|---|
 | 0 | 成功 |
-| 1 | コンパイルエラー、テスト失敗、依存解決失敗 |
+| 1 | コンパイルエラー、テスト失敗、依存解決失敗、fmt --check の差分など |
+| 2 | コマンド固有の使い方・入力・判定不能エラー（各節参照） |
+| 3 | almide verify: witness は ACCEPT だが未認証関数が残る INCOMPLETE |
+| 5 | almide test: 実行対象が 0 件（--allow-no-tests で変更可） |
 | 127 | `almide verify`: 独立検査器 `almide-verify` が見つからない（`error[verifier-missing]`） |
 
 ---
@@ -1176,7 +1169,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_BOUNDED_DEBUG` | debug | print why a bounded-loop bind declined (v1 lowering) |
 | `ALMIDE_BUILD_PROVENANCE=value` | ci | read by `build.rs` at BUILD time: `release` makes `almide --version` say `(release)`, anything else (including unset) says `(dev)`. Set only by `.github/workflows/release.yml`, the one thing that builds from a tag, so a binary claiming to be a release had to come from there (#2384) |
 | `ALMIDE_BUILD_SHA=value` | ci | read by `build.rs` at BUILD time: the commit `almide --version` names beside the build kind, truncated to 9 characters. Passed in by `make install` and the release workflow rather than read from git in the build script, which would rebuild the root crate after every commit (#2384) |
-| `ALMIDE_CACHE_MAX_BYTES=value` | tool | the size bound of each native build cache — the `almide test` worker cache (`<temp>/almide-test/native`, least recently used worker dirs emptied first) and a build scratch dir's per-program binaries and objects (`<temp>/almide-run`): `4G` (default), `512M`, a byte count, or `0`/`off` for no bound (#2608) |
+| `ALMIDE_CACHE_MAX_BYTES=value` | tool | the size bound of each native build cache under the private per-user cache base — the `almide test` worker cache (`<cache base>/test/native`, least recently used worker dirs emptied first) and a build scratch dir's per-program binaries and objects (`<cache base>/run`): `4G` (default), `512M`, a byte count, or `0`/`off` for no bound (#2608) |
 | `ALMIDE_CAPTURE_MOVE_OFF` | ablation | make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives |
 | `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build |
 | `ALMIDE_CI_BASE=value` | harness | the commit a sliced CI run diffs HEAD against to find the change's own files (a PR's base sha, a merge group's base_sha): every fixture the change touches joins the `ALMIDE_CI_SLICE` slice; scripts/ci-slice-prepare.sh resolves it into `ALMIDE_CI_TOUCHED` |

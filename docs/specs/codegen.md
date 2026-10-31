@@ -45,7 +45,7 @@ The flow:
 3. Target-specific emit:
    - **Rust**: Walker renders IR via templates, prepends runtime preamble
    - **WGSL**: `emit_wgsl::emit()` renders shader source
-   - **Wasm**: `unreachable!` — routed to `almide-mir` before reaching this crate
+   - **Wasm**: `unreachable!` — routed to the structural `almide-wasm` emitter before reaching this crate
 
 ```almd
 // Input: hello.almd
@@ -80,7 +80,8 @@ pub enum Target {
 ```
 
 Active targets in this crate: **Rust** and **WGSL**. TypeScript codegen was
-removed (2026-03-28); wasm codegen moved to `crates/almide-mir`.
+removed (2026-03-28). The current Wasm route is `src/wasm_route.rs` →
+`crates/almide-wasm`, not the retired MIR-to-WAT renderer.
 
 Each target is configured via `target::configure()` which returns a `TargetConfig`:
 
@@ -121,43 +122,19 @@ Passes compose into a `Pipeline`. The pipeline runner:
   (harness switch) injects a violation after the named pass, the release
   binary's negative control (`tests/ir_verify_every_profile_test.rs`)
 
-### Rust Pipeline (in order)
+### Rust pipeline source of truth
 
-**Source**: `crates/almide-codegen/src/target.rs`, `build_pipeline(Target::Rust)`
+[`build_pipeline(Target::Rust)`](../../crates/almide-codegen/src/target.rs)
+is the authoritative pass order, including dependencies and conditional gates.
+This is an implementation pipeline, not a frozen language-level sequence.
 
-| # | Pass | Source | Description |
-|---|------|--------|-------------|
-| 1 | UnifyVarTablesPass | `pass_unify_var_tables.rs` | Merge per-module VarTables into one namespace |
-| 2 | ListPatternLoweringPass | `pass_list_pattern.rs` | Lower list patterns to length checks + indexing |
-| 3 | LambdaTypeResolvePass | `pass_lambda_type_resolve.rs` | Resolve stale lambda param types |
-| 4 | ConcretizeTypesPass | `pass_concretize_types*.rs` | Box recursive types, generate anonymous record structs |
-| 5 | PatternLiteralGuardPass | `pass_pattern_literal_guard.rs` | Turn literal sub-patterns into guards |
-| 6 | ResolveCallsPass | `pass_resolve_calls.rs` | Resolve call targets as an independent pass |
-| 7 | BoxDerefPass | `pass_box_deref.rs` | Insert Deref IR nodes for pattern variables bound from Box'd fields in recursive enums |
-| 8 | LICMPass | `pass_licm.rs` | Hoist loop-invariant pure expressions to `let` bindings before the loop |
-| 9 | EggSaturationPass | `pass_egg_saturation.rs` | Equality-saturation simplification |
-| 10 | MatrixShapeSpecPass | `pass_matrix_shape_spec.rs` | Specialize matrix ops on known shapes |
-| 11 | ConstFoldPass | `pass_const_fold.rs` | Constant folding |
-| 12 | IntrinsicLoweringPass | `pass_intrinsic_lowering.rs` | Lower `@intrinsic` declarations to runtime calls |
-| 13 | BorrowInsertionPass | `pass_borrow_inference*.rs` | Analyze parameter usage, mark `&T` vs `T` |
-| 14 | TailCallOptPass | `pass_tco.rs` | Convert self-recursive tail calls into `while true` loops with parameter reassignment |
-| 15 | CaptureClonePass | `pass_capture_clone.rs` | Pre-clone variables captured by multiple move closures to avoid E0382 |
-| 16 | CloneInsertionPass | `pass_clone.rs` | Insert `Clone` IR nodes for heap-type variables based on use-count analysis |
-| 17 | MatchSubjectPass | `pass_match_subject.rs` | Insert `.as_str()` on String match subjects, `.as_deref()` on `Option<String>` |
-| 18 | EffectInferencePass | `pass_effect_inference.rs` | Infer capability requirements (IO, Net, Env, etc.) from stdlib usage |
-| 19 | StdlibLoweringPass | `pass_stdlib_lowering.rs` | Rewrite `Module { "list", "map" }` calls to `Named { "almide_rt_list_map" }` with arg decoration |
-| 20 | AutoParallelPass | `pass_auto_parallel.rs` | Rewrite pure `list.{map,filter,any,all}` calls to parallel `par_*` variants |
-| 21 | ResultPropagationPass | `pass_result_propagation.rs` | Insert `Try` (Rust `?`) around Result-returning calls in `effect fn` |
-| 22 | BuiltinLoweringPass | `pass_builtin_lowering.rs` | Convert `assert_eq`, `println`, etc. to `RustMacro` IR nodes |
-| 23 | PeepholePass | `pass_peephole.rs` | Local IR peephole cleanups |
-| 24 | RustLoweringPass | `pass_rust_lowering.rs` | Rust-specific final lowering |
-| 25 | FanLoweringPass | `pass_fan_lowering.rs` | Strip auto-try from fan spawn closures (try applied at join point) |
-| 26 | NormalizeRuntimeCallsPass | `pass_normalize_runtime_calls.rs` | Canonicalize runtime call shapes |
-| 27 | IrLinkFlattenPass | `pass_ir_link_flatten.rs` | Flatten linked modules for emission |
-| 28 | TopLetStoragePass | `pass_top_let_storage.rs` | Classify top-level lets (const vs LazyLock) |
+Its stages include type/call normalization, region and ownership analysis,
+borrowing/cloning, effect and Result adaptation, stream fusion, Rust-specific
+lowering, runtime-call normalization and final linking/storage decisions.
+`RegionWindowPass`, `StreamFusionPass` and `OwnedSourceHoistPass` are part of
+the current implementation; the old `AutoParallelPass` table is obsolete.
+Parallel scheduling follows the explicit `fan` forms, not that removed pass.
 
-The exact order and the per-pass gating live in `build_pipeline` — treat this
-table as an index, and `target.rs` as the truth.
 
 ## 4. Template System
 
@@ -337,7 +314,7 @@ import list
 
 fn main() =
   let xs = [1, 2, 3]
-  let doubled = xs.map(|x| x * 2)
+  let doubled = xs.map((x) => x * 2)
   println(doubled)
 ```
 
@@ -471,18 +448,24 @@ that no occurrence needs owned.
 
 ### Effect Functions
 
-`effect fn` compiles to Rust functions returning `Result<T, String>`. The `ResultPropagationPass` inserts `?` on fallible calls automatically. The template for `effect_fn_decl` is identical to `fn_decl` because the return type in IR is already `Result<T, String>`.
+A user `effect fn` declaring success type `T` has a fallible Result interface
+(default error type `String`); an explicitly declared Result keeps its error
+type. Source propagation is explicit: write `!`, or handle/discard the Result
+as specified by ADR-0008. The frontend lowers that intent into IR; native
+`ResultPropagationPass` adapts signatures, tails and calls to Rust
+representations. It does not restore implicit propagation in source code.
+The following Rust is schematic (runtime wrapper types are omitted).
 
 ```almd
 effect fn read_config(path: String) -> String =
-  let content = fs.read_text(path)
+  let content = fs.read_text(path)!
   content
 ```
 
 ```rust
 pub fn read_config(path: String) -> Result<String, String> {
     let content: String = almide_rt_fs_read_text(&path)?;
-    content
+    Ok(content)
 }
 ```
 
