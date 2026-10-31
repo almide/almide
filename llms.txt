@@ -37,7 +37,7 @@ read here is what the current compiler accepts.
   reads it, `==` is constant time on `Secret[String]`/`Secret[Bytes]` (E103
   otherwise), and a record with a Secret field is read, never written
   (declare it `: Decode`; a `: Codec` one derives `decode` only).
-  `env.secret(name)` reads a token as `Secret[String]`, and `hash.hmac_sha256`
+  `env.secret(name)` reads a token as `Option[Secret[String]]`, and `hash.hmac_sha256`
   takes and answers `Secret[Bytes]`.
 - Not in the stdlib since dialect epoch 14: the neural-network kernels
   (`gelu`, `softmax_rows`, attention, RoPE, the row norms, Q1_0/Q8_0, the
@@ -60,7 +60,8 @@ read here is what the current compiler accepts.
   returning `Option[B]`, an optional fn value spells `((A) -> B)?`, nested
   Option spells `(T?)?`. Errors are spelled `Result[T, E]`, or `-> T!` for the
   pure-fallible `Result[T, String]` return (value tails lift into ok(...)).
-  A lambda whose body uses `!` is a fallible closure `(A) -> Result[T, E]`
+  With Result propagation, a lambda whose body uses `!` is a fallible closure
+  `(A) -> Result[T, E]`
   — first-class, and as the callback of any list / map / set / option HOF
   (`list.all(xs, (x) => p(x)!)!`, `map.fold`, `option.map`, …) it makes the HOF
   fallible with the first-err form;
@@ -71,7 +72,9 @@ read here is what the current compiler accepts.
   callbacks take the entry as ONE `(K, V)` tuple — `map.filter(m, ((k, v)) => v > 0)`,
   `map.fold(m, 0, (acc, (k, v)) => acc + v)` — and where the ONLY parameter is a
   tuple its elements may be separate parameters (`map.filter(m, (k, v) => v > 0)`).
-  In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
+  An Option-returning context has its own failure-channel rules; see
+  `docs/specs/result-option-effect.md`. In test blocks lambda-`!` stays unwrap.
+  No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
   cannot call effect functions (checked, emits E006) — also not as a value:
@@ -96,7 +99,7 @@ read here is what the current compiler accepts.
   `args.option("in")! ?? "in.txt"` — `!` propagates the error, `??`
   defaults the none (without the `!`, `??` wants an `Option[T]`: E001).
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
-- `match` is exhaustive; missing arms emit a warning.
+- `match` is exhaustive; missing arms are a compile error (E010).
 - Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`
   cons, no `[a, ...rest]` spread in list patterns.
 
@@ -183,7 +186,7 @@ fn shout(items: List[String]) -> List[String] = items |> list.map(transform)
 
 ### Recursion for stateful loops (no head :: tail)
 
-When the iteration count is known up front, write a range `for` (`for _ in 0..<n`) and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance — not for counted `f(n - 1)` loops.
+When the iteration count is known up front, write a range `for` (`for _ in 0..<n`) and thread state with `var`. Use `break` / `continue` for loop control. Recursion can express state transitions whose bound is not known in advance — not for counted `f(n - 1)` loops.
 
 ```almide check
 fn peek(s: String, p: Int) -> String = string.slice(s, p, p + 1)
@@ -260,13 +263,13 @@ fn load_at_boundary(p: String) -> Result[String, String] =
 
 Do not branch on message TEXT (`string.contains(e, …)`, `e == "..."`) — E035.
 Non-goals, decided and not open: no `From`-style conversion hook, no error
-sets / unions / rows, no implicit propagation, no inferred lambda error type,
+sets / unions / rows, no implicit propagation. A fallible lambda infers a consistent error type from its body and expected function type;
 `main` stays String. Full rule: `docs/specs/result-option-effect.md` §8.0, §9.
 
 ### Verifying a webhook signature (HMAC)
 
 `import hash` and `import secret`. The key and the tag are `Secret[Bytes]`;
-read the key with `env.secret(name)`, which answers `Secret[String]`. Verify
+read the key with `env.secret(name)`, which answers `Option[Secret[String]]`. Verify
 with the `is_valid_` cell, key first: it computes HMAC-SHA256 and compares in
 constant time. A tag's own `==` is the constant-time one too (it is a
 `Secret[Bytes]`), so never `secret.reveal` two tags to compare them, and never
@@ -321,7 +324,7 @@ effect fn new_session_token() -> String = hex.encode(random.bytes(32))
 
 Almide uses operators for comparison and equality. There is no
 `int.gt`, `int.lt`, `int.eq`, etc. Use `>`, `<`, `==`, `!=`, `>=`, `<=`.
-Equality (`==` / `!=`) works on any type.
+Equality (`==` / `!=`) works on equality-capable types, recursively for supported containers and data types. Function values are not comparable (E016); only direct `Secret[String]` / `Secret[Bytes]` equality uses the constant-time comparison; other Secret equality and generic structural comparisons of Secret-containing types are rejected (E103).
 
 ### sqrt, abs, etc.
 
@@ -372,109 +375,127 @@ effect fn signup(req: HttpRequest) -> HttpResponse = match http.decode_json[Sign
 type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 ```
 
-## Diagnostic codes LLMs hit most (retry anchors)
+## Diagnostic code index
 
-| Code | Meaning | Usual fix (from `try:` snippet) |
-|---|---|---|
-| E001 | Type mismatch | Often Unit-leak: add a trailing expression, or rebind via `let new_x = if cond then … else …` |
-| E002 | Undefined function | Often a cross-language idiom (`length` → `len`, `push` → `+ [x]`). Check `almide ide outline @stdlib/<m>` |
-| E003 | Undefined variable | Missing explicit `import json` / `import fs` / etc |
-| E004 | Arg count mismatch | Signature placeholder in try: shows `<name: Type>` |
-| E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
-| E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
-| E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
-| E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), an input type holding a `Codec` record (a field or a variant payload), or a forwarded type parameter | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
-| E114 | Generic fn calls itself (directly or through other generic fns) at a growing type, e.g. `depth((x, x), n - 1)` inside `depth[T]` | Recurse at the type the fn was called with: collect values in a `List[T]`, or count levels in an `Int` |
-| E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
-| E009 | Reassign immutable | `let` → `var` |
-| E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |
-| E011 | Mutable var mutated inside closure in pure fn | Refactor with `list.fold` / `list.count` / etc, or mark fn `effect fn` |
-| E012 | Duplicate definition (fn / test) | Rename one side |
-| E013 | Field access on non-record / missing field | Check spelling; non-records don't have method syntax (see E002) |
-| E014 | Unreachable match arm | Drop the dead arm, or tighten the earlier arm so this one is reachable |
-| E015 | Possible stdlib reimplementation (warning) | Delegate via the `try:` shim, or rename if intentionally different |
-| E016 | Function in a `Set` element or `Map` key | Keep closures in a `List`, or use a comparable key (closures are fine as `Map` values) |
-| E017 | Record construction on an enum type name | Construct a specific record-bearing case (`Named { ... }`), not the enum type |
-| E018 | Empty collection with an uninferable element type | Annotate the element type (`let xs: List[Int] = []`), or inline (`list.len([]: List[Int])`) — never silently defaulted (Rust/Swift rule) |
-| E019 | Ambiguous variant constructor (same ctor name in two or more types) | Rename the constructor in one of the types so the name is unique (a qualified `Type.Ctor` is not yet supported) |
-| E020 | Two distinct types share one name with different structures | Rename one of the colliding types |
-| E021 | Invalid record construction/pattern shape (positional args on a record, unknown/duplicate/missing field, paren pattern on a record case) | Records take named fields: `Cfg(name: x)` or `Cfg { name: x }`; match record cases as `Case { .. }` |
-| E022 | `!` (unwrap-propagate) outside an effect fn body or test block | Mark the enclosing fn `effect fn`, or use `??` for a fallback value (`!` inside a lambda can't propagate) |
-| E023 | Derived `Codec`/`Ord`/`Hash` not satisfied by a field type | Add `: P` to the offending field type (every field of a `: P` type must itself be `P`) — or hand-write `Type.encode`/`decode` for Codec |
-| E024 | Integer literal out of range for its type (would silently fold to 0) | Use a literal within the type's range. Two causes, two fixes: **magnitude** → smaller literal or wider type (`UInt64` reaches its full `18446744073709551615`); **sign** (`let k: UInt64 = -5`) → drop the `-` or use the signed type of the same width. `-9223372036854775808` (i64::MIN) and `-0` in an unsigned type are both valid |
-| E025 | Cannot infer a concrete type — an undecidable type slot (e.g. the error type of a value that is always `ok(...)`) was never pinned | Annotate the binding with its full type (`let r: Result[Int, String] = ...`); an unconstrained slot is an error even if never constructed, never silently defaulted |
-| E026 | `[]` indexing on a String (a UTF-8 codepoint sequence, not a byte/char array) | Use `string.get(s, i)` (returns `Option[String]`) or `string.char_at(s, i)`; range slicing `s[a..b]` is fine |
-| E028 | `main()` takes no parameters (`fn main(args: List[String])` is not wired on any target) | Read program arguments with `env.args()` inside the body |
-| E029 | Unknown type name in an annotation or record literal (would fail the native build after check accepted) | Declare the type, fix the spelling, or add the missing import |
-| E030 | Type has no ordering — `list.sort/min/max` or a `sort_by` key over Map/Set/Fn or compound-nested Float | Sort by an explicit orderable key (`list.sort_by(xs, (m) => <Int/String key>)`) |
-| E031 | Retired range spelling — `..`/`..=` were replaced by Swift-style `..<` (exclusive) / `...` (inclusive) | Write `0 ..< n` / `1 ... n`, or run `almide fix <file>` to migrate every range mechanically |
-| E032 | Immutable binding (a `let`, a non-`mut` parameter, or a temporary) passed to a `mut` parameter — including every in-place writer's receiver (`list.push`, `map.clear`, the `bytes` writers `append_*`/`put_*`/`fill`/`clear`/`copy_from`) | A local: declare the root binding with `var` instead of `let`. A helper that writes its caller's buffer: declare the parameter `mut b: Bytes` and pass a `var`. A temporary must be bound to a `var` first (split from E007 in 2026-08) |
-| E033 | Opaque type constructed outside its defining module | Use the defining module's public constructor API (split from E008 in 2026-08) |
-| E034 | Error-channel operator (`!` / `?` / `??`) on a non-Option/Result operand | Drop the operator — a plain value has no error channel; if a fallible call was intended, apply it to that call's Result |
-| E035 | (warning) Branch condition reads error message text (`string.contains(e, …)` / `e == "…"` on an err binding) | Branch on a variant error type or use `??` for a kind-independent fallback; message text is a report, not an API |
-| E036 | (warning) `map_err` lambda never uses its error value — original error silently discarded | Keep the chain: `(e) => "context: ${e}"`; discard deliberately with `(_) => …` |
-| E037 | Equality between incompatible types (Result on one side only, or same container with different params — used to die as rustc E0308 after check passed) | Unwrap the Result side (`!` / `??` / match), or make both operand types identical |
-| E038 | `??` separated from its fallback (line-crossing swallowed the next statement; also the missing-operand form) | Put the fallback on the same line as `??`; multiline = parens with `??` trailing |
-| E039 | Retired `result.collect`/`collect_map` — Rust's collect short-circuits, almide's collected ALL errors (opposite strategy, same name); the fns are REMOVED (an ordinary E002 now) | All-errors: `let (oks, errs) = result.partition(rs)` then branch on `list.is_empty(errs)`; first-err: `list.map(xs, (x) => f(x)!)!` |
-| E041 | Implicit propagation (auto-?) was REMOVED (ADR-0008) — the value stays a Result in all 5 former positions | Append `!` to propagate (mechanical insertion carried by the error), or consume the Result (`??` / `?` / match) |
-| E042 | A statement-position Result is discarded — the error would be silently dropped (must-use, every fn kind) | Propagate with `expr!`, or discard on purpose with `let _ = expr` |
-| E043 | `list.try_*` was REMOVED (ADR-0006) — the core HOF is fallibility-polymorphic: a callback ending in `!` (or a named `-> T!` fn) instantiates the fallible form, first-err short-circuit included | `list.try_map(xs, f)` → `list.map(xs, (x) => f(x)!)!` (same shape for filter/flat_map/filter_map/fold/find/each) |
-| E044 | a PURE `main` returns Unit — a program's result is its output, not a return value (`fn main() -> Int` used to die downstream as invalid Rust); an EFFECT main may declare any Ok type (its wrapper discards the payload) | `fn main() -> Unit = println("${...}")`, or `process.exit(n)` for an exit code |
-| E045 | tuple index `.k` is defined only on tuples and only below the arity — `.0` on Int, or `.5` on a pair, is a check-time error naming the type/valid range (previously an Unknown that died at build as a compiler-blaming banner, #1266) | index within `.0`..`.arity-1`, or destructure: `let (x, y) = t` |
-| E046 | `_` in a call ARGUMENT is not a value and is NOT partial application — it lowered to `Unit` and died at build as a compiler-blaming banner (`add(_, 10)` → `add((), 10i64)`); measured: binding it typed the RETURN type, and in pipe position it counts as an extra argument (E004). `_` in EXPRESSION position stays a sanctioned typed hole | name the missing value with a lambda: `(x) => add(x, 10)` |
-| E047 | Invalid escape in a string literal — an escape Almide does not define (`"\q"`), or a `\u{…}` outside the Unicode scalar range (`"\u{110000}"`, surrogates). Both used to pass through SILENTLY as their own spelling (#1264) | Double the backslash for a literal one (`"\\d+"`), or use a raw string (`r"\d+"`); for a codepoint stay within U+0000..U+D7FF / U+E000..U+10FFFF (`"\u{0}"`, not `"\0"`) |
-| E048 | A constructor pattern the SUBJECT does not have: wrong family (`some`/`none` destructure an Option, `ok`/`err` a Result, and the two never mix — `list.get`/`map.get`/`string.find` return `T?`, `int.parse`/`fs.read_text`/`json.parse` return a Result), a builtin carrier aimed at a USER variant, or a user case borrowed from another variant. The checker only rejected a ctor pattern over a plain SCALAR, so these bound their payload Unknown and died at build — a compiler-blaming banner, or invalid generated Rust for the foreign-case cell (#1341) | Use the subject's own cases; for the family swap the error's `try:` names the same arm position (`ok(..)`→`some(..)`, `err(..)`→`none`, `some(..)`→`ok(..)`, `none`→`err(..)`), and for a variant the hint lists its cases |
-| E049 | `let ... in <expr>` is OCaml/Haskell syntax — Almide has no `in` keyword: bindings chain by newline and the block's trailing expression is its value | delete the `in`; what follows it is already the continuation. The fix-it is machine-applicable, so `almide fix <file>` removes every one mechanically |
-| E050 | A local `fn` collides with a selectively-imported name (`import json.{parse}` + `fn parse`) — one bare name, two resolutions: the checker used to pick the local fn while lowering picked the import, so a call type-checked against one function and EXECUTED the other (#1425) | Rename the local fn, or drop the name from the import list and call it module-qualified (`json.parse`) |
-| E051 | A file's `@dialect(N)` stamp names a HIGHER dialect epoch than the compiler implements — the file was verified against a newer language than the one being asked to compile it, so a success here would be luck rather than evidence | Upgrade the compiler; or, if the file really targets this dialect, run `almide check <file> --stamp` on a clean check to write the correct epoch (it only ever moves the stamp forward) |
-| E052 | A call names a `@deprecated` function. The hint names the replacement and classifies the edit by COMPARING the two signatures: identical means the rename is the whole edit, anything else means the arguments need looking at | Same signature: `almide fix <file>` applies it unattended. Different signature: the hint still names the replacement, but the edit is yours — the auto-fix is withheld on purpose rather than risk a miscompile |
-| E053 | An attribute name the compiler does not read (`@deprecatd`, `@inline`, anything invented). It parses and then nothing happens — before this warning a misspelled `@deprecated` left every caller unwarned while the author believed otherwise | Fix the spelling (the hint suggests the nearest real one, or lists the whole vocabulary). Almide reads: @extern @export @intrinsic @wasm_intrinsic @inline_rust @mutating @consume @borrow_ref @pure @schedule @location @derived @main @deprecated @dialect. On a RECORD FIELD an unknown attribute is an error (epoch 15); the field vocabulary is @builtin @location @skip @skip_decode, and `@serde(skip)`/`@redact` get a hint naming `@skip` / `Secret[String]` |
-| E054 | `almide fmt` refused to write: formatting would not conserve the program (parse, AST, or comments — the #1309 `--safe` verifier). The file is left untouched | Nothing in your source — this is a FORMATTER bug; report the file, leave it unformatted, format the rest |
-| E055 | `?.` on a Result — the optional chain is Option-only (`o?.f` is `option.map`) | Convert or unwrap first: `(r?)?.field` (Result→Option, then chain), `(r ?? fb).field`, or `match` |
-| E056 | (warning) `?` on an Option is a no-op — the operand is already an Option, nothing converts | Drop the operator; to unwrap use `?? fallback`, `match`, or `!` (effect fn) |
-| E057 | fn declaration has no body — only @extern/@intrinsic may omit it | Write `= expr` (or `= { ... }`) after the signature |
-| E058 | Unhashable Map key: Float, Map, or a record/variant carrying one anywhere in its fields (a FUNCTION in the key is E016) | Key on String/Int/Bool (or a record/variant of those); carry the unhashable value on the VALUE side |
-| E059 | `for` over a non-iterable head (`for x in 5`) — the loop head must be a List or a Map | Iterate a List, a range (`for i in 0...n`), or a Map (`for (k, v) in m`) |
-| E060 | (warning) Import hygiene: a module imported and never used, or imported twice under two names | Remove the unused/duplicate import; `import _name` suppresses a deliberate one |
-| E061 | Top-level `let` bound to a lambda — the closure has no home in a module constant and the binding is not callable | Declare it as a function: `fn name(…) = …`; a `let`-bound lambda inside a fn/test body is fine |
-| E062 | (warning) Shebang without `-S`: `#!/usr/bin/env almide run` runs on macOS and dies on Linux, whose kernel hands `env` the rest of the line as ONE argument | Write `#!/usr/bin/env -S almide run` — `-S` makes `env` split the line on both kernels |
-| E070 | `@bounded`: a loop without a compile-time trip count (`while`, `for` over a container, run-time range bounds) | Use a counted range with literal bounds: `for i in 0..<N` (ALS-B3) |
-| E071 | `@bounded`: allocation inside a counted loop (list/map/string construction, concat, push, closure) | Allocate outside the loop; accumulate scalars inside (ALS-B4) |
-| E072 | `@bounded`: `break`/`continue` inside a counted loop | Single exit: run every iteration and select with a branch (ALS-B5) |
-| E073 | `@bounded`: recursion — the reachable call graph must be a DAG | Replace recursion with a counted loop (ALS-B6) |
-| E074 | `@bounded`: a non-`@bounded` callee, closure, or higher-order call | Mark the callee `@bounded` or call a first-order pure stdlib member (ALS-B7) |
-| E075 | `@bounded`: run-time-length heap construction (`string.repeat(s, n)`, `list.with_capacity(n)`, …) | Give every constructed length a compile-time size (ALS-B8) |
-| E076 | `@bounded`: an effect outside the declared capability (env/fs/http/… or `fan.*`) | The profile's capability is standard output only (ALS-B9) |
-| E077 | `@bounded`: Float arithmetic or comparison (provisional rule) | Keep to Int arithmetic; Float values may be held and passed (ALS-B10) |
-| E078 | `@bounded`: `!` propagation or `guard` inside a counted loop | Propagate or guard outside the loop; default with `??` inside (ALS-B11) |
-| E080 | An or-pattern alternative binds a variable (`some(n) \| none`) — the body cannot depend on which alternative matched | Write separate arms when the body needs the payload, or use `_` inside the alternative |
-| E082 | The wasm target cannot lower the program on `--target wasm` (the reason and the function it came from are printed with the code; on the build route it can be a host op the stock-WASI shim cannot serve) — `almide check --target wasm` reports it at check time | On the build route try `almide run --target wasm` (the embedded host serves every op); otherwise restructure the walled shape named in the error |
-| E083 | The wasm emitter's own exit validator found a frame whose exit window releases a different set of credits than its exit plan declared (an owned block dropped or released twice) — a compiler defect, never a program error | Report it with the program; `almide run` (native) is unaffected |
-| E084 | A literal argument to stdlib `process.exit` is outside the exit status `0..=255` | Choose `0` for success or `1` through `255` for failure; computed arguments keep the runtime range check, and a WASI preview-1 build refuses 126..=255 at runtime |
-| E085 | `@intrinsic` / `@wasm_intrinsic` on a fn, or a `prim.*` reference / `import prim`, outside the stdlib (a user file binding a runtime symbol or calling the primitive floor directly bypasses the capability profile; `prim` is not user surface) | Intrinsics live in the stdlib; wrap in an effect fn — import the stdlib module that owns the operation (`fs`, `http`, `process`, …) and call it from an `effect fn` of your own. For `prim.*`, call the public function the hint names (`prim.read_text_file` → `fs.read_text`) |
-| E081 | The called stdlib fn is not available on `--target wasm` (the declared wasm wall set, `proofs/target-availability.toml`) | Run natively, use the named portable alternative from the `try:` line, or wait for the port the reason names |
-| E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.get(v, k)`), or run `almide fix <file>` |
-| E089 | A `${…}` segment whose value has no defined string form — Bytes, Unit, Matrix, a raw pointer, a function value, or a container/record/variant holding one; also reported at the CALL that instantiates a generic fn whose body interpolates its type parameter | Interpolate what you mean: `${bytes.to_list(b)}` / `${bytes.to_string_lossy(b)}`, `${matrix.to_lists(m)}`, the result of calling the function (`${f(x)}`); a Unit carries nothing, so drop the segment |
-| E086 | A value built inside a `scoped { … }` block would outlive it (the block's value, or a write to an outer binding) — the rows name where it was allocated and where the scope ends (ALS-E31) | Compute the scalar summary inside the scope and let that cross the boundary |
-| E087 | An operation not permitted in a scoped region: a callee that is not `scoped fn`, a global, host output or an `effect fn`, an unknown indirect call, a heap value captured from outside, a type outside the fragment, or `!` / `?` / `guard` (ALS-E31) | Declare the callee `scoped fn`, pass the value in as a parameter, or move the effect outside the scope |
-| E088 | A recursive call in a `scoped fn` retains the current activation — a single non-tail self-call, or mutual recursion between scoped workers (ALS-E31) | Carry the pending work in an accumulator and return the recursive call, or fold the mutual pair into one worker |
-| E090 | An `@extern(c)` signature with a type that has no C representation — a list, Bytes, map, record, variant, Option, tuple or fn value parameter, a `String` return, or a `mut` parameter | Pass C scalars (`Int`, sized ints, `Float`, `Bool`, `RawPtr`, `String` parameters), or bind through an `@extern(rust, "crate::host", "f")` fn in `native/*.rs`, which takes Almide values as `&[u8]` / `&[T]` / `&str` / `&Record` |
-| E092 | A `@pure` fn is not pure — it is an `effect fn` or an `@extern`, or it (or anything it calls) prints, panics, asserts, calls a stdlib fn with an effect category (`io.write`, `process.pid`, …) or calls an `@extern` | Move that call to a caller that is not `@pure`, or remove `@pure`; a call through a fn-typed parameter does not count |
-| E093 | A type applied to a different number of type arguments than its declaration has parameters — `Pair[Int, Int]` for `type Pair[T] = (T, T)`, `Score[Int]` for `type Score = Int`, or a builtin: `List[Int, Int]`, `Map[String]`, `Result[Int]` | Write one type per declared parameter (the message spells them: `Pair[T]`, `Map[K, V]`), or drop the brackets for a type without parameters |
-| E094 | Type aliases form a cycle — `type A = B` with `type B = A`, or `type Tree = List[Tree]` through a type argument | Give the cycle a nominal type: a record or variant may refer to itself (`type Tree = { kids: List[Tree] }`) |
-| E095 | The app passed to `http.serve` reads a local of the fn that serves it — `let boot = random.int(1, 9)` in main read by the handler, or `let app = http.router(…)!` in main passed to `serve` | Make the value a top-level `let` (`let app = http.router(…)` at top level, served as `http.serve(8080, app!)!`), or compute it inside the handler per request |
-| E096 | A fn with a `mut` parameter used as a function value — `let f = bump`, `list.map(xs, bump)`, a record field, a list element, a return, `counter.bump` — a function type cannot carry the write-back to the caller's `var` | Call it directly (`bump(s)` with `var s`), or pass a lambda that names the `var` (`() => bump(s)`); as a callback argument, a lambda of the slot's arity that copies into a local `var` (`(item) => { var copy = item; bump(copy); copy }`); a fn that only changes its own copy drops `mut` and returns the new value |
-| E097 | `pub` before a `type`, `protocol` or `test` — `pub type Point = { … }`; a type and a protocol are public by default and a test has no visibility | Delete `pub` (machine-applicable, `almide fix`); narrow a type with `mod type` (project) or `local type` (file) |
-| E098 | The closure passed to `testing.assert_aborts` captures a local of the test (a `let`, `var`, `where` binding or outer lambda parameter), or is a fn value rather than a lambda written in the call — it runs in a child process or instance where the locals do not exist | Compute the value inside the closure, or make it a top-level `let` |
-| E099 | `testing.assert_aborts` outside a direct call in a test block — in a `fn`, `main` or a top-level `let`, used as a value, or inside another `assert_aborts` closure | Call it directly in the `test` block, once per abort |
-| E100 | Outside the memory-safety guarantee: an `ffi.*` call in a file without `import ffi`; under `--profile critical`, any `ffi.*` call or an `@extern` fn | Add `import ffi` to the file that uses Regions (`ffi.region(b)`, `ffi.alloc(n)!`, `ffi.read(r, off, n)!`, `ffi.write(r, off, b)!` — bounds-checked, an access outside the region is an err); under critical, keep that code in a module not checked with `--profile critical` — no `--allow` grants it |
-| E101 | A raw bidirectional control character (U+202A–U+202E, U+2066–U+2069) anywhere in the source — a comment, string literal or heredoc (Trojan Source) | Delete it from a comment; in a literal write the escape `\u{202E}` |
-| E102 | A `regex.new` literal pattern the engine refuses — an unclosed group or class, nothing to repeat, a malformed `{…}`, a named group, lookaround, or more than 20,000 states — the same reason `regex.new` would abort with at run time | Fix the pattern (escape a literal `(`, `[`, `{` or `*` with `\\`, use a numbered group, shrink a large count), or build it with `regex.compile` and handle the err |
-| E104 | A record field marked `@skip` or `@skip_decode` has no default: input never sets it, so `T.decode` has no value for it | Give the field a default: `@skip_decode is_admin: Bool = false` |
-| E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
+This is a navigation index, not the complete diagnostic guide. Read the
+linked page (or `almide explain E022`) for the current repair, severity and
+fix-it applicability. `try:` suggestions are not automatically safe edits.
+The canonical code registry is `docs/diagnostics/codes.toml` and the complete
+index is [Diagnostic codes](docs/diagnostics/README.md).
 
-A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
-an Almide codegen bug, not a user error — report at the issues URL.
+For `!`, use the innermost compatible failure channel: an effect fn,
+a pure fn returning Result/Option, or a fallible lambda; tests unwrap.
+A lambda does not propagate directly out of its enclosing fn. See the
+context-specific rules in [E022](docs/diagnostics/E022.md) and
+[Result, Option and effect](docs/specs/result-option-effect.md).
+
+| Code | Meaning |
+|---|---|
+| [E001](docs/diagnostics/E001.md) | Type mismatch |
+| [E002](docs/diagnostics/E002.md) | Undefined function |
+| [E003](docs/diagnostics/E003.md) | Undefined variable |
+| [E004](docs/diagnostics/E004.md) | Wrong number of arguments |
+| [E005](docs/diagnostics/E005.md) | Argument type mismatch (constructor / function call) |
+| [E006](docs/diagnostics/E006.md) | Effect isolation: pure fn calls effect fn |
+| [E007](docs/diagnostics/E007.md) | `fan` block outside effect fn |
+| [E008](docs/diagnostics/E008.md) | a concurrently-run body reaches a `var` |
+| [E009](docs/diagnostics/E009.md) | Reassignment to immutable binding |
+| [E010](docs/diagnostics/E010.md) | Non-exhaustive match |
+| [E011](docs/diagnostics/E011.md) | Mutable var mutated inside closure in pure fn |
+| [E012](docs/diagnostics/E012.md) | Duplicate definition |
+| [E013](docs/diagnostics/E013.md) | Field access on a non-record / missing field |
+| [E014](docs/diagnostics/E014.md) | Unreachable match arm |
+| [E015](docs/diagnostics/E015.md) | Possible stdlib reimplementation |
+| [E016](docs/diagnostics/E016.md) | Function where equality or hashing is required |
+| [E017](docs/diagnostics/E017.md) | Record construction on an enum type name |
+| [E018](docs/diagnostics/E018.md) | Empty collection with an uninferable element type |
+| [E019](docs/diagnostics/E019.md) | Ambiguous constructor |
+| [E020](docs/diagnostics/E020.md) | Conflicting type declarations |
+| [E021](docs/diagnostics/E021.md) | Invalid record construction or pattern |
+| [E022](docs/diagnostics/E022.md) | `!` operator outside an error-propagating context |
+| [E023](docs/diagnostics/E023.md) | derived protocol not satisfied by a field type |
+| [E024](docs/diagnostics/E024.md) | integer literal out of range |
+| [E025](docs/diagnostics/E025.md) | cannot infer a concrete type (unconstrained type slot) |
+| [E026](docs/diagnostics/E026.md) | cannot index a String with `[]` |
+| [E027](docs/diagnostics/E027.md) | fan combinator tombstones: retired spellings that name their replacement |
+| [E028](docs/diagnostics/E028.md) | main() takes no parameters |
+| [E029](docs/diagnostics/E029.md) | unknown type name |
+| [E030](docs/diagnostics/E030.md) | type has no ordering |
+| [E031](docs/diagnostics/E031.md) | retired range spelling |
+| [E032](docs/diagnostics/E032.md) | immutable binding passed to `mut` parameter |
+| [E033](docs/diagnostics/E033.md) | opaque type constructed outside its defining module |
+| [E034](docs/diagnostics/E034.md) | error-channel operator on a non-Option/Result operand |
+| [E035](docs/diagnostics/E035.md) | branching on the text of an error message (warning) |
+| [E036](docs/diagnostics/E036.md) | map_err lambda never uses the error value (warning) |
+| [E037](docs/diagnostics/E037.md) | equality between incompatible types |
+| [E038](docs/diagnostics/E038.md) | `??` separated from its fallback |
+| [E041](docs/diagnostics/E041.md) | implicit propagation was removed |
+| [E042](docs/diagnostics/E042.md) | this statement discards a Result (must-use) |
+| [E043](docs/diagnostics/E043.md) | the try_* spellings, public and internal |
+| [E044](docs/diagnostics/E044.md) | main() returns Unit |
+| [E045](docs/diagnostics/E045.md) | tuple index on a non-tuple, or out of range |
+| [E046](docs/diagnostics/E046.md) | placeholder `_` in a call argument |
+| [E047](docs/diagnostics/E047.md) | invalid escape in a string literal |
+| [E048](docs/diagnostics/E048.md) | variant pattern the subject's type does not have |
+| [E049](docs/diagnostics/E049.md) | `let ... in <expr>` is OCaml/Haskell syntax |
+| [E050](docs/diagnostics/E050.md) | local `fn` or `let` collides with a selectively-imported name |
+| [E051](docs/diagnostics/E051.md) | file stamped for a dialect this compiler does not speak |
+| [E052](docs/diagnostics/E052.md) | calling a deprecated function |
+| [E053](docs/diagnostics/E053.md) | unknown attribute |
+| [E054](docs/diagnostics/E054.md) | fmt verification failed |
+| [E055](docs/diagnostics/E055.md) | `?.` on a Result |
+| [E056](docs/diagnostics/E056.md) | `?` on an Option is a no-op (warning) |
+| [E057](docs/diagnostics/E057.md) | fn has no body |
+| [E058](docs/diagnostics/E058.md) | unhashable Map key |
+| [E059](docs/diagnostics/E059.md) | non-iterable for head |
+| [E060](docs/diagnostics/E060.md) | import hygiene (warning) |
+| [E061](docs/diagnostics/E061.md) | top-level `let` bound to a function value |
+| [E062](docs/diagnostics/E062.md) | shebang without `-S` (warning) |
+| [E070](docs/diagnostics/E070.md) | `@bounded` requires counted loops |
+| [E071](docs/diagnostics/E071.md) | no allocation inside a counted loop |
+| [E072](docs/diagnostics/E072.md) | no `break`/`continue` in a `@bounded` loop |
+| [E073](docs/diagnostics/E073.md) | no recursion in the bounded profile |
+| [E074](docs/diagnostics/E074.md) | `@bounded` calls `@bounded` (or first-order pure stdlib) |
+| [E075](docs/diagnostics/E075.md) | no run-time-length heap construction |
+| [E076](docs/diagnostics/E076.md) | `@bounded` effects are capability-bounded |
+| [E077](docs/diagnostics/E077.md) | no Float arithmetic in the bounded profile (provisional) |
+| [E078](docs/diagnostics/E078.md) | no early exit inside a counted loop |
+| [E080](docs/diagnostics/E080.md) | or-pattern alternative binds a variable |
+| [E081](docs/diagnostics/E081.md) | the function is not available on the selected wasm target |
+| [E082](docs/diagnostics/E082.md) | the wasm leg cannot lower the program on --target wasm |
+| [E083](docs/diagnostics/E083.md) | compiler ownership defect: an emitted exit does not implement its checked ExitPlan |
+| [E084](docs/diagnostics/E084.md) | literal exit code outside the exit-status range |
+| [E085](docs/diagnostics/E085.md) | `@intrinsic` or `prim.*` outside the stdlib |
+| [E086](docs/diagnostics/E086.md) | a value would outlive its scoped allocation |
+| [E087](docs/diagnostics/E087.md) | an operation is not permitted in a scoped region |
+| [E088](docs/diagnostics/E088.md) | a recursive call retains the current scoped activation |
+| [E089](docs/diagnostics/E089.md) | the value has no defined string form |
+| [E090](docs/diagnostics/E090.md) | the `@extern(c)` signature has no C representation |
+| [E092](docs/diagnostics/E092.md) | a `@pure` fn is not pure |
+| [E093](docs/diagnostics/E093.md) | type applied to the wrong number of type arguments |
+| [E094](docs/diagnostics/E094.md) | type aliases form a cycle |
+| [E095](docs/diagnostics/E095.md) | the app passed to `http.serve` reads a local |
+| [E096](docs/diagnostics/E096.md) | a fn with a `mut` parameter used as a function value |
+| [E097](docs/diagnostics/E097.md) | `pub` before a `type`, `protocol` or `test` |
+| [E098](docs/diagnostics/E098.md) | the closure passed to `testing.assert_aborts` captures a local |
+| [E099](docs/diagnostics/E099.md) | `testing.assert_aborts` outside a direct call in a test block |
+| [E100](docs/diagnostics/E100.md) | outside the memory-safety guarantee |
+| [E101](docs/diagnostics/E101.md) | source that reads differently from what compiles |
+| [E102](docs/diagnostics/E102.md) | an invalid pattern in `regex.new` |
+| [E103](docs/diagnostics/E103.md) | `==` on a Secret that cannot compare in constant time |
+| [E104](docs/diagnostics/E104.md) | a skipped record field has no default |
+| [E109](docs/diagnostics/E109.md) | pure fn runs an effect fn through a function value |
+| [E110](docs/diagnostics/E110.md) | untrusted input decodes only into an input type |
+| [E114](docs/diagnostics/E114.md) | a generic fn reaches itself at a growing type |
+| [E420](docs/diagnostics/E420.md) | Function visibility violation |
+
+Retired codes: **E039** (`result.collect` / `collect_map`) and **E040**
+(the old json/value aliases) are migration history; removed functions now
+receive E002. **E091** (patterns after `var`) was retired when `var` gained
+binding patterns. See the canonical index for their release context.
+
+A rustc four-digit code (`error[E0XXX]`) in generated-code compilation is
+not an Almide diagnostic; preserve the compiler output when reporting it.
 
 ## Project layout
 
@@ -490,9 +511,9 @@ Sibling import is `import self.classifier` — no file paths.
 
 ## What Almide is NOT
 
-- Not Haskell/ML — no `let rec`, no `let … in`, no type classes (protocols exist but have explicit `impl`), no HKTs.
+- Not Haskell/ML — no `let rec`, no `let … in`, no type classes (protocols use convention methods, not `impl` blocks), no HKTs.
 - Not Rust — no lifetimes, no borrow checker surface syntax, no `unsafe`, no traits-as-data-attributes.
-- Not JS/Python — no dynamic typing, no `null`, no exceptions, no method-call syntax (`x.foo()` on non-UDTs).
+- Not JS/Python — no dynamic typing, no `null`, no exceptions. Receiver-call syntax uses UFCS (`x.foo()` calls a matching function with `x` as its first argument), not dynamic method lookup.
 
 Cross-language idioms that compile in other languages and break here:
 `let x = … in body` (OCaml), `head :: tail` (Haskell), `[a, ...rest]`
