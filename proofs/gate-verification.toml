@@ -114,7 +114,10 @@
 # (36 -> 37).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "37"
+# #4372: two new CI-prose gate rows explicitly map four still-uncompensated
+# limits (future consumers, live integration, unmodeled inputs, coordinated edits).
+# This is the bidirectional inventory count described above, not a relaxed ratchet.
+# uncompensated_blind_ceiling = "41"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1632,3 +1635,23 @@ evidence = "#4023 landing (2026-10-24): `controls` re-injects one fixed bug per 
 measures = "spec/ test files failing on native with ALMIDE_REGION_TRAP_STALE=1 and on wasm (the double-free trap always on), plus proofs/diff-fuzz.sh and one xtarget-fuzz campaign (seed 4023) diverging with the region trap armed (all files and programs on a full run; under ALMIDE_CI_SLICE a commit-rotated 1-in-k slice of the test files plus the change's own, and ceil(n/k) programs, at least 20 diff-fuzz and 30 xtarget-fuzz); for `controls`, whether each re-injected bug ends in its trap's exit code"
 varies = "#4023 landing, aarch64-apple-darwin: spec/ 537/537 files (4609 tests) native armed, 531 passed / 6 skipped wasm; diff-fuzz 150/150 match; xtarget-fuzz 300 generated, 267 clean, 0 findings. Controls: wasm 0 -> 1 across the trap's landing, native 0 unarmed -> 101 armed"
 blind = "a stale region read or a double free the corpus and the fuzz seed never reach -> UNCOMPENSATED; a wasm double release whose block was re-allocated between the two releases (rc back at 1, so the sentinel sees nothing — #3538's own partition reproduction, #2133 and #2397 are this shape) -> scripts/wasm-checked-alloc.sh; a region bug that only shows in the shipped arena layout (the armed prelude adds an 8-byte header per block) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/ci_prose.py"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml, .github/workflows/ci-cross-target.yml, .github/workflows/acceptance-ring.yml, .github/workflows/mutation-sweep.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4372 (2026-10-31): scripts/test_ci_prose.py checks real Git ranges, mixed source/prose, symlinks, renames, empty/invalid ranges, trusted-base bootstrap and isolated imports; rejects wrong repository/run/SHA/event, expired or undigested artifacts, digest mismatch, traversal/symlink/non-ELF archives and untrusted redirects. Missing artifact/API error emits reused=false, never a successful reused build. The first-install CI run 41214620542 observed trusted base classifier unavailable and selected the full lane. Live artifact reuse is a separate integration observation, not established by these offline controls."
+measures = "whether every changed path qualifies for the narrow prose lane, and whether an exact-base successful same-repository push artifact satisfies provenance, digest and archive constraints before reuse"
+varies = "#4372 controls: README-only real Git range true versus mixed source range false; valid mocked artifact accepted versus each forged provenance/digest/layout rejected; absent base helper selects full"
+blind = "a newly introduced runtime consumer of an allowlisted prose file -> UNCOMPENSATED (source review remains necessary); live API/storage/runner behavior not represented by mocks -> UNCOMPENSATED (normal-build fallback is safe, live reuse needs integration verification); compiler behavior outside these controls -> .github/workflows/ci.yml (existing compiler checks under their existing conditions, not a universal correctness proof)"
+
+[[gate]]
+path = "scripts/test_ci_prose.py"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "MUTATION_TESTED"
+evidence = "#4372 (2026-10-31): unchanged helper passes all 12 tests. In isolated scratch copies, forcing prose_path to return True for every path makes the suite exit 1; independently replacing verified_binary with an unconditional ELF return also makes the suite exit 1. Original repository sources remain unmodified by the drills. The bootstrap control executes the literal ci.yml shell with a missing base helper, mixed queue, invalid/manual event and PR-edited helper."
+measures = "whether the committed classification, bootstrap and artifact-reuse positive/negative regression controls all pass"
+varies = "#4372 controls: original helper exit 0; allow-all classifier mutant exit 1; digest-bypass mutant exit 1"
+blind = "defects outside the enumerated control inputs -> UNCOMPENSATED (source review and live integration verification remain necessary); coordinated corruption of implementation and expected test answers -> UNCOMPENSATED (independent review remains necessary)"
