@@ -1,272 +1,132 @@
-<!-- description: Five-layer security model making web vulnerabilities compile-time errors -->
+<!-- description: Proposed layered security model, implemented foundations, and remaining trust boundaries -->
 # Secure by Design
 
-> **Status: On Hold** — Phase 1 complete, Phase 2-4 blocked on infrastructure.
-> Layer 0-1 (effect isolation, @extern) ✅ complete.
-> Phase 1a (opaque type language feature) ✅ complete (v0.18.0): `mod type T = U` creates nominal newtype with E008 cross-module constructor rejection.
-> Phase 1b (stdlib opaque types) ✅ complete: `html.SafeHtml` (escape/raw/to_string/concat), `path.SafePath` (from_string with traversal rejection/trusted/to_string). `sql.SafeSql` deferred until DB driver exists.
-> Phase 2-4 on hold (requires @extern platform tags, package registry).
+> **Status: On Hold — design proposal, not a security certification.**
+> Reviewed against the repository on 2026-10-31. Opaque types, SafeHtml/SafePath
+> helpers and effect/capability analysis provide foundations. They do not establish
+> universal web safety or the per-package policy interface proposed below.
 
-## Thesis
+## Goal and limits
 
-Almide will become **web-safe** in the same way Rust is memory-safe. Not "safe if you're careful," but "safe by default. Won't break unless you intentionally try to break it."
+Make dangerous output and external access explicit and auditable. Typed wrappers
+help only when constructors enforce the intended policy and every relevant sink
+requires the wrapper. A wrapper alone does not prevent injection, path traversal,
+data exfiltration, or malicious dependencies.
 
-```
-Rust:  Memory-safe unless you write unsafe
-Almide: Web-safe unless you write @extern
-```
+This document preserves the five-layer design and its remaining integration work.
+For current guarantees and package behavior, see [security by construction](../active/security-by-construction.md)
+and the [package specification](../../specs/package-system.md).
 
-## Security Model
+## Layer 1: Effect isolation — checked calls, not a sandbox
 
-Almide's security consists of 5 layers. Each layer functions independently, and when all layers are in place, structural safety including supply chain is established.
+The checker separates ordinary pure and effect calls. This helps identify effectful
+operations, but built-in output exceptions exist. A pure API does not prove absence
+of observable behavior, termination, bounded resource use, or harmlessness of a
+package. Effect checking is not an isolation boundary for untrusted native code.
 
-### Layer 1: Effect Isolation — pure fn cannot perform I/O
+**Existing foundation:** effect checking and capability analysis. Their current
+scope must not be expanded into a blanket claim that pure functions cannot do I/O.
 
-```almide
-fn parse(s: String) -> Value = ...          // pure. I/O impossible
-effect fn load(path: String) -> String = ... // I/O possible
-```
+## Layer 2: Explicit external bridges
 
-- `fn` cannot call `effect fn`. Verified by the compiler
-- Pure fn cannot access the outside world at all. Data exfiltration and external communication are type errors
-- **Security implication**: If a package only exports pure fn, that package is harmless by definition
+`@extern` makes some external declarations visible. Standard-library intrinsics,
+host imports and native dependencies also cross trust boundaries. Searching for
+`@extern` is therefore not a complete security audit, nor is it equivalent to
+Rust's `unsafe` boundary.
 
-**Status: ✅ Implemented in the language.** Effect system is working.
+**Remaining proposal:** platform tags and their policy semantics. The earlier
+`@extern(platform: web, ...)` examples were proposed syntax, not evidence that
+platform-restricted execution is enforced today. Capability inference already
+exists; it does not depend on shipping this proposed tag syntax first.
 
-### Layer 2: Single Bridge — @extern is the only contact point with the outside world
+## Layer 3: Opaque types and safe sinks
 
-```almide
-@extern(platform: web, "fetch")
-effect fn fetch(url: String) -> Response
-```
+The language supports nominal module-private wrappers using `mod type T = U`.
+See [`html.SafeHtml`](../../../stdlib/html.almd) and
+[`path.SafePath`](../../../stdlib/path.almd) for existing helpers.
 
-- The only way to call native APIs is `@extern`
-- `eval()`, `require()`, dynamic `import()` do not exist in the language
-- **Security implication**: grep for `@extern` in the codebase and all contact points with the outside world are enumerated
+- `html.escape` escapes text, while `html.raw` deliberately wraps **trusted,
+  unescaped** input. SafeHtml therefore does not prove that every value was escaped.
+- SafePath construction rejects some unsafe strings. Filesystem containment also
+  depends on the sink, symlinks, races and platform semantics.
+- A proposed SafeSql wrapper and parameterized database sink require a database
+  implementation and a defined validation/encoding contract.
+- Framework sinks that require validated wrappers remain separate integration
+  work; not all standard-library I/O accepts opaque wrappers exclusively.
 
-**Status: ✅ @extern is implemented.** ✅ Capability inference implemented (Layer 2: 7 categories, transitive, `almide check --effects`). ❌ platform tags not yet implemented.
+**Remaining proposal:** define safe sink signatures, validate constructors and
+context-specific escaping, then test that unsafe construction and sink bypasses
+are rejected. The earlier `Response.html`/HTML-builder sketches were design
+examples, not shipped framework APIs.
 
-### Layer 3: Opaque Types — Restrict the means of constructing dangerous output
+## Layer 4: Package capability policy
 
-```almide
-type SafeHtml = opaque String
-type SafeSql  = opaque String
-type SafePath = opaque String
-```
-
-- `opaque` types cannot be constructed directly from outside
-- The only way to create `SafeHtml` is through a builder (with auto-escape)
-- The only way to create `SafeSql` is through parameterized query functions
-- stdlib I/O APIs only accept opaque types: `Response.html(body: SafeHtml)`
-- **Security implication**: XSS, SQL injection, command injection, and path traversal become type errors
-
-```almide
-// Compile error: Response.html requires SafeHtml, cannot pass String
-let html = "<p>" ++ user_input ++ "</p>"
-Response.html(html)  // ← type error: expected SafeHtml, got String
-
-// OK: builder auto-escapes
-let doc = Html { p { user_input } }
-Response.html(doc |> render)  // ← returns SafeHtml
-```
-
-**Status: ✅ Opaque types implemented (v0.18.0).** `mod type SafeHtml = String` creates a nominal newtype. Cross-module constructor calls rejected with E008. Pattern match unwrap works within defining module. Stdlib builders (SafeHtml, SafeSql, SafePath) deferred to web framework integration.
-
-### Layer 4: Capability Inference — Compiler infers package permissions
-
-The compiler traces the function call graph, tracking which `@extern` each function transitively reaches.
-
-```
-json-parser package
-├── parse()      → fn (pure) → no @extern
-├── stringify()  → fn (pure) → no @extern
-└── Inferred: capabilities = [] (pure)
-
-http-client package
-├── get()        → effect fn → fetch → @extern(platform: web, "fetch")
-├── post()       → effect fn → fetch → @extern(platform: web, "fetch")
-└── Inferred: capabilities = [network]
-
-sketchy-logger package
-├── log()        → effect fn → write_file → @extern(platform: node, "fs", ...)
-├── report()     → effect fn → http.post → @extern(platform: web, "fetch")
-└── Inferred: capabilities = [fs, network] ⚠️
-```
-
-Restrict capabilities on the consumer side:
+Capability inference helps describe effects reached by a function. The additional
+proposal is a consumer-granted, transitive **per-dependency policy**, for example:
 
 ```toml
-# almide.toml
-[dependencies.json-parser]
+# Proposed interface, not a current manifest contract.
+[dependencies.example]
 version = "1.0"
-capabilities = []              # Only pure allowed
-
-[dependencies.sketchy-logger]
-version = "1.0"
-capabilities = ["fs"]          # Only fs allowed, network denied
+capabilities = ["fs"]
 ```
 
-```
-error: sketchy-logger requires capability "network", but only ["fs"] granted
-  --> almide.toml:7:1
-   |
-   = note: sketchy-logger/src/report.almd:5 calls http.post
-   = note: http.post uses @extern(platform: web, "fetch")
-   = hint: add "network" to capabilities, or use a different package
-```
+Before implementing this interface, specify:
 
-**Status: ❌ Not implemented.** Required:
-- @extern platform tags (→ platform-target-separation.md)
-- Compiler capability inference pass (extension of effect propagation)
-- capabilities field in almide.toml
-- Transitive capability verification and diagnostic messages
+- how inferred effects and native/host implementations map to capabilities;
+- whether enforcement is static, runtime, or both, including unknown calls;
+- transitive dependency grants and diagnostics;
+- policy for changes in requested capabilities during updates;
+- behavior within granted capabilities (a filesystem grant is not proof of benign use).
 
-### Layer 5: Supply Chain Integrity — Package tampering detection
+Existing capability inference must not be described as unimplemented, or confused
+with proof that this proposed package policy is enforced.
 
-```toml
-[dependencies.http-client]
-version = "2.0"
-hash = "sha256:a1b2c3d4e5f6..."
-capabilities = ["network"]
-```
+## Layer 5: Supply-chain identity and provenance
 
-- Packages are pinned by source content hash
-- Even the same version with a different hash results in **compile error**
-- Capability changes are also detected: a package that was pure in v2.0 requesting network in v2.1 → explicit approval required
+The proposal combines locked identity, trusted provenance and capability-change
+review. See the current package specification for implemented lock/trust behavior;
+the hosted registry remains a [separate proposal](package-registry.md).
 
-```
-warning: http-client 2.0 → 2.1 adds new capability "fs"
-  --> almide.toml:3:1
-   |
-   = note: http-client@2.1/src/cache.almd uses fs.write_file
-   = hint: add "fs" to capabilities, or pin to version 2.0
-```
+A content hash detects a mismatch against a trusted expected identity. It does not
+prove benign behavior, prevent malicious initial publication or independently
+solve typosquatting. Hash verification does not sandbox native build steps. A
+registry is one possible distribution mechanism, not a prerequisite for hashing.
 
-**Status: ❌ Not implemented.** The package registry itself is not yet built (→ package-registry.md).
+**Remaining proposal:** define trusted provenance, identity pinning, update review
+and the interaction with native dependency trust. Capability changes and hash
+mismatches need explicit policy and diagnostics rather than assumed enforcement.
 
-## Attack Surface Elimination
+## Implementation sequence and why this remains on hold
 
-When all 5 layers are in place, which layer stops each attack:
+1. **Existing foundation:** opaque types, HTML/path helpers and effect/capability
+   analysis. Preserve them without claiming universal safe sinks.
+2. **Sink integration:** specify and test safe HTML, SQL, command and filesystem
+   boundaries, including trusted escape hatches and validation failure behavior.
+3. **Package policy:** define grants, transitive enforcement and external-code
+   trust; platform-tag design may contribute but is not the existing analyzer.
+4. **Distribution/provenance:** integrate trusted identity and capability-change
+   review with package tooling and any future registry.
 
-| Attack | Layer 1 | Layer 2 | Layer 3 | Layer 4 | Layer 5 |
-|---|---|---|---|---|---|
-| XSS (string injection) | | | **opaque SafeHtml** | | |
-| SQL injection | | | **opaque SafeSql** | | |
-| Command injection | | | **opaque SafeCmd** | | |
-| Path traversal | | | **opaque SafePath** | | |
-| Package data exfiltration | **effect isolation** | **@extern only** | | **capability detection** | |
-| Install-time code execution | | **no eval** | | | **hash verification** |
-| Transitive dependency poisoning | | | | **transitive tracking** | **hash verification** |
-| Prototype pollution | **immutable** | **no prototype** | | | |
-| Eval injection | | **no eval** | | | |
-| Version overwrite attack | | | | | **content hash** |
-| Typosquatting | | | | **capability mismatch** | **hash verification** |
+The remaining work includes policy and research questions, not merely scheduling:
+which properties are enforced, which components are trusted, how granted authority
+can be abused, and what evidence establishes each guarantee. The language's lack
+of JavaScript prototypes or dynamic eval does not constrain an external host or
+native dependency by itself.
 
-**A single attack stopped by multiple layers = defense in depth.**
+## Intended protections and residual risks
 
-## Implementation Order
+No coverage percentage is claimed. The former 100%/95% estimates were aspirations,
+not measurements or proofs, and should not be used as security guarantees.
 
-Implementation order based on dependencies:
-
-```
-Phase 1: opaque types
-  ← Language feature addition. parser + checker + codegen
-  ← Foundation for SafeHtml, SafeSql, SafePath
-  ← Make builder lift return SafeHtml
-  ← This alone makes XSS/SQLi/Command injection type errors
-
-Phase 2: @extern platform tags
-  ← platform-target-separation.md
-  ← @extern(platform: web, ...) / @extern(platform: node, ...) etc.
-  ← Prerequisite for capability inference
-
-Phase 3: capability inference
-  ← Built on Phase 2
-  ← Compiler tracks transitive @extern reachability
-  ← Auto-compute capabilities per package
-  ← capabilities field in almide.toml
-  ← This enables supply chain capability verification
-
-Phase 4: supply chain integrity
-  ← package-registry.md
-  ← Content-addressed hash
-  ← Capability change detection
-  ← @extern usage restriction policy
-```
-
-**Phase 1 alone makes XSS/SQLi/Command injection/Path traversal type errors.** Maximum impact at minimum implementation cost.
-
-Phase 2-3 adds supply chain security. Phase 4 depends on infrastructure (registry).
-
-## Prerequisites
-
-| Phase | Dependent roadmap item | Reason |
+| Boundary | Potential protection | Remaining obligation |
 |---|---|---|
-| Phase 1 | None (language core addition) | opaque is an independent type system extension |
-| Phase 2 | platform-target-separation.md | @extern platform tags |
-| Phase 3 | Phase 2 + effect system (existing) | capability = transitive inference of platform tags |
-| Phase 4 | package-registry.md | Content hash requires a registry |
+| HTML/SQL/command output | Reject incompatible values at typed sinks | Correct escaping/parameterization, constructors and trusted raw inputs |
+| Filesystem paths | Reject some invalid path strings | Containment, symlinks, races, platform behavior and authority |
+| Dependency effects | Identify and restrict selected capabilities | Complete enforcement and abuse within granted capabilities |
+| Package identity | Detect changes from a trusted expected identity | Initial trust, provenance, malicious updates and native build behavior |
 
-## What Already Works (Layer 0)
-
-These are already baked into the language and require no changes:
-
-- ✅ `fn` cannot do I/O (effect system)
-- ✅ `@extern` is the only FFI bridge
-- ✅ `eval()` / dynamic import do not exist
-- ✅ Prototype chain does not exist
-- ✅ Immutable by default
-- ✅ Static types make all code paths visible
-- ✅ Packages are .almd source files (no install-time code execution)
-
-**This Layer 0 is the most important and hardest to change.** Almide already has it. It's impossible for npm/Node.js to gain this retroactively (`require()` having full permissions is fundamental to their design).
-
-## Design Principle
-
-**Not "make it impossible to write unsafe code" but "writing normally results in safe code."**
-
-- Write HTML with builder → auto-escape (safe)
-- Write SQL with `sql()` → auto-parameterize (safe)
-- Use a package → capabilities are auto-inferred (safe)
-- Write `@extern` → this is the only act of "intentionally stepping outside safety"
-
-In Rust, `unsafe` is a marker for "from here on, I take responsibility." In Almide, `@extern` is the same. **The language default is safe, and danger is explicit.**
-
-## Why ON HOLD
-
-Phase 1 (opaque types) can begin after language core stabilization. Phase 2 onward depends on platform-target-separation.md and package registry.
-
-However:
-
-- **Layer 0 is already complete** — The most important and hardest-to-change part
-- **Phase 1 (opaque) alone makes XSS/SQLi/Path traversal type errors** — Maximum effect at minimum investment
-- **No unresolved research questions in the overall design** — A combination of known techniques
-
-Just as Rust made memory safety a property of the language, Almide will make web safety a property of the language. Technically possible. It's a matter of sequencing.
-
-## Coverage — What Gets Resolved After All Phases, What Remains
-
-### Structurally Eliminated (Language Guarantees)
-
-| Category | Resolution | Mechanism |
-|---|---|---|
-| Injection attacks (XSS, SQLi, CMDi) | **100%** | opaque types. Cannot pass String to dangerous sinks. Type error |
-| Path traversal | **100%** | opaque SafePath. Validation forced at construction |
-| Prototype pollution | **100%** | Prototype chain does not exist in the language |
-| Eval injection | **100%** | eval / dynamic import do not exist in the language |
-| Install-time code execution | **100%** | Packages are .almd source files. No execution hooks exist |
-| Supply chain (malicious packages) | **95%** | Compile-time detection via capability inference. Abuse within granted capabilities remains |
-| Version overwrite / typosquatting | **100%** | Content-addressed hash. Hash mismatch causes compile error |
-
-### Structurally Unresolvable (Remains in Any Language)
-
-| Category | Resolution | Reason |
-|---|---|---|
-| Logic bugs (authorization gaps, IDOR, etc.) | **0%** | "Should this operation be allowed" is business logic. Cannot be expressed in types |
-| Correctness of validation function internals | **0%** | Construction methods for opaque types can be restricted, but the correctness of those construction functions is human responsibility |
-| Side-channel / timing attacks | **0%** | Execution time uniformity is outside compiler guarantees |
-| SSRF (complete prevention) | **Partial** | Can be mitigated with SafeUrl type + allowlist, but allowlist correctness is human responsibility |
-
-### Implication
-
-**The majority of OWASP Top 10 becomes structurally zero.** What remains are "problems that persist regardless of language." A clear separation between problems you don't need to worry about when writing in Almide and problems you must worry about in any language.
+Authorization logic, validation correctness, deployment configuration, side
+channels, SSRF policy and resource exhaustion still require explicit design and
+review. These layers support defense in depth; they do not establish elimination
+of OWASP categories or make application security review unnecessary.

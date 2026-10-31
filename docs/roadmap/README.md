@@ -142,7 +142,7 @@
 | [Region-based Memory Management](on-hold/region-inference.md) | Region-based memory management — Phase 1+2 shipped, Phase 3 (full inference) on hold for server workloads |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
-| [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
+| [Secure by Design](on-hold/secure-by-design.md) | Proposed layered security model, implemented foundations, and remaining trust boundaries |
 | [Shell Completions](on-hold/shell-completions.md) | almide completions subcommand for bash/zsh/fish auto-completion |
 | [File-backed Snapshot Testing — On Hold](on-hold/snapshot-testing.md) | Optional file-backed snapshots beyond the shipped source-literal snapshot assertions |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
@@ -155,7 +155,7 @@
 15 items
 
 <details>
-<summary>Show all 15 completed items</summary>
+<summary>Show all 15 archived items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -172,6 +172,8 @@
 | 2026-03-19 | [HKT Foundation — Phase 1-4 + Stream Fusion (All 6 Laws)](done/hkt-foundation-phase1.md) | HKT foundation phases 1-4 with type constructors and algebraic laws |
 | 2026-03-19 | [Effect System — Phase 1-2](done/effect-system-phase1-2.md) | Effect inference engine with 7 categories and checker integration |
 | 2026-03-11 | [Playground Repair Turn](done/playground-repair.md) | Playground AI-powered error repair and type checker integration |
+| Not recorded | [WASM Optimization Roadmap](done/wasm-optimization-roadmap.md) |  |
+| Not recorded | [Almide WASM Engine — Complete Redesign](done/wasm-engine-redesign.md) | Complete redesign of the WASM engine around LayoutRegistry, WasmIR, and WasmBuilder |
 
 </details>
 
