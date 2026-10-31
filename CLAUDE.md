@@ -1,6 +1,6 @@
 # Mission
 
-**Almide is the language LLMs can write most accurately.** The claim is not that the model gets it right: it is that a wrong modification is caught at author time with a diagnostic that names the fix, and a right one is certified memory-safe by a checker proven in Rocq (`almide verify`). Every design decision serves that. (Modification survival rate, measured directly, saturates at the top of the model range — `demo/make-verify/README.md` records why it was replaced.)
+**Almide is the language LLMs can write most accurately.** The goal is to catch incorrect modifications at author time with actionable diagnostics. `almide verify` records witnesses for independent checking of modeled properties; this is not a guarantee that every incorrect program is rejected or that a complete artifact is memory-safe. See [the proof and trust boundary](docs/contracts/proven-vs-trusted.md). Every design decision serves that. (Modification survival rate, measured directly, saturates at the top of the model range — `demo/make-verify/README.md` records why it was replaced.)
 
 # Critical Safety Rules
 
@@ -161,11 +161,14 @@ make install   # cargo build --release + install to ~/.local/bin/almide
 
 ## Usage
 
+Cross-target output comparisons apply under the supported contracts and matching
+host/input assumptions; see [the equivalence scope](docs/design/EQUIVALENCE.md).
+
 ```bash
 cargo build --release
 
 almide run app.almd              # Compile + execute
-almide run app.almd --target wasm  # Compile + execute on wasmtime (byte-identical to native)
+almide run app.almd --target wasm  # Execute on embedded Wasmtime; parity has contract/host conditions
 almide run app.almd -- arg1 arg2 # Program args go after --
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
