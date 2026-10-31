@@ -1,8 +1,10 @@
 # Architecture
 
-Almide is a ~170,000-line pure-Rust compiler organized as a workspace of a CLI
-binary + 13 library crates (plus the cargo-excluded `almide-kernel` SIMD crate
-and the Lean 4 proof project `almide-perceus-belt`). Key dependencies: `serde` +
+Almide is a Rust workspace containing the compiler, runtime and backend crates,
+and independent verification tools. [`Cargo.toml`](../Cargo.toml) is the
+source of truth for workspace membership and exclusions; the default build
+includes both `almide` and the separate `almide-verify` checker. The Lean 4
+proof project `almide-perceus-belt` is not a Cargo crate. Key dependencies: `serde` +
 `serde_json` (AST serialization), `toml` (template loading), `clap` (CLI),
 `lasso` (string interning), `wat` + `wasmparser` + `wasm-encoder` (WASM
 assembly/validation), `lsp-server` + `lsp-types` (language server).
@@ -107,6 +109,9 @@ form) — same observable behavior, different bytes.
 
 ## Crate Structure
 
+Selected components are shown below; this is a navigation map, not a complete
+workspace roster. See [`Cargo.toml`](../Cargo.toml) for all members.
+
 ```
 almide/                    Workspace root
 ├── src/                   CLI binary (almide)
@@ -131,6 +136,7 @@ almide/                    Workspace root
 │   ├── almide-lang/       Facade crate: re-exports syntax + types (no logic)
 │   ├── almide-frontend/   Type checker (Infer → Solve → Resolve), AST→IR
 │   │                      lowering, canonicalize, ir_link
+│   ├── almide-driver/     Shared post-typecheck driver: optimize → mono → ir_link
 │   ├── almide-ir/         Typed IR: IrProgram/IrExpr (every node carries ty),
 │   │                      VarId/VarTable, visitors
 │   ├── almide-mir/        v1 Middle IR — single source of truth for ownership
@@ -143,6 +149,11 @@ almide/                    Workspace root
 │   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
 │   │                      TOML template renderer, target-agnostic walker;
 │   │                      templates/rust.toml = Rust syntax templates (~330 rules)
+│   ├── almide-wasm/       Structural wasm emitter and emission witnesses
+│   ├── almide-wasm-run/   Embedded host for emitted wasm modules
+│   ├── almide-wasi/       Transform emitted modules into stock-WASI artifacts
+│   ├── almide-verify/     Independent certificate checker, shipped beside almide
+│   ├── almide-anchor-check/  Check located witness events against shipped wasm bytes
 │   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
 │   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
 │   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
@@ -154,7 +165,7 @@ almide/                    Workspace root
 ├── grammar/               Git submodule → almide/almide-grammar: descriptive
 │                          keyword/precedence data consumed by the tree-sitter
 │                          and TextMate generators (not by the compiler build)
-├── stdlib/                Self-hosted stdlib: ~280 .almd files (see below)
+├── stdlib/                Self-hosted .almd modules (see below)
 └── runtime/rs/src/        Native Rust runtime for @intrinsic functions
 ```
 
@@ -216,13 +227,22 @@ from `almide-mir` was deleted by #2761.
 - Ownership/RC follows Perceus (Perceus-style RC in linear memory). The Coq
   theorems WasmEncode/WasmExec/WasmRcDec stand about a MODELED runtime (the
   retired incumbent's); the structural runtime's bytes are checked against
-  `StructuralDecode.v` by `proofs/check-structural-bytes.sh`. No per-build
-  ownership certificate is re-verified for a shipped wasm byte — the
-  structural leg is trusted, its certificate pending (#2755–#2760).
-- Stdlib calls are *self-hosted*: pure-Almide implementations from
-  `stdlib/*.almd` are registered in `almide-types/src/self_host_registry.rs`
-  and compiled along with user code. An unlinked stdlib call is a wall (hard
-  error).
+  `StructuralDecode.v` by `proofs/check-structural-bytes.sh`. The structural
+  leg records per-build witnesses; `almide verify` delegates their checking
+  to the independent `almide-verify`. When a built artifact is supplied or
+  found at the default path, the bundle is bound to that file with SHA-256
+  (#4011). The certified corpus is exercised by
+  `proofs/structural-wall.sh`. This is not a proof of semantic correctness
+  or whole-artifact memory safety: coverage and recording assumptions remain.
+  See [proven vs trusted](./contracts/proven-vs-trusted.md) and the
+  [memory-safety gap table](./design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011).
+- Stdlib calls are *self-hosted*: implementations from `stdlib/*.almd` are
+  compiled along with user code. New self-hosted bodies declare
+  `@implements("module.fn")`; the build generates
+  `crates/almide-types/src/generated/implements.rs` from those declarations.
+  `self_host_registry.rs` combines the declared entries with a legacy table
+  that only shrinks (`tests/name_keyed_sites_test.rs`), not a table to extend
+  for new bodies. An unlinked stdlib call is a wall (hard error).
 - `wasmparser::validate` guards the test harness. `almide test --target wasm`
   renders through the SAME route as `build`/`run --target wasm` (#2179):
   the structural leg (`almide-wasm`, with the shared `__test_runner`
@@ -447,9 +467,9 @@ interpolation are desugared once, in lowering — codegen never sees them.
 
 ## Diagnostics
 
-Every diagnostic includes an error code (E001–E030, E420 — see
-[diagnostics/](./diagnostics/)), file:line:col, source context with underline,
-and an actionable hint. Output: human-readable or `--json`.
+The [diagnostic reference](./diagnostics/README.md) lists the current codes.
+Diagnostics report the location and source context, with a repair hint where
+one is known. Output is human-readable or `--json`.
 
 ```
 error[E005]: argument 'xs' expects List[Int] but got String
