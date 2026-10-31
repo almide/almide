@@ -3,6 +3,17 @@
 
 > Last updated: 2026-10-22
 
+## この記録と現行実装の区別
+
+このディレクトリはリデザインの比較・採否・改訂順序を保存する記録です。以下の「いま」「追加」「撤去」や関数数は各調査・裁定時点の基準であり、現在の未実装一覧ではありません。後の巡で覆された案も、理由を失わないよう残しています。
+
+- 現在使える名前・シグネチャは [標準ライブラリリファレンス](../../stdlib/README.md)、移行は [dialect epoch 台帳](../../../proofs/dialect-epochs.toml) を参照してください。R-L0-14 の epoch 15/16 の計画を、全 API に共通する現在の撤去予定と読まないでください。
+- [target-surface](target-surface.md) は採用案を組み立てた設計の目標です。[距離検査](../../../scripts/check-stdlib-target.py) は名前・シグネチャ・非推奨状態を比較しますが、意味・性能・host 対応や protocol 階層全体の実装完了を証明しません。
+- 未完了の構想も残っています。例として R-string-15 の `slice` 既定引数撤去、R-url-05 の `userinfo`、`TimeAmount` の想定設計を、関数一覧の到達だけで完了扱いにしないでください。R-map-04・R-zlib-03 などの保留も維持します。
+- 範囲取り出しの負数を abort にする旧裁定は、その後の clamp 移行（epoch 台帳の #4147）と区別してください。外部ポインタの設計は [ADR-0031](../../adr/0031-raw-pointers-carry-provenance.md) の `Handle` / `Region` に進んでいます。
+
+以下は当時の記録です。
+
 Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 999 個と数えていましたが、二巡目で記録から漏れていた `bytes.heap_save`・`heap_restore` を見つけました）を、9 言語（Rust・Go・Python・TypeScript/JavaScript・Gleam・Elixir・OCaml・Kotlin・Swift）の標準ライブラリと並べて見直した記録です。実装はここでは行いません。採用した案（○）はすべて issue にしてあります。
 
 二巡目（2026-10-22）: リデザイン後の面（[target-surface.md](target-surface.md)）を、L0 の規則での機械的な点検と、4 つの分野（コレクション・データ形式・システム・数）の見直しにかけ、モジュールをまたぐ不統一と族の穴を埋めました。R-L0-22〜26 と、各 L2 の二巡目の案がそれです。
