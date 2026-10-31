@@ -1,6 +1,6 @@
 # almide-tools
 
-Developer-facing tools: formatter, module interface extraction, language server.
+Developer-facing tools: formatter, module interface extraction, and `.almdi` artifacts.
 
 ## Formatter (`fmt.rs`)
 
@@ -14,9 +14,10 @@ Developer-facing tools: formatter, module interface extraction, language server.
 - Includes type signatures, docs, deprecation flags, ABI layout for C FFI.
 - Used by export tooling to generate pip/npm/gem packages.
 
-## Language Server (`almdi.rs`)
+## Module Artifacts (`almdi.rs`)
 
-- LSP implementation: hover, goto-definition, completions, diagnostics.
+- `.almdi` serialization: public interface plus type-checked IR.
+- The language server is implemented by the root CLI in `src/cli/lsp*.rs`.
 
 ## Rules
 
