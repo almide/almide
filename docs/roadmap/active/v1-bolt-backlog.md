@@ -55,7 +55,7 @@ Bolt <ID>: <一行 intent>
   現在の実測(#2739): spec build lane 919 本 → structural 881 / incumbent のみ 24 / 両 leg 拒否 5。
   test lane 462 本 → structural 392 / incumbent 61。
 - **C1-B3: closures C2(first-class)** — ✅
-  Closure Architecture v2 P0-P6 完了([closure-architecture-v2](closure-architecture-v2.md))。
+  Closure Architecture v2 P0-P6 完了([closure-architecture-v2](../done/closure-architecture-v2.md))。
   structural で env drop-glue(`3f60174d3`)、route handler closure(`cf90ab9d7`)。
   「閉包に ABI なし」系列は #2287 ✅ / #2288 ✅ / **#2289 🔄**(→ N-B3)。
 - **C1-B4: stdlib の幅** — 🔄(ほぼ完了)

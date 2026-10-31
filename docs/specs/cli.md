@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-10-30
+> Last updated: 2026-10-31
 
 ## Overview
 
@@ -16,19 +16,19 @@ almide <command> [options] [arguments]
 
 ### `almide run`
 
-コンパイルして即実行。内部で Rust ソースを生成 → `cargo build` → バイナリ実行。
+コンパイルして即実行。既定の native ターゲットでは Rust ソースを生成 → `cargo build` → バイナリ実行。
 
 ```bash
 almide run                              # src/main.almd を実行
 almide run app.almd                     # 指定ファイルを実行 (native)
-almide run app.almd --target wasm       # wasm をビルドして wasmtime で実行
+almide run app.almd --target wasm       # wasm をビルドして埋め込み wasmtime ホストで実行
 almide run -- --flag value              # -- 以降はプログラムの引数
 almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム引数
 ```
 
 | オプション | 説明 |
 |---|---|
-| `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（v1 trust-spine が直接 WASM を生成し `wasmtime` CLI で実行。rustc 不要）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
+| `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（構造的エミッタが WASM を生成し、埋め込み wasmtime ホストで実行。外部の `wasmtime` CLI・rustc のインストールは不要）。未対応のプログラムは診断付き wall になり、別レンダラへフォールバックしない。クロスターゲット等価性の範囲と制約は [WASM-OUTPUT](../wasm/WASM-OUTPUT.md) を参照 |
 | `--no-check` | 型チェックをスキップ |
 | `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--release` | 最適化ビルド。opt-level=3、fat LTO、codegen-units=1。ターゲットが x86_64 なら **`x86-64-v3`（AVX2・FMA。Intel は 2013 年の Haswell 以降、AMD は 2017 年の Zen 以降）に合わせて調整する**（#3604）。実測（spectralnorm、実行時の `n`）では汎用 → v3 が AMD Zen3 で 87.8 → 67.2 ms、Intel Xeon 8581C で 57.1 → 45.4 ms。`native` は Zen3 で 109.8 ms と逆に遅く、一度既定にして取り消した（#3727 → #3734）。AVX2 を持たない CPU では `SIGILL` で落ちるので、そこに配るなら `--target-cpu portable`。aarch64 などほかのターゲットは汎用のまま |

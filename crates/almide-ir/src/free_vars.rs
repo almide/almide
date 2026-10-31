@@ -16,7 +16,7 @@
 //! env layout is host-deterministic (mirrors the existing `captures.sort()` the
 //! emitter relied on; see the Determinism Belt).
 //!
-//! Full design: docs/roadmap/active/closure-architecture-v2.md.
+//! Full design: docs/roadmap/done/closure-architecture-v2.md.
 
 use std::collections::HashSet;
 use crate::{IrExpr, IrExprKind, IrStmt, IrStmtKind, IrPattern, VarId};
