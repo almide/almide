@@ -1,6 +1,16 @@
 <!-- description: #1437: one declaration-driven carrier layout instead of producer drift -->
 # #1437: the lifted carrier's ABI — declaration-driven, one readable layout
 
+## L1 implemented; later stages remain separate
+
+The #1437 **L1 probe-only wrapping and heap-family admission are implemented**
+in [mod_c_tail.rs](../../../crates/almide-mir/src/lower/mod_c_tail.rs) and
+[binds_p2_bang.rs](../../../crates/almide-mir/src/lower/binds_p2_bang.rs).
+The L1 recipe and wall counts below are the August scout snapshot.
+This does not establish L2's declaration-only ABI or L3's default flip:
+`bang_return_probe` and probe-gated position desugars still exist. Keep those
+later milestones pending; do not treat the entire arc as complete.
+
 Status: DESIGN (scouted 2026-08-24; direction per the issue's recorded candidate —
 producer-side agreement by construction). Unblocks the return-op R2 matrix's
 fn-family class (40 fn-level declines; ~30 of the remaining fallback files).

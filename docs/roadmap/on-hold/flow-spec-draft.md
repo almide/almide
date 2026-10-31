@@ -3,7 +3,10 @@
 
 > Status: **draft** — will be promoted to `docs/specs/flow.md` after Phase 1 of [flow-design.md](./flow-design.md) is implemented.
 >
-> This document is the user-facing reference for Flow. Design rationale is in [flow-design.md](./flow-design.md).
+> This is a proposed user-facing reference, not a shipped API. Design rationale is in [flow-design.md](./flow-design.md).
+> `FLOW_FORBIDDEN_OP`, `FLOW_CONSUMED` and `FLOW_COLLECT_LIST` are symbolic
+> diagnostic placeholders; they are not allocated compiler codes. The former
+> E011/E012/E013 labels already belong to unrelated diagnostics.
 
 ---
 
@@ -30,7 +33,11 @@ For small, bounded data where you need random access or multiple passes, use `Li
 
 ### 2.1 Lazy
 
-A Flow pipeline does nothing until a **terminal operation** (`fold`, `each`, `collect`, `find`) is called. Building a pipeline is `O(1)` regardless of source size.
+Element processing is deferred until a **terminal operation** (`fold`, `each`,
+`collect`, `find`) is called. As specified by flow-design D1 (its construction-time Err example),
+`file.lines(path)!` opens
+the source immediately and can fail at construction; laziness does not defer
+that resource acquisition. Composing the pipeline does not read the file.
 
 ```almide
 let pipeline = file.lines("huge.log")!
@@ -39,7 +46,7 @@ let pipeline = file.lines("huge.log")!
 // Nothing has been read yet
 
 let count = pipeline |> flow.fold(0, (acc, _) => acc + 1)
-// Now the file is opened, lines are pulled one at a time, counted, and closed
+// The already-open file is read one line at a time, counted, and closed
 ```
 
 ### 2.2 Single-pass
@@ -49,7 +56,7 @@ A Flow can be consumed exactly once. Using a Flow after consumption is a compile
 ```almide
 let flow = file.lines(path)!
 let n1 = flow |> flow.fold(0, (acc, _) => acc + 1)  // consumes flow
-let n2 = flow |> flow.fold(0, (acc, _) => acc + 1)  // ❌ E012: use after consumption
+let n2 = flow |> flow.fold(0, (acc, _) => acc + 1)  // ❌ FLOW_CONSUMED: use after consumption
 ```
 
 If you need multiple passes, materialize first with `flow.collect()`:
@@ -66,10 +73,10 @@ A Flow cannot be accessed by index, reversed, sorted, or counted without consumi
 
 ```almide
 let flow = file.lines(path)!
-list.len(flow)       // ❌ E011: Flow does not support len
-list.get(flow, 5)    // ❌ E011: Flow does not support random access
-list.reverse(flow)   // ❌ E011: Flow is forward-only
-list.sort(flow)      // ❌ E011: Flow cannot be sorted
+list.len(flow)       // ❌ FLOW_FORBIDDEN_OP: Flow does not support len
+list.get(flow, 5)    // ❌ FLOW_FORBIDDEN_OP: Flow does not support random access
+list.reverse(flow)   // ❌ FLOW_FORBIDDEN_OP: Flow is forward-only
+list.sort(flow)      // ❌ FLOW_FORBIDDEN_OP: Flow cannot be sorted
 ```
 
 See section 6 (Forbidden Operations) for the full list and alternatives.
@@ -293,7 +300,7 @@ effect fn process(path: String) -> Result[Unit, String] = {
 
 ## 6. Forbidden Operations
 
-The following operations on `Flow[T]` are **compile errors** (`E011`). Each has a suggested alternative.
+The following operations on `Flow[T]` are **compile errors** (`FLOW_FORBIDDEN_OP`). Each has a suggested alternative.
 
 | Operation | Why forbidden | Alternative |
 |---|---|---|
@@ -413,10 +420,10 @@ effect fn fetch_all(url_file: String) -> Result[Unit, String] = {
 
 ## 8. Error Messages
 
-### E011 — Forbidden operation on Flow
+### FLOW_FORBIDDEN_OP — Forbidden operation on Flow
 
 ```
-error[E011]: list.len cannot be called on Flow[String]
+error[FLOW_FORBIDDEN_OP]: list.len cannot be called on Flow[String]
   --> bad.almd:5:11
    |
  5 |   let n = list.len(lines)
@@ -428,12 +435,12 @@ error[E011]: list.len cannot be called on Flow[String]
            lines |> flow.collect() |> list.len
 ```
 
-Every E011 error includes **two hints**: the recommended lazy alternative, and the materialize-first fallback with a memory warning.
+Every FLOW_FORBIDDEN_OP error includes **two hints**: the recommended lazy alternative, and the materialize-first fallback with a memory warning.
 
-### E012 — Flow consumed twice
+### FLOW_CONSUMED — Flow consumed twice
 
 ```
-error[E012]: Flow[String] is move-only and has been consumed
+error[FLOW_CONSUMED]: Flow[String] is move-only and has been consumed
   --> double.almd:4:11
    |
  3 |   let n1 = flow |> flow.fold(0, (acc, _) => acc + 1)
@@ -447,10 +454,10 @@ error[E012]: Flow[String] is move-only and has been consumed
            let n2 = list.len(xs)
 ```
 
-### E013 — `flow.collect` on a List
+### FLOW_COLLECT_LIST — `flow.collect` on a List
 
 ```
-error[E013]: flow.collect expects Flow[T], got List[T]
+error[FLOW_COLLECT_LIST]: flow.collect expects Flow[T], got List[T]
   --> wrong.almd:2:6
    |
  2 |   [1, 2, 3] |> flow.collect()

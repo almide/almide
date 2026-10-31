@@ -1,11 +1,12 @@
 # C-006 — fan.timeout was removed (0.29.0)
 
 > Prose companion to contract C-006 in [contracts.toml](contracts.toml).
-> Status: **active** — the contract now certifies the *absence* of the
-> operation: referencing `fan.timeout` is a check-time tombstone error (E027),
-> identical on both targets. This retired the ledger's last
-> `flagged-for-revision` entry; the equivalence claim carries no exceptions
-> clause.
+> Status: **active, superseded in part in 0.47.0** — C-006 records the
+> removal of the old `fan.timeout(ms, thunk)` form in 0.29.0. The current
+> `fan.timeout(duration) { body }` form is the cooperative oracle-tier
+> deadline of C-208; see [the current fan specification](../SPEC.md#136-fantimeout--the-oracle-tier-wall-clock-deadline).
+> The sections below explain the historical removal, not an absence of
+> `fan.timeout` from the current language.
 
 ## History: why it was the sole exemption (0.24.0 – 0.28.x)
 
@@ -40,14 +41,15 @@ An org-wide sweep found zero consumers. So the operation was removed outright:
 - The native runtime (`almide_rt_fan_timeout`), the wasm emit arm, the v1 MIR
   desugar, and the CLI build-time warnings were all deleted in the same change.
 
-## Evidence
+## Old-form diagnostic evidence
 
 - `tests/diagnostics/e027-fan-timeout-removed/` — broken/fixed pair: the
-  broken file must produce `error[E027]` with the host-boundary hint; the
-  fixed file (the same work via `fan.race`) must compile cleanly.
+  broken old-form call produces `error[E027]` (`fan.timeout changed signature`)
+  with the `fan.timeout(duration.ms(5000)) { work(x) }` migration hint.
+  The fixed file uses that current block form and must compile cleanly.
 - `tests/diagnostic_harness_test.rs::broken_files_produce_expected_diagnostics`
   — the harness that executes every diagnostics case.
 
-The tombstone is target-independent by construction (type check runs before
-the target split), so no `spec/wasm_cross` fixture applies: there is no
-program containing `fan.timeout` that reaches either backend.
+The old-form tombstone is target-independent because type checking precedes
+the target split. Current block-form timeout behavior and its cross-target
+limits are covered separately by C-208, not by this removal record.

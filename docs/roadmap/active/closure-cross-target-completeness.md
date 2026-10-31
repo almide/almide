@@ -1,5 +1,18 @@
-<!-- description: Closing the closure feature gap between the native and wasm legs, sweep by sweep -->
+<!-- description: Historical closure sweeps, later architecture context and evidence limits -->
 # Closure cross-target completeness
+
+## Historical sweep, not a current gap census
+
+The PR #337–344 sweeps and five-class plan below describe the earlier
+closure implementation. Their 240-file corpus and remaining findings are not
+a newly reproduced current census. The completed
+[closure architecture record](../done/closure-architecture-v2.md) and the current
+[module-global storage pass](../../../crates/almide-codegen/src/pass_top_let_storage.rs)
+are later context; v0 `emit_wasm` locations refer to retired code.
+
+The desired completeness property remains a goal. Passing a finite sweep or
+installing a guard does not prove every closure program correct; this update
+does not close every later closure/host shape or re-certify the old results.
 
 **Goal:** make native (Rust) and WASM agree on *every* closure program — not by passing more
 adversarial sweeps (sampling can't prove absence) but by **eliminating the bug classes by

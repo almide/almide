@@ -1,5 +1,14 @@
-<!-- description: Strategy for flowing the develop-v1 trust spine back into develop — what moves, in what order, and what stays branch-local until its gate exists -->
+<!-- description: Historical July 2026 proposal for integrating develop-v1; not a pending execution request -->
 # v1 → develop Reflow Strategy
+
+## Historical branch-integration decision record
+
+This is the July 3, 2026 `develop-v1` integration proposal. Its requests for
+an owner's Go and branch-local execution are historical, not pending approval
+for the current checkout. MIR, self-host sources and proof infrastructure are
+already in this repository; the current shipping Wasm route is
+[structural](../../../src/wasm_route.rs). The original sequencing and risk
+assessment below are retained, not reissued as instructions.
 
 > **Position**: develop-v1 に閉じている v1 成果（MIR trust spine・self-host 群・証拠ゲート群）を
 > いつ・どの単位で develop へ還流するかの方針案。**実行はユーザーの Go 判断待ち** —

@@ -1,5 +1,20 @@
-<!-- description: Mechanizing the WASM ownership emit layer to contain Perceus drift structurally -->
+<!-- description: Ownership-emit incident history and the implemented measurement infrastructure -->
 # WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)
+
+## Historical diagnosis and implemented measurement
+
+The original `PerceusVerify`/`emit_wasm` description is about the retired v0
+emitter, not the current structural Wasm route. The September appendix also
+records that the original #643 fix landed; earlier “still OPEN” headings
+preserve the diagnosis at that point in the investigation.
+
+The proposed implementation-count infrastructure now exists:
+[impl-count-ledger.toml](../../../proofs/impl-count-ledger.toml).
+Its presence does not mean every duplicate implementation has been merged or
+that emit-layer memory safety is fully proven. The source-to-witness and
+unmodeled-access limits remain described in
+[Memory Safety](../../design/MEMORY-SAFETY.md). Preserve the incident corrections
+below rather than treating each earlier hypothesis as a current bug.
 
 Status: active — 提案 + #643 の精密分析
 Owner: compiler

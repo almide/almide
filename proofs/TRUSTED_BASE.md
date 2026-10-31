@@ -37,7 +37,7 @@ but not listed fails, and so does a version listed but no longer used.
 |---|---|---|---|
 | rustc | **1.96.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
 | LLVM | the copy inside that rustc (the 22.1 series for 1.96; `rustc -vV` prints it) | native code generation | as rustc |
-| rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus under the ISO 26262 qualified toolchain (#573) | the qualification is Ferrocene's |
+| rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus with stock rustc at the recorded Ferrocene upstream pin (#573) | compatibility evidence only; the qualified Ferrocene binary is not used by this lane |
 | rustc (stable, perf) | **1.99.1** (`RUST_STABLE_TOOLCHAIN`) | builds the handwritten-Rust side of the perf ratio in `perf-ratchet` and `perf-profile-arm`; nothing shipped is built with it | the ratio gates themselves; pinning it keeps their baseline still |
 | rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation (branch coverage, MC/DC) and Miri over `almide-str`; nothing shipped is built with them | — |
 | wasmtime (embedded crate) | **49.0.4** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
@@ -52,27 +52,23 @@ Critical-profile surface: an artifact that imports more than its five WASI
 calls (fs, env, args) is refused at load, so for those artifacts wasmtime
 remains the only engine.
 
-**The embedded host is not a sandbox.** `almide run --target wasm` grants the
-guest the user's authority, as the native binary has it: the core-module lane's
-fs ops reach the whole host filesystem, and the p3 component lane
-(`run_component`, `crates/almide-wasm-run/src/component_host.rs`) preopens `/`
-read-write and inherits the environment. Wasm bounds the guest's memory
+**The embedded host is not a sandbox.** The core-module lane's
+filesystem operations honor `[permissions] fs` grants; without that key they
+retain access to the host filesystem. The p3 component lane
+(`run_component`, `crates/almide-wasm-run/src/component_host.rs`) preopens
+the granted roots, or the current working directory and temporary directory
+when the key is absent, and inherits the environment. Wasm bounds the guest's memory
 accesses, and the host bounds what the guest can make it allocate: one
 linear-memory budget per run across all its instances, and every guest span
 checked against memory before the host reads it (#4135). It does not bound
 what the guest may ask the host to do. `docs/wasm/README.md` ("What the
-embedded host grants") has the per-lane table; scoping file access is #4022.
+embedded host grants") has the per-lane table. Filesystem scoping (#4022)
+is implemented; it is not a general sandbox for every host capability.
 
-**Floating steps (debt).** Four CI steps install Rust without a version and
-run whatever `stable` is that day: the two perf ratchets, the commissioned
-wasm probes (the runtime ratio) and fuzz-nightly's coverage ratchet. They are
-listed by job in `scripts/toolchain-pins.txt`. A new one fails the gate, and
-pinning one requires deleting its line. Each measures a number a pin would
-move, so each should be pinned in a change that re-takes its baseline. The
-Miri job for `almide-str` runs on the dated nightly-2026-08-01, which ships
-the miri component. The four that judge no measured number (`shard-coverage`,
-`almide-gates` and the two commissioned wasm gate jobs that run REQ-VM-9) are
-pinned to `RUST_TOOLCHAIN` since #4010.
+**Floating steps (debt).** The remaining unversioned stable step is
+`fuzz-nightly.yml:coverage-ratchet`, listed in `scripts/toolchain-pins.txt`.
+Pinning it requires re-taking its measured baseline and deleting that ledger
+entry. The two perf jobs use `RUST_STABLE_TOOLCHAIN`; see the table above.
 
 **On a toolchain bump.** Raising `RUST_TOOLCHAIN` or a wasmtime version
 changes a trusted component, so before it lands:
@@ -296,7 +292,18 @@ witness of a render that lost a release with its Rust-mirror check bypassed
 rendered source into a binary keeping that balance, and every program off the
 floor, which ships from the standard codegen with no certificate.
 
-The receipt's claims are scoped to exactly this:
+## Historical implementation progression (retained evidence)
+
+The following brick-by-brick narrative records the earlier MIR/incumbent
+renderer work. Its corpus counts, pending work and references to the removed
+`check-wasm-bytes.sh` are historical, not current shipping guarantees. The
+incumbent was retired in #2761; its `Wasm*` theorems remain model theorems.
+Current structural-runtime byte grounding is `check-structural-bytes.sh`,
+artifact/witness checking is `structural-wall.sh`, and the native subset is
+checked by `native-wall.sh`. The current trace-model limits are stated above;
+use the receipt for the exact certified set and trusted boundaries.
+
+The earlier progression described its scope as follows:
 
 - **The flight-grade property SET is complete on the value-semantics subset**:
   RC balance (the TEMPORAL clause of `MemorySafe`, see below), name totality, capability bound (incl. transitive),
@@ -734,8 +741,10 @@ enforced at the match-linearization and Map-repr routing sites.
 
 ## Use-relativized completeness
 
-Completeness is declared per use, not absolute. Today the proven property set is
-complete for **memory-safety-of-the-ownership-fragment under the eager-copy
-realization** (no double-free). It is NOT a claim of absolute-semantics coverage
-(that diverges — CompCert-grade). The receipt names which use each artifact is
-proven for.
+Completeness is declared per model and use, not absolutely. The historical
+eager-copy result concerns its ownership fragment; it is not the shipping
+structural runtime's current completeness boundary. The trace-model theorems,
+runtime refinement and per-artifact certificate checks have distinct
+hypotheses and coverage. None is a proof of full source-to-artifact semantics
+or of `MemorySafe` for every shipped program. The receipt names the claims
+and remaining trusted assumptions for its certified artifacts.

@@ -1,5 +1,14 @@
-<!-- description: Goal prompt for ADT brick 5 — heap-field bind plus recursive drop, the highest-leverage remaining ADT step -->
+<!-- description: Historical ADT brick-5 goal prompt, completed recursive drop and retained rejected attempts -->
 # GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever
+
+## Historical goal prompt — completed brick
+
+The authoritative [ADT value-model record](v1-adt-value-model.md) records
+5b's recursive drop as done in `c98486be`, after 5c. The prompt below captures
+the earlier branch-local investigation and must not be resumed as an open
+implementation task. Its rejected attempts and trusted-drop boundary remain
+useful evidence; acceptance of an ownership trace does not prove the body of
+a generated raw-memory drop routine correct.
 
 You are continuing the v1 trust-spine ADT value-model work on branch **`develop-v1`**. Bricks
 1–4 + 5a are DONE and pushed (see `git log`). Your job: **land bricks 5c (heap-field match

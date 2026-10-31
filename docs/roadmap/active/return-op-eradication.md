@@ -1,6 +1,17 @@
 <!-- description: One desugar for the ! operator, deleting the per-position return-op zoo -->
 # Return-op eradication: one desugar for `!`, position zoo deleted
 
+## Probe status clarification
+
+The measured R2 matrices below are August campaign snapshots, not a current
+full-corpus count. Their #1437 blocker subsequently gained the L1 probe-only
+wrapping and heap-family admission described in
+[lifted-carrier-abi.md](lifted-carrier-abi.md). R2/R3 are not declared complete:
+`bang_return_probe` and the probe-gated position desugars remain in the MIR
+lowering. The v0-preservation instructions refer to the historical campaign;
+the current shipping Wasm route is structural
+([wasm_route.rs](../../../src/wasm_route.rs)).
+
 Status: R2 IN PROGRESS (ratified ○ 2026-08-15; R1 landed 3358f26f6+53439f582 —
 op through both renderers, verifier diverged rule, cert marker `x`, kernel
 format v5 `check_xc` all green; probe `ALMIDE_BANG_RETURN=1` gates the 9

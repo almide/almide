@@ -1,5 +1,20 @@
 # Effect inspection harness
 
+## Adopted design and implemented harness
+
+The October 12 problem counts and order of work below are a design snapshot.
+[ADR-0027](../../adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md)
+adopted the inspection rules on October 17; the final owner question below is
+not an undecided policy request. The current
+[catalogue](../../../tools/xtarget-fuzz/src/generator/catalogue.rs) admits
+supported signatures from sandboxed fs/env/io/args/process/net/http modules,
+hostless zlib functions and property-verdict functions. It does not skip all
+effect functions. Admission remains subject to signature and target filters;
+this is not a claim that every effect function has passed inspection.
+Use [the inspection ledger](../../../proofs/stdlib-inspection.toml) and
+[target availability](../../../proofs/target-availability.toml), not the old
+133/36 counts, for per-function state.
+
 **Status:** design, 2026-10-12; decided in [ADR-0027](../../adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md) (2026-10-17).
 **Tracks:** #3552 (the stdlib inspection campaign).
 

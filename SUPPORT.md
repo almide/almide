@@ -9,9 +9,9 @@ separate: see [SECURITY.md](./SECURITY.md).
 
 Almide is **pre-1.0**. There is exactly one supported line: the latest
 release. Fixes land on `develop` and ship as the next tag — there is no
-back-porting and no patch stream for older tags. Release cadence is high
-(225 tags in the first six months; latest `v0.59.2`), so "the next tag" is
-typically days away, not months.
+back-porting and no patch stream for older tags. Consult the [release history](https://github.com/almide/almide/releases) for
+the published tags; this policy does not pin an old release as "latest" or
+promise a release date.
 
 Two mechanisms keep that single line honest:
 
@@ -42,8 +42,8 @@ these two ledgers are:
 
 - **Dialect epochs** — [`proofs/dialect-epochs.toml`](./proofs/dialect-epochs.toml)
   is the append-only record of every change that can break already-written
-  code. The epoch advances **only** for such changes: 225 releases have
-  produced 3 epochs. Files carry `@dialect(N)` stamps so the compiler can
+  code. The epoch advances **only** for such changes; consult the ledger
+  for its current value rather than inferring it from the release count. Files carry `@dialect(N)` stamps so the compiler can
   tell a stale-dialect file from a wrong program, and the ledger is
   cross-checked against the compiler's `CURRENT_DIALECT` constant by
   `scripts/check-dialect-epochs.sh` — the record and the enforcement

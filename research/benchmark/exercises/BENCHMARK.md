@@ -1,8 +1,13 @@
-# Almide LLM Benchmark Results
+# Almide LLM Benchmark Results — Historical TypeScript/Deno Experiment
+
+This records the former TypeScript-transpiler experiment, not a benchmark of
+the current Rust/Wasm compiler. Its measured results and old syntax are retained
+as evidence; the auto-unwrap, `do`, `++`, and `src/almide.ts` instructions below
+are historical, not current language guidance.
 
 ## Overview
 
-Can an LLM write correct Almide code with **zero prior knowledge**, using only the [CHEATSHEET.md](../CHEATSHEET.md)?
+Can an LLM write correct Almide code with **zero prior knowledge**, using only the [current CHEATSHEET.md](../../../docs/CHEATSHEET.md)?
 
 We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises from scratch, given only the CHEATSHEET as reference. The same exercises were also solved in Python for comparison.
 
@@ -120,7 +125,7 @@ The codegen now detects `let x = expr; match x { ..., err(e) => ... }` and autom
 ### stdlib note
 `string.to_int`, `string.to_upper`, `string.to_lower` are now in the stdlib, reducing boilerplate from earlier exercises.
 
-## Running the benchmark
+## Historical runner commands
 
 ```bash
 # Run a single exercise

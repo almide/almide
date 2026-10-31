@@ -34,7 +34,9 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 <!-- stages:generated:end -->
 
 What the numbers do NOT claim: external adoption (a market fact, not a
-ledger fact), MC/DC coverage (line coverage only, ratcheted), C-WCET /
-C-FAITHFUL (keystone-gated, honestly PENDING in the receipt design), or ALS
-authoring completeness (the section→contract direction is gated; the
-syntax-element→section direction is Stage 3's remaining half).
+ledger fact), domain-level MC/DC qualification credit, or full artifact
+refinement. Line/condition coverage and safety-set decision vectors are
+separate evidence instruments. Consult the receipt for C-WCET / C-FAITHFUL
+scope and remaining assumptions. The dated syntax-element mapping above
+satisfies that mapping precondition, not semantic completeness or an
+authority's acceptance of a frozen specification.

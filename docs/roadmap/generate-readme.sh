@@ -71,7 +71,7 @@ if [ -f "${files[0]}" ]; then
   echo ""
 fi
 
-# Done — sorted by date (newest first)
+# Done — sorted by date (newest first); undated records remain visible last
 files=(done/*.md)
 if [ -f "${files[0]}" ]; then
   count=${#files[@]}
@@ -80,7 +80,7 @@ if [ -f "${files[0]}" ]; then
   echo "$count items"
   echo ""
   echo "<details>"
-  echo "<summary>Show all $count completed items</summary>"
+  echo "<summary>Show all $count archived items</summary>"
   echo ""
   echo "| Done | Item | Description |"
   echo "|------|------|-------------|"
@@ -95,8 +95,10 @@ if [ -f "${files[0]}" ]; then
     entries+="${date}|[$title]($f)|$desc"$'\n'
   done
 
-  echo "$entries" | sort -t'|' -k1 -r | while IFS='|' read -r date link desc; do
-    [ -z "$date" ] && continue
+  echo "$entries" | sort -t'|' -k1,1 -r | while IFS='|' read -r date link desc; do
+    # Ignore the final empty line, not an undated historical record.
+    [ -z "$link" ] && continue
+    [ -z "$date" ] && date="Not recorded"
     echo "| $date | $link | $desc |"
   done
 

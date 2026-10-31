@@ -1,5 +1,16 @@
-<!-- description: Design for executing a heap-result if/match on the v1 leg without changing the Coq kernel -->
+<!-- description: Historical first heap-result control-flow slice and later lowering context -->
 # v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)
+
+## Historical first slice; later lowering exists
+
+The literal-arm result and “remaining” list below describe the first MIR
+heap-result control-flow slice. Later match and non-literal-arm work exists
+in [the MIR lowering](../../../crates/almide-mir/src/lower/) and is recorded in
+[Camp 4](camp4-general-heap-match.md). Do not treat this original
+next-session recipe as proof that those shapes are still unimplemented.
+The current shipping Wasm route is [structural](../../../src/wasm_route.rs);
+the original certificate reasoning is retained within its modeled scope,
+not promoted to a whole-artifact memory-safety theorem.
 
 Status: **`if` with literal arms IMPLEMENTED (commit 126921e6), adversarially
 verified SOUND.** `fn label(c) -> String = if c then "yes" else "no"` now executes

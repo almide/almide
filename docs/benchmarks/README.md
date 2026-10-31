@@ -15,9 +15,12 @@ The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trial
 
 ## Byte-identical across targets
 
-**Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
-
-The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; and exactly two fns are exempt because their job is to report the host — `env.os()` and `fs.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee. Output printed from concurrent `fan { }` arms is inside the guarantee: each native arm writes into its own timeline, flushed in source order, so it reads as it does on wasm (C-004, ADR-0024 step 1).
+**Cross-target observations are compared within each contract's scope.** The
+byte comparisons cover execution output, not artifact bytes, under matching
+inputs and host assumptions. Randomness, platform reporting, compressed output,
+and oracle-relative deadlines have declared invariants or comparison conditions
+rather than unrestricted equality. An unsupported-operation refusal is not a
+successful parity run. See [the scope](../design/EQUIVALENCE.md).
 
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
@@ -26,17 +29,33 @@ This claim is not prose. Every observable promise is a named contract in the [be
 > **Ledger: 388 contracts — 388 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
-> **Divergences awaiting a fix: none.** Every contract in the ledger is
-> `active`, carrying executable evidence of class >= `fixture`. The one
-> by-design carve-out in the law — the platform-reporting fns `env.os`
-> and `fs.temp_dir` — is bounded by C-189.
+> **Contracts flagged for revision: none.** Every contract is marked
+> `active`; the ledger gate requires executable evidence of class >= `fixture`.
+> That status does not remove scoped comparison conditions or prove every program equivalent.
+> See [C-189](../../docs/contracts/contracts.toml) (platform reporting),
+> [C-208](../../docs/contracts/contracts.toml) (oracle-relative deadlines), and
+> [C-331](../../docs/contracts/contracts.toml) (leg-dependent compressed bytes).
 <!-- claims:generated:end -->
 
 Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/design/EQUIVALENCE.md](../design/EQUIVALENCE.md)**.
 
 ## Memory safety — proven where it is proven, trusted where it is trusted
 
-You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler decides where every heap value is introduced, duplicated, and consumed — garbage-collector-free, pause-free. The checker for those decisions is **kernel-proven** (Rocq/Coq spine, 126 audited theorems and lemmas, axiom-clean, independently re-checked by `coqchk`; the count is asserted by `proofs/check.sh`), and `almide verify --emit` still produces the MIR ownership witness it checks. The per-build certificate used to ride the incumbent wasm leg, which #2761 deleted; the **structural wasm leg** (the only wasm renderer) and the **native leg** are trusted, certificate pending (#2755–#2760): their evidence is differential — byte-identical output against each other and the interpreter on the contract corpus, held by a grow-only floor and a semantic-mutation net — and the structural runtime's bytes are checked against the Coq decoder model by `proofs/check-structural-bytes.sh`. The boundary, stage by stage: **[proven-vs-trusted.md](../contracts/proven-vs-trusted.md)**; the full account, including the Lean 4 Perceus belt the design started from: **[docs/design/MEMORY-SAFETY.md](../design/MEMORY-SAFETY.md)**.
+You write no ownership annotations, lifetimes, or `free`: the compiler places
+Perceus-style ownership operations. The Rocq/Coq checkers prove modeled witness
+properties, not complete artifact memory safety or semantic correctness.
+`almide verify <file.almd> --emit <bundle>` now records the structural Wasm
+bundle; the independent `almide-verify` checks it. Supported **core artifacts**
+can be bound by SHA-256 when supplied or found at the default path; component
+artifacts are not supported by this certification route. Native MIR witnesses
+remain a separate proof/gate input, not evidence that all native machine code
+has been verified.
+
+Recording trust, unmodeled accesses, and coverage limits remain. Differential
+corpus and semantic-mutation gates provide complementary behavioral evidence;
+`proofs/check-structural-bytes.sh` checks the structural runtime against the
+Coq decoder model. See [proven vs trusted](../contracts/proven-vs-trusted.md)
+and the [memory-safety gap table](../design/MEMORY-SAFETY.md).
 
 ## Performance
 

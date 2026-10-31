@@ -9,9 +9,9 @@ equal to the set of codes the compiler emits.
 
 | Code | Title |
 |------|-------|
-| [E001](E001.md) | Type mismatch (incl. Unit-leak in fn body / if-arm) |
-| [E002](E002.md) | Undefined function (incl. cross-language idiom hallucinations) |
-| [E003](E003.md) | Undefined variable (incl. missing `import` for Tier 2 stdlib) |
+| [E001](E001.md) | Type mismatch |
+| [E002](E002.md) | Undefined function |
+| [E003](E003.md) | Undefined variable |
 | [E004](E004.md) | Wrong number of arguments |
 | [E005](E005.md) | Argument type mismatch (constructor / function call) |
 | [E006](E006.md) | Effect isolation: pure fn calls effect fn |
@@ -20,60 +20,92 @@ equal to the set of codes the compiler emits.
 | [E009](E009.md) | Reassignment to immutable binding |
 | [E010](E010.md) | Non-exhaustive match |
 | [E011](E011.md) | Mutable var mutated inside closure in pure fn |
-| [E012](E012.md) | Duplicate definition (fn / test) |
-| [E013](E013.md) | Field access on non-record / missing field |
+| [E012](E012.md) | Duplicate definition |
+| [E013](E013.md) | Field access on a non-record / missing field |
 | [E014](E014.md) | Unreachable match arm |
-| [E015](E015.md) | Possible stdlib reimplementation (warning, delegation shim) |
-| [E028](E028.md) | `main()` takes no parameters (use `env.args()`) |
-| [E029](E029.md) | Unknown type name in an annotation or record literal |
-| [E030](E030.md) | Type has no ordering (sort/min/max over Map/Set/Fn or compound Float) |
-| [E031](E031.md) | Retired range spelling (`..`/`..=` → `..<`/`...`, fix-it + `almide fix`) |
-| [E032](E032.md) | Immutable binding passed to `mut` parameter |
-| [E033](E033.md) | Opaque type constructed outside its defining module |
-| [E034](E034.md) | Error-channel operator on non-Option/Result operand |
-| [E035](E035.md) | (warning) Branching on error message text |
-| [E036](E036.md) | (warning) map_err lambda discards the error value |
-| [E037](E037.md) | Equality between incompatible types |
+| [E015](E015.md) | Possible stdlib reimplementation |
+| [E016](E016.md) | Function where equality or hashing is required |
+| [E017](E017.md) | Record construction on an enum type name |
+| [E018](E018.md) | Empty collection with an uninferable element type |
+| [E019](E019.md) | Ambiguous constructor |
+| [E020](E020.md) | Conflicting type declarations |
+| [E021](E021.md) | Invalid record construction or pattern |
+| [E022](E022.md) | `!` operator outside an error-propagating context |
+| [E023](E023.md) | derived protocol not satisfied by a field type |
+| [E024](E024.md) | integer literal out of range |
+| [E025](E025.md) | cannot infer a concrete type (unconstrained type slot) |
+| [E026](E026.md) | cannot index a String with `[]` |
+| [E027](E027.md) | fan combinator tombstones: retired spellings that name their replacement |
+| [E028](E028.md) | main() takes no parameters |
+| [E029](E029.md) | unknown type name |
+| [E030](E030.md) | type has no ordering |
+| [E031](E031.md) | retired range spelling |
+| [E032](E032.md) | immutable binding passed to `mut` parameter |
+| [E033](E033.md) | opaque type constructed outside its defining module |
+| [E034](E034.md) | error-channel operator on a non-Option/Result operand |
+| [E035](E035.md) | branching on the text of an error message (warning) |
+| [E036](E036.md) | map_err lambda never uses the error value (warning) |
+| [E037](E037.md) | equality between incompatible types |
 | [E038](E038.md) | `??` separated from its fallback |
-| [E041](E041.md) | Implicit propagation removed — the value stays a Result; write `!` |
-| [E042](E042.md) | Statement-position Result discarded (must-use) — `expr!` or `let _ = expr` |
-| [E043](E043.md) | `list.try_*` removed, and `list.__fallible_*` is not a spelling — the core HOF is fallibility-polymorphic |
-| [E044](E044.md) | A pure `main` returns Unit — a program's result is its output, not a return value |
-| [E045](E045.md) | Tuple index `.k` on a non-tuple, or out of range |
-| [E046](E046.md) | `_` in a call argument — not a value, not partial application (the typed hole `_` is expression-position only) |
-| [E047](E047.md) | Invalid escape in a string literal — an undefined escape, or `\u{…}` outside the Unicode scalar range |
-| [E048](E048.md) | Variant pattern the subject's type does not have — wrong family (`ok`/`err` on an Option), a builtin carrier over a user variant, or a foreign user case |
-| [E049](E049.md) | `let ... in <expr>` is OCaml/Haskell syntax — bindings chain by newline (machine-applicable fix-it + `almide fix`) |
-| [E070](E070.md) | `@bounded`: counted loops only (ALS-B3) |
-| [E071](E071.md) | `@bounded`: no allocation inside a counted loop (ALS-B4) |
-| [E072](E072.md) | `@bounded`: no `break`/`continue` (ALS-B5) |
-| [E073](E073.md) | `@bounded`: no recursion — the call graph is a DAG (ALS-B6) |
-| [E074](E074.md) | `@bounded`: callees are `@bounded` or first-order pure stdlib (ALS-B7) |
-| [E075](E075.md) | `@bounded`: no run-time-length heap construction (ALS-B8) |
-| [E076](E076.md) | `@bounded`: effects bounded to standard output (ALS-B9) |
-| [E077](E077.md) | `@bounded`: no Float arithmetic, provisional (ALS-B10) |
-| [E078](E078.md) | `@bounded`: no early exit inside a counted loop (ALS-B11) |
-| [E085](E085.md) | `@intrinsic` / `@wasm_intrinsic` or a `prim.*` reference outside the stdlib — the runtime boundary is the stdlib's; call the public function that wraps it |
-| [E086](E086.md) | `scoped`: a value would outlive its scoped allocation (ALS-E31) |
-| [E087](E087.md) | `scoped`: an operation not permitted in a scoped region (ALS-E31) |
-| [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
-| [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
-| [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
-| [E092](E092.md) | A `@pure` fn is not pure: it is an `effect fn` or an `@extern`, or it reaches output, a `panic` / `assert*`, a stdlib call with an effect category, or an `@extern` |
-| [E093](E093.md) | A type written with brackets is applied to a different number of type arguments than its declaration has parameters (a generic alias, record or variant, a type declared without parameters, or a builtin: `List[Int, Int]`, `Map[String]`) |
-| [E094](E094.md) | Type aliases form a cycle: an alias leads back to itself through other aliases or a type argument (`type A = B` / `type B = A`, `type Tree = List[Tree]`) |
-| [E095](E095.md) | The app passed to `http.serve` reads a local of the fn that serves it (a `let`, `var` or parameter of main): the app must be closed over top-level items |
-| [E096](E096.md) | A fn with a `mut` parameter used as a function value (a `let`, an argument, a record field, a list element, a return, `module.fn`): a function type cannot carry the write-back |
-| [E097](E097.md) | `pub` before a `type`, `protocol` or `test` — those are public by default (or have no visibility); delete `pub` (machine-applicable fix-it + `almide fix`) |
-| [E098](E098.md) | The closure passed to `testing.assert_aborts` captures a local of the test, or is a fn value rather than a lambda written in the call: it runs in a child process or instance, where the test's locals do not exist |
-| [E099](E099.md) | `testing.assert_aborts` called outside a test block, used as a value, or called inside another `assert_aborts` closure |
-| [E100](E100.md) | Outside the memory-safety guarantee: a `@memory_unsafe` call (`ffi.*`, a deprecated `bytes` raw-pointer call) in a file without `import ffi` (#4043); under `--profile critical`, any of those or an `@extern` fn (#4008) |
-| [E101](E101.md) | Source that reads differently from what compiles: a raw hidden character (a bidi control, U+2028/U+2029, a zero-width or other Cf character, a tag character, a raw control) anywhere in the file — write `\u{202E}` in a literal (#4092, #4266) — or a homoglyph identifier: mixed scripts beyond UTS #39 Moderately Restrictive, or a UTS #39 confusable of another name (#4266) |
-| [E104](E104.md) | A record field marked `@skip` or `@skip_decode` has no default, so `T.decode` has no value for it (#4108) |
-| [E109](E109.md) | A pure fn runs an `effect fn` it reached through a function value — a record field, a list element, a callback handed down through pure helpers (#4151) |
-| [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22) |
-| [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
-| [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
+| [E041](E041.md) | implicit propagation was removed |
+| [E042](E042.md) | this statement discards a Result (must-use) |
+| [E043](E043.md) | the try_* spellings, public and internal |
+| [E044](E044.md) | main() returns Unit |
+| [E045](E045.md) | tuple index on a non-tuple, or out of range |
+| [E046](E046.md) | placeholder `_` in a call argument |
+| [E047](E047.md) | invalid escape in a string literal |
+| [E048](E048.md) | variant pattern the subject's type does not have |
+| [E049](E049.md) | `let ... in <expr>` is OCaml/Haskell syntax |
+| [E050](E050.md) | local `fn` or `let` collides with a selectively-imported name |
+| [E051](E051.md) | file stamped for a dialect this compiler does not speak |
+| [E052](E052.md) | calling a deprecated function |
+| [E053](E053.md) | unknown attribute |
+| [E054](E054.md) | fmt verification failed |
+| [E055](E055.md) | `?.` on a Result |
+| [E056](E056.md) | `?` on an Option is a no-op (warning) |
+| [E057](E057.md) | fn has no body |
+| [E058](E058.md) | unhashable Map key |
+| [E059](E059.md) | non-iterable for head |
+| [E060](E060.md) | import hygiene (warning) |
+| [E061](E061.md) | top-level `let` bound to a function value |
+| [E062](E062.md) | shebang without `-S` (warning) |
+| [E070](E070.md) | `@bounded` requires counted loops |
+| [E071](E071.md) | no allocation inside a counted loop |
+| [E072](E072.md) | no `break`/`continue` in a `@bounded` loop |
+| [E073](E073.md) | no recursion in the bounded profile |
+| [E074](E074.md) | `@bounded` calls `@bounded` (or first-order pure stdlib) |
+| [E075](E075.md) | no run-time-length heap construction |
+| [E076](E076.md) | `@bounded` effects are capability-bounded |
+| [E077](E077.md) | no Float arithmetic in the bounded profile (provisional) |
+| [E078](E078.md) | no early exit inside a counted loop |
+| [E080](E080.md) | or-pattern alternative binds a variable |
+| [E081](E081.md) | the function is not available on the selected wasm target |
+| [E082](E082.md) | the wasm leg cannot lower the program on --target wasm |
+| [E083](E083.md) | compiler ownership defect: an emitted exit does not implement its checked ExitPlan |
+| [E084](E084.md) | literal exit code outside the exit-status range |
+| [E085](E085.md) | `@intrinsic` or `prim.*` outside the stdlib |
+| [E086](E086.md) | a value would outlive its scoped allocation |
+| [E087](E087.md) | an operation is not permitted in a scoped region |
+| [E088](E088.md) | a recursive call retains the current scoped activation |
+| [E089](E089.md) | the value has no defined string form |
+| [E090](E090.md) | the `@extern(c)` signature has no C representation |
+| [E092](E092.md) | a `@pure` fn is not pure |
+| [E093](E093.md) | type applied to the wrong number of type arguments |
+| [E094](E094.md) | type aliases form a cycle |
+| [E095](E095.md) | the app passed to `http.serve` reads a local |
+| [E096](E096.md) | a fn with a `mut` parameter used as a function value |
+| [E097](E097.md) | `pub` before a `type`, `protocol` or `test` |
+| [E098](E098.md) | the closure passed to `testing.assert_aborts` captures a local |
+| [E099](E099.md) | `testing.assert_aborts` outside a direct call in a test block |
+| [E100](E100.md) | outside the memory-safety guarantee |
+| [E101](E101.md) | source that reads differently from what compiles |
+| [E102](E102.md) | an invalid pattern in `regex.new` |
+| [E103](E103.md) | `==` on a Secret that cannot compare in constant time |
+| [E104](E104.md) | a skipped record field has no default |
+| [E109](E109.md) | pure fn runs an effect fn through a function value |
+| [E110](E110.md) | untrusted input decodes only into an input type |
+| [E114](E114.md) | a generic fn reaches itself at a growing type |
+| [E420](E420.md) | Function visibility violation |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
 for one release and was retired when the aliases dropped (#1078) — a retired

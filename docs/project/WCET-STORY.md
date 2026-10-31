@@ -19,27 +19,28 @@ CRITICAL shape, demonstrated end to end on `examples/pid-kernel.almd`
 2. **The machine-independent bound (what the compiler enforces).** The
    deterministic compute meter (C-320) charges every loop head and
    dynamic operation in DEFINED units, identically on native and wasm —
-   `fan.bounded(compute.ms(…))` budgets are enforced against it with
-   unit-exact contracts. A Critical-shape program therefore carries a
-   compiler-derived, hardware-independent execution bound: WCET on a
-   target = (metered units) × (per-unit ceiling calibrated once per
-   target/toolchain pair). The calibration table is target-specific work
-   and is NOT claimed here.
+   `fan.bounded(compute.ms(…))` budgets are enforced against modeled charges.
+   A charge bound is not a hardware WCET proof: cooperative checks do not
+   bound every individual operation or blocking host call. Translating charges
+   into time would require justified per-operation ceilings and platform /
+   toolchain analysis; no such calibration or WCET result is claimed here.
 3. **Hardware WCET (what remains external).** Cache/pipeline-aware
    static WCET on a concrete MCU stays the seat of a qualified analyzer
-   over the generated Rust + Ferrocene object code (#573's split). What
+   over generated source and the deployed object code. The current #573
+   lane uses stock rustc at a recorded compatibility pin, not qualified
+   Ferrocene object code. What
    Almide contributes to that analysis is layer 1's input class and the
    `--trace-map` correspondence (#572) for annotating analysis results
    back onto source.
 
 ## What follows from the language
 
-- Bounded iteration: the Critical shape uses literal-bounded `for`
-  ranges; totality work (#567's profile) will make unbounded forms a
-  checked refusal rather than a convention.
+- Bounded iteration: `--profile critical` already rejects `while` and
+  recursion; `tests/critical_profile_test.rs` covers those refusals. The PID
+  example uses literal-bounded `for` ranges.
 - Bounded RC: the kernel shape keeps values scalar — no RC traffic at
-  all in the loop; where heap values do occur, drop cascades are bounded
-  by the type's depth (no cyclic structures exist by construction).
+  all in the loop. This scalar example does not establish a bound on drop
+  work for arbitrary heap values or recursive data types.
 - No hidden allocation: `+` on scalars is arithmetic; string/list
   concatenation (which allocates) simply does not appear in the shape,
   and the gate would catch it in the emitted text if it crept in.

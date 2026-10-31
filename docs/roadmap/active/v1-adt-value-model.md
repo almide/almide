@@ -1,8 +1,12 @@
 <!-- description: Custom ADTs (variants) as first-class values in the v1 value model -->
 # v1 ① — custom ADT (variant) as a first-class value
 
-The cross-repo wall lever #1 (~41 walls: recursive `to_string`/pretty-print over `type Expr = Lit(Int)
-| Add(Expr,Expr) | …`) is the tip of a real gap: **custom variants do not render in v1 at all.**
+## Original diagnosis (before the completed bricks recorded below)
+
+The initial cross-repo wall lever #1 (~41 walls: recursive `to_string`/pretty-print
+over `type Expr = Lit(Int) | Add(Expr,Expr) | …`) exposed missing custom-variant
+rendering. This is the pre-implementation diagnosis, not a current lack of ADT
+support; the later STATUS section records bricks 1–5 complete.
 
 ## Evidence (byte-match-first, /tmp/adt.almd, /tmp/adt3.almd)
 
@@ -119,7 +123,9 @@ backends agree on tag + field identity even though the byte layout differs.
 
 Custom ADTs are first-class in the v1 trust spine: construct + N-arm tag-dispatch match (scalar /
 heap-result, all positions incl. Unit-statement) + scalar/String/nested-variant ctor fields + recursive
-drop, all byte-matching v0, corpus-wall-sound (proven checker, zero silent miscompiles / double-frees),
+drop, with the recorded examples byte-matching v0 and the corpus ownership
+witnesses accepted. These scoped tests/checks do not establish zero possible
+silent miscompiles or runtime double-frees,
 and per-PR diff-fuzz + deterministic cargo guarded. The #1 cross-repo wall lever (recursive
 `to_string`/pretty-print over `type Expr = Lit | Add | Neg`) is LIT.
 

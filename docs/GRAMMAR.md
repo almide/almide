@@ -26,7 +26,7 @@ type_decl   = ("local" | "mod")? "type" TYPENAME generic_params?
               "=" type_body
 
 fn_decl     = attr* "pub"? ("local" | "mod")? "effect"? "fn" fn_name
-              generic_params? "(" params ")" "->" type ("=" fn_body)?
+              generic_params? "(" params ")" "->" return_type ("=" fn_body)?
 fn_name     = IDENT | TYPENAME "." IDENT                  (* convention method: fn Point.norm(self, ...) *)
 fn_body     = expr | braceless_block                      (* body may start with let/var/guard directly *)
 params      = ("self" ","?)? (param ("," param)* ","?)?
@@ -34,7 +34,7 @@ param       = attr* "mut"? IDENT ":" type ("=" expr)?     (* default args: once 
 attr        = "@" IDENT ("(" attr_arg ("," attr_arg)* ")")?   (* @extern(...), @export(...), @inline_rust *)
 
 protocol_decl   = "protocol" TYPENAME generic_params? "{" protocol_method* "}"
-protocol_method = "effect"? "fn" fn_name generic_params? "(" params ")" "->" type
+protocol_method = "effect"? "fn" fn_name generic_params? "(" params ")" "->" return_type
 
 top_let     = "pub"? ("local" | "mod")? ("let" | "var") name (":" type)? "=" expr
 test_decl   = "test" STRING where_clause* block           (* where: table cases / binds / call stubs *)
@@ -45,10 +45,14 @@ gparam      = TYPENAME (":" (TYPENAME ("+" TYPENAME)* | "{" fields "}"))?   (* b
 - Visibility: default is public; `pub` is an explicit no-op synonym. `mod` = same
   project, `local` = same file. `pub type` is not accepted (types take only
   `local`/`mod`).
-- `effect fn` marks side-effecting functions; on the Rust target it compiles to
-  `Result<T, String>`. Propagation is always **explicit** (ADR-0008): the postfix
-  `!` is what lowers to `?`. A fallible call with no `!` keeps its `Result` value
-  (E041 when the binding is un-annotated, E042 in statement position).
+- `effect fn` marks effect calls and has a fallible result channel; its error
+  type is not necessarily String (`T!E` spells `Result[T, E]`). Postfix `!` is
+  explicit, with propagation/unwrap behavior determined by the enclosing
+  function or lambda context, including test-block rules. See the
+  [context table](specs/result-option-effect.md), rather than treating every
+  `!` as a Rust `?`. Calls without `!` keep their Result/Option values; E041
+  and E042 cover the unannotated-binding and discard cases described in the
+  diagnostic reference.
 
 ## Types
 
@@ -61,16 +65,22 @@ variant     = TYPENAME
             | TYPENAME "(" type ("," type)* ")"            (* tuple payload *)
             | TYPENAME "{" field ("," field)* "}"          (* record payload *)
 
-type        = TYPENAME type_args?                          (* Int, Float, String, Bool, Unit, List[T], ... *)
-            | IDENT "." TYPENAME type_args?                (* module-qualified: mod.Name[T] *)
+type        = named_type "?"?                          (* Int, Float, String, Bool, Unit, List[T], ... *)
             | "{" field ("," field)* (",")? ".."? "}"      (* record / open record { a: Int, .. } *)
             | "(" ")"                                      (* Unit *)
-            | "(" type ("," type)+ ")"                     (* tuple type *)
-            | ("fn" | "Fn") "(" (type ("," type)*)? ")" "->" type   (* function type *)
-            | "(" (type ("," type)*)? ")" "->" type        (* function type, paren form *)
+            | "(" type ("," type)* ")" "?"?               (* grouped / tuple type; optional suffix *)
+            | "effect"? fn_type                           (* function slot; optional effect prefix *)
             | INT                                          (* const literal: Array[Float, 128] *)
+named_type  = (IDENT ".")* TYPENAME type_args?
+fn_type     = ("fn" | "Fn")? "(" (type ("," type)*)? ")" "->" return_type
+return_type = type ("!" named_type?)?                      (* T! = Result[T,String]; T!E = Result[T,E] *)
 type_args   = "[" type ("," type)* "]"                     (* generics use [] not <> *)
 ```
+
+`?` attaches to a named or parenthesized type atom; `(A) -> B?` returns
+Option[B], while `((A) -> B)?` is an optional function. Nested Option uses
+`(T?)?`, not `T??`. The `!E` return marker and its optional named error type
+must be on the same line; it is not a general postfix marker on every type.
 
 ## Expressions
 
@@ -114,14 +124,14 @@ lparam      = (IDENT | "_") (":" type)?
 pipe        = expr "|>" expr                               (* also: expr |> match { arms } *)
 range       = expr "..<" expr | expr "..." expr            (* exclusive / inclusive *)
 postfix     = primary ( "(" args ")"                       (* call *)
-                      | "[" type_args "]" "(" args ")"     (* explicit type args: f[Int](x) *)
+                      | type_args "(" args ")"     (* explicit type args: f[Int](x) *)
                       | "[" expr "]"                       (* index *)
                       | "." IDENT | "." INT                (* field access; tuple index t.0 *)
-                      | "!"                                (* unwrap, propagates err (effect fn) *)
+                      | "!"                                (* context-dependent propagation/unwrap; see context table *)
                       | "?"                                (* Result -> Option *)
                       | "?." IDENT                         (* optional chaining *)
                       | "??" unary )*                      (* fallback; RHS binds at unary level *)
-args        = ((expr | IDENT ":" expr | "_") ",")* ...     (* named args; _ = partial application *)
+args        = ((expr | IDENT ":" expr) ",")* ...           (* named args; partial application is rejected as E046 *)
 primary     = literal | IDENT | TYPENAME | "(" expr ")" | "(" expr ("," expr)+ ")"
             | "(" ")" | block | record_lit | "todo" "(" STRING ")"
             | "break" | "continue" | "_"                   (* _ = typed hole in expr position *)
@@ -135,24 +145,28 @@ fieldinit   = name (":" expr)?                             (* shorthand: { x } =
 ## Patterns
 
 ```ebnf
-pattern     = "_" | IDENT | INT | FLOAT | STRING | "-" (INT | FLOAT)
+pattern     = IDENT "@" pattern                           (* bind the whole matched value *)
+            | "_" | IDENT | INT | FLOAT | STRING | "-" (INT | FLOAT)
             | "true" | "false"
             | "none" | "some" "(" pattern ")" | "ok" "(" pattern ")" | "err" "(" pattern ")"
             | (IDENT ".")? TYPENAME                        (* unit constructor; module-qualified *)
             | (IDENT ".")? TYPENAME "(" pattern ("," pattern)* ")"
             | (IDENT ".")? TYPENAME "{" field_pat ("," field_pat)* (".." ","?)? "}"
             | "(" pattern ("," pattern)* ")"               (* tuple *)
-            | "[" (pattern ("," pattern)*)? "]"            (* list — fixed length only *)
+            | "[" (pattern ("," pattern)* ","?)? "]"      (* fixed-length list *)
+            | "[" (pattern ",")* ".." IDENT? "]"           (* tail rest, last position only *)
 field_pat   = name (":" pattern)?                          (* shorthand binds the field name *)
 ```
 
-Not supported (each has a dedicated parse error): or-patterns (`a | b`),
-range patterns, `@` bindings, list rest (`[h, ...t]` — use `list.first` /
-`list.drop`), `head :: tail`.
+Match arms support or-alternatives (`a | b => ...`), as-patterns
+(`whole @ pattern`), and final list rest (`[h, ..tail]` or `[h, ..]`).
+Range patterns, three-dot rest (`[h, ...tail]`), and `head :: tail` are not
+accepted. Rest may not be followed by another pattern or a trailing comma.
 
 ## Literals
 
-- Int: decimal with `_` separators (`1_000`), hex `0xFF` / `0xff_00`. No binary/octal.
+- Int: decimal with `_` separators (`1_000`), hex `0xFF`, binary `0b1010`,
+  octal `0o17`; radix prefixes are case-insensitive and digits may use `_` separators.
 - Float: `3.14`, scientific `1e9` / `2.5E-3`, `_` separators.
 - Strings: `"..."` (escapes + `${expr}` interpolation), `'...'` (escapes only,
   no interpolation), `"""..."""` heredoc (interpolation + common-indent strip),
@@ -194,24 +208,15 @@ Any other binary operator after the RHS applies to the whole pipe result:
 
 ## Stdlib imports
 
-Auto-imported (no `import` needed — union of the seed list in
+The current auto-import set is the union of the seed list in
 `crates/almide-frontend/src/import_table.rs` and `AUTO_IMPORT_BUNDLED` in
-`crates/almide-types/src/stdlib_info.rs`):
+`crates/almide-types/src/stdlib_info.rs`. Auto-import makes a module name
+available, not all its functions as unqualified names. `prim` is restricted to
+stdlib sources; it is not a public user import. The old `error` module is removed.
 
-```
-string, list, int, float, bytes, matrix, map, set, option, result, value, prim,
-error, math, datetime, int8, int16, int32, uint8, uint16, uint32, uint64, float32
-```
-
-Explicit `import` required:
-
-```
-json, http, fs, process, regex, io, random, testing, env, net, zlib, base64,
-hex, html, mem, args, path
-```
-
-See [stdlib/](https://github.com/almide/almide/tree/develop/docs/stdlib) and [CHEATSHEET.md](https://github.com/almide/almide/blob/develop/docs/CHEATSHEET.md) for function
-references.
+Use the [stdlib reference](stdlib/README.md) and [CHEATSHEET](CHEATSHEET.md)
+for current APIs and import examples instead of maintaining another module list
+in this syntax snapshot.
 
 ## Removed / rejected forms
 

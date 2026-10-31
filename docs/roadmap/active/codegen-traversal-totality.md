@@ -1,5 +1,18 @@
-<!-- description: Making every codegen traversal exhaustive by construction, so a new IR node cannot be silently skipped -->
+<!-- description: Traversal-totality design with implemented fold/lint foundations and their limited coverage -->
 # Codegen traversal totality
+
+## Implemented foundations and remaining guarantee scope
+
+`fold_expr` now recurses through the exhaustive `map_children` primitive
+([fold.rs](../../../crates/almide-ir/src/fold.rs)). The enforcement lint exists
+as [traversal_totality_lint.rs](../../../tests/traversal_totality_lint.rs),
+with an empty `LEGACY_DEBT` list. The Phase 0/1 and first-PR instructions below
+are therefore historical implementation plans, not missing infrastructure.
+
+The lint governs its listed source files and syntactic catch-all patterns;
+it does not prove arbitrary traversals complete or eliminate every semantic
+miscompile. The pass inventory and “~80%” estimate below are the original
+audit snapshot, not a current census.
 
 **Goal:** make "a pass forgot to recurse into a node kind" a **compile error or a CI failure**, never
 a silent native↔WASM divergence. This converts the largest remaining *asymptotic* divergence class

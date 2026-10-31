@@ -3,7 +3,9 @@
 
 **Research thesis**: High-level semantic information preserved through the compilation pipeline enables optimizations impossible in traditional low-level compilers. A language designed for LLM accuracy is simultaneously optimized for compiler analysis — both benefit from explicit semantics, clear data flow, and minimal aliasing.
 
-**Current state**: n-body 1.74s (Almide) vs 1.69s (hand-written Rust) = 2.9% overhead.
+**Original observation (toolchain/host/run not recorded here)**: n-body 1.74s
+(Almide) vs 1.69s (hand-written Rust), approximately 2.9% overhead. This is not
+a current benchmark result; a new comparison needs matched workloads and build settings.
 
 **Target**: Consistently outperform hand-written Rust across standard benchmarks.
 
@@ -13,7 +15,7 @@
 
 **Goal**: 1.00x vs hand-written Rust on n-body and 3+ additional benchmarks.
 
-**Root cause of 2.9%**: Redundant `.clone()` on Copy types, unnecessary `as f64` casts, suboptimal variable binding patterns.
+**Original root-cause hypothesis for that observation**: Redundant `.clone()` on Copy types, unnecessary `as f64` casts, suboptimal variable binding patterns.
 
 | Task | Effect | Difficulty |
 |------|--------|-----------|
@@ -25,12 +27,14 @@
 
 **Metric**: n-body ≤ 1.69s, spectral-norm ≤ Rust reference, binary-trees ≤ Rust reference.
 
-**Benchmark suite**: Implement 5 programs from Benchmarks Game in Almide:
+**Benchmark implementations now present** in `research/benchmark/perf/`
+(`nbody`, `spectralnorm`, `binarytrees`, `fannkuchredux`, `mandelbrot`).
+Existence does not establish the performance targets; rerun before reporting ratios:
 - [x] n-body (gravitational simulation)
-- [ ] spectral-norm (eigenvalue)
-- [ ] binary-trees (GC stress / allocation)
-- [ ] fannkuch-redux (combinatorial)
-- [ ] mandelbrot (floating-point parallel)
+- [x] spectral-norm (eigenvalue)
+- [x] binary-trees (GC stress / allocation)
+- [x] fannkuch-redux (combinatorial)
+- [x] mandelbrot (floating-point parallel)
 
 ---
 
@@ -68,7 +72,7 @@ let sum = xs.fold(0, |acc, x| acc + x)
 // static array on stack + direct fold (no heap allocation)
 ```
 
-| Pattern | Current codegen | Optimized codegen |
+| Pattern | Original baseline sketch | Desired optimized codegen |
 |---------|----------------|-------------------|
 | Small list literal | `vec![1, 2, 3]` (heap) | `[1, 2, 3]` (stack array) |
 | List used only in fold | `Vec<T>` + iterator | Direct accumulation (no list) |
@@ -228,7 +232,7 @@ for u in users { process(u.age, u.score) }
 
 ### Benchmark targets
 
-| Benchmark | Current | Phase 0 | Phase 1 | Phase 2-3 |
+| Benchmark | Original observation | Phase 0 target | Phase 1 target | Phase 2-3 target |
 |-----------|---------|---------|---------|-----------|
 | n-body | 1.03x | 1.00x | 0.97x | 0.90x |
 | spectral-norm | — | 1.00x | 0.95x | 0.90x |
@@ -247,7 +251,10 @@ for u in users { process(u.age, u.score) }
 | 3 | "Effect-Guided Optimization: How Purity Enables Automatic Parallelization and Deforestation" | PLDI / OOPSLA |
 | All | "Modification Survival Rate × Performance: A Language Designed for Both LLMs and Metal" | POPL |
 
-### Competitive positioning
+### Original competitive hypotheses (not measured rankings)
+
+The following unversioned comparisons are retained as research motivation only.
+They do not establish current relative performance, MSR or speedup factors.
 
 | Language | Performance | LLM accuracy | Almide advantage |
 |----------|------------|--------------|-----------------|
@@ -263,16 +270,16 @@ for u in users { process(u.age, u.score) }
 
 ## Key Insight: LLM-Friendliness = Optimization-Friendliness
 
-This is Almide's unique research contribution. The same properties that make a language easy for LLMs to write accurately also provide rich information for optimization:
+This is the research hypothesis to evaluate, not an established uniqueness claim. The same properties that make a language easy for LLMs to write accurately also provide rich information for optimization:
 
 | LLM-friendly property | Optimization benefit |
 |-----------------------|---------------------|
-| Immutable by default | No aliasing → aggressive optimization |
+| Immutable by default | May simplify reasoning; immutable values can still alias, so optimization needs explicit ownership/purity conditions |
 | Explicit effects (`effect fn`) | Purity analysis → DCE, parallelization, memoization |
 | No hidden control flow (no exceptions in pure fn) | Predictable optimization |
 | Type-dispatched operators in IR | No runtime type checks |
-| UFCS (no method resolution ambiguity) | Complete call graph → whole-program optimization |
-| No inheritance / vtable dispatch | Static dispatch → inlining |
+| UFCS | Resolves eligible calls; function values and indirect dispatch still require call-graph analysis |
+| No inheritance | Does not eliminate function-value/closure dispatch; inlining remains admission-dependent |
 
 **This correlation is not coincidental — it's structural.** A language that minimizes ambiguity for LLMs also minimizes ambiguity for optimizers. This thesis, if validated with benchmarks, is a publishable result.
 

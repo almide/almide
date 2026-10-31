@@ -12,6 +12,10 @@
 （ALS-T6 の abort を含む）も同じ `Error:` 接頭辞と exit 1 に統一される。
 Contracts: C-035。
 
+> **適用範囲の補足（非規範）**: 上記を任意のプロセス障害すべての終了規約に
+> 広げない。明示 `panic` は C-219、ホール等は ALS-E30、子の raw panic / trap
+> の識別は ALS-T30 を参照。それぞれが固有の見出し・exit status を記録する。
+
 ## ALS-R2 補間の表示形
 
 文字列補間 `"${v}"` の表示形は型ごとに規範化される:
@@ -49,12 +53,14 @@ Err が複数あれば**最小 index の Err** を結果とする — ブロッ�
 trap までの出力の後に abort する観測となり、k より後の要素の出力は現れない
 (C-200、`spec/wasm_cross/fan_trap_waits_for_elements_below.almd`)。
 
-`fan.race` と `fan.timeout` は 0.42.0 / 0.29.0 でいったん削除された後、
+旧名 `fan.race` と `fan.timeout` は 0.42.0 / 0.29.0 でいったん削除された後、
 **決定的意味論を得て 0.47.0 で復活した**: race は (spend, index) 辞書式
 最小の勝者則(ALS-DT3、C-205 — mapper 形 `fan.min(clock, xs, f)` を含む)、
 timeout は charge site 協調チェックの壁時計期限(ALS-DT5、C-208)。
 `fan.bounded(c) { … }` は決定的予算(ALS-DT2、C-204)であり、mapper 形は
 持たない。旧 tombstone 裁定(C-004/C-006)はこの復活で SUPERSEDED。
+現在の最小 spend の綴りは `fan.min`（dialect epoch 14）。`fan.race` は
+上記の復活時点の名前であり、現在の呼び出し名ではない。
 Contracts: C-004, C-005, C-006。
 
 ## ALS-R4 非有限浮動小数の定数表示
@@ -175,7 +181,8 @@ err を返さない型なので、呼び出し側の `!` は何もしない（�
 終了コードは main のものになる。二つ目のシグナル（この後始末の間でも、`serve` が
 戻った後でもよい）、または要求タイムアウト（30 秒）を過ぎても後始末が待っている
 ことは、stdout を flush して終了コード 1 で終わらせ、処理中の要求には答えない。
-どの停止も 128+シグナル番号では終わらない（C-350 の `0..=125`）。
+ここで述べた serve の停止は 128+シグナル番号では終わらない。
+一般の `process.exit` の範囲と preview-1 の制限は ALS-R9 / C-350 を参照。
 対象外: HTTP のフレーミングと接続の再利用（ホストが決める）。その他のシグナル。
 native の Windows では、強制停止は stdout を flush せずに終了コード 1 で終わる。
 stdout のバッファには serve しているスレッドしか触れず、stdout がプロセス全体で
@@ -281,7 +288,9 @@ Contracts: C-274。
   し（名前の綴りは最初に格納されたものを保つ・位置も動かない）、無ければ
   末尾に追加する。ゆえに `header(set_header(r, k, v), k') == some(v)`
   は `k` と `k'` が ASCII 大小文字違いなら常に成り立つ。
-- **`with_headers` は渡されたリストそのもの**（リスト順）を返し、
+- **`with_headers` は渡されたリストを上記の上書き規則で構成する**（C-275）。
+  重複名が無い場合はリスト順を保ち、重複名は最初の位置・綴りに最後の値を置く。
+
   `Content-Type` を勝手に**播かない**。既定の Content-Type は、名前を与える
   手段が他にない `response`（`text/plain`）と `json`
   （`application/json`）だけが持つ。`redirect` は `Location` のみを持つ。

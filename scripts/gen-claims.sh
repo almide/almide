@@ -63,16 +63,16 @@ awk -v root="$ROOT_LINK" '
     flush()
     print ">"
     if (nflag == 0) {
-      # "Divergences awaiting a fix", not "Exceptions" — this block sits directly
-      # under the equivalence claim, and the ratchet counts contracts flagged for
-      # revision, NOT carve-outs in the law itself. The one by-design carve-out
-      # (platform-reporting env.os / fs.temp_dir, C-189) is active, not flagged,
-      # so a bare "Exceptions: none" read as covering it would be false.
+      # Status is an evidence-class/triage fact, not exception-free equivalence.
+      # Scoped comparison conditions also occur in active contracts. Do not
+      # infer that C-189 is the sole condition from the absence of flags.
       # NOTE: this awk program is single-quoted — no apostrophes in these strings.
-      print "> **Divergences awaiting a fix: none.** Every contract in the ledger is"
-      print "> `active`, carrying executable evidence of class >= `fixture`. The one"
-      print "> by-design carve-out in the law — the platform-reporting fns `env.os`"
-      print "> and `fs.temp_dir` — is bounded by C-189."
+      print "> **Contracts flagged for revision: none.** Every contract is marked"
+      print "> `active`; the ledger gate requires executable evidence of class >= `fixture`."
+      print "> That status does not remove scoped comparison conditions or prove every program equivalent."
+      printf "> See [C-189](%s/docs/contracts/contracts.toml) (platform reporting),\n", root
+      printf "> [C-208](%s/docs/contracts/contracts.toml) (oracle-relative deadlines), and\n", root
+      printf "> [C-331](%s/docs/contracts/contracts.toml) (leg-dependent compressed bytes).\n", root
     } else {
       printf "> **Divergences awaiting a fix (%d)** — contracts flagged for revision; the ratchet says this list may only shrink:\n", nflag
       print ">"

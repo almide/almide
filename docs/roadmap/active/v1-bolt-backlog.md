@@ -144,7 +144,10 @@ MSR の作業は [almide/almide-dojo](https://github.com/almide/almide-dojo) に
   `proofs/OwnershipLoop.v` / `CoownLoop.v`。G-F2(ループを Coq に持ち上げ確保回数の上限を証明)は ⬜。
   structural witness の loop frame は #2757。target の calibration は外部に残る。
 - **C5-B2: 本番 MIR→Rust + Ferrocene** — 🔄
-  Ferrocene レーンは実 1.95.0 で 633 件全緑(#573 ✅)、trace-map #572 ✅。
+  Ferrocene 移行用レーンの記録は Rust 1.95.0 で 633 件全緑(#573 ✅)、trace-map #572 ✅。
+  ただし [レーン定義](../../../.github/workflows/ferrocene-lane.yml)は subscription 導入まで
+  **stock rustc** を使うと明記している。この記録を Ferrocene の資格化済みバイナリでの
+  実行証拠、または Almide→Rust lowering の意味保存証明と読んではいけない。
   **native Rust の生産者が 2 本ある問題 #1480 は Mob 待ち**。
 - **C5-B3: リファレンスアプリ + 資格化キット** — 🔄(✅ 寄り)
   参照アプリ PID は C-230、G-F4 は #776 ✅。キットは #566 / #567 / #568 / #574 / #575 / #576(Coq 45 定理)/

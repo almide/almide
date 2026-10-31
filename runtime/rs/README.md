@@ -103,7 +103,7 @@ build unit — no CI job and no script invokes cargo here.
 
 **The behavioural oracle for `runtime/rs` is the executable `spec/` suite.**
 It exercises this code the way programs do — through the stdlib, on native and
-on both wasm legs — and it is what CI runs. A Rust `#[cfg(test)]` block written
+on the structural Wasm leg — and it is what CI runs. A Rust `#[cfg(test)]` block written
 here runs nowhere: no cargo build compiles this directory, and
 `strip_test_blocks` removes the block from every emitted crate.
 

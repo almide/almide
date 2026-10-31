@@ -8,10 +8,25 @@
 > からの差分: `err` は Result ctor の予約語 → `e`/`prev_e`、`..` → `..<`、ローカル clamp →
 > `int.clamp` 委譲(E015)、**sketch は integral/prev_err を更新し忘れていた** — driver の scalar
 > `var` 更新として修正(§1 の制約注記どおり)。残: 段 2d(キーストーンあ)・6-7(キーストーンい)
-> + receipt の app-scoped ブロック。
+> + receipt の app-scoped ブロック（この行は 2026-08-12 時点の残件記録）。
+
+## Current evidence entrypoints
+
+- `spec/wasm_cross/flight_pid_control.almd` is the implemented application;
+  the original sketch below contains the already-recorded state-update/syntax
+  mistakes and is retained as design history, not a copyable current example.
+- `proofs/receipt.sh` now emits an app-scoped G-F4 block. Its actual verdicts
+  and scope—not the original PENDING list below—describe the checked artifact.
+- `crates/almide-mir/src/render_native.rs` and `src/cli/emit.rs` provide the
+  native renderer/trace-map path; it is not merely an unconnected 368-line demo.
+- `.github/workflows/ferrocene-lane.yml` explicitly uses stock rustc pending
+  Ferrocene access. Passing that lane is not proof of qualified-toolchain use,
+  complete Almide→Rust faithfulness or regulatory acceptance.
+- The per-loop witness/physical-WCET proposal remains separate; do not mark it
+  complete just because the reference application or bounded profile exists.
 
 > **Goal**: [flight-profile](flight-profile.md) ラダー **G-F4** の具体設計 ── 飛行プロファイルで
-> 書かれ `make verify` を端まで通る**リファレンスアプリ**(= スライドを成果物に変える「弾」)。
+> 書かれ検証・receipt の導線を持つ**リファレンスアプリ**(= スライドを成果物に変える「弾」)。
 > 走る → oracle byte 一致 → 毎ビルド証明書 → 可読 Rust → Ferrocene。飛行サブセット
 > ([flight-subset-spec](flight-subset-spec.md))内に収まること。
 > **関連**: [flight-profile](flight-profile.md) §7.2 / [receipt-logic](receipt-logic.md) / [flight-wcet-loops](flight-wcet-loops.md) / [flight-rust-ferrocene](flight-rust-ferrocene.md)。
@@ -86,7 +101,7 @@ shift/XOR fold。**より trivially in-subset**(`list.sum` の反復形そのも
 
 ---
 
-## 2. 端から端の make verify パイプライン(exist vs gated)
+## 2. 原設計の検証パイプライン（当時の exist/gated 記録）
 
 CI Trust Spine は `make verify-trust`→`make receipt`(`Makefile:77-84`)。本アプリの段:
 
@@ -110,7 +125,7 @@ CI Trust Spine は `make verify-trust`→`make receipt`(`Makefile:77-84`)。本�
 
 ---
 
-## 3. receipt ── 見せる成果物
+## 3. 原設計の receipt 形（現行出力は receipt.sh を参照）
 
 `make receipt`(`receipt.sh`)が checked facts を C-SAFE/C-REPRO/C-FAITHFUL/C-PROVEN バンドルに畳む。
 `pid_control.almd` 用(全体 receipt を app-scoped ブロックで拡張):
@@ -146,7 +161,7 @@ C-SAFE/C-PROVEN 行 + C-WCET/C-FAITHFUL の正直な PENDING。**PENDING を隠�
 
 ---
 
-## 4. De-risking 順(最小先行)
+## 4. 当初の De-risking 順(最小先行)
 
 - **Slice 0 ── pure scalar counted-loop 算術、print なし(今 green)**。`pid_step` + 累積 driver
   (`fn sim() -> Int = { var acc=0; for t in 0..16 { acc = acc + pid_step(...) }; acc }`)。今フル lower、
@@ -166,7 +181,7 @@ C-SAFE/C-PROVEN 行 + C-WCET/C-FAITHFUL の正直な PENDING。**PENDING を隠�
 
 ---
 
-## 5. 正直なギャップ(まだ実証できないもの)
+## 5. 当初のギャップ一覧（print/renderer/receipt の後続状況は冒頭参照）
 
 1. **Ferrocene compile + 可読 Rust(段 6-7)** = 本番 MIR→Rust renderer(キーストーン(い))要。今は
    368 行 `Vec<i64>` demo。C-FAITHFUL は正直に PENDING。証明コストは低い、エンジニアリング(≈5× render_wasm)が真の作業。

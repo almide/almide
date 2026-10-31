@@ -1,5 +1,19 @@
-<!-- description: Phase 1 implementation design: the MIR core plus the two renderers -->
+<!-- description: Historical MIR Phase 1 implementation design and the distinction between IR and MIR oracles -->
 # Almide v1 Phase 1: MIR コア + 二レンダラ — 実装設計
+
+## Historical MIR design and oracle boundary
+
+This is the implementation design following the June 2026 Phase 0 spike,
+not an unstarted plan for the current compiler. Its v0 Perceus/layout/emit
+source coordinates belong to that design snapshot. The present shipping
+Wasm route is [structural](../../../src/wasm_route.rs).
+
+In §5.1, the claim that an interpreter cannot observe a Core→MIR bug applies
+to an interpreter of that same MIR, not to every interpreter. The repository's
+[IR interpreter](../../../crates/almide-interp/src/lib.rs) evaluates the earlier
+IR and provides a separate differential observation; it too has coverage and
+trust limits. Neither agreement nor the Phase 0 examples prove the entire
+compiler faithful.
 
 Status: active — 設計(design-first)。Phase 0 決定ゲート合格(5/5)を受けた本体設計。実装着手前のレビュー対象。
 Owner: compiler

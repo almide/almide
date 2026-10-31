@@ -1,18 +1,35 @@
-<!-- description: Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts -->
+<!-- description: Proposed embedded WASI agent runtime; size and cross-host targets require hardware evidence -->
 # Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts
 
 **Priority:** after `porta` reaches v1.0 and graphics stack stabilizes
 **Prerequisites:** WASI Preview 2 sockets binding in Almide stdlib, `wasi-tls` proposal landing, size-optimized WASM emit pass
-**Principle:** Write an IoT agent once in Almide. Run it on any WASI-compliant host — desktop wasmtime for prototyping, WAMR / wasm3 on the MCU for deployment.
-**Differentiator:** The same Almide guest binary runs on `porta` (desktop) and `porta-embedded` (MCU). No other embedded runtime offers that.
+**Design target:** reuse an Almide agent across desktop and MCU hosts that implement the same required interfaces and semantics. “WASI-compliant” alone does not establish that compatibility.
+**Proposed differentiator:** unchanged guest deployment across selected desktop/MCU hosts. This has not been demonstrated here; no market-wide exclusivity is established.
 
-> "Almide agent = 10 KB. Host runtime = ≤ 100 KB. Everything a connected IoT node needs, in ≤ 110 KB total."
+> **Unmeasured target, not a result:** guest ≤ 10 KB and host + guest ≤ 110 KB.
+> A total must include the chosen TLS/network stacks, assets and platform glue;
+> flash size and peak RAM are separate measurements.
+
+## External baseline checked on 2026-10-31
+
+[Porta at `123bef31`](https://github.com/almide/porta/blob/123bef319c99610dd94fb73c28f6443c5a03fc73/README.md)
+describes a native process sandbox (macOS Seatbelt; Linux Landlock/seccomp/
+namespaces), as well as a separate Wasm mode. It is not solely a desktop
+Wasmtime host. Extending either mode to an MCU is work, not an inherited
+security guarantee.
+
+The 3.8 KB Obsid figure below comes from the
+[2026-04-11 draft strategy](https://github.com/almide-graphics/obsid/blob/7e31406ee983f43d21cb95ddcb63861bed6c6648/docs/strategy.md),
+which describes a browser WebGL engine using a thin JS bridge. It is historical,
+not a measurement of a complete native/embedded graphics runtime. This review
+did not build the external projects or measure hardware; the resume conditions
+remain unmet/unverified rather than automatically satisfied.
 
 ---
 
 ## Thesis
 
-Almide has a real path to a 10 KB IoT agent, but only if it stops trying to *be* an RTOS and instead *runs inside* a WASI-compliant host that provides TLS, TCP/IP, scheduling, and crypto as imports. The heavy math (TLS ciphers, certificate parsing, TCP state) stays in the host runtime (≈ 64–85 KB with WAMR or wasm3). Almide owns the application layer, MQTT framing, business rules, and capability policy — all the parts where the language's LLM-authoring and compile-time specialization actually matter.
+Almide has a real path to a 10 KB IoT agent, but only if it stops trying to *be* an RTOS and instead *runs inside* a WASI-compliant host that provides TLS, TCP/IP, scheduling, and crypto as imports. The proposal delegates TLS ciphers, certificate parsing and TCP state to the host. The original 64–85 KB engine estimates do not establish the size of a host including these services. Almide owns the application layer, MQTT framing, business rules, and capability policy — all the parts where the language's LLM-authoring and compile-time specialization actually matter.
 
 This is the `porta` philosophy extended to MCUs: *capability-controlled WASM guest, service-providing host, portable agent binary.*
 
@@ -20,9 +37,9 @@ This is the `porta` philosophy extended to MCUs: *capability-controlled WASM gue
 
 ## Why Not a Bare-Metal RTOS Clone
 
-A 10 KB all-in RTOS that includes TLS, TCP/IP, MQTT, and a shell is physically impossible, regardless of language. The binding constraint is mathematical, not compiler-related.
+The original planning estimates below motivated delegating system services. They are not mathematical lower bounds: code size depends on feature subsets, hardware offload, toolchain and what is included in the measurement.
 
-| Irreducible subsystem | Minimum size | Why |
+| Subsystem in original estimate | Illustrative size (not remeasured) | Rationale |
 |---|---|---|
 | AES-128-GCM (software) | ~1.5 KB | S-box + Galois field multiply |
 | SHA-256 (software) | ~0.8 KB | Round constants + mixing function |
@@ -31,10 +48,10 @@ A 10 KB all-in RTOS that includes TLS, TCP/IP, MQTT, and a shell is physically i
 | TCP state machine | ~5 KB | Retransmit + congestion + sequence |
 | MQTT 3.1.1 QoS 2 | ~3 KB | 4-way handshake state tracking |
 
-Even with Almide's DCE, monomorphization, and zero-libc advantage, the software-only floor is ~20–25 KB. The only ways under that are:
+The original ~20–25 KB estimate is not a proven software-only floor. Options to investigate include:
 
 1. **Hardware offload** of crypto and TCP (STM32 CryptoCell, ESP32 hardware AES, NXP MAC+IP). Possible but ties the agent to a specific MCU family.
-2. **Delegation to a WASI host** that already implements the heavy stacks. Portable, architecturally clean, and already proven by `porta` on the desktop side.
+2. **Delegation to a WASI host** that already implements the heavy stacks. Portability and equivalent enforcement must be demonstrated on the chosen hosts.
 
 Path 2 is the one this roadmap commits to.
 
@@ -42,7 +59,7 @@ Path 2 is the one this roadmap commits to.
 
 ## Where Almide's Size Advantage Comes From
 
-Obsid ships at 3.8 KB today — a fully-featured 3D scene engine. The Rust + WebGL equivalent is 20–30 KB. The 5×–8× density comes from compiler properties that survive unchanged into the embedded target:
+The historical Obsid/browser figure does not establish the old 5×–8× Rust comparison or its transfer to embedded systems. Candidate size mechanisms to measure on the actual guest include:
 
 - **No libc.** Almide's WASM emit doesn't pull crt0, printf, or format-parsing machinery.
 - **Whole-program DCE.** Function-level dead-code elimination runs by default; nothing stays in the binary because it *might* be called.
@@ -50,7 +67,7 @@ Obsid ships at 3.8 KB today — a fully-featured 3D scene engine. The Rust + Web
 - **Compile-time const propagation.** Far finer-grained than C's `#ifdef`; configuration choices become direct substitutions.
 - **No vtable layer.** `effect fn` rewrites to plain Result early-return, no dynamic dispatch cost.
 
-The one headwind is bytecode density: WASM is 1.5–2× larger than Thumb-2 for equivalent logic. Almide's compile-time advantages more than offset this when the binary is the *guest*, not the whole system.
+Wasm/Thumb-2 density and optimization benefits require same-program, same-feature measurements; no fixed ratio or guaranteed offset is established here.
 
 ---
 
@@ -70,22 +87,22 @@ The one headwind is bytecode density: WASM is 1.5–2× larger than Thumb-2 for 
 └──────────────────────────────────────────┘
 ```
 
-The guest imports named WASI Preview 2 functions via `@extern(wasm, "wasi:sockets/tcp", ...)`. The host runtime resolves those imports against its own TCP/TLS implementation. The same `.wasm` file runs under desktop wasmtime, which pleases developers doing local iteration.
+This is a proposed interface layout, not a runnable current binding recipe. Preview 2/component ABI support, adapters, host operations and TCP/TLS semantics must be validated together before claiming the same artifact runs on both hosts.
 
-### Runtime options (known tradeoffs)
+### Original runtime estimates (not a current compatibility or footprint matrix)
 
 | Host runtime | Size | Notes |
 |---|---|---|
-| `wasm3` | ~64 KB | Pure interpreter, smallest known footprint |
+| `wasm3` | ~64 KB | Interpreter candidate; full host footprint unverified |
 | `wasm-micro-runtime` (WAMR) | ~85 KB+ | Interp + AOT, Bytecode Alliance, broader WASI coverage |
-| wasmtime | ~10 MB | Desktop-only, what `porta` already uses |
+| wasmtime | ~10 MB | Desktop candidate; Porta also has a native process mode |
 | custom Almide-authored runtime | — | Deferred; see §"Scope Out" |
 
-WAMR is the default recommendation once WASI Preview 2 support lands upstream. wasm3 is the fallback for flash-constrained targets.
+WAMR and wasm3 remain candidates pending version-pinned interface, flash/RAM and hardware tests; this document does not select a deployment runtime.
 
 ---
 
-## Relationship to Existing `porta`
+## Original desktop/MCU comparison (Porta architecture update above)
 
 | Axis | `porta` (existing) | `porta-embedded` |
 |---|---|---|
@@ -96,7 +113,7 @@ WAMR is the default recommendation once WASI Preview 2 support lands upstream. w
 | Capabilities | FS / Network / Exec | GPIO / I²C / SPI / Network |
 | Manifest | `porta.toml` + `manifest.json` | Same format, shared parser |
 
-The shared manifest and capability model are load-bearing: **one Almide agent, prototyped on desktop `porta`, deployed unchanged to `porta-embedded`.** That cross-host portability is the feature no other embedded runtime offers today.
+A shared manifest and capability model are design goals. Equivalent enforcement and unchanged-artifact portability need positive and negative tests on each selected host; neither follows from sharing a schema.
 
 ---
 
@@ -148,18 +165,18 @@ The graphics stack strategy doc and `ml-inference.md` use the same five axes to 
 
 | Axis | Standing |
 |---|---|
-| Binary size | Guest < 10 KB, host + guest < 110 KB. Unmatched at this layer. |
-| LLM authoring | IoT business rules written in Almide are far easier to LLM-edit than C. |
-| Zero-copy | WASI linear memory carries payloads; no serialization tax. |
-| Cross-host | One guest binary runs on desktop and MCU. Nothing else in the market does this. |
-| Capability security | `porta`'s capability model reaches the MCU — defense-in-depth for field devices. |
+| Binary size | Target: guest < 10 KB, host + guest < 110 KB; not measured here. |
+| LLM authoring | Hypothesis to compare with C using controlled editing tasks. |
+| Zero-copy | Copies and ABI serialization depend on the selected host boundary; measure them. |
+| Cross-host | Desired same-artifact behavior on explicitly tested desktop/MCU hosts. |
+| Capability security | Proposed MCU host enforcement; not implied by desktop controls. |
 
 ---
 
 ## Scope Out
 
-- **Bare-metal RTOS authoring.** Covered by the math floor above. Not a language problem.
-- **Software TLS rewritten in Almide.** Crypto is irreducible math; rewriting it wastes effort.
+- **Bare-metal RTOS authoring.** Outside this application/host split; the size estimates above are not a mathematical impossibility proof.
+- **Software TLS rewritten in Almide.** The proposal delegates crypto rather than claiming a new implementation is needed.
 - **Custom Almide-authored WASI runtime.** Interesting long-term but requires `no_std` codegen, inline asm, linker section control — all absent today. Borrow WAMR / wasm3 instead.
 - **ML inference on MCU.** Lives in `ml-inference.md`. Can share infrastructure later.
 - **Graphics on MCU.** Lives in `obsid/docs/strategy.md`. Can share infrastructure later.

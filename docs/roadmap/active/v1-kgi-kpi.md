@@ -1,5 +1,18 @@
-<!-- description: v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. -->
+<!-- description: Historical June 2026 KGI/KPI scoreboard; targets distinguished from measured or proven results -->
 # v1 KGI / KPI スコアボード
+
+## Historical scoreboard; targets are not achieved guarantees
+
+The latest filled weekly entry below is June 21, 2026. Undated “current”
+columns are that early scoreboard, not measurements of today's compiler,
+TS support, proof coverage or MSR. KGI-T's complete safety/qualification bundle
+is a target, not a claim already established by a green corpus gate.
+
+Use [the current proof boundary](../../contracts/proven-vs-trusted.md) and
+[receipt generator](../../../proofs/receipt.sh) for scoped evidence. MSR work
+belongs to Dojo per [the repository boundary](../../../CLAUDE.md); this update
+does not invent external results or fill the old counters with estimates.
+The weekly observations and their original metrics remain below.
 
 > **これは何か**: v1 の終局指標(KGI)と、それを守る/攻める指標(KPI)を週次で
 > 埋めるスコアボード。このプロジェクトは構造が特殊で ―― **KPI が「攻める系

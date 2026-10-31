@@ -1,7 +1,8 @@
 # Reviewing generated Rust (#572)
 
 In the qualified-code-generator model (the SCADE KCG precedent), the
-generated source is the reviewable certified artifact. This is the
+generated source is a reviewable artifact. That qualification model is not
+a claim that Almide or its current build is qualified. This is the
 review guide for Almide's `--target rust` output.
 
 ## The correspondence map
@@ -21,24 +22,30 @@ to the committed emit baselines — anchors never appear unflagged.
 
 ## What a reviewer aligns on
 
-1. **Functions** are the correspondence unit: every `.almd` fn renders as
-   one Rust fn (monomorphized generics render one fn per instantiation,
-   suffixed with the concrete types). Statement ORDER inside a body is
-   preserved by construction — the walker renders the IR statement list
-   in sequence; no reordering pass exists on the Rust target.
-2. **Stable patterns**: `effect fn` → `Result<T, String>` with explicit
-   `?` only where the source wrote `!` (ADR-0008); `==` → `almide_eq!`;
+1. **Functions** are the trace-map correspondence unit: surviving `.almd`
+   functions normally render as Rust functions (monomorphized generics render one fn per instantiation,
+   suffixed with concrete types). Inlining, dead-code removal and helper
+   synthesis can change the one-to-one correspondence. The walker renders the
+   final IR in sequence, but optimizations such as LICM and stream fusion act
+   before it; source statement order cannot be inferred from that fact alone.
+   Review observable ordering against the pass contracts and emitted text.
+2. **Stable patterns**: effect results use the inferred/declared Result error
+   channel, not always String. Postfix `!` follows its enclosing context
+   ([context table](../specs/result-option-effect.md)); `==` first lowers through Secret/convention equality where applicable;
+   ordinary `BinOp::Eq` renders `almide_eq!` (frontend `lower/expressions_access.rs`);
    `+` on strings/lists → `AlmideConcat`; `mut` params → `&mut`;
    variants → Rust enums with the same case names; records → structs
    with the same field names. What the checker accepted is what renders —
    codegen never re-infers types (the TypeMap is the source of truth).
 3. **Warning-free**: generated Rust must compile without warnings (a
    standing testing rule), and the whole run-manifest corpus builds under
-   the Ferrocene-pinned toolchain weekly (`ferrocene-lane.yml`, #573).
+   the recorded Ferrocene upstream compatibility pin weekly
+   (`ferrocene-lane.yml`, #573). That lane currently installs stock rustc,
+   not a qualified Ferrocene binary.
 
 ## The certification frame
 
-The generated source + this correspondence story is the
-source-to-object half that the QUALIFIED COMPILER below (Ferrocene, the
-#573 split) carries onward. The tool-qualification package indexing all
-of it is `proofs/TOOL-QUALIFICATION.md` (#574).
+The proposed qualification split puts source generation here and a qualified
+compiler below it. The current stock-rustc compatibility lane does not establish
+that qualification. Evidence and remaining gaps are indexed in
+[TOOL-QUALIFICATION](../../proofs/TOOL-QUALIFICATION.md) (#574).

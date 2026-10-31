@@ -44,7 +44,8 @@ fn_decl      := [visibility] ["scoped"] ["effect"] "fn" name …
 **ヘッド**では、直後の `{` が構文自身の本体を開くので `scoped` は常に識別子と
 して読まれる — `match scoped { … }` は #1997 の前後で同じ意味を持つ。したがって
 `scoped` という名前の変数・関数・モジュールを持つ既存プログラムは一つも壊れず、
-方言エポックは上がらない(`proofs/dialect-epochs.toml` は 4 のまま)。ヘッドの
+この導入自体では方言エポックを上げなかった（導入時は epoch 4。現在の値と
+その後の変更は `proofs/dialect-epochs.toml` を参照）。ヘッドの
 中で本当にスコープブロックを書きたいときは括弧で囲む:
 `while (scoped { step(i) }) > 0 { … }`。
 

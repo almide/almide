@@ -3,18 +3,26 @@
 
 > "well-typed source -> correct binary" chain: layers that lack mechanical/mathematical proof
 
-Status: **Active** — analysis complete, milestone steps defined per-layer
+Status: **historical gap analysis with later correction logs**. The original
+Perceus/`emit_wasm` architecture below is retired; do not read its task list as
+the current structural backend inventory. Current route and proof boundaries
+are in `src/wasm_route.rs`, `proofs/receipt.sh` and `TRUSTED_BASE.md`.
 
-## Layers WITH guarantees
+## Evidence boundary
 
-| Layer | Guarantee | Basis |
-|-------|-----------|-------|
-| Perceus RC | heap alloc exactly-once freed | Lean 4: 23 theorems |
-| StackBalance | void context never leaks stack values | structural invariant (tail=None => no Ret) |
-| MonoVerify | no TypeVar survives in live code | live VarId collection + exhaustive check |
-| ConcretizeTypes | IR expr.ty and VarTable agree | postcondition check |
+The original headline “heap alloc exactly-once freed” overstated what the
+algorithm theorem establishes. A proof about modeled RC events is not, by
+itself, a proof of the Rust translation, generated drop routines or arbitrary
+executing programs. The historical analysis below itself records that
+model-to-implementation gap.
 
-## Layers WITHOUT guarantees
+Current IR postconditions (`crates/almide-codegen/src/pass.rs`) fail in release
+as well as debug builds; the later historical milestone proposing that change
+is not a current missing gate. The structural runtime proofs and remaining
+trusted seams should be read from the current receipt, not the old fixed
+23-theorem/Perceus/StackBalance inventory.
+
+## Original gap inventory (historical architecture)
 
 ### 1. WASM emitter (`emit_wasm/*.rs`) — largest gap
 
@@ -60,7 +68,7 @@ The Lean 4 theorems prove the algorithm correct, but the Rust implementation was
 
 ---
 
-## Milestone Steps
+## Original milestone steps (retain with the dated follow-up logs)
 
 ### Gap 1: WASM emitter -> WasmIR migration
 

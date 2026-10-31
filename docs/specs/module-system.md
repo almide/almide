@@ -69,24 +69,28 @@ test "every import form resolves" {
   `import self.b.util` すればそれぞれ別のモジュールに解決される（#2654）。
   同じファイルで両方を import すると束縛名 `util` が衝突してエラーになり、
   片方に `import self.b.util as butil` の別名が要る
+- 選択 import `import pkg.{func}` は指定した名前だけを非修飾で束縛する。
+  同名のローカル関数との衝突は E050（暗黙の上書きはしない）。
 - ワイルドカード `import pkg.*` は不可
 - 循環インポートはコンパイルエラー
 
 ### 2.2 stdlib の auto-import 層
 
-stdlib モジュールは2層に分かれる。
+名前解決には auto-import されるモジュールと、明示 import が必要なものがある。
+現在の集合は `crates/almide-types/src/stdlib_info.rs` の
+`TIER1_ALWAYS_ACCESSIBLE` / `AUTO_IMPORT_BUNDLED` が定義する。
 
-**Tier 1 (auto-imported — import 文不要):**
-`string`, `list`, `map`, `set`, `int`, `float`, `value`, `result`, `option`
+**import 文不要:** `string`, `list`, `map`, `set`, `int`, `float`, `bool`,
+`value`, `result`, `option`, `bytes`, `matrix`, `math`, `datetime`, `deque`,
+`heap`、各 sized integer / float モジュール。
+`compute` / `duration` は同様に名前を使える checker の時間・計算量サーフェス。
 
-これらは言語の基本型を操作するモジュール。全ファイルで暗黙的にスコープに入る。
+**明示 import の例:** `json`, `regex`, `testing`, `path`, `args`, `fs`,
+`env`, `process`, `io`, `http`, `random`, `ffi`, `bigint`。
+削除された `error` モジュールはこの一覧に含まれない。
 
-**Tier 2 (import 必須):**
-`json`, `math`, `regex`, `datetime`, `bytes`, `matrix`, `testing`, `error`, `path`, `args`, `fs`, `env`, `process`, `io`, `http`, `random`
-
-これらは具体的なドメイン機能。使用するファイルで `import json` 等を明示する。
-
-**設計根拠:** Tier 1 は言語のコア（型、コレクション、エラーハンドリング）。Tier 2 は具体フォーマット（JSON）、数学、I/O 等の機能モジュール。Swift の「標準ライブラリは auto-import、Foundation は import 必要」と同じ設計。
+Auto-import は名前解決の規則であり、すべての実装を全プログラムにリンクする意味ではない。
+Bundled source は到達性に従って読み込まれる（`bundled_reach`）。
 
 ### 2.3 import ヒントと自動修正
 
@@ -124,7 +128,7 @@ error[E003]: undefined variable 'yaml'
 - Tier 1 は対象外（既にスコープにあるため追加しない）
 
 **サブモジュール発見:**
-依存パッケージのキャッシュディレクトリ (`~/.almide/cache/{name}/.src-{source}/{version}/src/`、`{source}` はその依存自身の取得元) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
+依存パッケージのキャッシュディレクトリ (`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/<ref-or-commit>/` 配下の package source（`subdir` があればその内側）) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
 
 ```bash
 $ almide fmt app.almd
@@ -509,19 +513,25 @@ almide dep-path bindgen                   # キャッシュディレクトリを
 
 ### almide.lock
 
-`almide.lock` は正確なコミットハッシュを記録する。エントリの `git` と `ref` が `almide.toml` の記述と**一致する場合に限り**そのコミットを使い、一致しなければ（tag を書き換えた、取得元を差し替えた、lock が無い）manifest の ref を解決し直して記録を更新する。VCS にコミットすべき。
+`almide.lock` は正確なコミットハッシュを記録する。`git` と `ref` が manifest と
+一致するとき、そのコミットを使う。取得元 `git` の変更は黙って再解決せず拒否し、
+`almide update <name>` で新しい取得元を明示的に再ロックする。ref の変更や未ロックの
+依存の解決も trust / `--locked` の規則に従う（[package-system](package-system.md) §6.3）。
+lock は VCS にコミットすべき。
 
 lock は「第三者が同じバイト列を再構築できる」ために存在するので、記録される `(git, ref, commit)` は**実際に同時に成り立った三つ組**でなければならない。
 以前は名前だけで引いていたため、tag を上げても古いコミットのまま `ref` のラベルだけが新しい tag に書き換わり、lock は更新済みに見えてビルドは旧 tag をコンパイルしていた (#2522)。
 
 ### キャッシュ
 
-`~/.almide/cache/{name}/.src-{source}/{tag_or_commit}/` にクローンされる。`almide clean` でクリア。
+現在の clone root は
+`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/`。
+取得元 URL の成分を可逆にエンコードし、その下に ref / commit ごとの checkout を置く。
+同じ取得元・ref の `subdir` 依存も通常の依存も checkout を共有し、各 package の
+ディレクトリを読む。実装は `src/project_fetch.rs::dep_cache_root`。
 
-`.src-{source}` は取得元 URL の 64bit ダイジェスト。キャッシュキーに**取得元が入る**のは、同名・同タグのパッケージが別リポジトリに存在しうるため —
-以前の `{name}/{tag}` 配置では先に取得した方が後続の別 URL にも応答し、`almide.lock` が「その URL には存在しないコミット」を記録して他マシンで解決不能になった (#2523)。
-URL は逐語でハッシュする（`…/p` と `…/p.git` は別エントリ）: 綴りの差はクローンの重複で済むが、別ソースの取り違えはビルドの誤りになる。
-ダイジェスト成分が `.` で始まるのは git のref名が `.` で始まれないため — 旧配置のディレクトリが新しいキーと衝突しえない。旧エントリは再利用されず（再取得になる）、`almide clean` まで容量だけ占める。
+以前の name-keyed / `.src-<64bit hash>` / `.repos` 配置は履歴であり、現在は再利用しない。
+古いエントリは `almide clean` まで容量だけ占める。
 
 ### バージョン解決
 
@@ -574,9 +584,8 @@ pub struct Logger {
 @extern(rs, "std::cmp", "min")
 fn my_min(a: Int, b: Int) -> Int = if a < b then a else b   // フォールバック body
 
-@extern(rs, "std::cmp", "max")
-@extern(ts, "Math", "max")
-fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern 必須
+@extern(rust, "std::cmp", "max")
+fn my_max(a: Int, b: Int) -> Int = if a > b then a else b // 他ターゲット用の body
 ```
 
 ### 11.1 `@extern(rust, …)` の引数 ABI
@@ -626,7 +635,9 @@ fn fill(n: Int) -> Bytes = _
 | `Int8`〜`Int64` / `UInt8`〜`UInt64` | 同じ幅の整数 |
 | `Float` / `Float64` / `Float32` | `double` / `double` / `float` |
 | `Bool` | `int`（1 / 0） |
-| `RawPtr` | `*mut u8` |
+| `Handle` | `*mut u8`（不透明な foreign token） |
+| `Region`（引数） | ポインタと `size_t` 長の 2 引数 |
+| `Region`（戻り値） | `@region(len = …, release = "…")` で長さと解放を宣言したポインタ |
 | `String`（引数のみ） | `*const u8` — 最初の NUL までの NUL 終端コピー、呼び出し中のみ有効 |
 | `Unit`（戻り値のみ） | `void` |
 
@@ -649,8 +660,8 @@ fn c_sqrt(x: Float) -> Float = _
 2. `{base_dir}/pkg/mod.almd`
 3. `{base_dir}/pkg/src/mod.almd`
 4. `{base_dir}/pkg/src/lib.almd` (非推奨)
-5. `almide.toml` の `[dependencies]` → `~/.almide/cache/{name}/.src-{source}/...`
-   (`subdir` 依存は `~/.almide/cache/.repos/.src-{source}/{ref}/{subdir}/...`)
+5. `almide.toml` の `[dependencies]` → `~/.almide/cache/.sources/<encoded-source>/@/<ref-or-commit>/...`
+   （`subdir` 依存はその checkout 内の指定ディレクトリ）
 
 依存パッケージの `src/mod.almd` が見つかった場合、同ディレクトリのサブモジュールとサブディレクトリを再帰スキャン。
 

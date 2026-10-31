@@ -29,7 +29,7 @@ AST + TypeMap → `IrProgram`:
 - **TypeMap populated by checker, consumed by lowering.** Lowering reads `type_map[expr_id]` to annotate IR nodes. It never runs inference.
 - **Desugar in lowering, not in the checker.** The checker sees the original AST. Lowering transforms it into the IR form.
 - **Error recovery with `Unknown`.** When inference fails, the checker emits a diagnostic and assigns `Ty::Unknown`. This prevents cascade errors but can leak into IR — codegen must handle `Unknown` gracefully (fallback defaults).
-- **Exhaustiveness is mandatory.** Match patterns are checked for exhaustiveness in `check/exhaustiveness.rs`. Missing cases produce warnings.
+- **Exhaustiveness is mandatory.** Match patterns are checked for exhaustiveness in `check/exhaustiveness.rs`. Missing cases produce error E010.
 - **Auto-derive generates real IR.** `lower/derive.rs` produces `IrFunction` bodies for convention methods. These are regular functions — codegen doesn't special-case them.
 
 ## Module Layout

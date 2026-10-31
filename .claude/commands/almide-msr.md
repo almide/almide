@@ -4,7 +4,7 @@
 
 This repo is compiler correctness: `spec/` tests, `cargo test`, grammar-lab, lang-bench.
 Dojo owns daily MSR measurement, the task bank, malicious-hint detection, and the
-diagnostics feedback loop. The number in this repo's README (`| MSR | ... |`) is
+diagnostics feedback loop. The number on this repo's measurements page (`docs/benchmarks/README.md`) is
 published *by Dojo* — do not regenerate it from here.
 
 The local harness that used to live under `research/benchmark/msr/` (25 Exercism-style

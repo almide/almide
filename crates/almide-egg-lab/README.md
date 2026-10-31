@@ -1,9 +1,15 @@
 # almide-egg-lab
 
-**Feasibility PoC for egg (equality saturation) on a minimal Almide IR subset.**
+**Equality-saturation rules and IR bridge used by the compiler.**
 
-This crate exists to answer one question before we commit to the
-10-month [MLIR Backend + Egg Rewrite Engine](../../docs/roadmap/active/mlir-backend-adoption.md)
+> Current status (2026-10-31):
+> [`EggSaturationPass`](../almide-codegen/src/pass_egg_saturation.rs) uses this
+> crate's rules, bridge and cost model. It is not an isolated, freely deletable
+> experiment. The PoC verdict, timings and staged questions below are the
+> original experiment record, not a current test count or integration checklist.
+
+The original experiment asked one question before we commit to the
+10-month [MLIR Backend + Egg Rewrite Engine](../../docs/roadmap/on-hold/mlir-backend-adoption.md)
 arc: *can egg actually express Almide's existing stream-fusion rules,
 terminate quickly, and pick the fused form?*
 
@@ -46,8 +52,8 @@ in the e-graph and the extractor picks the cheapest.
   nodes with fresh `VarId`s. One-shot allocation is bounded by the
   output size, which sidesteps the e-graph alpha-equivalence issue
   without losing the fresh-id discipline the main IR requires.
-- Not wired into the main compiler pipeline. No codegen impact,
-  deletable with zero blast radius.
+- The original experiment was isolated. The current codegen integration is
+  linked above; changing or removing this crate can affect compiler output.
 
 ## What's included
 
@@ -88,10 +94,10 @@ Tracked as open questions in the arc document:
 cargo test -p almide-egg-lab --release
 ```
 
-## Next step if kept
+## Original next-step proposal if kept (historical)
 
 If this PoC passes review, Stage 1 of the MLIR adoption arc (see
-`docs/roadmap/active/mlir-backend-adoption.md`) will:
+`docs/roadmap/on-hold/mlir-backend-adoption.md`) will:
 
 1. Expand the language to cover the full `IrExpr` enum
 2. Decide whether to keep lower-time beta-reduction or promote
@@ -101,9 +107,10 @@ If this PoC passes review, Stage 1 of the MLIR adoption arc (see
 5. Run equality saturation as an opt-in pass before the existing
    Nanopass pipeline
 
-## Next step if rejected
+## Original rejection alternative (historical)
 
 If saturation proves intractable on real Almide programs, we fall
 back to GHC RULES-style priority rewriting inside the existing
 Nanopass framework. The MLIR adoption arc continues without egg.
-This crate gets deleted, no other code changes.
+Deleting the crate was an option at the PoC stage. It is no longer a
+standalone deletion: the current compiler depends on it.

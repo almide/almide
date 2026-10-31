@@ -1,5 +1,20 @@
-<!-- description: Retiring StringInterp as special syntax by desugaring it to concat + to_string(part) -->
+<!-- description: Historical interpolation desugaring decision and its scoped correctness rationale -->
 # StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`
+
+## Historical design; scope of the correctness claim
+
+This is the June 17, 2026 desugaring decision and campaign record. Its v0
+oracle-preservation instructions and missing-conversion inventory are not
+current implementation instructions; v0 has retired and the current stdlib
+contains Bool and Float conversion bodies.
+
+The phrase “silent miscompile is structurally impossible” below overstates
+what desugaring establishes. Removing one deferred-interpolation path can
+eliminate that path's failure mode, but correctness still depends on the
+desugar, formatting bodies, ownership and renderer. Finite byte comparisons
+are evidence, not a proof of all compositions. See
+[proven versus trusted](../../contracts/proven-vs-trusted.md). The original
+reasoning is retained below with that qualification.
 
 The ideal end-state (set 2026-06-17). Supersedes the per-position interp-lowering approach.
 

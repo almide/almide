@@ -19,7 +19,7 @@ The input is the JSON that `almide compile --json <file>` emits.
 almide compile --json /path/to/your.almd > /tmp/iface.json
 
 # 2. Render it with the Almide-written formatter
-almide run examples/almd-outline/src/main.almd /tmp/iface.json
+almide run examples/almd-outline/src/main.almd -- /tmp/iface.json
 ```
 
 The output is bit-identical to `almide ide outline /path/to/your.almd`
@@ -41,9 +41,12 @@ micro-benchmark. This file is ~140 lines and covers:
 - `guard cond else err("msg")` for `effect fn` early-return
 - `expr ?? default` and `expr!` for `Option` / `Result` handling
 
-## Gaps found while writing this
+## Historical gaps found while writing this
 
-Writing this demo surfaced real gaps, captured here to inform Phase 3:
+The following records the original implementation experience, not a current
+open-issue list. In particular, [llms.txt](../../llms.txt) now exists. Check
+current diagnostics and interface sources before treating a historical gap as
+unimplemented:
 
 1. **`guard cond else { println(...) }`** (side-effect only, no return value)
    should be a checker-level error saying "guard else must return or err",

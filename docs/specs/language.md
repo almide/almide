@@ -12,7 +12,7 @@ An Almide source file consists of three sections in order:
 
 1. **Module declaration** (optional) -- `module <path>`
 2. **Imports** -- zero or more `import` declarations
-3. **Declarations** -- functions, types, top-level lets, protocols, impls, tests
+3. **Declarations** -- functions, types, top-level lets, protocols, tests
 
 ```almide project
 // file: mylib/src/core.almd
@@ -138,7 +138,7 @@ effect fn main() -> Unit = {
 |------|-------------|
 | `(A, B, ...)` | Tuple |
 | `{ field: Type, ... }` | Record (anonymous) |
-| `Fn(A, B) -> C` | Function type |
+| `(A, B) -> C` / `effect (A, B) -> C` | Pure / effect function type |
 
 テスト: `spec/lang/data_types_test.almd`, `spec/lang/tuple_test.almd`
 
@@ -388,7 +388,7 @@ round-trip tests).
 
 ### 4.2 Effect Functions (`effect fn`)
 
-Functions with side effects (IO, randomness, etc.) use the `effect fn` modifier. They return `Result[T, E]` and support automatic `?`-propagation via `!`.
+Functions with side effects (IO, randomness, etc.) use the `effect fn` modifier. User effect functions expose a Result channel and propagate explicitly with `!`; never-error stdlib intrinsics are the documented bare-value exception.
 
 ```almide
 import fs
@@ -399,7 +399,7 @@ effect fn read_config(path: String) -> Result[String, String] = {
 }
 ```
 
-When an `effect fn` returns `Result[T, E]` and the body is a block that ends without an explicit `ok(...)`, the compiler automatically wraps the trailing expression in `ok(())`:
+When an `effect fn` returns `Result[T, E]` and the body is a block that ends without an explicit `ok(...)`, a success-valued tail is wrapped in `ok(...)` (a Unit tail becomes `ok(())`):
 
 ```almide
 effect fn log(msg: String) -> Result[Unit, String] = {
@@ -499,11 +499,13 @@ type Color: Eq, Repr = Red | Green | Blue
 type Point: Codec = { x: Float, y: Float }
 ```
 
-Built-in conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`.
+Built-in conventions include `Eq`, `Repr`, `Ord`, `Hash`, `Codec`, `Encode` and `Decode`.
 
 `Codec` derives `T.encode(v: T) -> Value` and `T.decode(v: Value) ->
-Result[T, String]`, and for a record type also `T.decode_strict(v: Value) ->
-Result[T, String]`. `T.decode` ignores keys it does not know;
+Result[T, String]`, plus `T.decode_strict(v: Value) -> Result[T, String]`
+for records and variants. `Encode` / `Decode` select one direction; see
+[ALS-D6](als/data-formats.md). Strict decode rejects unknown keys recursively,
+including nested containers, and reports their path. `T.decode` ignores keys it does not know;
 `T.decode_strict` first returns `err("unknown key '<k>'")` for the first key
 (in document order) that is not a decoded field's key, then decodes as
 `T.decode` does (C-429). A record field may carry `@skip` (neither decoded
@@ -1155,7 +1157,11 @@ test "member and index access" {
 
 ### 5.21 UFCS (Uniform Function Call Syntax)
 
-`f(x, y)` is equivalent to `x.f(y)`. The compiler resolves automatically.
+UFCS resolves `x.f(y)` through a fixed lookup ladder, including stdlib and
+convention methods before applicable user functions. It can be equivalent
+to `f(x, y)` when that function is selected, but a same-named local function
+does not override a stdlib method. See `check/calls_ufcs.rs` and
+`spec/lang/user_fn_namespace_collision_test.almd`.
 
 ```almide
 test "UFCS" {
@@ -1315,7 +1321,9 @@ effect fn create_once(path: String) -> Result[Unit, String] = {
 }
 ```
 
-`guard` checks a condition; if false, executes the `else` branch (which must diverge or return a Result).
+`guard` checks a condition; if false, the `else` branch returns early with
+a value compatible with the enclosing return channel, or diverges. It is
+not restricted to Result-returning functions.
 
 テスト: `spec/lang/guard_test.almd`
 
@@ -1477,7 +1485,7 @@ Almide uses words, not symbols: `&&` and `||` are rejected with hints.
 
 | Operator | Syntax | Description |
 |----------|--------|-------------|
-| `!` | `expr!` | Unwrap Result/Option; propagate the failure (effect fn / test / a pure fn whose return resolves to Result, Option, or `T!` — C-211, ADR-0002 Phase 1) |
+| `!` | `expr!` | Unwrap Result/Option in the current fn/lambda channel; tests unwrap and fail rather than propagate. See [context table](result-option-effect.md#2-演算子) for Result, Option, typed errors and infallible contexts. |
 | `??` | `expr ?? fallback` | Unwrap or use fallback value. fallback は**遅延評価**(none/err のときだけ)。**最高位に結合**: `a ?? 1 + 2` = `(a ?? 1) + 2` — C 系 `?:`(ほぼ最下位)と逆なので算術と混ぜるときは括弧推奨。fallback は同じ行に置く(行またぎは E038、複数行は括弧 + `??` 後置) |
 | `?` | `expr?` | Convert Result to Option (err becomes none) |
 | `?.` | `expr?.field` | Optional chaining (Option[Record] to Option[FieldType]) — **Option 専用**。Result には専用診断で拒否(`(r?)?.x` と合成する) |
@@ -1596,9 +1604,9 @@ test "built-ins" {
   let s = "hi"
   println(s)              // print line to stdout
   eprintln(s)             // print line to stderr (debug only)
-  assert_eq(1, 1)         // assert equal (test blocks)
-  assert_ne(1, 2)         // assert not equal (test blocks)
-  assert(true)            // assert true (test blocks)
+  assert_eq(1, 1)         // assert equal (also available outside tests)
+  assert_ne(1, 2)         // assert not equal (also available outside tests)
+  assert(true)            // assert true (also available outside tests)
 }
 ```
 
@@ -1612,7 +1620,8 @@ list, option, result, tuple, map or variant, and in an `assert_eq` /
 stdlib type that declares one: it prints `Secret(***)` on every path
 (`docs/stdlib/secret.md`).
 
-There is no `print` function -- use `println` for all output.
+There is no bare prelude `print`: use `println` for a line, or imported
+`io.print` for output without an added newline and an explicit flush.
 
 テスト: `spec/lang/prelude_test.almd`
 
@@ -1624,7 +1633,7 @@ There is no `print` function -- use `println` for all output.
 import env
 
 effect fn main() -> Unit = {
-  let args = env.args()                    // argv without the program name
+  let args = env.args()!                   // argv without the program name
   let name = list.get(args, 0) ?? "world"
   println("Hello, ${name}!")
 }
@@ -1646,7 +1655,8 @@ effect fn main() -> Unit = {
 - No macros, no operator overloading, no implicit conversions
 - Empty list = `[]`, empty map = `[:]` (with type annotation)
 - `_` is for match wildcard, let discard, for discard, and lambda wildcard params
-- All stdlib functions require module prefix: `string.len(s)`, not `len(s)`
+- Use qualified stdlib calls (`string.len(s)`), applicable UFCS (`s.len()`),
+  or an explicit selective import; there is no implicit unqualified import of every function.
 - `println(x)` where x is Int requires explicit conversion: `println(int.to_string(x))`
 
 ---
