@@ -66,6 +66,8 @@ The diagnostic is the fix: the model's next turn is `Triangle(b, h) => 0.5 * b *
 
 **[Try it in your browser →](https://almide.github.io/playground/)** — no installation.
 
+Install the GitHub CLI (`gh`) first: the default installer verifies the release attestation and refuses installation without it. See [SECURITY.md](./SECURITY.md#release-integrity) for verification details.
+
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
