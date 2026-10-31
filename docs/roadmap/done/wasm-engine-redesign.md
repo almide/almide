@@ -1,7 +1,12 @@
 <!-- description: Complete redesign of the WASM engine around LayoutRegistry, WasmIR, and WasmBuilder -->
 # Almide WASM Engine — Complete Redesign
 
-> **Status**: Design phase — foundation (LayoutRegistry + WasmIR + WasmBuilder) exists, full recreate planned
+> **Status**: Historical design proposal. The foundation/remaining-work descriptions
+> below describe the former emitter, not the current compiler. This file is kept
+> under `done/` as an archived design record; no completion date is recorded and
+> its location does not mean every proposed phase shipped. For the current
+> structural emitter route and limits, see [WASM-OUTPUT](../../wasm/WASM-OUTPUT.md)
+> and [wasm_route.rs](../../../src/wasm_route.rs).
 > **Motivation**: Hand-written WASM emission is the largest correctness gap. Also: WASM 3.0, WASI Preview 2, and Component Model all require a proper compilation pipeline, not raw instruction assembly.
 > **Goal**: Replace the 40-file hand-written assembler with a type-aware, layout-safe, stack-verified WASM compiler that outputs core modules or Component Model components.
 
