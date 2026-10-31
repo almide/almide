@@ -14,7 +14,7 @@
 | 拡張子の利用実績 | **1 年以内にインデックスされた `.almd` が 2,000 ファイル以上**、fork を除く | 全体 5,512 | 見かけ上は満たす |
 | 所有者を除いた実績 | レビュアは主要所有者を `-user:` で除外して評価する | `-user:almide -user:O6lvl4` で 904、さらに `-user:almide-graphics` を除くと **0** | **未達** |
 | 所有者 / リポの分散 | 無作為にクリックして分散していること | 非所有者分 904 のうち 296 が `almide-graphics/nn` の 1 本。実質 1 組織 | **未達** |
-| 構文強調文法 | TextMate 互換文法が**許容ライセンス**の公開リポにあること | `almide/vscode-almide` の `syntaxes/almide.tmLanguage.json`(`scopeName: source.almide`)。ただし **LICENSE ファイルが無い** | あと一歩 |
+| 構文強調文法 | TextMate 互換文法が**許容ライセンス**の公開リポにあること | `almide/vscode-almide` の `syntaxes/almide.tmLanguage.json`(`scopeName: source.almide`)。初回調査では LICENSE が無かったが、同日の追記で MIT 追加を記録（§2） | 同日対応済み（§2） |
 | サンプル | 実コード。hello world は拒否。ライセンス明記 | 候補多数。`almide/almide` は MIT / Apache-2.0 のデュアル | 満たせる |
 | 拡張子の衝突 | 既存言語と衝突しないこと | `languages.yml` に `.almd` は無い | 問題なし |
 

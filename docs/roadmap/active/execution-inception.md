@@ -1,14 +1,21 @@
-<!-- description: The execution inception: the as-if rule completed across concurrency and targets -->
+<!-- description: August execution-substrate investigation and original plan, with current ADR and component-host pointers -->
 # Execution Inception — as-if 規則を、並行と target の向こうまで完成させる
 
-> 実行基体の憲章。[async-inception.md](./async-inception.md) が**観測**を固定したのに対し、
-> 本文書は**何が実際に走るか**を決める。両者が食い違ったら、観測の側が正。
+> 2026-08-07 の実測から起こした実行基体の設計記録。測定・旧 C-004 引用・
+> 初期計画は当時の証拠として保存する。現行の as-if-sequential 契約と実装段階は
+> [ADR-0024](../../adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md)、
+> 選択名と clock は [ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md) が正本。
+> ADR-0024 の D1/D5/D6 と block の D3 は実装済みだが、effect mapper の
+> 並列実行など残件もあるため、この梯子を一括完了とはしない。
+> WASI 0.3 HTTP component の embedded host は
+> `crates/almide-wasm-run/src/component_host.rs` に存在する。
+> これは全 fan/async 構想の完成を意味しない。
 
 ## 0. 一文
 
 **最適化は観測を変えない。この 50 年の約束を、並行実行と target 差の向こうまで延ばしきったコンパイラが、2026 年の最高のコンパイラである。**
 
-## 1. 実測 — 憲章の一文には、今日ひとつ反例がある
+## 1. 2026-08-07 の実測 — 当時の憲章への反例
 
 async-inception は非同期の**観測**を固定した。論理時間が勝敗を決め、環境の時間は
 宣言された入力としてのみ入る。Lean の 7 定理、74,898 構成の全数合流、T1 から T9 の台帳。
@@ -34,7 +41,7 @@ wasm   ×  3 回:  ABCD, ABCD, ABCD
                  ── 常に arm 順
 ```
 
-契約台帳 C-004 の EXCEPTION 節は、これを予告している。
+当時の契約台帳 C-004 の EXCEPTION 節は、これを予告していた（以下は旧文の引用）。
 
 > EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle`
 > thunks is wall-clock on native (both run on real threads) and sequential on wasm
@@ -82,11 +89,11 @@ C-004 の EXCEPTION 節が過小評価されるのは、これで 2 度目でも
 逐次側は #1000 が定義した観測そのものだからだ —— 「実行は並列でよいが、観測可能な
 振る舞いは、リスト順に逐次評価した場合と厳密に同一」。
 
-## 3. 原因 — 基体を、誰も決めていない
+## 3. 当時の原因分析 — 基体の決定が不足していた
 
 なぜこうなったか。**実行基体が設計の産物ではなく実装都合の残り物だから**である。
 
-| target | 基体 | 出どころ |
+| 当時の target | 当時の基体 | 当時の出どころ |
 |---|---|---|
 | native | OS スレッド（`std::thread::scope`） | `crates/almide-codegen/templates/rust.toml` `[fan_expr]` |
 | wasm | 完全逐次（arm を inline 展開） | `crates/almide-mir/src/lower/desugar_fan.rs` |
@@ -243,7 +250,7 @@ TypeScript も、並列度を変えれば出力の混ざり方が変わる。そ
 観測をスケジュールの関数だと定義した結果である。**定義を変えた言語だけが、
 この文を書ける。**
 
-## 7. 計画
+## 7. 当初の計画（現在の未完了一覧ではない）
 
 ```mermaid
 flowchart LR
@@ -273,7 +280,7 @@ print 経路に arm 単位のバッファを通す変更に落ちる。判断が
 これを個別に塞ぐことより、**基体差分ゲートがこの病を構造的に検出するようになること**が
 本題なので、Lane 1 のゲートに合流させる。
 
-**Lane 3 が重い。** 今日は `wasi_snapshot_preview1` の core module を出しており
+**当初の Lane 3 評価。** 調査時点では `wasi_snapshot_preview1` の core module を出しており
 （`render_wasm_p3.rs` の import 群）、WASI 0.3 async は Component Model の上にある。
 ADR-0011 は D2 を**方向の決定**として採り、着手時期をここに委ねた。Rung 1 とゲートが
 立つまで着手しない —— 基体を足す資格が先である。

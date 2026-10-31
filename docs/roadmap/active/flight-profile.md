@@ -23,7 +23,13 @@
 
 ---
 
-## 2. 飛行品質の6本柱 — 持っているもの vs 足りないもの
+## 2. 当初の6本柱分析 — 現行の認証状態ではない
+
+この表の定理数・カバレッジ・未着手状態は原設計のスナップショットである。
+現在の証明/測定範囲は `proofs/receipt.sh`、規範 bounded profile は
+[ALS §B](../../specs/als/bounded.md)、native renderer は
+`crates/almide-mir/src/render_native.rs` を参照する。
+技術資産の存在から資格化・飛行適合・当局受理は導かない。
 
 DO-178C は「正しい成果物」ではなく「**証拠体系を生む開発プロセス**」を要求する
 ([certification-grade](certification-grade.md) の規格5メカニズム分解と整合)。
@@ -35,7 +41,7 @@ DO-178C は「正しい成果物」ではなく「**証拠体系を生む開発�
 | **③ 機能要求トレーサビリティ** | 要求 ↔ コード ↔ 検証の双方向 + MC/DC 構造被覆 | 🔴 **ゼロ** — 安全は証明するが「正しい制御則を計算するか」の追跡機構が無い |
 | **④ 実行環境の資格** | RTOS / HW / エンジンも DAL-A、WCET 解析 | 🟡 **半分** — #865 (2026-09-18, PR #2304) で wasmtime を信頼基底から外した: `crates/almide-wasm-vm` が Critical-profile の `to_wasi` 成果物を閉じた命令集合・load 時検証・固定容量スタック・fuel で実行し、要件は `REQUIREMENTS.md` の REQ-VM-N に束縛。WCET は #569 の counted-loop 設計([flight-wcet-loops](flight-wcet-loops.md))。残 = VM 自体の資格化と RTOS / HW 側(本書の範囲外) |
 | **⑤ 認証ドシエ + ツール資格化** | PSAC〜SAS・71目標・DO-330 TQL | 🔴 証明書は技術成果物であって認証成果物ではない。目標へのマッピング無し |
-| **⑥ 当局受理 + 実績** | DER / SOI 監査・service history | 🔴 「検査器を証明 = コンパイラ資格化の代替」を受理した当局はまだ存在しない。飛行実績ゼロ |
+| **⑥ 当局受理 + 実績** | DER / SOI 監査・service history | 🔴 この repo は Almide の当局受理/飛行実績を示していない。世界全体の前例の不存在は主張しない |
 
 **この文書のスコープは ② と ④ の工学で閉じられる部分**(柱③⑤⑥は規格プロセス・多年の
 当局作業で、[certification-grade](certification-grade.md) と GTM の領域)。
@@ -46,15 +52,11 @@ DO-178C は「正しい成果物」ではなく「**証拠体系を生む開発�
 
 ### 3.1 驚き(朗報):アロケータは既に WCET フレンドリー
 
-`$alloc` は **単一プローブ free-list + bump の O(1)**(`crates/almide-mir/src/render_wasm.rs:610-628`):
-free-list 先頭1ブロックを**バイトサイズ完全一致のときだけ**再利用、外れたら `$bump` を
-加算。**探索ループ・coalesce・split・size-class が一切ない**。さらに **64 KiB 固定1ページ・
-`memory.grow` なし**(`render_wasm.rs:601`)で総メモリは**既に物理上限**(ただし「設計され
-た上限」ではなく枯渇でトラップ/破損)。free-list 再利用は証明済み(`proofs/FreeList.v`、
-`reuse_is_validated_and_safe`)。
-
-→ **「動的確保は WCET 敵対的」という前提は Almide のアロケータには半分しか当たらない。**
-確保プリミティブの WCET はほぼ自明に出る。
+固定 64KiB・単一プローブという元の前提は旧 renderer のものだった。
+現在の structural allocator は `crates/almide-wasm/src/alloc_inline.rs` に
+size-class/free-list を持ち、heap cap や成長の扱いも実際の build/host 条件に依存する。
+抽象的な確保回数や O(1) という漸近性から、対象機械上の物理 WCET が自明に
+出るわけではない。allocator・生成コード・host の範囲を指定した評価が必要。
 
 ### 3.2 本当の WCET ギャップは**アロケータではなくループ**
 
@@ -108,34 +110,28 @@ counted range のみ・no-alloc-in-loop・static pool ── これは **DO-178C
 
 ## 4. フロント(い) — Rust → Ferrocene 忠実性
 
-### 4.1 驚き(戦略):証明の約75%は既にターゲット非依存
+### 4.1 原設計の再利用見積もり（割合・工数は未評価）
 
 スパインは wasm 境界で綺麗に割れる:
 
 | 区分 | ファイル | 飛行への含意 |
 |---|---|---|
-| **ターゲット非依存(そのまま再利用)** | `OwnershipChecker.v`(`check_sound`)/ 証明書 i/a/d/m/r/b(= **MIR 所有権事実**、wasm ではない、`OwnershipChecker.v:155-168`)/ `certificate.rs`(target 認識ゼロ)/ `RuntimeModel.v`(抽象 `Mem = Z→Z`)/ `NameTotality` / `CapabilityBound` / `TypeConcretization` / `Subset` / `Termination` / `FreeList` / `CowSafety` / `ALS` | **健全性の核は全部 Rust ターゲットにタダで移る** |
+| **ターゲット非依存(そのまま再利用)** | `OwnershipChecker.v`(`check_sound`)/ 証明書 i/a/d/m/r/b(= **MIR 所有権事実**、wasm ではない、`OwnershipChecker.v:155-168`)/ `certificate.rs`(target 認識ゼロ)/ `RuntimeModel.v`(抽象 `Mem = Z→Z`)/ `NameTotality` / `CapabilityBound` / `TypeConcretization` / `Subset` / `Termination` / `FreeList` / `CowSafety` / `ALS` | 抽象事象モデルの補題は再利用候補。生成 Rust との意味対応は別義務 |
 | **wasm 固有(作り直し)** | `Translation.v`(op→wasm 表)/ `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v` + `translation_validation.rs` の V validator | 4/16 ファイル・**最も薄く最も後回しの層** |
 
-### 4.2 含意:Rust → Ferrocene は最難関の Gap 1 を丸ごと迂回する
+### 4.2 Native 経路で残る証明境界
 
-- 飛行では **Rust 実行を証明しない**(`RustExec.v` は要らないし作るべきでない)。信頼は
-  2つに割れる:
-  - **Almide → Rust 翻訳忠実性** = `rust_pattern` 表 + per-build V。`Translation.v` の
-    **eager instance は既に証明済み**(`eager_translation_refines_safety`)で、同じ shape。
-    綺麗なマッピング(`Dup→.clone()` / `Drop→scope-end` / `Consume→move` /
-    `MakeUnique→no-op`)は `render_native.rs:1-21` に「§3.2 faithful-renderer 契約」
-    として既に書かれている。
-  - **Rust ソース → 機械語** = **Ferrocene に信頼**(ISO 26262 ASIL D / IEC 61508 資格化)。
-    SCADE KCG 型で、`certification-grade.md:135` が既にこのアナロジーを書いている。
-- **だから飛行成果物には wasm byte 束縛(Gap 1 = 今一番難しい未証明の本丸、
-  [v1-proof-architecture](v1-proof-architecture.md))を勝つ必要がない。** Ferrocene が
-  オブジェクトコードの信頼を肩代わりし、必要なのは**証明の中で一番安い層(翻訳忠実性)
-  だけ**。**証明コストとしては wasm 経路より飛行経路の方が安い。**
+- `OwnershipChecker` や eager 事象列の定理は、生成された Rust の意味保存を
+  直接述べていない。`rust_pattern` 文字列表だけで Almide→Rust の全翻訳忠実性を
+  証明済みにしない。
+- Ferrocene を採用する方針と、実際に資格化されたツールチェーンで検証した事実は別。
+  現行 `.github/workflows/ferrocene-lane.yml` は stock rustc 使用を明記する。
+- 後段ツールの資格化は前段の翻訳義務を自動的に消さない。Wasm 以外の経路を選んでも、
+  その経路のモデル/生成コード/機械語を結ぶ証拠が必要で、安価さは未確立。
 
-### 4.3 本当のコストは証明ではなくレンダラ(エンジニアリング)
+### 4.3 原設計の renderer 工数評価（現在は native renderer が実在）
 
-Rust 経路が**2本に分裂**している:
+以下は当初の demo と walker の比較であり、現行 renderer が未着手という意味ではない:
 
 - **綺麗な所有権保存マッピング** = `crates/almide-mir/src/render_native.rs`(368行のデモ)。
   だが Vec<i64> 一律・CLI 未接続・`v0`/`v1` 番号ローカルで**レビュー不可グレード**。
@@ -188,7 +184,7 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 | | キーストーン | 種類 | 解錠するもの | 前提 |
 |---|---|---|---|---|
 | **(あ) WCET** | ループを Coq `Op` 型に持ち上げる + counted-loop 上限 | 証明拡張 | 停止性 / no-alloc-in-loop / 確保 count 上限 ── 飛行性質3つ同時 | なし(Rust 決定に非依存) |
-| **(い) Ferrocene** | 本番 v1 MIR→Rust レンダラ + `rust_pattern` 忠実性層 | エンジニアリング(証明は安い) | Gap 1 迂回 / 飛行成果物 / Rust 市場 | §4.4 の方針確定 |
+| **(い) Ferrocene** | 本番 v1 MIR→Rust レンダラ + `rust_pattern` 忠実性層 | 翻訳・runtime 対応の証拠とエンジニアリング（工数未確定） | Gap 1 迂回 / 飛行成果物 / Rust 市場 | §4.4 の方針確定 |
 
 **先後**: 両者は独立。順序をつけるなら **(あ)のループ持ち上げが先** ── 飛行サブセットの
 「形」を確定し、停止性という単独で価値ある証明も解錠する。**(い)は §4.4 の戦略決定
@@ -219,11 +215,11 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 | **G-F3 飛行ターゲット決定+忠実性束縛** | Rust→Ferrocene を飛行ターゲットと決定、本番 MIR→Rust + `rust_pattern` 忠実性を飛行サブセット上で証明、Ferrocene コンパイル実証 | オブジェクトコード信頼(柱②④)の着地が無いと机上 | §4 キーストーン(い) |
 | **G-F4 リファレンスアプリが make verify を端まで通る** | 安全臨界形の小モジュール(制御則カーネル/状態機械/watchdog)を飛行プロファイルで: 走る→oracle 一致→証明書発行→可読 Rust→Ferrocene | 認証技術者が前のめりになる**弾**。スライドを成果物に変える | `make verify` キラーデモ([v1-kgi-kpi](v1-kgi-kpi.md)) |
 | **G-F5 証明書↔認証目標マッピング(ドシエの種)** | 証明書/receipt が DO-178C 目標 / DO-330 ツール資格論証 / DO-333 形式手法クレジットのどれを覆うかをドラフト文書化、DER がレビュー可能な形 | 「cert は後で」では「資格化可能」と言えない | [certification-grade](certification-grade.md) CG 領域 |
-| **G-F6 資格化キットの製品定義(AbsInt モデル)** | 売り物=キットの中身(資格化済み checker・検証ハーネス・トレーサビリティ・ドシエテンプレ)をスコープ。フルビルド不要、定義でよい | 売る対象が無いと「近い」は営業にならない | GTM([v1-kgi-kpi](v1-kgi-kpi.md)) |
+| **G-F6 資格化キットの製品定義(AbsInt モデル)** | 評価用キット案(checker の証拠・検証ハーネス・トレーサビリティ・ドシエテンプレ)をスコープ。定義は資格化や受理の達成を意味しない | 売る対象が無いと「近い」は営業にならない | GTM([v1-kgi-kpi](v1-kgi-kpi.md)) |
 
 **G-F0..G-F6 が揃った時点で A・B層ステータスを 🔴→近い に flip。**
 
-### 7.3 現在地(正直なマーカー)
+### 7.3 当初の進捗マーカー（現行 verdict は receipt を参照）
 
 - **G-F0**: 🔄 進行中 ── self-host stdlib で実行パリティを登攀中(string/list/math を Almide 化)
 - **G-F1**: 📐 規範仕様あり・未強制 ── [flight-subset-spec](flight-subset-spec.md)(特徴分類・open question 決着・`@flight` 強制設計)

@@ -3,7 +3,7 @@
 
 **Priority:** Medium — Optimizations automatically applied to all targets
 **Prerequisites:** Tier 1 (constant folding, DCE) complete, nanopass pipeline established
-**Goal:** Expand IR-level optimization passes to improve generated code quality without relying on rustc/V8
+**Goal:** Expand IR-level optimization passes to improve generated code quality without relying only on downstream native or Wasm engine optimization
 
 > "If the IR is smart, all targets become smart."
 
@@ -14,11 +14,13 @@
 Tier 1 (constant folding, DCE) is complete. However, there are optimizations that still need to be solved at the IR level:
 
 - Redundant computation of identical subexpressions
-- Small functions used only once still carry call overhead
+- Inlining beyond the currently admitted scalar/list-sink subsets
 - Heap allocation for objects that don't escape
 - High-cost operations that can be replaced with low-cost alternatives
 
-Solving these at the IR level benefits all targets: Rust/TS/WASM. WASM especially, since it doesn't go through rustc optimization — IR optimization effects are direct.
+Shared IR optimizations can benefit the native and Wasm targets. TypeScript is
+not a current compiler target. Wasm does not pass through rustc; downstream
+Wasm-engine optimization is distinct from these compiler passes.
 
 ---
 
@@ -30,9 +32,13 @@ Solving these at the IR level benefits all targets: Rust/TS/WASM. WASM especiall
 |------|------|---------|
 | LICM | `pass_licm.rs` | Loop-invariant code motion. effect fn calls excluded |
 | StreamFusion | `pass_stream_fusion.rs` | Fusion of map/filter/fold chains. Intermediate list elimination |
-| Auto Parallel | `pass_auto_parallel.rs` | Automatic parallelization of pure lambdas (Rust target) |
+| Scalar inlining | `crates/almide-wasm/src/inline_calls.rs`, `crates/almide-mir/src/lower/inline_scalar_fns.rs` | Conservative pure-scalar subsets; not arbitrary functions |
+| List-sink inlining | `crates/almide-optimize/src/optimize/sink_inline.rs` | Exposes eligible root list sinks to target-specific fusion |
 
-### Not Yet Implemented
+The former implicit `AutoParallelPass` is retired; explicit `fan` lowering is
+in `pass_rust_lowering_fan.rs`, not a general automatic-parallelization pass.
+
+### Remaining proposals
 
 ### Pass 1: Common Subexpression Elimination (CSE)
 
@@ -53,7 +59,9 @@ let b = __cse_0 * 3
 
 ### Pass 2: Simple Inlining
 
-Inline functions with use-count 1 and single-expression body.
+Extend inlining only where the existing scalar/list-sink passes do not apply.
+The original use-count/single-expression policy below is a proposed extension,
+not evidence that Almide currently performs no inlining.
 
 ```almd
 fn double(x: Int) -> Int { x * 2 }
@@ -92,7 +100,7 @@ Lower → IR
     │ Tier 1.5 (done)          │
     │  ├── LICMPass            │
     │  ├── StreamFusionPass    │
-    │  └── AutoParallelPass    │
+    │  └── (explicit fan separately) │
     ├─────────────────────────┤
     │ Tier 2 (this roadmap)    │
     │  ├── CSEPass             │
@@ -106,7 +114,9 @@ Lower → IR
     mono() → nanopass → codegen
 ```
 
-All passes implement the `NanoPass` trait and are inserted into the existing pipeline.
+This is the original proposed pass arrangement, not a complete current pipeline
+map. Existing inliners run at different IR/lowering points; a shared extension
+needs an explicit placement and admission rule before implementation.
 
 ---
 
@@ -120,7 +130,7 @@ All passes implement the `NanoPass` trait and are inserted into the existing pip
 
 ### Phase 2: Inlining
 
-- [ ] Implement `InlinePass` (use-count + body size check)
+- [ ] Specify and implement inlining beyond the existing subsets, avoiding duplicate passes (use-count + body-size policy to be evaluated)
 - [ ] Chaining test with constant folding
 - [ ] Monitor code size bloat (WASM binary size regression test)
 

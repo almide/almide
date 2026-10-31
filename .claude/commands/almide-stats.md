@@ -1,6 +1,6 @@
-# Update README Stats
+# Update Published Measurement Stats
 
-The README no longer carries hand-written counts: every number is either
+The front README links to `docs/benchmarks/README.md`, which carries the generated blocks and dated measurements (`scripts/lib/readme-targets.sh`). Every published number is either
 rendered by a script from a source in the tree, or carries the date it was
 measured, and `scripts/check-readme-numbers.sh` fails CI on a bare one. So
 "updating the stats" means regenerating, and measuring only where a stamped
@@ -24,19 +24,19 @@ running them by hand is for a fresh checkout or after a stdlib change
 ## Re-measure (only when the compiler changed the thing being measured)
 
 ```bash
-bash scripts/gen-readme-stats.sh --measure     # Hello, world on both wasm legs → docs/benchmarks/wasm-size.txt
+bash scripts/gen-readme-stats.sh --measure     # Hello, world on the structural wasm leg → docs/benchmarks/wasm-size.txt
 almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks
                                                # build-speed baseline → docs/benchmarks/build-speed.txt
 ```
 
 Both baselines carry the binary version and the date; CI rebuilds Hello,
 world and demands the stamped bytes, so a changed emitter is re-stamped here,
-never edited in README.md.
+never hand-edited in the generated measurements block.
 
 ## MSR
 
 Measured by [almide-dojo](https://github.com/almide/almide-dojo), not here.
-When a new run lands, update the scorecard table and its date in README.md
+When a new run lands, update the scorecard table and its date in `docs/benchmarks/README.md`
 (the line must keep a `YYYY-MM-DD`, or the numbers gate rejects it).
 
 ## Check

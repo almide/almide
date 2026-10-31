@@ -1,5 +1,16 @@
-<!-- description: The stdlib self-host machinery phase — Option, list building, and closures -->
+<!-- description: Historical early self-host machinery campaign; later closure/drop work and remaining linking proposal -->
 # v1 stdlib self-host — the machinery phase (Option / List-building / closures)
+
+## Historical machinery campaign
+
+The ~28-function status and “no function table / nested drop” frontiers below
+belong to the early June 2026 self-host campaign. The later
+[closure architecture](../done/closure-architecture-v2.md) and
+[records campaign](v1-records-svg.md) record subsequent implementation.
+These old counts are not current stdlib coverage. The separate
+[self-host linking v2 proposal](selfhost-link-v2.md) retains the unresolved
+registry/twin consolidation work; historical machinery progress does not
+establish that proposal complete.
 
 Status: **~28 functions self-hosted + executing = v0 (corpus-wall ACCEPT 13139/4083/3582
 every commit). The Option match-execution machinery is DONE; the campaign is now in clean

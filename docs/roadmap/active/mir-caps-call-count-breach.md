@@ -1,8 +1,28 @@
-<!-- description: spec/ is the trust spine's v0 corpus, not a test directory — the revived monkey suite grows two shrink-only ratchets and breaches the caps-soundness backstop -->
+<!-- description: August 2026 monkey-suite caps-accounting diagnosis, recovered public provenance and pending current reproduction -->
 
 # Reviving the monkey regression suite: what `spec/` actually is
 
-**Status**: open. Found 2026-08-08 while reviving the monkey regression suite
+## Reading status (2026-10-31)
+
+This preserves the **2026-08-08 diagnosis**, including its 15-wall census,
+two MIR>IR reports and rejected fixes. Those are not newly reproduced counts
+or a claim that today's CI is red. The original corpus is available in
+[public history at `48621335`](https://github.com/almide/almide/tree/48621335e54af937dd4bb8432ba14c525c310842/spec/regression),
+with the subsequent
+[revert rationale](https://github.com/almide/almide/commit/a5ebd06937b533dd2609a5bdc4a7daa961b4c6a7).
+The private archive is not required to recover that historical input.
+
+Current reproduction remains pending: the minimal example passes frontend
+`almide check`, but that command does **not** run the `classify_corpus` MIR/IR
+call-count backstop. A pinned classifier build and report are needed before
+calling the defect fixed or still reproducible. Do not restore the suite or
+expand a shrink-only baseline merely to make the documentation look complete.
+The design alternatives below remain historical, not a newly authorized
+compiler or gate-policy decision.
+
+## Original report
+
+**Status at discovery**: open. Found 2026-08-08 while reviving the monkey regression suite
 (`MONKEY_BUGS.md`, 41 files, written 2026-04-05 at v0.11.4) that had sat in the
 repo root's `_scenarios/` and rotted unrun because CI only runs `almide test spec/`.
 
@@ -146,7 +166,7 @@ ownership-certified lowering, so it wants its own review rather than a
 drive-by. Whichever is chosen, the acceptance test is the same: restore
 `spec/regression/` and watch `proofs/corpus-wall.sh` hold at 0 breaches.
 
-## Current state and the way in
+## State and proposed recovery at the time (2026-08-08)
 
 `spec/regression/` was reverted; the 41 files + this repro are in the working
 archive (`../almide-docs-archive/blocked-on-mir-caps-gate/`) and in git history

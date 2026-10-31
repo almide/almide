@@ -142,11 +142,12 @@ elif [ "${1:-}" = "--update" ]; then
         echo
         echo "The metric a mission-critical auditor reads: not \"how fast do they fix"
         echo "it\" but \"how long has it stayed unbroken\". A calendar day is CLEAN only"
-        echo "when every Fuzz (nightly) run that day delivered a NIGHT VERDICT that"
-        echo "concluded success over at least 75% of the planned fuzz-minutes (findings"
-        echo "fail it; a reclaimed shard does not, until the night falls under the 75%"
-        echo "line — #924's ruling, read from the \`fuzz-night:\` record line); any"
-        echo "failure breaks the streak; a day without a run neither grows nor resets it."
+        echo "when its completed runs meet the scorer's clean rule. Sharded runs use the"
+        echo "\`Night verdict\` job, with at least 75% of planned fuzz-minutes delivered and"
+        echo "no findings (including recovered shard findings), not the workflow conclusion"
+        echo "alone. A failing/partial day breaks the clean streak; a day without a run"
+        echo "neither grows nor resets it. See \`scripts/fuzz-green-streak.sh\` and the shared"
+        echo "\`scripts/lib/fuzz-night-line.sh\` scorer for legacy and missing-verdict cases."
         echo "First milestone: **90 consecutive clean days**."
         echo
         echo "Meter: \`scripts/fuzz-green-streak.sh\`. The nightly ledger-counts run calls it with"

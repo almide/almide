@@ -8,8 +8,9 @@
 > 3a/3b/3c + 4a/4b shipped inside their bricks (3c = the in-tree raw-byte ⟶ ISA
 > decoder, WasmDecode.v), **brick 6 shipped** (the kernel-as-oracle gate —
 > extraction retired as a verdict trust root). **The v1 brick ladder is
-> COMPLETE.** Remaining ratchets (recorded, not bricks): heap-capture closure
-> envs (`b`'s env consumer), A2 beyond the rc fragment (whole-function bodies
+> COMPLETE.** Heap-capture closure envs shipped on 2026-07-10 (see 5c);
+> their borrowed env loads are covered by call-mode/capture accounting, not `b`.
+> Remaining ratchets (recorded, not bricks): A2 beyond the rc fragment (whole-function bodies
 > stay the renderer contract), verified-extraction/CertiRocq adoption for the
 > fast path when the toolchains align.
 > Supersedes the implicit "i/d-per-object" format. Grounded in a prior-art +
@@ -73,13 +74,16 @@ fact the compiler already decided:
 | `d` | −1 | plain release (Drop) | — |
 | `m` | −1 | MOVE-OUT (Consume → container / return / consuming callee) | move≠drop |
 | `r` | −1 | REUSE-eligible release (drop where uniqueness was proven) | G2.2 |
-| `b` |  0 | BORROW marker (closure-env body borrow; no scope-end release) | G2.3 |
+| `b` |  0 | Live owned-reference borrow (no count change; `rc > 0` required) | G2.3 |
 
-The checker's per-line rule is one left-fold over `Z`: `i|a ⇒ +1`, `d|m|r ⇒ (if
-rc≤0 reject else −1)`, `b ⇒ +0`; accept iff never `<0` and ends at `0`. **The
-soundness proof reasons about the DELTAS, not the letters**, so adding
-ground-fact letters costs ZERO new proof obligations. **v0's `i`/`d` is the
-degenerate case** (Alias≡Inc, MoveOut≡Dec at the fold).
+The checker's per-line rule is the guarded fold in `proofs/OwnershipChecker.v`:
+`i|a ⇒ +1`; `d|m ⇒ (if rc≤0 reject else −1)`;
+`r ⇒ (if rc=1 then 0 else reject)`; `b ⇒ (if rc≤0 reject else rc)`.
+It starts at `0` and accepts only a fault-free run ending at `0`.
+Alias and MoveOut reuse the increment/decrement balance rules. Reuse additionally
+checks uniqueness (`check_reuse_sound`), and Borrow checks liveness; borrowed
+parameters/env loads are accounted through call modes, not this event. Neither is
+an unrestricted delta-only event. **v0's `i`/`d` is the degenerate case**.
 
 ~~A `MODE` byte (`eager` | `perceus` | `full`) prefixes the bundle and selects
 which letters are legal~~ — **RETIRED (brick 5b decision, 2026-07-08)**. The
@@ -145,10 +149,11 @@ Subset/Balance laws), never by making a rule cleverer.
 
 ## Migration from i/d
 
-`i`/`d` is a **degenerate instance** of the v1 alphabet. The OwnershipChecker.v
-`exec`/`check`/`check_all`/`check_cert` and all soundness theorems are KEPT
-verbatim; only `exec`'s match and `parse_byte` gain arms (proofs unchanged
-because they are about the run's `Z` result). v0 certificates remain valid.
+`i`/`d` is a **degenerate instance** of the v1 alphabet. The `OwnershipChecker.v` retains the balance-checking architecture and extends
+`exec` and parsing with the new events. Alias/MoveOut reuse the old delta
+semantics; Reuse/Borrow add uniqueness/liveness guards and require the
+corresponding proof cases (see bricks 4 and 5b below). The original `i`/`d`
+streams remain valid under the extended alphabet.
 
 ## Build order (each step gate-green; dual-oracle ratchet holds)
 
@@ -291,8 +296,10 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      via `rc_inc` (no copy), `MakeUnique` is a cow (clone-on-shared, `rc_dec`-first so
      no temp), refining `CowSafety`; the rc cell now actually tracks the abstract
      refcount (1→2→1→0), exercising the proven rc machine, output byte-unchanged.
-     **A1's renderer is now FULLY real-RC (share / cow / free-list / sentinel), every
-     piece refining a proof, zero trusted runtime.** REMAINING (perf/encoding, not
+     **A1 implements real-RC sharing, cow, free-list reclamation and the sentinel.**
+     The modeled RC routines have refinement proofs; this does not eliminate
+     trust in generated drop routines, whole-function lowering or the renderer.
+     See `proofs/receipt.sh` for the current C-PROVEN/C-FAITHFUL boundaries. REMAINING (perf/encoding, not
      safety): A1.2 size-classes/walking (exact-size head-match today); A2 raw-byte
      encoding. `rc_dec`/`rc_inc` DONE (A1.1b / A1.3-render).
 5. **full mode: branch agreement + `b` + closure signatures.** ✅ **SHIPPED
@@ -417,10 +424,12 @@ because they are about the run's `Z` result). v0 certificates remain valid.
 
 - Witness SIZE grows (more sections per build) — a throughput concern, not a
   trust concern; the checker stays small. Watch it doesn't make `gate.sh` slow.
-- The byte-binding semantic library (WasmCert-Coq import + runtime memory model)
-  is genuinely heavy and unbuilt — it is the single hardest remaining piece
-  (G1.2). The table-match decomposition makes per-build cheap but does not remove
-  the one-time proof.
+- Bricks 3b/3c already supply the recorded runtime-model/ISA and decoder slices;
+  they are not an unbuilt layer. The unresolved boundary is whole-function
+  witness-to-byte correspondence beyond the proven RC routines. The original
+  WasmCert-Coq integration was a proposed route, not evidence that arbitrary
+  generated code is now semantically verified. See `proofs/receipt.sh` for
+  the structural backend's current measured and proven scopes.
 - ~~Branch resource-state agreement (brick 5) is the place a CFG-walk is most
   tempting~~ — shipped WITHIN the tripwire: the `CBranch` rule is two flat arm
   folds + one equality; no CFG walk, no path enumeration (the emitter groups

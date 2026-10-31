@@ -1,5 +1,20 @@
-<!-- description: AlmidePerceusBelt — formal memory safety guarantee for Almide -->
+<!-- description: Historical Perceus belt design, retired emission type-state and scoped proof evidence -->
 # AlmidePerceusBelt
+
+## Historical type-state design and present proof scope
+
+The Phase B `Verified`/`PerceusVerify` emission boundary below belonged to
+the retired v0 emitter ([retirement record](../../../crates/almide-codegen/src/lib.rs)).
+It is not the current structural emitter's entry condition, and the old
+`--emit-unverified` instructions are not current CLI guidance.
+
+A checker establishes its modeled property over the witness it accepts;
+it does not establish that all compiler bugs are impossible to ship. The
+Lean belt models an ownership transform, while later Rocq runtime and
+certificate work has its own coverage and recording assumptions. Read
+[Memory Safety](../../design/MEMORY-SAFETY.md) for the current boundary.
+The incident corrections and the later Coq appendix below are historical
+evidence, not a claim that the old Phase A plan is still wholly unimplemented.
 
 > Almide's equivalent of RustBelt. Type-guided memory safety, proven by the compiler.
 

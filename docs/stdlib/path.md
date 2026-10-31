@@ -13,7 +13,11 @@ capability. Use `fs` for anything that reads or writes.
 `path.join(base, child)` for a relative `child` that stays inside `base`, and
 `err("path traversal rejected: <child>")` for any other — an absolute child,
 a `..` on either separator, a `~`, a drive letter or a NUL — so the result
-always names a place under `base`.
+stays lexically beneath `base`. This is not a filesystem containment check:
+symlinks can lead elsewhere. For untrusted filesystem access, use the rooted
+`fs` operations and review their platform-specific containment limits. The
+descriptor-based implementation is limited to supported 64-bit Linux/macOS
+hosts; fallback platforms do not have the same race resistance.
 
 ```almd run
 import path
@@ -32,8 +36,8 @@ refused
 
 ### `path.join(base: String, child: String) -> String`
 
-Join two segments with a single separator, whether or not `base` already ends
-in one. An absolute `child` replaces `base`, and a `..` in `child` climbs out
+Join two segments, removing one trailing separator from `base` before
+adding the separator and child. An absolute `child` replaces `base`, and a `..` in `child` climbs out
 of it: for a child that crossed a trust boundary use `path.join_within`.
 
 ```almd run
@@ -66,7 +70,7 @@ fn main() -> Unit = {
 
 ### `path.basename(path: String) -> String`
 
-Everything after the last separator.
+The last non-empty path segment; empty for `/` or the empty path.
 
 ```almd run
 import path

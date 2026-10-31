@@ -1,6 +1,13 @@
-# Grammar Lab: 開発で学んだこと
+# Grammar Lab: 初期開発で学んだこと（履歴）
 
-Runner を Almide で書く過程でぶつかった問題と解決策の記録。Almide の実用上の知見。
+初期 runner を書いた当時の問題と回避策を残した履歴資料。
+**現在の API / エラー伝播の手引きではない。** 特に auto-unwrap、`++`、
+`fn(x) =>`、`process.exec_status`、`println` 不在の説明は旧状態であり、
+現在は明示的な後置 `!`、`+`、`(x) =>`、`process.output`、builtin `println`
+などを使う。`env.args()` の現在の結果は利用者引数で、argv[0] を含めない。
+現行の [CHEATSHEET](../../docs/CHEATSHEET.md) と
+[Result/Option の文脈表](../../docs/specs/result-option-effect.md) を参照。
+以下の失敗例と当時の workaround は、研究経緯として変更せず保持する。
 
 ---
 

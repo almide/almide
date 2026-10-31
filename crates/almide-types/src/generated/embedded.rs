@@ -5215,7 +5215,7 @@ effect fn __environ() -> List[String] = _
 @intrinsic("almide_rt_env_cwd")
 effect fn cwd() -> Result[String, String] = _
 
-/// Blocks ms milliseconds; a negative ms hangs.
+/// Blocks ms milliseconds; zero or negative ms returns without waiting.
 @intrinsic("almide_rt_env_sleep_ms")
 @category("Time")
 effect fn sleep_ms(ms: Int) -> Unit = _
@@ -13415,7 +13415,7 @@ pub const SRC_JSON: &str = r#"
 
 
 
-/// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
+/// Strict JSON Value or err; trailing non-whitespace text and nesting over 1000 are errors.
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 
@@ -39135,7 +39135,7 @@ fn parse(s: String) -> Result[UInt16, String] =
   }
 
 
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+/// Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(
   int.__from_uint16(x),
   radix,
@@ -39330,7 +39330,7 @@ fn parse(s: String) -> Result[UInt32, String] =
   }
 
 
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+/// Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(
   int.__from_uint32(x),
   radix,
@@ -39852,7 +39852,7 @@ fn parse(s: String) -> Result[UInt8, String] =
   }
 
 
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+/// Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.__from_uint8(x), radix)
 
 /// UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.

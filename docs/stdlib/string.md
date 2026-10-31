@@ -302,7 +302,8 @@ true
 
 ### `string.is_upper(s: String) -> Bool`
 
-Check if all characters in the string are uppercase.
+True when there is at least one alphabetic character and every alphabetic
+character is uppercase; non-alphabetic characters are ignored.
 
 ```almd run
 fn main() -> Unit = {
@@ -315,7 +316,8 @@ true
 
 ### `string.is_lower(s: String) -> Bool`
 
-Check if all characters in the string are lowercase.
+True when there is at least one alphabetic character and every alphabetic
+character is lowercase; non-alphabetic characters are ignored.
 
 ```almd run
 fn main() -> Unit = {
@@ -328,7 +330,8 @@ true
 
 ### `string.to_codepoint(s: String) -> Option[Int]`
 
-Return the Unicode codepoint of the first character, or none for empty string.
+Return the Unicode scalar value when the string contains exactly one codepoint;
+return `none` for an empty string or more than one codepoint.
 
 ```almd run
 fn show(o: Option[Int]) -> String = match o {

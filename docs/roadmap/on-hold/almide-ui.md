@@ -3,15 +3,21 @@
 
 ## Thesis
 
-Build a SolidJS-like reactive UI framework written in Almide **as an Almide library**. No framework-specific optimization passes are added to the compiler. The compiler's general-purpose optimizations (type specialization, inlining, pipeline fusion) apply equally to framework code, resulting in Svelte/SolidJS-class output.
+Proposal: build a reactive UI library in Almide while keeping framework-specific
+knowledge out of the compiler where possible. The original design relied on TS
+output, which is retired. Choosing a supported browser host/DOM bridge is now
+a prerequisite; no Svelte/SolidJS-class performance or no-compiler-change
+feasibility has been demonstrated. Code below preserves the original design
+sketches, not a runnable current Almide framework.
 
 ```
 What the user writes: Almide builder syntax + signal library
-What the compiler does: Optimize as regular Almide code → TS output
-What comes out: No virtual DOM, fine-grained updates in plain JS
+Original backend assumption (retired): optimize Almide code → TS output
+Desired result: no virtual DOM, fine-grained updates; current host mapping unresolved
 ```
 
-**Framework knowledge stays within the library. The compiler only needs to know Almide.**
+**Design goal: keep framework knowledge within the library.** Host interop and
+optimization coverage must be established before claiming this needs no compiler work.
 
 ## Why This Is The Right Approach
 
@@ -26,7 +32,7 @@ What comes out: No virtual DOM, fine-grained updates in plain JS
 
 ### Benefits of Being an Almide Library
 
-1. **No compiler changes required** — Works with just builder machinery and general-purpose optimizations
+1. **Minimize compiler changes** — evaluate existing language/host support before deciding whether a library-only implementation is sufficient
 2. **Framework is written in Almide** — Same language as user code, same optimization target
 3. **Type info penetrates framework internals** — `.get()` on `Signal[Int]` is confirmed to return Int. Type specialization reaches all the way down
 4. **Framework evolution is independent of the compiler** — Library version upgrades don't require compiler releases
@@ -75,7 +81,9 @@ fn derived[T](compute: fn() -> T) -> Signal[T] = {
 }
 ```
 
-**From the compiler's perspective, this is just regular Almide code.** `get` is a one-line function, so it gets inlined. `Signal[Int]` gets monomorphized.
+This is a proposed representation. A one-line body does not by itself guarantee
+inlining: current inliners have scalar, scope and ownership admission rules.
+Validate the representation and generated code before claiming zero overhead.
 
 ### DOM Bridge
 
@@ -153,7 +161,8 @@ Users only need to know Signals and builder syntax. DOM operations are invisible
 
 ## Compiler Optimization — What Happens Automatically
 
-Both framework and user code are the same Almide to the compiler. The following optimizations apply automatically:
+The following are desired optimization examples, not guaranteed transformations
+of this unimplemented Signal API:
 
 ### 1. Inlining
 
@@ -167,11 +176,12 @@ p { "Count: ${count.get()}" }
 // After inlining (compiler internal)
 p { "Count: ${count.value}" }
 
-// TS output
+// Original illustrative TS output (retired target)
 p.textContent = `Count: ${count.value}`;
 ```
 
-Signal's `.get()` / `.set()` are one-line functions. Once the compiler inlines them, Signal overhead drops to zero.
+The proposed `.get()` / `.set()` optimization needs generated-code and runtime
+measurements; function size alone does not establish zero Signal overhead.
 
 ### 2. Type Specialization (Monomorphization)
 
@@ -201,7 +211,8 @@ Unused Signal methods and DOM helpers are removed from output. Bundle size is mi
 
 ## Future Option: Compiler-Aware Signal Tracking
 
-The library alone can achieve SolidJS-class performance. To aim for Svelte-class, the compiler can **optionally** add a pass that recognizes Signals:
+An optional research direction is a pass recognizing Signals. Neither
+library-only performance parity nor the need for that pass is established:
 
 ```almide
 // Compiler tracks Signal.get() calls inside builder blocks
@@ -230,7 +241,9 @@ name.subscribe(() => { p1.textContent = `Name: ${name.value}`; });
 // p2 has no subscription (static, no update needed)
 ```
 
-**The library can achieve the same thing at runtime** (which is what SolidJS does), so compiler support is purely an optional optimization. It can be added later.
+A runtime dependency-tracking implementation is another candidate. Its
+correctness, host integration and cost need measurement before choosing between
+it and compiler-assisted alternatives.
 
 ## Competitive Position
 
@@ -240,36 +253,38 @@ Svelte              ◎ (compiler)           ◎ (minimal)        ○ (JS)
 SolidJS             △ (JSX transform)      ◎ (signal)         ○ (JS)
 React               × (runtime diff)       △ (vDOM)           ◎ (largest)
 Leptos (Rust→WASM)  ○ (signal)             ○ (WASM overhead)  △ (WASM FFI)
-Almide UI           ○→◎ (can add later)    ◎ (inline signal)  ◎ (native JS output)
+Almide UI proposal  unmeasured           unmeasured         host mapping unresolved
 ```
 
 Almide UI differentiators:
-- **Emits plain JS, not WASM** — Fastest at the edge, fully ecosystem-compatible
-- **Same code becomes native via `--target rust`** — SSR as Rust binary, client as TS, all in one language
-- **Type info penetrates framework internals** — Optimization headroom that SolidJS lacks
-- **Framework is independent of the compiler** — Unlike Svelte, can evolve as a library
+- **Client output** — unresolved after retirement of the TypeScript backend; the original plain-JS performance/compatibility hypothesis is not a shipping capability or measured result
+- **Shared SSR/client code** — a goal, not current TS output; a supported client host and boundary remain to be designed
+- **Type-directed optimization** — a proposed opportunity, not an established advantage over SolidJS
+- **Library boundary** — a design goal; any required compiler integration must still be identified
 
 ## Relationship to Other Roadmap Items
 
-- **ts-edge-native.md**: Output target for Almide UI. Emitter optimization (Phase 1) directly impacts Almide UI performance
+- **Original TS emitter roadmap**: historical input only; it is not an available output target
 - **Result Builder (template.md)**: `builder Html` is exactly the UI description foundation for this framework. Once the builder machinery is complete, Almide UI's DOM construction works naturally
-- **cross-target-semantics.md**: The SSR (Rust) + Client (TS) single-language story requires cross-target correctness as a prerequisite
-- **emit-wasm-direct.md**: Independent. Almide UI uses TS output, so it's unrelated to the WASM path
+- **Cross-target semantics**: any SSR/client adapter needs explicit compatibility tests, not an assumption inherited from the old TS plan
+- **Wasm/browser host**: a possible replacement direction, not a selected or implemented UI backend
 
 ## Prerequisites
 
 1. **Builder machinery (template.md Phase 1)** — Without `builder Html` and trailing blocks, UI descriptions can't be written
-2. **Emitter optimization (ts-edge-native.md Phase 1)** — Without type specialization and inlining, runtime overhead is too large
+2. **Supported client backend** — select and validate a browser host/DOM boundary; the old TS emitter prerequisite is retired
 3. **Generics stability** — `Signal[T]` needs correct type checking and codegen
-4. **Closure codegen** — `subscribe(fn() => ...)` needs correct TS output
+4. **Closure/ownership semantics** — validate subscription lifetimes and callbacks on the selected host
 
 ## Why ON HOLD
 
-Builder machinery and emitter optimization come first. However:
+The client backend, DOM boundary, builder syntax and subscription ownership
+remain design dependencies. The original library-first rationale is retained,
+but it does not close those questions:
 
-- **No design blockers** — Signal is just an Almide type, DOM bridge is `@extern`, builder is already designed
-- **No compiler changes required** — If general-purpose optimizations work, framework-specific passes are optional
+- **Design work remains** — a Signal sketch, an extern declaration and a builder proposal do not establish a working DOM integration
+- **Compiler scope undecided** — measure what current generic optimizations support before selecting framework-specific work
 - **Can be built incrementally** — reactive core → DOM bridge → renderer → builder integration, each step is independent
-- **SolidJS has proven this works** — Library approach + fine-grained signals achieves Svelte-class performance
+- **Prior-art motivation** — library-first fine-grained reactivity is worth evaluating; its existence elsewhere is not a benchmark of this proposal
 
 Confidence is high. Once the prerequisite language features are in place, the framework itself is just Almide code.

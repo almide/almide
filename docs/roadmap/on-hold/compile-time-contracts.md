@@ -3,7 +3,11 @@
 
 **Priority:** 2.x — After type system stabilization
 **Principle:** Reduce the probability of LLMs generating "runs but is wrong" code. Raise modification survival rate with type checking + alpha.
-**Syntax cost:** Only one `where` clause. One new keyword.
+**Status:** General function preconditions and type-value invariants remain a
+proposal. The `newtype`/function-`where` forms below are original design sketches,
+not current syntax. `where` already exists in test contexts; shipped inline
+generic protocol bounds are a different feature (see
+[type-where-constraints.md](../active/type-where-constraints.md)).
 
 > "Types guarantee *what something is*. Contracts guarantee *what range it falls within*."
 
@@ -54,7 +58,7 @@ fn clamp(value: Int, lo: Int, hi: Int) -> Int
 - Conditions can only reference parameters (not local variables in the body)
 - At the call site of a function with `where`, the compiler statically verifies the conditions hold
 
-### Type Contracts (Invariants)
+### Proposed Type Contracts (Invariants; original `newtype` syntax sketch)
 
 ```almd
 type Percentage = newtype Int
@@ -119,7 +123,7 @@ Probability of LLMs getting `where` wrong: Low. Condition expressions use the sa
 
 ---
 
-## Multi-Target Codegen
+## Proposed lowering (not existing contract codegen)
 
 ### Rust
 
@@ -142,7 +146,7 @@ impl Percentage {
 - `debug_assert!` checks only in debug builds (removed in release builds)
 - Or enable in release builds with `--contracts=always` flag
 
-### TypeScript
+### Original TypeScript alternative (historical only; target retired)
 
 ```typescript
 function divide(a: number, b: number): number {
@@ -151,7 +155,8 @@ function divide(a: number, b: number): number {
 }
 ```
 
-- Always runtime check (TS has no compile-time constant folding)
+- This was an illustrative runtime-check strategy, not a current compiler target
+  or a claim about all JavaScript engine optimizations.
 
 ### WASM
 
@@ -190,16 +195,16 @@ function divide(a: number, b: number): number {
 |---|---|
 | `guard` | Runtime early return. Contract is the "compile-time promoted version" of guard |
 | `effect fn` | Contracts can be attached to both pure fn and effect fn |
-| `newtype` | `newtype` + `where` is a natural combination for creating constrained types |
+| Wrapper types | Proposed value invariants need a construction/validation contract; the old `newtype` sketch is not current syntax |
 | Type checker | Contract verification runs after type checking, before lowering |
-| nanopass | Inserted into the nanopass pipeline as `ContractCheckPass` |
+| nanopass | A proposed `ContractCheckPass`; not established as implemented |
 
 ### Complementary Relationship with guard
 
 ```almd
 // guard: checks condition at runtime, early return on failure
 effect fn parse_port(s: String) -> Result[Port, String] = {
-  let n = int.parse(s)?
+  let n = int.parse(s)!
   guard n >= 0, n <= 65535 else { return err("invalid port") }
   ok(Port(n))
 }
@@ -219,8 +224,8 @@ guard is for "validating user input", contract is for "baking the properties of 
 
 ### Phase 1: Parser + Checker
 
-- Add `where` keyword (43rd keyword)
-- Parser: Parse `where` clause in function and newtype declarations
+- Specify function-contract grammar without conflicting with existing test-context `where`
+- Parser: implement the adopted function/type contract grammar; original `newtype` spelling is not a current prerequisite
 - AST: Add `WhereClause { conditions: Vec<Expr> }` to FnDecl / TypeDecl
 - Checker: Verify that expressions in where conditions return Bool
 - Checker: Restrict referenceable variables in where conditions (parameters or self only)
@@ -236,7 +241,7 @@ guard is for "validating user input", contract is for "baking the properties of 
 ### Phase 3: Codegen
 
 - Rust: Generate `debug_assert!`
-- TS: Generate `if (!cond) throw new Error(...)`
+- No TS implementation target: the original TS backend sketch is historical
 - WASM: Generate `if ... unreachable`
 - `--contracts=always` / `--contracts=debug` / `--contracts=off` flags
 
@@ -252,7 +257,7 @@ guard is for "validating user input", contract is for "baking the properties of 
 
 - `divide(10, 0)` becomes a compile error
 - `divide(10, n)` compiles with runtime check when no guard is present
-- `type Percentage = newtype Int where self >= 0, self <= 100` works
+- The adopted constrained-type syntax validates construction of a 0..100 value (original `newtype ... where` spelling remains a sketch)
 - All existing tests pass (code without `where` is completely unaffected)
 - Addition to CHEATSHEET.md is 10 lines or fewer
 - Verify that LLMs can generate code correctly using `where`
@@ -262,4 +267,4 @@ guard is for "validating user input", contract is for "baking the properties of 
 - Requires type system and nanopass pipeline stabilization first
 - Avoid conflicts with Phase 3 (Effect System)
 - Outside 1.0 scope — to be considered after language spec freeze
-- However, since the combination with newtype is natural, it can be added retroactively as long as newtype's design isn't broken
+- Revisit how value invariants compose with current wrapper types and generic bounds; do not assume the original `newtype` design is shipped

@@ -354,8 +354,8 @@ parse_int(s)!                          // unwrap and propagate into the current 
 
 - **Multi-target**: Same IR emits to Rust or WASM via `--target rust|wasm` (TS codegen は削除済み)
 - **Codegen v3**: Nanopass pipeline (semantic rewrites) + TOML template renderer (syntax)
-- **Effect fn (Rust)**: `effect fn f() -> T` の呼び出しは既定で `Result<T, String>`。明示的な `Result[T, E]` 戻り型はそのエラー型を保持する。純粋な失敗可能関数は `-> T!` / `-> T!E`。伝搬は **明示のみ**（ADR-0008）— `expr!` が `?` に落ちる。暗黙伝搬は E041、statement 位置の握り潰しは E042
-- **`==`/`!=`**: `almide_eq!` macro in Rust
+- **Effect fn (Rust)**: `effect fn f() -> T` の呼び出しは既定で `Result<T, String>`。明示的な `Result[T, E]` 戻り型はそのエラー型を保持する。純粋な失敗可能関数は `-> T!` / `-> T!E`。伝搬は **明示のみ**（ADR-0008）— `!` の Rust 側の実現は文脈による（Result/Option の伝搬、test の unwrap など）。lambda の境界を含む詳細は [結果・Option・エフェクト仕様](docs/specs/result-option-effect.md) の文脈表を参照。暗黙伝搬は E041、statement 位置の握り潰しは E042
+- **`==`/`!=`**: 通常の二項等価比較は Rust の `almide_eq!` に出力する。convention `eq` および `Secret` の比較は、その前に lowerer が関数呼び出しへ解決する（`crates/almide-frontend/src/lower/expressions_access.rs`）。
 - **`+`**: Concatenation for strings and lists (overloaded with addition)
 - **Diagnostics**: Every error includes file:line, context, and actionable hint
 

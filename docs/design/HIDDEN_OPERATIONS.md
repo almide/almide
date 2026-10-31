@@ -65,7 +65,8 @@ effect fn load() -> String = {
 
 ### 何が起きるか
 
-生成コードに Almide ランタイムが自動埋め込まれる。外部 crate は不要。
+生成コードに必要な Almide ランタイムが埋め込まれる。使用機能によっては
+外部 Rust crate やホスト機能も必要になる。
 
 ### Rust target
 
@@ -79,24 +80,27 @@ effect fn load() -> String = {
 
 ### WASM target
 
-外部ランタイムは存在しない。stdlib は self-hosted な純 Almide 実装
-（`stdlib/*.almd` → `crates/almide-types/src/self_host_registry.rs`）が
-ユーザコードと一緒に WAT へコンパイルされ、少数の手書き WAT プリアンブルと
-共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](https://github.com/almide/almide/blob/develop/docs/wasm/WASM-OUTPUT.md)。
+stdlib の self-hosted な Almide 実装はユーザコードとともにリンクされ、
+`almide-wasm` の structural emitter が直接 Wasm バイトを生成する。
+旧 MIR→WAT renderer と手書き WAT preamble 経路は廃止済み。
+新しい self-hosted body は `@implements` で宣言し、生成 registry へ反映する。
+I/O などのホスト操作には選択した実行ルートの import 実装が必要。
+詳細: [WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md)。
 
 ---
 
-## 4. Perceus RC 挿入 (v1 trust-spine: WASM / native render)
+## 4. Perceus RC 挿入 (native MIR / structural Wasm)
 
 ### 何が起きるか
 
 v1 MIR (`crates/almide-mir`) は Perceus 方式で参照カウント操作
 （dup / drop）と、in-place 変異のための一意性検査（MakeUnique）を自動挿入する。
-所有権とメモリレイアウトの単一真実源はこの MIR。
+この MIR は native renderer と MIR witness producer の経路であり、
+現行 Wasm は別の structural emitter が RC/layout を扱う。
 
 ### ユーザーへの影響
 
-- 言語上の意味は変わらない（native / wasm / interp の 3-way oracle で保証）
+- 言語上の意味を保つことが要件（native / wasm / interp の差分ゲートが対象 corpus で検査）
 - 性能特性のみが対象。MakeUnique elision 等の最適化はリリースごとに強化される
 - 証明: `crates/almide-perceus-belt/`（Lean 4）が RC 規律を検証する
 
@@ -106,7 +110,9 @@ v1 MIR (`crates/almide-mir`) は Perceus 方式で参照カウント操作
 
 ### 何が起きるか
 
-`fan { a(); b() }` は `std::thread::scope` + `spawn` に変換される。各式が OS スレッドで実行される。
+native の並行化対象 `fan { a(), b() }` は `std::thread::scope` + `spawn`
+で実行される。`@ordered` 操作を含む block などは arm 順に実行されるため、
+すべての `fan` が必ず thread-per-arm になるわけではない。以下は並行 route の概略。
 
 ```rust
 std::thread::scope(|__s| -> Result<_, String> {
@@ -120,11 +126,11 @@ std::thread::scope(|__s| -> Result<_, String> {
 
 - 外部変数は `move` でキャプチャされる（clone される可能性）
 - `var` のキャプチャはコンパイルエラー (E008)
-- スレッド数 = fan 内の式の数（制限なし）
+- 実行基盤と並行化可否は compiler/host が決める。普通の `fan` は全 sibling を join し、arm 順の最初のエラーを返す
 
 ### ファイル
 
-- `crates/almide-codegen/src/pass_fan_lowering.rs` — fan lowering パス
+- `crates/almide-codegen/src/pass_fan_lowering.rs`、`pass_rust_lowering_fan.rs` — fan lowering と native parallel routing
 
 ---
 

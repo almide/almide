@@ -2,8 +2,9 @@
 # Ticks interface audit — is the demanded API shape different?
 
 > **命名は [ADR-0001](../../adr/0001-deterministic-time-units.md) が supersede した。**
-> 本監査が発見した「書けない数字」問題は正しく、修正 1（race の予算任意化）と
-> 修正 2（数字の供給者はツールとホスト境界）はそのまま生きている。ただし
+> 本監査の「書けない数字」問題とツールによる見積りの論点は残るが、修正 1 の
+> race 予算任意化は現行契約ではない。[ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md)
+> が `fan.race` を `fan.min` に改名し、clock 引数を必須にした。ただし
 > 「時間風単位の tick 換算」を却下した節は**誤り**だった — 深刻度の混同（決定性は
 > 一切壊れない）であり、ADR-0001 がその却下を訂正して時間単位を採用した。
 > 以下は当時の記録として保存する。

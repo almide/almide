@@ -59,7 +59,11 @@ Almide には Ferrocene より良い出発点がある: 実行可能な referenc
 
 ## Phases
 
-### CG-1: ALS + 規範意味論の昇格 (M-L) — Active
+### CG-1: ALS + 規範意味論 — 当初の計画と着地記録
+
+ALS は現在 [docs/specs/als/](../../specs/als/README.md) に存在し、
+契約の spec-keying も現行台帳/ゲートの対象である。以下の初回 121-fixture
+監査や起草手順は歴史的な計画・測定であって、ALS が現在未起草という意味ではない。
 
 1. **`almide-interp` を規範意味論に昇格** — 「3rd judge」から「THE spec」へ。
    まず gap audit: interp が評価できない言語機能・stdlib 関数の棚卸し
@@ -82,8 +86,9 @@ Almide には Ferrocene より良い出発点がある: 実行可能な referenc
 
 - spec / fixture 実行下でコンパイラの branch coverage を計測 (cargo llvm-cov)、
   CI ratchet 化 (下がらない)
-- 安全パス (`PerceusVerifyPass`, capability check, `StackBalancePass`) は
-  MC/DC 相当まで引き上げ
+- 現行の安全性検査を列挙して coverage の範囲を決める。元の
+  `PerceusVerifyPass` / `StackBalancePass` は旧 emitter の名前なので、
+  現行台帳を `proofs/receipt.sh` / codegen pass から作る
 - 規格対応: DO-178C Level A structural coverage。
   発見した未到達コード = 死んだ分岐 (削除) か 欠けた fixture (追加) の二択
 
@@ -96,7 +101,8 @@ MISRA C / Ada Ravenscar / SPARK subset の analog。`almide check --profile crit
 - 有界再帰・確保上限 (静的に検査可能な形)、RC drop カスケード長の上限
   → WCET 解析可能性
 - capability は deny-all 出発 (`Rand` / `Time` も明示 grant)
-- flagged 契約の機能は使用不可 (現状 flagged はゼロ — C-006 fan.timeout は 0.29.0 で言語ごと削除済み)
+- admissibility は現行 ALS §B と critical-profile 検査に従う。
+  `fan.timeout` の 0.29.0 撤去を現在の禁止理由にしない（後に oracle body 形として再導入）
 - **Critical は subset であって方言ではない** — 全 Critical コードは通常モードでも
   そのまま有効 (SPARK ⊂ Ada と同じ関係)
 
@@ -116,12 +122,14 @@ RC drop カスケード上限。
 belt の思想をビルド単位の証明に拡張: 「この .wasm はこの検証済み IR の正しい翻訳」
 という証拠を成果物ごとに添付する。
 
-- DO-330 の**上位互換** — プロセスの資格化ではなく per-artifact proof
-  (seL4 / CompCert の系譜)。紙の規格には構造的にできない芸当
-- 段階: `Verified<T>` の適用範囲拡大 → emit invariant の機械検査 →
+- per-artifact 検証を資格化評価の証拠として検討する。DO-330 の上位互換、
+  またはプロセス要求の自動代替とは主張しない
+- 元の `Verified<T>` は旧 emitter の設計。現行の対象・trusted seam を列挙し、
+  emit invariant の機械検査から必要な意味保存義務へ進む →
   (遠期) Lean での emit 規則証明
 - CompCert 級のフル証明は [completeness roadmap](correctness-guarantee-gaps.md)
-  で棄却済み — translation validation は同じ保証クラスをビルド単位で取る代替
+  の歴史的検討を参照。translation validation が同等の保証を与えるには、
+  checker の対象性質と実際の成果物との対応を別途確立する必要がある
 
 ### CG-5: Qualification bundle (S-M)
 
@@ -146,7 +154,7 @@ belt の思想をビルド単位の証明に拡張: 「この .wasm はこの検
 
 | 先行者 | 実績 | 借りるもの |
 |---|---|---|
-| SCADE KCG | DO-178C Level A 資格済みコード生成器 | 「資格化されたコンパイラの出力はソースレビュー不要」という **claim の形** — trust layer と完全に同型 |
+| SCADE KCG | DO-178C Level A 資格済みコード生成器 | 資格化資料の構成を参考にする。出力のレビューが不要になるとはこの repo から断定しない |
 | Ferrocene | rustc を ISO 26262 ASIL D / IEC 61508 資格化 | **spec を先に書く** playbook (FLS)。資格化資料の公開スタイル |
 | SPARK | DO-333 で証明をテスト代替として認めさせた | assurance ladder の設計 (evidence ladder は既に同型) |
 | CompCert / seL4 | 検証済みコンパイラ / binary までの証明 | translation validation の発想 (CG-4) |

@@ -1,12 +1,13 @@
-<!-- description: Region-based memory management — Phase 1+2 shipped, Phase 3 (full inference) on hold for server workloads -->
+<!-- description: Historical v0.23.4 region work and an unimplemented full-region-inference proposal -->
 # Region-based Memory Management
 
-> **Status**: On hold — Phase 1+2 shipped (v0.23.4) and cover the practical patterns.
-> Phase 3 (full region inference) targets long-running servers, a secondary use case;
-> revisit when that workload becomes primary.
-> Almide WASM uses a bump allocator with automatic region scoping.
+> **Status**: Full region inference remains an on-hold proposal. Phases 1+2
+> below record the v0.23.4 implementation, not the current Wasm allocator.
+> The structural backend now uses reference counting and size-class free lists
+> (`crates/almide-wasm/src/alloc_inline.rs`); do not infer a current leak from
+> the limitations of the old bump-restore design.
 
-## Implemented
+## Historical implementation (v0.23.4)
 
 ### Phase 1: Function-level region (v0.23.4)
 
@@ -34,13 +35,18 @@ reclaimed as soon as they're no longer used.
 
 ## Phase 3: Full region inference (future)
 
-### Remaining cases
+### Cases motivating the original proposal
+
+These describe limits of bump-only region restoration, not a current defect
+inventory. Nested-value drops and mutable replacement must be evaluated against
+the current ownership/drop implementation before proposing a new allocator.
 
 1. **Nested heap structures**: `List[List[Int]]` — inner lists can't be
    individually freed by bump restore (restoring frees everything above the mark)
 
 2. **Mutable variable replacement**: `var s = "hello"; s = "world"` — the old
-   "hello" allocation is leaked (can't restore without invalidating "world")
+   "hello" allocation cannot be reclaimed by that bump restore alone
+   (restoring would invalidate "world"); this is not a claim about current RC behavior
 
 3. **Closure captures**: Values captured by closures may outlive the capturing
    scope. Region inference must track capture lifetimes.
@@ -78,13 +84,13 @@ reclaimed as soon as they're no longer used.
 - MLKit compiler: https://github.com/melsman/mlkit
 - Cyclone language: Region-based safe C
 
-### Pragmatic observation
+### Original motivation
 
-Phase 1+2 already cover the vast majority of practical WASM programs:
+The v0.23.4 plan prioritized these patterns for Phases 1+2:
 - Short-lived processes (Phase 1)
 - Processing loops (Phase 2a)
 - Pipeline transformations (Phase 2b)
 
-Phase 3 is most valuable for long-running servers with complex state
-management — a use case that's currently secondary to Almide's primary
-targets (WASM modules, Edge functions, CLI tools).
+The original motivation for Phase 3 was long-running servers with complex
+state. Reopening this proposal requires a measured need beyond current RC and
+free-list reclamation; the historical region plan alone does not establish one.

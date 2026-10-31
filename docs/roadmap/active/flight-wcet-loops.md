@@ -1,9 +1,15 @@
-<!-- description: Concrete implementation design for flight keystone (あ) — G-F1/G-F2: counted-loop flight subset + lifting loops into Coq to prove bounded allocation (WCET-by-construction). The counted loop is a SEPARATE structural witness (preserving the flat-fold RC invariant), two Subset.v-shaped properties prove it, and try_lower_scalar_for_range already knows the trip count. -->
-# Flight Keystone (あ) — Counted Loops + Bounded Allocation(WCET-by-construction)
+<!-- description: Proposed counted-loop witnesses and allocation-count bounds; target-specific physical WCET remains a separate obligation -->
+# Flight Keystone (あ) — proposed counted loops and allocation bounds
+
+Current bounded-profile admission is specified in [ALS §B](../../specs/als/bounded.md).
+The separate counted-loop witness and proof sketches below are proposals, not
+a claim that their named files/checker already ship. An event-count bound is
+not by itself a bound on elapsed time on a target machine.
 
 > **Goal**: [flight-profile](flight-profile.md) のラダー gate **G-F1**(飛行サブセット
 > 定義+強制)と **G-F2**(ループを Coq に持ち上げ・確保上限を証明)の具体実装設計。
-> 核心 ── **WCET の真のギャップはアロケータ(既に O(1))ではなくループ**。Coq モデルは
+> 核心 ── ループの静的反復数と確保イベント数の対応を調べる。allocator の
+> 漸近計算量だけでは target の物理 WCET は確定しない。原設計が参照した Coq モデルは
 > 今 loop-free 断片(`proofs/Termination.v:16-18`)。これを**別の構造 witness**として
 > 持ち上げ(RC の flat-fold 不変条件を壊さない)、`Subset.v` 同型の2性質で「確保 count
 > が静的に有界」を証明する。
@@ -62,11 +68,11 @@ CountedLoopEnd,
 2. **bounded-static-alloc**(WCET 関連の集計)。`total_allocs ≤ (ループ外 alloc) +
    Σ_loops (bound_L × 本体 alloc_L)`。ルール1で本体 alloc=0 なら `total = ループ外 alloc`
    = ランタイム値に依存しない定数。
-3. **allocator 側**。`$alloc` は既に O(1) 単一プローブ + 固定 64KiB ページ(`render_wasm.rs`)
-   なので**確保コストは既に有界**。飛行プロファイルは count を有界化(1,2)し、静的
-   high-water-mark = `total_allocs × max_block` を得る。フラグメンテーション(exact-fit
-   退化)対策にループ毎単一サイズ or arena-reset を pin ── これは allocator policy で
-   checker 性質ではない。
+3. **allocator 側**。固定 64KiB/単一プローブは旧 renderer の前提であり、
+   現行 structural allocator は `crates/almide-wasm/src/alloc_inline.rs` の
+   size-class/free-list を参照する。`total_allocs × max_block` を byte 上限に
+   使うには block 最大サイズ・再利用・一時確保の条件も必要で、確保回数だけでは
+   足りない。実機の WCET には対象 CPU/host/runtime の別の時間評価が必要。
 
 ### 2.3 強制の二層(ラダー表 [flight-profile](flight-profile.md) §7.2 と整合)
 
@@ -190,8 +196,9 @@ pub fn alloc_bound_witness_string(func: &MirFunction) -> String { ... }
 
 RC アルファベットはバイトサイズを捨てる(`lib.rs:130`「Alloc は中身に関係なく 'i' 1つ」):
 
-- **count 基準は今証明可能**(§3.3):`total_allocs ≤ B`(確保**イベント数**)。O(1)/alloc の
-  アロケータと併せ count 基準 WCET と worst-case **オブジェクト** high-water-mark を与える。
+- **count 基準の提案**(§3.3): `total_allocs ≤ B`（確保イベント数）。
+  witness と実行の対応を確立して初めて実行上限として使える。これだけで
+  byte high-water-mark、再帰 drop の時間、対象機械の物理 WCET は証明しない。
 - **byte 基準は追加で必要**:witness が `Alloc` 毎バイトサイズを持ち(`Repr`/`LayoutId` +
   `Init` から)、`LOp` を `LAlloc (size:nat)` に精緻化し `Σ size` を畳む。難所は
   `Init::DynStr { len: ValueId }`(`lib.rs:137`)= **ランタイム長** ── byte 上限には `len`
