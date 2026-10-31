@@ -162,9 +162,9 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 Both take whatever type the context demands, so the rest of the program keeps
 type-checking, and both PANIC if execution reaches them (native: exit 101 —
 `not yet implemented: hole at line N` / `not yet implemented: <your message>`).
-This is a NATIVE-ONLY workflow: the wasm MIR has no arm for either node, so a
+This is a NATIVE-ONLY workflow: the structural wasm emitter does not support these nodes, so a
 program that still contains one walls (`almide run --target wasm` exits 1,
-"this program shape is not yet supported by the verified wasm renderer").
+with a diagnostic naming the unsupported shape).
 Fill the hole before you build for wasm.
 
 `_` in a **call argument** is a different thing and is rejected (E046):
@@ -416,7 +416,7 @@ fn main() -> Unit = {
 
 ## Expressions
 
-### If (MUST have else — no standalone `if`)
+### If (an omitted `else` returns Unit)
 ```
 if cond then expr else expr
 if a then x else if b then y else z
@@ -484,8 +484,12 @@ map.filter(m, (k, v) => v > 0)
 capability — one rule for every higher-order callee (`list.map`, …). Inside
 an `effect fn`, a lambda may call effect fns, but their results stay
 **explicit `Result` values** (auto-`?` never crosses a closure boundary):
-unwrap with `?? fallback` or `match` — `!` cannot propagate out of a lambda.
-In a pure fn the same lambda is an error. Exception: metered regions
+handle them with `?? fallback` or `match`, or use `!` to propagate into the
+**lambda's own** failure channel — never the enclosing function's. A `!` in
+an ordinary lambda infers a fallible lambda and lifts its value tail into
+`ok(...)`; an explicit effect-typed slot is not required. Test-block lambdas
+instead retain test unwrap semantics. In a pure fn, calling an effect fn
+inside a lambda is an error; pure fallible lambdas are allowed. Exception: metered regions
 (`fan.bounded` / `fan.min` bodies) are pure by design, so effect calls are
 rejected there even inside an effect fn.
 
@@ -561,7 +565,7 @@ while i < 10 {
 for i in 0..<n { ... }   // optimized: no list allocation
 let xs = list.map(0..<10, (i) => i * i)  // range as List[Int]
 ```
-Prefer `for i in 0..<n` whenever the iteration count is known up front (thread state with `var`); use recursion only for early exit or an unknown bound — see "✗ counted recursion".
+Prefer `for i in 0..<n` whenever the iteration count is known up front (thread state with `var`); loops support `break` / `continue`. Use recursion for recursive data or state transitions when that expresses the algorithm more clearly — see "✗ counted recursion".
 
 ### Pipe
 ```
@@ -904,7 +908,7 @@ effect fn main() -> Unit = {
 `io.read_line()` reads one stdin line with the trailing newline stripped and returns
 `String?`: `none` at end of input, `some("")` for an empty line. It requires an `effect fn`
 caller. For bytes, read a handle: `io.read(io.stdin()!, n)!`, `io.read_to_end(io.stdin()!)!`. `int.parse` / `float.parse` return `Result` — unwrap with
-`??`, `!` (effect fn), or `?`. There is no `int.from_string`.
+`??`, `!` in a fallible context, or `?`. There is no `int.from_string`.
 
 ## Entry point
 ```
@@ -941,7 +945,13 @@ Command-line arguments are accessed via `env.args()` (not main parameters); argv
 `|>` is asymmetric: its right-hand side is a single call/compose chain, so any operator after it applies to the piped result — `xs |> list.map(f) + ys` is `(xs |> list.map(f)) + ys`, and `xs |> f >> g` pipes into the composition `f >> g`.
 
 ## UFCS
-`f(x, y)` ≡ `x.f(y)` — compiler resolves automatically.
+Method syntax supplies the receiver as argument 1: for example,
+`xs.map(f)` resolves to `list.map(xs, f)`, and an ordinary user function
+`fn twice(n: Int) -> Int` can be called as `n.twice()` without an attribute.
+This is not an unconditional equivalence between every `f(x, y)` and
+`x.f(y)`: function-valued record fields, the receiver's stdlib module,
+conventions/protocols, ordinary user functions and the type's defining module
+are resolved in that order. See [UFCS resolution](../crates/almide-frontend/src/check/calls_ufcs.rs).
 
 ## Standard library modules
 
@@ -1156,7 +1166,7 @@ effect fn main() -> Unit = {
 ## Verifying a webhook signature (HMAC)
 
 `import hash` and `import secret`. The key and the tag are `Secret[Bytes]`;
-read the key with `env.secret(name)`, which answers `Secret[String]`. Verify
+read the key with `env.secret(name)!`, which answers `Option[Secret[String]]`. Handle absence before converting the revealed string to key bytes. Verify
 with the `is_valid_` cell, key first: it computes HMAC-SHA256 and compares in
 constant time. A tag's own `==` is the constant-time one too (it is a
 `Secret[Bytes]`), so never `secret.reveal` two tags to compare them, and never
@@ -1203,14 +1213,14 @@ epoch 15; use `hash.sha256`.
 - No exceptions — use `Result[T, E]` everywhere
 - No null — use `Option[T]`
 - No inheritance — use composition
-- No macros, no operator overloading, no implicit conversions
+- No macros or user-defined operator declarations; built-in operator dispatch is type/protocol-directed. No implicit numeric conversions
 - Empty list = `[]`, empty map = `[:]` (with type annotation)
-- `_` is ONLY for match wildcard patterns, never as a variable name
-- The stdlib functions listed above are exhaustive — no other functions exist
+- `_` is a wildcard/discard in patterns and ignored bindings/parameters, or a typed hole in expression position; it is not an ordinary variable name
+- The module table above is navigation only; use the [generated standard-library reference](stdlib/README.md) for the complete public API
 - Use `for x in xs { ... }` for iteration
 - **No nested functions.** All `fn` must be at the top level. Use lambdas for local helpers
 - **No `let mut`.** Use `var` for mutable bindings. `mut` itself is a real keyword, but only as a parameter modifier (`fn f(mut x: Int)`) — see Functions
-- Almide is NOT Rust. No `&`, `trait` (use `protocol`), `impl` (use convention methods: `fn Type.method(...)`), `pub`, `mod` (as declaration)
+- Almide is NOT Rust. No `&`, `trait` (use `protocol`) or `impl` (use convention methods: `fn Type.method(...)`). Visibility uses `local` / `mod`; `pub` is an optional explicit synonym for default-public functions and bindings, not types
 
 ## Naming conventions across stdlib
 
@@ -1348,15 +1358,21 @@ ML-style let-in is not supported. Use a block.
 ### ✗ `Char` type → ✓ `String`
 Almide has no `Char` type. Single characters are `String`: `"a"`, `"("`.
 
-### ✗ `break` / `continue` → ✓ recursion
-Use a recursive helper function instead of loop control keywords.
+### Loop control: `break` / `continue`
+Both are supported inside loops. `break` exits immediately; `continue` skips
+the rest of the current iteration (a range loop still advances its index).
 ```
-✗ while cond { if done then break }
-✓ fn loop(state) = if done then state else loop(next_state)
+while cond {
+  if done then break
+  if skip then continue
+  work()
+}
 ```
+Use a recursive helper when it expresses the algorithm more clearly, not
+because loop control is unavailable.
 
 ### ✗ counted recursion `f(n - 1)` → ✓ `for _ in 0..<n`
-When the iteration count is known up front, write a range `for` and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance.
+When the iteration count is known up front, write a range `for` and thread state with `var`. Use `break` / `continue` for loop control; recursion remains useful for recursive data or state transitions when it expresses the algorithm more clearly.
 ```almide
 // ✗ correct (tail calls are optimized), but the shape says nothing a `for` would not,
 //   reads as a stack risk, and drags `!` onto every iteration in an effect fn
@@ -1387,7 +1403,7 @@ The last expression in a block is the return value. No `return` keyword.
 ```
 
 ### ✗ Reassigning function parameters → ✓ `var` copy
-Function parameters are immutable. Copy to `var` first.
+Ordinary function parameters are immutable. Copy to `var` for local state; declare a `mut` parameter only when the caller's `var` binding should be updated (see Mutable parameters).
 ```
 ✗ fn f(n: Int) -> Int = { n = n - 1; n }
 ✓ fn f(n: Int) -> Int = { var m = n; m = m - 1; m }
