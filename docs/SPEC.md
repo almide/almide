@@ -1,4 +1,4 @@
-# Almide Language Specification v0.8
+# Almide Language Specification
 
 **"Not a language for writing freely, but a language for converging correctly."**
 
@@ -55,17 +55,29 @@ The essence of language design for LLMs is not maximizing expressiveness, but **
 ### 1.1 Identifiers
 
 ```
-Identifier ::= [a-z_][a-zA-Z0-9_]*
+Identifier ::= (XID_Start | "_") XID_Continue*
 ```
+
+Identifiers follow Unicode UAX #31 and are stored in NFC. Characters whose
+compatibility-normalized form differs from their canonical form (such as
+full-width Latin letters and digits) are rejected, not folded. A lone `_`
+is a placeholder, not a binding name. Keywords and module names stay ASCII.
+
+Tests: `spec/lang/unicode_identifier_test.almd`,
+`tests/unicode_identifier_nfc_test.rs`.
 
 Trailing `?` in identifiers was removed — predicates are plain identifiers
 that return `Bool` (`is_` prefix convention: `is_empty`, `is_digit`).
 
 ### 1.2 Type Names
 
-```
-TypeName ::= [A-Z][a-zA-Z0-9]*
-```
+Type names use the same Unicode identifier characters. An uppercase initial
+character marks a type-side name. A caseless name (for example CJK, kana or
+Hangul) is value-side unless its module declares it as a type or variant case;
+from another module, use the qualified spelling (for example `geo.住所`).
+
+Tests: `spec/lang/unicode_identifier_test.almd`,
+`spec/wasm_cross/unicode_identifiers.almd`.
 
 ### 1.3 Literals
 
@@ -231,22 +243,23 @@ import mylib.{Parser, Lexer}    // selective import
 
 ### 4.2 Auto-Imported Modules (Prelude)
 
-The following modules are available without `import`:
+The following public modules are available without `import`:
 
 ```
-string  list  int  float  math  map  set  result  option  value  prim
-datetime  error  bytes  matrix  int8  int16  int32  uint8  uint16  uint32
-uint64  float32
+string  list  int  float  bool  math  map  set  deque  heap
+result  option  value  datetime  bytes  matrix
+int8  int16  int32  int64  uint8  uint16  uint32  uint64  float32  float64
 ```
 
-All other stdlib modules require explicit `import`:
-
-```
-fs  env  io  process  json  random  regex  http  log  testing
-net  zlib  base64  hex
-```
-
-Bundled stdlib packages (pure Almide, import required): `args`, `path`, `html`, `mem`.
+Other public stdlib modules require an explicit `import`; see the
+[standard-library reference](./stdlib/README.md) for the current inventory.
+The source of truth is `TIER1_ALWAYS_ACCESSIBLE` plus `AUTO_IMPORT_BUNDLED` in
+[`stdlib_info.rs`](../crates/almide-types/src/stdlib_info.rs).
+`prim` is an internal stdlib implementation module, not user surface: a
+user-source reference is rejected with E085. The retired `error`, `log` and
+`mem` modules are not part of the public stdlib.
+The [compute](./stdlib/compute.md) and [duration](./stdlib/duration.md)
+clock surfaces are auto-available checker builtins, not importable modules.
 
 ### 4.3 Prelude Types
 
@@ -1226,7 +1239,7 @@ almide test --run "pattern"      # filter by name
 
 ### Predicates
 
-`?` suffix on function names: `is_empty`, `exists`, `contains`. Return type must be `Bool`.
+Predicates use plain identifiers: `is_empty`, `exists`, `contains`. Their return type is `Bool`; there is no trailing `?` in the name.
 
 The `is_` prefix convention is used for predicates in the stdlib: `string.is_empty(s)`, `string.is_digit(s)`.
 
@@ -1235,7 +1248,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 | Convention | Rule | Example |
 |---|---|---|
 | Module prefix | `module.function()` canonical form | `string.len(s)`, `list.get(xs, i)` |
-| Predicate suffix | `?` for boolean-returning functions | `string.is_empty(s)`, `fs.exists(path)` |
+| Predicates | Plain names returning `Bool`, often with an `is_` prefix | `string.is_empty(s)`, `fs.exists(path)` |
 | No synonyms | One name per operation | `len` not `length`/`size`/`count` |
 | Symmetric pairs | Matching names for inverses | `split`/`join`, `to_string`/`to_int` |
 | Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option[T]` |
@@ -1244,85 +1257,32 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 16. Standard Library
 
-1308 functions across 49 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+The [standard-library reference](./stdlib/README.md) is the current public
+API inventory. Its module pages contain signatures, documentation, examples
+and `@since` information; their signature indexes are generated from the
+compiler's module interfaces with `make stdlib-docs`. This specification does
+not duplicate those lists or maintain a second function count.
 
 ### 16.1 Auto-Imported Modules
 
-**string** (41 functions):
-`trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_start`, `pad_end`, `starts_with`, `ends_with`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty`, `is_digit`, `is_alpha`, `is_alphanumeric`, `is_whitespace`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper`, `is_lower`, `codepoint`, `from_codepoint`, `replace_first`, `last_index_of`, `to_float`
-
-**list** (54 functions):
-`len`, `get`, `get_or`, `first`, `last`, `sort`, `sort_by`, `reverse`, `contains`, `index_of`, `any`, `all`, `each`, `map`, `flat_map`, `filter`, `find`, `fold`, `enumerate`, `zip`, `flatten`, `take`, `drop`, `chunk`, `unique`, `join`, `sum`, `product`, `min`, `max`, `is_empty`, `push`, `pop`, `insert`, `remove`, `concat`, `slice`, `range`, `count`, `find_index`, `partition`, `scan`, `window`, `zip_with`, `unzip`, `group_by`, `frequencies`, `intersperse`, `reduce`, `take_while`, `drop_while`, `dedup`, `rotate`, `transpose`
-
-**map** (16 functions):
-`new`, `get`, `get_or`, `set`, `contains`, `remove`, `merge`, `keys`, `values`, `len`, `entries`, `from_list`, `is_empty`, `map_values`, `filter`, `fold`
-
-**int** (21 functions):
-`to_string`, `to_hex`, `parse`, `parse_hex`, `abs`, `min`, `max`, `band`, `bor`, `bxor`, `bshl`, `bshr`, `bnot`, `wrap_add`, `wrap_mul`, `rotate_right`, `rotate_left`, `to_u32`, `to_u8`, `clamp`, `signum`
-
-**float** (16 functions):
-`to_string`, `to_int`, `from_int`, `round`, `floor`, `ceil`, `abs`, `sqrt`, `parse`, `min`, `max`, `clamp`, `is_nan`, `is_infinite`, `signum`, `truncate`
-
-**math** (21 functions):
-`min`, `max`, `abs`, `pow`, `pi`, `e`, `sin`, `cos`, `tan`, `log`, `exp`, `sqrt`, `asin`, `acos`, `atan`, `atan2`, `log2`, `log10`, `floor`, `ceil`, `round`
-
-**result** (9 functions):
-`map`, `map_err`, `and_then`, `unwrap_or`, `is_ok`, `is_err`, `ok`, `err`, `flatten`
-
-**option** (9 functions):
-`map`, `and_then`, `unwrap_or`, `ok_or`, `is_some`, `is_none`, `flatten`, `filter`, `zip`
-
-**value** (19 functions):
-Type-agnostic value operations for dynamic data handling.
-
-**set** (auto-imported):
-Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, `difference`, `len`, `is_empty`, `to_list`, `from_list`.
-
-**datetime** (21 functions):
-Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `to_iso`, `from_parts`, etc.
-
-**error** (3 functions):
-`message`, `chain`, `context`
-
-Also auto-imported: `bytes`, `matrix`, and the sized numeric modules
-(`int8`/`int16`/`int32`, `uint8`/`uint16`/`uint32`/`uint64`, `float32`).
+See [§4.2](#42-auto-imported-modules-prelude) for the import rule and its
+compiler-owned registry. Follow each module's page in the
+[reference](./stdlib/README.md) for its current functions and types.
 
 ### 16.2 Import-Required Modules
 
-**fs** (24 functions, all effect):
-`read_text`, `read_bytes`, `read_lines`, `write`, `write_bytes`, `append`, `mkdir_p`, `exists`, `is_dir`, `is_file`, `remove`, `list_dir`, `copy`, `rename`, `remove_dir`, `metadata`, `glob`, `walk_dir`, `read_dir`, `create_dir`, `symlink`, `read_link`, `canonical`, `temp_dir`
+Public modules outside the auto-imported set require `import module`.
+Their signatures state which calls are effectful; an import requirement is
+not itself an effect classification.
 
-**env** (9 functions, effect):
-`unix_timestamp`, `millis`, `args`, `get`, `set`, `cwd`, `sleep_ms`, `home_dir`, `hostname`
+<a id="163-bundled-modules-pure-almide-import-required"></a>
 
-**io** (3 functions, effect):
-`read_line`, `print`, `read_all`
+### 16.3 Bundled Modules
 
-**process** (6 functions, effect):
-`exec`, `exec_status`, `exit`, `stdin_lines`, `spawn`, `pid`
-
-**json** (36 functions):
-`parse`, `stringify`, `stringify_pretty`, `get`, `get_string`, `get_int`, `get_float`, `get_bool`, `get_array`, `keys`, `to_string`, `to_int`, `as_string`, `as_int`, `as_float`, `as_bool`, `as_array`, `object`, `s`, `i`, `f`, `b`, `null`, `array`, `from_string`, `from_int`, `from_float`, `from_bool`, `from_map`, `is_null`, `is_string`, `is_int`, `is_array`, `is_object`, `len`, `merge`
-
-**random** (4 functions, effect):
-`int`, `float`, `choice`, `shuffle`
-
-**log** (8 functions, effect):
-`debug`, `info`, `warn`, `error`, `trace`, `set_level`, `with_context`, `flush`
-
-**testing** (7 functions):
-`assert`, `assert_eq`, `assert_ne`, `assert_ok`, `assert_err`, `assert_some`, `assert_none`
-
-**regex** (8 functions):
-`match`, `full_match`, `find`, `find_all`, `replace`, `replace_first`, `split`, `captures`
-
-**http** (26 functions, effect):
-HTTP client operations.
-
-### 16.3 Bundled Modules (Pure Almide, import required)
-
-`args`, `path`, `html`, `mem` — plus opt-in codecs `base64`, `hex`, `zlib` and
-`net`. (The former `time`/`encoding`/`hash`/`url`/`csv` modules were removed.)
+Bundling describes implementation, not import policy: self-hosted `.almd`
+modules include both auto-imported and explicitly imported APIs. See
+[`stdlib/README.md`](../stdlib/README.md) for the implementation layout and
+[§4.2](#42-auto-imported-modules-prelude) for the user-facing import rule.
 
 ### 16.4 Built-in Functions
 
@@ -1337,6 +1297,12 @@ assert(cond: Bool)              // assert true
 ```
 
 There is no `print` function (use `io.print` for no-newline output). `println` requires `String` -- no implicit conversion.
+
+`println`, `eprintln`, `panic`, `assert`, `assert_eq` and `assert_ne` are
+admissible in a plain `fn`: they write or abort, never read, and do not make
+the caller effectful. Other I/O remains effect-gated. See
+[effect-system.md §2.1](./specs/effect-system.md#21-output-and-abort-builtins-are-admissible-in-a-pure-fn)
+for the exact scope and its tests.
 
 ---
 

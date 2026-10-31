@@ -2,8 +2,11 @@
 
 > A programming language designed so that LLM-written code survives modification. Pure-Rust
 > compiler, `.almd` source files, dual-target codegen (Rust, WASM).
-> Every design decision serves one metric: **modification survival rate**
-> on the [almide-dojo](https://github.com/almide/almide-dojo) MSR benchmark.
+> The compiler catches invalid edits at author time and names a repair where
+> one is known. `almide verify` checks the shipped wasm module's certificate;
+> [proven vs trusted](docs/contracts/proven-vs-trusted.md) states its limits.
+> [demo/make-verify](demo/make-verify/README.md) records the edit-and-repair
+> evidence and why saturated modification-survival-rate scores were replaced.
 
 If you are an LLM writing Almide code, read this file first. It is
 concise on purpose. Follow the link map for depth. This file and
@@ -15,15 +18,20 @@ read here is what the current compiler accepts.
 
 - Extension: `.almd`. Auto-imported (no `import` needed): `string`, `int`,
   `float`, `bool`, `list`, `map`, `set`, `deque`, `heap`, `option`, `result`,
-  `value`, `error`, `math`, `datetime`.
+  `value`, `bytes`, `matrix`, `math`, `datetime`.
   Sized-numeric conversion modules (`int8`, `int16`, `int32`, `int64`,
   `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`) are also
   auto-imported; a conversion is named after the type it builds —
   `int64.from(x)` on `x: Int32`, `int.from_saturating(f)`, `uint8.from_wrapping(n)`.
   Everything else needs an explicit `import`: `args`, `base64`, `bigint`,
-  `bytes`, `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`,
-  `matrix`, `net`, `path`, `process`, `random`, `regex`, `secret`, `testing`,
-  `zlib`.
+  `env`, `ffi`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`,
+  `net`, `path`, `process`, `random`, `regex`, `secret`, `testing`,
+  `unix`, `url`, `uuid`, `zlib`.
+  `compute` and `duration` are auto-available checker surfaces, not importable
+  stdlib modules (see `docs/stdlib/compute.md` and `docs/stdlib/duration.md`).
+  The compiler-owned import sets live in
+  `crates/almide-types/src/stdlib_info.rs`; `prim` is internal to the stdlib
+  and is not callable from user source (E085). The `error` module is retired.
 - `secret.Secret[A]` holds a password or key: every renderer (interpolation,
   assert/abort output, the test report) prints `Secret(***)`, `secret.reveal(s)`
   reads it, `==` is constant time on `Secret[String]`/`Secret[Bytes]` (E103

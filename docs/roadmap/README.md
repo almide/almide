@@ -114,7 +114,7 @@
 
 ## On Hold
 
-33 items
+32 items
 
 | Item | Description |
 |------|-------------|
@@ -134,7 +134,6 @@
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |
 | [MLIR Backend + Egg Rewrite Engine](on-hold/mlir-backend-adoption.md) | Stage 2 progressive lowering — dialect walker passes all 227 spec tests |
-| [`almide update` — Dependency Update Command](on-hold/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
 | [Package Version Resolution](on-hold/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
