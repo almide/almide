@@ -45,7 +45,9 @@ fn main() -> Unit = {
 the list it came from, `xs = list.set(xs, i, v)` (or `xs = xs.set(i, v)`) on a
 `var`, is compiled as an in-place write of that one slot (#2244): the same
 value semantics — an alias taken earlier keeps the old list, an index out of
-range changes nothing — without the copy, so a loop of them is linear. The
+range changes nothing. An unshared buffer can be updated without copying;
+copy-on-write still preserves live aliases, so repeated aliasing can add
+copying costs. The
 statement form `xs[i] = v` is the same write, spelled directly; it aborts on an
 out-of-range index where `list.set` does nothing.
 
@@ -218,9 +220,9 @@ fn main() -> Unit = {
 [[1, 2], [3, 4], [5]]
 ```
 
-### `list.sum(xs: List[Int]) -> Int`
+### `list.sum(xs: List[A]) -> A`
 
-Sum all integers in a list.
+Sum the numeric elements of a list; zero for an empty list. Integer overflow wraps.
 
 ```almd run
 fn main() -> Unit = {
@@ -231,9 +233,9 @@ fn main() -> Unit = {
 6
 ```
 
-### `list.product(xs: List[Int]) -> Int`
+### `list.product(xs: List[A]) -> A`
 
-Multiply all integers in a list.
+Multiply the numeric elements of a list; one for an empty list. Integer overflow wraps.
 
 ```almd run
 fn main() -> Unit = {
@@ -296,9 +298,9 @@ fn main() -> Unit = {
 some(3)
 ```
 
-### `list.join(xs: List[String], sep: String) -> String`
+### `list.join(xs: List[T], sep: T) -> T`
 
-Join a list of strings with a separator.
+Join a list of Strings or Bytes with a separator of the same type.
 
 ```almd run
 fn main() -> Unit = {
@@ -309,7 +311,7 @@ fn main() -> Unit = {
 a-b-c
 ```
 
-### `list.map(xs: List[A], f: Fn[A] -> B) -> List[B]`
+### `list.map(xs: List[A], f: (A) -> B) -> List[B]`
 
 Apply a function to each element, returning a new list.
 
@@ -322,7 +324,7 @@ fn main() -> Unit = {
 [2, 4, 6]
 ```
 
-### `list.filter(xs: List[A], f: Fn[A] -> Bool) -> List[A]`
+### `list.filter(xs: List[A], f: (A) -> Bool) -> List[A]`
 
 Keep elements that satisfy a predicate.
 
@@ -335,7 +337,7 @@ fn main() -> Unit = {
 [3, 4]
 ```
 
-### `list.find(xs: List[A], f: Fn[A] -> Bool) -> Option[A]`
+### `list.find(xs: List[A], f: (A) -> Bool) -> Option[A]`
 
 Find the first element matching a predicate.
 
@@ -348,7 +350,7 @@ fn main() -> Unit = {
 some(2)
 ```
 
-### `list.any(xs: List[A], f: Fn[A] -> Bool) -> Bool`
+### `list.any(xs: List[A], f: (A) -> Bool) -> Bool`
 
 Check if any element satisfies a predicate.
 
@@ -361,7 +363,7 @@ fn main() -> Unit = {
 true
 ```
 
-### `list.all(xs: List[A], f: Fn[A] -> Bool) -> Bool`
+### `list.all(xs: List[A], f: (A) -> Bool) -> Bool`
 
 Check if all elements satisfy a predicate.
 
@@ -374,7 +376,7 @@ fn main() -> Unit = {
 true
 ```
 
-### `list.sort_by(xs: List[A], f: Fn[A] -> B) -> List[A]`
+### `list.sort_by(xs: List[A], f: (A) -> B) -> List[A]`
 
 Sort by a key-extraction function (not a comparator). f extracts the sort key from each element.
 
@@ -387,7 +389,7 @@ fn main() -> Unit = {
 ["a", "bb", "ccc"]
 ```
 
-### `list.flat_map(xs: List[A], f: Fn[A] -> List[B]) -> List[B]`
+### `list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]`
 
 Map each element to a list and flatten the results.
 
@@ -400,7 +402,7 @@ fn main() -> Unit = {
 [1, 10, 2, 20]
 ```
 
-### `list.filter_map(xs: List[A], f: Fn[A] -> Option[B]) -> List[B]`
+### `list.filter_map(xs: List[A], f: (A) -> Option[B]) -> List[B]`
 
 Map and filter in one pass: keep only some values.
 
@@ -413,7 +415,7 @@ fn main() -> Unit = {
 [1, 3]
 ```
 
-### `list.find_map(xs: List[A], f: Fn[A] -> Option[B]) -> Option[B]`
+### `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]`
 
 The first some value f gives, or none. f is not called after the hit — the short-circuiting `filter_map(xs, f) |> list.first`. A callback that propagates with `!` makes the whole call fallible, like the other list HOFs.
 
@@ -426,7 +428,7 @@ fn main() -> Unit = {
 some(2)
 ```
 
-### `list.take_while(xs: List[A], f: Fn[A] -> Bool) -> List[A]`
+### `list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]`
 
 Take elements from the front while a predicate holds.
 
@@ -439,7 +441,7 @@ fn main() -> Unit = {
 [1, 2]
 ```
 
-### `list.drop_while(xs: List[A], f: Fn[A] -> Bool) -> List[A]`
+### `list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]`
 
 Drop elements from the front while a predicate holds.
 
@@ -452,7 +454,7 @@ fn main() -> Unit = {
 [3, 1]
 ```
 
-### `list.count(xs: List[A], f: Fn[A] -> Bool) -> Int`
+### `list.count(xs: List[A], f: (A) -> Bool) -> Int`
 
 Count elements that satisfy a predicate.
 
@@ -465,7 +467,7 @@ fn main() -> Unit = {
 2
 ```
 
-### `list.partition(xs: List[A], f: Fn[A] -> Bool) -> (List[A], List[A])`
+### `list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])`
 
 Split a list into two: elements matching and not matching a predicate.
 
@@ -477,7 +479,7 @@ fn main() -> Unit = {
 }
 ```
 
-### `list.reduce(xs: List[A], f: Fn[A, A] -> A) -> Option[A]`
+### `list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]`
 
 Reduce a list by combining elements pairwise. Returns none if empty.
 
@@ -490,7 +492,7 @@ fn main() -> Unit = {
 some(6)
 ```
 
-### `list.group_by(xs: List[A], f: Fn[A] -> B) -> Map[B, List[A]]`
+### `list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]`
 
 Group elements by a key function into a map.
 
@@ -558,7 +560,7 @@ fn main() -> Unit = {
 [1, 3]
 ```
 
-### `list.find_index(xs: List[A], f: Fn[A] -> Bool) -> Option[Int]`
+### `list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]`
 
 Find the first index where a predicate holds.
 
@@ -571,7 +573,7 @@ fn main() -> Unit = {
 some(1)
 ```
 
-### `list.update(xs: List[A], i: Int, f: Fn[A] -> A) -> List[A]`
+### `list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]`
 
 Return a new list with the element at index i transformed by f.
 
@@ -597,7 +599,7 @@ fn main() -> Unit = {
 [0, 0, 0]
 ```
 
-### `list.scan(xs: List[A], init: B, f: Fn[B, A] -> B) -> List[B]`
+### `list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]`
 
 Like fold, but returns all intermediate accumulator values.
 
@@ -646,7 +648,7 @@ fn main() -> Unit = {
 3
 ```
 
-### `list.zip_with(xs: List[A], ys: List[B], f: Fn[A, B] -> C) -> List[C]`
+### `list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]`
 
 Combine two lists element-wise using a function.
 
@@ -659,7 +661,7 @@ fn main() -> Unit = {
 [11, 22]
 ```
 
-### `list.fold(xs: List[A], init: B, f: Fn[B, A] -> B) -> B`
+### `list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B`
 
 Reduce a list from left with an initial accumulator.
 
@@ -698,7 +700,7 @@ fn main() -> Unit = {
 [1, 2]
 ```
 
-### `list.unique_by(xs: List[A], f: Fn[A] -> K) -> List[A]`
+### `list.unique_by(xs: List[A], f: (A) -> K) -> List[A]`
 
 Remove duplicates by key function, preserving first occurrence.
 
@@ -722,7 +724,7 @@ fn main() -> Unit = {
 [[1, 2], [2, 3], [3, 4]]
 ```
 
-### `list.push(xs: List[A], x: A) -> Unit`
+### `list.push(mut xs: List[A], x: A) -> Unit`
 
 Append an element in place. Requires var binding.
 
@@ -737,7 +739,7 @@ fn main() -> Unit = {
 [1, 2, 3, 42]
 ```
 
-### `list.pop(xs: List[A]) -> Option[A]`
+### `list.pop(mut xs: List[A]) -> Option[A]`
 
 Remove the last element in place and return it (`some(x)`, or `none` when the list is empty). Requires var binding.
 
@@ -754,7 +756,7 @@ some(3)
 [1, 2]
 ```
 
-### `list.clear(xs: List[A]) -> Unit`
+### `list.clear(mut xs: List[A]) -> Unit`
 
 Remove all elements in place. Requires var binding.
 
@@ -774,8 +776,9 @@ true
 
 ## Fallible pipelines — the polymorphic core (ADR-0006)
 
-A callback whose body ends in `!` (or a named `-> T!` fn) instantiates the
-core combinator's FALLIBLE form: the call yields `Result[_, String]` and
+A callback that propagates with `!` (or a named `-> T!E` fn) instantiates the
+core combinator's fallible form: the call yields `Result[_, E]` with the
+callback's error type (`String` for plain `T!`) and
 **short-circuits on the first err** (elements after it are never evaluated).
 One name per combinator — the strategy rides the marker:
 

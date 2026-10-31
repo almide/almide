@@ -21,8 +21,9 @@ and body of either kind of message: `header`, `header_values`, `headers`,
 `body`, `body_bytes`, `set_header`, `set_body` and `set_body_bytes` take a
 request or a response and give back the same kind. A header list is
 `List[(String, String)]` everywhere — `with_headers`, `new_request`,
-`request` and what `headers` returns — in wire order, a
-repeated field kept.
+`request` and what `headers` returns. Received headers preserve wire order
+and repeated fields. Builders such as `with_headers` instead upsert names
+case-insensitively, keeping the first spelling and last value.
 
 The client functions are `effect fn`s that return `Result`. Propagation is
 explicit (ADR-0008): write `http.send(req)!` in an effect fn, or handle the
@@ -115,7 +116,7 @@ are byte-identical to native. A stock artifact from
 
 ## Routing and middleware
 
-A handler is a plain function from a request to a response —
+A handler is an effect function value from a request to a response —
 `type HttpHandler = effect (HttpRequest) -> HttpResponse` — and so are a
 router and a wrapped app. `http.serve` is one way to run a handler;
 `http.new_request` is another: a test builds a request in code and calls the

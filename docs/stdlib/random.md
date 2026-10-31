@@ -55,9 +55,9 @@ effect fn main() -> Unit = {
 }
 ```
 
-**wasm element coverage** (#1169): scalar (`Int`/`Float`/`Bool`), `String`, and
-`(String, String)` elements run on the wasm leg; any other element type walls
-honestly (`random.choice_x` unlinked) and runs via the native leg.
+**Wasm element coverage:** `choice` and `shuffle` use the structural list
+element representation, including records and tuples; they are not limited
+to scalar values, strings, or string pairs.
 
 ### `random.shuffle(xs: List[A]) -> List[A]`
 
