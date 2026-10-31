@@ -105,8 +105,37 @@ let r = "hello".split(" ").reverse()  // chaining works too
 
 ## Stdlib Quick Reference
 
-Use [the generated stdlib reference](../stdlib/README.md) for current signatures
-and [CHEATSHEET](../CHEATSHEET.md) for import and calling examples. Core modules
+Use [the generated stdlib reference](https://github.com/almide/almide/blob/develop/docs/stdlib/README.md) for current signatures
+and [CHEATSHEET](https://github.com/almide/almide/blob/develop/docs/CHEATSHEET.md) for import and calling examples. Core modules
 are auto-imported as module names, not as every unqualified function name.
 Platform/opt-in modules require explicit imports. The former `error` module is retired. `io.read_all()` remains available and
 returns `String`; see the IO reference for its effect-context calling syntax and target behavior.
+
+This selected name index is checked against the stdlib sources by CI; the
+generated reference remains authoritative for signatures and availability.
+
+```
+AUTO-IMPORTED (no import needed):
+  string: len trim split lines contains starts_with ends_with replace
+          index_of slice to_upper to_lower to_list pad_start pad_end
+  list:   len get first last map flat_map filter find fold enumerate
+          zip sort sort_by reverse any all take drop unique join sum
+  map:    new get set contains remove keys values to_list from_list merge len
+  set:    new insert contains remove union intersection len
+  int:    to_string parse parse_radix abs min max clamp pow to_hex from from_checked from_saturating
+  float:  to_string from abs min max pow round floor ceil
+  math:   sqrt log sin cos pi e
+  value:  get get_string get_int get_bool get_float get_array get_path as_object
+  datetime, value, option, result, bytes — also auto-imported
+
+IMPORT REQUIRED (effectful / platform / opt-in):
+  import fs      — read_text write_text read_lines append_text exists mkdir_p remove list_dir stat temp_dir
+  import env     — get set args cwd os sleep_ms
+  import process — exec output run
+  import io      — read_line print read_all
+  import json    — parse stringify stringify_pretty
+  import random  — int float shuffle
+  import regex   — is_match find find_all replace split captures
+  import path    — join dirname basename extension stem normalize is_absolute
+  import args    — has_flag option positional
+```
