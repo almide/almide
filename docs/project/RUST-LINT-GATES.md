@@ -12,6 +12,33 @@ nothing here is implicit in a Makefile comment.
 | rustc warnings | `scripts/check-rustc-warnings.sh` (CI `build` job) | shrink-only baseline, currently 0, fails both directions |
 | clippy warnings | `scripts/check-clippy-warnings.sh` (CI `build` job) | shrink-only baseline (`scripts/clippy-warnings-baseline.txt`): growth fails on PRs; a lower count is a notice there and fails in the nightly strict `clippy-baseline.yml` lane; deny-level lints (e.g. `overly_complex_bool_expr`) fail the compile itself — the first run caught a vestigial `\|\| true` in the parser's named-arg path |
 
+## Narrow prose-only CI lane
+
+For allowlisted prose-only changes, CI can reuse the Linux compiler artifact
+from a successful `ci.yml` push run at the exact compared base commit in this
+repository. The artifact must have matching repository/run/SHA provenance and
+a verified SHA-256 digest. Missing, expired, untrusted, or unverifiable artifacts
+fall back to the normal build; this is not a promise that every documentation
+change avoids compilation.
+
+The classifier is loaded from the trusted comparison base. Source, workflow,
+generator, compiled-in diagnostic/template, normative ALS, and unknown paths
+are not eligible for this new prose fast path. A merge group qualifies only
+when every changed path qualifies. Otherwise the normal compiler build and
+existing job selection apply: the older `docs_only` classifier may still skip
+its heavy test matrix for some documentation paths. A false `prose_only` value
+is therefore not a promise that every job runs. Source/workflow changes also
+fail the older docs-only classification. Main-target cross-platform builds
+remain unchanged. Initial installation cannot reuse this lane because its
+base does not yet contain the classifier.
+
+Document fences, generated-reference freshness, and the existing Emit & Format
+checks still run. Named required matrix contexts continue to report results;
+branch protection and merge-queue requirements do not change. Scheduled/manual
+verification remains on the full lane. See [`scripts/ci_prose.py`](../../scripts/ci_prose.py) and its offline
+regression controls in [`scripts/test_ci_prose.py`](../../scripts/test_ci_prose.py) for the exact allowlist and
+failure behavior.
+
 ## Recorded exclusion: `cargo fmt --all -- --check`
 
 Not gated, on purpose, as of 2026-08-28:

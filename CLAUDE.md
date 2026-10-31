@@ -99,11 +99,17 @@ Correct flow:
    `proofs/releases/vX.Y.Z.toml` on `develop`. CI re-measures every `[derived]` field
    against the tag forever after — the seal is the release's immutable evidence record.
 
-If you already shipped a broken release:
+If a release fails, first distinguish a build that never published from an
+already published release. A failed build is not, by itself, authorization to
+delete a published release or tag. A committed seal requires the original tag
+to remain fetchable; deleting it breaks the evidence check.
 
-- `gh release delete vX.Y.Z --yes`
-- `git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`
-- Fix on `develop`, bump to `vX.Y.(Z+1)`, repeat
+The former deletion-and-next-patch recipe did not settle that constraint.
+Before any withdrawal or destructive recovery, obtain an explicit owner-approved
+plan for the published tag, assets, attestations, and seal. This checklist does
+not decide an exception to evidence preservation. Prepare fixes on `develop`
+and use the normal versioned release procedure; do not silently reuse a
+published version.
 
 ## Development Setup
 
