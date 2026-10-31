@@ -1,4 +1,4 @@
-> Last updated: 2026-07-25
+> Last updated: 2026-10-31
 
 # Codegen Specification
 
@@ -6,9 +6,9 @@ Almide's codegen (`crates/almide-codegen`) is a three-layer architecture that
 transforms typed IR into source output for the **Rust** target (and WGSL). All
 semantic decisions are made in the IR before any text is emitted.
 
-The **WASM** target does not flow through this crate: it is the v1 MIR
-trust-spine in `crates/almide-mir` (WAT text, assembled by the CLI). The v0
-direct wasm emitter that used to live here was retired in #782. See
+The **WASM** target does not flow through this crate. The shared route in
+`src/wasm_route.rs` uses the structural emitter in `crates/almide-wasm` to
+produce Wasm bytes directly; the retired WAT renderer is not a fallback. See
 [../ARCHITECTURE.md](../ARCHITECTURE.md) and
 [../wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md).
 
@@ -495,15 +495,16 @@ Two levels of generic bounds:
 
 ## 7. WASM Target (not in this crate)
 
-**Source**: `crates/almide-mir/src/pipeline.rs`, `render_wasm*.rs`
+**Source**: `src/wasm_route.rs`, `crates/almide-wasm`
 
-The wasm binary is produced by the v1 MIR trust-spine, not by almide-codegen:
-`almide-mir` lowers the linked IR through MIR (Perceus ownership, layout) to
-WAT text; the CLI assembles it with the `wat` crate and keeps only function
-names in the name section. Stdlib calls are satisfied by self-hosted pure-Almide
-implementations (`stdlib/*.almd` via `crates/almide-types/src/self_host_registry.rs`); an unlinked
-call is a wall — a hard, diagnosed error. The v0 direct emitter that this
-section used to describe was retired in #782.
+The CLI and library consumers share one route: linked typed IR goes through
+the structural emitter to Wasm bytes, not through MIR-to-WAT rendering or a
+CLI `wat` assembly step. Programs outside the supported surface produce a
+named wall (`E082` at the CLI); there is no fallback to the retired renderer.
+The stock-WASI form used by browser runners is derived with
+`almide_wasi::to_wasi`. Runtime imports and self-hosted standard-library bodies
+are part of the linked program; they are not a reason to select a different
+renderer.
 
 Details: [../wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md),
 [../ARCHITECTURE.md](../ARCHITECTURE.md), [crates/CLAUDE.md](../../crates/CLAUDE.md).

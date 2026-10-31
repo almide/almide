@@ -40,7 +40,7 @@
 - **メリット**: 完成域では「v1 が実プログラムを単独コンパイル」＝強く正直なマイルストーン／
   Gap 3(実プログラム被覆)を直接前進／① の器の上で自動的に「v1 発動域の拡大」として価値化。
 - **デメリット**: 遅い／終端が見えにくい（1関数でも壁だと whole-program は v0 fallback）／
-  残件に **capturing closure = 証明モデルの根本制約**（[closure-architecture-v2](closure-architecture-v2.md)、
+  残件に **capturing closure = 証明モデルの根本制約**（[closure-architecture-v2](../done/closure-architecture-v2.md)、
   証明拡張＝研究）が混ざる／これ単体では何もリリースされない（①③で製品化が要る）。
 - **受入基準の例**: 対象 repo の全 fn が v1 で lower（壁ゼロ）→ `--verified` で v0 fallback が
   一度も発火しない。現状の残壁: Set（`Option/Result[Set]` は self-host 化可、`some(set)` は

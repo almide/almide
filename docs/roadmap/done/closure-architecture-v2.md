@@ -1,5 +1,12 @@
 <!-- description: Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION -->
+<!-- done: 2026-06-02 -->
 # Closure Architecture v2
+
+> **Completed design record.** P0–P6 are complete; the final implementation
+> branch merged in [#332](https://github.com/almide/almide/pull/332) on
+> 2026-06-02. Moved to `done/` on 2026-10-31. The problem description, phase
+> table, commands, test counts, and proof claims below record the implementation
+> at that time, not current compiler behavior or work to resume.
 
 > **One identity, one capture-set, lifting is lowering.** A closure is a single
 > canonical value with a program-unique identity and an explicit, once-computed
@@ -7,9 +14,9 @@
 > representational shortcut. This is the closure analogue of how `Verified` /
 > `Canonical` gate emit: correctness by construction, not by guessing.
 
-## Why
+## Original problem (historical)
 
-Today a single source lambda `(x) => f(x)` is represented up to **five** different
+At design time, a single source lambda `(x) => f(x)` is represented up to **five** different
 ways depending on use-site syntax, capture analysis, mutability, and target:
 
 1. an inline iterator-adapter callback (`IterStep`/`IterCollector`, Rust);
@@ -275,7 +282,7 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
   `Canonical` certificate is unaffected; closure table slots are assigned in scan
   order, independent of these ids, so emitted bytes stay host-deterministic.
 
-## Status & resume (RESUME HERE)
+## Implementation progress log (historical)
 
 ### Done / in flight
 
@@ -291,8 +298,9 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
 | P6 | non-Copy mutable captures → shared cell (`SharedMut`/heap cell) so a closure's mutation propagates — was silently wrong on both targets | **DONE** (`f680b807`), branch `closure-v2-p3`, verified (spec 240/240 + cargo test + 2 cross-target regressions) |
 
 P3 is on branch `closure-v2-p3` (Rust: `22a7d87a` groundwork + `232a4fac` fix; WASM: the call-target fix below).
-Work in a fresh worktree from `origin/develop` (or `origin/closure-v2-p3` to build on it);
-never touch the main checkout (it has unrelated uncommitted changes).
+The implementation used a fresh worktree from `origin/develop` (or
+`origin/closure-v2-p3`) to avoid unrelated uncommitted changes in the main
+checkout. This is a historical workflow note, not an instruction to resume.
 
 ### FIXED — P3 (WASM): auto-`?` closure binding called by name (was: "drops the block")
 
@@ -425,5 +433,5 @@ The capture-*cell* architecture is complete. A later adversarial cross-target sw
 adjacent divergences in how closures are *typed / parsed / stored* (string mutators on WASM,
 closure-in-tuple, list-index call, typed params, closure-in-map, non-Copy-element IndexAssign) —
 orthogonal to capture cells. Those are tracked separately in
-[Closure Codegen Cross-Target Gaps](../done/closure-codegen-cross-target-gaps.md) (5 fixed via #334; 2 deep
+[Closure Codegen Cross-Target Gaps](closure-codegen-cross-target-gaps.md) (5 fixed via #334; 2 deep
 ones root-caused and open).

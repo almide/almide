@@ -7,7 +7,7 @@
 
 ## Active
 
-100 items
+99 items
 
 | Item | Description |
 |------|-------------|
@@ -23,7 +23,6 @@
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
 | [CI critical path: measured baseline, peer survey and the ranked plan (2026-09-21)](active/ci-critical-path.md) |  |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) | Standing ledger of compiler warnings CI tolerates, and the plan to drive each class to zero |
-| [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) | Closing the closure feature gap between the native and wasm legs, sweep by sweep |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) | Making every codegen traversal exhaustive by construction, so a new IR node cannot be silently skipped |
 | [Completeness by Construction](active/completeness-by-construction.md) | Design note: borrowing Perceus / borrow-checker style mechanical completeness guarantees for Almide's own passes |
@@ -153,16 +152,17 @@
 
 ## Done
 
-14 items
+15 items
 
 <details>
-<summary>Show all 14 completed items</summary>
+<summary>Show all 15 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-07-23 | [Code Health: Codopsy-Driven File Splits and Function Decomposition](done/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | 2026-07-15 | [Claim wording: Perceus phrasing and the byte-identity guarantee scope](done/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | 2026-06-02 | [Closure Codegen Cross-Target Gaps](done/closure-codegen-cross-target-gaps.md) | Cross-target (native vs wasm) closure-codegen divergences found by the adversarial differential sweep — all 8 fixed |
+| 2026-06-02 | [Closure Architecture v2](done/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | 2026-04-20 | [Variant Exhaustiveness Refinement](done/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
 | 2026-04-20 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](done/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
 | 2026-04-19 | [Stdlib Declarative Unification — Toward a Single Source of Truth](done/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |

@@ -111,7 +111,7 @@ v0 はクロージャ変換で全対応。v1 は inline-defunctionalize でき�
 - **exit gate**: closure-passing プログラムが lower（`unresolvable method/computed`
   バケット → 0）。
 - **再開点**: `funcref_value_of` / `CallIndirect` 経路の拡張、closure env の
-  value-model 材料化。docs/roadmap/active/closure-architecture-v2.md と接続。
+  value-model 材料化。docs/roadmap/done/closure-architecture-v2.md と接続。
 - **重み**: 大（クロージャ env の所有権を PCC に載せる設計）。
 
 ## Phase D — stdlib self-host の完成

@@ -140,7 +140,7 @@ Consequences, in order of value:
 
 ## Relations — three adjacent recreates, three altitudes
 
-- **[[closure-architecture-v2]]** (exists) owns the closure REPRESENTATION
+- **[Closure Architecture v2](../done/closure-architecture-v2.md)** (completed) owns the closure REPRESENTATION
   layer: one identity, one capture-set, `lift_lambda`'s decline classes.
   The #1134 family-1 walls (fallible_hof/fallible_lambda baseline entries)
   live THERE — a bundled generic body links fine today when its lambda

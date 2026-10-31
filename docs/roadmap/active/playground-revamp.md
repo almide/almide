@@ -1,6 +1,27 @@
 <!-- description: Playground UI revamp: file tabs, share URLs, TS-style example gallery -->
 # Playground UI Revamp
 
+## Compiler-side status (2026-10-31)
+
+以下の July 2026 の記録にあったコンパイラ側の問題は修正済み:
+
+- `io.read_all` は構造的 Wasm エミッタで実装済み
+  ([host_env.rs](../../../crates/almide-wasm/src/host_env.rs))。
+  回帰テスト: [io_read_all_test.rs](../../../tests/io_read_all_test.rs)、
+  [io_read_all_capacity_test.rs](../../../tests/io_read_all_capacity_test.rs)。
+- CLI の guest cwd は `$PWD` ではなく `std::env::current_dir()` から
+  `ALMIDE_CWD` を設定する ([run.rs](../../../src/cli/run.rs)、
+  [component_host.rs](../../../crates/almide-wasm-run/src/component_host.rs))。
+  component 経路にも stale `$PWD` の
+  [回帰テスト](../../../tests/component_route_cwd_test.rs)がある。
+- 現行の CLI/library 共通 Wasm 経路は構造的エミッタであり、下記の
+  MIR/WAT レンダラの wall 記録は当時のもの
+  ([wasm_route.rs](../../../src/wasm_route.rs))。
+
+これは Almide リポジトリの確認であり、外部 playground の現在の配信版・
+ブラウザ動作の再検証ではない。almide-web バインディング統合
+(インタラクティブ Canvas) は別 arc として残す。以下は設計と検証の履歴。
+
 ## Vision
 
 サーバーサイド playground(Go/Rust 方式)の機能一覧を埋めるのではなく、
@@ -24,7 +45,7 @@
 - **ギャラリーのサンプルは native/WASM byte-parity CI**(playground repo `tests/run.mjs`)**に合流**させ、腐らせない
 - 追わないもの: 外部パッケージ取得、clippy/miri 的ツール群、Compiler Explorer 式マルチコンパイラ比較ペイン
 
-## Current State (playground repo, 2026-07-25 時点)
+## Historical snapshot (playground repo, 2026-07-25 時点)
 
 - 素の HTML + ES Modules 単一ファイル(index.html 1365 行)、エディタは textarea + 透明ハイライト重ねの自前実装
 - 実行は完全ブラウザ内: almide-mir `try_render_wasm_source` → `wat` crate → browser_wasi_shim(WASI)。コンパイラ wasm 1.6MB
@@ -45,11 +66,11 @@
 
 - [x] 3.1 Visual 出力 — 設計を「stdout に SVG / PPM P3 を印字したらプレイグラウンドが画像レンダリング」に確定。コンパイラ変更ゼロ、native では同じプログラムが正規の .svg/.ppm を吐くので byte-parity CI がそのまま適用される。Graphics カテゴリ(Mandelbrot PPM / 生成 SVG)追加、8/8 examples green。almide-web バインディング統合(インタラクティブ Canvas)は別 arc
 - [x] 3.2 embed モード — `?embed=1`(ヘッダ/AI バー非表示 + スリム Run バー + Open in Playground)、`&hide=` で hidden setup(タブ非表示・コンパイルには含む)、embed 時は localStorage 不使用
-- [x] 3.3 stdin + zip — `stdin.txt` タブが fd0 になる(io.read_line 動作確認、io.read_all は wasm registry 未登録で wall — 小ギャップ)。Export ボタンで `almide run src/main.almd` 可能なプロジェクト zip(依存ゼロの store 方式 zip writer)
+- [x] 3.3 stdin + zip — `stdin.txt` タブが fd0 になる(io.read_line 動作確認、当時 io.read_all は wasm registry 未登録で wall — 現行コンパイラでは解決済み、上記参照)。Export ボタンで `almide run src/main.almd` 可能なプロジェクト zip(依存ゼロの store 方式 zip writer)
 
-発見した課題(別対応):
-- `almide run --target wasm` が guest cwd を `$PWD` から導出しており、`getcwd` と食い違うと相対 fs read が wasm でだけ ENOENT(execFileSync 等 PWD を更新しない親から顕在化)。ハーネス側は PWD を明示して回避済み。**almide 本体で current_dir 参照に直すべき**
-- cross-module ADT(module 定義の variant 型を entry で使う形)は v1 wasm レンダラの wall(`main is outside the MIR-lowering subset`)。modules サンプルは関数モジュール(stats)に設計変更で回避
+当時発見した課題 (履歴。現行のコンパイラ側状況は上記):
+- `almide run --target wasm` が guest cwd を `$PWD` から導出しており、`getcwd` と食い違うと相対 fs read が wasm でだけ ENOENT(execFileSync 等 PWD を更新しない親から顕在化)。ハーネス側は PWD を明示して回避済み。**現在は almide 本体で current_dir 参照に修正済み**
+- 当時の cross-module ADT(module 定義の variant 型を entry で使う形)は v1 wasm レンダラの wall(`main is outside the MIR-lowering subset`)。modules サンプルは関数モジュール(stats)に設計変更で回避
 - AI システムプロンプトの example が旧 `effect fn main(_args)` 形で E028 を誘発していたのを修正
 
 ## Roadmap
