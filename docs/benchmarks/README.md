@@ -37,6 +37,15 @@ This claim is not prose. Every observable promise is a named contract in the [be
 > [C-331](../../docs/contracts/contracts.toml) (leg-dependent compressed bytes).
 <!-- claims:generated:end -->
 
+**Ledger consistency note:** an `active` status is not proof that every contract
+statement agrees. C-189 still describes only two platform-dependent exceptions
+and an `env.cwd` Wasm wall, while C-227 includes `env.cwd` in a served family and
+C-331 declares leg-dependent compressed bytes. These statements remain in the
+[pinned contract ledger](../contracts/contracts.toml). This page does not resolve
+that normative disagreement: reconciliation must follow the
+[judge-first procedure](../../scripts/check-als-pin.sh), not silently rewrite a
+contract, pin, or generated count.
+
 Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/design/EQUIVALENCE.md](../design/EQUIVALENCE.md)**.
 
 ## Memory safety — proven where it is proven, trusted where it is trusted
