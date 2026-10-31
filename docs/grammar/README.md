@@ -4,9 +4,10 @@
 reason: **decode-time constraint engines** — [llguidance](https://github.com/guidance-ai/llguidance),
 [XGrammar](https://github.com/mlc-ai/xgrammar), OpenAI custom tools (Lark CFG
 input) — can only force syntactic validity at token-sampling time if a
-consumable CFG exists. With one, syntactically invalid Almide becomes
-*unrepresentable* rather than merely diagnosed. That is the strongest accuracy
-lever this repo has: it acts before the model can make the mistake.
+consumable CFG exists. This artifact can rule out some invalid token sequences
+before generation, but it is a deliberate superset of compiler syntax. It does
+not make every invalid Almide program unrepresentable; the limits and tested
+negative examples are listed below.
 
 Evidence for the approach: CangjieBench (arXiv 2603.14501) — for a
 low-resource language, syntax-constrained generation is the best
@@ -83,7 +84,8 @@ floor on the fixture count.
 
 These are honest limits, not bugs. Where the artifact is *looser* than the
 compiler a decoder is simply unconstrained there; where it is *tighter* the
-corpus check proves no real Almide is affected.
+corpus check establishes only that the tested compiler-accepted files are
+not excluded; it does not prove coverage of all legal programs.
 
 | # | Gap | Direction |
 |---|---|---|
@@ -94,7 +96,7 @@ corpus check proves no real Almide is affected.
 | G5 | **Diagnostics-only restrictions.** The `??` line-crossing rule (E038/#1112), terminal `??` (E038), positional-after-named arguments, and the "every parameter after the first default needs one" rule are parser *diagnostics*, not grammar. The artifact accepts them. | looser |
 | G6 | **Reserved contextual identifiers.** `as`, `where` and the type name `Fn` are matched by spelling in the compiler but are ordinary identifiers to its lexer. The artifact reserves them, so `let as = 1` — legal Almide — is rejected. No corpus file does this. `self` is deliberately *not* reserved (it is a value in every convention method body), so the bare receiver parameter is spelled as "the first parameter may omit `: Type`" — the artifact accepts `fn f(x) -> Int = 1`, which the compiler rejects. | both |
 | G6b | **`scoped` is contextual and NOT reserved** (#1997, ALS-E31). Unlike G6's three, `scoped` keeps its identifier meaning in the artifact: the `SCOPED` terminal is admitted in every plain-name position (`_ident`), so `let scoped = 41` and `match scoped { … }` still parse. The artifact is *looser* than the compiler only in the heads — it reads `scoped` as a qualifier wherever a block or `fn` follows, while the compiler additionally requires the `{` to be on the same line and outside a `match`/`while`/`for` head. | looser |
-| G7 | **`fan.<head>`.** The head name is left open (any identifier); the compiler admits only `bounded`/`timeout`/`race`/`settle`/`any`. | looser |
+| G7 | **`fan.<head>`.** The head name is left open (any identifier); current block heads include `bounded`/`timeout`/`min`/`settle`; `race` and `any` are retired spellings diagnosed by the compiler. | looser |
 | G8 | **Statement separators are required** (a newline or `;`). The compiler tolerates two statements adjacent on one line with none. Deliberate: it removes a large ambiguity and no formatted Almide relies on it. | tighter |
 | G9 | **Arithmetic precedence is flattened.** `\|>`, `>>`, `+ -`, `* / %`, `^` share one level. Precedence shapes the parse *tree*, never the set of accepted token strings, and Earley pays for depth on every column. The binding powers remain authoritative in `grammar/precedence.toml` and `Parser::infix_bp`. Boolean, comparison and range levels ARE kept separate — their non-associativity is a language fact (`a < b < c` and `0..<1..<2` are errors). | equal |
 | G10 | **Retired / rejected spellings excluded.** `&&`, `\|\|`, `++` and `..`/`..=`-as-a-range parse in the compiler *only* so it can answer with a migration hint. The artifact excludes them: a decoder must never sample them. | tighter |

@@ -4,18 +4,18 @@ Stage 3 of the completeness roadmap: the machine that hunts the
 composition space continuously for **observable divergences** and
 compiler failures.
 
-It generates well-typed Almide programs (synthesis, corpus mutation, and
-the self-checking identity family), runs each through an oracle ladder
+It generates Almide programs through synthesis, corpus mutation, identity,
+composition, and multi-module shape families, runs them through an oracle ladder
 that compiles and executes it on both targets, and judges the results.
 Every program is reproducible from a `(seed, index, family)` triple.
-Findings are delta-debugged to a minimal repro and written to
-`findings/`.
+Findings are written to `findings/`. Minimization is family-specific;
+shape findings preserve the whole project rather than claiming a minimal repro.
 
 ## Which oracle judges what
 
 A *differential* fuzzer has no oracle for a bug the two legs SHARE.
-native-v1 and wasm share the whole frontend, `almide-mir` and the linked
-IR, so a miscompile there makes both legs identically wrong and the vote
+native and structural Wasm share frontend and linked-IR machinery (not a
+shared MIR/WAT renderer), so a miscompile there makes both legs identically wrong and the vote
 comes back unanimous — #1322 is exactly that: a scalar let-alias
 miscompile that lived from v0.57.0 while all 394 `spec/wasm_cross`
 parity fixtures stayed green.
@@ -24,7 +24,7 @@ parity fixtures stayed green.
 |---|---|---|
 | native ⇄ wasm differential | a divergence between the two backends | every program |
 | `almide-interp` (third judge, #516) | one backend, when the interpreter can run the program | abstains freely — it is a vote, not a verdict |
-| **by construction** (identity family, #1332) | **either leg, or BOTH at once** | only the identity family, which is Int scalars and their control flow |
+| **by construction** | **either leg, or BOTH at once** | identity scalars/control flow, composition operator/payload cells, and shape projects with expected output |
 
 The third row is the one the other two cannot supply: an identity-family
 program's expected stdout is a literal in its own source, so a leg is
@@ -64,7 +64,7 @@ cd tools/xtarget-fuzz && cargo build --release
 ./target/release/xtarget-fuzz stats
 ```
 
-`--family all|identity|synthesis` (default `all`) selects which families
+`--family all|identity|synthesis|composition|shape` (default `all`) selects which families
 a campaign draws from. **`(seed, index)` only reproduces a program under
 the same `--family`** — `all` spends one draw on the family roll before
 generating and `identity` spends none, so the two disagree from the first
@@ -77,10 +77,11 @@ and the `almide` binary are autodetected; override with `--repo` /
 
 ## The generator
 
-Three families (`SYNTHESIS_WEIGHT` / `MUTATION_WEIGHT` /
-`IDENTITY_WEIGHT` in `src/generator/mod.rs`): the identity family takes
-`3/13` ≈ 23% of a mixed campaign, and the remaining 77% splits 7:3
-between synthesis and mutation as before.
+Five families are selected in stages (`Engine::generate` in
+`src/generator/mod.rs`). Identity takes 3/13 of `all`; composition takes 3/13
+of the remaining draws; shape takes 1/6 of what both leave. The final
+remainder splits 7:3 between synthesis and mutation. The old 54% synthesis /
+23% mutation figures predate the composition and shape stages.
 
 The identity decision is drawn from a **separate** RNG sub-stream
 (`IDENTITY_STREAM_SALT`) rather than the program's main stream. Any draw
@@ -138,8 +139,9 @@ loop-carried scalar state, let-of-var aliasing, branch-arm assignment.
 
 **Deliberately NOT covered**: strings, floats, Unicode, collections as
 data, effects, generics. None of those has a cheap by-construction
-inverse; they stay under the differential oracle in the other two
-families. A narrow family with a real oracle beats a broad one with none.
+inverse in this identity family. Other families cover additional shapes:
+composition and shape have their own by-construction expected outputs;
+synthesis and mutation primarily use differential evidence.
 
 **Minimization is structural** (`minimize::minimize_plan`): identity
 findings shrink through the *plan*, never the text. Almost every line is
@@ -147,6 +149,14 @@ one half of an inverse pair, so deleting a line changes the value the
 program is supposed to print — a text-level shrink would "still
 reproduce" for a reason unrelated to the bug and quietly turn a
 miscompile into a generator artifact.
+
+### The composition family — operator/payload interactions
+
+`--family composition` samples operator × payload × position cells with
+expected output known by construction (`src/generator/composition.rs`):
+`??`, `!`, `?`, pipes, matches and tuple extraction over Int/String/tuple/record
+payloads in tail, let and argument positions. It does not rely on backend
+agreement to decide the expected answer.
 
 ### The shape family — multi-module projects (#3309)
 
@@ -176,7 +186,7 @@ rewrites the project under the scratch dir).
 
 ### The other two families
 
-- **Type-directed synthesis (~54%)** — `src/generator/{term,program}.rs`.
+- **Type-directed synthesis** — `src/generator/{term,program}.rs`.
   Builds programs well-typed *by construction* from a typed term grammar:
   pick a goal type, generate an expression of that type from literals,
   in-scope variables, stdlib calls whose return type unifies with the
@@ -196,7 +206,7 @@ rewrites the project under the scratch dir).
   combining marks, `ß`), float boundaries (`-0.0`, `5e-324`, `1e300`,
   `0.1+0.2` shapes), int extremes (`i64::MIN/MAX`, width boundaries).
 
-- **Mutation (~23%)** — `src/generator/mutate.rs`. Parses the
+- **Mutation** — `src/generator/mutate.rs`. Parses the
   `main`-bearing corpus (`spec/wasm_cross`, `examples`, …), strips `test`
   blocks, and applies type-preserving AST mutations (literal
   perturbation from the pools, equal-kind subexpression swap, statement
@@ -204,8 +214,12 @@ rewrites the project under the scratch dir).
 
 Determinism: `SplitMix64` (`src/rng.rs`) seeded `for_program(seed, index)`
 for the program itself, plus the salted sub-stream above for the family
-roll. No wall-clock / fs / process calls appear in generated programs
-(effects whitelist: `println`/`print`).
+roll. Effects are not limited to printing: the curated catalogue admits
+reproducible sandbox operations from fs/env/io/args/process/net/http, with
+seeded files, fixed inputs, and loopback fixtures. Host-decided results use
+property verdicts where declared. See `SANDBOXED_EFFECT_MODULES`,
+`generator/verdicts.rs`, `oracle/sandbox.rs`, and `oracle/fixture.rs` for the
+bounds; arbitrary unsandboxed effects are not implied.
 
 ## The oracle ladder
 
@@ -222,7 +236,7 @@ roll. No wall-clock / fs / process calls appear in generated programs
 | g | both vs the reference interpreter | one backend wrong, when the interpreter votes |
 
 Rung (e) fires only for programs that carry a by-construction oracle (the
-identity family). It runs **before** the differential comparison because
+identity, composition, and shape families). It runs **before** the differential comparison because
 it is the only rung that can convict two legs at once — but **after** the
 resource-limit skips (C-196 stack, C-197 wasm32 memory), so a wasm OOM is
 still a skip rather than a bogus miscompile.
@@ -268,8 +282,9 @@ and opens/updates a `fuzz`-labelled tracking issue when findings > 0. PR
 CI is intentionally left untouched — the fuzzer is nightly only.
 
 The nightly needs no change to pick up the identity family: it runs the
-default `--family all`, whose weight table now includes it, so roughly a
-quarter of every night is judged by the by-construction oracle. The
+default `--family all`, which includes identity, composition, and shape
+by-construction oracles. The actual delivered share depends on the staged
+selection and completed programs, not the old identity-only percentage. The
 campaign summary reports the exact share as `self-checked = N (P%)`.
 `SelfCheckFailure` is a correctness class, so a night that finds one goes
 red and files the tracking issue like any other miscompile.

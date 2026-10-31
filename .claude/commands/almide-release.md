@@ -37,7 +37,7 @@ Create a GitHub release with tag. Pushing the tag triggers `.github/workflows/re
    - Create a GitHub Release with all assets, titled and described from `docs/releases/v{version}.md`
    (the workflow fails before building if that file is missing or malformed)
 
-4. **Verify release** — Check that all 5 binaries + checksums are attached:
+4. **Verify release** — Check that all 5 platform archives + checksums are attached, and each archive contains both `almide` and `almide-verify` plus LICENSE:
    ```bash
    gh release view v{version}
    ```
@@ -54,11 +54,11 @@ Each release automatically includes:
 
 | File | Contents |
 |------|----------|
-| `almide-linux-x86_64.tar.gz` | Linux x86_64 binary + LICENSE |
-| `almide-linux-aarch64.tar.gz` | Linux ARM64 binary + LICENSE |
-| `almide-macos-x86_64.tar.gz` | macOS Intel binary + LICENSE |
-| `almide-macos-aarch64.tar.gz` | macOS Apple Silicon binary + LICENSE |
-| `almide-windows-x86_64.zip` | Windows x86_64 binary + LICENSE |
+| `almide-linux-x86_64.tar.gz` | Linux x86_64 `almide` + `almide-verify` + LICENSE |
+| `almide-linux-aarch64.tar.gz` | Linux ARM64 `almide` + `almide-verify` + LICENSE |
+| `almide-macos-x86_64.tar.gz` | macOS Intel `almide` + `almide-verify` + LICENSE |
+| `almide-macos-aarch64.tar.gz` | macOS Apple Silicon `almide` + `almide-verify` + LICENSE |
+| `almide-windows-x86_64.zip` | Windows x86_64 `almide.exe` + `almide-verify.exe` + LICENSE |
 | `almide-checksums.sha256` | SHA-256 checksums for all archives |
 
 ## Notes
