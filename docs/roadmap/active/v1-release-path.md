@@ -1,5 +1,20 @@
-<!-- description: v1 リリース路線 — opt-in 検証 codegen(v0 fallback) を beachhead に、カバレッジ→証明書 emit→flight-grade へ段階リリースする計画。4案のメリデメと選定理由、各段の受入基準。 -->
+<!-- description: Historical July 2026 release-path decision with correction of zero-risk and qualification overclaims -->
 # v1 リリース路線 — 段階リリース計画
+
+## Correction to the historical release rationale
+
+This is the July 5, 2026 release-path decision, not current flag or release
+guidance. Its categorical “no miscompile risk” / “always correct bytes”
+premises were too strong: ownership/capability certificates establish modeled
+properties, and byte parity establishes observations on tested programs.
+Neither proves full lowering semantics. Byte binding alone also does not
+confer flight qualification; that requires a scoped assurance case and the
+remaining trust assumptions.
+
+Read [proven versus trusted](../../contracts/proven-vs-trusted.md) for the
+boundary and [the Wasm overview](../../wasm/README.md) for today's route.
+The options and original decision rationale below are retained as history,
+not repeated as a zero-risk guarantee.
 
 > 2026-07-05 策定。「v1 をはやくリリースしたい」に対し、**正しさ(honest-wall + PCC)は
 > 既に保証済み**という事実を土台に、最速で「実体のある v1」を出す路線を選定した記録。

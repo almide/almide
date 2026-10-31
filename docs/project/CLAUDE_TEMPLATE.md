@@ -28,9 +28,9 @@ while cond { ... }             while cond { ... }  (SAME — while IS supported)
 // Function
 fn add(a: Int, b: Int) -> Int = a + b
 
-// Effect function (does I/O — returns Result)
+// Effect function (does I/O — returns Result; add `import fs` to the file)
 effect fn read(path: String) -> Result[String, String] = {
-  let text = fs.read_text(path)
+  let text = fs.read_text(path)!
   ok(text)
 }
 
@@ -39,7 +39,7 @@ effect fn main() -> Unit = {
   println("hello")
 }
 
-// If-then-else (else is MANDATORY)
+// If-then-else (omitting else gives Unit)
 let x = if n > 0 then "pos" else "neg"
 
 // Match
@@ -76,7 +76,7 @@ count = count + 1
 
 // List index read
 let xs = [10, 20, 30]
-let second = xs[1]       // 20 (returns Option[T])
+let second = xs[1]       // 20 (direct indexing returns T; use list.get for Option[T])
 
 // Guard (early exit)
 guard list.len(args) > 1 else err("need args")
@@ -97,13 +97,22 @@ type Shape =
 let combined = [1, 2] + [3, 4]
 let greeting = "hello" + " " + "world"
 
-// UFCS — method syntax works on any type (auto-resolves to correct module)
+// UFCS — the checker resolves by receiver type and scope, not an unconditional rewrite
 let n = "hello".len()          // same as string.len("hello")
 let m = [1, 2, 3].len()       // same as list.len([1, 2, 3])
 let r = "hello".split(" ").reverse()  // chaining works too
 ```
 
 ## Stdlib Quick Reference
+
+Use [the generated stdlib reference](https://github.com/almide/almide/blob/develop/docs/stdlib/README.md) for current signatures
+and [CHEATSHEET](https://github.com/almide/almide/blob/develop/docs/CHEATSHEET.md) for import and calling examples. Core modules
+are auto-imported as module names, not as every unqualified function name.
+Platform/opt-in modules require explicit imports. The former `error` module is retired. `io.read_all()` remains available and
+returns `String`; see the IO reference for its effect-context calling syntax and target behavior.
+
+This selected name index is checked against the stdlib sources by CI; the
+generated reference remains authoritative for signatures and availability.
 
 ```
 AUTO-IMPORTED (no import needed):
@@ -117,7 +126,7 @@ AUTO-IMPORTED (no import needed):
   float:  to_string from abs min max pow round floor ceil
   math:   sqrt log sin cos pi e
   value:  get get_string get_int get_bool get_float get_array get_path as_object
-  datetime, error, value, option, result, bytes — also auto-imported
+  datetime, value, option, result, bytes — also auto-imported
 
 IMPORT REQUIRED (effectful / platform / opt-in):
   import fs      — read_text write_text read_lines append_text exists mkdir_p remove list_dir stat temp_dir

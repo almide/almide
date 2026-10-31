@@ -2,7 +2,7 @@
 
 Option type operations. auto-imported.
 
-### `option.map(o: Option[A], f: Fn[A] -> B) -> Option[B]`
+### `option.map(o: Option[A], f: (A) -> B) -> Option[B]`
 
 Transform the inner value using a function. If none, returns none.
 
@@ -20,7 +20,7 @@ fn main() -> Unit = {
 some(20)
 ```
 
-### `option.flat_map(o: Option[A], f: Fn[A] -> Option[B]) -> Option[B]`
+### `option.flat_map(o: Option[A], f: (A) -> Option[B]) -> Option[B]`
 
 Chain an Option-returning function on the inner value. Flattens nested Options.
 
@@ -79,7 +79,7 @@ fn main() -> Unit = {
 7
 ```
 
-### `option.unwrap_or_else(o: Option[A], f: Fn[Unit] -> A) -> A`
+### `option.unwrap_or_else(o: Option[A], f: () -> A) -> A`
 
 Get the inner value, or compute a default using a function.
 
@@ -118,9 +118,9 @@ fn main() -> Unit = {
 true
 ```
 
-### `option.to_result(o: Option[A], err: String) -> Result[A, String]`
+### `option.to_result(o: Option[A], err: E) -> Result[A, E]`
 
-Convert some to ok, none to err with the given error message.
+Convert some to ok, none to err with the supplied error value of type E.
 
 ```almd run
 fn show(r: Result[Int, String]) -> String = match r {
@@ -138,7 +138,7 @@ ok(42)
 err("missing")
 ```
 
-### `option.filter(o: Option[A], f: Fn[A] -> Bool) -> Option[A]`
+### `option.filter(o: Option[A], f: (A) -> Bool) -> Option[A]`
 
 Keep the value if it satisfies the predicate, otherwise return none.
 
@@ -178,7 +178,7 @@ some((1, 2))
 none
 ```
 
-### `option.or_else(o: Option[A], f: Fn[Unit] -> Option[A]) -> Option[A]`
+### `option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]`
 
 Return the Option if some, otherwise call the function to produce an alternative.
 

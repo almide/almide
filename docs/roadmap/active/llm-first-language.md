@@ -1,11 +1,13 @@
 <!-- description: Plan to make Almide the language LLMs write most accurately, measured by dojo MSR -->
 # LLM-first Language
 
-> **Active scope: Phase 4-5** — UFCS 採用判断 + error-recovering parser。
-> Phase 1-3 は ✅ 完了 (Sonnet 100%, 70b 77%)。
-> **Exit criteria**: dojo MSR で Llama 70b ≥ 80%, 8b ≥ 50%。
+> **Scope update**: 本文の Phase と MSR は 2026-04 の設計・計測記録。
+> UFCS は現在実装済み（SPEC の method-call syntax を参照）で、採否判断は残件ではない。
+> bundled stdlib も `.almd` が現行ソースであり、旧 TOML routing 障害を現行の阻害要因にしない。
+> 残る tooling / parser / MSR 改善案は個別検証が必要。外部 Dojo の再計測なしに
+> 下記スコア・退出目標の達成を現行版へ引き継がない。
 
-Almide の **mission**: "The language LLMs can write most accurately." この roadmap はそこに向けた 5 軸の設計判断と、段階的な実装順をまとめる。**every change is measured against almide-dojo MSR delta** — 言語機能を追加する基準は「retry-success が上がるか」 で決める。
+Almide の **mission**: "The language LLMs can write most accurately." この roadmap はそこに向けた 5 軸の設計判断と、段階的な実装順をまとめる。**設計上は almide-dojo MSR delta を判断材料にする**（全 PR が実際に測定済みという主張ではない） — 言語機能を追加する基準は「retry-success が上がるか」 で決める。
 
 ## Design rule
 
@@ -40,7 +42,7 @@ Almide の **mission**: "The language LLMs can write most accurately." この ro
 - **Release notes に MSR スコア**: 各リリースが retry-success に責任を持つ。
 - **新機能の意思決定軸**: 「綺麗だが MSR -3pt」な機能は採用しない。
 
-## 実装 Phase 順 (staged plan, tooling-first per MoonBit findings)
+## 当初の実装 Phase 順（2026-04 の履歴、現在の backlog ではない）
 
 MoonBit の経験則: **「LLM-friendly な言語」だけでは不十分。「LLM-friendly な開発環境」** が同等以上に効く。Almide も tooling を言語拡張より先に積む。
 
@@ -82,7 +84,9 @@ baseline (v0.14.5 = phase2 着手前) から llm-first-phase2 branch で以下�
 | 0.14.6 (14d1a973) | llama-3.1-8b | 10/30 (33%) | 10/30 | -3 (variance) |
 | 0.14.6 (14d1a973) | **Sonnet 4.6** | **30/30 (100%)** | 26/30 (87%) | — |
 
-**戦略判定**:
+**当時の戦略判定（以下の一般化は未検証）**:
+この30課題の結果は言語全体の欠陥不存在、モデル能力だけが原因であること、
+真値帯や将来の retry budget を証明しない。原判断は経緯として保存する。
 - Sonnet 30/30 = **Almide の言語設計に構造的欠陥はない**。70b の残 7 fail は純粋に model capability の壁 (ADT / state-tracking / complex accumulator)。
 - **Path A (UFCS / imperative loop 譲歩) は不要と確定** — 強モデルは現設計で完走する。言語を汚す理由がない。
 - 70b の 1-shot 12/30 vs Sonnet 26/30 の乖離 = retry 前 prompt 品質よりも純粋な LLM 能力差。SYSTEM_PROMPT の細工で縮められる余地は限定的。
@@ -110,7 +114,7 @@ baseline (v0.14.5 = phase2 着手前) から llm-first-phase2 branch で以下�
 5-2. **`///|` block boundary** (MoonBit 風): 局所 refactor を構文で保証。
 5-3. **Skill marketplace / playbook**: refactor / bug-fix / new-feature の mode 別 playbook を plugin 化。
 
-## UFCS 別 proposal (保留理由)
+## 当初の UFCS proposal（当時の保留理由、現在は実装済み）
 
 - **現状 (v0.14.3+)**: `n.to_uppercase()` は error + hint `Write 'string.to_upper(x)'` を出す。v0.14.4 dojo data では retry-success ±0。
 - **論点**: error improvement に天井がある。UFCS は「間違えた形を正として受け入れる」言語セマンティクス変更で、別次元の effect。
@@ -128,7 +132,10 @@ baseline (v0.14.5 = phase2 着手前) から llm-first-phase2 branch で以下�
   | 0.14.6 | **30/30** | **23/30** | 10/30 | Phase 2 完了 (2026-04-16). Sonnet 30/30 で言語設計の validation 達成。 |
 - **retry budget**: dojo data で `pass-3 = 0 across all runs` を確認。`max_retries=3` は無駄、**2 で十分**。余った budget はタスクを 2 周して variance 除去に回す。
 
-## dojo data から学んだ構造 (2026-04-15)
+## dojo data から当時推測した構造 (2026-04-15)
+
+以下の「必ず」「保証」「証拠」は当時の task bank の観測/解釈であり、
+新しい課題・モデル・現行版での保証ではない。
 
 ### "両モデル必ず通る" 12 タスク = sweet spot
 `clamp`, `fizzbuzz`, `factorial`, `flatten-nested`, `repeat-string` 等 — 単一関数 / プリミティブ I/O / 浅い再帰。100% pass。**MSR-first 言語のベースライン保証ライン**。
@@ -156,7 +163,7 @@ baseline (v0.14.5 = phase2 着手前) から llm-first-phase2 branch で以下�
 → **大モデル向け**: 型推論強化、Option/Result chain (`?` operator) が効く
 → 両方を別々の Phase で積む。
 
-## UFCS 再考 (data を見た後)
+## 当時の UFCS 再考 (2026-04 data を見た後)
 
 - 8b の parse-error 9 件 vs 70b の 0 件 = **UFCS が効くのは 8b に強い、70b にはほぼ無関係**。
 - 70b の type-error 9 件 = 型推論 / Option chain の改善が効く。

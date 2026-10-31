@@ -1,4 +1,4 @@
-<!-- description: Flight gates G-F5 + G-F6 — how the PCC certificate/receipt maps to DO-178C Table A objectives, the DO-330 "prove-the-checker" tool-qualification argument (compiler→TQL-5 output-verified, checker→qualified-by-proof), the DO-333 formal-methods credit per proven property, and the G-F6 qualification kit as a product (AbsInt/SCADE-KCG model): what's in the kit, the boundary (kit provides vs customer's domain process), and the customer integration story. -->
+<!-- description: Proposed qualification-evidence mapping and kit design; no accepted regulatory credit or qualified tool established by this document -->
 # Flight Qualification — DO-178C/DO-330/DO-333 マッピング + 資格化キット(G-F5 + G-F6)
 
 > **Goal**: [flight-profile](flight-profile.md) ラダー **G-F5**(PCC 証明書/receipt を認証目標へ
@@ -8,7 +8,12 @@
 
 ---
 
-## 0. 接地事実(今スパインが産出するもの)
+## 0. 元の設計時点の技術資産スナップショット
+
+以下の固定件数・版は元の計画値であり、現在の在庫ではない。現行の証明・測定・
+trusted boundary は `proofs/receipt.sh` と生成済み `docs/TRUST-SPINE.md`、
+ALS は [規範仕様](../../specs/als/README.md) を参照。技術資産の存在と
+当局に受理された資格化は別であり、この文書は後者を示さない。
 
 - Coq **16 ファイル / 45 定理**、全 `Print Assumptions` = "Closed under the global context"、
   `coqchk` De-Bruijn 再検査、cross-version 9.1.1 + 9.2(`proofs/check.sh`, `TRUSTED_BASE.md`)。
@@ -23,11 +28,12 @@
 
 ## 1. G-F5.1 — DO-178C Table A 目標マッピング
 
-DO-178C credit は**飛行サブセット(G-F1)に対する DAL-A のみ**で主張。正直な枠 ── 証明書/receipt は
+以下は G-F1 サブセットについて検討した**未受理の対応案**であり、DAL-A credit の
+取得や規格解釈の正しさを確定する表ではない。証明書/receipt は
 **source-coding & integration + verification-of-verification 行**の検証プロセス証拠であって、要求/
 機能正しさの証拠ではない。
 
-### 主張できる目標
+### 専門レビューに付す対応候補
 
 | Table | 目標(意訳) | Almide 証拠 | 強度 |
 |---|---|---|---|
@@ -36,7 +42,7 @@ DO-178C credit は**飛行サブセット(G-F1)に対する DAL-A のみ**で主
 | **A-2 obj 5** | source code 開発(証明書 = MIR 束縛の開発成果物) | i/a/d/m/r/b witness + `Translation.v` op→wasm 表 | 補助 |
 | **A-6(統合)部分** | EOC が robust / target で runtime error なし | `WasmExec`(実バイトが `rt_inc/dec` 実行、double-free trap)+ sentinel。**wasm target のみ** | 部分・target 注釈付き(Ferrocene pivot が flyable target に移す) |
 | **A-7 obj 3-4** | **検証の検証** ── 手順/結果が正しく検証自体が健全 | **最強の主張**:soundness 定理 = 検証手法の検証。`coqchk` 独立再検査 + 公理監査 + claim-drift gate | 強・Almide の本拠 |
-| **A-7 obj 1-2** | HLR/LLR テスト被覆 | **DO-333 形式 credit で代替**(安全性質のみ。機能 LLR は不可) | DO-333 経由のみ |
+| **A-7 obj 1-2** | HLR/LLR テスト被覆 | 形式証拠を対応させる案（credit/代替の可否は未確定、機能 LLR は対象外） | DO-333 経由のみ |
 
 ### 触れない目標(正直なギャップ・DER に明言必須)
 
@@ -48,24 +54,18 @@ DO-178C credit は**飛行サブセット(G-F1)に対する DAL-A のみ**で主
 | A-6 完全 EOC/target テスト | wasm は証明済みだが「飛行機は wasm で飛ばない」 | Ferrocene pivot(G-F3) |
 | A-1 PSAC/計画適合 | 認証計画がまだ無い | G-F6 ドシエテンプレ |
 
-**DER 向け一文**:*「Almide 証明書は飛行サブセットの A-5 source 適合と A-7 検証の検証行の
-robustness/accuracy 証拠で、毎ビルド再導出可能。A-3/A-4 機能要求やアプリ MC/DC には一切主張しない。」*
+**外部説明の境界**:「Almide は、明示したモデル上の検査器定理と fixture の
+再検証結果を提供する。これらをどの認証目標の証拠として採用できるかは、
+用途・構成・未証明部分を含めた専門評価が必要であり、ここでは受理済みと主張しない。」
 
 ---
 
 ## 2. G-F5.2 — DO-330 ツール資格化論証(「checker を証明する」)
 
-**ツールと TQL**:DO-330 で、出力が独立検証されないコード生成器は **Criteria-1 / TQL-1**(誤りを
-airborne software に注入し得る)── 最も過酷。
-
-**Almide の手 = PCC 非対称性**:10万行のコンパイラを資格化せず、**出力を毎ビルド独立再検証**する
-小さな kernel-proven checker を置く。これが資格化対象を**降格**:
-
-- **未信頼コンパイラ**(`almide-mir`+renderer)→ **出力が検証される TQL-5/Criteria-3 ツール**。
-  DO-178C §6.0 + DO-330 が明示的に許す:ツールの出力が別プロセスで検証されるなら資格化レベルが
-  下がる。ここでの verifier = 証明済み checker。
-- **checker**(`checker.ml` 1,144 行 — 台帳は docs/TRUST-SPINE.md の生成ブロック)= 残る資格化対象 ──
-  ただし**テストでなく形式証明**で資格化(DO-330 + DO-333 結合)。
+**提案**: コンパイラ出力を独立に検査する構成の証拠を整理し、何を資格化対象と
+すべきか評価に付す。検査器の定理があることだけで compiler を TQL-5 に降格したり、
+checker を「形式証明により資格化済み」としたりはできない。この repo はその
+当局受理を示していない。具体的な TQL/Criteria/credit の判断は未確定として扱う。
 
 **資格化証拠パッケージ(全て実在、`proofs/`)**:
 1. checker は小さく監査可能。核 = 符号付き Δ 左 fold + `subset_check`。サイズ ∝ #event 文字 +
@@ -80,24 +80,24 @@ airborne software に注入し得る)── 最も過酷。
 **DER がなお challenge する点(先回りで明言)**:
 - **witness ⟹ emitted-bytes の縫い目は信頼で未証明**。checker は MIR-level witness を検証、emitted
   wasm/Rust バイトがそれを実現するのは §3 renderer 契約(`Translation.v` は presence 表照合)。
-  Gap 1 / 柱②=半分。**「checker は資格化したが、accepted MIR と飛ぶビットの間の renderer はなお
-  TQL-1」**。Ferrocene pivot がこれに答える(Rust→機械語を Ferrocene の資格化責任にし、残りを安い
-  翻訳忠実層に縮小)。
+  checker の資格化済み状態も renderer の TQL もここからは確定しない。
+  Rust/Ferrocene 方針は Almide→Rust の忠実性を自動的に証明しない。
+  `.github/workflows/ferrocene-lane.yml` は現在、契約待ちの stock rustc 使用を明記している。
 - **抽出が信頼**:証明は Coq 項上、走る checker は `ocamlopt` 経由 OCaml(Thompson 穴)。
   CertiCoq+CompCert で閉じる(未)。
-- **単一 checker**:DO-330 は多様性を好む、今 checker は1つ。
-- **前例ゼロ**:「checker 証明 = ツール資格化」を受理した当局はまだ無い。DER エンゲージメント
-  (SOI レビュー)自体が多年作業。
+- **検査実装の構成**: 独立性・共通原因故障・版管理を評価資料に含める。単一の規格一般論で十分性を決めない。
+- **受理の証拠なし**: このリポジトリは Almide の当局受理を示していない。
+  世界全体の前例の不存在や審査所要年数を、この資料だけから断定しない。
 - **ALS 妥当性は経験的・never proven**:「形式意味論が意図を捉えるか」が irreducible floor。
 
 ---
 
 ## 3. G-F5.3 — DO-333 形式手法 credit マッピング
 
-DO-333 は**形式解析が特定検証目標のテストを代替**するのを許す ── 3 つの正当化:(J1)手法が健全
-(偽性質を真と主張しない)、(J2)実装ツールが正しい、(J3)形式化性質が要求を捉える。
-
-| 代替される DO-178C 目標 | 証明性質(ファイル) | J1 健全 | J2 ツール正しさ | J3 性質が要求を捉える(弱点) |
+以下は、健全性・実装との対応・要求との対応を検討するための元の作業表である。
+DO-333 credit の受理、検証活動の代替可否、規格条項の充足は未確定であり、
+各行に定理があるだけで自動的に成立するものではない。
+| 対応を検討する DO-178C 目標案 | 証明性質(ファイル) | J1 健全 | J2 ツール正しさ | J3 性質が要求を捉える(弱点) |
 |---|---|---|---|---|
 | A-5 no double-free/leak | `check_all_sound`/`balanced_cert_frees_in_memory` | `accept ⟹ no_double_free ∧ no_leak`、axiom-clean | `coqchk`+`Print Assumptions`+drift gate | RC 均衡 = memory-safety LLR。✓ サブセット上 |
 | A-5 no dangling reference | `check_names_cert_sound` | 証明済み subset law | 同上 | name-totality = 使用名は全て定義 |
@@ -105,11 +105,11 @@ DO-333 は**形式解析が特定検証目標のテストを代替**するのを
 | A-5 type soundness | `TypeConcretization` | 証明済み | 同上 | LLR = Unknown 型が codegen に到達しない |
 | A-6 EOC robustness(wasm) | `WasmExec`/`rc_dec_bytes_trap_on_zero` | 実バイト上で証明(wat2wasm grounded) | wat2wasm + wasmtime 差分 | rc 安全 op のみ、機能 list-op は bootstrap runtime で未証明 |
 
-形式 credit は飛行サブセットの **memory-safety/name/type/capability LLR** に主張可、**検証の検証**も
-形式。**不可**:機能正しさ(柱③、制御則の形式仕様なし)、WCET(`Termination.v` でループ no-op、
+形式証拠は **memory-safety/name/type/capability** の明示したモデル範囲で提出候補になる。
+それを認証 credit として受理できるかは別の判断である。**不可**:機能正しさ(柱③、制御則の形式仕様なし)、WCET(`Termination.v` でループ no-op、
 キーストーン(あ)要)、value-semantics サブセット外(C-WALL が境界:in-profile 外は明示 `Unsupported`、
 silent 誤 credit しない)。DO-333 の J3 規律は receipt の per-claim「scope(honest)」列そのもの ──
-**receipt は構造的に DO-333 手法正当化表**。
+receipt は技術的な主張・根拠・scope の表であり、DO-333 適合性を自動的に成立させるものではない。
 
 ---
 
@@ -120,18 +120,18 @@ package + version + 署名したもの。
 
 | # | キット成果物 | 状態 | 在処 / 欠 |
 |---|---|---|---|
-| 1 | 資格化済み checker(binary + Coq source + 抽出レシピ) | ✅ EXISTS | `checker.ml` + `OwnershipChecker.v`/`Subset.v`/`Extract.v` + `build-checker.sh` |
+| 1 | checker 技術資産（資格化済みの意味ではない） | 技術資産あり | `checker.ml` + `OwnershipChecker.v`/`Subset.v`/`Extract.v` + `build-checker.sh` |
 | 2 | 証明スパイン(16 `.v`/45 定理)+ 公理監査 + coqchk 再現 | ✅ EXISTS | `proofs/*.v`, `check.sh` |
 | 3 | 検証ハーネス(1 コマンドで全再導出) | ✅ EXISTS | `make verify-trust`、CI mirror |
 | 4 | receipt(schema + sample)= 型付き主張バンドル | ✅ EXISTS | `make receipt`→`receipt.sh`、[receipt-logic](receipt-logic.md) |
 | 5 | 信頼基底台帳(toolchain pin + irreducible floor + 既知制限) | ✅ EXISTS | `TRUSTED_BASE.md` |
 | 6 | 証明書形式仕様(i/a/d/m/r/b + side-table + サイズ不変条件) | ✅ EXISTS | `certificate-format-v1.md` |
 | 7 | corpus-wall 証拠(totality + accept⟹safe over 実コーパス) | ✅ EXISTS | `corpus-wall.sh`、C-WALL |
-| 8 | ALS(Almide 言語仕様 = 性質を述べる規範意味論) | ◑ PARTIAL(CG-1) | `certification-grade.md` CG-1、interp-as-normative 進行中 |
+| 8 | ALS 規範仕様 | 仕様あり、資格化受理とは別 | [ALS](../../specs/als/README.md)、実装対応と scope は各章 |
 | 9 | トレーサビリティ行列(ALS § ↔ C-NNN ↔ fixture) | ◑ PARTIAL | `contracts.toml` 双方向 gate 在、`spec="ALS §"` keying は CG-1 |
 | 10 | 飛行プロファイル仕様(counted-loop/no-alloc/bounded、checker 強制) | 📐 DESIGNED | [flight-subset-spec](flight-subset-spec.md)。キーストーン(あ)未 |
 | 11 | WCET-bound 証拠(ループ Coq 持ち上げ・alloc-count 天井) | ⬜ BUILD | キーストーン(あ)G-F2 |
-| 12 | 飛行ターゲット束縛(MIR→Rust 本番 renderer + rust_pattern 忠実 → Ferrocene) | ⬜ BUILD(証明 ~75% 非依存済) | キーストーン(い)G-F3 |
+| 12 | ネイティブ翻訳・ツールチェーンの証拠 | renderer は実在、全翻訳忠実性と資格化は未確立 | `render_native.rs`、stock-rustc の Ferrocene lane；G-F3 の課題と分離 |
 | 13 | ドシエテンプレ(PSAC/SVP/SAS 骨格 → G-F5 目標表へ写像) | ⬜ BUILD | §1 のマッピングが種、`certification-grade.md` CG-5 |
 
 **要約**:技術核(1-7)は**今 EXISTS**で CI 強制。認証向け packaging(8-13)が build-out ──
@@ -144,21 +144,19 @@ package + version + 署名したもの。
 
 ### 境界(AbsInt/SCADE-KCG アナロジー)
 
-**SCADE KCG** = 資格化済みコード生成器を売り「生成コードは検証済みモデルを忠実に実装するので
-生成コードの source review を省ける」。**AbsInt aiT** = 資格化済み WCET 解析器を売るが顧客が system
-safety case を所有。Almide のキットは同カテゴリ。
+この製品境界は原設計の類推であり、SCADE/AbsInt の資格化条件や source review
+免除を本書が確認したものではない。Almide に同じ扱いが認められるとは推論しない。
 
-| キットが PROVIDE(ベンダ責任) | 顧客のドメイン工程がなお行う |
+| 評価へ提出する技術資産の案 | 別途判断・検証を要する範囲 |
 |---|---|
-| **ツール信頼** ── checker が proof で資格化、コンパイラが TQL-5(出力検証済)に降格 | アプリの箱の **DO-178C 認証**(PSAC〜SAS、DER、SOI) |
-| **コード安全証拠** ── mem/name/caps/type、飛行サブセット、毎ビルド再導出(A-5/A-7 行) | **機能要求**(A-3/A-4):正しい制御則を計算 ── 柱③、キット外 |
-| **毎ビルド再導出証明書 + receipt** ── C-SAFE/C-PROVEN/C-WALL | アプリ判定論理の **MC/DC**(DAL-A 主張時) |
-| **WCET-bound 証拠**(キーストーン(あ)着地後)飛行サブセット | **system safety assessment**(FHA/PSSA/SSA, ARP4761) |
-| **資格化ドシエテンプレ**(各成果物 → DO-178C/330/333 目標) | **当局受理**(「prove-the-checker」は前例ゼロ) |
+| checker の健全性証明と対象 witness/model の説明 | ツール資格化、適用 TQL、意図した用途での受理は未確定 |
+| mem/name/caps/type の scoped receipt と declared subset | source→artifact の対応、未証明 runtime/host、アプリの機能要求 |
+| 検証ハーネス、traceability、ドシエのテンプレート案 | 実際の対象構成・証拠の充足性と顧客/専門家の評価 |
+| WCET に関するモデル/測定案（完成を主張しない） | 実機・環境の前提、system-level timing/safety case |
 
-**load-bearing 一文**:*キットは生成コードの安全をタダにしツールの信頼を安くする。顧客の
-システムを正しく/認証済みにはしない。* SCADE-KCG split そのもの(`certification-grade.md`「何を
-しないか」)。
+キットは証拠を整理して評価を助けるための案であり、生成コードの安全を無償で
+保証したり、proof だけで checker を資格化したり、コンパイラを自動的に TQL-5
+へ変更するものではない。当局受理と世界的前例の有無を本書では確定しない。
 
 ### 顧客の使い方
 

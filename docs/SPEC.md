@@ -42,7 +42,7 @@ The essence of language design for LLMs is not maximizing expressiveness, but **
 - Writing freedom for experts
 - Cultural "language feel" and ergonomic DSLs
 - Metaprogramming power (no macros, no reflection)
-- Operator overloading and implicit conversions
+- Custom operator syntax and implicit conversions (existing operators can dispatch through declared protocols)
 - Multiple return styles and lambda notations
 - Ad-hoc polymorphism via implicit instance resolution
 
@@ -82,7 +82,8 @@ Tests: `spec/lang/unicode_identifier_test.almd`,
 ### 1.3 Literals
 
 ```
-IntLiteral       ::= [0-9]+ | "0x" [0-9a-fA-F]+     // decimal or hex
+IntLiteral       ::= [0-9]+ | "0" [xX] [0-9a-fA-F]+
+                   | "0" [bB] [01]+ | "0" [oO] [0-7]+  // separators described below
 FloatLiteral     ::= [0-9]+ "." [0-9]+ ([eE] [+-]? [0-9]+)?
 StringLiteral    ::= '"' (char | "\n" | "\t" | "\r" | "\\" | "\"" | "\$")* '"'
 InterpolatedStr  ::= '"' (char | "${" Expr "}")* '"'
@@ -139,8 +140,8 @@ Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
 - `+` is overloaded: addition for numbers, concatenation for strings and lists
 - `..<` is exclusive range, `...` is inclusive range (the Rust-style `..`/`..=` are a diagnosed E031 with a mechanical fix-it)
 - `...` is spread (in records)
-- `_` is wildcard (in match patterns) or placeholder (in pipe arguments)
-- `@` is used for extern annotations
+- `_` discards a pattern binding or denotes a typed hole in an expression; it is not a pipe/call-argument placeholder (E046, §9.10)
+- `@` introduces attributes, including extern annotations
 
 ---
 
@@ -192,13 +193,16 @@ list.first(xs)
 
 ## 3. Syntactic Categories
 
+This is an overview, not a second exhaustive grammar. See the focused
+[language specification](specs/language.md) for concrete syntax and examples.
+
 ```
 Program   ::= ImportDecl* TopDecl*
 
 TopDecl   ::= TypeDecl | ProtocolDecl | FnDecl
             | TopLetDecl | TestDecl
 
-Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | Expr
+Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | BreakStmt | ContinueStmt | Expr
 
 Expr      ::= Literal | Name | InterpolatedStr
             | RecordExpr | SpreadExpr | ListExpr | MapExpr
@@ -264,12 +268,12 @@ clock surfaces are auto-available checker builtins, not importable modules.
 ### 4.3 Prelude Types
 
 Implicitly imported types and constructors:
-- Primitives: `Int`, `Float`, `Bool`, `String`, `Unit`, `Path`
+- Primitives include `Int`, `Float`, their sized numeric families, `Bool`, `String`, `Unit`, `Bytes`; `Path` is a `String` alias
 - Collections: `List[T]`, `Map[K, V]`, `Set[T]`
 - Error handling: `Option[T]`, `Result[T, E]`
 - Constructors: `some(x)`, `none`, `ok(x)`, `err(x)`
 - Booleans: `true`, `false`
-- Boundary: `Json`, `Value`
+- Boundary: `Value` (`json.parse` returns `Value`, not a separate builtin `Json` type)
 
 ### 4.4 Visibility Modifiers
 
@@ -300,7 +304,7 @@ TypeParam     ::= TypeName
 
 ```
 Result[List[Map[String, Int]], Error]
-fn map[U](xs: List[T], f: Fn(T) -> U) -> List[U]
+fn transform[T, U](xs: List[T], f: Fn(T) -> U) -> List[U] = list.map(xs, f)
 ```
 
 ### 5.2 Record Types
@@ -352,7 +356,10 @@ type Color: Eq, Repr =
   | Red | Green | Blue
 ```
 
-Available conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`. `Eq` and `Hash` are automatic for all value types and do not need to be declared.
+Built-in protocols include `Eq`, `Repr`, `Ord`, `Hash`, `Codec`, `Encode`,
+`Decode`, and `Numeric`. See the [type-system reference](specs/type-system.md)
+for their requirements and derivation rules; declaring a protocol does not
+replace those requirements.
 
 ### 5.5 Protocols
 
@@ -392,9 +399,8 @@ as bare `self`, sugar for `self: Self` that resolves to the declaring type on
 a convention method the same way it does inside a `protocol { ... }`
 declaration itself.
 
-`Self` is a placeholder for the implementing type. Built-in conventions (Eq,
-Repr, Ord, Hash, Codec) are protocols; `Eq` and `Hash` are compiler-derived
-automatically from type structure and need no annotation.
+`Self` is a placeholder for the implementing type. Built-in conventions are protocols; structural derivation and explicit
+methods follow the [type-system reference](specs/type-system.md).
 
 Protocols can be used as generic bounds:
 
@@ -451,7 +457,10 @@ The bare-parens form (see 5.6) is equivalent and works everywhere too:
 Int  Float  Bool  String  Path  Unit
 ```
 
-`Bytes` is represented as `List[Int]`.
+`Bytes` is a distinct type, not interchangeable with `List[Int]`; use the
+[bytes API](stdlib/bytes.md) for conversions. `Path` is an alias for `String`.
+Sized integer and floating-point types are described in the
+[type-system reference](specs/type-system.md).
 
 ### Collections
 
@@ -469,7 +478,7 @@ Result[T, E] -- ok(x) | err(e)
 ### Boundary Types
 
 ```
-Json  Value
+Value
 ```
 
 Used as receivers for external input. Requires explicit conversion before use in domain logic.
@@ -495,7 +504,7 @@ Modifier order: `[local|mod]? effect? fn`
 - Return type is required
 - The body is a single expression (after `=`)
 - `effect fn` marks functions with side effects
-- `fan { }` for scoped concurrent execution — native threads, sequential on wasm (only inside `effect fn`)
+- `fan { }` for scoped execution (only inside `effect fn`); scheduling depends on the compiler and selected host route (§13)
 
 ```
 fn add(x: Int, y: Int) -> Int = x + y
@@ -555,7 +564,10 @@ fn pure_fn() -> String =
   fs.read_text("file.txt")    // Compile error: cannot call effect fn from non-effect fn
 ```
 
-The `effect` system is a **search space reducer for code generation**: a pure function can only call other pure functions, shrinking the set of valid completions.
+The effect bit is not a claim of mathematical purity or zero capability categories.
+Output/abort builtins are admitted in plain `fn` (§16.4), and calls through
+transparent function parameters follow the callback rules in the
+[effect-system reference](specs/effect-system.md).
 
 ### 7.6 Top-Level let -- Module-Scope Constants
 
@@ -573,9 +585,12 @@ For FFI bindings to target-specific functions:
 
 ```
 @extern(rust, "std::fs", "read_to_string")
-@extern(ts, "fs", "readFileSync")
 effect fn read_text(path: String) -> Result[String, String] = _
 ```
+
+The example is a native Rust binding, not a portable implementation.
+The former TypeScript backend is retired; foreign/host bindings must satisfy
+the selected target and its permission/trust boundaries.
 
 ### 7.8 Mutable Parameters
 
@@ -621,7 +636,8 @@ var (x, y) = pair           // var takes the let patterns; x and y are both vars
 ```
 
 - `var` takes the same patterns as `let`, and every bound name is mutable (#3149)
-- Nested destructuring is not allowed
+- Tuple destructuring can nest and discard positions: `var (x, (y, _)) = value`
+- Record shorthand destructuring is not a general nested match pattern
 - Renaming is not allowed
 
 ### 8.3 guard
@@ -661,7 +677,7 @@ m["key"] = value             // map write (var only)
 if cond then expr else expr
 ```
 
-- `else` is **mandatory**. `if` without `else` is a syntax error.
+- Omitting `else` gives a Unit-valued conditional; it is not a value-producing two-branch expression.
 - The condition must be `Bool`. No truthiness.
 - Chaining: `if a then x else if b then y else z`
 
@@ -696,6 +712,10 @@ Pattern ::= "_"                                      // wildcard
 ```
 
 `FieldPattern ::= Ident (":" Pattern)?`
+
+The language also has list/tail, or, and as patterns. Their binding and
+exhaustiveness rules are in [the language reference](specs/language.md);
+the forms above are not an exhaustive pattern inventory.
 
 Record patterns support `..` for partial matching:
 
@@ -769,14 +789,18 @@ while i < 10 {
 ```
 
 Loops while the condition is true. The loop body is `Unit`-typed.
+`break` and `continue` provide loop-local early exit and next-iteration control;
+they do not return a value from the enclosing function.
 
 ### 9.8 fan (Deterministic Data-Parallelism)
 
 ```
-fan { expr1; expr2; expr3 }
+fan { expr1, expr2, expr3 }
 ```
 
-Runs expressions concurrently. Returns results as a tuple. Only valid inside `effect fn`.
+Joins scoped arm expressions and returns their results as a tuple. Only valid
+inside `effect fn`. Arms are separated by commas or newlines, not semicolons;
+a block expression used as an arm can contain ordinary statements.
 
 `fan` is a SCHEDULING construct, not a semantic one: execution may be parallel, but the
 program's observable behaviour is defined to be exactly that of sequential evaluation in
@@ -836,7 +860,8 @@ value |> match {
 
 ### 9.11 UFCS (Uniform Function Call Syntax)
 
-`f(x, y)` and `x.f(y)` are equivalent. The compiler resolves automatically.
+When UFCS resolution selects `f`, `x.f(y)` supplies `x` as its first argument.
+This is not an unconditional parse-time equivalence with any `f` in scope.
 
 ```
 string.trim(text)       // canonical form
@@ -846,14 +871,17 @@ string.split(text, ",")
 text.split(",")         // equivalent
 ```
 
-Resolution: when `x.f(args...)` is called, the compiler looks for `f(x, args...)` in scope.
+Resolution depends on the receiver type and lexical scope: callable record
+fields, builtin-module functions, convention/protocol methods, and user/imported
+functions have distinct resolution paths. Local bindings can shadow module
+names. See `crates/almide-frontend/src/check/calls_ufcs.rs`.
 
 ### 9.12 Range
 
 ```
 0..<5           // [0, 1, 2, 3, 4]    exclusive end
 1...5           // [1, 2, 3, 4, 5]    inclusive end
-for i in 0..n { ... }   // no list allocation (optimized)
+for i in 0..<n { ... }   // no list allocation (optimized)
 ```
 
 ### 9.13 Record and Spread
@@ -899,7 +927,8 @@ let name = "world"
 let msg = "hello ${name}, 1+1=${1 + 1}"
 ```
 
-Works in double-quote strings, single-quote strings, and heredocs (but not raw strings).
+Works in double-quote strings and non-raw heredocs. Single-quote strings,
+raw strings, and raw heredocs do not interpolate (§1.3).
 
 ### 9.18 Hole / Todo
 
@@ -935,7 +964,7 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
   `xs \|> list.map(f) + ys` is `(xs \|> list.map(f)) + ys`, and
   `xs \|> f >> g` pipes into the composition `f >> g`
 - Assignment (`=`) is a statement, not an operator
-- Operator overloading is prohibited -- built-in types only
+- Operator syntax is fixed. Existing operators can dispatch through declared protocol requirements (for example `Eq` and `Numeric`); arbitrary new operator symbols are not supported
 - `&&` and `||` are rejected with hints to use `and`/`or`; `++` is rejected
   with a hint to use `+`
 
@@ -954,7 +983,12 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | `..<` `...` | Range (exclusive / inclusive) |
 | `!` `?` `?.` `??` (postfix) | Unwrap / to-Option / optional chain / fallback |
 
-In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In WASM codegen, they emit byte-level comparison.
+Equality is type-directed. Secret/convention equality can lower to a function
+call before target codegen; ordinary Rust equality uses `almide_eq!`. Wasm
+implements equality according to the value type, including structural
+comparison of supported compound values, not universal raw-memory byte equality.
+See `lower/expressions_access.rs::lower_eq_protocol` in the frontend and
+`crates/almide-wasm/src/equality*.rs`.
 
 ---
 
@@ -975,13 +1009,13 @@ Exceptions **do not exist**. There is no `throw`/`catch`.
 Three postfix operators for explicit error handling on `Result[T, E]` and `Option[T]`:
 
 ```
-expr!          // unwrap — propagate err on failure (effect fn only)
+expr!          // context-dependent unwrap/propagation; see the context table below
 expr ?? val    // unwrap or — use fallback on failure
 expr?          // to option — convert Result to Option (err → none)
 ```
 
 ```
-effect fn load(path: String) -> Result[Config, String] = {
+effect fn load_json(path: String) -> Result[Value, String] = {
   let text = fs.read_text(path)!       // err → propagates
   let config = json.parse(text)!       // err → propagates
   ok(config)
@@ -991,6 +1025,11 @@ let port = int.parse(input) ?? 8080    // err → use 8080
 let name = map.get(config, "key") ?? "default"  // none → use "default"
 ```
 
+`!` is also available in pure fallible functions and lambdas. Its behavior
+depends on the return context, including test-block exceptions; it is not a
+synonym for automatic propagation at every effect call. Use the
+[Result/Option context table](specs/result-option-effect.md) for the exact rules.
+
 ### 11.3 Typed Error Variants
 
 For branching on error kinds, use a variant type as the error parameter:
@@ -998,7 +1037,7 @@ For branching on error kinds, use a variant type as the error parameter:
 ```
 type LoadError = | NotFound(String) | ParseFailed(String)
 
-effect fn load(path: String) -> Result[Config, LoadError] = {
+effect fn load_json(path: String) -> Result[Value, LoadError] = {
   let text = fs.read_text(path)
     |> result.map_err((e) => NotFound(e))!
   let config = json.parse(text)
@@ -1006,7 +1045,7 @@ effect fn load(path: String) -> Result[Config, LoadError] = {
   ok(config)
 }
 
-match load("app.toml") {
+match load_json("app.json") {
   ok(config) => use(config),
   err(NotFound(path)) => create_default(),
   err(ParseFailed(msg)) => println("Bad config: ${msg}"),
@@ -1038,7 +1077,11 @@ When a hole is found, the compiler returns:
 
 ### 13.1 fan Block
 
-`fan { }` runs expressions as one scoped unit — real threads on native, sequential in declaration order on wasm; results are identical either way. Only valid inside `effect fn`.
+`fan { }` runs expressions as one scoped unit. Native can use scoped threads;
+supported embedded-Wasm routes can use instance workers. Ordered arms and
+unsupported parallel shapes use sequential execution. The observable contract
+is arm-order evaluation, not a promise that every arm runs in parallel or that
+every Wasm host has the same scheduler. Only valid inside `effect fn`.
 
 ```
 effect fn main() -> Result[Unit, String] = {
@@ -1175,8 +1218,12 @@ let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
 - The verdict is ω-RELATIVE: which check the deadline fires at is a host
   input (ADR-0001 S8). A recorded ω replays byte-identically
   (`ALMIDE_OMEGA_RECORD=1` to record on native, `ALMIDE_OMEGA=<n>` to
-  replay — the replay never reads the clock). Today replay works on native
-  only; wasm ignores `ALMIDE_OMEGA` (#3781). Two ends are
+  replay — the replay uses the recorded cut rather than the clock). Native and
+  embedded Wasm replay are covered by `tests/fan_timeout_replay_test.rs`: distinct
+  replay ordinals produce matching observable progress on both routes (#3781).
+  Set `ALMIDE_OMEGA` on the compiler/run invocation: the cut is baked into the
+  built artifact, not read dynamically from the host by an existing binary.
+  This is timeout-cut replay, not recording of arbitrary I/O or every async bug. Two ends are
   absolute: a deadline larger than the work always completes, and a
   diverging body under any finite deadline is always cut.
 
@@ -1194,8 +1241,9 @@ let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
   when the cancellation landed, which is exactly the scheduling dependence the model excludes.
   The block joins every sibling and reports the first `Err` in list order. (The only cut is of a
   PURE body at a charge site: `fan.bounded`, `fan.timeout` and `fan.min(compute…)` arms. The
-  `Duration` clock of `fan.min` / `fan.timeout`, #3788, is the one oracle-tier
-  exception: a loser is cancelled at its next charge site or I/O boundary and awaited.)
+  planned `Duration` clock of `fan.min` (#3788) has a separate loser-cancellation
+  contract; it is not implemented today. `fan.timeout` has one pure body, not
+  competing loser arms.)
 - Budgets are `Compute`, never `Duration` and never a bare `Int` — wall-clock
   limits belong to the oracle tier (`fan.timeout`), not the
   deterministic tier
@@ -1308,18 +1356,19 @@ for the exact scope and its tests.
 
 ## 17. Entry Point
 
-```
-effect fn main(args: List[String]) -> Result[Unit, AppError] = {
-  let cmd = list.get(args, 1)
-  match cmd {
-    some("run") => do_something(),
-    some(other) => err(UnknownCommand(other)),
-    none => err(NoCommand),
-  }
+```almide
+import env
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  println(list.get(args, 0) ?? "no argument")
 }
 ```
 
-`args[0]` is the program name, `args[1]` is the first argument. The runtime calls `main(args)`.
+The entry function takes no parameters; the runtime calls `main()`.
+Use `env.args()` for arguments: the program name is excluded, so element 0
+is the first user argument. An entry function can instead return an explicit
+`Result[Unit, E]` when it needs a fallible result channel.
 
 ---
 
@@ -1336,42 +1385,26 @@ Almide compiles to multiple targets:
 
 ### 18.2 Codegen v3 Pipeline
 
-Three-layer architecture: IR -> Nanopass -> Templates.
+The native Rust route lowers typed IR through semantic/ownership passes and
+renders Rust with the walker/templates. This is not the Wasm emission route:
+Wasm uses the direct structural emitter, with core/component packaging selected
+for its host surface. See [codegen](specs/codegen.md) and
+[architecture](ARCHITECTURE.md) for the maintained pipeline descriptions.
 
-```
-IrProgram (typed IR)
-    |
-Layer 1: Core IR normalization (target-agnostic)
-    |
-Layer 2: Semantic Rewrite (target-specific Nanopass pipeline)
-    |
-Layer 3: Template Renderer (TOML-driven syntax output)
-    |
-Target source code
-```
-
-**Rust pipeline passes:**
-1. TypeConcretization -- resolve generic types
-2. BorrowInsertion -- insert `&` references
-3. CloneInsertion -- insert `.clone()` calls
-4. StdlibLowering -- module calls to named calls with arg decoration
-5. ResultPropagation -- insert `?` for effect fn calls
-6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
-7. FanLowering -- fan blocks to scoped threads (`std::thread::scope`)
-
-Templates are defined in TOML files (`crates/almide-codegen/templates/*.toml`), separating syntax from semantics.
+Propagation lowering handles source `!` according to its return context; it does
+not insert propagation at every effect call. Fan lowering chooses a supported
+substrate while preserving the applicable ordering contract.
 
 ### 18.3 Cross-Target Semantics
 
 | Feature | Rust | WASM |
 |---------|------|------|
-| `Result[T, E]` | `Result<T, String>` | Tag-based (0=Ok, 1=Err) |
-| `Option[T]` | `Option<T>` | Tag-based (0=None, 1=Some) |
-| `effect fn` | returns `Result<T, String>`; `expr!` lowers to `?` | Tag check + early return |
-| `==` / `!=` | `almide_eq!` macro (deep) | Byte comparison |
-| `+` on String | `format!` / owned concat | `string_concat` runtime |
-| `+` on List | `[...a, ...b]` | `list_concat` runtime |
-| `fan { }` | `std::thread::scope` | Sequential (single-threaded) |
+| `Result[T, E]` | Result carrier preserving the declared/inferred error type `E` | Tagged value with the corresponding payload layout |
+| `Option[T]` | `Option<T>` | Tagged value with payload layout for `T` |
+| `effect fn` | Effect bit and return channel are distinct; `!` uses its context | Corresponding effect/return semantics, not an unconditional String error |
+| `==` / `!=` | Protocol call or ordinary structural equality | Type-directed equality, not universal byte comparison |
+| `+` on String / List | Runtime/helper or optimized native operations | Type-specific structural/runtime operations |
+| `fan { }` | Scoped parallel or ordered execution as applicable | Sequential or supported embedded-host worker route |
 
 ---
 
@@ -1381,7 +1414,7 @@ Templates are defined in TOML files (`crates/almide-codegen/templates/*.toml`), 
 |---|---|---|
 | 1 | Implicit type conversion | LLMs mix up types |
 | 2 | Truthiness | Conditions must be `Bool` only |
-| 3 | Operator overloading | Operator meaning must not change by type |
+| 3 | Custom operator syntax | Fixed operator vocabulary; type-directed builtin and protocol dispatch remain supported |
 | 4 | Exceptions (`throw`/`catch`) | Control flow invisible |
 | 5 | Multiple lambda notations | Generation distribution disperses |
 | 6 | Internal DSLs | Strong context dependence |
@@ -1404,6 +1437,9 @@ Cascading derived errors are suppressed. A single root cause is presented.
 
 ### 20.2 Structured Error Output
 
+The following is an illustrative diagnostic, not the CLI JSON wire schema.
+Consumers should use the documented [CLI](specs/cli.md) output and its schema/version contract.
+
 ```json
 {
   "kind": "type_mismatch",
@@ -1419,7 +1455,7 @@ Cascading derived errors are suppressed. A single root cause is presented.
 The compiler recognizes common syntax from other languages and provides actionable hints:
 
 ```
-'!' is not valid in Almide at line 5:12
+Prefix '!x' is not boolean negation in Almide
   Hint: Use 'not x' for boolean negation, not '!x'.
 
 'return' is not valid in Almide at line 12:5
@@ -1531,7 +1567,7 @@ G |- { ...base, fi: ei, ... } : { f1:T1, ..., fn:Tn }
 ```
 G |- e1 : Result[T1, E]    G |- e2 : Result[T2, E]    enclosing function is effect
 ------------------------------------------------------------------------------------
-G |- fan { e1; e2 } : Result[(T1, T2), E]
+G |- fan { e1, e2 } : Result[(T1, T2), E]
 ```
 
 ### guard
@@ -1555,7 +1591,8 @@ G |- _ : T                      G |- todo(msg) : T
 
 ## 22. Complete Example
 
-```
+```almide
+import env
 import fs
 import json
 
@@ -1578,20 +1615,21 @@ fn with_description(config: Config, desc: String) -> Config =
 fn summary(config: Config) -> String =
   "root=${config.root}, bare=${config.bare}"
 
-effect fn load(path: String) -> Result[Config, ConfigError] = {
-  let text = fs.read_text(path)
-  let raw = json.parse(text)
-  value.get_string(raw, "root")
-    |> option.ok_or("missing root")
-    |> result.map((r) => { root: r, bare: false, description: "" })
+fn decode_config(text: String) -> Result[Config, ConfigError] = {
+  let raw = json.parse(text) |> result.map_err((e) => Parse(e))!
+  let root = value.get_string(raw, "root") |> option.to_result(Parse("missing root"))!
+  ok(default_config(root))
 }
 
-effect fn main(args: List[String]) -> Result[Unit, ConfigError] = {
-  let path = match list.get(args, 1) {
-    some(p) => p,
-    none => "config.json",
-  }
-  let config = load(path)
+effect fn load(path: String) -> Result[Config, ConfigError] = {
+  let text = fs.read_text(path) |> result.map_err((e) => Io(e))!
+  decode_config(text)
+}
+
+effect fn main() -> Result[Unit, ConfigError] = {
+  let args = env.args()
+  let path = list.get(args, 0) ?? "config.json"
+  let config = load(path)!
   println(summary(config))
   ok(())
 }
@@ -1608,6 +1646,12 @@ test "with_description updates correctly" {
   assert_eq(updated.description, "my repo")
   assert_eq(updated.root, cfg.root)
 }
+
+test "decode config validates the boundary" {
+  assert_eq(decode_config('{"root":"/repo"}')!, default_config("/repo"))
+  assert_eq(decode_config('{}'), err(Parse("missing root")))
+}
+
 ```
 
 ---

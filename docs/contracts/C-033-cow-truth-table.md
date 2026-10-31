@@ -7,10 +7,11 @@
 > the formerly-grandfathered `cow_check` note in
 > `crates/almide-codegen/rt-oracle-registry.toml` (retired with the v0 emitter, #782 —
 > see git history; the live gates are spec/wasm_cross + the interp oracle).
-> This is the SOLE doc-only contract — it records a real, currently-unfixable
-> native<->wasm divergence, not a behaviour we can yet certify.
+> Before that fix this was a doc-only record of a divergence. The sections
+> below preserve that pre-fix diagnosis and its closure criteria; they are
+> not current implementation status.
 
-## The promise (what *should* hold)
+## The promise
 
 ```almide
 var a = [1, 2, 3, 4, 5]
@@ -23,7 +24,7 @@ Value semantics: `var b = a` copies, so a later in-place mutation of `a` must no
 be observable through `b`. The mechanism is copy-on-write — copy the backing
 buffer at the first in-place mutation of a shared value.
 
-## The divergence (what actually happens)
+## Historical divergence (before the fix)
 
 | Step | native (Rust) | wasm |
 |------|---------------|------|
@@ -35,7 +36,7 @@ buffer at the first in-place mutation of a shared value.
 Observed probe: native `999,2,3,4,5 | 1,2,3,4,5` vs wasm
 `999,2,3,4,5 | 999,2,3,4,5` — `b` is corrupted on wasm.
 
-## Why it cannot be flipped today
+## Why the historical runtime-only fix was insufficient
 
 `__cow_check` (the wasm routine meant to prevent this) has **no callers** in the
 wasm emitter — `IndexAssign` / `FieldAssign` / `ListSwap` / `ListReverse` all
@@ -51,7 +52,7 @@ suppression of mutable-var alias copy-propagation. That is out of scope for the
 runtime-routine drain, so the routine is left **grandfathered honestly** rather
 than force a false "verified" flip.
 
-## How this clears (the ratchet rule)
+## Historical closure criteria (fulfilled by the fix above)
 
 When the VarStorage/alias work lands: add a `var b = a; a[i] = v; read both`
 fixture to `spec/wasm_cross/`, flip `C-033` to `status = "active"` with that

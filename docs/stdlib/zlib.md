@@ -10,9 +10,9 @@ whose compressed bytes differ from the wasm legs', so their output is not a
 pure function of the input.
 
 **Both targets.** The wasm legs carry a self-hosted zlib (#1700, C-331 —
-`stdlib/zlib_inflate.almd` and `stdlib/zlib_deflate.almd`): every entry point
-round-trips byte-identically on native and wasm, and the checksums agree. The
-one difference is the compressed size — the wasm legs encode stored blocks
+`stdlib/zlib_inflate.almd` and `stdlib/zlib_deflate.almd`): the matching compressor/decoder pairs
+recover the original payload bytes on native and wasm. Compressed bytes and
+sizes can differ — the wasm legs encode stored blocks
 (valid DEFLATE that does not shrink), so the ratio is not a promise; the round
 trip is. `spec/stdlib/zlib_test.almd` runs on the wasm test lane (#2179).
 
@@ -29,8 +29,10 @@ Three container formats share one DEFLATE core, and they are NOT interchangeable
 
 zlib container, default level.
 
-```almd
-effect fn pack(b: Bytes) -> Result[Bytes, String] = ok(zlib.compress(b))
+```almd check
+import zlib
+
+effect fn pack(b: Bytes) -> Bytes = zlib.compress(b)!
 ```
 
 ### `effect zlib.compress_level(b: Bytes, level: Int) -> Bytes`

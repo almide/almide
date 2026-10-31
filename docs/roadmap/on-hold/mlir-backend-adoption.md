@@ -2,7 +2,9 @@
 # MLIR Backend + Egg Rewrite Engine
 
 > **Status: On Hold** — egg rewriter shipped (Stage 1 done), dialect backend deferred.
-> Stage 1 (egg equality saturation): ✅ Done (0.16.0). Default-enabled, -1183 lines, MatrixFusion/StreamFusion replaced.
+> Stage 1 (egg equality saturation): ✅ Done (0.16.0 historical milestone).
+> The current native pipeline includes EggSaturationPass and target-specific
+> StreamFusion; the old replacement/line-count report is not a complete current pass inventory.
 > Stage 2 (dialect): PoC complete (SSA lowering, Rust/LLVM emit, 7 equiv tests). Full walker migration deferred.
 > Stage 3-4 (GPU/PGO): on-hold.
 
@@ -13,7 +15,7 @@ Almide は以下の 2 本柱で「世界最高の dispatch 基盤」を構築す
 1. **egg (e-graph) ベースの equality saturation rewriter** を Almide dialect レベルで適用する front-end optimizer
 2. **MLIR progressive lowering** を back-end に採用し、Rust/WASM/native/GPU 多ターゲットを formal に扱う
 
-この arc の前段として Stdlib Declarative Unification arc (`active/stdlib-declarative-unification.md`) を完遂する。宣言ルールと typed intrinsic はそのまま e-graph rewrite ルール / MLIR FunctionImport に変換されるため、投資は無駄にならない。
+この arc の前段として Stdlib Declarative Unification arc ([stdlib-declarative-unification.md](../done/stdlib-declarative-unification.md)) を完遂する。宣言ルールと typed intrinsic はそのまま e-graph rewrite ルール / MLIR FunctionImport に変換されるため、投資は無駄にならない。
 
 ## 全体アーキテクチャ
 
@@ -157,9 +159,9 @@ Known gaps:
 - LLVM の標準最適化 (inline, LICM, vectorize) を default pipeline に組み込み
 - 既存 imperative Nanopass を全廃 (全て egg rule + MLIR pattern に移行済)
 - dojo MSR で arc 前後の差分測定、regression 0 確認
-- `--opt egg` flag を default 化
+- 旧案の `--opt egg` 既定化は Stage 1 の記録で完了済み。残る PGO/MLIR 研究とは分ける
 
-合計 **10 ヶ月**の本気コミット。0.15.0 で Stdlib Unification 完了、0.16.0 で egg + MLIR 基盤、0.17.0 で GPU PoC。
+当初見積りは合計 **10 ヶ月**（履歴であり、現行の実施期限ではない）。0.15.0 で Stdlib Unification 完了、0.16.0 で egg + MLIR 基盤、0.17.0 で GPU PoC。
 
 ## Stdlib Unification arc との関係
 
@@ -199,17 +201,17 @@ Known gaps:
 - `cargo build --release` の compilation speed が現状比 ±20% 以内 (egg + MLIR 経由でも劣化しない)
 - egg equality saturation が既存 StreamFusion より厳密に多くの最適形を発見する (ベンチで実証)
 
-## スケジュール
+## 当初のバージョンスケジュール（履歴、現在のリリース計画ではない）
 
 ```
 0.14.x         — 前段完了 (v0.14.7 Dispatch Ideal Form)、Stdlib Unification 準備
 0.15.0         — Stdlib Unification 完了
 0.16.0 ✅      — Stage 1A (egg rewriter) + Stage 1B (dialect schema + LLVM PoC)
                  + bit introspection + Hashable protocol
-0.16.x (next)  — Stage 2 continuation: dialect walker を既存テストスイートで検証、
+0.16.x (当初の次段)  — Stage 2 continuation: dialect walker を既存テストスイートで検証、
                  borrow insertion の型駆動化、nanopass の dialect 上再実装
 0.17.0         — Stage 3 (LLVM native binary / GPU PoC)
-0.17.x         — Stage 4 (PGO、imperative pass 全廃、egg default 化)
+0.17.x         — Stage 4 の当初案 (PGO、imperative pass 全廃。egg default 化は Stage 1 で完了)
 1.0 前提       — 本 arc 完走
 ```
 

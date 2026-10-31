@@ -420,7 +420,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect env.remove(name: String) -> Unit` — Removes name for this process and later spawns; ok if unset; err if name is empty or holds `=` or NUL.
 - `effect env.vars() -> Map[String, String]` — Every environment variable of this process, keyed and ordered by name.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
-- `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.
+- `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; zero or negative ms returns without waiting.
 - `env.os() -> String` — Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 
 ## ffi
@@ -906,7 +906,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [json.md](json.md)
 
-- `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored; nesting over 1000 is err.
+- `json.parse(text: String) -> Result[Value, String]` — Strict JSON Value or err; trailing non-whitespace text and nesting over 1000 are errors.
 - `json.stringify(v: Value) -> String` — Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
 - `json.stringify_pretty(v: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
 
@@ -1419,7 +1419,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
 - `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
-- `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 - `uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` — UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
 - `uint16.from(x: S) -> UInt16` — x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
 - `uint16.from_checked(x: S) -> Option[UInt16]` — some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
@@ -1459,7 +1459,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
 - `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
-- `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 - `uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` — UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
 - `uint32.from(x: S) -> UInt32` — x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
 - `uint32.from_checked(x: S) -> Option[UInt32]` — some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
@@ -1539,7 +1539,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
 - `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
-- `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 - `uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` — UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
 - `uint8.from(x: S) -> UInt8` — x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
 - `uint8.from_checked(x: S) -> Option[UInt8]` — some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).

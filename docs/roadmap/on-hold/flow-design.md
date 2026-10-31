@@ -1,6 +1,11 @@
 <!-- description: Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs -->
 # Flow[T] — Lazy Streaming Sequences
 
+> Unimplemented design proposal. `FLOW_FORBIDDEN_OP`, `FLOW_CONSUMED` and
+> `FLOW_COLLECT_LIST` below are symbolic placeholders, not allocated diagnostic
+> codes. E011/E012/E013 already describe other errors in `docs/diagnostics/`;
+> any Flow implementation must allocate diagnostics through the current registry.
+
 ## Design Philosophy
 
 Almide は一般に語彙削減を重視するが、Flow については **lazy/eager 境界と stream 性を局所的に明示する価値が高い** ため、`flow.*` 名前空間を採用する。
@@ -103,7 +108,7 @@ Iterator が drop される時点で BufReader → File と順に drop
 let flow = file.lines(path)!
 let n1 = flow |> flow.fold(0, (acc, _) => acc + 1)   // flow を消費 (move)
 let n2 = flow |> flow.fold(0, (acc, _) => acc + 1)   // ❌ error: use after move
-// error[E012]: Flow[String] is move-only and has been consumed
+// error[FLOW_CONSUMED]: Flow[String] is move-only and has been consumed
 //   --> file.almd:3:11
 //    |
 //  2 |   let n1 = flow |> flow.fold(...)
@@ -257,7 +262,7 @@ let f: Flow[Int] = flow.from_list(xs)
 
 ## Forbidden Operations (compile-time 拒否)
 
-以下は `Flow[T]` に対して呼ぶとコンパイルエラー (`E011`):
+以下は `Flow[T]` に対して呼ぶとコンパイルエラー (`FLOW_FORBIDDEN_OP`):
 
 | 操作 | 代替 |
 |---|---|
@@ -272,10 +277,10 @@ let f: Flow[Int] = flow.from_list(xs)
 
 ## Error Message Templates
 
-### E011 — Forbidden operation on Flow
+### FLOW_FORBIDDEN_OP — Forbidden operation on Flow
 
 ```
-error[E011]: list.len cannot be called on Flow[String]
+error[FLOW_FORBIDDEN_OP]: list.len cannot be called on Flow[String]
   --> bad.almd:5:11
    |
  5 |   let n = list.len(lines)
@@ -293,10 +298,10 @@ error[E011]: list.len cannot be called on Flow[String]
 
 LLM がどちらも学習できるように。
 
-### E012 — Flow move after consume
+### FLOW_CONSUMED — Flow move after consume
 
 ```
-error[E012]: Flow[String] is move-only and has been consumed
+error[FLOW_CONSUMED]: Flow[String] is move-only and has been consumed
   --> double.almd:4:11
    |
  3 |   let n1 = flow |> flow.fold(0, (acc, _) => acc + 1)
@@ -327,10 +332,10 @@ warning[W005]: flow.collect() on a flow without upstream flow.take
            let _ = flow.collect(flow)
 ```
 
-### E013 — flow.collect on already-List
+### FLOW_COLLECT_LIST — flow.collect on already-List
 
 ```
-error[E013]: flow.collect expects Flow[T], got List[T]
+error[FLOW_COLLECT_LIST]: flow.collect expects Flow[T], got List[T]
   --> wrong.almd:2:6
    |
  2 |   [1, 2, 3] |> flow.collect()
@@ -536,14 +541,14 @@ Phase 2 はまず unordered で実装。
 
 - [ ] `Ty::Flow(Box<Ty>)` を checker に追加 (`crates/almide-types`)
 - [ ] Flow の move-only 制約を use-count 解析に追加 (D3)
-- [ ] `stdlib/defs/flow.toml` 新規作成 (12 関数)
+- [ ] `stdlib/flow.almd` に提案 API を定義（実装時に現行 stdlib 登録手順を確認）
 - [ ] `file.lines` の runtime 実装 (`runtime/rs/src/file.rs`)
-- [ ] Forbidden ops のコンパイル時エラー (E011) + hint 2 本立て
-- [ ] E012 (move after consume), E013 (collect on List), W005 (unbounded collect)
+- [ ] Forbidden ops のコンパイル時エラー (FLOW_FORBIDDEN_OP) + hint 2 本立て
+- [ ] FLOW_CONSUMED (move after consume), FLOW_COLLECT_LIST (collect on List), W005 (unbounded collect)
 - [ ] Rust codegen: `Flow[T]` → `Box<dyn Iterator<Item = T>>` (runtime 埋め込み)
 - [ ] WASM codegen: Phase 1 は無効化 (型エラーで拒否、Phase 4 で対応)
 - [ ] `spec/lang/flow_test.almd` — 12 関数の単体テスト
-- [ ] `spec/lang/flow_error_test.almd` — E011/E012/E013/W005 の expect-fail テスト
+- [ ] `spec/lang/flow_error_test.almd` — FLOW_FORBIDDEN_OP/FLOW_CONSUMED/FLOW_COLLECT_LIST/W005 の expect-fail テスト
 - [ ] `docs/specs/flow.md` — ユーザー向け詳細仕様 (この roadmap の詳細版)
 - [ ] cheatsheet に Flow セクション追加 + terminal op の 🔴 マーク
 
@@ -586,11 +591,16 @@ demand ベースで追加:
 
 ---
 
-## Files to Modify
+## Original implementation sketch — not a current file-edit checklist
+
+The paths below record the proposal's original compiler layout. In particular,
+`stdlib/defs/*.toml` is no longer the stdlib source of truth: declarations live
+in `stdlib/*.almd`. Before implementation, remap the type/checker/lowering and
+backend work to the current tree; these paths do not imply Flow is implemented.
 
 ### Phase 1
 - `crates/almide-types/src/types/mod.rs` — `Ty::Flow`、subtype 関係なし (D3)
-- `crates/almide-frontend/src/check/calls.rs` — forbidden ops 検出、E011/E012/E013
+- `crates/almide-frontend/src/check/calls.rs` — forbidden ops 検出、FLOW_FORBIDDEN_OP/FLOW_CONSUMED/FLOW_COLLECT_LIST
 - `crates/almide-frontend/src/check/lint.rs` — W005 の lint
 - `crates/almide-ir/src/use_count.rs` — Flow の move-only ルール
 - `crates/almide-codegen/src/walker/expressions.rs` — Flow codegen

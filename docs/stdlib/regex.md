@@ -58,7 +58,7 @@ The reasons, first violation from the left: `unclosed group`, `unmatched )`,
 ### `regex.is_match(re: Regex, s: String) -> Bool` and `regex.is_full_match(re: Regex, s: String) -> Bool`
 
 `is_match`: re matches somewhere in s. `is_full_match`: re matches the whole
-of s (`regex.full_match` is its deprecated old name, removed at epoch 16).
+of s (`regex.full_match` is its deprecated old name, scheduled for removal at epoch 16).
 
 ```almd run
 import regex
@@ -207,8 +207,8 @@ repetition. Native and wasm agree byte for byte.
 
 Matching takes time proportional to the pattern's states times the subject's
 length, whatever the pattern (#4019, #4083), and an accepted pattern has at
-most 20,000 states, so no call takes longer than 20,000 × the subject's
-length steps: `(a+)+$` or `(a|aa)*b` on 100,000 characters answers at once,
+most 20,000 states. This bounds matching work, not all work in a call
+(such as a replacement callback or output construction): `(a+)+$` or `(a|aa)*b` on 100,000 characters answers at once,
 and the worst case — every state live at every character, `a{0,9000}b` on
 100,000 `a`s — takes about 8 s native and a minute on wasm. Each call first
 runs a backtracking matcher under a step budget of 4 × (pattern length + 1)
@@ -227,7 +227,7 @@ pattern without expanding it.
 | `a`, `\.`, `\\` | literal characters (escape a metacharacter with `\`) |
 | `.` | any character except `\n` |
 | `[abc]`, `[a-z]`, `[^0-9]` | character class, range, negated class (a leading `]` is a member) |
-| `\d` `\w` `\s` and `\D` `\W` `\S` | digit, word (`[A-Za-z0-9_]`), whitespace (`[ \t\n\v\f\r]`, the ASCII set every mainstream engine uses), and their negations; inside a class `\d` `\w` `\s` `\n` `\t` |
+| `\d` `\w` `\s` and `\D` `\W` `\S` | digit, word (`[A-Za-z0-9_]`), whitespace (`[ \t\n\v\f\r]`, the ASCII whitespace set), and their negations; inside a class `\d` `\w` `\s` `\n` `\t` |
 | `\n` `\t` `\r` | control characters |
 | `^`, `$` | start / end of the string |
 | `\b`, `\B` | word boundary / non-boundary (ASCII word characters) |

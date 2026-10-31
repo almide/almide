@@ -181,7 +181,7 @@ fn main() -> Unit = {
 2
 ```
 
-### `map.map(m: Map[K, V], f: Fn[V] -> B) -> Map[K, B]`
+### `map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]`
 
 Transform all values in the map using a function, keeping keys unchanged.
 
@@ -198,7 +198,7 @@ fn main() -> Unit = {
 3
 ```
 
-### `map.filter(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Map[K, V]`
+### `map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]`
 
 Return a new map containing only entries where the predicate returns true.
 
@@ -212,7 +212,7 @@ fn main() -> Unit = {
 ["a": 1, "c": 3]
 ```
 
-### `map.fold(m: Map[K, V], init: A, f: Fn[A, (K, V)] -> A) -> A`
+### `map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A`
 
 Accumulate over all entries with an initial value.
 
@@ -226,7 +226,7 @@ fn main() -> Unit = {
 247
 ```
 
-### `map.any(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Bool`
+### `map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool`
 
 Check if any entry satisfies the predicate.
 
@@ -242,7 +242,7 @@ true
 false
 ```
 
-### `map.all(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Bool`
+### `map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool`
 
 Check if all entries satisfy the predicate.
 
@@ -258,7 +258,7 @@ true
 false
 ```
 
-### `map.count(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Int`
+### `map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int`
 
 Count entries that satisfy the predicate.
 
@@ -272,7 +272,7 @@ fn main() -> Unit = {
 2
 ```
 
-### `map.find(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Option[(K, V)]`
+### `map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> Option[(K, V)]`
 
 Find the first entry matching the predicate. Returns Option[(K, V)].
 
@@ -294,9 +294,10 @@ alice: 90
 no match
 ```
 
-### `map.update(m: Map[K, V], key: K, f: Fn[V] -> V) -> Map[K, V]`
+### `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]`
 
-Update the value at a key using a function. Key must exist.
+Update the value at an existing key using a function. An absent key leaves
+the map unchanged and does not call the function.
 
 ```almd run
 fn main() -> Unit = {
@@ -308,7 +309,7 @@ fn main() -> Unit = {
 ["alice": 100, "bob": 75]
 ```
 
-### `map.clear(m: Map[K, V]) -> Unit`
+### `map.clear(mut m: Map[K, V]) -> Unit`
 
 Remove all entries in place. Requires var binding.
 

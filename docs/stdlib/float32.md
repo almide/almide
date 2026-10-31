@@ -3,8 +3,9 @@
 `Float32` (32-bit float, IEEE-754 binary32): bounds, arithmetic, bits, text, and the conversions into the
 type. Auto-imported — no `import` needed.
 
-`Float32` holds an f64 internally and narrows at the conversion boundary, so a
-value outside binary32's range becomes an infinity rather than an error.
+`Float32` has binary32 precision: conversions and arithmetic results are
+rounded to that precision. A conversion outside binary32's finite range
+becomes an infinity rather than an error.
 
 ## Conversions
 

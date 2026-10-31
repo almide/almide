@@ -30,11 +30,10 @@ destination holds every value the source can carry; a narrowing destination
 chooses abort, `none`, clamp or wrap by name, never silently.
 
 > **Convert to `Int` before passing to an `Int`-taking function.** A sized value
-> is not implicitly widened, and the checker currently accepts the mismatch
-> where the generated code does not build ([#867]). `int.from(x)` is the idiom
-> that works on both targets.
-
-[#867]: https://github.com/almide/almide/issues/867
+> is not implicitly widened: the checker rejects the mismatched types.
+> Use `int.from(x)` to request the conversion explicitly on both targets;
+> an out-of-range value aborts (use the checked, saturating, or wrapping
+> variant when that is the intended policy).
 
 Literals of a sized type are range-checked at compile time — `let a: Int32 = 3000000000`
 is an E024 error, not a silent fold.

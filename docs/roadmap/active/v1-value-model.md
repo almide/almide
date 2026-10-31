@@ -79,7 +79,7 @@ heap) + cargo test + output-parity 67/67.
 NEXT: the APPEND-accumulator TCO variant (collect_seq/flow_rec `acc + [x]` → in-place push) +
 mutual-recursion (flow_rec↔flow_step), then value.object/stringify + tuple-heap (block_*).
 
-## yaml wall countdown (the live tally)
+## Historical yaml wall countdown (June 2026 session tally)
 
 74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, commit fab14729) → **15** (let-bound variant-call read-shape seed = `num_signed_base`, below). Remaining 15: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), block_scalar/block_line/block_nonblank (tuple-heap + let-bound heap-if), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).
 
@@ -322,8 +322,17 @@ one below it (empirically confirmed this session).
 
 ## Gates (per brick, the proven methodology — 9 bricks this session)
 
-corpus-wall ACCEPT (3 props, ownership = the leak/double-free check that catches a bad recursive drop) + a Value-model byte-match probe (build + stringify, compared to v0) + cargo test + output-parity baseline. A drop bug = a leak/double-free → corpus-wall REJECTS or the probe diverges → revert (never ship). After the Value model: TCO (mid-loop-break-with-result, docs/roadmap/active/v1-tco-self-recursion.md) + float.parse → yaml 0 walls.
+The recorded gates were corpus-wall acceptance, a Value-model byte-match probe
+(build + stringify versus v0), cargo tests and the output-parity baseline.
+Certificate acceptance establishes the modeled ownership-event property; it
+does not inspect every operation inside the trusted recursive drop routine.
+A leak loop or differential probe can expose a runtime bug, but a passing
+finite test is not proof that every bad drop is rejected. Preserve the earlier
+empty-certificate/trusted-routine caveat when interpreting these results.
+The subsequent TCO/float.parse work belongs to the historical yaml plan.
 
 ## Honest scale
 
-This is a COUPLED unit (~5 pieces, recursive runtime drop + serializer), genuinely a focused multi-brick push, not a single-turn task — but every piece is Coq-free and byte-verifiable, and the recursive-drop is the ONLY trusted-base addition (one routine, like DropListStr). Path A keeps the Value model PROVEN, which is the v1 differentiator.
+This is a COUPLED unit (~5 pieces, recursive runtime drop + serializer), genuinely a focused multi-brick push, not a single-turn task — but every piece is Coq-free and byte-verifiable, and the recursive-drop is the ONLY trusted-base addition (one routine, like DropListStr). Path A combines checked ownership events with empirically tested operations
+and a trusted recursive-drop boundary; it does not prove the entire Value
+implementation correct merely by passing these gates.

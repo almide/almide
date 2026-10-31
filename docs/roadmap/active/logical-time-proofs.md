@@ -130,7 +130,10 @@ T1 により有界断片のすべての実行は有限時間で観測に到達�
 
 系: I/O レース・タイムアウトは**必然的に** oracle 層（環境を宣言された入力 ω とし、
 R_Ω で関係付ける契約クラス）に属する。これは設計の選好ではなく境界の定理である。
-`fan.timeout` を Stage 4 まで tombstone に留める判断はこの系の帰結。
+当初 `fan.timeout` を Stage 4 まで保留したのは実装順序の判断であり、
+この系が timeout 構文の恒久的禁止を証明するわけではない。現在の body 形と
+clock による層の区別は [SPEC §13](../../SPEC.md#13-concurrency-fan) と
+[ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md) を参照。
 
 ## 証明作業が設計に強いた訂正（3 件 + モデル自身の 1 件）
 
@@ -151,26 +154,34 @@ logical-time-async.md には 1–3 を訂正マーク付きで反映済み。
 
 ## 非同期機能としての十全性（adequacy audit）
 
-| 非同期パターン | v2 での表現 | 根拠 |
+| 非同期パターン | 現行表面との対応 | 根拠・範囲 |
 |---|---|---|
 | 並行 fan-out / join（`Promise.all`） | `fan { }` / `fan.map`（実行は並列可、観測はリスト順） | C-004 / C-199 / C-200 |
 | 全収集（`allSettled`） | `fan.settle` | 既存 |
-| フォールバック連鎖（`any`） | `fan.any`（逐次フォールバック） | 既存 + fan-v2 正式化 |
-| 計算の投機・ポートフォリオ（`race` の純粋形） | `fan.race(fuel:)` | T2–T5 |
-| 計算量上限・全域化 | `fan.bounded(fuel:)` | T1 / T8 |
-| I/O レース（最初に応答した方） | **決定層では不可能（T9）** → oracle 層 Stage 4 | T9 |
-| タイムアウト | oracle 層 `fan.timeout(ms:)`（Stage 4）/ host boundary | T9 |
+| フォールバック連鎖 | `??` / `list.find_map`（旧 `fan.any` は削除） | ADR-0028 |
+| 計算の投機・ポートフォリオ | `fan.min(compute.ms(n))`（clock 必須） | T2–T5 の選択モデル。実装適合は別 |
+| 計算量上限・全域化 | `fan.bounded(compute.ms(n))` | T1 / T8 のモデル範囲 |
+| I/O レース（最初に応答した方） | `fan.min(duration.ms(n))` は設計決定のみ（#3788、未実装） | T9 の境界。詳細は ADR-0028 / SPEC |
+| タイムアウト | `fan.timeout(duration.ms(n)) { body }` | oracle 層、body 形。T9 は実装証明ではない |
 | streaming / backpressure | `Flow[T]`（flow-design.md）の領分 | 範囲外を明示 |
 | fire-and-forget | 恒久却下（rush / spawn — fan-v2 の却下表） | stance |
 
 誠実な要約: 非同期の中核ユース（並行 I/O の fan-out・全収集・フォールバック）は
-決定層が今日すでに覆う。**選択的 I/O レースとタイムアウトだけが oracle 層待ち**で
-あり、それが層の外にあることは T9 により選好ではなく必然である。
+決定層に整理できる。選択的 I/O レースとタイムアウトは oracle 層の契約であり、
+timeout body は実装済みだが、Duration min は未実装（#3788）。層の決定と実装状態を分ける。T9 はこの層の区別を論じるもので、
+現行ランタイムの全機能を証明するものではない。
 
 ## 小スコープの但し書き
 
-モデル検査は 枝 ≤ 3 / charge ≤ 3 / 予算 ≤ 7 の全数であり、その外は Lean 定理
-（サイズ非依存）と紙の証明が覆う。Lean が覆うのは選択代数（事象と ≺ の理論）で
+モデル検査の実行範囲は [GATE.md](../../../research/spike/logical-time-race/GATE.md)
+に記録された二つの集合の和である:
+
+- 枝 ≤ 3、枝あたり charge ≤ 2（コスト 1..2）、予算 0..=5
+- 枝 ≤ 2、charge ≤ 3、予算 0..=7
+- 入れ子の外側 bounded は予算 0..=9 × 追加 charge {0, 1}
+
+枝 ≤ 3 / charge ≤ 3 / 予算 ≤ 7 の全直積を検査したわけではない。
+Lean のサイズ非依存な定理が覆うのは選択代数（事象と ≺ の理論）で
 あり、「トレース → 候補集合」の接続（候補の idx 相異、記録 ⊆ 真、決定事象の記録）は
 モデルが構成ごとに検査した。スコープを広げた再実行は `run-gate.sh` 一発で可能。
 

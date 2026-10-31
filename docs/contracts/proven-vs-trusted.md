@@ -14,10 +14,12 @@ DO-333 shape) — is [`proofs/FORMAL-CREDIT.md`](../../proofs/FORMAL-CREDIT.md).
 
 ## The one-sentence version
 
-An **accepted certificate proves the function is memory-safe** — no double-free,
-no leak, no dangling name, no undeclared capability. It proves **nothing about
-whether the lowering picked the right semantics**: a certified-sound function
-can still print the wrong string.
+An **accepted certificate establishes the property its checker models**, within
+that witness's coverage and assumptions: for example RC balance, name totality
+or capability bounds. This is not a proof of complete artifact memory safety;
+recording and unmodeled accesses remain trust boundaries. It proves **nothing
+about whether lowering picked the right semantics**: a certified function can
+still print the wrong string.
 
 ## Which leg is this page about?
 
@@ -56,7 +58,7 @@ bytes against the Coq decoder model `StructuralDecode.v`.
 | Stage | Status | What backs it |
 |---|---|---|
 | Lexer, parser | trusted | differential fuzz, the spec corpus |
-| Type checker kernel | **proven** | `proofs/OwnershipChecker.v`, `TypeConcretization.v`, `NameTotality.v` |
+| MIR witness checkers (ownership, type concretization, names) | **proven for their modeled properties** | `proofs/OwnershipChecker.v`, `TypeConcretization.v`, `NameTotality.v`; not a proof of the whole frontend type checker |
 | Coown patterns | **proven** | `proofs/CoownCompose.v`, `CoownLoop.v`, `CowSafety.v` |
 | AST → IR lowering | trusted | the checker's `TypeMap` is the source of truth; 974-file emit baselines |
 | IR → MIR lowering | **trusted** | ← *this is the gap F3 (#777) is about* |
@@ -163,7 +165,7 @@ Lean proof.
 
 "Backends are refinements of the kernel" is therefore enforced over the
 GENERATED λ_almd-expressible fragment — machine-computed programs,
-machine-proven expected values, machine-diffed backends — with one
+compiled-evaluator expected values (not kernel-checked), machine-diffed backends — with one
 reviewed ~80-line seam. What remains out of reach without rewriting the
 compiler in a prover: a verified surface-core→λ_almd translation and
 per-pass simulation proofs over the Rust implementation itself. Those are

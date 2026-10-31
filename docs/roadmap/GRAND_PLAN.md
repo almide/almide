@@ -9,7 +9,13 @@
 
 ---
 
-## Phase 1: 1.0 Completion ← **READY**
+## Phase 1: original 1.0 readiness assessment (historical)
+
+The checklist below records an earlier assessment, not a current release
+readiness verdict or an API freeze. Its counts and excluded modules are historical.
+For current language/API behavior use [SPEC](../SPEC.md), the
+[stdlib reference](../stdlib/README.md) and the actual release/version metadata.
+A 1.0 release decision is not implied by this document.
 
 言語として信用を取る。機能を増やさず、完成の定義を固定する。
 
@@ -26,7 +32,8 @@
 - examples / cookbook / migration story
 - LLM計測 (MSR, 初回正答率) — ブロックしない
 
-**ゴール達成: "この言語はもう信用して使っていい" 状態に到達**
+**当初の評価目標**: 安定性の根拠を明示して利用判断できる状態。上の旧チェック結果だけで
+現行の全用途に対する安全性・互換性・1.0 readiness を保証しない。
 
 ## Phase 2: Production Language
 
@@ -45,15 +52,15 @@
 
 Almideの独自性を確立する。**effect を capability に育てる。**
 
-- [x] **[HKT Foundation Phase 1-3](done/hkt-foundation-phase1.md)** — TypeConstructor/Kind/代数法則, Stream Fusion (map+map, filter+filter, map+fold 融合)
-- [ ] **[HKT Foundation Phase 4-6](done/hkt-foundation-phase1.md)** — Ty統一リファクタ, Effect型統合, Trait統合
+- [x] **[HKT Foundation Phase 1-4](done/hkt-foundation-phase1.md)** — TypeConstructor/Kind/代数法則, Stream Fusion, Ty::Applied 統一（完了記録の範囲）
+- [ ] **HKT の旧残計画 Phase 5-6** — Effect型統合, Trait統合（Phase 4 の Ty 統一は完了記録に含む）
 - [x] **[Effect System Phase 1-2](done/effect-system-phase1-2.md)** — 自動推論 capability (7カテゴリ, 推移的), almide check --effects, Security Layer 2
 - [ ] **[Effect System Phase 3-4](../specs/effect-system.md)** — Dependency制限, 型レベル統合
 - [ ] **Typed host bindings** — IDL/schema-first, codegen-first, 手書きFFI不要
 - [ ] **Resource/task model** — task/scheduler, resource lifetime
 - [ ] **Persistence/sync primitives** — local-first, CRDT/merge, sync queue
 - [ ] **Observability** — effect trace, IR dump, pass inspector, runtime event timeline
-- [ ] **[Compile-Time Contracts](on-hold/compile-time-contracts.md)** — `where` 句で事前条件・型不変条件。newtype + where で制約付き型。静的検証 + 動的降格 (SMT不要)
+- [ ] **[Compile-Time Contracts](on-hold/compile-time-contracts.md)** — 一般の関数事前条件・型値不変条件は提案。既存の generic bounds / test-context where とは別で、旧 newtype/where スケッチを現行構文とは扱わない
 
 **命令: "effect を runtime permission model の核にせよ"**
 

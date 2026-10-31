@@ -10,8 +10,11 @@ byte-identically on native and `--target wasm`** across the org.
 
 For every org repo with tests: `almide test --target native` AND
 `almide test --target wasm` must BOTH pass every test. Assertions in the repo's
-own suite are the vectors; a pass on both targets is the byte-match. The sweep
-script pattern is recorded in this session's history; a repo with no tests
+own suite are the vectors. A pass on both targets establishes those assertions,
+not equality of arbitrary stdout/stderr/exit bytes. Claim byte identity only
+where this record describes an explicit comparison of those observations; keep
+that distinct from independently passing suites. The sweep script pattern is
+recorded in this session's history; a repo with no tests
 (almide-web, almide-sqlite) cannot be verified this way and stays 🟡.
 
 ## porta native build (handoff step 1) — FIXED, 52 → 0 errors
