@@ -80,7 +80,7 @@
 | [Test-surface 25× — the road to reference-compiler scale](active/test-surface-25x.md) | Grow the committed test surface 25x toward reference-compiler scale |
 | [Ticks interface audit — is the demanded API shape different?](active/ticks-interface-audit.md) | Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
-| [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
+| [Type Where Constraints](active/type-where-constraints.md) | Proposed where-clause syntax and type-definition constraints beyond existing inline generic bounds |
 | [v0 wasm codegen: Try/Unwrap/Fan early-return heap leak](active/v0-unwrap-early-return-leak.md) | The retired v0 wasm emitter's Try/Unwrap/Fan early-return heap leak, kept as the historical record of the class |
 | [GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever](active/v1-adt-brick5-goal.md) | Goal prompt for ADT brick 5 — heap-field bind plus recursive drop, the highest-leverage remaining ADT step |
 | [v1 ① — custom ADT (variant) as a first-class value](active/v1-adt-value-model.md) | Custom ADTs (variants) as first-class values in the v1 value model |
@@ -120,10 +120,10 @@
 |------|-------------|
 | [Almide-to-Almide FFI via almide-lander](on-hold/almide-to-almide-ffi.md) | Use almide-lander to call compiled Almide libraries from Almide via shared library FFI |
 | [Almide UI — Reactive Web Framework as Almide Library](on-hold/almide-ui.md) | SolidJS-like reactive UI framework built as a pure Almide library |
-| [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
+| [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Package-facing API diff and version advice beyond the shipped stdlib interface gate |
 | [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
-| [Externalize `try:` Snippets from Rust Literals](on-hold/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
+| [Externalize `try:` Snippets from Rust Literals](on-hold/diagnostic-snippet-externalization.md) | Remaining migration of diagnostic repair snippets from Rust literals to checked source templates |
 | [Flow[T] — Lazy Streaming Sequences](on-hold/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
 | [Flow[T] — User Specification (Draft)](on-hold/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
@@ -131,11 +131,11 @@
 | [law ブロック実験 — C-ASSERTED を測ってみた記録 (2026-09-27)](on-hold/law-blocks-experiment.md) | C-ASSERTED の最初の実地測定。law ブロック(全入力で成り立つ性質)を LLM に読ませた MSR 実験、同じ law を Lean の自動タクティクだけで何本閉じられるかの実験、関数ごとに law を書けば数学の作法なしで証明が組み上がるかの実験。数字・発見・Lean 相当に足りないもの・次の一手。 |
 | [law 証明層 — 設計 (draft, 2026-09-28)](on-hold/law-proofs-design.md) | 関数ごとの law を Lean をカーネルにして証明する層の設計。純粋な断片の自動翻訳、proved / tested / refuted の算出、Int の折り返しと剰余の意味、停止性、翻訳の信頼の鎖、Lean の利用条件(ライセンス・商標)、段階計画。 |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
-| [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
+| [LSP Code Actions — Remaining Refactorings](on-hold/lsp-code-actions.md) | Remaining generated refactorings and import-management coverage beyond shipped diagnostic quickfixes |
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |
 | [MLIR Backend + Egg Rewrite Engine](on-hold/mlir-backend-adoption.md) | Stage 2 progressive lowering — dialect walker passes all 227 spec tests |
-| [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
-| [Package Version Resolution](on-hold/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
+| [Central Package Registry](on-hold/package-registry.md) | Central package publishing, ownership and provenance beyond the existing git-based package system |
+| [Dependency Version Constraints](on-hold/package-version-resolution.md) | Remaining dependency-range semantics and available-version selection beyond the shipped MVS resolver |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
 | [Process composition: a pipeline is a value, running it is a separate step](on-hold/process-composition.md) | Build a command pipeline as a value and make running it one explicit step; parked until a real need appears |
@@ -145,10 +145,10 @@
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
 | [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 | [Shell Completions](on-hold/shell-completions.md) | almide completions subcommand for bash/zsh/fish auto-completion |
-| [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
+| [File-backed Snapshot Testing — On Hold](on-hold/snapshot-testing.md) | Optional file-backed snapshots beyond the shipped source-literal snapshot assertions |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
 | [WASM Exception Handling](on-hold/wasm-exception-handling.md) | WASM native exception handling (try_table/throw) for zero-cost effect fn error propagation |
-| [WASM HTTP Client](on-hold/wasm-http-client.md) | Current wasm HTTP lanes and their target-availability authority |
+| [WASM HTTP Client](on-hold/wasm-http-client.md) | Shipped wasm HTTP client lanes and the remaining default-component transition |
 | [Web Framework](on-hold/web-framework.md) | Hono-like web framework as an external package over stdlib http, with template and Codec integration |
 
 ## Done

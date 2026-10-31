@@ -945,40 +945,41 @@ Command-line arguments are accessed via `env.args()` (not main parameters); argv
 
 ## Standard library modules
 
-Full function signatures: [docs/stdlib/](stdlib/)
+Current function signatures and counts: [generated standard-library reference](stdlib/README.md).
+The table below is a navigation guide, not a second API inventory.
 
-| Module | Description | Import | # |
-|---|---|---|---|
-| [string](stdlib/string.md) | String manipulation | auto-imported | 44 |
-| [list](stdlib/list.md) | List operations | auto-imported | 59 |
-| [map](stdlib/map.md) | Map (dictionary) operations | auto-imported | 24 |
-| [set](stdlib/set.md) | Set operations | auto-imported | 19 |
-| [deque](stdlib/deque.md) | Double-ended queue: push/pop at both ends | auto-imported | 58 |
-| [heap](stdlib/heap.md) | Priority queue, least first | auto-imported | 16 |
-| [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 22 |
-| [float](stdlib/float.md) | Floating-point operations | auto-imported | 17 |
-| [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported | 3 |
-| [value](stdlib/value.md) | Dynamic value manipulation | auto-imported | 19 |
-| [result](stdlib/result.md) | Result type operations | auto-imported | 12 |
-| [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
-| [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
-| [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
-| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` | 16 |
-| [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
-| [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
-| [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
-| [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
-| [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
-| [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
-| [fs](stdlib/fs.md) | File system | `import fs` | 24 |
-| [env](stdlib/env.md) | Environment and system | `import env` | 9 |
-| [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` | 17 |
-| [io](stdlib/io.md) | Standard streams; `read` / `write` / `close` over any handle | `import io` | 12 |
-| [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` | 16 |
-| [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` | 10 |
-| [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` | 7 |
-| [http](stdlib/http.md) | HTTP client and server; `HttpRequest` and `HttpResponse` share `header` / `headers` / `body` / `set_header` / `set_body` | `import http` | 36 |
-| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
+| Module | Description | Import |
+| --- | --- | --- |
+| [string](stdlib/string.md) | String manipulation | auto-imported |
+| [list](stdlib/list.md) | List operations | auto-imported |
+| [map](stdlib/map.md) | Map (dictionary) operations | auto-imported |
+| [set](stdlib/set.md) | Set operations | auto-imported |
+| [deque](stdlib/deque.md) | Double-ended queue: push/pop at both ends | auto-imported |
+| [heap](stdlib/heap.md) | Priority queue, least first | auto-imported |
+| [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported |
+| [float](stdlib/float.md) | Floating-point operations | auto-imported |
+| [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported |
+| [value](stdlib/value.md) | Dynamic value manipulation | auto-imported |
+| [result](stdlib/result.md) | Result type operations | auto-imported |
+| [option](stdlib/option.md) | Option type operations | auto-imported |
+| [json](stdlib/json.md) | JSON parsing and querying | `import json` |
+| [math](stdlib/math.md) | Mathematical functions | auto-imported |
+| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` |
+| [datetime](stdlib/datetime.md) | Date and time | auto-imported |
+| [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) |
+| [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) |
+| [bytes](stdlib/bytes.md) | Binary data | auto-imported |
+| [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported |
+| [testing](stdlib/testing.md) | Test assertions | `import testing` |
+| [fs](stdlib/fs.md) | File system | `import fs` |
+| [env](stdlib/env.md) | Environment and system | `import env` |
+| [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` |
+| [io](stdlib/io.md) | Standard streams; `read` / `write` / `close` over any handle | `import io` |
+| [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` |
+| [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` |
+| [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` |
+| [http](stdlib/http.md) | HTTP client and server; `HttpRequest` and `HttpResponse` share `header` / `headers` / `body` / `set_header` / `set_body` | `import http` |
+| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` |
 
 ### Regex: compile once, pass the `Regex` first
 
