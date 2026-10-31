@@ -17,8 +17,9 @@ Two mechanisms keep that single line honest:
 
 - **Release blockers** — the release workflow refuses to cut a final tag
   while any issue labeled `I-unsound` / `I-miscompile` / `I-divergence` /
-  `regression` is open (the gate of #1482). A known-bad compiler cannot
-  become "the supported release".
+  `regression` is open (the gate of #1482). This prevents a final release
+  over those labeled open issues; it is not a claim that every defect is
+  discovered or correctly labeled.
 - **The RC channel** — releases carrying language-surface or
   compiler-behaviour changes tag `vX.Y.Z-rcN` first, published as a GitHub
   prerelease for a soak window before the final tag (#1484).
@@ -82,10 +83,12 @@ correctness lives in the maintainer's head:
   public infrastructure (GitHub, Sigstore's public log); the license
   (MIT OR Apache-2.0) permits any party to fork and continue.
 
-What does not exist yet, so it is not claimed: a legal entity that can
-sign support contracts, paid support of any kind, or a certification
-sponsor. Those are organizational-ladder items (#586), not engineering,
-and they are listed there rather than implied here.
+The organization and security contact are identified in [SECURITY.md](./SECURITY.md).
+Their existence is separate from an offer of a paid support contract. This
+policy does not specify paid-support terms, a contracting arrangement, or
+certification sponsorship. Do not infer those commitments from the engineering
+gates or the security reporting policy; any such offer needs separately stated
+scope and terms. Organizational-ladder work (#586) is not itself that offer.
 
 ## Getting help
 

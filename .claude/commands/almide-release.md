@@ -66,4 +66,9 @@ Each release automatically includes:
 - Version format: `v{major}.{minor}.{patch}`
 - Release notes must be in English
 - The release workflow takes ~10 minutes to complete all builds
-- If a build fails, delete the release and tag, fix, and re-tag
+- If a build fails, first establish whether anything was published. Failure
+  before publication and recovery of a published release are different cases.
+  Do not treat a failed build as permission to delete or re-tag a published
+  version: a committed release seal requires its original tag to remain
+  fetchable. Follow the recovery boundary in `CLAUDE.md` and obtain an explicit
+  owner-approved evidence-preservation plan before any destructive action.
