@@ -49,18 +49,26 @@ Fixture: `spec/wasm_cross/float_parse.almd`、`float_parse_finite_only.almd`、
 
 ## ALS-T3 `json.parse`
 
-受理文法は RFC 8259 に、次の**裁定**を加えたもの:
+以下は採択済み C-391・C-400・C-401・C-413 の説明要約である。
+受理文法は RFC 8259 と、それらの契約に記録された I-JSON の制約に従う。
 
-- 数値は ALS-T2 の値規範で binary64 化する。ただしオーバーフローはエラーにせず
-  ±inf とする（`float.parse` だけが有限値に限られる — C-413）
-- 文字列のサロゲートペア（`\uD800`–`\uDBFF` + `\uDC00`–`\uDFFF`）は合成する。
-  不対サロゲートは**黙って落ちる**（寛容 — `json_string_span.almd` が
-  両ターゲット同一で pin。厳格拒否は不採用）
-- 先頭が値として読める入力は**前置 parse**で受理される（`"[1] x"` →
-  `ok([1])` — RFC 8259 の全文一致要求への寛容拡張、0.59.1 実測）
-- エラー報告は**文字単位の位置**（バイトでなくコードポイント index）を含む
+- 数値は ALS-T2 の値規範で読む。浮動小数点数のオーバーフローは
+  `err("float literal out of range")`（C-413）であり、±inf を返さない。
+- 正しいサロゲートペアは合成する。不対サロゲート、不正な escape、
+  生の制御文字、非文字、閉じていない文字列は拒否する（C-400）。
+- JSON 空白（space / tab / LF / CR）の間に**ちょうど1値**を受ける。
+  後続データ、重複キー、引用符のないキー、末尾カンマ、欠けた区切り、
+  JSON 以外の空白、不正な数値を拒否する（C-401）。
+- 位置を持つエラーの位置は文字単位（コードポイント index）である。
+  コンテナのネスト上限は C-391 を参照。
 
-Fixture: `spec/wasm_cross/json_*.almd` 群（`json_string_span.almd` 含む）。
+旧 0.59.1 の前置 parse / 不対サロゲートの削除という説明は
+C-400・C-401 で、overflow の ±inf という説明は C-413 で置き換わった。
+
+テスト: `spec/wasm_cross/json_parse_strict_strings.almd`、
+`spec/wasm_cross/json_parse_strict_structure.almd`、
+`spec/wasm_cross/json_parse_lenient_edges.almd`、`json_string_span.almd`。
+Contracts: C-391, C-400, C-401, C-413。
 
 ## ALS-T4 `list.chunk` / `list.window`
 
@@ -286,7 +294,8 @@ v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.repl
 `test` ブロック外の `assert` 族の失敗は、**stderr の構造化ブロック + exit code 1**
 で停止する（T6 の終了規約ファミリ）。生の Rust panic（exit 101）や wasm trap
 （exit 134）、値情報なしの出力は不適合。ブロックは `  key: value` を1行ずつ並べた
-形（値の表示は ALS-R2 の補間 Display と同一）:
+形（値の表示は ALS-R2 の Display に C-153・C-418 の制御文字・不可視文字の
+escape を適用する。生の改行等をそのまま埋め込まない）:
 
 - `assert_eq(l, r)` →
   `Error: assertion failed\n  at: line <N>\n  expected: <r>\n  found: <l>`
@@ -295,8 +304,8 @@ v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.repl
 - `assert(c)` → `Error: assertion failed\n  at: line <N>`
 - `assert(c, msg)` → `Error: assertion failed: <msg>\n  at: line <N>`
 
-フィールド順は固定で、**終端子を持たない `found` が必ず最後**（値が複数行に
-またがっても曖昧にならない）。`at:` 行は呼び出しに span が無いときだけ省略され、
+フィールド順は固定で、**終端子を持たない `found` が必ず最後**。
+値中の改行は `\n` などの escape として表示する（C-153・C-418）。`at:` 行は呼び出しに span が無いときだけ省略され、
 これは共有 frontend lowering の性質なのでターゲット間では常に一致する。
 
 被演算子は**一度だけ評価**される（失敗メッセージは束縛済み temp を再参照する）。
@@ -337,9 +346,14 @@ ALS-C9（totalOrder）・ALS-E3（`-0.0` 表示）・ALS-C3（等値）・ALS-R4
 T21（非正規数の保存）・T22（超越関数の誤差上限）・T23（符号付きゼロ）・
 T24（Float → Int 変換）。
 
-**NaN の観測境界**は `float.to_bits`・`float.to_string`・文字列補間・JSON / Value
-符号化・Map / Set のキー比較であり、どの境界でも NaN は単一の正準値として観測
-される（C-210: `to_bits` は `0x7FF8000000000000`）。
+**NaN のビット観測**は C-210 の境界で正準化される。`float.to_bits` は
+`0x7FF8000000000000`、bytes の f64 / f32 writer はそれぞれ
+`0x7FF8000000000000` / `0x7FC00000` を書く。これは NaN の等値規則を
+変更するという意味ではない（ALS-C3）。表示・符号化は各節の規則に従う。
+
+> 実装注記（非規範）: native の `Set[Float]` は `runtime/rs/src/set.rs` の
+> PartialEq 比較を使う。C-210 のビット正準化だけからキー同一性の保証は
+> 導かない。等値は ALS-C3 / C-292 を参照。
 
 ```almide
 test "a Float result is a function of the program alone" {
