@@ -135,14 +135,16 @@ jobs:
     # broken classifier yields an EMPTY output, `'' != 'true'` holds, and
     # everything runs. Breakage costs twenty minutes, never a skipped suite.
     #
-    # What still runs on a docs-only change: build (the checks need the
-    # binary), Emit & Format (LLM-surface fences, stdlib doc indexes, README
-    # stats, the build-speed block, `almide docs-gen --check`), Lean proofs.
+    # Emit & Format still validates docs (fences, indexes, README stats and
+    # docs-gen freshness). The narrower prose lane may reuse a verified base
+    # binary and omit Lean; unknown inputs or unavailable artifacts build normally.
     name: Change class (docs-only skips the test matrix)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      prose_only: ${{ steps.prose.outputs.prose_only }}
+      prose_base: ${{ steps.prose.outputs.base_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -178,6 +180,24 @@ jobs:
               echo "docs_only=false" >> "$GITHUB_OUTPUT"
               echo "check-docs-only: no comparable base for this push — full run"
             fi
+          fi
+
+      - id: prose
+        name: Narrow prose-only lane (unknown inputs stay full)
+        continue-on-error: true
+        run: |
+          # Classify with code from the compared base, not a PR-edited helper.
+          # -I prevents repository modules/PYTHONPATH from shadowing stdlib imports.
+          base=$(python3 -I -c 'import json,os; e=json.load(open(os.environ["GITHUB_EVENT_PATH"])); n=os.environ.get("GITHUB_EVENT_NAME"); print(e.get("pull_request",{}).get("base",{}).get("sha","") if n=="pull_request" else e.get("merge_group",{}).get("base_sha","") if n=="merge_group" else e.get("before","") if n=="push" else "")')
+          if [[ "$base" =~ ^[0-9a-f]{40}$ ]] && git merge-base --is-ancestor "$base" HEAD && git cat-file -e "$base:scripts/ci_prose.py"; then
+            classifier=$(mktemp "$RUNNER_TEMP/prose-classify.XXXXXX.py")
+            trap 'rm -f "$classifier"' EXIT
+            git show "$base:scripts/ci_prose.py" > "$classifier"
+            python3 -I "$classifier" classify
+          else
+            echo "prose_only=false" >> "$GITHUB_OUTPUT"
+            echo "base_sha=" >> "$GITHUB_OUTPUT"
+            echo "trusted base classifier unavailable; full lane"
           fi
 
       - name: Verdict
@@ -291,13 +311,26 @@ jobs:
 
   build:
     name: Build (Linux)
+    needs: changes
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
 
+      - name: Prose-lane negative controls (offline)
+        run: python3 scripts/test_ci_prose.py
+      - id: prose-cache
+        name: Reuse only a verified compiler from this exact base
+        if: needs.changes.outputs.prose_only == 'true' && needs.changes.outputs.docs_only == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROSE_BASE_SHA: ${{ needs.changes.outputs.prose_base }}
+        run: python3 -I scripts/ci_prose.py reuse --base "$PROSE_BASE_SHA" --output target/release/almide
+
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: steps.prose-cache.outputs.reused != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           # clippy rides this job's compile cache for its ratchet (#1462).
@@ -312,12 +345,14 @@ jobs:
       # `save-if`: develop writes, PRs and queue branches read — one warm
       # entry per toolchain + lockfile instead of one per branch.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.prose-cache.outputs.reused != 'true'
         with:
           shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
           cache-on-failure: true
 
       - run: cargo build --release
+        if: steps.prose-cache.outputs.reused != 'true'
 
       # #1732: the workspace's TEST build happens ONCE, here, and ships to
       # the shards as a cargo-nextest archive — the four shard jobs stop
@@ -334,11 +369,13 @@ jobs:
       # The shards need no profile flag: the archive records its own layout
       # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
+        if: steps.prose-cache.outputs.reused != 'true'
         run: |
           curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
+        if: steps.prose-cache.outputs.reused != 'true'
         # On $RUNNER_TEMP (the root volume), not the ~7.9 GB /tmp tmpfs: the
         # archive is 3.0 GB (see .github/actions/fetch-test-archive).
         run: |
@@ -347,6 +384,7 @@ jobs:
           ls -la "$RUNNER_TEMP/almide-tests.tar.zst"
           df -h / /tmp "$RUNNER_TEMP"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.prose-cache.outputs.reused != 'true'
         with:
           name: almide-tests-archive
           path: ${{ runner.temp }}/almide-tests.tar.zst
@@ -360,6 +398,7 @@ jobs:
       # the release build so the warning set is measured against the same
       # compilation the artifact came from (#1379 / #1228).
       - name: Rustc warning ratchet (a noisy build hides the one warning that matters)
+        if: steps.prose-cache.outputs.reused != 'true'
         run: bash scripts/check-rustc-warnings.sh
 
       # The clippy tier of the same discipline (#1462): a shrink-only
@@ -367,6 +406,7 @@ jobs:
       # `build` for the same reason the rustc ratchet does — it compiles,
       # and the release build above primes the dependency cache.
       - name: Clippy warning ratchet (#1462 — the lint tier rustc does not see)
+        if: steps.prose-cache.outputs.reused != 'true'
         run: bash scripts/check-clippy-warnings.sh
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1396,6 +1436,8 @@ jobs:
 
   lean-proofs:
     name: Lean Proofs (0 sorry)
+    needs: changes
+    if: ${{ always() && !cancelled() && needs.changes.outputs.prose_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
