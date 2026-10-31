@@ -43,7 +43,35 @@ env:
 permissions: read-all
 
 jobs:
+  prose-changes:
+    # Missing/invalid classification always selects the original full lane.
+    runs-on: ubuntu-latest
+    outputs:
+      prose_only: ${{ steps.classify.outputs.prose_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        continue-on-error: true
+        run: |
+          # Classify with code from the compared base, not a PR-edited helper.
+          # -I prevents repository modules/PYTHONPATH from shadowing stdlib imports.
+          base=$(python3 -I -c 'import json,os; e=json.load(open(os.environ["GITHUB_EVENT_PATH"])); n=os.environ.get("GITHUB_EVENT_NAME"); print(e.get("pull_request",{}).get("base",{}).get("sha","") if n=="pull_request" else e.get("merge_group",{}).get("base_sha","") if n=="merge_group" else e.get("before","") if n=="push" else "")')
+          if [[ "$base" =~ ^[0-9a-f]{40}$ ]] && git merge-base --is-ancestor "$base" HEAD && git cat-file -e "$base:scripts/ci_prose.py"; then
+            classifier=$(mktemp "$RUNNER_TEMP/prose-classify.XXXXXX.py")
+            trap 'rm -f "$classifier"' EXIT
+            git show "$base:scripts/ci_prose.py" > "$classifier"
+            python3 -I "$classifier" classify
+          else
+            echo "prose_only=false" >> "$GITHUB_OUTPUT"
+            echo "base_sha=" >> "$GITHUB_OUTPUT"
+            echo "trusted base classifier unavailable; full lane"
+          fi
+
   cross-target:
+    needs: prose-changes
+    if: ${{ always() && !cancelled() && needs.prose-changes.outputs.prose_only != 'true' }}
     name: Cross-Target (Rust vs WASM)
     runs-on: ubuntu-latest
     steps:
@@ -189,6 +217,8 @@ jobs:
   # switch: it is in every build since #4023. The re-injection controls that
   # show each trap fires are nightly (memory-traps-nightly.yml).
   memory-traps:
+    needs: prose-changes
+    if: ${{ always() && !cancelled() && needs.prose-changes.outputs.prose_only != 'true' }}
     name: Memory traps armed (spec/ + differential fuzz)
     runs-on: ubuntu-latest
     timeout-minutes: 60

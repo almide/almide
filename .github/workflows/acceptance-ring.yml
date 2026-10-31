@@ -46,7 +46,35 @@ env:
 permissions: read-all
 
 jobs:
+  prose-changes:
+    # Missing/invalid classification always selects the original full lane.
+    runs-on: ubuntu-latest
+    outputs:
+      prose_only: ${{ steps.classify.outputs.prose_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        continue-on-error: true
+        run: |
+          # Classify with code from the compared base, not a PR-edited helper.
+          # -I prevents repository modules/PYTHONPATH from shadowing stdlib imports.
+          base=$(python3 -I -c 'import json,os; e=json.load(open(os.environ["GITHUB_EVENT_PATH"])); n=os.environ.get("GITHUB_EVENT_NAME"); print(e.get("pull_request",{}).get("base",{}).get("sha","") if n=="pull_request" else e.get("merge_group",{}).get("base_sha","") if n=="merge_group" else e.get("before","") if n=="push" else "")')
+          if [[ "$base" =~ ^[0-9a-f]{40}$ ]] && git merge-base --is-ancestor "$base" HEAD && git cat-file -e "$base:scripts/ci_prose.py"; then
+            classifier=$(mktemp "$RUNNER_TEMP/prose-classify.XXXXXX.py")
+            trap 'rm -f "$classifier"' EXIT
+            git show "$base:scripts/ci_prose.py" > "$classifier"
+            python3 -I "$classifier" classify
+          else
+            echo "prose_only=false" >> "$GITHUB_OUTPUT"
+            echo "base_sha=" >> "$GITHUB_OUTPUT"
+            echo "trusted base classifier unavailable; full lane"
+          fi
+
   build-cli:
+    needs: prose-changes
+    if: ${{ always() && !cancelled() && needs.prose-changes.outputs.prose_only != 'true' }}
     name: Build the compiler under test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -72,7 +100,9 @@ jobs:
 
   ring:
     name: Ring (${{ matrix.project }})
-    needs: build-cli
+    needs: [prose-changes, build-cli]
+    # Expand real matrix context names even when no compiler inputs changed.
+    if: ${{ always() && !cancelled() && (needs.prose-changes.outputs.prose_only == 'true' || needs.build-cli.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -97,10 +127,13 @@ jobs:
     steps:
       # The compiler repo, for the leg driver script only.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.prose-changes.outputs.prose_only != 'true'
         with:
           path: compiler
       - uses: ./compiler/.github/actions/root-tmpdir
+        if: needs.prose-changes.outputs.prose_only != 'true'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.prose-changes.outputs.prose_only != 'true'
         with:
           repository: ${{ matrix.repo }}
           ref: ${{ matrix.ref }}
@@ -109,10 +142,12 @@ jobs:
       # `almide build` compiles through Rust, so downstream builds need a
       # toolchain even though the compiler itself arrives prebuilt.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: needs.prose-changes.outputs.prose_only != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.prose-changes.outputs.prose_only != 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -122,11 +157,13 @@ jobs:
           restore-keys: ring-${{ matrix.project }}-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
+        if: needs.prose-changes.outputs.prose_only != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: wasmtime-v49.0.1-x86_64-linux.tar.xz
           key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
+        if: needs.prose-changes.outputs.prose_only != 'true'
         # `almide test` executes its wasm leg on the wasmtime CLI; without it
         # every file would fall back to native and the fallback ceiling in the
         # leg driver would fail the run (deliberately — a ring that quietly
@@ -145,15 +182,18 @@ jobs:
           wasmtime --version
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.prose-changes.outputs.prose_only != 'true'
         with:
           name: almide-ring-cli
           path: bin
       - name: Put the compiler under test on PATH
+        if: needs.prose-changes.outputs.prose_only != 'true'
         run: |
           chmod +x bin/almide
           echo "$PWD/bin" >> "$GITHUB_PATH"
 
       - name: Ring leg
+        if: needs.prose-changes.outputs.prose_only != 'true'
         run: |
           almide --version
           bash compiler/scripts/ci-acceptance-ring.sh project ${{ matrix.min_tests }} 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
