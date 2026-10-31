@@ -48,6 +48,14 @@ Contracts: C-043, C-076, C-079, C-093。
 
 ## ALS-M4 effect fn の脱糖規範
 
+> **整合注記（非規範、2026-10-31）**: 以下の auto-`?` の説明は旧実装の
+> 記録である。採択済み [ADR-0008](../../adr/0008-explicit-propagation-only.md)
+> と C-217 は暗黙伝搬の廃止、C-345 は引数位置での Result 保持を記録する。
+> 現行の利用説明は [effect-fn-call-semantics](../effect-fn-call-semantics.md)
+> と `spec/lang/explicit_propagation_test.almd` を参照。
+> C-064 の契約本文には旧 auto-`?` の記述が残る。この注記はその契約を
+> 書き換えず、judge 側で解消すべき不整合を明示するものである。
+
 effect fn 内の can-err 呼び出しへの自動 `?` 付与は**束縛形に依存しない**
 （let / tail / 引数位置で同一規則）。構築子位置の auto-`?` も同一。`!` の
 Err は `for` ループ本体からも関数境界へ伝播する。末尾自己再帰は(明示の
@@ -104,6 +112,11 @@ if/match アームから束縛される heap 値（`let s = if c then "a" else m
 Contracts: C-106, C-115。
 
 ## ALS-M11 unwrap の脱糖
+
+> **文脈の補足（非規範）**: 以下は C-108 が扱う Result の伝搬文脈の説明。
+> `test` 内などの plain unwrap（C-222 が区別する失敗時停止）や Option の
+> `!` まで、すべて Err 返却に読み替えるものではない。文脈別の利用説明は
+> [result-option-effect](../result-option-effect.md) を参照。
 
 `!`（unwrap）と let-unwrap は全ての位置（let / tail / 引数 / ネスト）で
 「Ok payload を取り出し、Err なら関数の Err として伝播」の単一規則。

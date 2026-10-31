@@ -7,6 +7,19 @@ DO-178C Table A-1 artifact for the ALS: the standard the requirements are
 authored against. `scripts/check-als-style.sh` enforces everything here that
 a machine can check; the rest is review discipline.
 
+> **Implementation checkout note (2026-10-31; explanatory, not a new
+> requirements policy).** This document retains the 2026-08-21 authoring and
+> review discipline below. The named `scripts/check-als-style.sh`,
+> `scripts/check-als-validation.sh`, and `proofs/als-validation.toml` are not
+> present in this checkout; their described enforcement and the statement
+> about every recorded reviewer being the author are not a current validation
+> report. The available [pin gate](../../../scripts/check-als-pin.sh) checks
+> contract IDs and statement/title agreement against the pinned judge, and the
+> [element-coverage gate](../../../scripts/check-als-element-coverage.sh)
+> checks syntax-element coverage. Neither substitutes for substantive,
+> independent review or establishes qualification. This note changes no
+> contract, pin, authoring rule, or acceptance criterion.
+
 ## Section identity
 
 - A section heading is `## ALS-<PREFIX><n>[a-z]? <title>` — e.g.
