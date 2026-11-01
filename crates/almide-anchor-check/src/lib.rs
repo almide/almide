@@ -31,7 +31,9 @@
 //! BOUNDS, per token: a `c` is `i64.ge_u` (the list compare) or `i32.eqz`
 //! (the Bytes room test), then `if` (empty), then `i32.const` — anchored at
 //! the const — and that `if` has no `else` and ends in `unreachable` (the
-//! abort); an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
+//! abort); or (#4281, a string's byte) the surface's own `i32.ge_u` /
+//! `i32.eqz` test, then an `if` with an `else` — anchored at the `if` —
+//! whose `else` holds the access; an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
 //! `br_if` — straight inside a `loop` whose parent `block` it leaves to (a
 //! loop's exit test, operands.rs `loop_exit`); an `a` is a load (or a load then the `call` that releases what it
 //! loaded); a `w` is a store; a slot's located events lie in one function,
@@ -413,8 +415,39 @@ impl<'a> Ctx<'_, 'a> {
         Ok(stores)
     }
 
-    fn check_guard(&self, at: At) -> Result<(), String> {
+    /// A `c`'s guard; its compare's index. Two shapes, each a compare whose
+    /// TRUE side never reaches the access:
+    /// - the compare, `if` (empty), `i32.const` — anchored at the const —
+    ///   and that `if` has no `else` and ends in `unreachable` (the abort);
+    /// - the surface's own test (#4281): the compare, then an `if` — anchored
+    ///   at the `if` — that has an `else`; the access lies in that `else`
+    ///   (operands.rs `covers` holds it there), so no second test exists.
+    fn check_guard(&self, at: At) -> Result<usize, String> {
         let b = self.body(at)?;
+        // A fresh block's own size (#4281): `i32.const N; call $alloc`,
+        // anchored at the call — the access below reads inside its N bytes.
+        if let Op::Call { function_index } = b.ops[at.op] {
+            if self.alloc == u32::MAX || function_index != self.alloc {
+                return Err(format!("c: anchored at a call of {function_index}, not $alloc"));
+            }
+            if at.op == 0 || !matches!(b.ops[at.op - 1], Op::I32Const { .. }) {
+                return Err("c: the allocation's size is not a constant".into());
+            }
+            return Ok(at.op);
+        }
+        if at.op >= 1 && matches!(b.ops[at.op], Op::If { .. }) {
+            if !matches!(b.ops[at.op - 1], Op::I32GeU | Op::I32Eqz) {
+                return Err(format!("c: the `if`'s test is {:?}, not a compare", b.ops[at.op - 1]));
+            }
+            let d_in = *b.depth.get(at.op + 1).ok_or("c: the test's `if` has no body")?;
+            let has_else = (at.op + 1..b.ops.len())
+                .find(|&j| b.depth[j] == d_in && matches!(b.ops[j], Op::End | Op::Else))
+                .is_some_and(|j| matches!(b.ops[j], Op::Else));
+            if !has_else {
+                return Err("c: the test's `if` has no `else` to hold the access".into());
+            }
+            return Ok(at.op - 1);
+        }
         if at.op < 2 {
             return Err("c: no room for the compare".into());
         }
@@ -449,7 +482,7 @@ impl<'a> Ctx<'_, 'a> {
                 b.ops[end - 1]
             ));
         }
-        Ok(())
+        Ok(at.op - 2)
     }
 
     fn access(&self, at: At, write: bool) -> Result<(), String> {
@@ -582,11 +615,22 @@ pub fn check_bounds_held(
     holds: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
+    check_bounds_alloc(bodies, bounds, anch, judges, holds, u32::MAX, rep)
+}
+
+/// [`check_bounds_held`] knowing `$alloc` (a function index, as a `call`
+/// names it): a `c` may then be a fresh block's own allocation (#4281).
+pub fn check_bounds_alloc(
+    bodies: &[Body<'_>],
+    bounds: &str,
+    anch: &str,
+    judges: &[At],
+    holds: &[At],
+    alloc: u32,
+    rep: &mut Report,
+) -> Result<(), String> {
     let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
-    let ctx = Ctx {
-        bodies,
-        alloc: u32::MAX,
-    };
+    let ctx = Ctx { bodies, alloc };
     if bounds.trim().is_empty() && anch.trim().is_empty() {
         return Ok(());
     }
@@ -631,10 +675,9 @@ pub fn check_bounds_held(
                     last.insert(tok[1..].to_string(), at);
                     match kind {
                         'c' => {
-                            ctx.check_guard(at)
+                            let cmp = ctx.check_guard(at)
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            // The guard's compare: two before the anchor.
-                            guard.insert(tok[1..].to_string(), (at, at.op - 2));
+                            guard.insert(tok[1..].to_string(), (at, cmp));
                             rep.bounds_checks += 1;
                         }
                         'e' => {
@@ -711,14 +754,68 @@ pub fn bundle_witness(bundle: &[u8], property: &str) -> Result<String, String> {
     Ok(String::new())
 }
 
-/// #4277's lines: the rc_inc routine, the release routines, and per
-/// certified frame its position and live RC events.
+/// Every record of `property` in the bundle, as `(function, bytes)`.
+pub fn bundle_records(bundle: &[u8], property: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let mut i = bundle.iter().position(|&b| b == b'\n').ok_or("bundle: no header")? + 1;
+    while i < bundle.len() {
+        let j = i + bundle[i..].iter().position(|&b| b == b'\n').ok_or("bundle: unterminated line")?;
+        let line = std::str::from_utf8(&bundle[i..j]).map_err(|e| e.to_string())?;
+        i = j + 1;
+        if let Some(rest) = line.strip_prefix("witness ") {
+            let mut parts = rest.splitn(3, ' ');
+            let (p, n, f) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            let n: usize = n.parse().map_err(|_| format!("bundle: bad length in `{line}`"))?;
+            let w = bundle.get(i..i + n).ok_or("bundle: witness past the end")?;
+            if p == property {
+                out.push((f.to_string(), String::from_utf8(w.to_vec()).map_err(|e| e.to_string())?));
+            }
+            i += n + 1;
+        }
+    }
+    Ok(out)
+}
+
+/// #4278 B1: per signed runtime helper (function index), whether it consumes
+/// each parameter — read from the bundle's `rc-sig` record the anchor file
+/// names for it (the record the proven checker judges against the helper's
+/// lines). A helper the anchor file signs must carry its own `rc` frame, so
+/// its logged events are held to its shipped body here like any frame's;
+/// a name with no record, or a signed helper with no frame, is refused.
+fn helper_sigs(
+    bundle: &[u8],
+    imports: u32,
+    frames: &[(usize, String)],
+    helpers: &[(usize, String)],
+) -> Result<std::collections::HashMap<u32, Vec<bool>>, String> {
+    let records = bundle_records(bundle, "rc-sig")?;
+    let mut sigs = std::collections::HashMap::new();
+    for (pos, name) in helpers {
+        let (_, rec) = records
+            .iter()
+            .find(|(f, _)| f == name)
+            .ok_or_else(|| format!("rc: helper {name} at position {pos} has no rc-sig record in the bundle"))?;
+        if !frames.iter().any(|(p, _)| p == pos) {
+            return Err(format!("rc: signed helper {name} at position {pos} has no rc line"));
+        }
+        let modes = rec.split('|').next().unwrap_or("");
+        let consume: Vec<bool> = modes.split_whitespace().map(|m| m != "0").collect();
+        sigs.insert(imports + *pos as u32, consume);
+    }
+    Ok(sigs)
+}
+
+/// #4277's lines: the rc_inc routine, the release routines, per certified
+/// frame its position and live RC events, the arm and routine windows, and
+/// (#4278 B1) per signed runtime helper its position and the name of the
+/// bundle's `rc-sig` record that declares it.
 pub type RcLines = (
     Option<u32>,
     std::collections::HashSet<u32>,
     Vec<(usize, String)>,
     Vec<(usize, usize, usize)>,
     Vec<(usize, usize, usize)>,
+    Vec<(usize, String)>,
 );
 
 /// The anchor file read by [`parse_anchors`]: `(alloc, init anchors, bounds
@@ -794,8 +891,18 @@ pub fn parse_anchors_held(text: &str) -> Result<AnchorsHeld, String> {
             };
             let arms = windows(rest.get(i + 2), "rcarms");
             let routines = windows(rest.get(i + 3), "rcroutines");
+            let helpers = rest
+                .get(i + 4)
+                .and_then(|l| l.strip_prefix("rchelpers"))
+                .unwrap_or("")
+                .split_whitespace()
+                .map(|t| {
+                    let (p, n) = t.split_once(':').ok_or_else(|| format!("anchors: bad rchelpers token `{t}`"))?;
+                    Ok((p.parse().map_err(|_| format!("anchors: bad rchelpers position `{t}`"))?, n.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             rest.truncate(i);
-            Some((inc, decs, frames, arms, routines))
+            Some((inc, decs, frames, arms, routines, helpers))
         }
     };
     let mut lines = rest.into_iter();
@@ -863,11 +970,12 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
+    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, alloc, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
-    if let Some((inc, decs, frames, arms, routines)) = rc_lines {
+    if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs }, &judges, &frames, &[arms, routines], &mut r)?;
+        let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;
+        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs, sigs: &sigs }, &judges, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

@@ -1,0 +1,11 @@
+// #4278 B1 drill: a field write releases the replaced field's occupant as
+// its slot's consume (`r`), but the new value is stored into another slot.
+// The release is held to a LATER store into the same slot; with none, the
+// slot event has no call and the release is no frame credit.
+type P = { name: String, tag: String, n: Int }
+
+effect fn main() -> Unit = {
+  var p = { name: "a" + int.to_string(1), tag: "t" + int.to_string(2), n: 1 }
+  p.name = "b" + int.to_string(3)
+  println(p.tag)
+}

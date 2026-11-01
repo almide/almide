@@ -6,6 +6,8 @@
 // stderr. Before this file no test called io.read_all, io.stderr or io.eprint
 // on either leg, nor io.read_to_end on wasm (proofs/stdlib-test-coverage.txt).
 import io
+import process
+import testing
 
 test "read_all is the empty string at the end of input" {
   assert_eq(io.read_all()!, "")
@@ -23,9 +25,27 @@ test "eprint writes to stderr without an err" {
   io.eprint("")!
 }
 
-test "the stderr handle takes raw bytes" {
-  let e = io.stderr()!
-  io.write(e, bytes.from_string("io_stdin_eof_stderr_test: stderr handle\n"))!
-  io.write(e, bytes.from_list([]))!
-  io.write(io.stderr()!, bytes.from_list([10]))!
+// The bytes land on STDERR: `assert_aborts` reads the child's stderr from its
+// last `Error: ` line, so the text it finds is the text the writer put there —
+// on stdout, or lost, the abort would read as a bare `exit code 1`.
+test "eprint's text is what stderr shows" {
+  testing.assert_aborts(
+    "via eprint",
+    () => {
+      io.eprint("Error: via eprint\n")!
+      process.exit(1)
+    },
+  )
+}
+
+test "the stderr handle writes raw bytes to stderr" {
+  testing.assert_aborts(
+    "via the stderr handle",
+    () => {
+      let e = io.stderr()!
+      io.write(e, bytes.from_list([]))!
+      io.write(e, bytes.from_string("Error: via the stderr handle\n"))!
+      process.exit(1)
+    },
+  )
 }

@@ -5841,6 +5841,8 @@ evidence  = [
   { path = "spec/embedded_cross/process_start_run_end_stops_children.almd", class = "fixture" },
   { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_cross_fixture_sees_both_legs_stop_the_child", class = "fixture" },
   { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_wasm_host_stops_an_unwaited_child_on_every_exit_route", class = "fixture" },
+]
+
 [[contract]]
 id        = "C-446"
 spec      = "ALS-D7"
@@ -5851,4 +5853,31 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_host_js/region_export_push.almd", class = "fixture" },
   { path = "spec/wasm_host_js/region_extern_pull.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-447"
+spec      = "ALS-R5"
+title     = "fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length"
+statement = "ALS-R5 (almide/almide#4382): `fs.append_bytes(path, data)` opens `path` for appending, creating the file when it is missing (never its parent), and writes `data` after whatever the file holds, bytes another call wrote included, on native, on the embedded wasm lane, on the stock WASI preview-1 artifact and on the WASI 0.3 component. The file's content is never read: an append to a file one byte past the 1 GiB whole-file read limit (C-431), which `fs.read_bytes` refuses with `File too large`, answers ok and grows the file by exactly `bytes.len(data)`, so what an append costs depends on the appended bytes alone. Every byte value 0..=255 is written verbatim, and an empty `data` leaves the file as it was. An error names the call and the path as written, `fs.append_bytes(\"<path>\"): <text>`, with the text the leg's classified errno table gives: a directory at `path` errs from the open, before anything is written, and a missing parent errs without being created. NOT covered: atomicity against a concurrent writer (no single program observes it), and the WASI 0.2 component, which carries no filesystem."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_append_bytes_true_append.almd", class = "fixture" },
+  { path = "spec/embedded_cross/append_bytes_past_read_bound.almd", class = "fixture" },
+  { path = "tests/fs_append_bytes_true_append_test.rs", name = "append_bytes_reaches_only_the_append_op", class = "fixture" },
+  { path = "tests/fs_append_bytes_true_append_test.rs", name = "appending_does_not_read_the_file_on_every_leg", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-448"
+spec      = "ALS-R5"
+title     = "net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native"
+statement = "ALS-R5 (almide/almide#4306): a program calling `net.udp_bind`, `net.udp_local_port`, `net.udp_send_to`, `net.udp_recv_from`, `io.close` of a `UdpSocket` or `net.lookup_host`, built as a WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --target wasm --component`), imports `wasi:sockets/types@0.3.0` and `wasi:sockets/ip-name-lookup@0.3.0` and no interface outside the WASI 0.3 command world; a component whose program calls none of them imports no `wasi:sockets` interface. Run on a stock wasmtime with the network granted (`-S inherit-network -S allow-ip-name-lookup`), the component answers C-442's and C-443's programs with the same stdout and exit code as the native leg, byte for byte: the same handle numbering (the lowest free slot, reused after a close), datagram boundaries and max-bytes rule, the sender's address as the native leg prints it, and every err text from the one table C-443 states. An IP literal (IPv4, IPv6, or IPv6 in brackets) is read by the native leg's grammar and never reaches the host's resolver. Run without the network grant, a bind is an `err` reading that table's permission text: `udp_bind(127.0.0.1:0): permission denied` for `udp_bind(\"127.0.0.1\", 0)`. Evidence: tests/net_udp_p3_cross_test.rs builds spec/embedded_cross/net_udp_loopback.almd and net_udp_errors.almd as the component, runs each natively and on wasmtime, and requires both legs to reach the program's closing `done` line with identical stdout and exit code; a second test builds an echo program and a bind program and reads the imports and the ungranted bind."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/net_udp_loopback.almd", class = "fixture" },
+  { path = "spec/embedded_cross/net_udp_errors.almd", class = "fixture" },
+  { path = "tests/net_udp_p3_cross_test.rs", name = "udp_and_lookup_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_udp_p3_cross_test.rs", name = "sockets_ship_only_with_udp_ops_and_a_missing_grant_is_the_permission_text", class = "fixture" },
 ]

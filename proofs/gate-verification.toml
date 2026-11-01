@@ -1685,3 +1685,17 @@ evidence = "#4372 (2026-10-31): unchanged helper passes all 12 tests (16 since 2
 measures = "whether the committed classification, bootstrap and artifact-reuse positive/negative regression controls all pass"
 varies = "#4372 controls: original helper exit 0; allow-all classifier mutant exit 1; digest-bypass mutant exit 1; 2026-11-01 scratch mutants each exit 1: generated-block check disabled, docs/GRAMMAR.md re-admitted, docs/stdlib re-admitted, docs-only GRAMMAR/cli exclusion dropped, an Emit & Format document check guarded by the lane, the checks job explicit `if` dropped"
 blind = "defects outside the enumerated control inputs -> UNCOMPENSATED (source review and live integration verification remain necessary); coordinated corruption of implementation and expected test answers -> UNCOMPENSATED (independent review remains necessary)"
+
+[[gate]]
+path = "scripts/check-stdlib-test-coverage.sh"
+# The shell runs one cargo test target and exits with its status; the
+# structured read (the inspection ledger, the coverage ledger, the availability
+# matrix, the compiler's IR) is in Rust, tests/stdlib_test_coverage_test.rs,
+# which CI also runs directly in the test-rust shards.
+reads = "scalar"
+wired_by = "Makefile"
+class = "NEGATIVE_TESTED"
+evidence = "2026-11-01 (branch stdlib-test-coverage, GCE n2-standard-8): green on develop (1306 of 1320 public fns tested on both legs, 14 rows) and on the merge with sec-post-rc1b (1322 of 1322, 0 rows). Controls, each restored after: deleting spec/stdlib/fs_append_bytes_test.almd went red `+ fs.append_bytes has no test on either leg and no ledger row`; dropping the uuid.v7 row went red `+ uuid.v7 has no test on the wasm leg`; a row reason without an issue went red twice (`names no tracking issue`, and `target-availability.toml declares it unavailable on the embedded leg under #4307; the row must cite #4307`); marking spec/stdlib/regex_callback_escape_test.almd `// wasm:skip` went red on the five regex fns it alone covers on wasm; replacing every regex.captures_all test with a call whose result is dropped (`let _ = regex.captures_all(..)` beside a passing assert) went red `+ regex.captures_all has no test on either leg`; moving every duration.us spelling into a helper no test calls went red `+ duration.us has no test on either leg`; restored, green"
+measures = "per public stdlib fn, whether a test reachable on the native leg and on the wasm leg calls it AND observes its value (an assertion argument, a byte-compared output, or a decision gating one, through lets, user-fn params and returns; or a value-less call), read off the compiler's lowered IR plus the lowering-erased spellings on observed lines, diffed against the equality-pinned rows of proofs/stdlib-test-coverage.txt under the MAX_ROWS ceiling"
+varies = "2026-11-01: the first measurement read 53 fns missing a leg (36 on both); the branch's tests brought develop to 14, all wasm-only, and the merge with sec-post-rc1b to 0"
+blind = "a call whose native and wasm results differ while both are observed -> .github/workflows/ci-cross-target.yml"

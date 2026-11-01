@@ -1,0 +1,12 @@
+// #4278 B1 drill (an arm whose declaration lies about its body):
+// `string.capitalize` builds its result from two scratch blocks — the cased
+// head and the verbatim rest — and releases both before it answers, logging
+// each as the arm's own temporary (`i d`). Re-injected, the arm logs only
+// one: it declares one release while its body makes two. The ownership
+// witness still balances (the undeclared temporary is simply absent). Once
+// counted as the arm's own (arm-internal), the release left over is refused
+// since #4278 B1 retired that class: the RC byte check must reject.
+effect fn main() -> Unit = {
+  let s = string.repeat("hello", 1)
+  println(string.capitalize(s))
+}

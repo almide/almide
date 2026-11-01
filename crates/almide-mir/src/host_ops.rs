@@ -197,6 +197,7 @@ pub const HOST_OPS: &[HostOp] = &[
     // Read-then-write compositions, and the unique-name creators (entropy suffix).
     op("fs", "copy", "almide_rt_fs_copy", READ_WRITE).result(),
     op("fs", "append_text", "almide_rt_fs_append", READ_WRITE).result(),
+    op("fs", "append_bytes", "almide_rt_fs_append_bytes", READ_WRITE).result(),
     op("fs", "remove", "almide_rt_fs_remove", READ_WRITE).result(),
     op("fs", "__root_remove", "almide_rt_fs___root_remove", READ_WRITE).result(),
     op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),

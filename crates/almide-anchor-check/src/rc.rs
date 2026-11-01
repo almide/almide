@@ -28,17 +28,27 @@
 //! `o` is counted (`rebind_unmatched`), not refused, and a judge call no `o`
 //! takes is counted (`judges_unmatched`) — both #4278's to settle.
 //!
-//! An RC call left over inside a stdlib arm's window (`rcarms`) is the arm's
-//! own (an inlined `list.get` takes its payload's +1, which the witness
-//! accounts as the arm's handed-over credit): counted (`arm_internal`), not
-//! refused — the arm-certificate residue of #4278.
+//! A stdlib arm's window (`rcarms`) orders the matching (a call inside it is
+//! tried after those outside) but accounts nothing: an RC call left over
+//! inside it is refused like any other (#4278 B1 retired the `arm_internal`
+//! class — each RC call an arm makes is one of its logged events: a
+//! temporary it allocated and releases, a share it stores or gives back, a
+//! retained argument it gives back, a slot consume).
 //!
-//! Likewise an RC call left over inside a taken compound routine's window
-//! (`rcroutines`: an in-place append, string building, a map edit — every
-//! route the emitter takes through `Emitter::routine`) is that routine's own,
-//! counted (`routine_internal`); and one whose argument is a value loaded out
-//! of a heap block's slot is the container's element credit, counted
-//! (`element`). Each count is printed per build, apart from the others.
+//! A taken compound routine's window (`rcroutines`: an in-place append,
+//! string building, a map edit — every route the emitter takes through
+//! `Emitter::routine`) orders the matching (a call inside it is tried after
+//! those outside) but accounts nothing: an RC call left over inside it is
+//! refused like any other (#4278 B1 retired the `routine_internal` class —
+//! every such call is a logged event of the routine, a slot consume, or a
+//! consumption its callee's checked signature declares).
+//!
+//! A release of a value loaded out of a heap block's slot that a later store
+//! overwrites is the slot's consume (#4278 B1): the recorder logs it as an
+//! `r` event in the release's own window (almide-wasm `slot_release`), and
+//! it matches only a release inside that window on a loaded value whose slot
+//! a later store writes. The `element` class that used to count such calls
+//! is retired: an unlogged one is refused like any other leftover call.
 //!
 //! An event on an OUTER holder names it by the recorder's pseudo local (a
 //! global `0xC000_0000 | g`, a C-319 cell `0xA000_0000 | l`): it matches a
@@ -54,21 +64,24 @@
 //!
 //! A variable's recorded release (or +1) with no RC call of its own matches
 //! a call inside a stdlib arm's or a compound routine's window that takes
-//! the variable as an argument — the arm or routine consumes it, or takes
-//! the +1 its argument guard prepays — counted (`consumed`).
+//! the variable as an argument, when the callee's SIGNATURE declares that
+//! parameter consumed (#4278 B1, `signed`): a runtime helper's builder
+//! declares, per parameter, borrow or consume on every path, and logs its
+//! body's events (almide-wasm `helper_sig.rs`). The declaration is the
+//! bundle's `rc-sig` record — the proven checker, the Rocq kernel and
+//! almide-verify hold it to the helper's lines (proofs/HelperSig.v,
+//! `check_sig_cert_sound`), and this check holds those events to the
+//! helper's shipped body like any frame's (`rchelpers` places each). A
+//! callee with no signature consumes nothing: the release stays unmatched.
+//! The consumption is no longer read off the callee's bytes (the every-path
+//! reading of 2026-10-28, which a body could satisfy by a path the reading
+//! misjudged): a signature that lies about its body is refused by the
+//! checker of that body, not trusted here.
 //!
-//! The windows and the element class are confined (sec-rows-2-3-4, the
-//! drills of proofs/fixtures/rc-witness/reinject/): a leftover call counts
-//! as an arm's, a routine's or an element's only if its argument names no
-//! variable the frame's events name; an element release only if a later
-//! store writes the same slot; and a release or +1 counts as `consumed` only
-//! by a call inside an arm or routine window whose callee's own body takes
-//! ownership of that parameter on EVERY path to its exits (a callee that
-//! takes it on some paths only is refused — the every-path rule, adopted
-//! 2026-10-28). When a runtime routine fails that rule the routine is the
-//! bug and is fixed, never the rule: `$list_push` and `$bytes_push` released
-//! their outgrown block only when uniquely owned, and now release it on
-//! every grow path.
+//! The windows are confined (sec-rows-2-3-4, the drills of
+//! proofs/fixtures/rc-witness/reinject/): a leftover call counts as an arm's
+//! or a routine's only if its argument names no variable the frame's events
+//! name.
 //!
 //! An arm that answers with its ARGUMENT's block as its owned result on
 //! some path (`if c { rc_inc(p); p } else { fresh }`) states it per site: the
@@ -77,16 +90,14 @@
 //! that arm's own window read through the argument — a named event, never a
 //! counted class.
 //!
-//! The four counted classes (arm-internal, routine-internal, element,
-//! consumed) are debts to #4278's per-helper certificates — a declared
-//! per-path effect for each helper, checked against its body. They may only
-//! shrink; a new trusted class is an owner decision, not a checker edit.
+//! No counted window class is left (#4278 B1): `consumed` was retired by the
+//! helper signatures, `element` by the slot consume, `routine-internal` and
+//! `arm-internal` by the routines' and arms' own logged events. A new
+//! trusted class is an owner decision, not a checker edit.
 //!
-//! TRUSTED (#4278, until its arm, routine and container certificates exist):
-//! that `rcfns` names every rc_inc and release routine; that an arm's own RC
-//! keeps the balance its ownership declaration states; that a compound
-//! routine's own RC keeps the balance of the operation the witness records;
-//! and that an element's RC keeps its container's credit invariant.
+//! TRUSTED (#4278): that `rcfns` names every rc_inc and release routine.
+//! (An arm's and a compound routine's RC are no longer trusted: each of
+//! their calls is one of their logged events.)
 
 use std::collections::{HashMap, HashSet};
 
@@ -106,12 +117,15 @@ fn is_move(c: char) -> bool {
     matches!(c, 'm' | 'h')
 }
 
-/// The anchor file's `rcfns` line: the rc_inc routine's function index, if
-/// the module has one, and every release routine's.
+/// The anchor file's `rcfns` line — the rc_inc routine's function index, if
+/// the module has one, and every release routine's — and the signed helpers.
 #[derive(Clone, Copy)]
 pub struct RcFns<'r> {
     pub inc: Option<u32>,
     pub releases: &'r HashSet<u32>,
+    /// Per signed runtime helper (function index), whether it consumes each
+    /// heap parameter (#4278 B1, the checked `rc-sig` records).
+    pub sigs: &'r HashMap<u32, Vec<bool>>,
 }
 
 /// What the RC check saw.
@@ -122,10 +136,8 @@ pub struct RcReport {
     pub calls: usize,
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
-    pub arm_internal: usize,
-    pub routine_internal: usize,
-    pub element: usize,
-    pub consumed: usize,
+    /// Releases (or +1s) a callee's checked signature consumes (#4278 B1).
+    pub signed: usize,
 }
 
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
@@ -245,12 +257,6 @@ fn names(arg: &crate::operands::T) -> Vec<u32> {
     v
 }
 
-/// How function `f` takes ownership of its parameter `j`: `(some, all)` —
-/// on some path, and on every path to an exit. A path takes it by releasing
-/// it, storing it into a block, returning it, or handing it to a callee that
-/// takes it on every path (followed `depth` calls deep). An exit is covered
-/// when it returns or tail-passes the parameter, or a taking instruction
-/// dominates it. An imported function takes nothing.
 /// Callee `f` hands its parameter `j` back as its result on some path.
 fn returns_param(bodies: &[Body<'_>], imports: u32, f: u32, j: u32) -> bool {
     let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return false };
@@ -290,54 +296,19 @@ fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, judged: &HashS
     v
 }
 
-fn takes(bodies: &[Body<'_>], imports: u32, releases: &HashSet<u32>, f: u32, j: u32, depth: u32) -> (bool, bool) {
-    if depth == 0 {
-        return (false, false);
-    }
-    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return (false, false) };
-    let fl = Flow::new(b, HashSet::new());
-    let dead = dead(b);
-    let last = b.ops.len().saturating_sub(1);
-    let names_j = |k: usize, a: usize| names(&fl.arg(k, a, FUEL)).contains(&j);
-    let mut points: Vec<usize> = Vec::new();
-    let mut exits: Vec<(usize, bool)> = Vec::new();
-    for (k, op) in b.ops.iter().enumerate() {
-        if dead[k] {
-            continue;
-        }
-        match op {
-            Op::Call { function_index: g } => {
-                if (0..b.args[k].len()).any(|a| {
-                    names_j(k, a) && (releases.contains(g) || takes(bodies, imports, releases, *g, a as u32, depth - 1).1)
-                }) {
-                    points.push(k);
-                }
-            }
-            Op::ReturnCall { function_index: g } => {
-                let passes = (0..b.args[k].len()).any(|a| {
-                    names_j(k, a) && (releases.contains(g) || takes(bodies, imports, releases, *g, a as u32, depth - 1).1)
-                });
-                exits.push((k, passes));
-            }
-            Op::Return => exits.push((k, (0..b.args[k].len()).any(|a| names_j(k, a)))),
-            Op::End if k == last => exits.push((k, (0..b.args[k].len()).any(|a| names_j(k, a)))),
-            o if store_width(o).is_some() && names_j(k, 1) => points.push(k),
-            _ => {}
-        }
-    }
-    let some = !points.is_empty() || exits.iter().any(|e| e.1);
-    let all = !exits.is_empty() && exits.iter().all(|&(e, ret)| ret || points.iter().any(|&c| fl.dominates(c, e)));
-    (some, all)
-}
-
 /// The release at `k` of a value loaded out of a slot replaces it: a later
 /// store writes the same slot (the container's element is swapped, its old
 /// credit released).
 fn replaces(fl: &Flow<'_, '_>, b: &Body<'_>, k: usize) -> bool {
     let arg = fl.arg(k, 0, FUEL);
     let Some((addr, off)) = crate::operands::load_parts(&arg) else { return false };
+    let (base, at) = crate::operands::effective(addr, off);
     (k + 1..b.ops.len()).any(|k2| match store_width(&b.ops[k2]) {
-        Some((_, o)) => o == off && fl.same(addr, &fl.arg(k2, 0, FUEL)),
+        Some((_, o)) => {
+            let st = fl.arg(k2, 0, FUEL);
+            let (sbase, sat) = crate::operands::effective(&st, o);
+            sat == at && fl.same(base, sbase)
+        }
         None => false,
     })
 }
@@ -353,7 +324,7 @@ pub fn check_rc(
     windows: &[Vec<(usize, usize, usize)>; 2],
     rep: &mut RcReport,
 ) -> Result<(), String> {
-    let RcFns { inc, releases } = rc_fns;
+    let RcFns { inc, releases, sigs } = rc_fns;
     for (pos, events) in frames {
         let judged: HashSet<usize> = judges.iter().filter(|j| j.func == *pos).map(|j| j.op).collect();
         let b = bodies.get(*pos).ok_or_else(|| format!("rc: no defined function at position {pos}"))?;
@@ -465,7 +436,7 @@ pub fn check_rc(
         // A routine's HOLD move (`h<local>@<from>-<to>`: a credit moved into
         // the routine through a pooled hold local) names that local only
         // inside its window — the slot is reused for other values outside it.
-        let witnessed: HashSet<u32> = evs.iter().filter(|e| e.0 != 'h').filter_map(|e| e.1).collect();
+        let witnessed: HashSet<u32> = evs.iter().filter(|e| !matches!(e.0, 'h' | 'r')).filter_map(|e| e.1).collect();
         let held_at: Vec<(u32, usize, usize)> = (0..evs.len())
             .filter(|&e| evs[e].0 == 'h')
             .filter_map(|e| Some((evs[e].1?, evwin[e]?.0, evwin[e]?.1)))
@@ -504,10 +475,9 @@ pub fn check_rc(
         // - a named `a` / `d` may instead be an arm's or a routine's
         //   consumption of the variable: a call INSIDE an arm or routine
         //   window (no RC call itself) takes the variable's value at that
-        //   call as argument `j`, and the callee's own body takes ownership
-        //   of parameter `j` on every path (releases, stores, returns or
-        //   passes it on). Each such argument is one node of the matching,
-        //   so it accounts for ONE event.
+        //   call as argument `j`, and the callee's checked signature
+        //   declares parameter `j` consumed (#4278 B1). Each such argument
+        //   is one node of the matching, so it accounts for ONE event.
         let nc = calls.len();
         let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         let rc_call: HashSet<usize> = calls.iter().map(|c| c.0).collect();
@@ -521,10 +491,11 @@ pub fn check_rc(
                 takers.push((k, j, *g));
             }
         }
-        let verdicts: std::cell::RefCell<std::collections::HashMap<(u32, usize), (bool, bool)>> = Default::default();
-        let verdict = |g: u32, j: usize| -> (bool, bool) {
-            *verdicts.borrow_mut().entry((g, j)).or_insert_with(|| takes(bodies, imports, releases, g, j as u32, 4))
-        };
+        // A callee consumes its parameter `j` exactly when its checked
+        // signature declares it (#4278 B1): the bundle's `rc-sig` record,
+        // which the proven checker holds to the callee's own body. A callee
+        // with no signature consumes nothing here.
+        let consumes = |g: u32, j: usize| sigs.get(&g).is_some_and(|m| m.get(j) == Some(&true));
         // Per variable a named event carries, which consuming arguments hold
         // its value at their call (computed once per variable: a term per
         // argument, compared against the variable's value there).
@@ -545,18 +516,27 @@ pub fn check_rc(
         let temp_arg: Vec<bool> = (0..takers.len())
             .map(|t| !owned_at(&names_through(bodies, imports, b, &judged, &args[t], 2), takers[t].0))
             .collect();
+        // #4278 B1: a release whose argument is read straight out of a hold
+        // a routine's or an arm's `h` move names, inside that move's window,
+        // is that hold's credit: a temporary's unnamed event never takes it.
+        // (The direct read only: a pooled hold also shows up among the
+        // locals an unrelated value may have passed through.)
+        let hold_claimed: Vec<bool> = calls
+            .iter()
+            .map(|(k, kind, names)| *kind == 'd' && held_at.iter().any(|&(l, a, z)| a <= *k && *k <= z && names.first() == Some(&l)))
+            .collect();
         let fits = |e: usize, i: usize| -> bool {
             if i >= nc {
                 let t = i - nc;
                 return match evs[e] {
-                    ('a' | 'd', Some(l)) => holds(l, t) && verdict(takers[t].2, takers[t].1).1,
+                    ('a' | 'd', Some(l)) => holds(l, t) && consumes(takers[t].2, takers[t].1),
                     // A temporary's event logged inside an arm or routine
                     // window: that window's call taking a temporary (no frame
                     // variable) on every path.
                     ('a' | 'd', None) => {
                         evwin[e].is_some_and(|(a, z)| a <= takers[t].0 && takers[t].0 <= z)
                             && temp_arg[t]
-                            && verdict(takers[t].2, takers[t].1).1
+                            && consumes(takers[t].2, takers[t].1)
                     }
                     _ => false,
                 };
@@ -566,9 +546,11 @@ pub fn check_rc(
                 ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
                 // The arm or routine the credit moved into, or one enclosing
                 // it (a callback's move released by the fold that called it).
+                // A hold's move (`h`) takes only a release read straight out of
+                // its hold: the pooled local carries other values too.
                 (c, Some(l)) if is_move(c) => {
                     k == 'd'
-                        && names_of.contains(&l)
+                        && (if c == 'h' { names_of.first() == Some(&l) } else { names_of.contains(&l) })
                         && evwin[e].is_some_and(|(a, z)| {
                             windows.iter().flatten().any(|&(p, x, y)| p == *pos && x <= a && z <= y && x <= calls[i].0 && calls[i].0 <= y)
                                 || (a <= calls[i].0 && calls[i].0 <= z)
@@ -587,6 +569,15 @@ pub fn check_rc(
                             names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l)))
                         })
                 }
+                // #4278 B1: a container slot's replaced occupant (`r-@<window>`):
+                // a release inside its window on a value loaded out of a slot
+                // that a later store overwrites.
+                ('r', _) => {
+                    k == 'd'
+                        && evwin[e].is_some_and(|(a, z)| a <= calls[i].0 && calls[i].0 <= z)
+                        && elements.contains(&calls[i].0)
+                        && replaces(&fl, b, calls[i].0)
+                }
                 // A C-319 cell variable's events name its local; a call on
                 // the block the cell holds reads through it (`CELL_HOLDER | l`).
                 // Both are that variable's credit, matched one to one.
@@ -597,7 +588,7 @@ pub fn check_rc(
                 // A temporary's event logged inside an arm or routine window
                 // records an instruction emitted inside it: it takes a call
                 // in that window, never a release elsewhere it does not own.
-                (kind, None) => k == kind && evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z),
+                (kind, None) => k == kind && !hold_claimed[i] && evwin[e].is_none_or(|(a, z)| a <= calls[i].0 && calls[i].0 <= z),
             }
         };
         let order: Vec<usize> = (0..evs.len())
@@ -606,22 +597,24 @@ pub fn check_rc(
             .chain((0..evs.len()).filter(|&e| is_move(evs[e].0)))
             .collect();
         // A call inside an arm or routine window is tried after those
-        // outside (left over, it is that arm's or routine's own; one outside
-        // has no such reading), and a consuming argument last.
+        // outside (a windowed temporary's event can take only a call inside
+        // its window), and a consuming argument last.
         let in_window = |k: usize| windows.iter().flatten().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // More generally: a call that has a reading of its own when left over
-        // (an arm's or routine's, a replaced element's) is tried after the
-        // calls that have none.
-        let fallback = |i: usize| {
-            if i >= live {
-                return true;
-            }
-            let k = calls[i].0;
-            let frame_owned = owned_at(&calls[i].2, k);
-            !frame_owned && (in_window(k) || (elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k))))
-        };
+        // would be tried after the calls that have none; none has one now. An
+        // arm's or a routine's window gives no such reading (#4278 B1): every
+        // RC call either emits is one of its logged events; nor does a call
+        // before an abort (sec-b2): it is matched like any other.
+        let fallback = |i: usize| i >= live;
+        // A call a move (`m` / `h`) could take is tried after the others —
+        // before any other preference (a hold's name makes its release read
+        // as a frame credit, which would otherwise sort it first): a move is
+        // matched last and never displaces an event, so an unnamed event that
+        // took such a call first would leave the move's release over and an
+        // instruction the window's own events account unmatched.
+        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| is_move(evs[e].0) && fits(e, i))).collect();
         let mut by_pref: Vec<usize> = (0..nc).collect();
-        by_pref.sort_by_key(|&i| (i >= live, fallback(i), in_window(calls[i].0), calls[i].0));
+        by_pref.sort_by_key(|&i| (i >= live, move_fits[i], fallback(i), in_window(calls[i].0), calls[i].0));
         by_pref.extend(nc..nc + takers.len());
         let mut owner: Vec<Option<usize>> = vec![None; nc + takers.len()];
         fn augment(
@@ -655,7 +648,7 @@ pub fn check_rc(
         // A move is not re-routed here: it may take nothing (its arm or
         // routine keeps the credit), so it never displaces a release from its
         // own call onto a consuming argument — that would trade an instruction
-        // the frame's events account for a trusted `consumed` reading.
+        // the frame's events account for a signed consumption.
         for &e in &order {
             if owner.contains(&Some(e)) || is_move(evs[e].0) {
                 continue;
@@ -705,7 +698,6 @@ pub fn check_rc(
                 rehome(c, evs.len(), &fits, &fallback_call, &mut seen, &mut owner);
             }
         }
-        let move_fits: Vec<bool> = (0..nc).map(|i| (0..evs.len()).any(|e| is_move(evs[e].0) && fits(e, i))).collect();
         let or_move = |i: usize| fallback_call(i) || move_fits[i];
         for round in 0..2 {
             // A move's credit is released by the arm on some of its paths: one
@@ -852,7 +844,7 @@ pub fn check_rc(
         for i in 0..nc {
             used[i] = owner[i].is_some();
         }
-        rep.consumed += owner[nc..].iter().filter(|o| o.is_some()).count();
+        rep.signed += owner[nc..].iter().filter(|o| o.is_some()).count();
         for (e, &(kind, local)) in evs.iter().enumerate() {
             if got[e] {
                 continue;
@@ -860,36 +852,16 @@ pub fn check_rc(
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
                 (c, _) if is_move(c) => {}
-                // The every-path rule (adopted 2026-10-28): a callee that
-                // takes the parameter on some paths but not all is refused.
-                (k @ ('a' | 'd'), Some(l)) if (0..takers.len()).any(|t| holds(l, t) && verdict(takers[t].2, takers[t].1) == (true, false)) => {
-                    unmatched.push(format!("{k}{l} (its consuming callee takes it on some paths only)"))
+                // A window's callee that holds the variable but declares no
+                // consuming signature for that parameter (#4278 B1).
+                (k @ ('a' | 'd'), Some(l)) if (0..takers.len()).any(|t| holds(l, t)) => {
+                    unmatched.push(format!("{k}{l} (no callee in its window declares that it consumes it)"))
                 }
                 (k, Some(l)) => unmatched.push(format!("{k}{l}")),
                 (k, None) => unmatched.push(format!("{k}-")),
             }
         }
         rep.judges_unmatched += (0..live).filter(|&i| !used[i] && calls[i].1 == 'j').count();
-        for i in 0..calls.len() {
-            if used[i] || calls[i].1 == 'j' || i >= live {
-                continue;
-            }
-            let k = calls[i].0;
-            // A frame variable's credit is never an arm's, a routine's or an
-            // element's: such a call stays unaccounted.
-            let frame_owned = owned_at(&calls[i].2, k);
-            let slot = if !frame_owned && inside(&windows[0], k) {
-                &mut rep.arm_internal
-            } else if !frame_owned && inside(&windows[1], k) {
-                &mut rep.routine_internal
-            } else if !frame_owned && elements.contains(&k) && (calls[i].1 == 'a' || replaces(&fl, b, k)) {
-                &mut rep.element
-            } else {
-                continue;
-            };
-            *slot += 1;
-            used[i] = true;
-        }
         let extra: Vec<String> = (0..live)
             .filter(|&i| !used[i] && calls[i].1 != 'j')
             .map(|i| format!("{}@{} on {:?}", calls[i].1, calls[i].0, calls[i].2))
@@ -906,7 +878,6 @@ pub fn check_rc(
                 for i in 0..nc {
                     let by = match owner[i] {
                         Some(e) => ev_txt(e),
-                        None if used[i] => "counted".to_string(),
                         None => "LEFT".to_string(),
                     };
                     msg.push_str(&format!("\n  {}@{} {:?} <- {}", calls[i].1, calls[i].0, calls[i].2, by));

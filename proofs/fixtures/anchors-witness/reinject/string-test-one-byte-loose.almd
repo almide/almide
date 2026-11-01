@@ -1,0 +1,10 @@
+// #4281 drill: string.get's own test `off >=u len(s)` admits one byte past
+// the string's len word while the bounds witness still records `c a` — the
+// proven checker accepts, the bytes test a looser bound than the read needs.
+effect fn main() -> Unit = {
+  let s = "hey"
+  match string.get(s, 1) {
+    some(c) => println(c),
+    none => println("none"),
+  }
+}

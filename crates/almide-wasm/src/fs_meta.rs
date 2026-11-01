@@ -388,6 +388,10 @@ impl Emitter<'_> {
             // #3677: the 32-byte stat scratch is read out; it goes before
             // its hold is reused for the Result block.
             i.local_get(hb).call(F_DEC_FLAT);
+            let _ = i;
+            // #4278 B1: logged as the arm's own temporary.
+            self.arm_temp_released();
+            let mut i = self.f.instructions();
             i.i32_const(16).call(F_ALLOC).local_set(hb);
             i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
             i.local_get(hb).local_get(hr).i32_store(slot_memarg(almide_layout::SUM_FIELD));
@@ -432,6 +436,10 @@ impl Emitter<'_> {
         i.i64_store(slot_memarg(almide_layout::SUM_FIELD));
         // #3137: the 8-byte scratch is read out; it was never released.
         i.local_get(hb).call(F_DEC_FLAT);
+        let _ = i;
+        // #4278 B1: logged as the arm's own temporary.
+        self.arm_temp_released();
+        let mut i = self.f.instructions();
         i.local_get(hs2);
         i.end();
         let _ = i;

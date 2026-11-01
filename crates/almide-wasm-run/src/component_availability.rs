@@ -10,7 +10,9 @@
 /// (43..=49; op 50 is retired), and — through the spliced p1 fs service over its
 /// wasi:filesystem@0.3 adapter (#3140) — every op the p1 fs service
 /// answers, the fan prefetch triple (40..=42) and env.os / fs.temp_dir /
-/// env.cwd (27 / 28 / 33) among them.
+/// env.cwd (27 / 28 / 33) among them — and UDP and name lookup (140..=145,
+/// #4306) over wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
+/// (wasi_p3_net.rs).
 pub fn serves(op: i32, p3: bool) -> bool {
     // 74: the instance-parallel fan offer (#3003), answered "not served" by
     // both component shims — the guest then runs its chunks sequentially.
@@ -18,6 +20,7 @@ pub fn serves(op: i32, p3: bool) -> bool {
     let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74 | 76);
     let extra = p3
         && (matches!(op, 26 | 29 | 36 | 37 | 40..=49 | 65 | 77)
+            || almide_wasm::host_ops::UDP.contains(&op)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -101,10 +104,14 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 /// world imports no `wasi:filesystem`, which `wasmtime serve` does not link
 /// without a flag (#2659, measured on wasmtime 47) — plus `http.serve`'s
 /// own ops 70..=72 and 75 (the contained loop, #4203, answered "not
-/// served"), which the shim answers guest-side.
+/// served"), which the shim answers guest-side. Nor does the service world
+/// import wasi:sockets: a handler's datagram wait would hold the one
+/// request the export is serving, so UDP and name lookup (140..=145) stay
+/// E081 there.
 pub fn serves_service(op: i32) -> bool {
     let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
-    matches!(op, 70..=72 | 75) || (!fs && serves(op, true))
+    let net = almide_wasm::host_ops::UDP.contains(&op);
+    matches!(op, 70..=72 | 75) || (!fs && !net && serves(op, true))
 }
 
 /// [`check`] for the service shape: an op the export cannot answer is E081
@@ -154,6 +161,7 @@ fn operation_name(op: i32) -> &'static str {
             60 => "datetime.monotonic_ns",
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes", 64 => "fs.read_bytes_if_exists",
+            66 => almide_wasm::host_ops::FS_APPEND_BYTES_CALL,
             73 => "panic",
             77 => "env.vars",
             91..=103 => "the net core (net.tcp_*)",

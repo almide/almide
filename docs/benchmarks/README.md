@@ -53,7 +53,7 @@ Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target f
 You write no ownership annotations, lifetimes, or `free`: the compiler places
 Perceus-style ownership operations. The Rocq/Coq checkers prove modeled witness
 properties, not complete artifact memory safety or semantic correctness.
-The proof spine has 134 audited theorems; `proofs/check.sh` checks this count
+The proof spine has 137 audited theorems; `proofs/check.sh` checks this count
 against its `Print Assumptions` audits and independently rechecks the spine.
 `almide verify <file.almd> --emit <bundle>` now records the structural Wasm
 bundle; the independent `almide-verify` checks it. Supported **core artifacts**

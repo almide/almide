@@ -632,8 +632,8 @@ echo
 echo "== structural leg, fan accumulator  ⊳  proven checker (#2755) =="
 run_structural spec/wasm_cross/witness_straightline.almd fan_bang 0
 run_structural spec/wasm_cross/witness_straightline.almd fan_first 0
-tamper_structural fan_bang '4s/^{id|im}$/{i|im}/' "#2755 fan carrier"
-tamper_structural fan_bang '6s/^{|im}$/{|i}/' "#2755 fan payload"
+tamper_structural fan_bang '5s/^{id|im}$/{i|im}/' "#2755 fan carrier"
+tamper_structural fan_bang '7s/^{|im}$/{|i}/' "#2755 fan payload"
 
 # ── #2755: `xs[i]` over a bound list is a VIEW of the element (shared out,
 # `{|am}`); out of bounds ABORTS the process with nothing released — the

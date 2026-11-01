@@ -9413,20 +9413,6 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
-
-[[fn]]
-name = "ffi.slice"
-sig = "(r: Region, off: Int, n: Int) -> Result[Region, String]"
-class = "pure"
-status = "inspected"
-impl = "fnv1a:f4c8fce8922d4df1"
-stamp = "almide 0.69.0 (dev) at batch-cleanup bc33946d41094fb75967d3b1805395239bc6c2f7 (ffi.region, ffi.len, ffi.is_writable, ffi.slice, ffi.read, ffi.write over the Region nominal, and http.typed with its literal media type inline and a constant TypedBody digest, after the #4339 certificate fix; every leg of the fuzz ladder in one sandboxed environment); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), 200 programs per fn; GCE c4-standard-8 (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU standard, one fn at a time, us-central1-a), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-29; codopsy: no scored crate code changed by this inspection"
-order = "1"
-parity = "PASS: seed 1793309444, 200 programs; 200 program(s) call it, 152 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1048576..2097152 6.501e7/6.501e7/6.501e7/6.501e7/6.501e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s wasm k=65536..131072 5.120e7/5.119e7/5.120e7/5.119e7/5.119e7 fit 1 (rms 0.0%) moved 2.621e6/2.621e6/2.621e6/2.621e6/2.622e6B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order 1 ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
 [[fn]]
 name = "ffi.to_bytes"
 sig = "effect (r: Region) -> Bytes ! String"

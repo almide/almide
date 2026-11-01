@@ -103,6 +103,9 @@ op_families! {
     FS_RANGE = 61..=64 => OpCaps::All(&[FS_READ]);
     /// The full-response http leaf (ADR-0023 step 4).
     HTTP_RESPONSE = 65..=65 => OpCaps::All(&[NET]);
+    /// fs.append_bytes: op 16's true append under its own call name
+    /// ([`FS_APPEND_BYTES_CALL`], #4382).
+    FS_APPEND_BYTES = 66..=66 => OpCaps::All(&[FS_WRITE]);
     /// http.serve's bind / next / reply (#2650).
     SERVE = 70..=72 => OpCaps::All(&[NET]);
     /// The raw stderr append (#2769).
@@ -133,6 +136,10 @@ op_families! {
     /// The `process.start` child (#4308): the WIT cases after `run-with`.
     PROC_CHILD = 146..=151 => OpCaps::All(&[CAP_PROC]);
 }
+
+/// The call [`FS_APPEND_BYTES`] answers for: every leg's error names it,
+/// declared here beside its op rather than in a table of fs call names.
+pub const FS_APPEND_BYTES_CALL: &str = "fs.append_bytes";
 
 /// The first pair of families (indexes into [`FAMILIES`]) that share an op,
 /// or that declare an empty range (it is reported as overlapping itself).

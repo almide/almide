@@ -35,9 +35,12 @@
 #                 adapter: every op P1_SERVED_OPS names, with env.os /
 #                 env.temp_dir / env.cwd (27 / 28 / 33); since #3223 env.set
 #                 (37) too, through the p1 shim's guest-side overlay log,
-#                 so component_availability.rs declares no exclusion. The
-#                 artifact runs on a stock wasmtime 46+ with no feature
-#                 flag (step 1).
+#                 so component_availability.rs declares no exclusion; since
+#                 #4306 UDP and name lookup (140..=145) over wasi:sockets@0.3.
+#                 The artifact runs on a stock wasmtime 46+ with no feature
+#                 flag (step 1); a udp program needs the network grant
+#                 (`-S inherit-network`, `-S allow-ip-name-lookup` for a
+#                 name).
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure
@@ -336,6 +339,12 @@ pending_self_host_ceiling = 0
 # with the stock-p1 leg only. Evidence:
 # spec/embedded_cross/process_start_family.almd and
 # spec/stdlib/process_start_test.almd on the wasm test lane.
+# 2026-11-01 (#4306): 23 -> 23. The same five rows are now served by the
+# WASI 0.3 component too: its shim answers ops 140..=145 over
+# wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
+# (crates/almide-wasm-run/src/wasi_p3_net.rs; C-448, evidence: the C-442 / C-443
+# fixtures under tests/net_udp_p3_cross_test.rs). Only the stock-p1 leg
+# remains, and its reason now says why: preview 1 has no sockets at all.
 pending_port_ceiling = 23
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
@@ -604,35 +613,35 @@ issue = "#3620"
 fn = "net.lookup_host"
 legs = ["stock-p1"]
 class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
+reason = "stock-p1 only (#4306): WASI preview 1 defines no sockets, so no p1 artifact can bind, send or resolve, and the default `build --target wasm` keeps E081. Every other leg serves it: `almide run --target wasm` (ops 140..=145 over native's net core), the structural leg (the stdlib/net_wasm.almd bodies) and the WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --component`, run with `-S inherit-network -S allow-ip-name-lookup`) over wasi:sockets@0.3 udp-socket and ip-name-lookup. The leg closes when the default build routes a udp program to that component, as the tcp family will (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_bind"
 legs = ["stock-p1"]
 class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
+reason = "stock-p1 only (#4306): WASI preview 1 defines no sockets, so no p1 artifact can bind, send or resolve, and the default `build --target wasm` keeps E081. Every other leg serves it: `almide run --target wasm` (ops 140..=145 over native's net core), the structural leg (the stdlib/net_wasm.almd bodies) and the WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --component`, run with `-S inherit-network -S allow-ip-name-lookup`) over wasi:sockets@0.3 udp-socket and ip-name-lookup. The leg closes when the default build routes a udp program to that component, as the tcp family will (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_local_port"
 legs = ["stock-p1"]
 class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
+reason = "stock-p1 only (#4306): WASI preview 1 defines no sockets, so no p1 artifact can bind, send or resolve, and the default `build --target wasm` keeps E081. Every other leg serves it: `almide run --target wasm` (ops 140..=145 over native's net core), the structural leg (the stdlib/net_wasm.almd bodies) and the WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --component`, run with `-S inherit-network -S allow-ip-name-lookup`) over wasi:sockets@0.3 udp-socket and ip-name-lookup. The leg closes when the default build routes a udp program to that component, as the tcp family will (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_send_to"
 legs = ["stock-p1"]
 class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
+reason = "stock-p1 only (#4306): WASI preview 1 defines no sockets, so no p1 artifact can bind, send or resolve, and the default `build --target wasm` keeps E081. Every other leg serves it: `almide run --target wasm` (ops 140..=145 over native's net core), the structural leg (the stdlib/net_wasm.almd bodies) and the WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --component`, run with `-S inherit-network -S allow-ip-name-lookup`) over wasi:sockets@0.3 udp-socket and ip-name-lookup. The leg closes when the default build routes a udp program to that component, as the tcp family will (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
 fn = "net.udp_recv_from"
 legs = ["stock-p1"]
 class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
+reason = "stock-p1 only (#4306): WASI preview 1 defines no sockets, so no p1 artifact can bind, send or resolve, and the default `build --target wasm` keeps E081. Every other leg serves it: `almide run --target wasm` (ops 140..=145 over native's net core), the structural leg (the stdlib/net_wasm.almd bodies) and the WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --component`, run with `-S inherit-network -S allow-ip-name-lookup`) over wasi:sockets@0.3 udp-socket and ip-name-lookup. The leg closes when the default build routes a udp program to that component, as the tcp family will (TCP design step 4)."
 issue = "#4306"
 
 [[unavailable]]
