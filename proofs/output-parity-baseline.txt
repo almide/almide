@@ -378,6 +378,7 @@ spec/wasm_cross/fold_family_source_before_init.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/fold_init_rebinds_source.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/for_in_list_value_semantics.almd
 spec/wasm_cross/fs_error_path_escape.almd
 spec/wasm_cross/fs_fallible_walker_call_head.almd
 spec/wasm_cross/fs_relative_path.almd
@@ -812,6 +813,7 @@ spec/wasm_cross/range_first_class.almd
 spec/wasm_cross/range_head_fold_edges.almd
 spec/wasm_cross/range_head_fold_huge.almd
 spec/wasm_cross/range_inclusive_end_at_max.almd
+spec/wasm_cross/range_inclusive_runtime_max.almd
 spec/wasm_cross/range_materialize_oom.almd
 spec/wasm_cross/rc_alloc_stress.almd
 spec/wasm_cross/rc_reclaim_churn.almd
@@ -1113,3 +1115,4 @@ spec/wasm_host_js/effect_exports.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd
+spec/wasm_host_js/region_export_push.almd
