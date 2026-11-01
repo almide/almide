@@ -472,7 +472,6 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     let guards = fs_runtime_guards();
     let entries: std::collections::BTreeSet<String> =
         guards.iter().filter(|(_, g)| **g != "__almide_fs_root").map(|(n, _)| n.clone()).collect();
-    let (twin, twinned) = super::fs_scope_twin::scoped_twin(fs_runtime_source(), &entries);
     // Only the user code is rewritten: with the runtime inlined, its own
     // definitions and internal calls sit before the boundary marker.
     let marker = almide::codegen::RT_BOUNDARY_MARKER;
@@ -480,9 +479,20 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
         Some(i) => rs_code.split_at(i + marker.len()),
         None => ("", rs_code.as_str()),
     };
+    // The scope's own items are the runtime's: inside the private runtime
+    // module when the runtime is inlined (#4345), at the root through
+    // `use almide_rt::*` when it is linked.
+    let (rt_path, rt_use) = if head.is_empty() {
+        (String::new(), String::new())
+    } else {
+        let m = almide::codegen::RUNTIME_MODULE;
+        (format!("crate::{m}::"), format!("use crate::{m}::*;\n"))
+    };
+    let (twin, twinned) = super::fs_scope_twin::scoped_twin(fs_runtime_source(), &entries, &rt_use);
     let user = wrap_fs_calls(user, &guards, &twinned);
     let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
-    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}{twin}", list.join(", "));
+    let guards_src = FS_SCOPE_GUARDS.replace("__ALMIDE_RT::", &rt_path);
+    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{guards_src}{twin}", list.join(", "));
     if head.is_empty() {
         splice_after_inner_attrs(&user, &prelude)
     } else {
@@ -497,17 +507,17 @@ const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<(
 fn __almide_fs_scope_check(path: &str) -> Result<(), String> {
     __ALMIDE_FS_SCOPE.get_or_init(|| {
         let raw: Vec<String> = __ALMIDE_FS_SCOPE_ROOTS.iter().map(|r| r.to_string()).collect();
-        fs_scoped_install(Some(&raw));
+        __ALMIDE_RT::fs_scoped_install(Some(&raw));
     });
-    if fs_scoped_admits(path) { Ok(()) } else { Err(fs_scope_refusal(path)) }
+    if __ALMIDE_RT::fs_scoped_admits(path) { Ok(()) } else { Err(__ALMIDE_RT::fs_scope_refusal(path)) }
 }
 fn __almide_fs_fix<T, E: std::ops::Deref<Target = str> + From<String>>(r: Result<T, E>, path: &str) -> Result<T, E> {
-    match r { Err(e) if fs_scoped_refused_in(&e) => Err(E::from(fs_scope_refusal(path))), r => r }
+    match r { Err(e) if __ALMIDE_RT::fs_scoped_refused_in(&e) => Err(E::from(__ALMIDE_RT::fs_scope_refusal(path))), r => r }
 }
 macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }
 macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => __almide_fs_fix(($f)(__almide_p, __almide_q), &__almide_s), Err(e) => Err(e.into()) } }}; }
-macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = __ALMIDE_RT::fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_root { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from((&*__almide_p).split('\0').next().unwrap_or("")); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = std::env::temp_dir().to_string_lossy().into_owned(); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
 "#;
