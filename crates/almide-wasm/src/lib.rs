@@ -154,6 +154,7 @@ mod emitter_values;
 mod emitter_vars;
 mod patterns;
 mod prim;
+mod prim_shape;
 mod runtime;
 mod runtime_alloc;
 mod deep_walk;
