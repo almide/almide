@@ -214,12 +214,12 @@ if [ "$MODE" = tests ]; then
   sed 's/^/    /' "$OUT/run-host-limited"
   # Anchor rejects against the ledger's `anchors` rows (file<TAB>anchors<TAB>-<TAB>issue):
   # a reject the ledger does not name fails, and so does a row that no longer rejects.
-  grep -v -E '^(#|$)' "$EXCEPTIONS" 2>/dev/null | awk -F'\t' '$2 == "anchors" {print $1}' | LC_ALL=C sort -u > "$OUT/anchor-ledger"
+  { grep -v -E '^(#|$)' "$EXCEPTIONS" 2>/dev/null || true; } | awk -F'\t' '$2 == "anchors" {print $1}' | LC_ALL=C sort -u > "$OUT/anchor-ledger"
   cut -f1 "$OUT/anchor-rejects" | LC_ALL=C sort -u > "$OUT/anchor-seen"
   echo "  [anchors] $(wc -l < "$OUT/anchor-seen" | tr -d ' ') of $N artifact(s) hold an event that is not its instruction:"
   sed 's/^/    /' "$OUT/anchor-rejects"
   unnamed="$(LC_ALL=C comm -23 "$OUT/anchor-seen" "$OUT/anchor-ledger")"
-  stale="$(LC_ALL=C comm -13 "$OUT/anchor-seen" "$OUT/anchor-ledger" | while IFS= read -r f; do grep -qxF "$f" "$OUT/selected" && echo "$f"; done)"
+  stale="$(LC_ALL=C comm -13 "$OUT/anchor-seen" "$OUT/anchor-ledger" | while IFS= read -r f; do if grep -qxF "$f" "$OUT/selected"; then echo "$f"; fi; done)"
   if [ -n "$unnamed" ] || [ -n "$stale" ]; then
     [ -z "$unnamed" ] || { echo "STRUCTURAL WALL FAIL: ANCHORS REJECT on an artifact no exception names:" >&2; echo "$unnamed" | sed 's/^/  /' >&2; }
     [ -z "$stale" ] || { echo "STRUCTURAL WALL FAIL: STALE anchors exception (the artifact now reads ANCHORS OK — remove the row):" >&2; echo "$stale" | sed 's/^/  /' >&2; }
@@ -332,7 +332,8 @@ if os.path.exists(exceptions_path):
         line = line.strip()
         if line and not line.startswith("#"):
             fx, prop, fn = line.split("\t")[:3]
-            exceptions.add((fx, prop, fn))
+            if prop != "anchors":  # the stdlib-test leg's artifact rows, judged in bash
+                exceptions.add((fx, prop, fn))
 
 fail = []
 stats = {p: [0, 0] for p in FN}
