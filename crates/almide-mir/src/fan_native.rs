@@ -58,6 +58,7 @@ pub(crate) fn arm(name: &str) -> Option<Arm> {
 }
 
 /// The arms the last lift made, by group: `(group, [arm name; count])`.
+#[cfg(test)]
 pub(crate) fn groups() -> BTreeMap<usize, Vec<String>> {
     let mut out: BTreeMap<usize, Vec<String>> = BTreeMap::new();
     ARMS.with(|a| {
