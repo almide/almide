@@ -34,6 +34,22 @@ use std::fmt::Write as _;
 /// The Result block's tag word: right after the payload handle in slot 0.
 const RESULT_TAG_OFFSET: i64 = BLOCK_HEADER as i64 + 4;
 
+/// A Result of two scalar payloads: the materializers build its Ok as
+/// `Init::ResOkScalar` (length word 0) and its Err as a one-slot block
+/// (length word 1), so the length word is its tag and slot 0 its payload.
+fn len_tagged(i: u16) -> bool {
+    result_payloads(i).is_some_and(|(o, e)| o == NTy::I64 && e == NTy::I64)
+}
+
+/// The i64 a scalar payload slot holds for value `v`.
+fn scalar_rhs(tys: &BTreeMap<ValueId, NTy>, v: ValueId) -> Result<String, LowerError> {
+    match tys.get(&v) {
+        Some(NTy::I64) => Ok(var(v)),
+        Some(NTy::F64) => Ok(format!("{}.to_bits() as i64", var(v))),
+        other => Err(wall(format!("native: a {other:?} value as a scalar carrier payload"))),
+    }
+}
+
 /// A function's carrier signature: each param's and the return's generated
 /// carrier index, if the declared type is one.
 pub(crate) type CarrierSig = (Vec<Option<u16>>, Option<u16>);
@@ -164,11 +180,15 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
                 }
             }
             Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } if args.len() == 1 => {
-                if let Some(&(r, RESULT_TAG_OFFSET)) = at.get(&args[0]) {
-                    tags.insert(*d, r);
+                // The tag word of either Result layout (an Option's length
+                // word lands here too; only a Result's payload read asks).
+                if let Some(&(r, o)) = at.get(&args[0]) {
+                    if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
+                        tags.insert(*d, r);
+                    }
                 }
             }
-            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
+            Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
                 if let Some(&(r, o)) = at.get(&args[0]) {
                     if o == i64::from(BLOCK_HEADER) && arms.iter().all(|(t, _)| *t != Some(r)) {
                         reads.insert(*d, r);
@@ -244,6 +264,24 @@ pub(super) fn render_carrier_op(
             st.arms.pop();
             None
         }
+        Op::Alloc { dst, init: Init::ResOkScalar { payload }, .. } if st.alloc_rec.get(dst).is_some_and(|i| len_tagged(*i)) => {
+            let i = st.alloc_rec[dst];
+            tys.insert(*dst, NTy::Rec(i));
+            Some(scalar_rhs(tys, *payload).map(|rhs| {
+                emit(out, indent, &format!("let mut {}: {} = Ok({rhs});", var(*dst), struct_name(i)));
+                true
+            }))
+        }
+        Op::Alloc { dst, init: Init::DynList { len }, .. } if st.alloc_rec.get(dst).is_some_and(|i| len_tagged(*i)) => {
+            let i = st.alloc_rec[dst];
+            if st.consts.get(len) != Some(&1) {
+                return Some(Err(wall("native: a scalar Result block that is not one Err slot")));
+            }
+            tys.insert(*dst, NTy::Rec(i));
+            // Its one slot is stored next: the length word 1 made it an Err.
+            emit(out, indent, &format!("let mut {}: {};", var(*dst), struct_name(i)));
+            Some(Ok(true))
+        }
         Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. } | Init::OptNone, .. }
             if st.alloc_rec.get(dst).is_some_and(|i| is_carrier(*i)) =>
         {
@@ -270,7 +308,22 @@ pub(super) fn render_carrier_op(
                 tys.insert(*d, NTy::I64);
                 emit(out, indent, &format!("let mut {}: i64 = {b}.is_some() as i64;", var(*d)));
                 Ok(true)
-            } else if *width == 4 && ad.idx.is_none() && result_payloads(i).is_some() && ad.off == RESULT_TAG_OFFSET {
+            } else if *width == 4 && ad.idx.is_none() && len_tagged(i) && ad.off == i64::from(BLOCK_LEN_OFFSET) {
+                tys.insert(*d, NTy::I64);
+                st.res_tags.insert(*d, ad.base);
+                emit(out, indent, &format!("let mut {}: i64 = {b}.is_err() as i64;", var(*d)));
+                Ok(true)
+            } else if *width == 8 && len_tagged(i) && rec_slot(&ad) == Some(0) {
+                let arm = st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
+                let read = match arm.or_else(|| st.hoisted.get(d).copied()) {
+                    Some(true) => format!("match &{b} {{ Err(v) => *v, Ok(_) => 0 }}"),
+                    Some(false) => format!("match &{b} {{ Ok(v) => *v, Err(_) => 0 }}"),
+                    None => format!("match &{b} {{ Ok(v) | Err(v) => *v }}"),
+                };
+                tys.insert(*d, NTy::I64);
+                emit(out, indent, &format!("let mut {}: i64 = {read};", var(*d)));
+                Ok(true)
+            } else if *width == 4 && ad.idx.is_none() && result_payloads(i).is_some() && !len_tagged(i) && ad.off == RESULT_TAG_OFFSET {
                 tys.insert(*d, NTy::I64);
                 st.res_tags.insert(*d, ad.base);
                 emit(out, indent, &format!("let mut {}: i64 = {b}.is_err() as i64;", var(*d)));
@@ -324,6 +377,13 @@ pub(super) fn render_carrier_op(
             if let Some(p) = option_payload(i) {
                 return Some(payload_rhs(st, tys, args[1], p).map(|rhs| {
                     emit(out, indent, &format!("{} = Some({rhs});", var(ad.base)));
+                    true
+                }));
+            }
+            if len_tagged(i) {
+                // A one-slot block of this Result is its Err (length word 1).
+                return Some(scalar_rhs(tys, args[1]).map(|rhs| {
+                    emit(out, indent, &format!("{} = Err({rhs});", var(ad.base)));
                     true
                 }));
             }

@@ -44,7 +44,8 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
     let bin = dir.join("prog_bin");
     std::fs::write(&rs, &rust).unwrap();
     let rc = Command::new("rustc")
-        .args(["-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
+        // The edition the product's native build compiles with (src/cli/build.rs).
+        .args(["--edition", "2021", "-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
         .output()
         .expect("rustc");
     assert!(
@@ -123,6 +124,10 @@ const CORPUS: &[(&str, &str)] = &[
     // ── #4006: heap Option / Result carriers, typed from the declarations ──
     ("option_string", "fn find(x: Int) -> String? = if x > 0 then some(\"p\" + int.to_string(x)) else none\n\nfn show(o: String?) -> String = match o {\n  some(s) => \"got \" + s,\n  none => \"none\",\n}\n\nfn main() -> Unit = {\n  println(show(find(3)))\n  println(show(find(-1)))\n  let d = find(0) ?? \"dflt\"\n  println(d)\n}\n"),
     ("result_record", "type P = { name: String, n: Int }\n\nfn mk(x: Int) -> Result[P, String] = if x > 0 then ok({ name: \"a\", n: x }) else err(\"neg\")\n\nfn say(r: Result[P, String]) -> String = match r {\n  ok(p) => p.name + int.to_string(p.n),\n  err(e) => e,\n}\n\nfn main() -> Unit = {\n  println(say(mk(2)))\n  println(say(mk(-2)))\n}\n"),
+    // ── #4006: the stdlib Value on v0's runtime enum; a Text-protocol call ──
+    ("value_floor", "import json\n\nfn mk(n: Int) -> Value = value.int(n)\n\neffect fn main() -> Unit = {\n  println(json.stringify(mk(7)))\n  println(json.stringify(value.string(\"hi\")))\n  let p = json.parse(\"{\\\"a\\\": [1, true]}\")!\n  println(json.stringify(p))\n}\n"),
+    ("list_join_strings", "fn j(xs: List[String]) -> String = list.join(xs, \", \")\n\nfn main() -> Unit = {\n  let xs = [\"a\", \"b\", \"c\"]\n  println(list.join(xs, \"-\"))\n  println(j(xs))\n}\n"),
+    ("result_int_int", "fn ck(x: Int) -> Result[Int, Int] = if x > 0 then ok(x) else err(0 - x)\n\nfn show(r: Result[Int, Int]) -> String = match r {\n  ok(v) => int.to_string(v),\n  err(e) => \"e\" + int.to_string(e),\n}\n\nfn main() -> Unit = {\n  println(show(ck(3)))\n  println(show(ck(-4)))\n}\n"),
     // The same one-slot block as `some(s)`, declared a list: stays a list.
     ("one_string_list", "fn one(s: String) -> List[String] = [s]\n\nfn main() -> Unit = {\n  let xs = one(\"solo\")\n  println(xs[0])\n  println(int.to_string(list.len(xs)))\n}\n"),
     // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
@@ -184,7 +189,7 @@ fn divzero_abort_matches_v0() {
     let rs = dir.join("prog.rs");
     let bin = dir.join("prog_bin");
     std::fs::write(&rs, &rust).unwrap();
-    let rc = Command::new("rustc").args(["-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()]).output().unwrap();
+    let rc = Command::new("rustc").args(["--edition", "2021", "-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()]).output().unwrap();
     assert!(rc.status.success(), "{}", String::from_utf8_lossy(&rc.stderr));
     let v1 = Command::new(&bin).output().unwrap();
     assert_eq!(v0.status.code(), v1.status.code(), "divzero exit code diverges");
