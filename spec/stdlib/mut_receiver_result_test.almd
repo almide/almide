@@ -1,0 +1,28 @@
+// A stdlib mutator over a `mut` receiver answers its own result, whether or not
+// the program reads the receiver again (#4400: the interp answered bytes.pop's
+// `(result, buffer)` pair at a call site the move-mode rewrite did not reach).
+// tests/interp_mut_receiver_result_test.rs runs the same programs through the
+// interpreter on both fronts.
+test "bytes.pop on a var never read again answers the byte" {
+  var s: Bytes = bytes.from_list([100, 100, 7, 2])
+  let r: Int? = bytes.pop(s)
+  assert_eq("${r}", "some(2)")
+}
+
+test "bytes.pop on a var read again answers the byte and shortens it" {
+  var s: Bytes = bytes.from_list([2, 7])
+  let r: Int? = bytes.pop(s)
+  assert_eq("${r} ${bytes.to_list(s)}", "some(7) [2]")
+}
+
+test "bytes.pop on an empty var answers none" {
+  var s: Bytes = bytes.from_list([])
+  let r = bytes.pop(s)
+  assert_eq("${r}", "none")
+}
+
+test "list.pop on a var never read again answers the element" {
+  var xs: List[Int] = [2, 7]
+  let r: Int? = list.pop(xs)
+  assert_eq("${r}", "some(7)")
+}

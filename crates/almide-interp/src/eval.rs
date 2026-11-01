@@ -251,12 +251,14 @@ impl<'a> Interpreter<'a> {
         Some(match &expr.kind {
             // ── Calls ──
             IrExprKind::Call { target, args, .. } => {
+                self.call_result_ty = Some(expr.ty.clone());
                 let flow = self.eval_call(target, args, scope);
                 self.lift_unless_intrinsic_stub(target, &expr.ty, flow)
             }
             // TailCall is codegen-inserted (TailCallMarkPass, post-cut) but we
             // treat it == Call defensively.
             IrExprKind::TailCall { target, args } => {
+                self.call_result_ty = Some(expr.ty.clone());
                 let flow = self.eval_call(target, args, scope);
                 self.lift_unless_intrinsic_stub(target, &expr.ty, flow)
             }
