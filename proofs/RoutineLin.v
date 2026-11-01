@@ -21,7 +21,9 @@
 
      LHandle h r       h := r's base address (`prim.handle`);
      LLen n r s        n := a count of r's block at stride s (0 <= n, s·n <= cap);
-     LAlloc h r sz     h := a fresh block, now region r, of capacity >= sz;
+     LAlloc h r sz     h := a fresh block, now region r, of capacity >= sz
+                       (sz the i32 the allocator receives, proven in
+                       [0, 2^32) so it is the size asked);
      LWf r             the block lies in the 32-bit address space (wasm32);
      LStatic r b c     region r := the static block at address b of
                        capacity c (a literal the data segment holds);
@@ -480,7 +482,7 @@ Inductive lrun : Bm -> Env -> LProg -> list Ev -> Out -> Prop :=
       is_i64 v -> 0 <= v -> s * v <= CAP (lb (bm r)) ->
       lrun bm (upd e n v) k t o -> lrun bm e (LLen n r s k) t o
   | LRAlloc : forall bm e h r sz lo hi b k t o,
-      ok b -> wrap (eval (val bm e) sz) <= CAP (lb b) ->
+      ok b -> eval (val bm e) sz mod 2 ^ 32 <= CAP (lb b) ->
       lrun (bupd bm r b) (upd e h (base b)) k t o -> lrun bm e (LAlloc h r sz lo hi k) t o
   | LRWf : forall bm e r k t o, lrun bm e k t o -> lrun bm e (LWf r k) t o
   | LRStatic : forall bm e r b0 c0 b k t o,
@@ -707,7 +709,7 @@ Fixpoint lcheck (P : Procs) (C : Ctx) (F : Facts) (p : LProg) {struct p} : optio
   | LHandle h r k => lcheck P C (eqs (VS h) (v1 (VB r)) ++ kill F (VS h)) k
   | LLen n r s k => lcheck P C (lneg (v1 (VS n)) :: lsub (lmul s (v1 (VS n))) (v1 (VC r)) :: kill F (VS n)) k
   | LAlloc h r sz lo hi k =>
-      if no_wrap F sz (lo, hi) && negb (mentions (VS h) sz) && negb (mentions (VB r) sz) && negb (mentions (VC r) sz)
+      if entails F lo (lneg sz) && entails F hi (lsub sz (kz (ADDR - 1))) && negb (mentions (VS h) sz) && negb (mentions (VB r) sz) && negb (mentions (VC r) sz)
       then lcheck P C (eqs (VS h) (v1 (VB r)) ++ lsub sz (v1 (VC r)) :: kill_region (kill F (VS h)) r) k
       else None
   | LWf r k =>
@@ -1109,13 +1111,14 @@ Proof.
 Qed.
 
 Lemma good_alloc : forall bm e F h r sz lo hi b, good bm e F -> ok b ->
-  no_wrap F sz (lo, hi) = true -> mentions (VS h) sz = false -> mentions (VB r) sz = false -> mentions (VC r) sz = false ->
-  wrap (eval (val lb base bm e) sz) <= CAP (lb b) ->
+  entails F lo (lneg sz) = true -> entails F hi (lsub sz (kz (ADDR - 1))) = true ->
+  mentions (VS h) sz = false -> mentions (VB r) sz = false -> mentions (VC r) sz = false ->
+  eval (val lb base bm e) sz mod 2 ^ 32 <= CAP (lb b) ->
   good (bupd bm r b) (upd e h (base b)) (eqs (VS h) (v1 (VB r)) ++ lsub sz (v1 (VC r)) :: kill_region (kill F (VS h)) r).
 Proof.
-  intros bm e F h r sz lo hi b [HF [Hi Ho]] Hb Hnw Hmh Hmb Hmc Hcap.
-  pose proof (no_wrap_sound _ F sz _ (val_vi64 bm e Hi) HF Hnw) as Hr.
-  rewrite wrap_small in Hcap by exact Hr.
+  intros bm e F h r sz lo hi b [HF [Hi Ho]] Hb Hlo Hhi Hmh Hmb Hmc Hcap.
+  apply (entails_sound _ _ _ _ HF) in Hlo. apply (entails_sound _ _ _ _ HF) in Hhi. evals.
+  rewrite Z.mod_small in Hcap by (unfold ADDR in *; lia).
   set (rho := val lb base bm e) in *.
   set (rho' := rupd (rupd (rupd rho (VS h) (base b)) (VB r) (base b)) (VC r) (CAP (lb b))).
   assert (Hv : forall v, rho' v = val lb base (bupd bm r b) (upd e h (base b)) v) by (intro v; symmetry; apply val_alloc).
@@ -1428,11 +1431,11 @@ Proof.
   - (* Handle *) exact (IHHrun C _ rr (good_handle bm e F h r Hg) Hc).
   - (* Len *) exact (IHHrun C _ rr (good_len bm e F n r s v Hg H H0 H1) Hc).
   - (* Alloc *)
-    destruct (no_wrap F sz (lo, hi) && negb (mentions (VS h) sz) && negb (mentions (VB r) sz) && negb (mentions (VC r) sz)) eqn:Hcd;
-      [| discriminate].
-    rewrite !andb_true_iff in Hcd. destruct Hcd as [[[Hnw Hmh] Hmb] Hmc].
+    destruct (entails F lo (lneg sz) && entails F hi (lsub sz (kz (ADDR - 1))) && negb (mentions (VS h) sz)
+              && negb (mentions (VB r) sz) && negb (mentions (VC r) sz)) eqn:Hcd; [| discriminate].
+    rewrite !andb_true_iff in Hcd. destruct Hcd as [[[[Hlo Hhi] Hmh] Hmb] Hmc].
     apply negb_true_iff in Hmh. apply negb_true_iff in Hmb. apply negb_true_iff in Hmc.
-    exact (IHHrun C _ rr (good_alloc bm e F h r sz lo hi b Hg H Hnw Hmh Hmb Hmc H0) Hc).
+    exact (IHHrun C _ rr (good_alloc bm e F h r sz lo hi b Hg H Hlo Hhi Hmh Hmb Hmc H0) Hc).
   - (* Wf *) exact (IHHrun C _ rr (good_wf bm e F r Hg) Hc).
   - (* Static *) exact (IHHrun C _ rr (good_static bm e F r b0 c0 b Hg H H0 H1) Hc).
   - (* Set *) exact (IHHrun C _ rr (good_kill_upd bm e F x v Hg H) Hc).

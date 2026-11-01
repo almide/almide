@@ -25,7 +25,7 @@
              | 'W' N Z Z lin pf pf pf        LSto
              | 'h' N N                       LHandle h r
              | 'n' N N Z                     LLen n r s
-             | 'a' N N lin pf pf             LAlloc h r sz lo hi
+             | 'a' N N lin pf pf             LAlloc h r sz lo hi  (lo: 0 <= sz, hi: sz < 2^32)
              | 'f' N                         LWf r
              | 'g' N Z Z                     LStatic r b c
              | 's' N                         LSet x
@@ -406,4 +406,16 @@ Example accepts_static_read : check_lbounds_cert (static_text "256") = true.
 Proof. reflexivity. Qed.
 
 Example rejects_static_past_cap : check_lbounds_cert (static_text "18912") = false.
+Proof. reflexivity. Qed.
+
+(* An allocation of 8 bytes, its first 8 payload bytes read; a 9-byte read
+   is refused. Facts after `f4`: 0 `-b4`, 1 `-c4`, 2 wf, 3 `s0 - b4`,
+   4 `b4 - s0`, 5 `8 - c4`. *)
+Definition alloc_text (n : string) : string :=
+  "Q1{ | | 0 | a0,4 []8 ()1 ()1 f4 A4," ++ n ++ ",12 [s0:1]0 (4:1 0:1)1 (4:1)1 (3:1 5:1)1 R{} }".
+
+Example accepts_alloc_read : check_lbounds_cert (alloc_text "8") = true.
+Proof. reflexivity. Qed.
+
+Example rejects_alloc_overread : check_lbounds_cert (alloc_text "9") = false.
 Proof. reflexivity. Qed.

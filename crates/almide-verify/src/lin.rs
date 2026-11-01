@@ -660,7 +660,8 @@ fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
                 f = g;
             }
             Item::Alloc { h, r, sz, lo, hi } => {
-                if !(no_wrap(&f, sz, &(lo.clone(), hi.clone()))
+                if !(entails(&f, lo, &lneg(sz))
+                    && entails(&f, hi, &lsub(sz, &kz(Z::pow2(32).sub(&one()))))
                     && !mentions(&Var::S(h.clone()), sz)
                     && !mentions(&Var::B(r.clone()), sz)
                     && !mentions(&Var::C(r.clone()), sz))
@@ -780,6 +781,13 @@ mod tests {
         assert!(!check_bounds_cert(b"c0 s0 a0 ; Q3{ | | 0 | R{} }"));
         assert!(!check_bounds_cert(b"Q3{ | | 0 | h0,7 f7 A7,4,4 [s0:1]0 (4:1 0:1)1 (4:1)1 (3:1 1:-1)1 R{} }"));
         assert!(check_bounds_cert(b"Q3{ | | 0 | h0,7 f7 A7,4,4 [s0:1]0 (4:1 0:1)1 (4:1)1 (3:1 1:1)1 R{} }"));
+        // An allocation of 8 bytes (its size proven in [0, 2^32) by the
+        // constant itself), then a read of its first 8 payload bytes:
+        // facts after `f4`: 0 `-b4`, 1 `-c4`, 2 wf, 3 `s0 - b4`, 4 `b4 - s0`,
+        // 5 `8 - c4`.
+        let al = |n: &str| format!("Q1{{ | | 0 | a0,4 []8 ()1 ()1 f4 A4,{n},12 [s0:1]0 (4:1 0:1)1 (4:1)1 (3:1 5:1)1 R{{}} }}");
+        assert!(check_bounds_cert(al("8").as_bytes()));
+        assert!(!check_bounds_cert(al("9").as_bytes()));
         let st = |off: &str| format!("Q1{{ | | 0 | g2,144,18756 A2,1,{off} []0 ()1 (0:1)1 (1:1 3:1)1 R{{}} }}");
         assert!(check_bounds_cert(st("256").as_bytes()));
         assert!(!check_bounds_cert(st("18912").as_bytes()));
