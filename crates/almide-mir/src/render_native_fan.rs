@@ -147,3 +147,109 @@ pub(crate) fn fan_glue() -> String {
 pub(crate) fn route_exits(program: &str) -> String {
     program.replace("std::process::exit(", "almide_v1_exit(")
 }
+
+/// At op `i`, a call of a self-host body the lift admitted a parallel twin
+/// for (crate::fan_map_twin): render it as the standard codegen's
+/// `almide_rt_fan_map_par` over the list, each element calling the certified
+/// lambda through its typed dispatch table. `false` when op `i` is no such
+/// call.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_fan_map_twin(
+    func: &MirFunction,
+    i: usize,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    sigs: &NativeSigs,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+    used_shims: &mut Vec<&'static str>,
+) -> Result<bool, LowerError> {
+    let Op::CallFn { dst, name, args, result } = &func.ops[i] else { return Ok(false) };
+    if !crate::fan_map_twin::is_twin(name) {
+        return Ok(false);
+    }
+    let twin_wall = |why: &str| wall(format!("native: the parallel twin of `{name}`: {why}"));
+    let [CallArg::Handle(xs), CallArg::Handle(blk)] = args.as_slice() else {
+        return Err(twin_wall("not a call of a list and a closure block"));
+    };
+    let (elem, elem_nty, xs_slice) = match tys.get(xs) {
+        Some(NTy::Vec) => ("i64", NTy::I64, format!("&{}[..]", var(*xs))),
+        Some(NTy::VecRef) => ("i64", NTy::I64, var(*xs)),
+        Some(NTy::VecStr) => ("AlmideString", NTy::Str, format!("&{}[..]", var(*xs))),
+        other => return Err(twin_wall(&format!("a list held as {other:?}"))),
+    };
+    if !matches!(tys.get(blk), Some(NTy::Vec | NTy::VecRef)) {
+        return Err(twin_wall("the closure is not a block"));
+    }
+    // The bound result, as the sequential call would bind it.
+    let mut line = String::new();
+    render_call_fn(
+        NativeCall { dst, name, args, result },
+        NativeSink { user_fns, sigs, tys, out: &mut line, indent: 0, used_shims },
+    )?;
+    let Some((v, t, _)) = split_arm_line(&line) else {
+        return Err(twin_wall("the call renders as more than one bound value"));
+    };
+    // One element's call: the dispatch the self-host body's `CallIndirect`
+    // makes, rendered over stand-in values and then spelled over the element.
+    let (x, idx, d) = (ValueId(u32::MAX - 2), ValueId(u32::MAX - 1), ValueId(u32::MAX));
+    tys.insert(x, elem_nty);
+    tys.insert(idx, NTy::I64);
+    let x_arg = if elem_nty == NTy::I64 { CallArg::Scalar(x) } else { CallArg::Handle(x) };
+    let mut call = String::new();
+    let typed = crate::render_native_closure::render_typed_call_indirect(
+        &Some(d),
+        &idx,
+        &[CallArg::Handle(*blk), x_arg],
+        &Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+        sigs,
+        tys,
+        &mut call,
+        0,
+    );
+    tys.remove(&x);
+    tys.remove(&idx);
+    tys.remove(&d);
+    if !typed? {
+        return Err(twin_wall("no typed dispatch table serves its lambda"));
+    }
+    let Some((_, _, each)) = split_arm_line(&call) else {
+        return Err(twin_wall("the element call renders as more than one bound value"));
+    };
+    let each = each.replace(&var(x), "__almide_x").replace(&var(idx), &format!("{}[0]", var(*blk)));
+    let pad = "    ".repeat(indent);
+    writeln!(out, "{pad}let mut {v}: {t} = almide_v1_fan_map({xs_slice}, |__almide_x: {elem}| {each});").unwrap();
+    FAN_RENDERED.with(|c| c.set(true));
+    FAN_MAP_RENDERED.with(|c| c.set(true));
+    Ok(true)
+}
+
+thread_local! {
+    static FAN_MAP_RENDERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Did the program render a parallel `fan.map` twin (so it needs
+/// [`fan_map_glue`])?
+pub(crate) fn fan_map_rendered() -> bool {
+    FAN_MAP_RENDERED.with(|c| c.get())
+}
+
+pub(crate) fn fan_map_rendered_reset() {
+    FAN_MAP_RENDERED.with(|c| c.set(false));
+}
+
+/// The parallel `fan.map` runtime (verbatim: `almide_rt_fan_map_par` and the
+/// list module's dealer, `almide_codegen::fan_map_parallel_runtime_text`) and
+/// the one call this render makes of it.
+pub(crate) fn fan_map_glue() -> Result<String, LowerError> {
+    let runtime = almide_codegen::fan_map_parallel_runtime_text()
+        .ok_or_else(|| wall("native: the parallel fan.map runtime text has moved from its markers"))?;
+    Ok(format!(
+        "// #4006 family H: the parallel fan.map runtime (runtime/rs/src/fan.rs + list.rs, verbatim).\n\
+         use almide_str_block::almide_str_mark_reachable;\n\
+         {runtime}\n\
+         fn almide_v1_fan_map<A: Send + Sync + Clone, B: Send>(xs: &[A], f: impl Fn(A) -> Result<B, AlmideString> + Send + Sync) -> Result<Vec<B>, AlmideString> {{\n\
+         \x20   almide_rt_fan_map_par(xs.to_vec(), f)\n\
+         }}\n"
+    ))
+}

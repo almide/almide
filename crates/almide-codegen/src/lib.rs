@@ -871,3 +871,37 @@ pub fn rem_const_prelude_text() -> String {
 pub fn rem_const_divisor(d: i64) -> bool {
     prelude_rem::rem_const_applies(d)
 }
+
+/// The parallel `fan.map` runtime, for the certified native render's
+/// `fan.map` twin (#4006 family H): `almide_rt_fan_map_par` and its settle
+/// step from the fan module, the dealer, cost model and worker pool of the
+/// list module's parallel section, and the thread-share marker — each the
+/// text the standard codegen emits, sliced verbatim between the markers
+/// that bound it in `runtime/rs/src/`. `None` when a marker moved (the
+/// render then declines rather than guess a boundary).
+pub fn fan_map_parallel_runtime_text() -> Option<String> {
+    let module = |name: &str| {
+        generated::rust_runtime::RUST_RUNTIME_MODULES.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+    };
+    let slice = |text: &str, from: &str, to: &str| -> Option<String> {
+        let a = text.find(from)?;
+        let b = a + text[a..].find(to)?;
+        Some(text[a..b].to_string())
+    };
+    let map_par = slice(module("fan")?, "// `fan.map`'s PARALLEL twin", "// NO PRODUCER.")?;
+    let dealer = slice(module("list")?, "// ── Parallel variants", "// ── Mutable operations ──")?;
+    Some(format!("{}\n{dealer}\n{map_par}", prelude_string::shared_thread_boundary_text()))
+}
+
+#[cfg(test)]
+mod fan_map_parallel_runtime_tests {
+    #[test]
+    fn the_parallel_runtime_slices_are_found_between_their_markers() {
+        let t = super::fan_map_parallel_runtime_text().expect("both runtime markers are present");
+        for item in ["fn almide_rt_fan_map_par", "fn almide_fan_map_settle_slots", "fn almide_fan_deal", "fn almide_rt_fan_plan", "trait AlmideShare"] {
+            assert!(t.contains(item), "{item} is in the parallel runtime slice");
+        }
+        assert!(!t.contains("fn almide_rt_fan_race"), "the slice stops at the fan module's next section");
+        assert!(!t.contains("fn almide_rt_list_pop"), "the slice stops at the list module's next section");
+    }
+}

@@ -38,6 +38,12 @@ fn concat_trait(vis: &str) -> String {
 
 /// `x.almide_share()` marks every block a value reaches thread-shared (ADR-0013
 /// design point 3): a value is `Clone`, a slice marks its elements, a `str` holds no block.
+/// [`shared_thread_boundary`] at crate visibility, for the certified native
+/// render's parallel `fan.map` twin.
+pub(crate) fn shared_thread_boundary_text() -> String {
+    shared_thread_boundary("")
+}
+
 fn shared_thread_boundary(vis: &str) -> String {
     let mut s = format!("{vis}trait AlmideShare {{ fn almide_share(&self); }}\n");
     s.push_str("impl<T: Clone> AlmideShare for T { #[inline] fn almide_share(&self) { almide_str_mark_reachable(self) } }\n");

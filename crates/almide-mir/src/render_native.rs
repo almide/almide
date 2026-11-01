@@ -279,9 +279,16 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
     fan_rendered_reset();
+    fan_map_rendered_reset();
+    // The bodies only a parallel fan.map twin reaches run as the twin: they
+    // stay verified (and witnessed by the pipeline) but are not rendered.
+    let twin_only = crate::fan_map_twin::twin_only(prog.functions.iter());
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
+        if twin_only.contains(&func.name) {
+            continue;
+        }
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
@@ -317,7 +324,11 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
         // output macros shadow std's for all that follows), and every exit
         // through the trap wait.
         let at = out.find("\n\n").map_or(0, |i| i + 2);
-        out.insert_str(at, &fan_glue());
+        let mut glue = fan_glue();
+        if fan_map_rendered() {
+            glue.push_str(&fan_map_glue()?);
+        }
+        out.insert_str(at, &glue);
         out = route_exits(&out);
     }
     Ok(out)
@@ -414,7 +425,9 @@ fn render_fn(
     }
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
-        if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)? {
+        if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)?
+            || render_fan_map_twin(func, i, user_fns, sigs, &mut tys, &mut out, indent, used_shims)?
+        {
             continue;
         }
         // #3639: `s = s + x` / `string.push(s, x)` grows `s` in place.

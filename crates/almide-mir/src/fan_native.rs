@@ -84,12 +84,17 @@ const DECLINE: &str = "native: fan concurrency requires the scoped-thread codege
 /// program with the standing fan wall.
 pub(crate) fn lift_fan_arms(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     ARMS.with(|a| a.borrow_mut().clear());
+    crate::fan_map_twin::reset();
     let fans = Fans::of(&ir);
-    if fans.blocks == 0 && fans.declined.is_none() {
+    if fans.blocks == 0 && fans.maps == 0 && fans.declined.is_none() {
         return Ok(ir);
     }
     if let Some(span) = fans.declined {
-        return Err(LowerError::at(span, DECLINE));
+        let msg = match &fans.why {
+            Some(why) => format!("{DECLINE} ({why})"),
+            None => DECLINE.to_string(),
+        };
+        return Err(LowerError::at(span, msg));
     }
     if almide_ir::meter_plan::program_has_regions(&ir) {
         return Err(LowerError::at(fans.first, format!("{DECLINE} (a metered region's budget is per thread)")));
@@ -127,15 +132,21 @@ pub(crate) fn lift_fan_arms(mut ir: IrProgram) -> Result<IrProgram, LowerError> 
 
 /// What the program's fans need: how many blocks of two or more arms, and
 /// the first fan form this render cannot thread (a decline).
-struct Fans {
+struct Fans<'a> {
     blocks: usize,
+    /// `fan.map` calls admitted to the parallel twin (crate::fan_map_twin).
+    maps: usize,
     first: Option<almide_ir::Span>,
     declined: Option<Option<almide_ir::Span>>,
+    why: Option<String>,
+    ir: &'a IrProgram,
+    globals: HashSet<VarId>,
 }
 
-impl Fans {
-    fn of(ir: &IrProgram) -> Fans {
-        let mut v = Fans { blocks: 0, first: None, declined: None };
+impl<'a> Fans<'a> {
+    fn of(ir: &'a IrProgram) -> Fans<'a> {
+        let globals = ir.top_lets.iter().map(|t| t.var).collect();
+        let mut v = Fans { blocks: 0, maps: 0, first: None, declined: None, why: None, ir, globals };
         for f in ir.functions.iter().filter(|f| !f.is_test) {
             v.visit_expr(&f.body);
         }
@@ -143,7 +154,7 @@ impl Fans {
     }
 }
 
-impl IrVisitor for Fans {
+impl IrVisitor for Fans<'_> {
     fn visit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
             IrExprKind::Fan { exprs } => {
@@ -155,13 +166,21 @@ impl IrVisitor for Fans {
                     self.declined = Some(e.span);
                 }
             }
-            // An element-wise fan call — a list and a function over it
-            // (`fan.map`, `fan.any_map`): a parallel map on the standard
-            // codegen, so its sequential render here would be slower.
+            // An element-wise fan call — a list and a function over it: a
+            // parallel map on the standard codegen. A map this render can
+            // thread takes the parallel twin (crate::fan_map_twin); any other
+            // (`fan.any_map`, a map outside the twin's preconditions) declines,
+            // since its sequential render here would be slower.
             IrExprKind::Call { target: CallTarget::Module { module, .. }, args, .. }
                 if module.as_str() == "fan" && is_element_wise(args) && self.declined.is_none() =>
             {
-                self.declined = Some(e.span);
+                match crate::fan_map_twin::admit(args, &e.ty, self.ir, &self.globals) {
+                    Ok(()) => self.maps += 1,
+                    Err(why) => {
+                        self.declined = Some(e.span);
+                        self.why = why;
+                    }
+                }
             }
             _ => {}
         }

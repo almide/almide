@@ -45,6 +45,7 @@ pub mod purity;
 pub mod render_native;
 mod lambda_sigs;
 mod fan_native;
+mod fan_map_twin;
 mod render_native_addr;
 mod render_native_closure;
 mod render_native_rec;
