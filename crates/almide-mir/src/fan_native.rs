@@ -350,21 +350,21 @@ mod tests {
     }
 
     // The gate (TRUSTED_BASE "fan arms on threads"): an arm that captures a
-    // `var` is refused, so the program keeps the standard codegen.
+    // `var` is refused, so the program keeps the standard codegen. The
+    // frontend already refuses a `var` in a fan arm, so the control flips the
+    // argument's binding to `var` in the IR the lift sees.
     #[test]
     fn an_arm_capturing_a_var_is_refused() {
-        let e = lift(
-            "fn f(n: Int) -> Int = n + 1\n\
-             effect fn main() -> Unit = {\n  var n = 1\n  n = n + 1\n  let (a, b) = fan { f(n), f(2) }\n  println(int.to_string(a + b))\n}\n",
-        );
-        match e {
-            Err(e) => assert!(e.to_string().contains("var"), "{e}"),
-            Ok(_) => {
-                // The frontend may itself refuse a `var` reaching a fan arm;
-                // then no arm with a var can be lifted at all.
-                assert!(groups().is_empty() || arm("__fan_arm_0_0").is_none());
-            }
+        let src = "fn f(n: Int) -> Int = n + 1\n\
+                   effect fn main() -> Unit = {\n  let n = 1\n  let (a, b) = fan { f(n), f(2) }\n  println(int.to_string(a + b))\n}\n";
+        let ir = crate::pipeline::source_to_ir_for_tests(src).expect("ir");
+        assert!(lift_fan_arms(ir.clone()).is_ok(), "the `let` form lifts");
+        let mut ir = ir;
+        for v in ir.var_table.entries.iter_mut().filter(|v| v.name.as_str() == "n") {
+            v.mutability = Mutability::Var;
         }
+        let e = lift_fan_arms(ir).expect_err("a var argument is refused");
+        assert!(e.to_string().contains("captures the `var`"), "{e}");
     }
 
     // ...and an arm whose argument is a function value cannot cross a thread.
