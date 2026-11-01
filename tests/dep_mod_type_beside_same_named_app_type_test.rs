@@ -163,7 +163,7 @@ fn a_root_and_a_submodule_mod_type_shadowed_in_one_entry_file() {
     let app = scratch(
         "both",
         true,
-        "type Vault = { key: String }\n\neffect fn main() -> Unit = {\n  let v = Vault { key: \"k\" }\n  let Vault { key } = { ...v, key: \"w\" }\n  println(\"${id_of(make(\"y\"))} ${v.key} ${key} [${uses_dep()}]\")\n}\n",
+        "type Vault = { key: String }\n\neffect fn main() -> Unit = {\n  let v = Vault { key: \"k\" }\n  let w = { ...v, key: \"w\" }\n  println(\"${id_of(make(\"y\"))} ${v.key} ${w.key} [${uses_dep()}]\")\n}\n",
     );
     write(
         &app.join("..").join("dep").join("src").join("mod.almd"),
