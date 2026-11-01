@@ -70,6 +70,7 @@ spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
 spec/lang/fan_any_wasm.almd
 spec/lang/fan_map_int_wasm.almd
+spec/lang/guard_continue_under_if_test.almd
 spec/lang/guarded_variant_match_wasm.almd
 spec/lang/higher_order_heap_return_wasm.almd
 spec/lang/higher_order_result_traverse_wasm.almd
