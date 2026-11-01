@@ -4,34 +4,35 @@
 import regex
 
 // ── captures_all ──
+// The matches in the list's own display form, `[[some("a"), none], ...]`,
+// built element by element: one exact String compare sees every element,
+// none included (no input here holds a quote, a comma or a bracket).
+fn shape(m: List[List[String?]]) -> String = {
+  let groups = m |> list.map((g) => {
+    let items = g |> list.map((o) => o |> option.map((t) => "some(\"" + t + "\")") ?? "none")
+    "[" + list.join(items, ", ") + "]"
+  })
+  "[" + list.join(groups, ", ") + "]"
+}
+
 test "regex.captures_all lists [whole, group1, ...] of every match, in order" {
   let re = regex.new("([a-z]+)=([0-9]+)")
   assert_eq(
-    regex.captures_all(re, "a=1, bb=22, ccc=333"),
-    [
-      [some("a=1"), some("a"), some("1")],
-      [some("bb=22"), some("bb"), some("22")],
-      [some("ccc=333"), some("ccc"), some("333")]
-    ],
+    shape(regex.captures_all(re, "a=1, bb=22, ccc=333")),
+    "[[some(\"a=1\"), some(\"a\"), some(\"1\")], [some(\"bb=22\"), some(\"bb\"), some(\"22\")], [some(\"ccc=333\"), some(\"ccc\"), some(\"333\")]]",
   )
 }
 
 test "regex.captures_all: an unmatched optional group is none" {
   assert_eq(
-    regex.captures_all(regex.new("(x)?(y)"), "y xy"),
-    [
-      [some("y"), none, some("y")],
-      [some("xy"), some("x"), some("y")]
-    ],
+    shape(regex.captures_all(regex.new("(x)?(y)"), "y xy")),
+    "[[some(\"y\"), none, some(\"y\")], [some(\"xy\"), some(\"x\"), some(\"y\")]]",
   )
 }
 
 test "regex.captures_all: no match is the empty list; a group-free pattern gives the whole match alone" {
-  assert_eq(regex.captures_all(regex.new("([0-9]+)"), "no digits"), [])
-  assert_eq(regex.captures_all(regex.new("[0-9]"), "a1b2"), [
-    [some("1")],
-    [some("2")]
-  ])
+  assert_eq(shape(regex.captures_all(regex.new("([0-9]+)"), "no digits")), "[]")
+  assert_eq(shape(regex.captures_all(regex.new("[0-9]"), "a1b2")), "[[some(\"1\")], [some(\"2\")]]")
 }
 
 // ── escape ──
