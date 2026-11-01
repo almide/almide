@@ -308,7 +308,7 @@ effect fn main() -> Unit = {{
 }
 
 /// #4387 (C-328): a body that is not UTF-8 reads as native's lossy decode on
-/// every lane. Both wasm lanes used to hand the server's bytes back as the
+/// every lane. The p3 component used to hand the server's bytes back as the
 /// String itself — `[97, 128, 98, 206]` where native reads
 /// `a\u{FFFD}b\u{FFFD}` — and `string.reverse` then walked the trailing lead
 /// byte's claimed continuation off the end of the block. The text, request

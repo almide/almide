@@ -208,10 +208,11 @@ impl Emitter<'_> {
 
     /// ret on stack → Result[String, String] whose ok text is decoded the
     /// way native decodes a fetched body: `String::from_utf8_lossy`. The
-    /// http text family (ops 43..=49) answers the response bytes as the
-    /// server sent them on every wasm host, so without this an ok payload
-    /// could hold invalid UTF-8 where native holds U+FFFD — and every
-    /// String walker past it trusts the encoding (#4387). A valid payload
+    /// embedded host decodes the http text family (ops 43..=49) itself, but
+    /// the p3 shim answers the response bytes as the server sent them, so an
+    /// ok payload could hold invalid UTF-8 where native holds U+FFFD — and
+    /// every String walker past it trusts the encoding (#4387). Decoding in
+    /// the guest holds for any host. A valid payload
     /// is kept as it is (one validation pass, no copy); only an invalid one
     /// is rebuilt.
     pub(crate) fn fs_result_text_lossy(&mut self) -> Result<SliceTy, EmitError> {
