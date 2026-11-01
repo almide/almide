@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench: `list.get` in a hot loop over a fixed list.
+fn main() -> Unit = {
+  let xs = list.range(0, 1000)
+  var acc = 0
+  var r = 0
+  while r < 3000 {
+    var i = 0
+    while i < 1000 {
+      acc = acc + (list.get(xs, i) ?? 0)
+      i = i + 1
+    }
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

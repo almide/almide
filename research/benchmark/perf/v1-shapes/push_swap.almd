@@ -1,0 +1,19 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh): a swap-carried list
+// rebuilt by `list.push` each round — the push must append in place and the
+// swap must move, not copy.
+fn main() -> Unit = {
+  var cur: List[Int] = [1, 2, 3]
+  var w = 0
+  while w < 18 {
+    var merged: List[Int] = []
+    let n = list.len(cur)
+    var j = 0
+    while j < n * 2 {
+      list.push(merged, j)
+      j = j + 1
+    }
+    cur = merged
+    w = w + 1
+  }
+  println(int.to_string(list.len(cur)))
+}

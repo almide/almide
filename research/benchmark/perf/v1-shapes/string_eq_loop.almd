@@ -1,0 +1,13 @@
+// v1-vs-v0 shape bench: string equality and comparison in a hot loop.
+fn main() -> Unit = {
+  let a = "the quick brown fox jumps over the lazy dog"
+  let b = "the quick brown fox jumps over the lazy cat"
+  var hits = 0
+  var i = 0
+  while i < 500000 {
+    if a == b then hits = hits + 1 else hits = hits
+    if a < b then hits = hits + 2 else hits = hits
+    i = i + 1
+  }
+  println(int.to_string(hits))
+}
