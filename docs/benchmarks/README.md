@@ -1,6 +1,6 @@
 # What is measured
 
-Every claim on this page is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI, and refuses an LLM-writability scorecard that is older than 90 days or that does not name the almide-dojo run it came from. The tables between `generated` markers are rendered from the committed ledgers in this directory (`*.txt`) and from `proofs/`; CI fails when a rendered block and its ledger disagree. Do not edit them by hand. The methodology and the per-benchmark scoreboard are in [docs/project/BENCHMARKS.md](../project/BENCHMARKS.md).
+Every claim on this page is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI, and refuses an LLM-writability scorecard that is older than 90 days or that does not name the almide-dojo run it came from. The tables between `generated` markers are rendered from the committed ledgers in this directory (`*.txt`) and from `proofs/`; CI fails when a rendered block and its ledger disagree. Do not edit them by hand. A change to the prose outside the markers runs only CI's documentation checks. A change inside them, or to a marker, runs the full lane. The methodology and the per-benchmark scoreboard are in [docs/project/BENCHMARKS.md](../project/BENCHMARKS.md).
 
 ## LLM writability
 

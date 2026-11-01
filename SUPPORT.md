@@ -102,3 +102,7 @@ scope and terms. Organizational-ladder work (#586) is not itself that offer.
   writing Almide, [docs/SPEC.md](./docs/SPEC.md) for the language,
   [docs/contracts/](./docs/contracts/README.md) for what is promised
   across targets.
+- **Documentation fixes** — a pull request against `develop` that changes
+  only explanatory prose is checked by CI's documentation lane
+  ([docs/project/RUST-LINT-GATES.md](./docs/project/RUST-LINT-GATES.md)) and
+  does not wait for the compiler test matrix.
