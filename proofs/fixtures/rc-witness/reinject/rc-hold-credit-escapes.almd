@@ -1,0 +1,11 @@
+// #4277 drill: a routine's hold (a fresh key's credit moved into the judged
+// set, `h<local>@window`) is released again PAST the routine's window with no
+// event. The ownership witness is unchanged. A hold move's name is scoped to
+// its window, so outside it the call is no routine's own and no event takes
+// it: the RC byte check must refuse it — window scoping never lets a release
+// escape its routine.
+effect fn main() -> Unit = {
+  var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
+  m = map.set(m, string.repeat("a", 1), 3)
+  println(int.to_string(map.len(m)))
+}

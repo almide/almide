@@ -101,13 +101,14 @@
 | [ALS-E30](./expressions.md#als-e30-ホールと未実装マーカーexprkindhole--todo--placeholder) | ホールと未実装マーカー(`ExprKind::Hole` / `Todo` / `Placeholder`) | C-268 |
 | [ALS-E31](./expressions.md#als-e31-スコープ付き領域exprkindscoped--scoped-fn) | スコープ付き領域(`ExprKind::Scoped` / `scoped fn`) | C-362, C-363, C-364 |
 
-## implementation.md — 3 section(s)
+## implementation.md — 4 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
 | [ALS-I1](./implementation.md#als-i1-参照カウント規律（perceus）) | 参照カウント規律（Perceus） | C-041, C-066, C-071, C-086, C-121, C-122, C-130, C-149, C-146, C-159, C-319, C-334 |
 | [ALS-I2](./implementation.md#als-i2-コンパイラの決定性と資源) | コンパイラの決定性と資源 | C-040, C-059 |
 | [ALS-I3](./implementation.md#als-i3-v1-lowering-エッジの等価証拠) | v1 lowering エッジの等価証拠 | C-075, C-107, C-109, C-116, C-120, C-138, C-152, C-143, C-144, C-139, C-156, C-157, C-158, C-212, C-336 |
+| [ALS-I4](./implementation.md#als-i4-コンパイルコストの予算) | コンパイルコストの予算 | C-440 |
 
 ## runtime.md — 9 section(s)
 
@@ -190,4 +191,4 @@
 | [ALS-T30](./text-and-numbers.md#als-t30-testingassert_aborts-—-子で走る-abort-表明) | testing.assert_aborts — 子で走る abort 表明 | C-384 |
 | [ALS-T31](./text-and-numbers.md#als-t31-hmac-と定数時間比較) | HMAC と定数時間比較 | C-422, C-423 |
 
-137 sections across 11 chapters.
+138 sections across 11 chapters.

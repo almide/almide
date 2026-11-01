@@ -75,6 +75,11 @@ pub enum ExportRet {
     /// An i32 `Result` block: tag at payload+`SUM_TAG` (0 = ok), the value
     /// at payload+`SUM_FIELD`.
     Result(AbiShape, AbiShape),
+    /// A Region (ADR-0031 amendment A1, #4354): the export is the adapter,
+    /// whose two results are the view's data address and byte length in the
+    /// memory's address width. The host holds one share of the block per
+    /// address until it hands the address to `__region_release`.
+    Region,
 }
 
 /// Records nest at most this deep on the boundary; a deeper (or recursive)

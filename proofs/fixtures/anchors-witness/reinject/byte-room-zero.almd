@@ -1,0 +1,8 @@
+// #4005 operands drill: the Bytes read's room test asks for zero bytes, so
+// `b[len]` passes it and reads one past the end. The test, its abort and the
+// byte load are where the witness says; only the operands show the width.
+effect fn main() -> Unit = {
+  let buf: Bytes = bytes.from_list([1, 2, 3])
+  let at = 1
+  println("${buf[at]}")
+}

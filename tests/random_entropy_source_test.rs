@@ -22,6 +22,9 @@ mod runtime_random {
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"
     ));
+    // random.bytes reads the OS source through sys.rs's `fill_entropy`
+    // (#4007: the runtime's foreign calls live in that one module).
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/rs/src/sys.rs"));
 
     // The emitted prelude's abort, which random.bytes calls on a negative n.
     fn almide_abort(msg: impl std::fmt::Display) -> ! {
@@ -107,6 +110,24 @@ fn fn_bodies<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
     out
 }
 
+/// Every body of `fn name` in `text` whose `fn` sits at one indent level
+/// (inside sys.rs's `mod almide_rt_sys_ffi`): from the signature to the
+/// first line that closes it at that indent.
+fn fn_bodies_in_mod<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
+    let sig = format!("fn {name}(");
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(rel) = text[from..].find(&sig) {
+        let start = from + rel;
+        let len = text[start..]
+            .find("\n    }\n")
+            .unwrap_or_else(|| panic!("fn {name} has no end"));
+        out.push(&text[start..start + len]);
+        from = start + len;
+    }
+    out
+}
+
 // Row 12 of the security table: `random.bytes` is the one CSPRNG, and its
 // behavioural tests (lengths, two draws differ) pass a seeded xorshift too.
 // These pin the source on every leg instead. Negative control: make
@@ -114,9 +135,11 @@ fn fn_bodies<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
 // return a xorshift draw, or a `random_get` in random_bytes.almd read the
 // clock) and the matching test fails.
 
-/// Native: `random.bytes` fills only through `almide_os_entropy`, which is
-/// getrandom(2) on Linux, getentropy(3) on the other unixes, BCryptGenRandom
-/// on Windows, and a refusal (the abort, never a fallback) anywhere else.
+/// Native: `random.bytes` fills only through `almide_os_entropy`, which hands
+/// the chunk to sys.rs's `fill_entropy` on every unix and Windows (#4007: the
+/// runtime's foreign calls live in that one module) and refuses (the abort,
+/// never a fallback) anywhere else; `fill_entropy` is getentropy(3) on every
+/// unix and BCryptGenRandom on Windows.
 #[test]
 fn native_random_bytes_reads_only_the_os_csprng() {
     let rt = code(&source("runtime/rs/src/random.rs"));
@@ -134,8 +157,8 @@ fn native_random_bytes_reads_only_the_os_csprng() {
     let sources = fn_bodies(&rt, "almide_os_entropy");
     assert_eq!(
         sources.len(),
-        4,
-        "almide_os_entropy: one body per cfg (linux, other unix, windows, the rest)"
+        2,
+        "almide_os_entropy: one body handing off to sys.rs (unix, windows), one refusal for the rest"
     );
     for s in &sources {
         for other in ["next_u64", "RNG_STATE", "RandomState", "SystemTime", "Instant"] {
@@ -143,23 +166,31 @@ fn native_random_bytes_reads_only_the_os_csprng() {
         }
     }
     assert!(
-        sources.iter().any(|s| s.contains("getrandom(")),
-        "no almide_os_entropy reads getrandom(2)"
-    );
-    assert!(
-        sources.iter().any(|s| s.contains("getentropy(")),
-        "no almide_os_entropy reads getentropy(3)"
-    );
-    assert!(
-        sources.iter().any(|s| s.contains("BCryptGenRandom(")),
-        "no almide_os_entropy reads BCryptGenRandom (Windows)"
+        sources.iter().any(|s| s.contains("almide_rt_sys_ffi::fill_entropy(")),
+        "no almide_os_entropy hands the chunk to sys.rs's fill_entropy"
     );
     assert!(
         sources
             .iter()
-            .filter(|s| !s.contains("getrandom(") && !s.contains("getentropy(") && !s.contains("BCryptGenRandom("))
+            .filter(|s| !s.contains("fill_entropy("))
             .all(|s| s.trim_end().ends_with("false")),
         "an almide_os_entropy with no OS source must refuse (false), not fall back"
+    );
+    let sys = code(&source("runtime/rs/src/sys.rs"));
+    let fills = fn_bodies_in_mod(&sys, "fill_entropy");
+    assert_eq!(fills.len(), 2, "fill_entropy: one body for unix, one for Windows");
+    for s in &fills {
+        for other in ["next_u64", "RNG_STATE", "RandomState", "SystemTime", "Instant"] {
+            assert!(!s.contains(other), "fill_entropy reads `{other}`:\n{s}");
+        }
+    }
+    assert!(
+        fills.iter().any(|s| s.contains("getentropy(")),
+        "no fill_entropy reads getentropy(3)"
+    );
+    assert!(
+        fills.iter().any(|s| s.contains("BCryptGenRandom(")),
+        "no fill_entropy reads BCryptGenRandom (Windows)"
     );
 }
 

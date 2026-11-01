@@ -13,10 +13,10 @@
 //! in parallel — slots in behind a clean trait ([`ReferenceOracle`]).
 //! This crate does NOT depend on it; the hook is `Option<&dyn ...>`.
 
+pub(crate) mod fixture;
 mod interp;
 mod ladder;
 mod runner;
-pub(crate) mod fixture;
 pub(crate) mod sandbox;
 pub(crate) mod serve;
 

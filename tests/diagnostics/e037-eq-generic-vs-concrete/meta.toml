@@ -1,0 +1,3 @@
+expects_code = "E037"
+expects_error = "operator '==' compares T with Int"
+hint_substring = "same type"

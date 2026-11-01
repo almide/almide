@@ -27,7 +27,10 @@ impl InterpOracle {
         // that needs more than this is a loop the wall-clock rungs already
         // bound at seconds.
         const DEFAULT_FUEL: u64 = 50_000_000;
-        Self { fuel: DEFAULT_FUEL, wall: INTERP_WALL_BUDGET }
+        Self {
+            fuel: DEFAULT_FUEL,
+            wall: INTERP_WALL_BUDGET,
+        }
     }
 
     /// An oracle with an explicit budget. Only the tests use this — they
@@ -35,7 +38,10 @@ impl InterpOracle {
     /// `FuelExhausted` verdict does not depend on the budget's size.
     #[cfg(test)]
     pub fn with_fuel(fuel: u64) -> Self {
-        Self { fuel, wall: INTERP_WALL_BUDGET }
+        Self {
+            fuel,
+            wall: INTERP_WALL_BUDGET,
+        }
     }
 
     /// An oracle with an explicit wall-clock budget (tests only).
@@ -204,8 +210,15 @@ fn main() -> Unit = {
         let oracle = InterpOracle::with_wall(50_000_000, std::time::Duration::from_secs(1));
         let t = std::time::Instant::now();
         assert_eq!(oracle.evaluate(QUADRATIC), None);
-        assert!(!oracle.exhausts_fuel(QUADRATIC), "a deadline is not non-termination evidence");
-        assert!(t.elapsed() < std::time::Duration::from_secs(20), "took {:?}", t.elapsed());
+        assert!(
+            !oracle.exhausts_fuel(QUADRATIC),
+            "a deadline is not non-termination evidence"
+        );
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(20),
+            "took {:?}",
+            t.elapsed()
+        );
     }
 
     #[test]
@@ -265,7 +278,10 @@ fn main() -> Unit = {
                 // When it DOES vote, it must agree with the construction —
                 // a disagreement here is a real finding in the interpreter
                 // (or in the generator's algebra), not a coverage gap.
-                assert_eq!(out, expected, "interp disagreed with the oracle at index {index}");
+                assert_eq!(
+                    out, expected,
+                    "interp disagreed with the oracle at index {index}"
+                );
             }
         }
         // Printed so the rate is recoverable with `--nocapture` rather than

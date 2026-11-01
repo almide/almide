@@ -51,6 +51,10 @@ use crate::*;
 /// unread and shares as before.
 fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
     let read = match &value.kind {
+        // #4315: `x = f(x, …)!` — a fallible `@reuse` op (value.set_path's
+        // walk) under its propagation. The op spends the credit on both of
+        // its answers, and an err leaves the frame with the emptied local.
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => return consumed_read(expr),
         _ if let Some(source) = reuse_root(value) => source,
         IrExprKind::SpreadRecord { base, .. } => base.as_ref(),
         // #3530: a one-element push onto the var, at either end.
@@ -527,13 +531,21 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
-        if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+        match dying {
+            Some((id, idx, _)) => self.empty_dying(id, idx),
+            // #4277: an owned temporary receiver's credit moves into this
+            // routine through `mh`; the judged set releases it there when the
+            // block is shared and it copies.
+            None => self.witness_rc_hold_move(mh),
         }
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        // A fresh key's credit moves in through `kh` (map_inplace.rs, the same set).
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         let vh = self.hold_for(v)?;
         self.lower_arg(value, Some(v), ArgMode::Retain)?;
         self.f.instructions().local_set(vh);
@@ -559,9 +571,13 @@ impl Emitter<'_> {
         let SliceTy::Named(ti) = ty else { return Ok(None) };
         let NamedDef::Record(def) = &self.types.def(ti) else { return Ok(None) };
         let mut slots = Vec::new();
+        let mut poss = Vec::new();
         for (fname, _) in fields {
-            match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                Some(fi) => slots.push((fi.ty, fi.offset)),
+            match def.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                Some(k) => {
+                    slots.push((def.fields[k].ty, def.fields[k].offset));
+                    poss.push(k);
+                }
                 None => return Ok(None),
             }
         }
@@ -604,16 +620,19 @@ impl Emitter<'_> {
         for &(e, _) in &takes {
             self.owned_call_marks.set_take(e, None);
         }
-        for (&(fty, off), &vh) in slots.iter().zip(&vals) {
+        for ((&(fty, off), &vh), &pos) in slots.iter().zip(&vals).zip(&poss) {
             // The overwritten field's credit goes with it (a moved slot is
             // NULL: a release of nothing).
             if self.elem_is_handle(fty) {
                 let dec = self.dec_fn_of(fty);
-                self.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                self.f.instructions().local_get(hold).i32_load(slot_memarg(off));
+                self.fw_field(ty, None, pos);
+                self.f.instructions().call(dec);
             }
             self.f.instructions().local_get(hold);
             self.f.instructions().local_get(vh);
             self.store_ty_slot(fty, off);
+            self.fw_field(ty, None, pos);
         }
         self.empty_dying(id, idx);
         self.f.instructions().local_get(hold);
@@ -627,12 +646,14 @@ impl Emitter<'_> {
     /// The field read `e` (its record's address on the stack) when it was
     /// noted a slot take: load the slot, null it, and hand the value on
     /// owned. `false`: not a take — nothing emitted.
-    pub(crate) fn try_take_slot(&mut self, e: &IrExpr, fty: SliceTy) -> Result<bool, EmitError> {
+    pub(crate) fn try_take_slot(&mut self, e: &IrExpr, fty: SliceTy, (rty, pos): (SliceTy, usize)) -> Result<bool, EmitError> {
         let Some(off) = self.owned_call_marks.take_slot(e) else { return Ok(false) };
         let t = self.hold_i32()?;
         self.f.instructions().local_tee(t);
         self.load_ty_slot(fty, off);
+        self.fw_field(rty, None, pos);
         self.f.instructions().local_get(t).i32_const(0).i32_store(slot_memarg(off));
+        self.fw_field(rty, None, pos);
         self.release_i32();
         self.owned_call_marks.mark(e);
         Ok(true)

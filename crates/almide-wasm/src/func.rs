@@ -312,6 +312,8 @@ pub(crate) fn lower_fn(
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
+            if_sites: Default::default(),
+            display_src: None,
             borrowed_temps: Vec::new(),
             exit_ledger: Vec::new(), arm_rests: Default::default(),
             borrow_base,
@@ -539,6 +541,7 @@ pub(crate) fn lower_fn(
         // or not (the floor test fails loudly on the sentinel).
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
             crate::witness::push_recorded(name, &w);
+            crate::witness::rc::frame(anchor_serial, name);
         }
         record_meter_reads(&em, witness_name.as_deref());
         exit_ledger = std::mem::take(&mut em.exit_ledger);

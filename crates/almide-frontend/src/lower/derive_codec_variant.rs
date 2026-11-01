@@ -8,7 +8,7 @@
 /// Circle(3.0) → Object([("Circle", Object([("radius", Float(3.0))]))])
 pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
     let type_name = wk.type_name.to_string();
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
 
     // Build match arms for each variant case
@@ -104,7 +104,7 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                 args: vec![IrExpr { kind: IrExprKind::List { elements: vec![IrExpr { kind: IrExprKind::Tuple { elements: vec![
                     IrExpr { kind: IrExprKind::LitStr { value: case.name.to_string() }, ty: Ty::String, span: None, def_id: None },
                     payload_value,
-                ]}, ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None, def_id: None }] }, ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None, def_id: None }],
+                ]}, ty: Ty::Tuple(vec![Ty::String, value_ty.clone()].into()), span: None, def_id: None }] }, ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()].into())), span: None, def_id: None }],
                 type_args: vec![],
             },
             ty: value_ty.clone(), span: None, def_id: None,
@@ -134,7 +134,7 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
 /// {"Circle": {"radius": 3.0}} → Circle(3.0)
 pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
     let type_name = wk.type_name.to_string();
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
     let var_v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
 
@@ -415,11 +415,11 @@ pub(super) fn derive_container_helpers(
     type_name: &str,
     type_ty: &Ty,
 ) -> Vec<IrFunction> {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let t = type_ty.clone();
     let list_t = Ty::list(t.clone());
     let list_v = Ty::list(value_ty.clone());
-    let opt_t = Ty::Applied(TypeConstructorId::Option, vec![t.clone()]);
+    let opt_t = Ty::Applied(TypeConstructorId::Option, vec![t.clone()].into());
     let res_list_t = Ty::result(list_t.clone(), Ty::String);
     let res_opt_t = Ty::result(opt_t.clone(), Ty::String);
 

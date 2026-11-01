@@ -1,0 +1,47 @@
+// @contract: C-303
+// ALS-T20 through matrix.mul (#4344): every cell is `0.0`, then
+// `s + a[i][k] * b[k][j]` for k ascending, the product and the sum each
+// rounded once, whichever kernel the native leg picks. The register-tiled AVX
+// kernel used a fused multiply-add, so on an AVX2 + FMA CPU native printed
+// 2^-53 - 2^-105 where wasm printed 0.0.
+//
+// Row [-1, 1 + 2^-52] times column [1, 1 - 2^-53], parsed at run time so
+// nothing is const-folded: (1 + 2^-52)(1 - 2^-53) rounds to exactly 1.0, so
+// every cell is 0.0. A fused step leaves 1.1102230246251563e-16. 4x2 times
+// 2x4 puts every cell in the AVX 4x4 tile; 5x2 times 2x5 adds the scalar
+// edge cells.
+//
+// The order, not only the fusion: [1, 1e16, -1e16] summed left to right is
+// (1 + 1e16) - 1e16 = 0.0 (the 1 is rounded away); summing the two large
+// terms first would give 1.0.
+
+fn bits_of(c: Matrix) -> String =
+  matrix.to_lists(c)
+    |> list.flat_map((row) => row |> list.map((x) => "${float.to_bits(x)}"))
+    |> list.join(" ")
+
+fn probe(rows: Int, cols: Int) -> String = {
+  let p = float.parse("1.0000000000000002") ?? 0.0
+  let q = float.parse("0.9999999999999999") ?? 0.0
+  let a = matrix.from_lists(list.range(0, rows) |> list.map((_) => [-1.0, p]))
+  let b = matrix.from_lists([list.range(0, cols) |> list.map((_) => 1.0), list.range(0, cols) |> list.map((_) => q)])
+  bits_of(a * b)
+}
+
+fn order(rows: Int, cols: Int) -> String = {
+  let big = float.parse("1e16") ?? 0.0
+  let a = matrix.from_lists(list.range(0, rows) |> list.map((_) => [1.0, big, 0.0 - big]))
+  let b = matrix.from_lists(list.range(0, 3) |> list.map((_) => list.range(0, cols) |> list.map((_) => 1.0)))
+  bits_of(a * b)
+}
+
+fn main() -> Unit = {
+  println(probe(4, 4))
+  // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  println(probe(5, 5))
+  // 25 zeros
+  println(order(4, 4))
+  // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  println(order(5, 6))
+  // 30 zeros
+}

@@ -45,6 +45,34 @@ but not listed fails, and so does a version listed but no longer used.
 | almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
 | OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
 
+**What CI fetches (security row 16).** Every binary or archive a workflow
+or CI script downloads is checked against a sha256 stated in
+`.github/pinned-downloads.txt` (`scripts/fetch-pinned.sh`). This covers
+wasmtime, cargo-nextest, wasm-pack, elan, the Lean toolchain and Node. A
+first-party `latest` almide release is checked against its release
+attestation instead. Every `git clone` checks out a 40-hex commit (codopsy),
+the opam repository is pinned to a commit whose opam files carry each source
+archive's checksum, and every third-party action is declared there with what
+it fetches. `scripts/check-action-pins.sh` refuses anything else. Four
+channels are trusted rather than pinned here:
+- **rustup.** `dtolnay/rust-toolchain` runs it for an exact toolchain. rustup
+  checks every component against the sha256 in that release's channel
+  manifest, which static.rust-lang.org serves. The Rust release
+  infrastructure is trusted, as rustc itself is.
+- **apt and Homebrew packages** (binaryen, musl-tools, opam, wabt, valgrind,
+  Vulkan drivers). These are checked against the distribution's signed
+  package index, not against a digest stated here.
+- **`actions/cache` entries.** Only this repository's own runs write them; a
+  pull request's cache is scoped to its own ref. A cached release tarball is
+  re-hashed by `fetch-pinned.sh` before use. An unpacked tree (the Lean
+  toolchain under `~/.elan`, the codopsy binary keyed by its pinned commit,
+  the opam root) is not.
+- **Clones marked `# supply: head-tracked`.** In these the moving head is the
+  thing being measured. The downstream canary tests each project at its
+  default-branch HEAD: it is dispatch-only, its token is read-only, and the
+  leg holds no secrets. The grammar drift check reads `almide-grammar` as
+  data and never builds or runs it.
+
 **Two engines.** wasm execution does not rest on wasmtime alone.
 `almide-wasm-vm` shares no code with wasmtime, and REQ-VM-9 diffs it against
 the stock runtime on the whole `spec/wasm_cross` corpus. Its scope is the
@@ -204,6 +232,10 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `reorder_memory_safe` | InitCert.v | Closed under the global context |
 | `check_init_cert_sound` | InitCert.v | Closed under the global context |
 | `fill_window` | InitCert.v | Closed under the global context |
+| `rsite_window` | FieldCert.v | Closed under the global context |
+| `ftrace_safe` | FieldCert.v | Closed under the global context |
+| `fields_memory_safe` | FieldCert.v | Closed under the global context |
+| `check_fields_cert_sound` | FieldCert.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -225,7 +257,7 @@ arm and reassigned i64 index, is `Spatial` — with the emitter's one unsigned
 compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
 puts the certificate's byte parser inside the proof and extracts
 `check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
-the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with 18 accept/refuse unit modules and three byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. TRUSTED: the compare's operands (that a hoisted count is the list's count, len_hoist.rs), the kills' placement, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator, which no witness records. And
+the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with 18 accept/refuse unit modules and three byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. Since sec-rows-2-3-4 (2026-10-27) the compare's OPERANDS are checked too (crates/almide-anchor-check/src/operands.rs): each located access is held to its slot's check over the shipped instructions — same index, `len / S` of the block it addresses in its own slot size, within one slot, the check dominating, and no change of the index or the list between (a write only by the list's own copy-on-write judge, whose calls the anchor file's `judges` line locates; no other call handed the list; no store of its count word) — the hoisted count and the payload pointer included, which also checks what the kills stood for; 578 of 578 located accesses on the 995-fixture corpus, and three operand drills in `scripts/witness-reinject.sh anchors`. TRUSTED: that a located judge call is a copy-on-write judge (returns a block of its argument's count), that only a call handed a block shrinks it in place, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator, which no witness records. And
 at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
 `if`, `while`, indexing with its bounds check, `if` expressions and
@@ -278,6 +310,59 @@ discipline, and that a site's block stays private until its last store. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
+
+**Record, tuple and variant fields (#4013 TYPE clause, #4279).** A field is
+read and written at a CONSTANT offset with no check, so it is in bounds and
+initialized exactly when its block was built with the layout the access
+assumes. `FieldCert.v` adds the layout-typed construction site and the field
+access as a third per-build certificate, `fields`: a layout table (per kind —
+a record or tuple, or one case of a variant — its payload size and each
+field's offset and width, a variant case's field 0 its tag word), sites that
+must store every field of their kind, accesses that must name a declared
+field, and tag reads that must be field 0 of every case. `rsite_window` proves
+an accepted site's window MemorySafe and leaves its block of the layout with
+every field initialized; `ftrace_safe` proves every event on a block of a
+recorded kind MemorySafe in a trace whose allocations of such blocks are
+accepted sites and whose loads and stores of them name declared fields of
+their kind, given TEMPORAL; `fields_memory_safe` composes that with the other
+certificates' clauses for every other block into `MemorySafe`;
+`check_fields_cert_sound` puts the byte parser inside the proof (driver mode
+`fields`). The structural leg emits the witness per build
+(crates/almide-wasm/src/witness_fields.rs) for record, tuple and variant
+literals and constructors, member and positional reads, a dying read's slot
+take, pattern tests and binds and spread overwrites, and
+`almide-anchor-check` holds every located event to the shipped bytes against
+the SAME layout table: the allocation's payload size, each store's and each
+access's width and offset, a variant site's tag store of its own case, and
+each variant CASE field's read to a tag test of its own address that
+guards it (an enclosing `if` whose condition implies `tag == C`, the address
+the same variable or the same field re-loaded with nothing that may write
+memory between; a call only when the callee's body writes none, a fixpoint
+over the module). On the 1000-fixture certified corpus (GCE, ba31c7646): 1000/1000
+`fields` witnesses accepted by all three verdicts and FIELDS OK on every
+artifact — 3998 sites / 8636 stores, 5390 field accesses (552 variant case
+fields held to their tag test), 614 tag reads. TRUSTED: that a block's static type is its layout (the
+representation, trusted already for the bounds and init witnesses; the IR is
+cast-free and FieldAssign is refused),
+and the one row #4279 adds (owner ruling, 2026-10-30):
+
+> **TRUSTED (#4279): nothing rewrites a variant block's tag word after its
+> construction window.**
+> Scope: only the case a variant CASE-FIELD read relies on. Both ends are
+> checked on the bytes: the construction site records its tag store as field
+> 0 and `almide-anchor-check` requires that store to store the site's own case
+> constant; every recorded case-field read must sit under a tag test of its
+> own address for that case (`operands.rs` `case_guarded`). What is trusted is
+> only the span between them — that no instruction stores to the tag word in
+> between — because the heap model (`MemorySafe.v`) carries no values. Tag
+> reads themselves need no such row: field 0 is the tag word in every case
+> (`ITag`). The drill `case-field-unguarded` (scripts/witness-reinject.sh
+> anchors) moves a case field's read above its test and must read ANCHORS
+> REJECT.
+
+The runtime's own routines over these blocks (typed drop, copy,
+equality, comparison, display bodies) record nothing yet (#4278), and a
+nullary case is a static pool block outside the allocation model.
 
 **The native leg (#4006).** For the programs the verified native renderer
 renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`
@@ -336,7 +421,7 @@ The earlier progression described its scope as follows:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (126 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (134 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

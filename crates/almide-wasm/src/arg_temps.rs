@@ -27,7 +27,7 @@
 //! joins the normal frame releases, including the propagation edge.
 
 use almide_base::intern::sym;
-use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, IrStmt, IrStmtKind, Mutability, VarTable};
 use almide_types::types::constructor::TypeConstructorId;
 use almide_types::types::Ty;
@@ -414,7 +414,49 @@ fn fold_int_display_parts(parts: &mut [almide_ir::IrStringPart], changed: &mut b
     }
 }
 
+/// #4315: `x = f(x, …)!` and `x = f(x, …) ?? fb` — the fold step that
+/// rebinds its own argument. The extraction stays unbound: its owned-carrier
+/// route (data_unwrap.rs for `!`, data.rs `lower_unwrap_or_owned_result`
+/// for a Result `??`) moves the payload out and frees the shell at once, on
+/// both paths. Parked, the temporary kept a credit on the payload until its
+/// next rebind, so the next step met the value x holds at rc 2 and an
+/// in-place callee (`value.set_path`'s walk) copied it every time. A
+/// fallback that reads x keeps the parked form: x is not moved there.
+fn fold_step_call(value: &IrExpr, var: almide_ir::VarId) -> Option<()> {
+    let expr = match &value.kind {
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => expr,
+        IrExprKind::UnwrapOr { expr, fallback }
+            if matches!(expr.ty, Ty::Applied(TypeConstructorId::Result, _))
+                && !crate::rc_ownership::rc_mentions_var(fallback, var) =>
+        {
+            expr
+        }
+        _ => return None,
+    };
+    let IrExprKind::Call { args, .. } = &expr.kind else { return None };
+    args.iter().any(|a| matches!(a.kind, IrExprKind::Var { id } if id == var)).then_some(())
+}
+
 impl IrMutVisitor for Binder<'_> {
+    fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+        if let IrStmtKind::Assign { var, value } = &mut s.kind
+            && fold_step_call(value, *var).is_some()
+        {
+            // The call and its arguments (and a fallback) are named as
+            // anywhere else; only the carrier stays unbound.
+            match &mut value.kind {
+                IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => self.visit_expr_mut(expr),
+                IrExprKind::UnwrapOr { expr, fallback } => {
+                    self.visit_expr_mut(expr);
+                    self.visit_expr_mut(fallback);
+                }
+                _ => unreachable!("fold_step_call matched an extraction"),
+            }
+            return;
+        }
+        walk_stmt_mut(self, s);
+    }
+
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         let tail = self.tail;
         self.tail = false;

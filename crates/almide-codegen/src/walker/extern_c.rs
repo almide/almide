@@ -9,7 +9,8 @@
 /// disagree. The host fn sees plain Rust types: `&str`, `&[T]`, `&[u8]`,
 /// `&AlmideMatrix`, `&T` for records / maps / sets, `&mut T` for `mut`
 /// params, `&dyn Fn(A) -> B` for fn values, and owned scalars / `Option` /
-/// `Result` / tuples / variants. A `Bytes` / `Matrix` RETURN accepts either the raw
+/// `Result` / tuples / variants, and a `Region` as two arguments `(*mut u8,
+/// usize)` — its base and runtime length (#4353). A `Bytes` / `Matrix` RETURN accepts either the raw
 /// `Vec<u8>` / `AlmideMatrix` or the `AlmideRcCow` handle (`.into()`).
 fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
     use types::render_type;
@@ -147,7 +148,7 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
         if abi.conv == CConv::Region {
             c_params.push(format!("{name}: *mut u8, {name}_len: usize"));
             wrapper_params.push(format!("{name}: {}", render_type(ctx, &p.ty)));
-            call_args.push(format!("{name}.base, {name}.len.max(0) as usize"));
+            call_args.push(format!("{name}.base.wrapping_add({name}.off.max(0) as usize), {name}.len.max(0) as usize"));
             continue;
         }
         c_params.push(format!("{name}: {}", abi.c_ty));
@@ -194,6 +195,12 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     };
     // A Region return binds the pointer first and builds the Region after.
     let (bind, end) = if epilogue.is_empty() { ("", "") } else { ("let __almide_p: *mut u8 = ", ";") };
+    // SAFETY: (of the emitted call) the program's own `@extern(c)` declaration
+    // states the foreign signature, which no compiler can check against the C
+    // side: it is trusted, and --profile critical refuses the declaration
+    // itself (E100, #4008). The glue adds nothing beyond it: every argument is a value of the
+    // declared C type (a CString kept alive in the wrapper for the call; a
+    // Region's base + off and len, bounds-checked by the Region itself).
     let ret_value = format!("    {bind}unsafe {{ {body} }}{end}\n{epilogue}");
     format!(
         "{link}\nextern \"C\" {{ fn {c_func}({}) -> {};{extra_decls} }}\n\
@@ -231,10 +238,13 @@ fn region_clause(func: &IrFunction) -> Option<(String, String)> {
 /// from `ffi.alloc`), and the release guard in `keep` (D6).
 fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
     let n = format!("    let __almide_n: i64 = if __almide_p.is_null() {{ 0 }} else {{ {len}.max(0) }};\n");
+    // SAFETY: (of the emitted release) the guard runs this once, on the last
+    // drop, with the pointer the foreign call returned — the contract the
+    // program's `@region(release = …)` declares (ADR-0031 D6).
     let release_call = format!("|__almide_q: *mut u8| unsafe {{ {release}(__almide_q) }}");
     let keep = format!("almide_rt_ffi_release_guard(__almide_p, {release_call})");
     format!(
-        "{n}    {region_ty} {{ owner: Vec::<u8>::new().into(), base: __almide_p, len: __almide_n, writable: false, keep: {keep} }}\n"
+        "{n}    {region_ty} {{ owner: Vec::<u8>::new().into(), base: __almide_p, off: 0, len: __almide_n, writable: false, keep: {keep} }}\n"
     )
 }
 
@@ -245,11 +255,24 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
 ///
 /// #[export_name = "my_add"]
 /// pub extern "C" fn __c_my_add(a: i32, b: i32) -> i32 {
-///     my_add(a as i64, b as i64) as i32
+///     let __almide_ret = my_add(a as i64, b as i64);
+///     (__almide_ret) as i32
 /// }
 /// ```
+///
+/// A `Region` parameter (ADR-0031 amendment A2) is two C arguments, the
+/// caller's buffer and its `size_t` length: `const uint8_t*` and a read-only
+/// Region, or — for a parameter the declaration names with
+/// `@region(out = p)` — `uint8_t*` and a writable one. The Region is lent for
+/// the call: it owns nothing (the memory is the caller's), every access is
+/// still checked against the length the caller passed, and after the call the
+/// wrapper stops the process if a copy of it is still held
+/// (`almide_rt_ffi_lent_end`), so no Region outlives the buffer it views. An
+/// `effect fn`'s error has no C form: it is printed and the process exits 1,
+/// as an error escaping `main` does.
 fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExportAttr) -> String {
     use almide_lang::types::Ty;
+    use almide_lang::types::extern_abi::is_region;
 
     let symbol = attr.symbol.as_str();
     let fn_name = func.name.as_str();
@@ -260,11 +283,27 @@ fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     let almide_fn = render_function(ctx, &clean_func);
 
     // 2. Build C wrapper
+    let outs = export_c_out_params(func);
     let mut c_params = Vec::new();
     let mut call_args = Vec::new();
+    let mut lends = String::new();
+    let mut ends = String::new();
 
     for p in &func.params {
         let name = p.name.as_str();
+        if is_region(&p.ty) {
+            let writable = outs.iter().any(|o| o == name);
+            let ptr = if writable { "*mut u8" } else { "*const u8" };
+            c_params.push(format!("{name}: {ptr}, {name}_len: usize"));
+            let lent = format!("__almide_lent_{name}");
+            lends.push_str(&format!("    let {lent} = {};\n", render_lent_region(&render_type(ctx, &p.ty), name, writable)));
+            call_args.push(match p.borrow {
+                ParamBorrow::Own => format!("{lent}.clone()"),
+                _ => format!("&{lent}"),
+            });
+            ends.push_str(&format!("    almide_rt_ffi_lent_end(&{lent}.keep, \"{symbol}\", \"{name}\");\n"));
+            continue;
+        }
         match &p.ty {
             Ty::Int    => { c_params.push(format!("{}: i32", name)); call_args.push(format!("{} as i64", name)); }
             Ty::Float  => { c_params.push(format!("{}: f64", name)); call_args.push(name.into()); }
@@ -284,14 +323,46 @@ fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     };
 
     let c_params_str = c_params.join(", ");
-    let call_args_str = call_args.join(", ");
+    let call = format!("{fn_name}({})", call_args.join(", "));
+    let value = if func.is_effect {
+        format!("match {call} {{ Ok(__almide_v) => __almide_v, Err(__almide_e) => {{ eprintln!(\"{{}}\", __almide_e); std::process::exit(1) }} }}")
+    } else {
+        call
+    };
 
     let wrapper = format!(
-        "#[export_name = \"{symbol}\"]\npub extern \"C\" fn __c_{fn_name}({c_params_str}) -> {c_ret} {{ {wo}{fn_name}({args}){wc} }}",
-        symbol = symbol, fn_name = fn_name,
-        c_params_str = c_params_str, c_ret = c_ret,
-        wo = wrap_open, args = call_args_str, wc = wrap_close,
+        "#[export_name = \"{symbol}\"]\npub extern \"C\" fn __c_{fn_name}({c_params_str}) -> {c_ret} {{\n{lends}    let __almide_ret = {value};\n{ends}    {wrap_open}__almide_ret{wrap_close}\n}}",
     );
 
     format!("{}\n\n{}", almide_fn, wrapper)
+}
+
+/// The parameters an `@export(c)` declaration names as caller-provided
+/// writable buffers: `@region(out = p)`, once per parameter (ADR-0031
+/// amendment A2). `check` validated each names a Region parameter (E090).
+fn export_c_out_params(func: &IrFunction) -> Vec<String> {
+    use almide_lang::ast::AttrValue;
+    func.attrs
+        .iter()
+        .filter(|a| a.name.as_str() == almide_lang::stdlib_info::REGION_ATTR)
+        .flat_map(|a| a.args.iter())
+        .filter(|a| a.name.is_some_and(|n| n.as_str() == "out"))
+        .filter_map(|a| match &a.value {
+            AttrValue::Ident { name } => Some(name.as_str().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Region an `@export(c)` wrapper lends its Almide fn over the C caller's
+/// `(name, name_len)`: no owner Bytes (the memory is the caller's), the
+/// caller's length (0 for a null pointer), writable only for an
+/// `@region(out = …)` parameter, and a fresh `keep` the wrapper checks after
+/// the call.
+fn render_lent_region(region_ty: &str, name: &str, writable: bool) -> String {
+    format!(
+        "{region_ty} {{ owner: Vec::<u8>::new().into(), base: {name} as *mut u8, off: 0, \
+         len: if {name}.is_null() {{ 0 }} else {{ i64::try_from({name}_len).unwrap_or(i64::MAX) }}, \
+         writable: {writable}, keep: almide_rt_ffi_lent_keep() }}"
+    )
 }

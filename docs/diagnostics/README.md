@@ -104,7 +104,14 @@ equal to the set of codes the compiler emits.
 | [E104](E104.md) | a skipped record field has no default |
 | [E109](E109.md) | pure fn runs an effect fn through a function value |
 | [E110](E110.md) | untrusted input decodes only into an input type |
+| [E111](E111.md) | type too large |
+| [E112](E112.md) | too many generic instances |
+| [E113](E113.md) | match too complex to check for exhaustiveness |
 | [E114](E114.md) | a generic fn reaches itself at a growing type |
+| [E116](E116.md) | a response's Content-Type is written from its body's type |
+| [E117](E117.md) | `http.typed` takes a literal media type no safe module owns |
+| [E118](E118.md) | a media type's owner is not granted, not unique, or not a literal |
+| [E119](E119.md) | a Region lent to an `@export(c)` fn escapes its call |
 | [E420](E420.md) | Function visibility violation |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

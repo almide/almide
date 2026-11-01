@@ -34,10 +34,33 @@ fn zfill(buf: Region) -> Unit
 ```
 
 A `Region` parameter of an `@extern(c)` fn is two C arguments, the pointer and
-its `size_t` length (`void zfill(uint8_t *buf, size_t len)`), and of an
+its `size_t` length (`void zfill(uint8_t *buf, size_t len)`), of an
+`@extern(rust)` fn the same pair `(base: *mut u8, len: usize)`, and of an
 `@extern(wasm)` fn two numbers, base and length: the callee always gets the
-length the runtime holds. A foreign region's release function runs once, when
-the last copy of the region goes away; Almide code never frees.
+length the runtime holds, and a host never names the runtime's Region type. A
+binding with both `@extern(wasm)` and `@extern(rust)` therefore has one
+parameter shape on both hosts (#4353):
+
+```almide
+import ffi
+
+@extern(wasm, "sys", "log")
+@extern(rust, "crate::sys", "log")
+fn log(buf: Region) -> Unit = _
+```
+
+```rust
+// native/sys.rs
+pub fn log(base: *mut u8, len: usize) {
+    let bytes = unsafe { std::slice::from_raw_parts(base, len) };
+    println!("{}", String::from_utf8_lossy(bytes));
+}
+```
+
+The pointer is valid for the call only, and a host writes through it only
+when the Region is writable (`ffi.alloc`). A foreign region's release
+function runs once, when the last copy of the region goes away; Almide code
+never frees.
 
 `import ffi` is the opt-in: outside the stdlib, a call to any `ffi` function is
 E100 in a file that does not write `import ffi` (#4043). `almide check
@@ -65,6 +88,89 @@ effect fn main() -> Unit = {
 }
 ```
 
+**Slices.** `ffi.slice(r, off, n)` is a view of the `n` bytes at `off` inside
+`r`. It answers `err` unless `0 <= off` and `off + n <= ffi.len(r)`, so it never
+reaches past its parent. A slice is read-only, even of a writable parent. It
+reads the parent's memory, so a later write to the parent shows through it, and
+it holds the parent's block, so the memory outlives the view. Handing a slice to
+an `@extern` passes a sub-range with no copy.
+
+```almide check
+import ffi
+
+effect fn main() -> Unit = {
+  let r = ffi.alloc(4)!
+  let tail = ffi.slice(r, 2, 2)!
+  ffi.write(r, 2, bytes.from_list([7, 8]))!
+  println(bytes.to_list(ffi.read(tail, 0, 2)!) |> list.map((x) => int.to_string(x)) |> list.join(","))
+  let far = match ffi.slice(r, 3, 2) {
+    ok(_) => "sliced",
+    err(e) => e,
+  }
+  println(far)
+}
+```
+
+**Host buffers, with no copy** (ADR-0031 amendment, 2026-10-29). The length
+always comes from the Region.
+
+- *Push, wasm.* An `@export(wasm)` fn may return a Region. It crosses as
+  `(ptr: i32, len: i32)` through the multi-value return. The host holds one
+  share of the Region's block: the bytes stay where they are, whatever the
+  program does with its own copies, until the host passes `ptr` to the
+  module's `__region_release` export. The host can write straight into an
+  `ffi.alloc` Region the export returned, then call the next export, which
+  reads it (a top-level `var` holds the program's copy). An empty Region
+  crosses as `(0, 0)`. A slice crosses as its own address, with no copy:
+  the share keeps its parent alive until the host releases it. Releasing an
+  address twice traps. An `effect fn` export's `err` prints and traps. The
+  pair is the view's data address and the Region's own length, never the
+  address of the Region's record (#4354). With `--host js` the glue wraps
+  the export as `f(…) → [ptr, len]` and adds `regionRelease(ptr)`.
+- *Lent to a wasm export.* An `@export(wasm)` fn may take a Region
+  parameter. The host passes it as `(base, len)`, the same pair an import
+  receives, in the memory's address width. The fn gets a read-only Region
+  over that range of the module's memory, lent for the one call: it owns
+  nothing, and every access is checked against the host's length. A copy
+  the body stores in a top-level `var`, returns or captures in a closure is
+  E119. A host usually passes back a range it got from a push export, which
+  its share keeps alive.
+- *Pull.* A writable `ffi.alloc` Region passed to an `@extern(wasm)` or
+  `@extern(c)` fn is lent for that call, as `(base, len)` in the memory's
+  address width (`i32` on wasm32) or `(uint8_t*, size_t)`, and the foreign
+  code fills it in place.
+- *C callers.* An `@export(c)` fn may take a Region parameter: the caller's
+  `(const uint8_t*, size_t)`, read-only, or, for a parameter the declaration
+  names with `@region(out = p)`, `(uint8_t*, size_t)`, writable. Either is lent
+  for the one call. Every access is still checked against the length the
+  caller passed. A copy the body stores in a top-level `var`, returns or
+  captures in a closure is E119 at check time. A copy kept some other way
+  stops the process when the call returns, rather than outlive the caller's
+  buffer.
+
+```almide
+import ffi
+
+var inbox: Region = ffi.region(bytes.new())
+
+@export(wasm, "inbox_open")
+effect fn inbox_open(n: Int) -> Region = {
+  inbox = ffi.alloc(n)!
+  inbox
+}
+
+@export(wasm, "inbox_sum")
+effect fn inbox_sum(part: Region) -> Int =
+  bytes.to_list(ffi.read(part, 0, ffi.len(part))!) |> list.fold(0, (a, x) => a + x)
+
+@export(c, "fill")
+@region(out = out)
+effect fn fill(out: Region, byte: Int) -> Int = {
+  ffi.write(out, 0, bytes.from_list(list.repeat(byte, ffi.len(out))))!
+  ffi.len(out)
+}
+```
+
 The removed spellings (dialect epoch 15; `almide fix` renames the first three):
 
 | Removed | Write |
@@ -78,7 +184,7 @@ The removed spellings (dialect epoch 15; `almide fix` renames the first three):
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (7 functions)
+## Signature index (8 functions)
 
 ```
 // A read-only view of b; b lives as long as the view.
@@ -108,6 +214,10 @@ effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit
 // A copy of the whole region as Bytes.
 // @since unreleased
 effect ffi.to_bytes(r: Region) -> Bytes
+
+// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+// @since unreleased
+ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

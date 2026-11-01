@@ -662,6 +662,7 @@ spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd
 spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
+spec/wasm_cross/matrix_mul_no_fma.almd
 spec/wasm_cross/matrix_neg_signed_zero.almd
 spec/wasm_cross/matrix_pow_libm.almd
 spec/wasm_cross/matrix_product_family.almd
@@ -1068,6 +1069,7 @@ spec/wasm_cross/uoe_heap_ok_share.almd
 spec/wasm_cross/url_authority_edges.almd
 spec/wasm_cross/url_whatwg_probes.almd
 spec/wasm_cross/user_box_recursive_enum.almd
+spec/wasm_cross/uuid_v7_monotonic.almd
 spec/wasm_cross/value_array_leak_loop.almd
 spec/wasm_cross/value_array_tuple_tco.almd
 spec/wasm_cross/value_as_array_leak_loop.almd

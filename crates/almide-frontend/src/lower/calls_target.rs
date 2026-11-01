@@ -203,7 +203,7 @@ fn lower_call_target_module_call(ctx: &mut LowerCtx, object: &ast::Expr, field: 
         if ctx.lookup_var(module).is_none() {
             let key = format!("{}.{}", module, field);
             if ctx.env.functions.contains_key(&sym(&key))
-                || ctx.find_convention_fn(&Ty::Named(sym(module), vec![]), field).is_some()
+                || ctx.find_convention_fn(&Ty::Named(sym(module), Default::default()), field).is_some()
             {
                 return Some(CallTarget::Named { name: sym(&key) });
             }
@@ -227,7 +227,7 @@ fn lower_call_target_typename(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sy
             return Some(CallTarget::Named { name: sym(&key) });
         }
         if ctx.env.functions.contains_key(&sym(&key))
-            || ctx.find_convention_fn(&Ty::Named(sym(type_name), vec![]), field).is_some()
+            || ctx.find_convention_fn(&Ty::Named(sym(type_name), Default::default()), field).is_some()
         {
             return Some(CallTarget::Named { name: sym(&key) });
         }
@@ -295,7 +295,7 @@ fn lower_call_target_convention_method(ctx: &mut LowerCtx, object: &ast::Expr, f
         // `P.encode`; constructing `lib.P.encode` here produced a call the IR
         // verifier could not resolve (#1087).
         let resolved = crate::canonicalize::registration::convention_emit_key(ctx.env, &type_name, field)
-            .or_else(|| ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field));
+            .or_else(|| ctx.find_convention_fn(&Ty::Named(sym(&type_name), Default::default()), field));
         if let Some(key) = resolved {
             let ir_obj = lower_expr(ctx, object);
             return Some(CallTarget::Method { object: Box::new(ir_obj), method: key });

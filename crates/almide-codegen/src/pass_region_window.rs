@@ -615,7 +615,7 @@ fn twin_produce_arg(mut a: IrExpr, produce: Sym) -> IrExpr {
         && heap
     {
         *name = twin_name(produce);
-        a.ty = Ty::Named(twin_name(enum_name(&a.ty).expect("site enum")), vec![]);
+        a.ty = Ty::Named(twin_name(enum_name(&a.ty).expect("site enum")), Default::default());
         a.def_id = None;
     }
     a

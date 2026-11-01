@@ -75,3 +75,18 @@ test "two allocations never share memory" {
   assert(not failed(ffi.write(a, 0, bytes.from_list([5, 6]))))
   assert_eq(bytes_of(ffi.read(b, 0, 2)), [0, 0])
 }
+
+test "slice is a read-only view inside the parent's bounds" {
+  let r = ffi.alloc(4) ?? ffi.region(bytes.new())
+  let v = ffi.slice(r, 1, 2) ?? ffi.region(bytes.new())
+  assert_eq(ffi.len(v), 2)
+  assert(not ffi.is_writable(v))
+  assert(failed(ffi.write(v, 0, bytes.from_list([1]))))
+  assert(not failed(ffi.write(r, 1, bytes.from_list([7, 8]))))
+  assert_eq(bytes_of(ffi.read(v, 0, 2)), [7, 8])
+  assert(failed(ffi.slice(r, 3, 2)))
+  assert(failed(ffi.slice(r, -1, 1)))
+  assert(failed(ffi.slice(r, 0, -1)))
+  assert(failed(ffi.slice(v, 1, 2)))
+  assert_eq(ffi.len(ffi.slice(r, 4, 0) ?? r), 0)
+}

@@ -223,9 +223,19 @@ impl Emitter<'_> {
         w.note_arg(chain as *const almide_ir::IrExpr as usize);
         w.note_arg(cb as *const almide_ir::IrExpr as usize);
         w.loop_open();
+        w.fused_open();
         if carried {
             w.carried_owned(acc);
         }
+    }
+
+    /// The fused iteration's end: the element's owners are released on this
+    /// edge (witness_rest.rs), and the activation closes.
+    pub(crate) fn witness_fused_close(&mut self) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.iteration_releases();
+        w.fused_close();
+        w.loop_close();
     }
 
     /// A fused stage's param takes the element: an OWNED map result (a
@@ -238,7 +248,7 @@ impl Emitter<'_> {
         }
         let Some(w) = self.witness.as_mut() else { return };
         if owned {
-            w.bind_fresh(local);
+            w.iteration_owner(local);
         } else {
             w.param_borrowed(local);
         }
@@ -250,6 +260,7 @@ impl Emitter<'_> {
         let Some(w) = self.witness.as_mut() else { return };
         w.branch_open();
         w.branch_arm();
+        w.iteration_releases();
         w.loop_jump();
         w.branch_arm();
         w.branch_close();
@@ -326,11 +337,20 @@ impl Emitter<'_> {
 
     /// `r?` over a Result (data.rs): an OWNED carrier is released on both
     /// arms — with its err payload, or as a spine whose ok payload moved into
-    /// the fresh some-cell — so it is born and released here (`id`); over a
-    /// BORROWED carrier the ok arm shares the payload into the cell.
+    /// the fresh some-cell — so it is born here and released on each arm
+    /// (`id` on both paths: one release call per arm, each its own event for
+    /// the byte check, #4277); over a BORROWED carrier the ok arm shares the
+    /// payload into the cell.
     pub(crate) fn witness_to_option(&mut self, owned_carrier: bool, payload: SliceTy) {
         if owned_carrier {
-            self.witness_discard();
+            let Some(w) = self.witness.as_mut() else { return };
+            let o = w.temp_born();
+            w.branch_open();
+            w.branch_arm();
+            w.temp_ops(o, "d");
+            w.branch_arm();
+            w.temp_ops(o, "d");
+            w.branch_close();
             return;
         }
         self.witness_branch_open();

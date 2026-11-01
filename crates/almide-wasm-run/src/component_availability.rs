@@ -41,6 +41,12 @@ pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
     (88, PROC_EXCLUDED),
     (89, PROC_EXCLUDED),
     (90, PROC_EXCLUDED),
+    (146, PROC_EXCLUDED),
+    (147, PROC_EXCLUDED),
+    (148, PROC_EXCLUDED),
+    (149, PROC_EXCLUDED),
+    (150, PROC_EXCLUDED),
+    (151, PROC_EXCLUDED),
 ];
 
 /// The ops the WASI 0.3 shim serves and the embedded core-module host does
@@ -119,7 +125,7 @@ pub fn check_service(host_ops: &[i32]) -> Result<(), String> {
 
 /// `operation_name`, with the subprocess family (#2589) named as one.
 fn operation_label(op: i32) -> &'static str {
-    if (80..=90).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
+    if crate::wasi::is_proc_op(op) { "the subprocess family (process.exec / output / run / start / kill / …)" } else { operation_name(op) }
 }
 
 fn operation_name(op: i32) -> &'static str {
@@ -154,6 +160,7 @@ fn operation_name(op: i32) -> &'static str {
             // Interim embedded-only ops (#3620): WASI has neither Unix-domain
             // sockets nor shared memory; they retire at ADR-0023 step 7.
             104..=116 => "the unix-socket and shared-memory core (net.unix_* / net.shm_*)",
+            140..=145 => "the net core's udp and name lookup (net.udp_* / net.lookup_host)",
             _ => "unknown operation",
         })
 }

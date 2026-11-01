@@ -1,0 +1,21 @@
+// #4329: a function named in a selective import is a value as well as a
+// callee. Calling `size(t)` resolved through the import; naming `size` as a
+// value was E003 (undefined variable). tests/selective_import_ctor_let_test.rs
+// runs this file on both legs.
+import selvar.{T, V, A, size, inc1}
+
+fn apply(f: (T) -> Int, t: T) -> Int = f(t)
+
+test "a selectively imported fn passed to a higher-order fn" {
+  assert_eq([V(1), A(V(1), V(2))] |> list.map(size), [1, 2])
+  assert_eq([1, 2, 3] |> list.map(inc1), [2, 3, 4])
+}
+
+test "a selectively imported fn passed as an argument" {
+  assert_eq(apply(size, A(V(0), A(V(1), V(2)))), 3)
+}
+
+test "a selectively imported fn bound to a local" {
+  let f = inc1
+  assert_eq(f(41), 42)
+}

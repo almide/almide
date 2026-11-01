@@ -333,13 +333,13 @@ mod hard_gate_tests {
     fn whitelisted_residuals_are_not_violations() {
         let empty_list = expr(
             IrExprKind::List { elements: vec![] },
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Unknown]),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Unknown].into()),
         );
         let prog = program(empty_list, VarTable::new());
         assert!(collect_unresolved_sites(&prog).is_empty(), "empty `[]` is whitelisted");
 
         let none = expr(IrExprKind::OptionNone, Ty::Applied(
-            almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Unknown]));
+            almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Unknown].into()));
         let prog = program(none, VarTable::new());
         assert!(collect_unresolved_sites(&prog).is_empty(), "OptionNone is whitelisted");
     }
@@ -370,7 +370,7 @@ mod hard_gate_tests {
     #[test]
     fn unknown_only_in_empty_container_payloads_is_whitelisted() {
         use almide_lang::types::constructor::TypeConstructorId as TCI;
-        let opt_unknown = Ty::Applied(TCI::Option, vec![Ty::Unknown]);
+        let opt_unknown = Ty::Applied(TCI::Option, vec![Ty::Unknown].into());
         let rec_ty = Ty::Record { fields: vec![
             ("value".into(), Ty::Int),
             ("left".into(), opt_unknown.clone()),
@@ -392,23 +392,23 @@ mod hard_gate_tests {
         // A bare-Unknown List/Set element or Map value is NO LONGER whitelisted —
         // it would be an undecidable empty collection, which E018 rejects first,
         // so reaching here is a compiler bug.
-        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![Ty::Unknown])),
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![Ty::Unknown].into())),
             "bare List[Unknown] is now an E018 the frontend owns — a gate violation");
-        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Set, vec![Ty::Unknown])),
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Set, vec![Ty::Unknown].into())),
             "bare Set[Unknown] is now an E018 the frontend owns — a gate violation");
-        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::String, Ty::Unknown])),
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::String, Ty::Unknown].into())),
             "bare Map[_, Unknown] is now an E018 the frontend owns — a gate violation");
         // A List/Set of only-`none` elements stays legit THROUGH the Option.
-        assert!(unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![opt_unknown.clone()])),
+        assert!(unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![opt_unknown.clone()].into())),
             "List[Option[Unknown]] (a list of nones) is legit via the Option payload");
         // Load-bearing Unknowns are NOT whitelisted.
         assert!(!unresolved_only_in_empty_payloads(&Ty::Unknown), "bare Unknown is load-bearing");
-        assert!(!unresolved_only_in_empty_payloads(&Ty::Tuple(vec![Ty::Int, Ty::Unknown])),
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Tuple(vec![Ty::Int, Ty::Unknown].into())),
             "tuple element Unknown is load-bearing");
-        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Result, vec![Ty::Unknown, Ty::String])),
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Result, vec![Ty::Unknown, Ty::String].into())),
             "Result Ok Unknown is load-bearing");
         // Map KEY Unknown is load-bearing.
-        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::Unknown, Ty::Int])),
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::Unknown, Ty::Int].into())),
             "Map key Unknown is load-bearing");
         // A fully concrete type is never reported as payload-only.
         assert!(!unresolved_only_in_empty_payloads(&Ty::Int));

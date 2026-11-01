@@ -2,10 +2,29 @@
 //! answers' shapes, the `[permissions] proc` bound, and the canonical-ABI
 //! import driven by a hand-built guest.
 
-use super::{call, cells, dispatch, link_spawn_import, set_allowlist};
+use super::{call, cells, dispatch, link_spawn_import, set_allowlist, ProcTable};
 
 /// The allowlist is process-wide; these tests set it one at a time.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Where [`guest_calling`] asks for the result cell.
+const RET: i32 = 1024;
+
+/// The `start` children these tests make.
+static TABLE: ProcTable = std::sync::Mutex::new(Vec::new());
+
+/// A p1 artifact's host: the run's output and its children (#4347).
+#[derive(Default)]
+struct P1Run {
+    out: Vec<u8>,
+    children: super::RunChildren,
+}
+
+impl super::SpawnHost for P1Run {
+    fn spawn_children(&self) -> &super::RunChildren {
+        &self.children
+    }
+}
 
 fn frame(items: &[&str]) -> String {
     items.iter().map(|s| format!("{}\n{s}", s.chars().count())).collect()
@@ -23,9 +42,9 @@ fn cells_round_trip_char_lengths_and_refuse_a_short_cell() {
 fn exec_status_answers_code_then_the_two_texts() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     set_allowlist(None);
-    let got = call(83, "echo", &frame(&["hi"]), &|| {}).expect("echo runs");
+    let got = call(83, "echo", &frame(&["hi"]), &|| {}, &TABLE).expect("echo runs");
     assert_eq!(got, "0\n3\nhi\n");
-    let missing = call(83, "almide-no-such-binary-2589", "", &|| {}).unwrap_err();
+    let missing = call(83, "almide-no-such-binary-2589", "", &|| {}, &TABLE).unwrap_err();
     assert!(missing.starts_with("process.exec_status(\"almide-no-such-binary-2589\"): "), "{missing}");
 }
 
@@ -33,11 +52,11 @@ fn exec_status_answers_code_then_the_two_texts() {
 fn the_allowlist_refuses_a_command_outside_it_by_name() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     set_allowlist(Some(vec!["echo".to_string()]));
-    assert!(call(80, "echo", &frame(&["ok"]), &|| {}).is_ok());
-    let refused = call(80, "cargo", &frame(&["--version"]), &|| {}).unwrap_err();
+    assert!(call(80, "echo", &frame(&["ok"]), &|| {}, &TABLE).is_ok());
+    let refused = call(80, "cargo", &frame(&["--version"]), &|| {}, &TABLE).unwrap_err();
     assert_eq!(refused, "process.exec(\"cargo\"): `cargo` is not in [permissions] proc");
     // exec_in names the command its frame carries, not the directory.
-    let refused_in = call(81, "/", &frame(&["cargo"]), &|| {}).unwrap_err();
+    let refused_in = call(81, "/", &frame(&["cargo"]), &|| {}, &TABLE).unwrap_err();
     assert_eq!(refused_in, "process.exec_in(\"cargo\"): `cargo` is not in [permissions] proc");
     set_allowlist(None);
 }
@@ -50,14 +69,14 @@ fn the_allowlist_bounds_signalling_as_the_kill_command() {
     let me = std::process::id().to_string();
     set_allowlist(Some(vec!["echo".to_string()]));
     assert_eq!(
-        call(87, &me, "0", &|| {}).unwrap_err(),
+        call(87, &me, "0", &|| {}, &TABLE).unwrap_err(),
         "process.kill(\"kill\"): `kill` is not in [permissions] proc"
     );
     set_allowlist(Some(vec!["echo".to_string(), "kill".to_string()]));
-    assert_eq!(call(87, &me, "0", &|| {}).unwrap(), "");
+    assert_eq!(call(87, &me, "0", &|| {}, &TABLE).unwrap(), "");
     set_allowlist(None);
     assert_eq!(
-        call(87, "-1", "0", &|| {}).unwrap_err(),
+        call(87, "-1", "0", &|| {}, &TABLE).unwrap_err(),
         "process.kill(-1, 0): pid must be in 1..=2147483647"
     );
 }
@@ -68,7 +87,7 @@ fn the_allowlist_bounds_signalling_as_the_kill_command() {
 fn a_refused_command_is_named_escaped() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     set_allowlist(Some(vec!["echo".to_string()]));
-    let refused = call(80, "x\ny\u{1b}", &frame(&[]), &|| {}).unwrap_err();
+    let refused = call(80, "x\ny\u{1b}", &frame(&[]), &|| {}, &TABLE).unwrap_err();
     assert_eq!(
         refused,
         "process.exec(\"x\\ny\\u{1b}\"): `x\\ny\\u{1b}` is not in [permissions] proc"
@@ -80,10 +99,10 @@ fn a_refused_command_is_named_escaped() {
 fn the_fs_call_form_packs_status_and_length() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     set_allowlist(None);
-    let (ret, buf) = dispatch(89, "", b"", &|| {});
+    let (ret, buf) = dispatch(89, "", b"", &|| {}, &TABLE);
     assert_eq!(ret >> 32, 0);
     assert_eq!(String::from_utf8(buf).unwrap(), std::process::id().to_string());
-    let (ret, buf) = dispatch(87, "x", b"9", &|| {});
+    let (ret, buf) = dispatch(87, "x", b"9", &|| {}, &TABLE);
     assert_eq!(ret >> 32, 1);
     assert_eq!(String::from_utf8(buf).unwrap(), "malformed process operand `x`");
 }
@@ -91,6 +110,12 @@ fn the_fs_call_form_packs_status_and_length() {
 /// A guest that imports `almide:process/spawn.call` in its canonical form,
 /// exports `memory` and a bump `cabi_realloc`, and calls `exec` on `echo`.
 fn guest() -> Vec<u8> {
+    guest_calling(0, b"echo", b"2\nhi")
+}
+
+/// The guest above for any WIT case: `a` at 0, `b` at 256, the result cell
+/// at [`RET`].
+fn guest_calling(case: i32, a: &[u8], b: &[u8]) -> Vec<u8> {
     use wasm_encoder::{
         CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
         GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module, TypeSection, ValType,
@@ -108,7 +133,7 @@ fn guest() -> Vec<u8> {
     let mut mem = MemorySection::new();
     mem.memory(MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
     let mut globals = GlobalSection::new();
-    globals.global(GlobalType { val_type: i32t, mutable: true, shared: false }, &ConstExpr::i32_const(1024));
+    globals.global(GlobalType { val_type: i32t, mutable: true, shared: false }, &ConstExpr::i32_const(2048));
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
     exports.export("cabi_realloc", ExportKind::Func, 1);
@@ -118,20 +143,20 @@ fn guest() -> Vec<u8> {
     realloc.instructions().global_get(0).global_get(0).local_get(3).i32_add().global_set(0).end();
     code.function(&realloc);
     let mut run = Function::new([]);
-    // op 0 = exec; a = "echo" at 0, b = frame ["hi"] at 16; retptr 64.
+    assert!(a.len() <= 256 && b.len() <= RET as usize - 256);
     run.instructions()
+        .i32_const(case)
         .i32_const(0)
-        .i32_const(0)
-        .i32_const(4)
-        .i32_const(16)
-        .i32_const(4)
-        .i32_const(64)
+        .i32_const(a.len() as i32)
+        .i32_const(256)
+        .i32_const(b.len() as i32)
+        .i32_const(RET)
         .call(0)
         .end();
     code.function(&run);
     let mut data = DataSection::new();
-    data.active(0, &ConstExpr::i32_const(0), b"echo".iter().copied());
-    data.active(0, &ConstExpr::i32_const(16), b"2\nhi".iter().copied());
+    data.active(0, &ConstExpr::i32_const(0), a.iter().copied());
+    data.active(0, &ConstExpr::i32_const(256), b.iter().copied());
     let mut m = Module::new();
     m.section(&types).section(&imports).section(&funcs).section(&mem).section(&globals);
     m.section(&exports).section(&code).section(&data);
@@ -146,12 +171,12 @@ fn the_canonical_import_lands_the_answer_through_cabi_realloc() {
     let module = wasmtime::Module::new(&engine, guest()).expect("guest validates");
     let mut linker = wasmtime::Linker::new(&engine);
     link_spawn_import(&mut linker).expect("link");
-    let mut store = wasmtime::Store::new(&engine, ());
+    let mut store = wasmtime::Store::new(&engine, P1Run::default());
     let inst = linker.instantiate(&mut store, &module).expect("instantiate");
     inst.get_typed_func::<(), ()>(&mut store, "run").expect("run export").call(&mut store, ()).expect("run");
     let mem = inst.get_memory(&mut store, "memory").expect("memory");
     let mut cell = [0u8; 12];
-    mem.read(&store, 64, &mut cell).expect("result cell");
+    mem.read(&store, RET as usize, &mut cell).expect("result cell");
     assert_eq!(cell[0], 0, "ok discriminant");
     let word = |at: usize| u32::from_le_bytes([cell[at], cell[at + 1], cell[at + 2], cell[at + 3]]) as usize;
     let (ptr, len) = (word(4), word(8));
@@ -171,11 +196,12 @@ fn a_linker_without_the_import_refuses_the_guest_at_instantiation() {
 }
 
 /// The WIT is the interface's one written form: its `enum op` order IS the
-/// host op numbering (case index = op − 80), and `call` keeps the shape the
+/// host op numbering (case index = op − 80, the `start` child's cases
+/// continuing at op 146), and `call` keeps the shape the
 /// canonical import above lowers. A reordered case or a changed signature
 /// fails here before it can disagree with the emitter or the host.
 #[test]
-fn the_wit_names_the_eleven_ops_in_host_op_order_and_the_call_shape() {
+fn the_wit_names_the_ops_in_host_op_order_and_the_call_shape() {
     let mut resolve = wit_parser::Resolve::default();
     let pkg = resolve
         .push_str("spawn.wit", include_str!("../../wit/process/spawn.wit"))
@@ -187,9 +213,21 @@ fn the_wit_names_the_eleven_ops_in_host_op_order_and_the_call_shape() {
     let cases: Vec<&str> = e.cases.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(
         cases,
-        ["exec", "exec-in", "exec-with-stdin", "exec-status", "output", "run", "spawn", "kill", "is-alive", "pid", "run-with"]
+        [
+            "exec", "exec-in", "exec-with-stdin", "exec-status", "output", "run", "spawn", "kill", "is-alive", "pid",
+            "run-with", "start", "poll", "wait", "stop", "read-new", "child-pid",
+        ]
     );
-    assert_eq!(super::OP_LAST - super::OP_FIRST + 1, cases.len() as i32);
+    let first_block = super::OP_LAST - super::OP_FIRST + 1;
+    assert_eq!(first_block + super::CHILD_LAST - super::CHILD_FIRST + 1, cases.len() as i32);
+    // Every case maps to its host op and back (the forwarder's arithmetic).
+    for (case, _) in cases.iter().enumerate() {
+        let op = crate::wasi::proc_op_of_case(case as i32);
+        let want = if (case as i32) < first_block { super::OP_FIRST + case as i32 } else { super::CHILD_FIRST + case as i32 - first_block };
+        assert_eq!(op, want, "case {case}");
+        assert!(super::is_op(op), "op {op}");
+        assert_eq!(crate::wasi::proc_case(op), case as i32);
+    }
     let call = &resolve.interfaces[iface].functions["call"];
     let params: Vec<&str> = call.params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(params, ["op", "a", "b"]);
@@ -275,13 +313,13 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
 
     let engine = wasmtime::Engine::default();
     let module = wasmtime::Module::new(&engine, &p1).expect("artifact validates");
-    let mut linker = wasmtime::Linker::<Vec<u8>>::new(&engine);
+    let mut linker = wasmtime::Linker::<P1Run>::new(&engine);
     link_spawn_import(&mut linker).expect("link");
     linker
         .func_wrap(
             "wasi_snapshot_preview1",
             "fd_write",
-            |mut caller: wasmtime::Caller<'_, Vec<u8>>, _fd: i32, iovs: i32, n: i32, nwritten: i32| -> i32 {
+            |mut caller: wasmtime::Caller<'_, P1Run>, _fd: i32, iovs: i32, n: i32, nwritten: i32| -> i32 {
                 let mem = caller.get_export("memory").and_then(|e| e.into_memory()).expect("memory");
                 let mut total = 0u32;
                 for k in 0..n as u32 {
@@ -290,7 +328,7 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
                     let (ptr, len) = (u32::from_le_bytes([iov[0], iov[1], iov[2], iov[3]]), u32::from_le_bytes([iov[4], iov[5], iov[6], iov[7]]));
                     let mut buf = vec![0u8; len as usize];
                     mem.read(&caller, ptr as usize, &mut buf).expect("bytes");
-                    caller.data_mut().extend_from_slice(&buf);
+                    caller.data_mut().out.extend_from_slice(&buf);
                     total += len;
                 }
                 mem.write(&mut caller, nwritten as usize, &total.to_le_bytes()).expect("nwritten");
@@ -303,10 +341,10 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
             Err(wasmtime::Error::msg(format!("proc_exit({code})")))
         })
         .expect("proc_exit");
-    let mut store = wasmtime::Store::new(&engine, Vec::new());
+    let mut store = wasmtime::Store::new(&engine, P1Run::default());
     let inst = linker.instantiate(&mut store, &module).expect("a host with the import instantiates it");
     inst.get_typed_func::<(), ()>(&mut store, "_start").expect("_start").call(&mut store, ()).expect("runs");
-    assert_eq!(String::from_utf8(store.data().clone()).expect("utf-8"), "0\n2\nhi\n");
+    assert_eq!(String::from_utf8(store.data().out.clone()).expect("utf-8"), "0\n2\nhi\n");
 
     // A stock host: the two preview-1 calls, no almide:process/spawn.
     let mut stock = wasmtime::Linker::<()>::new(&engine);
@@ -314,4 +352,91 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
     stock.func_wrap("wasi_snapshot_preview1", "proc_exit", |_: i32| {}).expect("proc_exit");
     let Err(e) = stock.instantiate(&mut wasmtime::Store::new(&engine, ()), &module) else { panic!("refused") };
     assert!(format!("{e:#}").contains("almide:process/spawn"), "{e:#}");
+}
+
+/// The `start` child (#4308) over ops 146..=151: native's child core on the
+/// run's table — the handle, poll while running, the incremental reads, the
+/// outcome, stop, and an unknown handle.
+#[test]
+fn the_start_child_answers_through_its_handle() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    set_allowlist(None);
+    let t: ProcTable = std::sync::Mutex::new(Vec::new());
+    let script = "printf a; printf x >&2; exit 3";
+    let h = call(146, "sh", &frame(&["0", "", "", "-c", script]), &|| {}, &t).expect("start");
+    let st = call(148, &h, "", &|| {}, &t).expect("wait");
+    assert_eq!(st, "3\n1\nax");
+    assert_eq!(call(147, &h, "", &|| {}, &t).as_deref(), Ok("1"));
+    assert_eq!(call(150, &h, "1", &|| {}, &t).as_deref(), Ok("a"));
+    assert_eq!(call(150, &h, "1", &|| {}, &t).as_deref(), Ok(""));
+    assert_eq!(call(150, &h, "2", &|| {}, &t).as_deref(), Ok("x"));
+    assert!(call(151, &h, "", &|| {}, &t).expect("pid").parse::<i64>().expect("decimal") > 0);
+
+    let s = call(146, "sleep", &frame(&["0", "", "", "30"]), &|| {}, &t).expect("start sleep");
+    assert_eq!(call(147, &s, "", &|| {}, &t).as_deref(), Ok("0"));
+    let stopped = call(149, &s, "200", &|| {}, &t).expect("stop");
+    assert!(stopped.starts_with("-1\n"), "{stopped}");
+    assert_eq!(call(149, &s, "200", &|| {}, &t).as_deref(), Ok(stopped.as_str()));
+
+    let late = call(146, "sleep", &frame(&["100", "", "", "30"]), &|| {}, &t).expect("start");
+    assert_eq!(call(148, &late, "", &|| {}, &t).unwrap_err(), "exec timed out after 100ms");
+
+    assert_eq!(call(148, "99", "", &|| {}, &t).unwrap_err(), "invalid ProcessChild handle: 99");
+    let missing = call(146, "almide-no-such-binary-4308", &frame(&["0", "", ""]), &|| {}, &t).unwrap_err();
+    assert!(missing.starts_with("process.start(\"almide-no-such-binary-4308\"): "), "{missing}");
+}
+
+/// The run's end stops a child neither waited on nor stopped (C-437's rule).
+#[test]
+fn the_run_end_stops_an_unwaited_child() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    set_allowlist(None);
+    let t: ProcTable = std::sync::Mutex::new(Vec::new());
+    let h = call(146, "sleep", &frame(&["0", "", "", "30"]), &|| {}, &t).expect("start");
+    let pid: i32 = call(151, &h, "", &|| {}, &t).expect("pid").parse().expect("decimal");
+    super::stop_unwaited(&t);
+    assert_eq!(call(147, &h, "", &|| {}, &t).as_deref(), Ok("1"));
+    let gone = std::process::Command::new("sh").arg("-c").arg(format!("kill -0 {pid} 2>/dev/null")).status().expect("sh");
+    assert!(!gone.success(), "the child outlived the run");
+}
+
+/// Whether a process `pid` exists (`kill -0`, the shell builtin).
+fn alive(pid: i64) -> bool {
+    std::process::Command::new("sh").arg("-c").arg(format!("kill -0 {pid} 2>/dev/null")).status().is_ok_and(|s| s.success())
+}
+
+/// #4347: on the p1-artifact route (the canonical `almide:process/spawn`
+/// import a stock artifact carries), a `process.start` child neither waited
+/// on nor stopped is stopped when the run ends, as the embedded lane and
+/// native stop theirs (C-437). The run's end is its store being dropped.
+#[test]
+fn the_p1_import_route_stops_its_children_when_the_run_ends() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    set_allowlist(None);
+    let engine = wasmtime::Engine::default();
+    // WIT case 11 = `start` (op 146): `sleep 30`, no timeout.
+    let module = wasmtime::Module::new(&engine, guest_calling(11, b"sleep", frame(&["0", "", "", "30"]).as_bytes())).expect("guest validates");
+    let mut linker = wasmtime::Linker::new(&engine);
+    link_spawn_import(&mut linker).expect("link");
+    let mut store = wasmtime::Store::new(&engine, P1Run::default());
+    let inst = linker.instantiate(&mut store, &module).expect("instantiate");
+    inst.get_typed_func::<(), ()>(&mut store, "run").expect("run export").call(&mut store, ()).expect("run");
+    let mem = inst.get_memory(&mut store, "memory").expect("memory");
+    let mut cell = [0u8; 12];
+    mem.read(&store, RET as usize, &mut cell).expect("result cell");
+    assert_eq!(cell[0], 0, "start answered ok");
+    let pid = {
+        let t = store.data().children.lock().unwrap_or_else(|p| p.into_inner());
+        t.first().and_then(|c| c.as_ref()).expect("the run's table holds the child").pid()
+    };
+    assert!(alive(pid), "the child {pid} runs while the run does");
+    drop(store);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while alive(pid) {
+        if std::time::Instant::now() >= until {
+            let _ = std::process::Command::new("sh").arg("-c").arg(format!("kill -9 {pid} 2>/dev/null")).status();
+            panic!("the p1 route's unwaited child {pid} outlived the run (#4347)");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }

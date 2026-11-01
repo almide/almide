@@ -408,7 +408,7 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                         let var = ctx.define_var(
                             &format!("__tuple_param_{}", i), param_ty.clone(), Mutability::Let, None);
                         let elem_tys: Vec<Ty> = match &param_ty {
-                            Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                            Ty::Tuple(es) if es.len() == names.len() => es.to_vec(),
                             _ => vec![Ty::Unknown; names.len()],
                         };
                         let elements: Vec<IrPattern> = names.iter().zip(elem_tys.iter())

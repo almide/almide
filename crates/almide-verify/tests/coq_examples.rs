@@ -191,6 +191,14 @@ fn bounds_examples() {
             ("a0", false),
             ("c0 a0 s0 a0", false),
             ("w0 w1 c2 a2", false),
+            // #4280: the loop exit test
+            ("c0 a0;e0 a0;e0 a0 c1 a1", true),
+            ("L{ e0 a0 s0 }", true),
+            ("a0 e0", false),
+            ("L{ e0 s0 a0 }", false),
+            ("e0 L{ a0 s0 }", false),
+            ("e1 a0", false),
+            ("e a0", false),
         ],
     );
 }
@@ -223,6 +231,30 @@ fn init_examples() {
             ("h12 w8 v4 r0 f4 t16", false),
             ("h12 w8 v4 r0 f4 t8 s0", false),
             ("h12 w8 v4 r0 f4", false),
+        ],
+    );
+}
+
+#[test]
+fn fields_examples() {
+    verdicts(
+        Property::Fields,
+        &[
+            // FieldCert.v
+            ("L4 c0 n1 z16 o0 w8 o8 w4 ; k4 c0 s0 s1 ; a4 c0 f1", true),
+            ("L6 c0 n2 z8 o0 w4 ; L6 c1 n2 z16 o0 w4 o8 w8 ; k6 c1 s0 s1 ; t6 ; a6 c1 f1", true),
+            ("", true),
+            ("L4 c0 n1 z16 o0 w8 o8 w4 ; k4 c0 s0", false),
+            ("L4 c0 n1 z12 o0 w8 o8 w8", false),
+            ("L4 c0 n1 z16 o0 w8 o8 w4 ; a4 c0 f2", false),
+            ("L4 c0 n1 z16 o0 w8 o8 w4 ; a5 c0 f0", false),
+            ("L6 c0 n1 z8 o0 w8 ; t6", false),
+            ("L4 c1 n1 z8", false),
+            ("L4 c0 n1 z8 o0 w8 ; L4 c0 n1 z16 o0 w8", false),
+            ("L4 c0 n1 z8 o0", false),
+            ("a4 c0 f0 x", false),
+            ("k4 s0", false),
+            (";", false),
         ],
     );
 }

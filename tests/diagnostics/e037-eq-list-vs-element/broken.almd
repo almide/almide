@@ -1,0 +1,7 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// A list and one of its elements are two types.
+fn main() -> Unit = {
+  let xs = [1, 2]
+  let n = 1
+  println("${xs == n}")
+}

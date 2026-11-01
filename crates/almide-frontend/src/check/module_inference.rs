@@ -24,6 +24,7 @@ impl Checker {
         self.validate_eq_operand_types();
         self.validate_eq_instantiations();
         self.validate_opaque_spreads();
+        self.validate_eq_operand_pairs();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
@@ -39,9 +40,12 @@ impl Checker {
         self.check_concurrent_var_reach(program);
         self.check_abort_sites(program);
         self.check_regex_literals(program);
+        self.check_body_rules(program);
+        self.check_media_ownership(program);
         self.check_scoped(program);
         self.check_pure_attrs(program);
         self.record_outside_guarantee(program);
+        self.check_lent_region_escapes(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
@@ -114,7 +118,9 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.report_type_budget_hit(None);
         self.validate_after_solve(prog);
+        self.report_type_budget_hit(None);
         self.current_module_prefix = saved_prefix;
 
         // Restore
@@ -180,6 +186,7 @@ impl Checker {
             self.deferred_input_sink_checks.len(),
             self.deferred_protocol_bounds.len(),
             self.deferred_opaque_spreads.len(),
+            self.deferred_eq_pair_checks.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -241,6 +248,7 @@ impl Checker {
         self.deferred_input_sink_checks.truncate(saved_deferred_lens.16);
         self.deferred_protocol_bounds.truncate(saved_deferred_lens.17);
         self.deferred_opaque_spreads.truncate(saved_deferred_lens.18);
+        self.deferred_eq_pair_checks.truncate(saved_deferred_lens.19);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
@@ -546,6 +554,14 @@ impl Checker {
         {
             let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
             self.reject_extern_c_types(sig, extern_attrs, attrs);
+        }
+        // ADR-0031 amendment A2: an `@export(c)` fn's Region parameters and
+        // its `@region(out = …)` clauses.
+        if let ast::Decl::Fn { name, params, return_type, extern_attrs, export_attrs, attrs, span, .. } = &*decl
+            && extern_attrs.is_empty()
+        {
+            let sig = extern_abi_check::ExternSig { name: name.as_str(), params, return_type, span: *span };
+            self.check_export_c_regions(sig, export_attrs, attrs);
         }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the

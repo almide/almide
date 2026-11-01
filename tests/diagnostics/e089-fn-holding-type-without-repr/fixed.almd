@@ -1,0 +1,10 @@
+type Hook = { run: (Int) -> Int }
+
+fn Hook.apply(h: Hook, x: Int) -> Int = h.run(x)
+
+fn Hook.repr(h: Hook) -> String = "Hook(${h.apply(0)})"
+
+effect fn main() -> Unit = {
+  let h = Hook { run: (x: Int) => x + 1 }
+  println("h=${h}")
+}

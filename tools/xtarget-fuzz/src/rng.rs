@@ -152,10 +152,7 @@ mod tests {
         assert_eq!(a.next_u64(), b.next_u64());
         // Different index ⇒ different early output (decorrelated).
         let mut c = SplitMix64::for_program(7, 124);
-        assert_ne!(
-            SplitMix64::for_program(7, 123).next_u64(),
-            c.next_u64()
-        );
+        assert_ne!(SplitMix64::for_program(7, 123).next_u64(), c.next_u64());
     }
 
     #[test]

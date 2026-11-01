@@ -1,0 +1,3 @@
+expects_code = "E110"
+expects_error = "through type parameter `T` of `body_as`, and `body_as` is not an input sink"
+hint_substring = "Mark `body_as` `@input_sink`"

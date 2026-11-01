@@ -28,6 +28,9 @@ pub(crate) struct AssembleIn<'a> {
     pub(crate) extra_fns: &'a [(u32, Function)],
     pub(crate) global_decls: &'a [(almide_ir::VarId, SliceTy)],
     pub(crate) export_fns: &'a [(String, u32)],
+    /// ADR-0031 amendment A1: the `(ptr, len)` adapters of the Region
+    /// exports, appended after `extra_fns` (region_export.rs).
+    pub(crate) region_exports: &'a [crate::region_export::RegionExport],
     pub(crate) main_index: u32,
 }
 
@@ -134,8 +137,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         extra_fns,
         global_decls,
         export_fns,
+        region_exports,
         main_index,
     } = a;
+    // ADR-0031 A1: the Region adapters' bodies for the helper scan; their
+    // export-table global index is fixed once the globals are laid out, and
+    // the call edges do not depend on it.
+    let mut adapters: Vec<Function> = region_exports.iter().map(|e| crate::region_export::adapter(e, 0)).collect();
+    let shares = region_exports.iter().any(crate::region_export::RegionExport::hands_out_share);
+    let mut release = shares.then(|| crate::region_export::release(0));
     // #2407: the allocation counters, APPENDED after the top-let globals so
     // no existing index moves — four i64 globals `$alloc` / `$free` bump,
     // present only under the `alloc_count` switch (a shipped module has
@@ -155,7 +165,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
                 _ => None,
             })
             .chain(std::iter::once(main_fn))
-            .chain(extra_fns.iter().map(|(_, f)| f)),
+            .chain(extra_fns.iter().map(|(_, f)| f))
+            .chain(adapters.iter())
+            .chain(release.iter()),
         if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
     let mut lits = HelperLits::intern(pool, &used);
@@ -205,6 +217,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // indices assigned eagerly during lowering from itype_base.
     for (ps, r) in work.itypes.borrow().iter() {
         types.ty().function(ps.clone(), r.iter().copied().collect::<Vec<_>>());
+    }
+    let adapter_ty = T_FN_BASE + table.infos.len() as u32 + work.itypes.borrow().len() as u32;
+    for e in region_exports {
+        types.ty().function(e.export_params(), e.export_results());
     }
 
     let mut imports = ImportSection::new();
@@ -259,6 +275,13 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     for (ti, _) in extra_fns {
         functions.function(*ti);
     }
+    let adapter_base = main_index + 1 + extra_fns.len() as u32;
+    for k in 0..adapters.len() as u32 {
+        functions.function(adapter_ty + k);
+    }
+    if release.is_some() {
+        functions.function(1); // __region_release ((i32) -> ())
+    }
 
     let mut memories = MemorySection::new();
     // #1729: an armed heap-cap becomes the memory's declared MAXIMUM
@@ -271,7 +294,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     memories.memory(MemoryType {
         minimum: pages,
         maximum,
-        memory64: false,
+        memory64: crate::region_export::MEMORY64,
         shared: false,
         page_size_log2: None,
     });
@@ -382,6 +405,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // recursive type's drop, `==` or display walks one (deep_walk.rs).
     debug_assert!(!work.deep_globals_used.get() || globals.len() == work.deep_global_base.get());
     crate::deep_walk::declare_globals(&mut globals, work);
+    // The Region export table (region_export.rs): block, count, capacity.
+    if release.is_some() {
+        let g = globals.len();
+        for _ in 0..crate::region_export::TABLE_GLOBALS {
+            globals.global(GlobalType { val_type: ValType::I32, mutable: true, shared: false }, &ConstExpr::i32_const(0));
+        }
+        adapters = region_exports.iter().map(|e| crate::region_export::adapter(e, g)).collect();
+        release = Some(crate::region_export::release(g));
+    }
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
@@ -403,6 +435,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
+    }
+    for (k, e) in region_exports.iter().enumerate() {
+        exports.export(&e.name, ExportKind::Func, adapter_base + k as u32);
+    }
+    if release.is_some() {
+        exports.export(crate::region_export::RELEASE_EXPORT, ExportKind::Func, adapter_base + adapters.len() as u32);
     }
     // #2265: the JS host allocates the `String` blocks it passes in and
     // releases the ones it takes out through the module's own runtime —
@@ -458,6 +496,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
     code.function(main_fn);
     for (_, f) in extra_fns {
+        code.function(f);
+    }
+    for f in adapters.iter().chain(release.iter()) {
         code.function(f);
     }
 
@@ -530,6 +571,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     }
     _ => match map_index::helper_body(h)
         .or_else(|| crate::map_ordered::helper_body(h, work.helper_base.get() + hpos as u32))
+        .or_else(|| crate::value_set_path::helper_body(h, work.helper_base.get() + hpos as u32))
         .or_else(|| crate::fan::js_async::helper_body(h))
         .or_else(|| runtime_alloc::helper_body(h, work))
         .or_else(|| runtime_line::helper_body(h, work))
@@ -555,6 +597,7 @@ pub(crate) fn resolve_extras(
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match map_index::helper_params(h)
             .or_else(|| crate::map_ordered::helper_params(h))
+            .or_else(|| crate::value_set_path::helper_params(h))
             .or_else(|| crate::fan::js_async::helper_params(h))
             .or_else(|| runtime_alloc::helper_params(h))
             .or_else(|| runtime_line::helper_params(h))

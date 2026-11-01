@@ -25,8 +25,8 @@
 use almide_rt_core::net_unix_core::AlmideUnixTables;
 
 /// The first and last unix-socket / shm op.
-pub(crate) const OP_FIRST: i32 = 104;
-pub(crate) const OP_LAST: i32 = 116;
+pub(crate) const OP_FIRST: i32 = *almide_wasm::host_ops::UNIX_SHM.start();
+pub(crate) const OP_LAST: i32 = *almide_wasm::host_ops::UNIX_SHM.end();
 
 fn int(s: &str) -> Result<i64, String> {
     s.trim().parse().map_err(|_| format!("malformed net operand {}", almide_base::err_text::almide_rt_errtext_quote(s)))

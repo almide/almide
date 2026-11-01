@@ -48,20 +48,29 @@ runs:
     - name: Download almide
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
+      # Callers in other repositories have no scripts/fetch-pinned.sh, and the
+      # version may be `latest`, which no digest can pin: the archive is refused
+      # unless it carries the release workflow's Sigstore attestation (security
+      # row 16). The old fallback to an un-archived binary is gone — every
+      # release ships `.tar.gz` archives, and the fallback was a second
+      # unverified fetch.
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
+        set -euo pipefail
         VERSION="${{ steps.version.outputs.version }}"
         ASSET="${{ steps.platform.outputs.asset }}"
         mkdir -p ~/.almide/bin
 
         DOWNLOAD_URL="https://github.com/almide/almide/releases/download/${VERSION}/${ASSET}.tar.gz"
         echo "Downloading ${DOWNLOAD_URL}"
-        curl -fsSL "${DOWNLOAD_URL}" | tar -xz -C ~/.almide/bin
-
-        # If the archive doesn't contain a tar.gz, try plain binary
-        if [ ! -f ~/.almide/bin/almide ]; then
-          curl -fsSL -o ~/.almide/bin/almide \
-            "https://github.com/almide/almide/releases/download/${VERSION}/${ASSET}"
-        fi
+        tmp="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$tmp/${ASSET}.tar.gz" "${DOWNLOAD_URL}"
+        gh attestation verify "$tmp/${ASSET}.tar.gz" --repo almide/almide \
+          --signer-workflow almide/almide/.github/workflows/release.yml >/dev/null
+        # The archive holds `<asset>/almide`; the binary lands in ~/.almide/bin.
+        tar -xzf "$tmp/${ASSET}.tar.gz" --strip-components=1 -C ~/.almide/bin
+        rm -rf "$tmp"
 
         chmod +x ~/.almide/bin/almide
 

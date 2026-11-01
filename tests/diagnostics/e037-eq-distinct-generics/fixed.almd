@@ -1,0 +1,7 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// Two type parameters are two types, whatever a caller binds them to.
+fn same[A](a: A, b: A) -> Bool = a == b
+
+fn main() -> Unit = {
+  println("${same(1, 2)}")
+}

@@ -56,8 +56,13 @@ pub enum Payload {
     OptRes,
 }
 
-const PAYLOADS: [Payload; 5] =
-    [Payload::Int, Payload::Str, Payload::Tuple, Payload::Record, Payload::OptRes];
+const PAYLOADS: [Payload; 5] = [
+    Payload::Int,
+    Payload::Str,
+    Payload::Tuple,
+    Payload::Record,
+    Payload::OptRes,
+];
 
 impl Payload {
     fn suffix(self) -> &'static str {
@@ -255,7 +260,9 @@ fn wrap(op: Op, e: &str, p: Payload, k: i64, indent: usize) -> String {
         Op::Question => format!("(w_ok_{s}({e})? ?? {d})"),
         Op::Pipe => format!("({e} |> id_{s})"),
         Op::MatchSome => {
-            format!("(match w_some_{s}({e}) {{\n{pad}  some(v) => v,\n{pad}  none => {d},\n{pad}}})")
+            format!(
+                "(match w_some_{s}({e}) {{\n{pad}  some(v) => v,\n{pad}  none => {d},\n{pad}}})"
+            )
         }
         Op::TupleWrap => format!("({e}, 7).0"),
         Op::GuardPass => format!(
@@ -308,8 +315,15 @@ pub fn render(plan: &Plan) -> (String, String) {
             Position::CallArg => format!("id_{s}({e})"),
         };
         let kw = if pr.effect { "effect fn" } else { "fn" };
-        fns.push_str(&format!("{kw} probe_{i}() -> {} = {body}\n\n", pr.payload.ty()));
-        let call = if pr.effect { format!("probe_{i}()!") } else { format!("probe_{i}()") };
+        fns.push_str(&format!(
+            "{kw} probe_{i}() -> {} = {body}\n\n",
+            pr.payload.ty()
+        ));
+        let call = if pr.effect {
+            format!("probe_{i}()!")
+        } else {
+            format!("probe_{i}()")
+        };
         main_lines.push(format!(
             "  println(\"p{i}=\" + int.to_string({}))",
             pr.payload.extract(&call)
@@ -336,14 +350,18 @@ pub fn render(plan: &Plan) -> (String, String) {
     if used.contains(&Payload::OptRes) {
         src.push_str("type Q = Result[Int, String]?\n\n");
         src.push_str("fn mk_opr(n: Int) -> Q = some(ok(n))\n\n");
-        src.push_str("fn un_opr(x: Q) -> Int = match x {\n  some(r) => r ?? 0,\n  none => 0,\n}\n\n");
+        src.push_str(
+            "fn un_opr(x: Q) -> Int = match x {\n  some(r) => r ?? 0,\n  none => 0,\n}\n\n",
+        );
     }
     // Spelled the way `almide fmt` spells it (`T?`, one blank line between
     // top-level items), so a committed sample passes the fmt gate untouched.
     for p in used {
         let (s, t) = (p.suffix(), p.ty());
         src.push_str(&format!("fn id_{s}(x: {t}) -> {t} = x\n\n"));
-        src.push_str(&format!("fn w_ok_{s}(x: {t}) -> Result[{t}, String] = ok(x)\n\n"));
+        src.push_str(&format!(
+            "fn w_ok_{s}(x: {t}) -> Result[{t}, String] = ok(x)\n\n"
+        ));
         src.push_str(&format!("fn w_some_{s}(x: {t}) -> {t}? = some(x)\n\n"));
     }
     src.push_str(&fns);
@@ -406,7 +424,10 @@ mod tests {
             let mut rng = SplitMix64::for_program(0xC0DE, index);
             let p = plan(&mut rng);
             let (src, expected) = render(&p);
-            assert!(parses(&src), "composition program {index} did not parse:\n{src}");
+            assert!(
+                parses(&src),
+                "composition program {index} did not parse:\n{src}"
+            );
             assert_eq!(
                 super::super::identity::expected_from_source(&src).as_deref(),
                 Some(expected.as_str()),
@@ -422,13 +443,14 @@ mod tests {
     /// is a no-op otherwise (the parse gate above always runs).
     #[test]
     fn composition_programs_pass_almide_check() {
-        let bin = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/release/almide");
+        let bin =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/almide");
         if !bin.exists() {
             eprintln!("skipping: no workspace almide binary");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("xtarget-composition-check-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("xtarget-composition-check-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         for index in 0..120u64 {
             let mut rng = SplitMix64::for_program(0xC4EC, index);
@@ -457,8 +479,14 @@ mod tests {
                 let (src, expected) = render(&c);
                 assert!(parses(&src), "shrink candidate did not parse:\n{src}");
                 assert_eq!(expected.lines().count(), c.size());
-                assert!(c.probes.iter().all(|pr| pr.effect || !pr.ops.iter().any(|o| o.needs_effect())));
-                assert!(c.probes.iter().all(|pr| pr.ops.iter().all(|o| o.applies(pr.payload))));
+                assert!(c
+                    .probes
+                    .iter()
+                    .all(|pr| pr.effect || !pr.ops.iter().any(|o| o.needs_effect())));
+                assert!(c
+                    .probes
+                    .iter()
+                    .all(|pr| pr.ops.iter().all(|o| o.applies(pr.payload))));
             }
         }
     }

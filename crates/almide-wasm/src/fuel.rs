@@ -228,6 +228,12 @@ impl Emitter<'_> {
         if let Some(w) = self.witness.as_mut() {
             w.branch_open();
             w.branch_arm();
+            // #4277: the pending block is born at the measured site and
+            // released here, on the cut's arm — a recorded temporary, so the
+            // release above is an event of this path.
+            if pending.is_some() {
+                w.temp_discarded();
+            }
             w.arm_err_exit();
         }
         let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);

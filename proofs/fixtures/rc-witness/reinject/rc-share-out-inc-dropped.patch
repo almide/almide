@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/value.rs b/crates/almide-wasm/src/value.rs
+index fd2c80e95..d024bdec0 100644
+--- a/crates/almide-wasm/src/value.rs
++++ b/crates/almide-wasm/src/value.rs
+@@ -167,7 +167,8 @@ impl Emitter<'_> {
+         i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(VT_OBJECT).i32_ne();
+         i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(VT_OBJECT).i32_ne();
+         i.i32_or().if_(BlockType::Result(wasm_encoder::ValType::I32));
+-        i.local_get(hb).call(F_INC);
++        // RE-INJECTED (#4278 drill): the share-out's rc_inc is not emitted;
++        // its event stays.
+         i.local_get(hb);
+         let _ = i;
+         self.witness_arm_share_out(vb);

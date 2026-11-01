@@ -356,13 +356,47 @@ pub const USER_FN_ESCAPE: &str = "almide_fn_";
 /// compiler's spelling, never a user fn's (#3487).
 pub const RUNTIME_SYMBOL_PREFIX: &str = "almide_rt_";
 
+/// The lower-case prefix of every value item the native runtime defines
+/// (#4345): its `almide_rt_*` symbols ([`RUNTIME_SYMBOL_PREFIX`]) and its
+/// `almide_*` helpers alike. [`USER_FN_ESCAPE`] lies inside it too, so the
+/// escape of a user fn is never itself a name a user can spell.
+pub const RUNTIME_FN_SPACE: &str = "almide_";
+
 /// Does a user fn named `name` need [`USER_FN_ESCAPE`]? The compiler's
-/// spaces are `__` (synthesized fns, #3483) and [`RUNTIME_SYMBOL_PREFIX`]
-/// (runtime symbols, #3487): a user fn `almide_rt_list_len` was collapsed into
-/// the runtime's `almide_rt_list_len` call and defined twice beside it (rustc
-/// E0428 / E0308 on the native fallback).
+/// spaces are `__` (synthesized fns, #3483) and [`RUNTIME_FN_SPACE`]: the
+/// runtime's symbols (#3487: a user fn `almide_rt_list_len` was collapsed into
+/// the runtime's `almide_rt_list_len` call and defined twice beside it, rustc
+/// E0428 / E0308 on the native fallback) and every other runtime value item
+/// (#4345: a user `almide_abort` was defined twice beside the prelude's).
 pub fn is_reserved_fn_name(name: &str) -> bool {
-    name.starts_with("__") || name.starts_with(USER_FN_ESCAPE) || name.starts_with(RUNTIME_SYMBOL_PREFIX)
+    name.starts_with("__") || name.starts_with(RUNTIME_FN_SPACE)
+}
+
+/// May the native runtime name a crate-root item `name`? (#4345) The ONE
+/// declaration of the runtime's namespace in the generated Rust crate: the
+/// runtime's sources are spliced into the user's crate, so every name they
+/// put at its root must lie where no user item reaches Rust —
+///
+/// - `almide_*`: a user fn spelled there is escaped ([`is_reserved_fn_name`]),
+///   except into [`USER_FN_ESCAPE`], which is the escape itself;
+/// - `Almide*`: a user type spelled there is qualified and mangled
+///   (`almide_codegen`'s `is_rust_reserved_type_name`);
+/// - `ALMIDE_*`: a user top-level `let` is a static under
+///   `ALMIDE_G_<name>` / `ALMIDE_RT_<len>_<origin>_<name>`
+///   ([`top_let_storage::static_name`]), so those two shapes are the user's.
+///
+/// The runtime keeps every other helper (`mk`, `sha256`, `request`, …) inside
+/// a private module and re-exports only the names this admits; the guard
+/// test in `almide_codegen::runtime_namespace` holds the whole crate-root
+/// preamble to it.
+pub fn is_runtime_item_name(name: &str) -> bool {
+    let user_static = name.starts_with(top_let_storage::ENTRY_STATIC_PREFIX)
+        || name
+            .strip_prefix(top_let_storage::MODULE_STATIC_PREFIX)
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+    (name.starts_with(RUNTIME_FN_SPACE) && !name.starts_with(USER_FN_ESCAPE))
+        || name.starts_with("Almide")
+        || (name.starts_with("ALMIDE_") && !user_static)
 }
 
 /// Did the compiler synthesize the ENTRY program fn whose IR name is

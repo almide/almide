@@ -1,0 +1,19 @@
+// One arm per column, then one arm for every value the columns leave: the
+// check walks each column once.
+fn first_set(x0: Bool, x1: Bool, x2: Bool, x3: Bool, x4: Bool, x5: Bool, x6: Bool, x7: Bool, x8: Bool, x9: Bool, x10: Bool, x11: Bool) -> Int = match (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11) {
+  (true, _, _, _, _, _, _, _, _, _, _, _) => 0,
+  (_, true, _, _, _, _, _, _, _, _, _, _) => 1,
+  (_, _, true, _, _, _, _, _, _, _, _, _) => 2,
+  (_, _, _, true, _, _, _, _, _, _, _, _) => 3,
+  (_, _, _, _, true, _, _, _, _, _, _, _) => 4,
+  (_, _, _, _, _, true, _, _, _, _, _, _) => 5,
+  (_, _, _, _, _, _, true, _, _, _, _, _) => 6,
+  (_, _, _, _, _, _, _, true, _, _, _, _) => 7,
+  (_, _, _, _, _, _, _, _, true, _, _, _) => 8,
+  (_, _, _, _, _, _, _, _, _, true, _, _) => 9,
+  (_, _, _, _, _, _, _, _, _, _, true, _) => 10,
+  (_, _, _, _, _, _, _, _, _, _, _, true) => 11,
+  _ => -1,
+}
+
+effect fn main() -> Unit = println("${first_set(true, true, true, true, true, true, true, true, true, true, true, true)}")

@@ -1,0 +1,7 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// An Int and a Float never compare: there is no implicit numeric juggling.
+fn main() -> Unit = {
+  let n = 1
+  let x = 1.0
+  println("${n == x}")
+}

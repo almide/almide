@@ -1,0 +1,1 @@
+ANCHORS REJECT: rc: function 9: recorded events with no call [d0 (its consuming callee takes it on some paths only)]; calls with no recorded event []

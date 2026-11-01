@@ -23,18 +23,22 @@ impl Emitter<'_> {
     fn emit_local_cow(&mut self, target: VarId, cow: u32, hb: u32) {
         let idx = self.locals[&target].0;
         let flag = self.cow_flag_of(target);
-        let mut i = self.f.instructions();
+        // #4005: each judge call's anchor goes to the bounds sink, so the
+        // byte-level operand check knows the call keeps the list's count.
         if self.cow_prejudged.contains(&target) {
             // The loop's preheader already judged it (cow_hoist.rs).
-            i.local_get(idx).local_set(hb);
+            self.f.instructions().local_get(idx).local_set(hb);
         } else if let Some(flag) = flag {
-            i.local_get(flag).i32_eqz().if_(BlockType::Empty);
-            i.local_get(idx).call(cow).local_set(idx);
+            self.f.instructions().local_get(flag).i32_eqz().if_(BlockType::Empty).local_get(idx).call(cow);
+            crate::witness::bounds::judge(self.f);
+            let mut i = self.f.instructions();
+            i.local_set(idx);
             i.i32_const(1).local_set(flag).end();
             i.local_get(idx).local_set(hb);
         } else {
-            i.local_get(idx).call(cow).local_set(hb);
-            i.local_get(hb).local_set(idx);
+            self.f.instructions().local_get(idx).call(cow);
+            crate::witness::bounds::judge(self.f);
+            self.f.instructions().local_set(hb).local_get(hb).local_set(idx);
         }
     }
 
@@ -47,13 +51,14 @@ impl Emitter<'_> {
         let (idx, declared) = self.locals[&target];
         let cow = self.cow_fn_of(declared);
         let flag = self.cow_flag_of(target);
-        let mut i = self.f.instructions();
         if let Some(flag) = flag {
-            i.local_get(flag).i32_eqz().if_(BlockType::Empty);
-            i.local_get(idx).call(cow).local_set(idx);
-            i.i32_const(1).local_set(flag).end();
+            self.f.instructions().local_get(flag).i32_eqz().if_(BlockType::Empty).local_get(idx).call(cow);
+            crate::witness::bounds::judge(self.f);
+            self.f.instructions().local_set(idx).i32_const(1).local_set(flag).end();
         } else {
-            i.local_get(idx).call(cow).local_set(idx);
+            self.f.instructions().local_get(idx).call(cow);
+            crate::witness::bounds::judge(self.f);
+            self.f.instructions().local_set(idx);
         }
     }
 
@@ -171,7 +176,9 @@ impl Emitter<'_> {
                     self.witness_mut_rebind(*target, false);
                 } else {
                     get_target(self.f, self.locals, self.globals);
-                    self.f.instructions().call(cow).local_set(hb);
+                    self.f.instructions().call(cow);
+                    crate::witness::bounds::judge(self.f);
+                    self.f.instructions().local_set(hb);
                     let g = self.globals[&(self.var_space, *target)].0;
                     self.f.instructions().local_get(hb).global_set(g);
                     self.witness_mut_rebind(*target, true);
@@ -232,7 +239,9 @@ impl Emitter<'_> {
         match slot {
             None => self.emit_local_cow(*target, F_COW, hb),
             Some(g) => {
-                self.f.instructions().global_get(g).call(F_COW).local_tee(hb).global_set(g);
+                self.f.instructions().global_get(g).call(F_COW);
+                crate::witness::bounds::judge(self.f);
+                self.f.instructions().local_tee(hb).global_set(g);
             }
         }
         // #2755: the judge rebinds the var (the copy, or the same block).

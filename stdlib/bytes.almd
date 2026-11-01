@@ -1229,3 +1229,9 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
 else list.len(bytes.split(b, needle)) - 1
+
+// ADR-0032: bytes is a response Body (the builtin protocol in
+// crates/almide-frontend/src/canonicalize/protocols.rs).
+fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
+
+fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)

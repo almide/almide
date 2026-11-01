@@ -35,6 +35,18 @@ mod tests {
         }
     }
 
+    /// #4007: the `imul` asm (x86_64) against the portable i128 form it
+    /// stands for, at the sign and magnitude edges of both operands.
+    #[test]
+    fn mulhs_is_the_high_half_of_the_i128_product() {
+        let edges = [0, 1, -1, 2, -2, 3, i64::MAX, i64::MIN, i64::MIN + 1, i64::MAX - 1, 0x5555_5555_5555_5556, -0x5555_5555_5555_5555];
+        for &a in &edges {
+            for &b in &edges {
+                assert_eq!(almide_mulhs(a, b), ((a as i128 * b as i128) >> 64) as i64, "mulhs({a}, {b})");
+            }
+        }
+    }
+
     #[test]
     fn the_constant_remainder_is_the_truncated_remainder() {
         let mut xs = vec![0, 1, -1, 2, -2, i64::MAX, i64::MIN, i64::MIN + 1, i64::MAX - 1];

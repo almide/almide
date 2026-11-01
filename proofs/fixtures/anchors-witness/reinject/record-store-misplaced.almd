@@ -1,0 +1,9 @@
+// #4279 drill: a record literal stores its first field into the second
+// field's slot while the witness still records `s0 s1` — the fields checker
+// accepts, the bytes leave field 0 unwritten.
+type P = { x: Int, y: Int }
+
+effect fn main() -> Unit = {
+  let p = P { x: 3, y: 4 }
+  println("${p.y}")
+}

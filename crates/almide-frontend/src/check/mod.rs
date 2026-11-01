@@ -21,6 +21,7 @@
 
 mod types;
 mod fallible_user_hof;
+mod lent_region_escape;
 mod toplet_order;
 mod infer;
 pub(crate) mod calls;
@@ -32,6 +33,7 @@ mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod eq_operands;
 mod mut_fn_value;
 mod pure_attr;
 mod bang_error_channel;
@@ -46,6 +48,8 @@ mod effect_isolation_cascade;
 mod qq_effect_bang;
 mod expect_effect;
 mod regex_runtime;
+/// E111: an inferred type over the `type_size` budget (ADR-0030, #4114).
+mod type_budget;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -303,6 +307,9 @@ pub struct Checker {
     /// check (E033): a base whose type is still open at the spread is
     /// judged once it resolves.
     pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Comparison operand pairs awaiting the post-solve one-type check
+    /// (E037, #4018 / security row 11b): see `eq_operands.rs`.
+    pub(crate) deferred_eq_pair_checks: Vec<eq_operands::EqPairSite>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
     /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
@@ -372,6 +379,9 @@ pub struct Checker {
     /// Protocol bounds whose type parameter was an open inference var at the
     /// call, judged post-solve — see `calls::DeferredBoundSite`.
     pub(crate) deferred_protocol_bounds: Vec<calls::DeferredBoundSite>,
+    /// Where E111 (a type over the `type_size` budget, ADR-0030) was
+    /// reported, so one site is named once — see `type_budget.rs`.
+    pub(crate) type_budget_sites: std::collections::HashSet<(usize, usize)>,
     /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
     /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
     /// type resolved to Result is a hard error — E042 (must-use: a discarded
@@ -741,6 +751,7 @@ impl Checker {
             eq_reqs: std::collections::HashMap::new(),
             eq_reported: std::collections::HashSet::new(),
             deferred_opaque_spreads: Vec::new(),
+            deferred_eq_pair_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_float_overflow_checks: Vec::new(),
@@ -750,6 +761,7 @@ impl Checker {
             deferred_type_param_checks: Vec::new(),
             deferred_input_sink_checks: Vec::new(),
             deferred_protocol_bounds: Vec::new(),
+            type_budget_sites: std::collections::HashSet::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             isolation_cascade: Default::default(),
@@ -1282,7 +1294,9 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.report_type_budget_hit(None);
         self.validate_after_solve(program);
+        self.report_type_budget_hit(None);
         // Unused import warnings. Usage is judged SYNTACTICALLY first
         // (#1783): every `alias.x` spelling in the file — call targets,
         // record/variant constructors, type annotations, patterns — marks
@@ -1536,6 +1550,7 @@ include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
 include!("regex_literal_check.rs");
+include!("body_rules.rs");
 include!("abort_site_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");

@@ -64,8 +64,8 @@ pub mod cap {
     pub const NET: u32 = 7;
     /// A program-declared `@extern(wasm, ..)` host function.
     pub const FOREIGN: u32 = 8;
-    /// Starting and signalling child processes (ops 80..=90, the private
-    /// `almide:process/spawn` capability, ADR-0025), and assert_aborts's
+    /// Starting and signalling child processes (ops 80..=90 and 146..=151,
+    /// the private `almide:process/spawn` capability, ADR-0025), and assert_aborts's
     /// child run (op 117). `almide_mir::Capability::Process` has this id. Past [`super::SENTINEL`]
     /// so the sentinel keeps its small value.
     pub const PROC: u32 = 10;
@@ -87,41 +87,11 @@ const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC];
 /// were plain `fn` stdin readers until #3248 and this bound admitted them.
 const PURE_BOUND: &[u32] = &[cap::STDOUT];
 
-/// The capabilities one `almide.fs_call` op reaches (op numbers:
-/// fs_meta.rs and its siblings). An op outside the table is [`SENTINEL`].
+/// The capabilities one `almide.fs_call` op reaches: its family's declared
+/// capabilities (`host_ops.rs`, one declaration with the op ranges, #4338).
+/// An op no family assigns is [`SENTINEL`].
 pub fn op_caps(op: i32) -> &'static [u32] {
-    use cap::*;
-    match op {
-        1 | 4..=6 | 11..=14 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
-        2 | 3 | 7..=10 | 15 | 16 | 20 | 21 => &[FS_WRITE],
-        19 => &[FS_READ, FS_WRITE],
-        // The rooted family's descriptor ops (#4084, fs_root.rs): read text,
-        // read bytes, list, exists read; write text and remove write.
-        120..=123 => &[FS_READ],
-        124 | 125 => &[FS_WRITE],
-        26..=29 | 33 | 37 | 77 => &[ENV],
-        30 | 73 => &[STDOUT],
-        32 => &[ENTROPY],
-        34 | 36 | 60 => &[CLOCK],
-        35 => &[STDIN],
-        // 50 (framed raw-bytes http) is retired.
-        43..=49 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
-        80..=90 => &[PROC],
-        // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
-        // site on a fresh instance — a child, the native leg's re-exec — and
-        // op 118 reads which site this instance was launched to run.
-        117 => &[PROC],
-        118 => &[ENV],
-        // The instance-parallel fan offer (#3003, fan_par_lower.rs): the host
-        // runs the program's own exported `__fan_site_K` chunk on workers and
-        // writes scalars into the answer room; their output is captured and
-        // dropped. The op itself reaches nothing — what a chunk could reach is
-        // that function's, and the not-served fallback calls the same
-        // function from this frame, so the call graph already counts it.
-        // 76 is a deliberate exit's mark (#4203): it answers and reaches nothing.
-        74 | 76 => &[],
-        _ => &[SENTINEL],
-    }
+    crate::host_ops::caps_of(op).unwrap_or(&[SENTINEL])
 }
 
 /// What one function body references and reaches.

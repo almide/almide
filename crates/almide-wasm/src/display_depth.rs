@@ -21,7 +21,7 @@ impl Emitter<'_> {
         // its self-hosted carrier (`HttpRequest` is a `List[String]`) holds
         // what the repr hides, so the carrier's own display never runs.
         if let Some(i) = self.declared_repr_fn(ir) {
-            return self.emit_declared_repr(i);
+            return self.emit_declared_repr(i, None);
         }
         let container = matches!(
             got,
@@ -108,7 +108,10 @@ impl Emitter<'_> {
     /// repr `i` (a `(T) -> String` that borrows its argument). The text it
     /// hands over is copied into the line and released here — the
     /// `emit_float_display` discipline.
-    fn emit_declared_repr(&mut self, i: usize) -> Result<(), EmitError> {
+    /// `src`: the frame variable the value was read from, when it was — the
+    /// share an owning repr takes is that variable's, moved into the callee
+    /// (`am`, the call-argument convention).
+    fn emit_declared_repr(&mut self, i: usize, src: Option<u32>) -> Result<(), EmitError> {
         let info = &self.table.infos[i];
         if info.refuse.is_some() || info.ret != Some(STR) || info.params.len() != 1 {
             return unsup("interp-part:declared-repr-impl");
@@ -120,6 +123,11 @@ impl Emitter<'_> {
         let idx = info.wasm_index;
         if owned {
             self.rc_inc_top();
+            if let (Some(l), Some(w)) = (src, self.witness.as_mut())
+                && !w.arg_share_move(l)
+            {
+                w.poison();
+            }
         }
         self.calls.insert(i);
         self.witness_discard();

@@ -33,8 +33,17 @@
 # decoder, no compiler code) holds every located event to the instruction
 # there — a site's allocation size and its stores' width, offset and address
 # local, a fill loop's exact shape, a check's compare-and-abort, an access's
-# load or store. Every fixture must read ANCHORS OK: the events the proven
+# load or store — and each access's guard's OPERANDS (operands.rs): the
+# compare tests this access's index against the count of the list it
+# addresses. Every fixture must read ANCHORS OK: the events the proven
 # checkers judge are the instructions the artifact contains.
+#
+# RC (#4277): the same check matches every rc_inc and release call of each
+# certified frame against the ownership witness's recorded events (the anchor
+# file's `rc` lines), and every recorded event against a call; a call or an
+# event left over, or a check past the binary's deadline, is ANCHORS REJECT.
+# Its four counted classes (arm-internal, routine-internal, element,
+# consumed — the #4278 debts) are totalled per run below.
 #
 # Every witness is judged by THREE independent verdicts, and all three must
 # agree: the checker extracted from the Coq proof (proofs/checker), the Rocq
@@ -126,18 +135,44 @@ echo "  $N fixture bundle(s); artifact digests in proofs/structural-artifacts.sh
 python3 - "$OUT" <<'PYEOF'
 import os, re, sys
 out = sys.argv[1]
-keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated"]
+keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated", "operands"]
+fkeys = ["f_sites", "f_stores", "f_accesses", "f_guarded", "f_tags", "f_unlocated"]
+ftot = dict.fromkeys(fkeys, 0)
+fpat = re.compile(r"FIELDS OK: (\d+) site\(s\) / (\d+) store\(s\), (\d+) access\(es\) \((\d+) case field\(s\) under their tag test\), (\d+) tag read\(s\), (\d+) unlocated")
 tot = dict.fromkeys(keys, 0)
-pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated")
+pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated, (\d+) operand pair\(s\)")
 for f in os.listdir(out):
     if f.endswith(".anchor"):
-        m = pat.search(open(os.path.join(out, f)).read())
+        text = open(os.path.join(out, f)).read()
+        m = pat.search(text)
         if m:
             for k, v in zip(keys, m.groups()):
                 tot[k] += int(v)
+        m = fpat.search(text)
+        if not m:
+            sys.exit(f"STRUCTURAL WALL FAIL: {f} carries no FIELDS OK line — the fields witness was not held to the bytes")
+        for k, v in zip(fkeys, m.groups()):
+            ftot[k] += int(v)
+if tot["operands"] != tot["accesses"]:
+    sys.exit(f"STRUCTURAL WALL FAIL: {tot['accesses']} located access(es) but {tot['operands']} held to their guard's operands")
+rcpat = re.compile(r"RC OK: (\d+) frame\(s\), (\d+) event\(s\) matched to (\d+) call\(s\), (\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed")
+rk = ["frames", "events", "calls", "rebind", "judges", "arm", "routine", "element", "consumed"]
+rc = dict.fromkeys(rk, 0)
+for f in os.listdir(out):
+    if f.endswith(".anchor"):
+        m = rcpat.search(open(os.path.join(out, f)).read())
+        if not m:
+            sys.exit(f"STRUCTURAL WALL FAIL: {f}: no RC verdict — the anchor file carried no rc lines")
+        for k, v in zip(rk, m.groups()):
+            rc[k] += int(v)
+print(f"  [rc] RC OK on every artifact: {rc['frames']} frame(s), {rc['events']} event(s) matched to {rc['calls']} call(s); counted (#4278): "
+      f"{rc['arm']} arm-internal, {rc['routine']} routine-internal, {rc['element']} element, {rc['consumed']} consumed; "
+      f"{rc['rebind']} rebind(s) with no instruction, {rc['judges']} judge(s) with no rebind")
 print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
-      f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes; unlocated (dead bodies): "
+      f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes, every access's guard operands to it; unlocated (dead bodies): "
       f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")
+print(f"  [anchors] FIELDS OK on every artifact: {ftot['f_sites']} site(s) / {ftot['f_stores']} store(s), {ftot['f_accesses']} field access(es) "
+      f"({ftot['f_guarded']} variant case field(s) held to their tag test), {ftot['f_tags']} tag read(s); unlocated (dead bodies): {ftot['f_unlocated']}")
 PYEOF
 
 echo "== drill: one byte of a shipped artifact changed — the verifier must reject =="
@@ -169,7 +204,7 @@ import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
-      "bounds": "check_bounds_cert", "init": "check_init_cert"}
+      "bounds": "check_bounds_cert", "init": "check_init_cert", "fields": "check_fields_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -258,7 +293,7 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert FieldCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -280,15 +315,24 @@ for p, (a, t) in stats.items():
 # record, and how many of them carry no check of their own token count
 # (elided by #3345 and re-derived by the checker). Only accepted witnesses.
 import re as _re
-toks = {k: 0 for k in "acws"}
+toks = {k: 0 for k in "acwse"}
 for w in accepts["bounds"]:
-    for t in _re.findall(r"[acws](?=\d)", w):
+    for t in _re.findall(r"[acwse](?=\d)", w):
         toks[t] += 1
-print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
+print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['e']} loop exit test(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
 # #4013 coverage: the construction sites the init witnesses record (list
 # literals today; every other allocation site records nothing).
 sites = sum(len([x for x in w.split(";") if x.strip()]) for w in accepts["init"])
 print(f"  [init] recorded: {sites} construction site(s), over {sum(1 for w in accepts['init'] if w.strip())} non-empty witness(es)")
+# #4279 coverage: the record / tuple / variant sites, field accesses and tag
+# reads the fields witnesses record.
+ftoks = {k: 0 for k in "Lkat"}
+for w in accepts["fields"]:
+    for item in w.split(";"):
+        item = item.strip()
+        if item and item[0] in ftoks:
+            ftoks[item[0]] += 1
+print(f"  [fields] recorded: {ftoks['k']} construction site(s), {ftoks['a']} field access(es), {ftoks['t']} tag read(s) over {ftoks['L']} layout(s), in {sum(1 for w in accepts['fields'] if w.strip())} non-empty witness(es)")
 n = sum(1 for _ in open(os.path.join(out, "index")))
 print(f"  {fixtures_ok}/{n} fixture(s) accepted on every property; {len(rejects)} rejected witness(es), each named in the exception ledger")
 for m in fail[:20]:
@@ -364,8 +408,8 @@ fi
 # slot store lost — scripts/witness-reinject.sh <property> re-injects each
 # bug and pins its witness to
 # these files. Every verdict must REJECT each one, on every run.
-for prop in bounds init; do
-  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; esac
+for prop in bounds init fields; do
+  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; fields) PFN=check_fields_cert; PMOD=FieldCert ;; esac
   echo "== $(printf %s "$prop" | tr a-z A-Z) POISON LEG: every lost-${prop} witness is REJECTED by all three verdicts =="
   PPOISONED=("$ROOT"/proofs/poisoned-certs/$prop/*.cert)
   if [ ! -e "${PPOISONED[0]}" ]; then
@@ -406,6 +450,6 @@ done
 
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
-echo "bounds, init, name-totality, capability and call-graph witness of the structural build is accepted —"
+echo "bounds, init, fields, name-totality, capability and call-graph witness of the structural build is accepted —"
 echo "the extracted checker, the Rocq kernel and almide-verify agreeing on every verdict — and"
 echo "every bundle names the SHA-256 of the file 'almide build --target wasm' shipped for it."

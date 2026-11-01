@@ -162,7 +162,7 @@ fn subst_ty(t: &Ty, twins: &HashMap<Sym, Sym>) -> Ty {
         Ty::Named(n, args) if twins.contains_key(n) => {
             Ty::Named(twins[n], args.iter().map(|a| subst_ty(a, twins)).collect())
         }
-        Ty::Variant { name, .. } if twins.contains_key(name) => Ty::Named(twins[name], vec![]),
+        Ty::Variant { name, .. } if twins.contains_key(name) => Ty::Named(twins[name], Default::default()),
         _ => t.map_children(&|c| subst_ty(c, twins)),
     }
 }

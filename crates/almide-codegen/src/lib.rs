@@ -752,6 +752,13 @@ fn dedup_use_lines(use_lines: Vec<String>, use_set: &std::collections::HashSet<S
     }).collect()
 }
 
+/// The `needed` runtime modules as crate-root source (#4345): their bodies
+/// inside the private [`runtime_namespace::RUNTIME_MODULE`] (which sees the
+/// crate root through `use super::*`), then one re-export per item whose name
+/// lies in the runtime's namespace. A helper spelled anything else (`mk`,
+/// `sha256`, a shared core's `request`) never reaches the root, so it cannot
+/// collide with a user item. The hoisted `use` lines stand at both levels, so
+/// each scope keeps the traits they bring.
 fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
     let mut use_set = std::collections::HashSet::new();
     let mut use_lines = Vec::new();
@@ -762,14 +769,21 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
         }
     }
     let use_lines = dedup_use_lines(use_lines, &use_set);
+    let mut bodies = String::new();
+    for line in &body_lines { bodies.push_str(line); bodies.push('\n'); }
     let mut out = String::new();
     for u in &use_lines { out.push_str(u); out.push('\n'); }
-    for line in &body_lines { out.push_str(line); out.push('\n'); }
+    out.push_str(&format!("mod {} {{\nuse super::*;\n", runtime_namespace::RUNTIME_MODULE));
+    for u in &use_lines { out.push_str(u); out.push('\n'); }
+    out.push_str(&bodies);
+    out.push_str("}\n");
+    out.push_str(&runtime_namespace::runtime_reexports(&bodies));
     out
 }
 
 mod runtime_crates;
 pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
+mod runtime_namespace;
 pub mod rust_idents;
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +

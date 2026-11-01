@@ -23,6 +23,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust BoundsCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Certified.v >/dev/null
 "$COQC" -Q . AlmideTrust InitCert.v >/dev/null
+"$COQC" -Q . AlmideTrust FieldCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -51,6 +52,10 @@ printf 'I{I|}D\n'  > $GATE_TMP/branch_disagree.cert  # 5a: arms DISAGREE (+1 vs 
 printf '{I|D}\n'   > $GATE_TMP/branch_cross.cert     # 5a: cross-arm compensation (flat-balanced, runtime-unsafe) → REJECT
 printf 'IDAM\n'    > $GATE_TMP/resurrect.cert        # #3229: an OWNED object freed, then aliased + moved out (balanced, use-after-free) → REJECT
 printf 'AMAM\n'    > $GATE_TMP/param_realias.cert    # #3229: a borrowed param's line re-aliased at 0 (the caller holds it) → ACCEPT
+printf 'S\nID\n'   > $GATE_TMP/share_out.cert        # #4278: an arm's share-out of a borrowed argument; the result's line releases the share → ACCEPT
+printf 'SD\n'      > $GATE_TMP/share_out_credit.cert # #4278: the argument's line releases the share it handed out (not its credit) → REJECT
+printf 'IDS\n'     > $GATE_TMP/share_out_dead.cert   # #4278: share-out of an OWNED object after its release (use-after-free) → REJECT
+printf 'S\nI\n'   > $GATE_TMP/share_out_leak.cert   # #4278: the result that received the share never releases it → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
@@ -79,6 +84,10 @@ run $GATE_TMP/branch_disagree.cert 1
 run $GATE_TMP/branch_cross.cert 1
 run $GATE_TMP/resurrect.cert 1
 run $GATE_TMP/param_realias.cert 0
+run $GATE_TMP/share_out.cert 0
+run $GATE_TMP/share_out_credit.cert 1
+run $GATE_TMP/share_out_dead.cert 1
+run $GATE_TMP/share_out_leak.cert 1
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.
@@ -145,6 +154,24 @@ printf 'h12 w8 v4 r0 f4 t8'  > $GATE_TMP/init_fill.cert      # a range's loop fi
 printf 'h12 w8 v4 r0 f4 t16' > $GATE_TMP/init_fill_skip.cert # the cursor skips a slot per step → REJECT
 runi $GATE_TMP/init_fill.cert 0
 runi $GATE_TMP/init_fill_skip.cert 1
+
+# FIELDS witness (#4013 / #4279): layouts `L R c C n N z S (o O w W)*`, record /
+# tuple / variant sites `k R c C (s I)*`, accesses `a R c C f I`, tag reads `t R`.
+# accept ⟹ every site leaves its block of the layout with every field
+# initialized, every access names a declared field (check_fields_cert_sound).
+printf 'L3 c0 n1 z16 o0 w8 o8 w4 ; k3 c0 s0 s1 ; a3 c0 f1' > $GATE_TMP/fields_record.cert   # a record built and read → ACCEPT
+printf 'L3 c0 n1 z16 o0 w8 o8 w4 ; k3 c0 s0'             > $GATE_TMP/fields_unstored.cert # field 1 never stored → REJECT
+printf 'L3 c0 n1 z12 o0 w8 o8 w8'                         > $GATE_TMP/fields_past.cert     # a field past the payload → REJECT
+printf 'L3 c0 n1 z16 o0 w8 o8 w4 ; a3 c0 f2'              > $GATE_TMP/fields_undeclared.cert # an access of an undeclared field → REJECT
+runf() { # path expected_exit  (fields mode)
+  set +e; ./checker fields "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runf $GATE_TMP/fields_record.cert 0
+runf $GATE_TMP/fields_unstored.cert 1
+runf $GATE_TMP/fields_past.cert 1
+runf $GATE_TMP/fields_undeclared.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

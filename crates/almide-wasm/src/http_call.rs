@@ -52,7 +52,11 @@ impl Emitter<'_> {
         };
         // The subprocess leaves (#2589, ADR-0025): two text operands in
         // a/b, a Result[String, String] answer.
-        let proc = PROC_LEAVES.iter().find(|(l, _)| *l == name).map(|&(_, op)| op);
+        let proc = PROC_LEAVES
+            .iter()
+            .find(|(l, _)| *l == name)
+            .map(|&(_, op)| op)
+            .or_else(|| crate::fs_meta::proc_child_op(name));
         if let Some(op) = framed.or(proc) {
             let [a, b] = args else { return unsup("host-leaf-arity") };
             self.fs_call_str2(a, b, op)?;
@@ -108,7 +112,7 @@ impl Emitter<'_> {
 
     /// The `HttpCall` slice type and its id slot's payload offset.
     fn http_call_ty(&self) -> Result<(SliceTy, u32), EmitError> {
-        let Some(t) = crate::ty::slice_ty_of(&almide_types::types::Ty::Named(almide_base::intern::sym("HttpCall"), vec![]), self.types)
+        let Some(t) = crate::ty::slice_ty_of(&almide_types::types::Ty::Named(almide_base::intern::sym("HttpCall"), Default::default()), self.types)
         else {
             return unsup("http-call-ty");
         };

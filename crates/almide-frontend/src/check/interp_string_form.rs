@@ -16,6 +16,12 @@
 //                    anonymous record, or a named record / variant field
 //                    (transitively, including through the type's arguments)
 //
+//   ...unless the type DECLARES its repr (#4314): a named type with an
+//   explicit `fn T.repr` prints through that declaration (#4107) whatever
+//   its fields hold — `Region` holds a Handle and a closure, `Secret[A]`
+//   any A — so neither it nor a compound holding it is a gap. The rule
+//   reads the declaration, never a type name.
+//
 // Inside a container Unit, Bytes and Matrix DO render (`[(), ()]`,
 // `[[1, 2]]`, `[matrix.from_lists([[0]])]`) — the `AlmideRepr` impls exist
 // — so only the function-value / raw-pointer gap propagates through a
@@ -194,6 +200,9 @@ impl Checker {
             // emitted struct renders the wrapped value. So a newtype over
             // one of the gaps above is the same gap, named for the reader.
             Ty::Named(name, _) => {
+                if self.declares_repr(*name) {
+                    return None;
+                }
                 if let Some(target) = self.newtype_target(*name)
                     && let Some(g) = self.string_form_gap(&target)
                 {
@@ -210,6 +219,14 @@ impl Checker {
                 gap(format!("a `{}` value — it holds {leaf}", ty.display()), HOLDS_HINT)
             }
         }
+    }
+
+    /// The type declares its string form: an explicit `fn T.repr` with a
+    /// body, in any module (#4314). Every renderer prints such a value
+    /// through that declaration (#4107), so what the type holds is never
+    /// rendered.
+    fn declares_repr(&self, name: Sym) -> bool {
+        crate::canonicalize::registration::declared_convention_key(&self.env, name.as_str(), "repr").is_some()
     }
 
     /// The type an opaque newtype wraps, when `name` is one — a `type` decl
@@ -252,6 +269,11 @@ impl Checker {
                     .map(|l| format!("{l} (case `{}`)", c.name))
             }),
             Ty::Named(name, args) => {
+                // A declared repr is the type's whole string form (#4314):
+                // neither its fields nor its arguments are rendered.
+                if self.declares_repr(*name) {
+                    return None;
+                }
                 if let Some(l) = args.iter().find_map(|a| self.unprintable_leaf_in(a, visiting)) {
                     return Some(l);
                 }

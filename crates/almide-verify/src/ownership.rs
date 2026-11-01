@@ -1,7 +1,8 @@
 //! The ownership checker — the Rust mirror of `proofs/OwnershipChecker.v`'s
 //! `check_xc` (certificate format v6: flat events, `(…)` loops, `[…|…]`
 //! conditional loops, `{…|…}` one-shot branches, the `x` arm-exit marker and
-//! the `t` arm-abort terminal), with the owned-line resurrection rule (#3229:
+//! the `t` arm-abort terminal; format v7 adds the `s` arm share-out, #4278),
+//! with the owned-line resurrection rule (#3229:
 //! on a line born by a top-level `i`, every later `a` must meet a live count).
 //!
 //! One line per reference-counted object. Every function below is a
@@ -19,6 +20,9 @@ enum Op {
     MoveOut,
     Reuse,
     Borrow,
+    /// `ShareOut` (#4278, `s`): an arm's share-out of its argument — +0 on
+    /// the argument's line (the share's credit is the arm result's `i`).
+    ShareOut,
 }
 
 /// `CertItem` — one element of a parsed certificate line.
@@ -44,6 +48,7 @@ fn parse_byte(b: u8) -> Option<Op> {
         b'm' => Some(Op::MoveOut),
         b'r' => Some(Op::Reuse),
         b'b' => Some(Op::Borrow),
+        b's' => Some(Op::ShareOut),
         _ => None,
     }
 }
@@ -69,6 +74,7 @@ fn exec(ops: &[Op], mut rc: i64) -> Option<i64> {
             Op::Reuse => return None,
             Op::Borrow if rc <= 0 => return None,
             Op::Borrow => rc,
+            Op::ShareOut => rc,
         };
     }
     Some(rc)
@@ -293,6 +299,7 @@ fn guard_ops(ops: &[Op]) -> Vec<Op> {
     ops.iter()
         .flat_map(|o| match o {
             Op::Alias => vec![Op::Borrow, Op::Alias],
+            Op::ShareOut => vec![Op::Borrow, Op::ShareOut],
             other => vec![*other],
         })
         .collect()
@@ -332,6 +339,18 @@ pub(crate) fn check_xc(witness: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_arm_share_out_is_the_results_credit_never_the_arguments() {
+        // OwnershipChecker.v cert_xc_share_out_*: accept the hand-over, refuse
+        // a release of the shared-out credit, a share-out of a freed owned
+        // object, and a result that keeps the share.
+        assert!(check_xc(b"s\nid"));
+        assert!(check_xc(b"isd\nid"));
+        assert!(!check_xc(b"sd"));
+        assert!(!check_xc(b"ids"));
+        assert!(!check_xc(b"s\ni"));
+    }
 
     #[test]
     fn a_loop_opened_inside_a_branch_region_is_not_a_loop() {

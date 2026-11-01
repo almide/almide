@@ -1,0 +1,7 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// A type parameter is not Int, even when one caller passes an Int.
+fn is_one(x: Int) -> Bool = x == 1
+
+fn main() -> Unit = {
+  println("${is_one(1)}")
+}

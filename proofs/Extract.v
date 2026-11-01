@@ -10,6 +10,7 @@ From AlmideTrust Require Import CapabilityReach.
 From AlmideTrust Require Import CallModes.
 From AlmideTrust Require Import BoundsCert.
 From AlmideTrust Require Import InitCert.
+From AlmideTrust Require Import FieldCert.
 From Stdlib Require Import Extraction.
 From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
@@ -59,4 +60,10 @@ Set Extraction Output Directory ".".
    `;`-separated construction sites and decides `site_ok` on each, so
    `accept ⟹ every site's window leaves its block initialized over its whole
    extent` (`check_init_cert_sound`, via InitCert.site_window). *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert.
+(* `check_fields_cert` (FieldCert, #4013 / #4279) is the FIELDS checker: it
+   parses the record / tuple / variant layouts, construction sites, field
+   accesses and tag reads, so `accept ⟹ every layout's fields fit its payload,
+   every site's window leaves its block of the layout with every field
+   initialized, every access names a declared field` (`check_fields_cert_sound`,
+   via FieldCert.rsite_window and ftrace_safe). *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert check_fields_cert.

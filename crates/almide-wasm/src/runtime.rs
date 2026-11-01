@@ -556,12 +556,13 @@ pub(crate) fn emit_list_get(s: Scalar) -> Function {
 /// checker only lets `push` target mut vars); otherwise a fresh block
 /// with doubled capacity. Returns the (possibly new) base for write-back.
 pub(crate) fn emit_list_push(s: Scalar) -> Function {
-    // params: 0=list i32, 1=v; locals: 2=la i32, 3=cap i32, 4=base i32
-    let (list, v, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    // params: 0=list i32, 1=v; locals: 2=la i32, 3=cap i32, 4=base i32,
+    // 5=k i32 (the shared-block element walk)
+    let (list, v, la, cap, base, k) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
     let stride = s.slot_size();
     let payload = almide_layout::PAYLOAD as i32;
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let mut f = Function::new([(3, ValType::I32)]);
+    let mut f = Function::new([(if stride == 4 { 4 } else { 3 }, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(list).i32_load(len_memarg()).local_set(la);
     i.local_get(list).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
@@ -594,13 +595,28 @@ pub(crate) fn emit_list_push(s: Scalar) -> Function {
     };
     // live len = old len + stride (cap field keeps newcap from $alloc)
     i.local_get(base).local_get(la).i32_const(stride as i32).i32_add().i32_store(word(almide_layout::LEN.offset));
-    // RC-3: the outgrown block is garbage IFF this list is uniquely
-    // owned (push targets are bind-copied mut vars — but builders and
-    // shared handles exist, so the rc==1 check is the judge, not the
-    // caller). The growth CHAIN was the churn gate's whole leak.
-    i.local_get(list).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
-    i.local_get(list).call(F_FREE);
-    i.end();
+    // RC-3: the caller hands its reference to `list` in and takes `base`
+    // back, so the grow path RELEASES `list` on every path (#4278's
+    // every-path rule) — `$dec_flat` frees it when uniquely owned (the
+    // growth CHAIN was the churn gate's whole leak), only drops the
+    // caller's share when the block is shared, and ignores a static.
+    // The old `rc == 1 → $free` judge kept the caller's share of a shared
+    // block forever (#4304). A shared block of 4-byte slots also hands its
+    // element handles to `base`, so those copies are new references
+    // (`$inc` ignores Bool slots and statics, both below the heap floor);
+    // a unique block's elements MOVE and need none.
+    if stride == 4 {
+        i.local_get(list).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_ne().if_(BlockType::Empty);
+        i.i32_const(0).local_set(k);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(k).local_get(la).i32_ge_u().br_if(1);
+        i.local_get(base).local_get(k).i32_add().i32_load(slot_memarg(0)).call(F_INC);
+        i.local_get(k).i32_const(4).i32_add().local_set(k);
+        i.br(0);
+        i.end().end();
+        i.end();
+    }
+    i.local_get(list).call(F_DEC_FLAT);
     i.local_get(base);
     i.end();
     f
@@ -608,7 +624,7 @@ pub(crate) fn emit_list_push(s: Scalar) -> Function {
 
 /// `$bytes_push(b: i32, v: i64) -> i32`: the byte-stride twin of
 /// `$list_push` (#1689) — in-place when `cap - len >= 1`, else a fresh
-/// block at `max(cap*2, 16)` with the outgrown block freed at rc==1.
+/// block at `max(cap*2, 16)` with the outgrown block released.
 /// The old inline `emit_copy_grow(b, 1)` protocol reallocated len+1 on
 /// EVERY push and never freed the outgrown block, so n pushes retained
 /// n²/2 bytes and 69k pushes OOM'd where native completes.
@@ -645,11 +661,10 @@ pub(crate) fn emit_bytes_push() -> Function {
     i.i64_store8(byte);
     // live len = old len + 1 (cap field keeps newcap from $alloc)
     i.local_get(base).local_get(la).i32_const(1).i32_add().i32_store(word(almide_layout::LEN.offset));
-    // RC-3: the outgrown block is garbage IFF uniquely owned — same
-    // judge as $list_push.
-    i.local_get(b).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
-    i.local_get(b).call(F_FREE);
-    i.end();
+    // RC-3: release the outgrown block on every path, as $list_push and
+    // $str_append do — freed when uniquely owned, the caller's share
+    // dropped when shared, a static left alone (#4304).
+    i.local_get(b).call(F_DEC_FLAT);
     i.local_get(base);
     i.end();
     f

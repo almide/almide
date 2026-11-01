@@ -403,6 +403,18 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
     match &e.kind {
         IrExprKind::Call { target, args, .. } if table_call(target) => out.push((args.as_ptr() as usize, take(args))),
         IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => exit_calls(expr, vars, out),
+        // #4315: `x = f(x, …) ?? fb` — the fallback runs after the call, so
+        // a var it reads stays put.
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            let mut inner = Vec::new();
+            exit_calls(expr, vars, &mut inner);
+            for (at, cand) in inner {
+                let free: Vec<Place> = cand.into_iter().filter(|p| !reads(fallback, p.root())).collect();
+                if !free.is_empty() {
+                    out.push((at, free));
+                }
+            }
+        }
         IrExprKind::Block { stmts, expr } => {
             if let Some(t) = expr {
                 exit_calls(t, vars, out);

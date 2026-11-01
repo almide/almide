@@ -1,0 +1,7 @@
+// E117 (ADR-0032): text/html is owned by `html`; `http.typed` would label
+// a String as a page, so attacker text in `name` would run as script.
+import http
+
+fn page(name: String) -> HttpResponse = http.response(200, http.typed("text/html", bytes.from_string("<h1>${name}</h1>")))
+
+fn main() -> Unit = println(http.body(page("guest")))

@@ -1,0 +1,27 @@
+name: "Setup Node (pinned sha256)"
+description: >-
+  Install an exact Node.js release on a Linux x64 runner from nodejs.org's
+  release archive, fetched through scripts/fetch-pinned.sh, so the bytes are
+  checked against the sha256 in .github/pinned-downloads.txt (security row 16).
+  It replaces actions/setup-node, whose own download of the Node archive is
+  checked against no digest this repository states. Bump the version here and
+  the manifest line together.
+
+inputs:
+  node-version:
+    description: "The exact Node.js version (e.g. 20.20.2); its linux-x64 archive must be in .github/pinned-downloads.txt"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Node (pinned)
+      shell: bash
+      run: |
+        set -euo pipefail
+        V="${{ inputs.node-version }}"
+        bash scripts/fetch-pinned.sh "https://nodejs.org/dist/v${V}/node-v${V}-linux-x64.tar.xz" "$RUNNER_TEMP/node.tar.xz"
+        mkdir -p "$RUNNER_TEMP/node-${V}"
+        tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node-${V}" --strip-components=1
+        echo "$RUNNER_TEMP/node-${V}/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/node-${V}/bin/node" --version

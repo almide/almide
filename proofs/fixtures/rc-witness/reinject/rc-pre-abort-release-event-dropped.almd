@@ -1,0 +1,14 @@
+// sec-b2 drill: a release the emitter makes BEFORE an abort loses its event.
+// `panic(msg)` builds its `PANIC: <msg>` line as a parked temporary, writes
+// it, releases it, and then aborts; the recorder logs that temporary's birth
+// and release (`temp_borrowed`). The patch drops the two events and keeps
+// the instruction, and the ownership witness stays balanced. Before sec-b2
+// the RC check COUNTED a leftover release before an abort (`pre_abort`) and
+// accepted the frame, trusting that the abort ends the process. Under
+// `http.serve` an abort ends only the request, so that release is a recorded
+// event like any other: the check must refuse it.
+import env
+
+fn pick(n: Int) -> Int = if n > 3 then panic("too big") else n
+
+effect fn main() -> Unit = println(int.to_string(pick(list.len(env.args()))))

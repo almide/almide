@@ -105,7 +105,7 @@ impl LowerCtx<'_> {
                 let (p, q) = (self.var_table.alloc(sym("_p"), u.clone(), Mutability::Let, None), self.var_table.alloc(sym("_q"), u.clone(), Mutability::Let, None));
                 let oks = self.secret_eq_expr(e_(IrExprKind::Var { id: x }, t.clone()), e_(IrExprKind::Var { id: y }, t.clone()), t);
                 let errs = self.secret_eq_expr(e_(IrExprKind::Var { id: p }, u.clone()), e_(IrExprKind::Var { id: q }, u.clone()), u);
-                let pair_ty = Ty::Tuple(vec![ty.clone(), ty.clone()]);
+                let pair_ty = Ty::Tuple(vec![ty.clone(), ty.clone()].into());
                 e_(IrExprKind::Match {
                     subject: Box::new(e_(IrExprKind::Tuple { elements: vec![va.clone(), vb.clone()] }, pair_ty)),
                     arms: vec![
