@@ -59,6 +59,7 @@ use wasmparser::{BlockType, Operator as Op};
 
 mod decode;
 mod fields;
+pub mod lin;
 mod operands;
 pub mod rc;
 pub use rc::{check_rc, RcReport};
@@ -831,9 +832,12 @@ pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, V
     };
     let (init, bounds) = (field("init")?, field("bounds")?);
     // The optional `fields` line (#4279) is read by `fields_anchors`.
-    // So is the optional `prims` line (#4005 A4), read by `prims_anchors`.
+    // So are the optional `prims` and `selfhost` lines (#4005 A4), read by
+    // `prims_anchors` and lin.rs.
     let mut rest: Vec<&str> = lines
-        .filter(|l| !(*l == "fields" || l.starts_with("fields ") || *l == "prims" || l.starts_with("prims ")))
+        .filter(|l| {
+            !["fields", "prims", "selfhost"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
+        })
         .collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
     let rc_lines = match rc_at {

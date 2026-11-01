@@ -12,6 +12,27 @@ fn main() {
         args.remove(at);
         almide_anchor_check::rc::EXPLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    // `--lin-skel <artifact.wasm> <anchors>`: the linear certificate's
+    // translation of every self-host body (lin.rs), holes as `_`.
+    if args.first().map(String::as_str) == Some("--lin-skel") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        match almide_anchor_check::lin::skeletons(&w, &a, None) {
+            Ok(v) => {
+                for (pos, r) in v {
+                    match r {
+                        Ok((_, t)) => println!("{}", almide_anchor_check::lin::render_holes(&t)),
+                        Err(e) => println!("REFUSED {pos}: {e}"),
+                    }
+                }
+            }
+            Err(e) => {
+                println!("LIN REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),
