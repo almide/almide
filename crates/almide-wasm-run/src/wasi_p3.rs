@@ -489,6 +489,11 @@ include!("wasi_p3_serve_arena.rs");
 
 // UDP and name lookup over wasi:sockets@0.3 (#4306): wasi_p3_net.rs.
 include!("wasi_p3_net.rs");
+include!("wasi_p3_net_fns.rs");
+include!("wasi_p3_net_shim.rs");
+#[cfg(test)]
+#[path = "tests/p3_net_test.rs"]
+mod net_tests;
 
 // The p3 transform itself (`to_p3`): wasi_p3_emit.rs.
 include!("wasi_p3_emit.rs");
