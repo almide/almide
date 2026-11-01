@@ -73,3 +73,42 @@ fn the_call_handle_fixture_runs_alike_on_native_and_the_p3_component() {
     let p3 = observe(run, "wasmtime run");
     assert_eq!((&p3.0, p3.1), (&native.0, native.1), "the p3 component diverged from native\n--- p3 stderr\n{}", p3.2);
 }
+
+const FAN_HTTP: &str = r#"import http
+
+effect fn main() -> Unit = {
+  let urls = ["http://127.0.0.1:1/a", "http://127.0.0.1:1/b"]
+  println(int.to_string(list.len(fan.settle(urls, (u) => http.get(u)))))
+  let r = fan.map(urls, (u) => http.get(u))
+  println(match r { ok(xs) => "ok ${list.len(xs)}", err(e) => e })
+}
+"#;
+
+/// C-004: an http-bodied callback in the fan mapper heads follows the
+/// capability, not the mapper — it builds into the same component an
+/// `http.get` alone does, and answers what native answers.
+#[test]
+fn an_http_bodied_fan_mapper_runs_alike_on_native_and_the_p3_component() {
+    if !wasmtime_runs_p3() {
+        return;
+    }
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("fan_http.almd");
+    std::fs::write(&src, FAN_HTTP).expect("write");
+    let mut native = Command::new(almide_bin());
+    native.arg("run").arg(&src);
+    let native = observe(native, "almide run");
+    assert_eq!(native.0.lines().count(), 2, "native: {native:?}");
+    let wasm = scratch.path().join("fan_http.wasm");
+    let built = Command::new(almide_bin())
+        .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "-o", wasm.to_str().expect("utf8")])
+        .env_remove("ALMIDE_COMPONENT_P3")
+        .stdin(Stdio::null())
+        .output()
+        .expect("almide build");
+    assert!(built.status.success(), "the default build failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    let mut run = Command::new("wasmtime");
+    run.args(["run", "-S", "http"]).arg(&wasm);
+    let p3 = observe(run, "wasmtime run");
+    assert_eq!((&p3.0, p3.1), (&native.0, native.1), "the p3 component diverged from native\n--- p3 stderr\n{}", p3.2);
+}
