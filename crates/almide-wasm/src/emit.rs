@@ -311,6 +311,11 @@ fn emit_program_pass(
                 // A declared import's slot: the loud stub the post-pass removes.
                 let mut stub = Function::new([]);
                 stub.instructions().unreachable().end();
+                // Call modes (#2758): the host releases no argument, so each droppable param is borrowed.
+                if crate::witness::collecting() {
+                    let modes = table.infos[i].params.iter().filter(|&&t| crate::rc_ownership::rc_droppable_ty(&types, t));
+                    crate::witness::modes::signature(table.infos[i].wasm_index, modes.map(|_| 0).collect());
+                }
                 lowered.push(Ok((stub, HashSet::new())));
                 break 'one_fn;
             }
