@@ -395,3 +395,18 @@ fn a_byte_inside_a_fresh_allocation_is_accepted() -> Result<(), String> {
     assert!(check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", &[], &[], 1, &mut Report::default()).is_err());
     Ok(())
 }
+
+#[test]
+fn a_static_strings_byte_is_accepted() -> Result<(), String> {
+    // s is a pool constant read through local 0: an address, not an offset.
+    let body = "i32.const 112 local.set 0
+  local.get 0 i32.load offset=4 local.set 2
+  block loop
+    local.get 1 local.get 2 i32.ge_u (;@;) br_if 1
+    local.get 0 local.get 1 i32.add (;@;) i32.load8_u offset=12 drop
+    local.get 1 i32.const 1 i32.add local.set 1
+    br 0
+  end end";
+    assert_eq!(marked(3, body, "e0 a0")?.bounds_operands, 1);
+    Ok(())
+}

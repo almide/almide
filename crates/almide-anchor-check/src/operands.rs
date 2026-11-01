@@ -1227,16 +1227,18 @@ fn list_slot(fl: &Flow<'_, '_>, ix: &T, counted: Option<((&T, usize), i64)>, add
 }
 
 /// `t` as a sum: its addends (through `i32.add`, and `i32.sub` of a
-/// constant) and the constant they add up with.
+/// literal) and the literal constant they add up with.
 fn split(t: &T) -> (Vec<&T>, i64) {
     fn go<'t>(t: &'t T, v: &mut Vec<&'t T>, c: &mut i64) {
-        if let Some(k) = cst(t) {
+        // A literal is an offset; a constant read through a variable is a
+        // block's address (a static string's), an addend of its own.
+        if let T::Const(k) = t {
             *c += k;
         } else if let Some([a, b]) = op(t, "i32.add") {
             go(a, v, c);
             go(b, v, c);
-        } else if let Some([a, b]) = op(t, "i32.sub").filter(|xs| cst(&xs[1]).is_some()) {
-            *c -= cst(b).unwrap_or(0);
+        } else if let Some([a, T::Const(k)]) = op(t, "i32.sub") {
+            *c -= k;
             go(a, v, c);
         } else {
             v.push(t);
