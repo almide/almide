@@ -27,6 +27,28 @@ pub fn serves(op: i32, p3: bool) -> bool {
     common || extra
 }
 
+/// Whether `host_ops` names an op of a sockets family
+/// (`almide_wasm::host_ops::SOCKET_FAMILIES`): WASI preview 1 has no
+/// sockets, so such a program is built as the WASI 0.3 component by default
+/// (the net/tcp design step 4, C-377), as an `http.serve` program is built as
+/// the serve export. Read from the op set and the families' declared ranges,
+/// never from a function's name; a socket op the p3 shim does not serve is
+/// then [`check`]'s E081, not a preview 1 build.
+pub fn needs_sockets(host_ops: &[i32]) -> bool {
+    almide_wasm::host_ops::names_socket_op(host_ops)
+}
+
+/// The line `almide build` prints for a sockets component: the grant a stock
+/// runtime needs (net/tcp design Q7), the name-lookup flag when the op set
+/// can resolve a name.
+pub fn sockets_grant_note(output: &str) -> String {
+    format!(
+        "note: {output} is a WASI 0.3 component that uses wasi:sockets (preview 1 has no sockets); a stock runtime denies \
+         every socket address unless the run grants it: `wasmtime run -S inherit-network {output}`, plus \
+         `-S allow-ip-name-lookup` when a host argument is a name rather than an IP literal"
+    )
+}
+
 /// The p1-served ops the p3 component does NOT serve, each with the reason
 /// (#3140's gate: the p3 served set covers `P1_SERVED_OPS` minus exactly
 /// these; `tests` below hold both directions). Since #3223 only the

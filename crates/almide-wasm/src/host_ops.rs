@@ -166,6 +166,17 @@ const _: () = assert!(
     "two host op families claim the same op, or a family is empty (#4338): see host_ops::FAMILIES"
 );
 
+/// The families whose ops need `wasi:sockets`: the tcp family (#3620) and
+/// udp with name lookup (#4306). WASI preview 1 has no sockets, so a build
+/// whose op set names one of them ships as the WASI 0.3 component (the
+/// net/tcp design step 4) — the routing reads these ranges, never a name.
+pub const SOCKET_FAMILIES: &[RangeInclusive<i32>] = &[TCP, UDP];
+
+/// Whether `ops` names an op of a [`SOCKET_FAMILIES`] family.
+pub fn names_socket_op<'a>(ops: impl IntoIterator<Item = &'a i32>) -> bool {
+    ops.into_iter().any(|op| SOCKET_FAMILIES.iter().any(|f| f.contains(op)))
+}
+
 /// The family `op` belongs to, if any.
 pub fn family_of(op: i32) -> Option<&'static str> {
     FAMILIES.iter().find(|(_, r)| r.contains(&op)).map(|(n, _)| *n)

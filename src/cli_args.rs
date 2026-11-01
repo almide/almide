@@ -216,6 +216,10 @@ pub(crate) enum Commands {
         /// wasi_snapshot_preview1 adapter via wit-component, so the artifact
         /// runs anywhere components run (wasmtime, jco, wasmCloud). Sync
         /// surface only — the fan/async component target is #1628 stage 2.
+        /// Not needed for a program that serves (`http.serve`) or names a
+        /// tcp / udp / name-lookup op: those build as the WASI 0.3 component
+        /// by default, and a socket program's build prints the network
+        /// grant it needs (`wasmtime run -S inherit-network=y ...`).
         #[arg(long = "component")]
         component: bool,
         /// Bake a hard heap ceiling (bytes) into the built artifact (#1530).
