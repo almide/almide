@@ -744,7 +744,17 @@ fn render_native_flow_op(
         }};
     }
     match op {
-        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } | Op::DropWrapperRec { .. } => {
+        Op::DropVariant { .. }
+        | Op::Drop { .. }
+        | Op::DropListStr { .. }
+        | Op::DropWrapperRec { .. }
+        | Op::DropValue { .. }
+        | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. }
+        | Op::DropResultValue { .. }
+        | Op::DropResultListValue { .. }
+        | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. } => {
             return render_native_drop_op(op, borrows, tys, out, *indent)
         }
         // Pure ownership bookkeeping — no native code.
@@ -825,6 +835,19 @@ fn render_native_drop_op(
         {
             line!("// drop: borrowed join, scope-end");
         }
+        // The Value-holding releases: the wasm leg's routine walks the block's
+        // tags to free it; a native value of a generated type (the runtime
+        // `Value`, a list of it, a carrier of it) frees like any owned Rust value.
+        Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v } => match tys.get(v) {
+            Some(NTy::Rec(_)) => line!("// drop(value-holding): scope-end"),
+            other => return Err(wall(format!("native: {} of a {other:?} value", op_name(op)))),
+        },
         Op::Drop { v } => {
             if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
                 return Err(wall(

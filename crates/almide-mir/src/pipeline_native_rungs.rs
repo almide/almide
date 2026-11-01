@@ -108,6 +108,7 @@ fn native_sig_subset_check(
             || (matches!(t, Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
             || heap_carrier_of(t).is_some()
+            || crate::lower::is_value_ty(t)
     };
     let sig_ok = |t: &Ty| {
         matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
@@ -444,6 +445,8 @@ fn native_sig_kind(
         {
             Some(NativeSigKind::ListI64)
         }
+        // The stdlib's dynamic Value: v0's runtime `AlmideValue`.
+        t if crate::lower::is_value_ty(t) => Some(NativeSigKind::Rec(crate::render_native_rec::value_index())),
         Ty::Named(n, args) if args.is_empty() => crate::render_native_rec::rec_index(n.as_str()).map(NativeSigKind::Rec),
         Ty::Named(_, _) if crate::render_native_rec::is_scalar_instance(t) => Some(NativeSigKind::ListI64),
         Ty::Named(_, _) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
