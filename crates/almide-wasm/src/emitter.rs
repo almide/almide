@@ -747,4 +747,6 @@ impl Emitter<'_> {
     }
 }
 
-include!("emitter_control.rs");
+#[path = "emitter_control.rs"]
+mod control;
+use control::is_sum_shape;

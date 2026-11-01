@@ -60,6 +60,19 @@ interface types {
     ipv6(ipv6-socket-address),
   }
 
+  // TCP (#3620, the net/tcp design step 4): `connect` is an async func the
+  // shim lowers synchronously, as native's connect blocks; the byte streams
+  // `send` and `receive` hand over are driven by the async stream builtins.
+  resource tcp-socket {
+    create: static func(address-family: ip-address-family) -> result<tcp-socket, error-code>;
+    bind: func(local-address: ip-socket-address) -> result<_, error-code>;
+    connect: async func(remote-address: ip-socket-address) -> result<_, error-code>;
+    listen: func() -> result<stream<tcp-socket>, error-code>;
+    send: func(data: stream<u8>) -> future<result<_, error-code>>;
+    receive: func() -> tuple<stream<u8>, future<result<_, error-code>>>;
+    get-local-address: func() -> result<ip-socket-address, error-code>;
+  }
+
   // UDP (#4306): `send` and `receive` are async funcs the shim lowers
   // synchronously — the task blocks for the datagram, as native's call does.
   resource udp-socket {

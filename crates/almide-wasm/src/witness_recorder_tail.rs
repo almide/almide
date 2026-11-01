@@ -1,7 +1,7 @@
-// ── witness.rs, the recorder's temporaries, decline and certificate, and the balance rule ──
-//
-// include!-spliced into `witness.rs` at module level (the 800-line file
-// discipline). The imports are witness.rs's own.
+//! The recorder's temporaries, views, decline and certificate, and the
+//! mirrored balance rule (split from witness.rs).
+
+use super::*;
 
 impl WitnessRecorder {
     /// An owned temporary born here whose later events the site names by

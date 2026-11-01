@@ -1,7 +1,7 @@
-// ── display.rs, the display-helper build phase ──
-//
-// include!-spliced into `display.rs` at module level (the 800-line file
-// discipline). The imports are display.rs's own.
+//! The display-helper build phase: the bodies of every registered display,
+//! scan and named helper, built on one Emitter shell (split from display.rs).
+
+use super::*;
 
 /// The display-helper build phase: bodies for every registered
 /// `DisplayNamed` (fixed point — a body may register more). Called after
@@ -105,23 +105,23 @@ pub(crate) fn build_display_helpers(
 /// 4-param shift put `hold_i32_base` on an f64 slot and only the
 /// validator noticed.
 #[derive(Clone, Copy)]
-struct Shell {
-    params: u32,
-    i32s: u32,
-    cursor: u32,
-    tmp_i32: u32,
-    scr_i32: u32,
+pub(crate) struct Shell {
+    pub(crate) params: u32,
+    pub(crate) i32s: u32,
+    pub(crate) cursor: u32,
+    pub(crate) tmp_i32: u32,
+    pub(crate) scr_i32: u32,
 }
 
 impl Shell {
     /// Two raw params, and the three i32 locals after them ARE the
     /// Emitter's cursor / tmp / scratch: `(a, b) -> i32` (the named-op
     /// bodies) and `(block, cursor) -> cursor` (display).
-    const PAIR: Shell = Shell { params: 2, i32s: 3, cursor: 2, tmp_i32: 3, scr_i32: 4 };
+    pub(crate) const PAIR: Shell = Shell { params: 2, i32s: 3, cursor: 2, tmp_i32: 3, scr_i32: 4 };
     /// `(block, stride, off, needle) -> address|0`: four params, and two
     /// of the five i32 locals (4 = p, 5 = end) are the scan's own walk, so
     /// the Emitter's cursor takes the spare slot 8.
-    const SCAN: Shell = Shell { params: 4, i32s: 5, cursor: 8, tmp_i32: 6, scr_i32: 7 };
+    pub(crate) const SCAN: Shell = Shell { params: 4, i32s: 5, cursor: 8, tmp_i32: 6, scr_i32: 7 };
 }
 
 /// Build one helper body on `shell`'s local layout: `body` emits into a
@@ -130,7 +130,7 @@ impl Shell {
 /// module.
 /// #2758: the frame's witness, armed while a sweep collects, is audited
 /// against the closed body (witness_helper.rs).
-fn build_helper_body(
+pub(crate) fn build_helper_body(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
@@ -233,7 +233,7 @@ fn build_helper_body(
 
 /// One `(block, stride, off, needle) -> address|0` DEEP scan body: walk
 /// the entries comparing the key slot by the type-directed `==`.
-fn build_one_scan_helper(
+pub(crate) fn build_one_scan_helper(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
@@ -285,7 +285,7 @@ fn build_one_scan_helper(
 /// a type's shape, so a type that contains itself must become a CALL
 /// somewhere. `path` starts with `ti`, so the self-referencing fields see
 /// a cycle and call THIS helper's promised index instead of inlining.
-fn build_one_named_helper(
+pub(crate) fn build_one_named_helper(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
@@ -316,7 +316,7 @@ fn build_one_named_helper(
 }
 
 /// One `(block, cursor) -> cursor` display body.
-fn build_one_display_helper(
+pub(crate) fn build_one_display_helper(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
@@ -338,7 +338,7 @@ fn build_one_display_helper(
 
 /// The IR type of field `name` in a record IR type (`{ f: T }`, open or
 /// closed) — the anonymous-record shape's leaf types (#3187).
-fn record_field_ir<'t>(ir: Option<&'t Ty>, name: &str) -> Option<&'t Ty> {
+pub(crate) fn record_field_ir<'t>(ir: Option<&'t Ty>, name: &str) -> Option<&'t Ty> {
     match ir? {
         Ty::Record { fields } | Ty::OpenRecord { fields } => {
             fields.iter().find(|(f, _)| f.as_str() == name).map(|(_, t)| t)

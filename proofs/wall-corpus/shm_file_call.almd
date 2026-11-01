@@ -1,0 +1,11 @@
+// @wall: `unix.shm_create` is not available on --target wasm
+// Shared-memory files have no WASI interface (L2-unix): a stock artifact
+// refuses the call with the E081 availability diagnostic at check time.
+// Pinned beside unix_socket_call.almd so the shm half of the unix family
+// cannot start building into a stock artifact silently.
+import unix
+
+effect fn main() -> Unit = {
+  let fd = unix.shm_create(4096)!
+  println("${bytes.len(unix.shm_read(fd, 0, 4)!)}")
+}

@@ -523,4 +523,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     Ok(module.finish())
 }
 
-include!("assembly_helpers.rs");
+#[path = "assembly_helpers.rs"]
+mod helpers;
+pub(crate) use helpers::resolve_extras;
+use helpers::{export_serve_restore_state, used_static_helpers};

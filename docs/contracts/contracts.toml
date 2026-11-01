@@ -4988,6 +4988,8 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_loopback.almd", class = "fixture" },
   { path = "spec/embedded_cross/net_tcp_fan_handles.almd", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "tcp_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_wasm_default_route_test.rs", name = "a_socket_program_builds_as_the_p3_component_by_default_and_names_its_grant", class = "fixture" },
 ]
 [[contract]]
 id        = "C-378"
@@ -4998,6 +5000,8 @@ since     = "0.68.0"
 status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_errors.almd", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "tcp_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "an_ungranted_component_reads_the_permission_text", class = "fixture" },
 ]
 [[contract]]
 id        = "C-379"
@@ -5008,6 +5012,7 @@ since     = "0.68.0"
 status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_timeouts.almd", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "tcp_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
 ]
 [[contract]]
 id        = "C-380"

@@ -1,7 +1,8 @@
-// ── assembly.rs, the emitted-helper bodies and the export restore state ──
-//
-// include!-spliced into `assembly.rs` at module level (the 800-line file
-// discipline). The imports are assembly.rs's own.
+//! The emitted-helper bodies, the extras resolution and the static-helper
+//! reachability, and the serve loop's exported restore state (split from
+//! assembly.rs).
+
+use super::*;
 
 /// One emitted-helper BODY (split from resolve_extras for the
 /// complexity budget).
@@ -9,7 +10,7 @@
 /// table and every global, so the embedded host can call the loop's
 /// closure and put the instance back to its state at the call after a
 /// handler abort. A module without the op keeps its bytes.
-fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global_count: u32) {
+pub(crate) fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global_count: u32) {
     if !work.host_ops.borrow().contains(&crate::fs_meta::OP_HTTP_SERVE_RUN) {
         return;
     }
@@ -20,14 +21,14 @@ fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global
 }
 
 /// A per-program helper's body and its declared RC signature (#4278 B1).
-fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> (Function, Option<HelperSig>) {
+pub(crate) fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> (Function, Option<HelperSig>) {
     match crate::helper_sig::per_program(h) {
         Some((f, sig)) => (f, Some(sig)),
         None => (helper_body_unsigned(h, work, helper_snapshot, hpos), None),
     }
 }
 
-fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
+pub(crate) fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
     match h {
     Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
         work.helper_base.get(),
@@ -163,7 +164,7 @@ pub(crate) fn resolve_extras(
 }
 /// The named-type / json-path half of the helper table —
 /// split from `helper_body` for the complexity budget.
-fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
+pub(crate) fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
     match h {
     Helper::DisplayNamed { ti, irk } => {
         match work.display_bodies.borrow_mut().remove(&(*ti, *irk)) {
@@ -223,7 +224,7 @@ fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
 /// outside a body reaches the core: the exports are `memory` / `main` /
 /// `__heap` / the `@export` fns, and the WASI transforms park their
 /// buffers on their own page rather than calling `$alloc`.
-fn used_static_helpers<'a>(
+pub(crate) fn used_static_helpers<'a>(
     helpers: &[(u32, Function, Option<HelperSig>)],
     roots: impl Iterator<Item = &'a Function>,
     seeds: &[u32],
@@ -265,7 +266,7 @@ fn used_static_helpers<'a>(
 /// pattern-matched (a raw 0x10 inside an immediate is not a call). A body
 /// that fails to parse claims every helper: over-keeping is bytes,
 /// under-keeping is a trap.
-fn called_function_indices(f: &Function) -> Vec<u32> {
+pub(crate) fn called_function_indices(f: &Function) -> Vec<u32> {
     use wasm_encoder::Encode;
     let mut buf = Vec::new();
     f.encode(&mut buf);

@@ -500,4 +500,7 @@ impl Emitter<'_> {
     }
 }
 
-include!("display_helpers.rs");
+#[path = "display_helpers.rs"]
+mod helpers;
+pub(crate) use helpers::{build_display_helpers, ir_arg};
+use helpers::{build_helper_body, record_field_ir, Shell};
