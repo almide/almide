@@ -520,7 +520,7 @@ impl NetTexts {
         };
         // The class texts, then the table of (address, length) per case.
         let texts: Vec<NetPiece> = abi.ec_class.iter().map(|c| put(nc::net_class_text(*c).as_bytes())).collect();
-        while (base + blob.len() as u64) % 4 != 0 {
+        while !(base + blob.len() as u64).is_multiple_of(4) {
             blob.push(0);
         }
         let ec_table = (base + blob.len() as u64) as i32;

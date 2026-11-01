@@ -380,7 +380,7 @@ fn net_fn_ip_fmt(a: &NetAbi, t: &NetTexts, fns: NetFns) -> Function {
     net_put(&mut i, dst, t.mapped);
     net_dotted(&mut i, dst, fns.dec, &|i: &mut Sink<'_>, b: u64| {
         i.local_get(el).i32_load16_u(net_m16(po + 12 + 2 * (b / 2)));
-        if b % 2 == 0 {
+        if b.is_multiple_of(2) {
             i.i32_const(8).i32_shr_u();
         } else {
             i.i32_const(255).i32_and();
