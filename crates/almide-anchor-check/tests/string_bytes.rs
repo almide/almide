@@ -3,7 +3,7 @@
 //! the shapes the bounds check accepts, and the one-instruction changes it
 //! must refuse.
 
-use almide_anchor_check::{check_bounds, check_bounds_alloc, decode, Report};
+use almide_anchor_check::{check_bounds, check_bounds_alloc, decode, Report, Sites};
 
 /// Function 0 is `$alloc`; function 1 is the subject. Locals: 0 the
 /// string, 1 the index, 2 a captured count (or another string).
@@ -203,7 +203,7 @@ fn marked(n: usize, body: &str, w: &str) -> Result<Report, String> {
     .expect("wat");
     let bodies = decode(&bytes)?;
     let mut r = Report::default();
-    check_bounds_alloc(&bodies, w, &anchors(body), &[], &[], 0, &mut r).map(|()| r)
+    check_bounds_alloc(&bodies, w, &anchors(body), Sites::default(), 0, &mut r).map(|()| r)
 }
 
 /// The instruction index of each `(;@;)` mark: instruction tokens before it.
@@ -379,7 +379,7 @@ fn a_byte_inside_a_fresh_allocation_is_accepted() -> Result<(), String> {
     ))
     .expect("wat");
     let bodies = decode(&bytes)?;
-    check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", &[], &[], 0, &mut r)?;
+    check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", Sites::default(), 0, &mut r)?;
     assert_eq!(r.bounds_operands, 1);
     // one byte past the allocation
     let past = body.replace("offset=12", "offset=13");
@@ -390,9 +390,9 @@ fn a_byte_inside_a_fresh_allocation_is_accepted() -> Result<(), String> {
     ))
     .expect("wat");
     let bodies = decode(&bytes)?;
-    assert!(check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", &[], &[], 0, &mut Report::default()).is_err());
+    assert!(check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", Sites::default(), 0, &mut Report::default()).is_err());
     // a call that is not $alloc (function 1 is the subject itself)
-    assert!(check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", &[], &[], 1, &mut Report::default()).is_err());
+    assert!(check_bounds_alloc(&bodies, "c0 a0", "1:1 1:4", Sites::default(), 1, &mut Report::default()).is_err());
     Ok(())
 }
 
