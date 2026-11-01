@@ -242,6 +242,9 @@ pub fn try_render_native_program(
 /// every fn and the closure dispatch tables. The metered-region splice
 /// (#3669) renders its region fns through here, with no `main` of its own.
 pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
+    // #4006: params that receive a block's raw address are typed as that block.
+    let (addr_sigs, addr_params) = crate::render_native_addr::infer_addr_params(&prog.functions, sigs);
+    let sigs = &addr_sigs;
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
@@ -252,7 +255,7 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
-        let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
+        let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &addr_params, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
@@ -335,6 +338,7 @@ fn render_fn(
     func: &MirFunction,
     user_fns: &BTreeMap<&str, &MirFunction>,
     sigs: &NativeSigs,
+    addr_params: &crate::render_native_addr::AddrParams,
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
@@ -360,7 +364,7 @@ fn render_fn(
     let used = native_used_values(func);
     // #3532: the if-as-value joins realized as a borrow of the selected value.
     let borrows = crate::borrow_join::borrow_joins(func);
-    let mut addrs = crate::render_native_addr::AddrState::new(func, sigs);
+    let mut addrs = crate::render_native_addr::AddrState::new(func, sigs, addr_params);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         used_shims.push(STACK_GUARD_GLUE_SHIM);
@@ -374,6 +378,9 @@ fn render_fn(
     }
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
+        // #4006: a call passing a block's address passes the block instead.
+        let rebased = addrs.rebase_call(op)?;
+        let op = rebased.as_ref().unwrap_or(op);
         // #3639: `s = s + x` / `string.push(s, x)` grows `s` in place.
         if let Some(append) = crate::render_native_append::str_self_append(func, i, &tys) {
             line!("{append}");

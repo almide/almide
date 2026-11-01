@@ -33,6 +33,8 @@ enum Idx {
     Bytes(ValueId),
     /// An element index already bounds-checked by `Prim{ElemAddr}`.
     Elem(ValueId),
+    /// An unscaled byte offset into a byte block (a String's bytes).
+    Byte(ValueId),
 }
 
 /// A symbolic address: `base`'s block + `off` bytes (+ the index term).
@@ -73,10 +75,137 @@ pub(crate) struct AddrState {
     arms: Vec<(Option<ValueId>, bool)>,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
+    /// Every function's address-typed params ([`infer_addr_params`]): a call
+    /// passing an address there passes the address's block instead.
+    callees: AddrParams,
+}
+
+/// fn name → per param: `Some(off)` when the param is an ADDRESS — every call
+/// site passes `handle(block) + off` of one block kind — and is rendered as a
+/// borrow of that block, its address being the block's + `off`.
+pub(crate) type AddrParams = BTreeMap<String, Vec<Option<i64>>>;
+
+/// The declared kind a block of native type `t` is passed as.
+fn block_kind(t: crate::render_native::NativeSigKind) -> bool {
+    use crate::render_native::NativeSigKind as K;
+    matches!(t, K::ListI64 | K::ListStr | K::Str)
+}
+
+/// Infer the address-typed params of a program (#4006): an `Int` param every
+/// one of whose call sites passes `prim.handle(b) + off` for a block `b` of
+/// one declared kind and one constant `off` (a linked self-host body handing
+/// its list or string to a helper as a raw address). Such a param is retyped
+/// to that block kind and rendered as a borrow of it. A param any call site
+/// passes a plain integer, another kind or another offset keeps its `Int`
+/// type, and the address that reaches it keeps walling at the call.
+pub(crate) fn infer_addr_params(
+    fns: &[MirFunction],
+    sigs: &crate::render_native::NativeSigs,
+) -> (crate::render_native::NativeSigs, AddrParams) {
+    use crate::render_native::NativeSigKind as K;
+    let mut sigs = sigs.clone();
+    let mut params: AddrParams = BTreeMap::new();
+    for _ in 0..16 {
+        // (callee, param) → every call site's (kind, offset), `None` = not an address.
+        let mut seen: BTreeMap<(String, usize), Vec<Option<(K, i64)>>> = BTreeMap::new();
+        for f in fns {
+            let own = sigs.get(f.name.as_str());
+            let mut at: BTreeMap<ValueId, (K, i64)> = BTreeMap::new();
+            for (i, p) in f.params.iter().enumerate() {
+                if let (Some(off), Some(k)) = (
+                    params.get(&f.name).and_then(|o| o.get(i).copied().flatten()),
+                    own.and_then(|(ps, _)| ps.get(i)),
+                ) {
+                    at.insert(p.value, (*k, off));
+                }
+            }
+            let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+            for op in &f.ops {
+                match op {
+                    Op::ConstInt { dst, value } => {
+                        consts.insert(*dst, *value);
+                    }
+                    Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
+                        let k = f
+                            .params
+                            .iter()
+                            .position(|p| p.value == args[0])
+                            .and_then(|i| own.and_then(|(ps, _)| ps.get(i)).copied())
+                            .filter(|k| block_kind(*k));
+                        if let Some(k) = k {
+                            at.insert(*d, (k, 0));
+                        }
+                    }
+                    Op::IntBinOp { dst, op: IntOp::Add, a, b } => {
+                        let hit = match (at.get(a), at.get(b), consts.get(a), consts.get(b)) {
+                            (Some(&(k, o)), None, _, Some(c)) | (None, Some(&(k, o)), Some(c), _) => Some((k, o + c)),
+                            _ => None,
+                        };
+                        if let Some(h) = hit {
+                            at.insert(*dst, h);
+                        }
+                    }
+                    Op::CallFn { name, args, .. } => {
+                        for (i, a) in args.iter().enumerate() {
+                            if let crate::CallArg::Scalar(v) | crate::CallArg::Handle(v) = a {
+                                // A self-call handing a param through unchanged says
+                                // nothing new about it (the fixpoint's seed).
+                                if *name == f.name && f.params.get(i).is_some_and(|p| p.value == *v) && !at.contains_key(v) {
+                                    continue;
+                                }
+                                seen.entry((name.clone(), i)).or_default().push(at.get(v).copied());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut next: AddrParams = BTreeMap::new();
+        let mut kinds: Vec<(String, usize, K)> = Vec::new();
+        for ((callee, i), obs) in &seen {
+            if callee == "main" || !fns.iter().any(|f| &f.name == callee) {
+                continue;
+            }
+            let Some(Some((k, off))) = obs.first().copied() else { continue };
+            if !obs.iter().all(|o| *o == Some((k, off))) {
+                continue;
+            }
+            let declared = sigs.get(callee).and_then(|(ps, _)| ps.get(*i)).copied();
+            let was_addr = params.get(callee).and_then(|o| o.get(*i).copied().flatten()).is_some();
+            if declared != Some(K::I64) && !was_addr {
+                continue;
+            }
+            let n = fns.iter().find(|f| &f.name == callee).map_or(0, |f| f.params.len());
+            next.entry(callee.clone()).or_insert_with(|| vec![None; n])[*i] = Some(off);
+            kinds.push((callee.clone(), *i, k));
+        }
+        // Restore every param this round no longer retypes to its declared Int.
+        for (callee, offs) in &params {
+            for (i, o) in offs.iter().enumerate() {
+                let still = next.get(callee).and_then(|n| n.get(i).copied().flatten()).is_some();
+                if o.is_some() && !still {
+                    if let Some((ps, _)) = sigs.get_mut(callee) {
+                        ps[i] = K::I64;
+                    }
+                }
+            }
+        }
+        for (callee, i, k) in kinds {
+            if let Some((ps, _)) = sigs.get_mut(&callee) {
+                ps[i] = k;
+            }
+        }
+        if next == params {
+            break;
+        }
+        params = next;
+    }
+    (sigs, params)
 }
 
 impl AddrState {
-    pub(crate) fn new(func: &MirFunction, sigs: &crate::render_native::NativeSigs) -> Self {
+    pub(crate) fn new(func: &MirFunction, sigs: &crate::render_native::NativeSigs, callees: &AddrParams) -> Self {
         use crate::render_native::NativeSigKind;
         let rec_kind = |k: Option<&NativeSigKind>| match k {
             Some(NativeSigKind::Rec(i)) => Some(*i),
@@ -284,20 +413,63 @@ impl AddrState {
                 _ => {}
             }
         }
+        // An address-typed param is its own block, `off` bytes in.
+        let addrs = callees
+            .get(&func.name)
+            .map(|offs| {
+                func.params
+                    .iter()
+                    .zip(offs)
+                    .filter_map(|(p, o)| o.map(|off| (p.value, Addr { base: p.value, off, idx: None })))
+                    .collect()
+            })
+            .unwrap_or_default();
         AddrState {
             str_lists,
             alloc_rec,
             addr_operands,
             consts: BTreeMap::new(),
             scaled: BTreeSet::new(),
-            addrs: BTreeMap::new(),
+            addrs,
             reassigned,
             stored,
             res_tags: BTreeMap::new(),
             pending: BTreeMap::new(),
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
+            callees: callees.clone(),
         }
+    }
+
+    /// A user-fn call passing a symbolic address, rewritten to pass the
+    /// address's block to the callee's address-typed param (`None` = no
+    /// address among the args). An address the callee does not take at that
+    /// param, or at another offset, walls: native has no raw address to pass.
+    pub(crate) fn rebase_call(&self, op: &Op) -> Result<Option<Op>, LowerError> {
+        let Op::CallFn { dst, name, args, result } = op else { return Ok(None) };
+        let addr_of = |a: &crate::CallArg| match a {
+            crate::CallArg::Scalar(v) | crate::CallArg::Handle(v) => self.addrs.get(v).copied(),
+            _ => None,
+        };
+        if !args.iter().any(|a| addr_of(a).is_some()) {
+            return Ok(None);
+        }
+        let offs = self.callees.get(name.as_str());
+        let mut out = Vec::with_capacity(args.len());
+        for (i, a) in args.iter().enumerate() {
+            let Some(ad) = addr_of(a) else {
+                out.push(a.clone());
+                continue;
+            };
+            if ad.idx.is_some() || offs.and_then(|o| o.get(i).copied().flatten()) != Some(ad.off) {
+                return Err(wall(format!(
+                    "native: a slot address passed to `{name}` where that param is not one address of its block at offset {}",
+                    ad.off
+                )));
+            }
+            out.push(crate::CallArg::Handle(ad.base));
+        }
+        Ok(Some(Op::CallFn { dst: *dst, name: name.clone(), args: out, result: result.clone() }))
     }
 }
 
@@ -387,6 +559,7 @@ fn slot_index(a: &Addr) -> Option<String> {
         None => format!("{k}usize"),
         Some(Idx::Bytes(b)) => format!("({k}i64 + {} / {w}i64) as usize", var(b)),
         Some(Idx::Elem(i)) => format!("({k}i64 + {}) as usize", var(i)),
+        Some(Idx::Byte(_)) => return None,
     })
 }
 
@@ -420,7 +593,8 @@ pub(crate) fn render_addr_op(
             match ty(tys, &x) {
                 Some(t)
                     if (is_block(t) && (st.addr_operands.contains(d) || st.stored.contains(d)))
-                        || (matches!(t, NTy::Str | NTy::StrRef) && st.stored.contains(d)) =>
+                        || (matches!(t, NTy::Str | NTy::StrRef)
+                            && (st.stored.contains(d) || st.addr_operands.contains(d))) =>
                 {
                     if st.reassigned.contains(&x) {
                         return Err(wall("native: a slot address of a reassigned local"));
@@ -442,6 +616,8 @@ pub(crate) fn render_addr_op(
                 Addr { off: ad.off + c, ..ad }
             } else if st.scaled.contains(&other) && ad.idx.is_none() {
                 Addr { idx: Some(Idx::Bytes(other)), ..ad }
+            } else if ad.idx.is_none() && ty(tys, &ad.base).is_some_and(|t| matches!(t, NTy::Str | NTy::StrRef)) {
+                Addr { idx: Some(Idx::Byte(other)), ..ad }
             } else {
                 return Err(wall("native: a slot address offset by an unscaled value"));
             };
@@ -482,6 +658,24 @@ pub(crate) fn render_addr_op(
                 tys.insert(*d, NTy::I64);
                 line!("let mut {}: i64 = {}.len() as i64;", var(*d), var(ad.base));
                 return Ok(true);
+            }
+            if matches!(bt, Some(NTy::Str | NTy::StrRef)) {
+                if *width == 4 && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() {
+                    tys.insert(*d, NTy::I64);
+                    line!("let mut {}: i64 = {}.len() as i64;", var(*d), var(ad.base));
+                    return Ok(true);
+                }
+                let k = ad.off - i64::from(BLOCK_HEADER);
+                let at = match ad.idx {
+                    None if k >= 0 => Some(format!("{k}usize")),
+                    Some(Idx::Byte(i)) => Some(format!("({} + {k}) as usize", var(i))),
+                    _ => None,
+                };
+                if let (1, Some(at)) = (*width, at) {
+                    tys.insert(*d, NTy::I64);
+                    line!("let mut {}: i64 = {}.as_bytes()[{at}] as i64;", var(*d), var(ad.base));
+                    return Ok(true);
+                }
             }
             if let (8, Some(i), Some(k)) = (*width, is_enum(bt), rec_slot(&ad)) {
                 if let Some((acc, t)) = enum_read(i, k, true) {
@@ -713,6 +907,18 @@ pub(crate) fn render_addr_op(
             return Ok(true);
         }
         _ => {}
+    }
+    // A tail loop re-binding an address param to the same address: nothing moves.
+    if let Op::SetLocal { local, src } = op {
+        if let (Some(l), Some(s)) = (st.addrs.get(local), st.addrs.get(src)) {
+            if l.base == s.base && l.off == s.off && l.idx.is_none() && s.idx.is_none() {
+                line!("// {}: the same address", var(*local));
+                return Ok(true);
+            }
+        }
+        if st.addrs.contains_key(local) {
+            return Err(wall(format!("native: an address param {} re-bound to another value", var(*local))));
+        }
     }
     // Any other op that reads a symbolic address would see a number native
     // does not have.
