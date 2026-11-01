@@ -24,6 +24,8 @@ use std::fmt::Write as _;
 
 #[path = "render_native_carrier.rs"]
 mod carrier;
+#[path = "render_native_slots.rs"]
+mod slots;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 
 /// The index term of a slot address.
@@ -181,99 +183,9 @@ impl AddrState {
                 _ => {}
             }
         }
-        loop {
-            let before = alloc_rec.len();
-            for op in &func.ops {
-                let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
-                let (Some(&(r, off)), Some(&vsrc)) = (base_of.get(&args[0]), handle_of.get(&args[1])) else { continue };
-                let Some(&i) = alloc_rec.get(&r) else { continue };
-                let slot = off.and_then(|o| {
-                    let (h, w) = (i64::from(BLOCK_HEADER), i64::from(SLOT_SIZE));
-                    (o >= h && (o - h) % w == 0).then(|| ((o - h) / w) as usize)
-                });
-                let kind = if let Some(e) = crate::render_native_rec::list_elem(i) {
-                    Some(e)
-                } else if carrier::is_carrier(i) {
-                    slot.and_then(|k| carrier::slot_kind(i, k))
-                } else if let Some(k) = slot {
-                    crate::render_native_rec::rec_field(i, k).or_else(|| {
-                        let ks: Vec<NTy> = crate::render_native_rec::enum_slot_kinds(i, k)
-                            .into_iter()
-                            .filter(|t| matches!(t, NTy::Rec(_)))
-                            .collect();
-                        (ks.len() == 1).then(|| ks[0])
-                    })
-                } else {
-                    None
-                };
-                if let Some(NTy::Rec(j)) = kind {
-                    alloc_rec.entry(vsrc).or_insert(j);
-                }
-            }
-            if alloc_rec.len() == before {
-                break;
-            }
-        }
-        // An untyped list block whose every stored element has one generated
-        // kind (a typed aggregate, or a scalar list) is a list of that kind.
-        let scalar_lists: BTreeSet<ValueId> = func
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                Op::ListLit { dst, .. } | Op::Alloc { dst, init: Init::IntList(_), .. } => Some(*dst),
-                _ => None,
-            })
-            .collect();
-        let strings: BTreeSet<ValueId> = func
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::Str(_) | Init::DynStr { .. }, .. } => Some(*dst),
-                Op::CallFn { dst: Some(d), name, .. } if sigs.get(name.as_str()).is_some_and(|(_, r)| *r == Some(NativeSigKind::Str)) => Some(*d),
-                _ => None,
-            })
-            .collect();
-        let blocks: Vec<ValueId> = func
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } if !alloc_rec.contains_key(dst) => Some(*dst),
-                _ => None,
-            })
-            .collect();
-        let mut str_lists: BTreeSet<ValueId> = BTreeSet::new();
-        for r in blocks {
-            let mut kinds: Vec<NTy> = Vec::new();
-            for op in &func.ops {
-                let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
-                let (Some(&(root, _)), Some(&src)) = (base_of.get(&args[0]), handle_of.get(&args[1])) else { continue };
-                if root != r {
-                    continue;
-                }
-                let k = match alloc_rec.get(&src) {
-                    Some(j) => NTy::Rec(*j),
-                    None if scalar_lists.contains(&src) => NTy::Vec,
-                    None if strings.contains(&src) => NTy::Str,
-                    None => {
-                        kinds.clear();
-                        break;
-                    }
-                };
-                if !kinds.contains(&k) {
-                    kinds.push(k);
-                }
-            }
-            match kinds.as_slice() {
-                // A DynList filled with strings is a List[String] block.
-                [NTy::Str] => {
-                    str_lists.insert(r);
-                }
-                [k] => {
-                    alloc_rec.insert(r, crate::render_native_rec::list_type_of(*k));
-                }
-                _ => {}
-            }
-        }
+        // The untyped blocks, typed from their stores and the declarations
+        // that consume them, in one fixpoint (render_native_slots.rs).
+        let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
         let alloc_rec = func
             .ops
             .iter()
