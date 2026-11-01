@@ -195,6 +195,7 @@ def return_only_generics(f: dict, params, ret) -> list:
 def render(t: dict) -> str:
     """Almide type syntax for a type node, type variables resolved."""
     k = t.get("kind")
+    if k == "literal": return "String"
     if k == "int": return "Int"
     if k == "float": return "Float"
     if k == "string": return "String"
@@ -230,6 +231,7 @@ def has_tvar(t: dict) -> bool:
 def dummy(t: dict, ctx: Ctx, types: dict) -> str:
     """A minimal well-typed expression for a type node, or raise Unsynth."""
     k = t.get("kind")
+    if k == "literal": return t["expr"]
     if k == "int": return "0"
     if k == "float": return "0.0"
     if k == "string": return '"x"'
@@ -378,6 +380,16 @@ BOUNDED_TVARS = {
         "set_header", "set_body", "set_body_bytes")},
     # list.join[T: Text]: String is the conformer a probe can print.
     "list.join": {"T": {"kind": "string"}},
+    # A response body (`[B: Body]`, ADR-0032): String is a Body.
+    **{f"http.{n}": {"B": {"kind": "string"}} for n in ("response", "with_headers", "with_body")},
+}
+
+# Parameters whose String must be a literal of a checked shape (the checker
+# reads it at compile time), so the probe's `"x"` would be a type error, not
+# the leg's wall. Keyed "mod.fn" -> {param: source literal}.
+CHECKED_LITERALS = {
+    # http.typed's media type is checked as `type/subtype` (E117).
+    "http.typed": {"media_type": '"text/csv"'},
 }
 
 
@@ -411,6 +423,8 @@ def resolve_unknowns(mod, f):
             if p["name"] not in table:
                 raise Unsynth(f"param {p['name']}: interface JSON kind=unknown, not in UNMODELED")
             t = table[p["name"]]
+        if p["name"] in CHECKED_LITERALS.get(key, {}):
+            t = {"kind": "literal", "expr": CHECKED_LITERALS[key][p["name"]]}
         params.append((p["name"], t))
     ret = f.get("return", {"kind": "unit"})
     if ret.get("kind") == "unknown":
