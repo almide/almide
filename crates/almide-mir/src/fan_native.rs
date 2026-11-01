@@ -114,7 +114,13 @@ pub(crate) fn lift_fan_arms(mut ir: IrProgram) -> Result<IrProgram, LowerError> 
             a.insert(f.name.as_str().to_string(), *arm);
         }
     });
+    let lifted = !out.is_empty();
     ir.functions.extend(out.into_iter().map(|(f, _)| f));
+    if lifted {
+        // The lifted fns' effect ABI (never-err, auto-wrap) is a fact of the
+        // program, computed from every fn's body.
+        crate::lower::install_effect_abi_facts(&ir);
+    }
     Ok(ir)
 }
 
@@ -247,69 +253,92 @@ impl Lift<'_> {
     /// Rewrite one arm in place to a call of its lifted function.
     fn lift_arm(&mut self, arm: &mut IrExpr, at: Arm) -> Result<(), String> {
         // The arm as written (`f(x)`), its scoped `f(x)!`, or the frontend's
-        // `ok(f(x))` lift of an infallible call: the call inside.
-        let call = match &mut arm.kind {
+        // `ok(e)` lift of an infallible arm: the expression inside.
+        let x = match &mut arm.kind {
             IrExprKind::Unwrap { expr } | IrExprKind::ResultOk { expr } => &mut **expr,
             _ => arm,
         };
-        let call_ty = call.ty.clone();
-        let mut body = call.clone();
-        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut call.kind else {
-            let shape: String = format!("{:?}", call.kind).chars().take(120).collect();
-            return Err(format!("an arm that is not a direct call: {shape}"));
-        };
-        let Some((_, ret, is_effect)) = self.user.get(name.as_str()).cloned() else {
-            return Err(format!("an arm calling `{name}`, not a user function"));
-        };
-        if !thread_crossable(&call_ty, self.decls, 0) || !thread_crossable(&ret, self.decls, 0) {
-            return Err(format!("an arm whose result `{call_ty:?}` cannot cross a thread"));
-        }
-        let mut params = Vec::new();
-        let mut inner_args = Vec::new();
-        let mut outer_args = Vec::new();
-        for a in args.iter() {
-            match &a.kind {
-                IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } | IrExprKind::Unit => {
-                    inner_args.push(a.clone());
-                }
-                IrExprKind::Var { id } => {
-                    let info = self.vt.get(*id).clone();
-                    if info.mutability == Mutability::Var {
-                        return Err(format!("an arm that captures the `var` `{}`", info.name));
-                    }
-                    if self.globals.contains(id) {
-                        return Err(format!("an arm that reads the top-level `{}`", info.name));
-                    }
-                    if !thread_crossable(&info.ty, self.decls, 0) {
-                        return Err(format!("an arm argument `{}` that cannot cross a thread", info.name));
-                    }
-                    let p = self.vt.alloc_like(*id, info.ty.clone(), Mutability::Let);
-                    params.push(IrParam {
-                        var: p,
-                        ty: info.ty.clone(),
-                        name: info.name,
-                        borrow: almide_ir::ParamBorrow::Own,
-                        is_mut: false,
-                        open_record: None,
-                        default: None,
-                        attrs: Vec::new(),
-                    });
-                    inner_args.push(IrExpr { kind: IrExprKind::Var { id: p }, ..a.clone() });
-                    outer_args.push(a.clone());
-                }
-                _ => return Err("an arm argument that is not a literal or a local".into()),
+        let direct = match &x.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                self.user.get(name.as_str()).cloned().filter(|_| args.iter().all(is_arg_leaf))
             }
-        }
+            _ => None,
+        };
         let lifted = arm_name(at.group, at.index);
-        if let IrExprKind::Call { args, .. } = &mut body.kind {
-            *args = inner_args;
+        let (body, ret, is_effect) = match direct {
+            // A direct call `f(a, …)`: the lifted fn is `f`'s own signature,
+            // its body the call (typed as `f` declares it, so the lift's
+            // effect ABI is `f`'s).
+            Some((_, ret, is_effect)) => {
+                let mut body = x.clone();
+                body.ty = ret.clone();
+                (body, ret, is_effect)
+            }
+            // An operator expression over locals, literals and user calls
+            // (an arm the optimizer inlined): the lifted fn returns its value.
+            None => {
+                if !is_arm_expr(x) {
+                    let shape: String = format!("{:?}", x.kind).chars().take(120).collect();
+                    return Err(format!("an arm that is not a call or an operator expression: {shape}"));
+                }
+                let is_effect = calls_effect_fn(x, self.user);
+                (x.clone(), x.ty.clone(), is_effect)
+            }
+        };
+        if !thread_crossable(&x.ty, self.decls, 0) || !thread_crossable(&ret, self.decls, 0) {
+            return Err(format!("an arm whose result `{:?}` cannot cross a thread", x.ty));
         }
-        *name = almide_base::intern::sym(&lifted);
-        *args = outer_args;
+        // Every local the arm reads becomes a parameter of the lifted fn.
+        let mut free = Vec::new();
+        collect_vars(&body, &mut free);
+        let mut subst: BTreeMap<VarId, VarId> = BTreeMap::new();
+        let mut params = Vec::new();
+        let mut outer_args = Vec::new();
+        for id in free {
+            if subst.contains_key(&id) {
+                continue;
+            }
+            let info = self.vt.get(id).clone();
+            if info.mutability == Mutability::Var {
+                return Err(format!("an arm that captures the `var` `{}`", info.name));
+            }
+            if self.globals.contains(&id) {
+                return Err(format!("an arm that reads the top-level `{}`", info.name));
+            }
+            if !thread_crossable(&info.ty, self.decls, 0) {
+                return Err(format!("an arm argument `{}` that cannot cross a thread", info.name));
+            }
+            let p = self.vt.alloc_like(id, info.ty.clone(), Mutability::Let);
+            subst.insert(id, p);
+            params.push(IrParam {
+                var: p,
+                ty: info.ty.clone(),
+                name: info.name,
+                borrow: almide_ir::ParamBorrow::Own,
+                is_mut: false,
+                open_record: None,
+                default: None,
+                attrs: Vec::new(),
+            });
+            outer_args.push(IrExpr { kind: IrExprKind::Var { id }, ty: info.ty.clone(), span: x.span, def_id: None });
+        }
+        let mut body = body;
+        rename_vars(&mut body, &subst);
+        let call_ty = x.ty.clone();
+        *x = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named { name: almide_base::intern::sym(&lifted) },
+                args: outer_args,
+                type_args: Vec::new(),
+            },
+            ty: call_ty,
+            span: x.span,
+            def_id: None,
+        };
         let f = IrFunction {
             name: almide_base::intern::sym(&lifted),
             params,
-            ret_ty: call_ty,
+            ret_ty: ret,
             body,
             is_effect,
             is_test: false,
@@ -327,6 +356,76 @@ impl Lift<'_> {
         self.out.push((f, at));
         Ok(())
     }
+}
+
+/// A literal or a local: an argument the lifted call can take as is.
+fn is_arg_leaf(a: &IrExpr) -> bool {
+    matches!(
+        a.kind,
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+    )
+}
+
+/// An arm the lift moves whole: literals, locals, operators, `if`, and
+/// calls of user functions over them — nothing that binds a variable, so
+/// every variable it reads is free.
+fn is_arm_expr(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } => true,
+        IrExprKind::BinOp { left, right, .. } => is_arm_expr(left) && is_arm_expr(right),
+        IrExprKind::UnOp { operand, .. } => is_arm_expr(operand),
+        IrExprKind::If { cond, then, else_ } => is_arm_expr(cond) && is_arm_expr(then) && is_arm_expr(else_),
+        IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } => args.iter().all(is_arm_expr),
+        _ => false,
+    }
+}
+
+/// Does `e` call a user function declared `effect`?
+fn calls_effect_fn(e: &IrExpr, user: &BTreeMap<String, (Vec<Ty>, Ty, bool)>) -> bool {
+    struct C<'a>(&'a BTreeMap<String, (Vec<Ty>, Ty, bool)>, bool);
+    impl IrVisitor for C<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+                if self.0.get(name.as_str()).is_some_and(|(_, _, eff)| *eff) {
+                    self.1 = true;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C(user, false);
+    c.visit_expr(e);
+    c.1
+}
+
+/// Every local `e` reads, in order (repeats included).
+fn collect_vars(e: &IrExpr, out: &mut Vec<VarId>) {
+    struct V<'a>(&'a mut Vec<VarId>);
+    impl IrVisitor for V<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind {
+                self.0.push(*id);
+            }
+            walk_expr(self, e);
+        }
+    }
+    V(out).visit_expr(e);
+}
+
+/// Rename the locals of `e` by `subst`.
+fn rename_vars(e: &mut IrExpr, subst: &BTreeMap<VarId, VarId>) {
+    struct R<'a>(&'a BTreeMap<VarId, VarId>);
+    impl IrMutVisitor for R<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            if let IrExprKind::Var { id } = &mut e.kind {
+                if let Some(n) = self.0.get(id) {
+                    *id = *n;
+                }
+            }
+            walk_expr_mut(self, e);
+        }
+    }
+    R(subst).visit_expr_mut(e);
 }
 
 #[cfg(test)]
