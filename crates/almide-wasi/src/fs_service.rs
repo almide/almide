@@ -120,7 +120,6 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (62, "fs.fold_lines_chunked"),
     (63, "fs.read_bytes"),
     (64, "fs.read_bytes_if_exists"),
-    (66, "fs.append_bytes"),
     // 120..=125: the rooted family's descriptor ops (#4084), each under the
     // PLAIN call whose answer it gives on `<root>/<segments>` (123, exists,
     // answers no io error, so it needs no name).
@@ -133,6 +132,10 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
 
 /// The call name of an fs op (`"fs"` for one without its own row).
 pub fn fs_op_name(op: i32) -> &'static str {
+    // fs.append_bytes (#4382) declares its name beside its op family.
+    if almide_wasm::host_ops::FS_APPEND_BYTES.contains(&op) {
+        return almide_wasm::host_ops::FS_APPEND_BYTES_CALL;
+    }
     FS_OP_NAMES.iter().find(|(o, _)| *o == op).map_or("fs", |(_, n)| n)
 }
 
