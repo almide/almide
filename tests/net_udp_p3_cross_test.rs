@@ -75,6 +75,18 @@ fn build_p3(src: &Path, out: &Path) -> Result<(), String> {
     if built.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&built.stderr).into_owned()) }
 }
 
+/// `src` by the default `almide build --target wasm` at `out` — a program
+/// with a socket op builds as the WASI 0.3 component without a flag.
+fn build_default(src: &Path, out: &Path) -> Result<(), String> {
+    let built = Command::new(almide_bin())
+        .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "-o", out.to_str().expect("utf8")])
+        .env_remove("ALMIDE_COMPONENT_P3")
+        .stdin(Stdio::null())
+        .output()
+        .expect("almide build");
+    if built.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&built.stderr).into_owned()) }
+}
+
 /// `wasmtime run` with the network grant (`granted`) or without.
 fn run_p3(wasm: &Path, granted: bool) -> (String, Option<i32>, String) {
     let mut cmd = Command::new("wasmtime");
@@ -99,7 +111,7 @@ fn udp_and_lookup_fixtures_run_alike_on_native_and_the_p3_component() {
         let native = observe(native, "almide run");
         assert!(native.0.ends_with("done\n"), "{name}: native did not finish:\n{}\n{}", native.0, native.2);
         let wasm = scratch.path().join(format!("{name}.wasm"));
-        build_p3(&src, &wasm).unwrap_or_else(|e| panic!("{name}: the p3 build failed:\n{e}"));
+        build_default(&src, &wasm).unwrap_or_else(|e| panic!("{name}: the default build failed:\n{e}"));
         let p3 = run_p3(&wasm, true);
         assert!(p3.0.ends_with("done\n"), "{name}: the p3 component did not finish:\n{}\n{}", p3.0, p3.2);
         assert_eq!((&p3.0, p3.1), (&native.0, native.1), "{name}: the p3 component diverged from native\nstderr: {}", p3.2);

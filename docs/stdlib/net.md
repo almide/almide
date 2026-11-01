@@ -23,14 +23,14 @@ but as an `effect fn` its call yields a `Result` too: write
 `fn`s: they compute over text and need no capability.
 
 **Targets.** Native serves every function. `almide run --target wasm` (the
-embedded host) serves every function too. The WASI 0.3 component
-(`ALMIDE_COMPONENT_P3=1 almide build --target wasm --component`) serves UDP and
-`lookup_host` over `wasi:sockets@0.3`; run it with the network granted
-(`wasmtime run -S inherit-network -S allow-ip-name-lookup app.wasm`), or a bind
-reads `udp_bind(<host>:<port>): permission denied`. A default stock artifact
-(`almide build --target wasm`, WASI preview 1) refuses the socket functions at
-build time, because preview 1 has no sockets. `parse_ip`, `ip_to_string` and
-`is_loopback` are pure and run everywhere.
+embedded host) serves every function too. `almide build --target wasm` builds a
+program that calls a TCP, UDP or `lookup_host` function as the WASI 0.3
+component over `wasi:sockets@0.3` — no flag needed, since WASI preview 1 has no
+sockets — and prints the grant it needs. Run it with the network granted
+(`wasmtime run -S inherit-network -S allow-ip-name-lookup app.wasm`), or each
+bind and connect reads `<call>(<host>:<port>): permission denied`. A program
+with no socket call still builds the preview 1 module it built before.
+`parse_ip`, `ip_to_string` and `is_loopback` are pure and run everywhere.
 
 ## TCP client
 
@@ -129,7 +129,7 @@ effect fn main() -> Unit = {
 
 ## UDP
 
-Native only for now (see Targets).
+Every target serves it (see Targets).
 
 ### `net.udp_bind(host: String, port: Int) -> Result[UdpSocket, String]`
 
@@ -172,7 +172,7 @@ four octets, or eight 16-bit groups.
 ### `net.lookup_host(host: String) -> Result[List[IpAddr], String]`
 
 The addresses `host` resolves to, each once; an `err` if it resolves to none.
-Native only for now (see Targets).
+Every target serves it (see Targets).
 
 ```almd check
 import net
