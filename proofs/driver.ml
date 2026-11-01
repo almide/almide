@@ -23,7 +23,7 @@ let () =
     | "caps" -> Checker.check_caps_cert bytes
     | "caps-transitive" -> Checker.check_prog_cert bytes  (* call-graph: transitive reach ⊆ declared *)
     | "call-modes" -> Checker.check_modes_cert bytes  (* per-call-site param modes = callee's declared signature *)
-    | "bounds" -> Checker.check_pbounds_cert bytes  (* every elided bounds check re-derived, routine stretches by their contracts, self-host procedures by theirs; accept ⟹ Spatial (#4005) *)
+    | "bounds" -> Checker.check_lbounds_cert bytes  (* every elided bounds check re-derived, routine stretches by their contracts, self-host procedures by theirs (counted or linear); accept ⟹ Spatial (#4005) *)
     | "init" -> Checker.check_init_cert bytes  (* every construction site fills its block; accept ⟹ initialized (#4013) *)
     | "fields" -> Checker.check_fields_cert bytes  (* every field held to its kind's layout; accept ⟹ in bounds and initialized (#4279) *)
     | "rc-sig" -> Checker.check_sig_cert bytes  (* a helper's body nets each heap param to its declared mode on every path (#4278) *)
