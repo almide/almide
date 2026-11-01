@@ -103,6 +103,8 @@ op_families! {
     FS_RANGE = 61..=64 => OpCaps::All(&[FS_READ]);
     /// The full-response http leaf (ADR-0023 step 4).
     HTTP_RESPONSE = 65..=65 => OpCaps::All(&[NET]);
+    /// fs.append_bytes: op 16's true append under its own call name (#4382).
+    FS_APPEND_BYTES = 66..=66 => OpCaps::All(&[FS_WRITE]);
     /// http.serve's bind / next / reply (#2650).
     SERVE = 70..=72 => OpCaps::All(&[NET]);
     /// The raw stderr append (#2769).

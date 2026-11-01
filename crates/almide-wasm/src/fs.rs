@@ -33,6 +33,9 @@ const OP_READ_TEXT_IF_EXISTS: i32 = 13;
 // `fs.write_bytes` takes Bytes (R-fs-01).
 const OP_WRITE_BYTES: i32 = 15;
 const OP_APPEND: i32 = 16;
+// fs.append_bytes (#4382): op 16's true append, carrying the Bytes payload
+// raw under its own number so an error names `fs.append_bytes`.
+const OP_APPEND_BYTES: i32 = crate::host_ops::nth(crate::host_ops::FS_APPEND_BYTES, 0);
 // #2090 — `fold_lines` / `for_each_line` are implemented on this leg as
 // read_lines + a walk, so they used to hand the host OP_READ_LINES. That was
 // invisible while every failure printed errno alone; once the message names the
@@ -72,27 +75,11 @@ impl Emitter<'_> {
                 self.fs_result_unit()?
             }
             ("write_bytes", [p, bs]) => {
-                self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
-                let hp = self.hold_i32()?;
-                self.f.instructions().local_set(hp);
-                match self.lower_arg(bs, None, ArgMode::Borrow)? {
-                    SliceTy::Scalar(Scalar::Bytes) => {}
-                    other => return unsup(&format!("fs-write-bytes-of:{other:?}")),
-                }
-                let hb = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                self.note_host_op(OP_WRITE_BYTES);
-                let mut i = self.f.instructions();
-                i.i32_const(OP_WRITE_BYTES);
-                i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hp).i32_load(len_memarg());
-                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hb).i32_load(len_memarg());
-                i.call(F_FS_CALL);
-                let _ = i;
-                self.release_i32();
-                self.release_i32();
+                self.fs_call_path_bytes(p, bs, OP_WRITE_BYTES, "fs-write-bytes-of")?;
+                self.fs_result_unit()?
+            }
+            ("append_bytes", [p, bs]) => {
+                self.fs_call_path_bytes(p, bs, OP_APPEND_BYTES, "fs-append-bytes-of")?;
                 self.fs_result_unit()?
             }
             ("mkdir_p", [p]) => {
@@ -123,6 +110,33 @@ impl Emitter<'_> {
         Ok(Some(Some(Lowered::owned(out))))
     }
 
+
+    /// (path, Bytes) → fs_call(op, path, bytes): the Bytes payload goes to
+    /// the host raw (`fs.write_bytes`, `fs.append_bytes`); the i64 ret is on
+    /// the stack.
+    fn fs_call_path_bytes(&mut self, p: &IrExpr, bs: &IrExpr, op: i32, wall: &str) -> Result<(), EmitError> {
+        self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
+        let hp = self.hold_i32()?;
+        self.f.instructions().local_set(hp);
+        match self.lower_arg(bs, None, ArgMode::Borrow)? {
+            SliceTy::Scalar(Scalar::Bytes) => {}
+            other => return unsup(&format!("{wall}:{other:?}")),
+        }
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.note_host_op(op);
+        let mut i = self.f.instructions();
+        i.i32_const(op);
+        i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hp).i32_load(len_memarg());
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_load(len_memarg());
+        i.call(F_FS_CALL);
+        let _ = i;
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
 
     /// path → fs_call(op, path, 0, 0): the i64 ret is on the stack.
     pub(crate) fn fs_call_1(&mut self, p: &IrExpr, op: i32) -> Result<(), EmitError> {

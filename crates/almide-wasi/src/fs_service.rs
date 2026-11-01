@@ -71,6 +71,9 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     // 14/25's bodies under their own op (#2890).
     (63, "op_read_bytes", 63),
     (64, "op_read_bytes_if_exists", 64),
+    // 66: fs.append_bytes, op 16's append (fdflags APPEND) under its own
+    // name (#4382).
+    (66, "op_append", 66),
     // 120..=125: the rooted family by descriptor (#4084) — a walk from the
     // root that follows no symlink, then the plain call's body.
     (120, "op_root_read", 120),
@@ -117,6 +120,7 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (62, "fs.fold_lines_chunked"),
     (63, "fs.read_bytes"),
     (64, "fs.read_bytes_if_exists"),
+    (66, "fs.append_bytes"),
     // 120..=125: the rooted family's descriptor ops (#4084), each under the
     // PLAIN call whose answer it gives on `<root>/<segments>` (123, exists,
     // answers no io error, so it needs no name).

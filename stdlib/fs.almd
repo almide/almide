@@ -47,21 +47,16 @@ effect fn write_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 @category("FS.write")
 effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 
-// append_bytes is the read + write it means, so every leg runs the same
-// composition; an err names `fs.append_bytes`, the call the writer wrote.
+// append_bytes is a true append on every leg (#4382): native opens with
+// O_APPEND, the wasm legs send host op 66, which the embedded host, the p1
+// service (fdflags APPEND) and the p3 adapter (append-via-stream) serve. The
+// file is never read, so its size does not enter the cost; an err names
+// `fs.append_bytes`, the call the writer wrote.
 /// Appends data verbatim; creates the file if missing.
 @ordered
+@intrinsic("almide_rt_fs_append_bytes")
 @category("FS.write")
-effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
-  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
-  else bytes.new()
-  __as_append(fs.write_bytes(path, bytes.__concat(old, data)))
-}
-
-local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
-  ok(x) => ok(x),
-  err(e) => err(["fs.read_bytes", "fs.write_bytes"] |> list.find((call) => string.starts_with(e, call)) |> option.map((call) => "fs.append_bytes" + string.drop(e, string.len(call))) ?? e),
-}
+effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
