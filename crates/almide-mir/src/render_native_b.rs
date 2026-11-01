@@ -205,6 +205,8 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
     } else if crate::native_list_ops::is_list_concat(name) {
         render_list_concat(call, OpSink { tys, out, indent, used_shims })
+    } else if let Some(floor) = protocol_instance_floor(&call, tys) {
+        render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -231,9 +233,17 @@ fn render_user_fn_call(
     for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
         let (code, got) = call_arg(a, s.tys)?;
-        rendered_args.push(user_arg_in_declared_mode(name, want, code, got)?);
+        let arg = user_arg_in_declared_mode(name, want, code, got)?;
+        // A narrow param crosses in its real Rust type (#4006).
+        rendered_args.push(match callee_sig.and_then(|(ps, _)| ps.get(i)).and_then(|k| k.narrow_rust()) {
+            Some(t) => format!("({arg} as {t})"),
+            None => arg,
+        });
     }
-    let rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    let mut rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    if callee_sig.and_then(|(_, r)| *r).is_some_and(|k| k.narrow_rust().is_some()) {
+        rendered = format!("({rendered} as i64)");
+    }
     bind_user_fn_result(call, callee_sig, &rendered, s)
 }
 
@@ -248,7 +258,7 @@ fn declared_param_want(
     p: &crate::MirParam,
 ) -> Result<NTy, LowerError> {
     Ok(match callee_sig.and_then(|(ps, _)| ps.get(i)) {
-        Some(NativeSigKind::I64) => NTy::I64,
+        Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::ListStr) => NTy::VecStrRef,
@@ -365,7 +375,7 @@ fn bind_user_fn_result(
                 Some(NativeSigKind::ListStr) => NTy::VecStr,
                 Some(NativeSigKind::Rec(i)) => NTy::Rec(i),
                 Some(NativeSigKind::Str) => NTy::Str,
-                Some(NativeSigKind::I64) => NTy::I64,
+                Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
                 Some(NativeSigKind::Res) => NTy::Res,
                 Some(NativeSigKind::Opt) => NTy::Opt,
@@ -424,6 +434,13 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
 /// A stdlib call its declaration puts on the native floor (`@intrinsic`, a
 /// per-type signature, a runtime body the header can carry): the runtime
 /// body is rendered beside the program and called as v0 calls it.
+/// The declared floor entry of the conformer a protocol-generic stdlib call
+/// answers with, given the kinds its args carry (`list.join` over strings).
+fn protocol_instance_floor(call: &NativeCall<'_>, tys: &BTreeMap<ValueId, NTy>) -> Option<&'static crate::native_floor::FloorFn> {
+    let kinds: Vec<NTy> = call.args.iter().map(|a| call_arg(a, tys).map(|(_, k)| k)).collect::<Result<_, _>>().ok()?;
+    crate::native_floor::declared(&crate::native_floor::protocol_instance(call.name, &kinds)?)
+}
+
 fn render_declared_floor_call(
     call: NativeCall<'_>,
     floor: &'static crate::native_floor::FloorFn,
@@ -865,8 +882,11 @@ pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
 /// dies with the arm, so it moves (its `.clone()` copied it a second time);
 /// a value that outlives the arm keeps `copy`.
 fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
+    // A value the arm itself defined dies with the arm's block: the join takes
+    // it by move (a list of strings or a generated record included — copying
+    // one deep-cloned every element, #4006 no-perf-loss audit).
     match t {
-        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr if arm_own => var(v),
+        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr | NTy::VecStr | NTy::Rec(_) if arm_own => var(v),
         _ => copy,
     }
 }
@@ -899,6 +919,12 @@ pub(crate) fn render_int_binop(
         IntOp::Div => {
             used_shims.push(shim("__chk_div").expect("\"__chk_div\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_div({l}, {r})")
+        }
+        // A literal divisor takes the standard route's constant remainder
+        // (render_native_rem.rs); it can never be 0 or -1, so no abort is lost.
+        IntOp::Mod if literal_rem_divisor(b).is_some() => {
+            used_shims.push(rem_const_shim());
+            format!("almide_rem_const::<{}>({l})", literal_rem_divisor(b).unwrap_or_default())
         }
         IntOp::Mod => {
             used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);

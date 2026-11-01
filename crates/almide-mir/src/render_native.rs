@@ -92,6 +92,35 @@ pub enum NativeSigKind {
     Opt,
     /// `Result<AlmideString, AlmideString>` — a `Result[String, String]`.
     ResStr,
+    /// A narrow integer (`Int8`..`UInt32`) crossing a call boundary as its
+    /// real Rust type (`i32`, `u8`, …): the value is the lane's i64 inside
+    /// the body, converted with `as` at the boundary (#4006). The MIR keeps
+    /// every narrow value re-wrapped, so both conversions are exact.
+    Narrow { bits: u8, signed: bool },
+}
+
+impl NativeSigKind {
+    /// The kind on the i64 lane: a narrow integer travels as `i64` where an
+    /// ABI is shared by dispatch (a closure table, a function value).
+    pub(crate) fn lane(self) -> Self {
+        match self {
+            NativeSigKind::Narrow { .. } => NativeSigKind::I64,
+            k => k,
+        }
+    }
+
+    /// The Rust spelling of a narrow integer kind (`None` for any other kind).
+    pub(crate) fn narrow_rust(self) -> Option<&'static str> {
+        let NativeSigKind::Narrow { bits, signed } = self else { return None };
+        Some(match (bits, signed) {
+            (8, true) => "i8",
+            (16, true) => "i16",
+            (32, true) => "i32",
+            (8, false) => "u8",
+            (16, false) => "u16",
+            _ => "u32",
+        })
+    }
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -249,11 +278,13 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
         .collect();
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
+    fan_rendered_reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
+        let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
@@ -281,6 +312,14 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
     push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
     crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    if fan_rendered() {
+        // #4006 family H: the fan runtime ahead of every other item (its
+        // output macros shadow std's for all that follows), and every exit
+        // through the trap wait.
+        let at = out.find("\n\n").map_or(0, |i| i + 2);
+        out.insert_str(at, &fan_glue());
+        out = route_exits(&out);
+    }
     Ok(out)
 }
 
@@ -318,7 +357,7 @@ fn seed_param_ntys(
             Some(NativeSigKind::ListStr) => NTy::VecStrRef,
             Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),
             Some(NativeSigKind::Str) => NTy::StrRef,
-            Some(NativeSigKind::I64) => NTy::I64,
+            Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
             Some(NativeSigKind::Opt) => NTy::Opt,
             Some(NativeSigKind::ResStr) => NTy::ResStr,
@@ -338,6 +377,7 @@ fn render_fn(
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
+    let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
     let mut out = String::new();
     let mut indent = 1usize;
@@ -374,13 +414,21 @@ fn render_fn(
     }
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
+        if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)? {
+            continue;
+        }
         // #3639: `s = s + x` / `string.push(s, x)` grows `s` in place.
         if let Some(append) = crate::render_native_append::str_self_append(func, i, &tys) {
             line!("{append}");
             ops.nth(1);
             continue;
         }
-        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys) {
+        if let Some(push) = crate::render_native_append::list_push(func, i, &tys) {
+            line!("{push}");
+            ops.nth(2);
+            continue;
+        }
+        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys, &borrows.arms) {
             line!("{append}");
             ops.nth(1);
             continue;
@@ -408,6 +456,30 @@ fn render_fn(
             }
             Op::Dup { dst, src } if borrows.arms.contains(dst) => {
                 crate::borrow_join::render_arm(dst, src, &mut tys, &mut out, indent)?
+            }
+            // A copy of a value nothing reads again moves it (no clone).
+            Op::Dup { dst, src }
+                if tys
+                    .get(src)
+                    .is_some_and(|t| crate::render_native_move::last_use(func, i, *src, *t, &borrows.arms)) =>
+            {
+                let t = tys[src];
+                tys.insert(*dst, t);
+                line!("let mut {} = std::mem::take(&mut {});", var(*dst), var(*src));
+            }
+            Op::SetLocal { local, src }
+                if tys.get(src).is_some_and(|t| {
+                    tys.get(local).is_none_or(|l| l == t)
+                        && crate::render_native_move::last_use(func, i, *src, *t, &borrows.arms)
+                }) =>
+            {
+                let t = tys[src];
+                if tys.contains_key(local) {
+                    line!("{} = std::mem::take(&mut {});", var(*local), var(*src));
+                } else {
+                    tys.insert(*local, t);
+                    line!("let mut {} = std::mem::take(&mut {});", var(*local), var(*src));
+                }
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).
@@ -569,6 +641,47 @@ fn finish_native_fn(
         out = out.replace(CUT_RET_MARKER, cut_ret);
     }
     Ok((format!("{sig}{out}"), ret_nty))
+}
+
+/// #4006: a function whose declared signature holds a narrow integer crosses
+/// its call boundary in the real Rust type (`i32`, `u8`, …), the way the
+/// standard codegen spells it — the i64 lane at the boundary cost an
+/// Int32 recurrence a sign-extension per call on its dependency chain. The
+/// body renders on the lane as before, as `NAME__lane` (inlined into the
+/// boundary fn), and the boundary converts with `as`: exact both ways, since
+/// the MIR keeps every narrow value re-wrapped to its width. Only an
+/// all-scalar signature takes this ABI (the sig table lanes any other).
+fn narrow_abi_wrapper(func: &MirFunction, sigs: &NativeSigs, rendered: String) -> Result<String, LowerError> {
+    let Some((ps, ret)) = sigs.get(func.name.as_str()) else { return Ok(rendered) };
+    if !ps.iter().chain(ret.iter()).any(|k| k.narrow_rust().is_some()) {
+        return Ok(rendered);
+    }
+    let m = mangle(&func.name);
+    let head = format!("fn {m}(");
+    if !rendered.contains(&head) || ps.len() != func.params.len() {
+        return Err(wall("native: a narrow-ABI fn whose rendered head is not found"));
+    }
+    let lane = rendered.replacen(&head, &format!("#[inline(always)]\nfn {m}__lane("), 1);
+    let spell = |k: &NativeSigKind| -> Result<&'static str, LowerError> {
+        match k {
+            NativeSigKind::I64 => Ok("i64"),
+            NativeSigKind::F64 => Ok("f64"),
+            k => k.narrow_rust().ok_or_else(|| wall("native: a narrow-ABI fn with a non-scalar signature")),
+        }
+    };
+    let mut params = Vec::new();
+    let mut args = Vec::new();
+    for (p, k) in func.params.iter().zip(ps) {
+        params.push(format!("{}: {}", var(p.value), spell(k)?));
+        args.push(if k.narrow_rust().is_some() { format!("{} as i64", var(p.value)) } else { var(p.value) });
+    }
+    let call = format!("{m}__lane({})", args.join(", "));
+    let (ret_s, body) = match ret {
+        None => (String::new(), format!("{call};")),
+        Some(k) if k.narrow_rust().is_some() => (format!(" -> {}", spell(k)?), format!("{call} as {}", spell(k)?)),
+        Some(k) => (format!(" -> {}", spell(k)?), call),
+    };
+    Ok(format!("{lane}fn {m}({}){ret_s} {{\n    {body}\n}}\n", params.join(", ")))
 }
 
 /// The trailing return expression: a borrowed param is moved out as a fresh
@@ -744,7 +857,17 @@ fn render_native_flow_op(
         }};
     }
     match op {
-        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } | Op::DropWrapperRec { .. } => {
+        Op::DropVariant { .. }
+        | Op::Drop { .. }
+        | Op::DropListStr { .. }
+        | Op::DropWrapperRec { .. }
+        | Op::DropValue { .. }
+        | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. }
+        | Op::DropResultValue { .. }
+        | Op::DropResultListValue { .. }
+        | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. } => {
             return render_native_drop_op(op, borrows, tys, out, *indent)
         }
         // Pure ownership bookkeeping — no native code.
@@ -825,6 +948,19 @@ fn render_native_drop_op(
         {
             line!("// drop: borrowed join, scope-end");
         }
+        // The Value-holding releases: the wasm leg's routine walks the block's
+        // tags to free it; a native value of a generated type (the runtime
+        // `Value`, a list of it, a carrier of it) frees like any owned Rust value.
+        Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v } => match tys.get(v) {
+            Some(NTy::Rec(_)) => line!("// drop(value-holding): scope-end"),
+            other => return Err(wall(format!("native: {} of a {other:?} value", op_name(op)))),
+        },
         Op::Drop { v } => {
             if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
                 return Err(wall(
@@ -939,3 +1075,5 @@ pub(crate) fn render_dup(
 }
 
 include!("render_native_b.rs");
+include!("render_native_fan.rs");
+include!("render_native_rem.rs");

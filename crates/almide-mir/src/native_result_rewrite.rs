@@ -42,7 +42,16 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Rewrite every recognized Result window in `f`. `result_fns` names the
 /// functions whose (declared) return is a native-carrier Result — their
 /// `CallFn` dsts seed the consumer-side value tracking.
-pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>, res_params: &[ValueId]) {
+///
+/// `carriers` are the values whose declared type is a generated Option/Result
+/// carrier (`render_native_carrier`, e.g. `Result[Int, Int]`): their semantic
+/// Ok is that carrier's, rendered from the unrewritten MIR.
+pub fn rewrite_result_ops(
+    f: &mut MirFunction,
+    result_fns: &BTreeSet<String>,
+    res_params: &[ValueId],
+    carriers: &BTreeSet<ValueId>,
+) {
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
@@ -62,7 +71,7 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>, re
             // the piece's own accounting untouched — the carrier clones). This is
             // what retires the producer-window recognition below for every
             // materializer that emits the semantic form.
-            Op::Alloc { dst, init: Init::ResOkScalar { payload }, .. } => {
+            Op::Alloc { dst, init: Init::ResOkScalar { payload }, .. } if !carriers.contains(dst) => {
                 let (dst, payload) = (*dst, *payload);
                 out.push(Op::Prim {
                     kind: PrimKind::ResMakeOk,

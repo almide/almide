@@ -1,0 +1,14 @@
+// v1-vs-v0 shape bench: a record with a List field rebuilt in a loop.
+type Acc = { items: List[Int], n: Int }
+
+fn add(a: Acc, v: Int) -> Acc = { items: a.items + [v], n: a.n + 1 }
+
+fn main() -> Unit = {
+  var a: Acc = { items: [], n: 0 }
+  var i = 0
+  while i < 20000 {
+    a = add(a, i)
+    i = i + 1
+  }
+  println(int.to_string(a.n + list.len(a.items)))
+}

@@ -44,10 +44,13 @@ pub mod prim_ops;
 pub mod purity;
 pub mod render_native;
 mod lambda_sigs;
+mod fan_native;
 mod render_native_addr;
 mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;
+mod render_native_move;
+mod render_native_borrow_read;
 mod render_native_str;
 mod render_native_op_families;
 mod render_native_shims;
@@ -56,6 +59,7 @@ pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
 mod native_list_ops;
+mod native_narrow_rewrite;
 
 use std::collections::{BTreeMap, BTreeSet};
 

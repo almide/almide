@@ -321,6 +321,33 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
             line!("ALMD_SLOT_{}.store({}, std::sync::atomic::Ordering::Relaxed);", slot, v);
         }
+        // ── #4006: narrow integer arithmetic (native_narrow_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::NativeNarrowBin { op, bits, signed },
+            dst: Some(d),
+            args,
+        } if args.len() == 2 => {
+            let ty = match (*bits, *signed) {
+                (8, true) => "i8",
+                (16, true) => "i16",
+                (32, true) => "i32",
+                (8, false) => "u8",
+                (16, false) => "u16",
+                (32, false) => "u32",
+                _ => return Err(wall(format!("native: a narrow op at width {bits}"))),
+            };
+            let f = match op {
+                crate::IntOp::Add => "wrapping_add",
+                crate::IntOp::Sub => "wrapping_sub",
+                crate::IntOp::Mul => "wrapping_mul",
+                other => return Err(wall(format!("native: a narrow {other:?}"))),
+            };
+            if args.iter().any(|a| tys.get(a) != Some(&NTy::I64)) {
+                return Err(wall("native: a narrow op over a non-integer operand"));
+            }
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = (({} as {ty}).{f}({} as {ty})) as i64;", var(*d), var(args[0]), var(args[1]));
+        }
         // ── #4006 family B: the native scalar-Option carrier (native_option_rewrite) ──
         Op::Prim {
             kind: crate::PrimKind::OptMakeSome,
@@ -467,7 +494,14 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // bidi controls today, but one rule for every native renderer
                 // keeps that a property of the code, not of std's Debug tables.
                 let lit = almide_base::rust_lit::escape_rust_str(s);
-                line!("let mut {}: AlmideString = AlmideString::from(\"{lit}\");", var(*dst));
+                // An immortal static block (`rc == 0`, ADR-0013): a literal
+                // costs no allocation and no free, as the standard codegen's
+                // borrowed `&str` literal does; an edit copies it first.
+                line!(
+                    "let mut {}: AlmideString = {{ static S: crate::almide_str_block::AlmideStrStatic<{}> = crate::almide_str_block::AlmideStrStatic::new(\"{lit}\"); AlmideString::from_static(&S) }};",
+                    var(*dst),
+                    s.len()
+                );
             }
             // #4006: a constant int list (a literal the lowering folded, an
             // empty `[]`, a top-level list `let`) — the same Vec a ListLit renders.

@@ -1,0 +1,13 @@
+# Known v1-slower-than-v0 programs (scripts/check-native-v1-perf.sh). A DEBT
+# list, not an allowance: each row is a certified program whose v1 render runs
+# more instructions than its v0 build, with the ratio it was found at (it may
+# only fall), the date found and the plan that removes it. A row goes as soon
+# as the program reads clean; the gate fails on a clean row left behind.
+#
+# program<TAB>ratio<TAB>found<TAB>plan
+spec/wasm_cross/append_accumulator_heap_linear.almd	1.374	2026-11-01	List[String] append copies each element (rc increment per string); 686b78f6a moves a last-use appended list (append) — re-measure, then drop the row
+spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd	1.116	2026-11-01	threaded fan block: per-arm scoped spawn and result routing cost more than the standard route on a 2M-step arm; profile the spawn/join path in render_native_fan.rs (family H)
+spec/wasm_cross/rc_reclaim_churn.almd	1.193	2026-11-01	a record field read for string.len clones the String; extend render_native_borrow_read to generated-struct field reads (borrow-only uses)
+spec/wasm_cross/variant_result_one_credit_churn.almd	1.618	2026-11-01	enum payload reads that feed a constructor or an if-join still deep-copy; borrow or move them (borrow_read + last-use moves on payloads)
+research/benchmark/perf/v1-shapes/string_index_loop.almd	1.380	2026-11-01	string.get renders the linked self-host codepoint scan per call where v0 calls the runtime; render the scan over the borrowed bytes without per-byte bounds checks, or route string.get to the declared native floor
+research/benchmark/perf/v1-shapes/tree_walk.almd	1.213	2026-11-01	enum construction renders Default::default() then with_tag then field sets; build the case in one expression
