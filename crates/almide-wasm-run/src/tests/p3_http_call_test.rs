@@ -135,7 +135,7 @@ fn corpus() -> Vec<Vec<u8>> {
     for _ in 0..4000 {
         let n = (g.next() % 12) as usize;
         let v: Vec<u8> = (0..n)
-            .map(|_| if g.next() % 3 == 0 { (g.next() & 0xFF) as u8 } else { pick[(g.next() as usize) % pick.len()] })
+            .map(|_| if g.next().is_multiple_of(3) { (g.next() & 0xFF) as u8 } else { pick[(g.next() as usize) % pick.len()] })
             .collect();
         out.push(v);
     }
