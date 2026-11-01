@@ -156,8 +156,22 @@ fn outside_untouched(base: &Path) {
 /// Replace `data/sub` by a link to `outside/sub` (the original kept aside).
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn swap(base: &Path, link: LinkFn) {
-    std::fs::rename(base.join("data").join("sub"), base.join("data").join("sub.orig")).expect("test fixture setup");
+    assert!(try_swap(base, link), "test fixture setup: data/sub could not be renamed");
+}
+
+/// [`swap`], false when the OS refuses the rename. Windows refuses to
+/// rename a directory while a handle to something inside it is open, so a
+/// walk that already holds `sub/deep` makes the swap itself impossible there:
+/// the attacker's window closes in the kernel, not only in the walk.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn try_swap(base: &Path, link: LinkFn) -> bool {
+    match std::fs::rename(base.join("data").join("sub"), base.join("data").join("sub.orig")) {
+        Ok(()) => {}
+        Err(e) if cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied => return false,
+        Err(e) => panic!("test fixture setup: {e}"),
+    }
     link(&base.join("outside").join("sub"), &base.join("data").join("sub"));
+    true
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
@@ -269,17 +283,23 @@ fn rooted_calls_never_leave_their_root() {
             let (_t, base) = tree();
             let root = s(&base.join("data"));
             let mut swapped = false;
+            let mut hook_ran = false;
             let r = fs_beneath_read_with(&root, "sub/deep/a.txt", true, &mut |i| {
-                if i == at && !swapped {
-                    swap(&base, link);
-                    swapped = true;
-                    // The window is real: a path-based read at this instant
-                    // — the pre-#4084 check-then-use — reaches the outside.
-                    let p = base.join("data").join("sub").join("deep").join("a.txt");
-                    assert_eq!(std::fs::read_to_string(p).expect("test fixture setup"), "outside");
+                if i == at && !hook_ran {
+                    hook_ran = true;
+                    // Windows refuses the rename once the walk holds a handle
+                    // below `sub` (hooks 1 and 2): no window opens at all.
+                    swapped = try_swap(&base, link);
+                    if swapped {
+                        // The window is real: a path-based read at this instant
+                        // — the pre-#4084 check-then-use — reaches the outside.
+                        let p = base.join("data").join("sub").join("deep").join("a.txt");
+                        assert_eq!(std::fs::read_to_string(p).expect("test fixture setup"), "outside");
+                    }
                 }
             });
-            assert!(swapped, "the hook never ran at {at}");
+            assert!(hook_ran, "the hook never ran at {at}");
+            assert!(swapped || (cfg!(windows) && at > 0), "{kind}: the rename was refused before the walk held anything (hook {at})");
             match r {
                 Err(FsBeneathError::Escape) => assert_eq!(at, 0, "{kind}: refused although the walk already held sub"),
                 Ok(bytes) => {
