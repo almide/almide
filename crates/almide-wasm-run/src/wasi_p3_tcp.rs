@@ -153,7 +153,6 @@ struct TcpTexts {
     read_head: NetPiece,
     rt_head: NetPiece,
     write_head: NetPiece,
-    available_head: NetPiece,
     local_head: NetPiece,
     ec_timeout: i32,
     ec_broken: i32,
@@ -208,7 +207,8 @@ impl TcpTexts {
             read_head: put(read_head.as_bytes()),
             rt_head: put(rt_head.as_bytes()),
             write_head: put(b"tcp_write"),
-            available_head: put(b"tcp_available"),
+            // No `tcp_available` head: past the handle check the lookahead
+            // copy never fails; a broken stream reaches the next read.
             local_head: put(b"tcp_local_port"),
             ec_timeout: disc(nc::NetErrorClass::Timeout),
             ec_broken: disc(nc::NetErrorClass::ConnectionBroken),
