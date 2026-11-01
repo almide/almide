@@ -60,7 +60,12 @@ impl Emitter<'_> {
         if let Some(op) = framed.or(proc) {
             let [a, b] = args else { return unsup("host-leaf-arity") };
             self.fs_call_str2(a, b, op)?;
-            return Ok(Some(self.fs_result_string()?));
+            // The text and status leaves answer the response body as the
+            // server sent it: decode it lossily, as native does (#4387). The
+            // response leaf's answer keeps the raw body cell `body_bytes`
+            // reads (http_framed.almd); the subprocess leaves are unchanged.
+            let text = op == OP_HTTP_FRAMED_TEXT || op == OP_HTTP_FRAMED_STATUS;
+            return Ok(Some(if text { self.fs_result_text_lossy()? } else { self.fs_result_string()? }));
         }
         // The http.serve loop's leaves (#2650): bind (port text), next (the
         // request as a List[String] of frames), reply (the response's cells

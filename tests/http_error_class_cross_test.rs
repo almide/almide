@@ -306,3 +306,49 @@ effect fn main() -> Unit = {{
     );
     assert_eq!(out, want);
 }
+
+/// #4387 (C-328): a body that is not UTF-8 reads as native's lossy decode on
+/// every lane. The p3 component used to hand the server's bytes back as the
+/// String itself — `[97, 128, 98, 206]` where native reads
+/// `a\u{FFFD}b\u{FFFD}` — and `string.reverse` then walked the trailing lead
+/// byte's claimed continuation off the end of the block. The text, request
+/// and status forms all ride the decode; the reversed and lower-cased copies
+/// prove the String a program receives keeps the encoding invariant.
+#[test]
+fn a_non_utf8_body_reads_as_the_lossy_decode_on_native_embedded_and_p3() {
+    if !wasmtime_runs_p3() {
+        return;
+    }
+    let body: &[u8] = b"a\x80b\xce";
+    let mut reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+    reply.extend_from_slice(body);
+    let port = answering(reply);
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("non_utf8_body.almd");
+    std::fs::write(
+        &src,
+        format!(
+            r#"import http
+
+fn hx(s: String) -> String = "${{bytes.to_list(bytes.from_string(s))}}"
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {{
+  match r {{
+    ok(b) => println("${{tag}}: ${{hx(b)}} rev=${{hx(string.reverse(b))}} lower=${{hx(string.to_lower(b))}}"),
+    err(e) => println("${{tag}}: ${{e}}"),
+  }}
+}}
+
+effect fn main() -> Unit = {{
+  show("get", http.get("http://127.0.0.1:{port}/"))
+  show("request", http.request("GET", "http://127.0.0.1:{port}/", "", [("X-Ok", "1")]))
+}}
+"#
+        ),
+    )
+    .expect("write program");
+    let out = assert_same("non-UTF-8 body", &three_legs(&src, &[], scratch.path()));
+    let lossy = "[97, 239, 191, 189, 98, 239, 191, 189]";
+    let rev = "[239, 191, 189, 98, 239, 191, 189, 97]";
+    assert_eq!(out, format!("get: {lossy} rev={rev} lower={lossy}\nrequest: {lossy} rev={rev} lower={lossy}\n"));
+}
