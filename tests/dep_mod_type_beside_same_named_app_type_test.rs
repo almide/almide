@@ -149,3 +149,25 @@ fn the_dependency_mod_type_is_still_opaque_to_the_app() {
         );
     }
 }
+
+/// #4322 and #4352 in one program: the entry declares a record that shadows
+/// the dependency's ROOT `mod type Vault` (#4322's shape) beside the
+/// `ToolCall` that shadows its submodule's `mod type ToolCall` (#4352's).
+/// The two fixes read one entry-own key, so each declaration answers its own
+/// bare spelling, whichever of the two shapes the dependency holds.
+#[test]
+fn a_root_and_a_submodule_mod_type_shadowed_in_one_entry_file() {
+    if !tools_available() {
+        return;
+    }
+    let app = scratch(
+        "both",
+        true,
+        "type Vault = { key: String }\n\neffect fn main() -> Unit = {\n  let v = Vault { key: \"k\" }\n  let Vault { key } = { ...v, key: \"w\" }\n  println(\"${id_of(make(\"y\"))} ${v.key} ${key} [${uses_dep()}]\")\n}\n",
+    );
+    write(
+        &app.join("..").join("dep").join("src").join("mod.almd"),
+        &format!("{DEP_MOD}\nmod type Vault = {{ key: String }}\n"),
+    );
+    assert_runs_on_both_targets(&app, "y k w []\n");
+}
