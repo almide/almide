@@ -380,6 +380,11 @@ fn render_fn(
             ops.nth(1);
             continue;
         }
+        if let Some(push) = crate::render_native_append::list_push(func, i, &tys) {
+            line!("{push}");
+            ops.nth(2);
+            continue;
+        }
         if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys) {
             line!("{append}");
             ops.nth(1);
@@ -408,6 +413,30 @@ fn render_fn(
             }
             Op::Dup { dst, src } if borrows.arms.contains(dst) => {
                 crate::borrow_join::render_arm(dst, src, &mut tys, &mut out, indent)?
+            }
+            // A copy of a value nothing reads again moves it (no clone).
+            Op::Dup { dst, src }
+                if tys
+                    .get(src)
+                    .is_some_and(|t| crate::render_native_move::last_use(func, i, *src, *t, &borrows.arms)) =>
+            {
+                let t = tys[src];
+                tys.insert(*dst, t);
+                line!("let mut {} = std::mem::take(&mut {});", var(*dst), var(*src));
+            }
+            Op::SetLocal { local, src }
+                if tys.get(src).is_some_and(|t| {
+                    tys.get(local).is_none_or(|l| l == t)
+                        && crate::render_native_move::last_use(func, i, *src, *t, &borrows.arms)
+                }) =>
+            {
+                let t = tys[src];
+                if tys.contains_key(local) {
+                    line!("{} = std::mem::take(&mut {});", var(*local), var(*src));
+                } else {
+                    tys.insert(*local, t);
+                    line!("let mut {} = std::mem::take(&mut {});", var(*local), var(*src));
+                }
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).

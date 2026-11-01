@@ -48,6 +48,7 @@ mod render_native_addr;
 mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;
+mod render_native_move;
 mod render_native_str;
 mod render_native_op_families;
 mod render_native_shims;

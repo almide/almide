@@ -83,3 +83,42 @@ pub(crate) fn list_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<Valu
     let (xs, x_own) = crate::native_list_ops::as_slice(&var(x), *tys.get(&x)?)?;
     (own == x_own).then(|| format!("{}.extend_from_slice({xs});", var(s)))
 }
+
+/// `list.push(xs, e)` (#4006, no-perf-loss rule): the lowering builds a fresh
+/// one-element list and appends it (`t = [e]; d = xs + t; drop xs; xs = d`),
+/// which [`list_self_append`] alone renders as a `vec![e]` allocation plus an
+/// `extend_from_slice` per push. When the literal feeds only that append, the
+/// four ops render as `xs.push(e)` (several scalar elements: one
+/// `extend_from_slice` of an array, no heap literal). Taken under
+/// [`list_self_append`]'s conditions, for a scalar list.
+pub(crate) fn list_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>) -> Option<String> {
+    if crate::render_native_move::drill_no_moves() {
+        return None;
+    }
+    let Op::ListLit { dst: lit, elems } = func.ops.get(i)? else {
+        return None;
+    };
+    let (s, x, d) = self_append_window(func, i + 1)?;
+    if x != *lit || tys.get(&s) != Some(&NTy::Vec) || func.ret == Some(d) || touches(func, d) != 2 {
+        return None;
+    }
+    if elems.is_empty() || !elems.iter().all(|e| tys.get(e) == Some(&NTy::I64)) || elems.contains(&s) {
+        return None;
+    }
+    // The literal is read by nothing but the append (drops erase on this render).
+    let mut vals = Vec::new();
+    for op in func.ops.iter().filter(|op| !crate::render_native_move::bookkeeping(op)) {
+        crate::mir_ops::op_values(op, &mut vals);
+    }
+    if vals.iter().filter(|&&w| w == *lit).count() != 2 || func.ret == Some(*lit) {
+        return None;
+    }
+    Some(match elems.as_slice() {
+        [e] => format!("{}.push({});", var(s), var(*e)),
+        many => format!(
+            "{}.extend_from_slice(&[{}]);",
+            var(s),
+            many.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ")
+        ),
+    })
+}
