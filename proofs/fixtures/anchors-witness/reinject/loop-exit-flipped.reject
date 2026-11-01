@@ -1,1 +1,1 @@
-ANCHORS REJECT: bounds stretch 0: `a0` against its check at 6:37: the walk's access is 8 bytes at offset 12, not one payload byte
+ANCHORS REJECT: bounds stretch 0: `a0` against its check at 6:35: the walk's access is 8 bytes at offset 12, not one payload byte
