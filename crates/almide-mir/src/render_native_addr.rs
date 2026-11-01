@@ -78,6 +78,10 @@ pub(crate) struct AddrState {
     /// Heap slot reads of an owned record that move the value out
     /// (`render_native_slots::movable_loads`): nothing reads the slot again.
     moves: BTreeSet<ValueId>,
+    /// Struct blocks built whole (`render_native_slots::built_whole`), and
+    /// the fields stored so far of the one being built.
+    whole: BTreeSet<ValueId>,
+    building: BTreeMap<ValueId, Vec<bool>>,
 }
 
 impl AddrState {
@@ -205,6 +209,7 @@ impl AddrState {
                 _ => None,
             })
             .collect();
+        let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let reassigned = func
             .ops
             .iter()
@@ -252,6 +257,8 @@ impl AddrState {
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
             moves,
+            whole,
+            building: BTreeMap::new(),
         }
     }
 }
@@ -557,6 +564,19 @@ pub(crate) fn render_addr_op(
                     },
                     (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
                 };
+                if let Some(done) = st.building.get_mut(&ad.base) {
+                    // A struct built whole: the field waits in its own local
+                    // until the last one is stored.
+                    let b = var(ad.base);
+                    line!("let mut {b}_f{k}: {} = {rhs};", crate::render_native_rec::owned_ty(field));
+                    done[k] = true;
+                    if done.iter().all(|d| *d) {
+                        let fields = (0..done.len()).map(|f| format!("f{f}: {b}_f{f}")).collect::<Vec<_>>().join(", ");
+                        line!("{b} = {} {{ {fields} }};", crate::render_native_rec::struct_name(i));
+                        st.building.remove(&ad.base);
+                    }
+                    return Ok(true);
+                }
                 line!("{}.f{k} = {rhs};", var(ad.base));
                 return Ok(true);
             }
@@ -620,6 +640,11 @@ pub(crate) fn render_addr_op(
         Op::Alloc { dst, init: Init::DynList { .. }, .. } if st.alloc_rec.contains_key(dst) => {
             let i = st.alloc_rec[dst];
             tys.insert(*dst, NTy::Rec(i));
+            if let (true, Some(n)) = (st.whole.contains(dst), slots::struct_width(i)) {
+                line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
+                st.building.insert(*dst, vec![false; n]);
+                return Ok(true);
+            }
             line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
             return Ok(true);
         }

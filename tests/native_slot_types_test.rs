@@ -1,8 +1,9 @@
 //! #4006: untyped slot blocks typed from their stores render natively
 //! (crates/almide-mir/src/render_native_slots.rs), byte-identical to the v0
 //! native pipeline. A tuple of mixed slot kinds is a generated struct of its
-//! slot kinds; the last read of a heap slot of an owned record moves the
-//! value out instead of copying it, and every other read copies.
+//! slot kinds, built whole when its fields are stored in one straight run;
+//! the last read of a heap slot of an owned record moves the value out
+//! instead of copying it, and every other read copies.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -55,7 +56,14 @@ fn a_mixed_tuple_is_a_struct_of_its_slot_kinds_and_its_one_read_moves() {
         "fn main() -> Unit = {\n  let t: (Int, String) = (4, \"x\")\n  println(match t {\n    (n, s) => int.to_string(n) + s\n  })\n}\n",
     );
     assert!(rust.contains("f0: i64,") && rust.contains("f1: AlmideString,"), "no struct of the slot kinds:\n{rust}");
-    assert!(rust.contains("= std::mem::take(&mut v"), "the one read of the String slot copies instead of moving:\n{rust}");
+    assert!(
+        rust.lines().any(|l| l.contains("= std::mem::take(&mut v") && l.contains(".f1)")),
+        "the one read of the String slot copies instead of moving:\n{rust}"
+    );
+    assert!(
+        rust.lines().any(|l| l.contains(" = AlmdRec") && l.contains("{ f0: ")),
+        "the tuple is assigned field by field instead of built whole:\n{rust}"
+    );
 }
 
 /// A slot read again later, or read inside a loop, is copied: moving it out

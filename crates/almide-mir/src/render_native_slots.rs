@@ -373,6 +373,67 @@ pub(super) fn movable_loads(func: &MirFunction, base_of: &BTreeMap<ValueId, (Val
     out
 }
 
+/// The field count of a generated plain struct (not a list, an enum or a carrier).
+pub(super) fn struct_width(i: u16) -> Option<usize> {
+    if rec::list_elem(i).is_some() || rec::enum_cases(i).is_some() || carrier::is_carrier(i) {
+        return None;
+    }
+    let n = (0..).take_while(|k| rec::rec_field(i, *k).is_some()).count();
+    (n > 0).then_some(n)
+}
+
+/// The struct blocks the render builds whole, `Struct { f0, … }`, instead of
+/// a default value whose fields are then assigned: each field is stored
+/// exactly once at a constant slot, in the alloc's own straight-line run
+/// (no `if` or loop marker before the last store), and nothing reads the
+/// block before then but its own address arithmetic.
+pub(super) fn built_whole(
+    func: &MirFunction,
+    alloc_rec: &BTreeMap<ValueId, u16>,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+) -> BTreeSet<ValueId> {
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynList { .. }, .. } = op else { continue };
+        let Some(n) = alloc_rec.get(b).and_then(|r| struct_width(*r)) else { continue };
+        let mut stored = vec![false; n];
+        let mut whole = false;
+        for later in &func.ops[i + 1..] {
+            let ok = match later {
+                Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopStart | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => false,
+                Op::Prim { kind: PrimKind::Handle, args, .. } if args.first() == Some(b) => true,
+                Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } if rooted(a, *b) || rooted(y, *b) => true,
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| rooted(a, *b)) => {
+                    match base_of.get(&args[0]).and_then(|(_, o)| slot_of(*o)).filter(|k| *k < n) {
+                        Some(k) if !stored[k] && !rooted(&args[1], *b) => {
+                            stored[k] = true;
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                other => {
+                    let mut reads = Vec::new();
+                    crate::mir_ops::op_reads(other, &mut reads);
+                    !reads.iter().any(|v| v == b || rooted(v, *b))
+                }
+            };
+            if !ok {
+                break;
+            }
+            if stored.iter().all(|s| *s) {
+                whole = true;
+                break;
+            }
+        }
+        if whole {
+            out.insert(*b);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::slot_kinds;
