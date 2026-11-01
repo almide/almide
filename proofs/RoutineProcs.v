@@ -445,7 +445,7 @@ Proof.
   intros P f gs [[kq cq] nq] body HP Hf. unfold procs_ok in HP. rewrite forallb_forall in HP.
   unfold plook in Hf.
   destruct (find (fun q => Nat.eqb (fst q) f) P) as [[g d] |] eqn:Hfd; [| discriminate].
-  injection Hf as <-. apply find_some in Hfd. destruct Hfd as [Hin _].
+  injection Hf as Hd. subst d. apply find_some in Hfd. destruct Hfd as [Hin _].
   specialize (HP _ Hin). simpl in HP. simpl.
   destruct (pcheck P gs kq cq nq body) as [rb |]; [exists rb; reflexivity | discriminate].
 Qed.
