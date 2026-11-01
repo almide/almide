@@ -486,13 +486,18 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
         // i64 slot values (the wasm leg stores the same bits).
         Op::ListLit { dst, elems } => {
+            // A real `f64` element goes into its slot as its bits — the value
+            // the MIR (and the wasm leg) stores there.
+            let mut items = Vec::with_capacity(elems.len());
             for e in elems {
-                if tys.get(e) != Some(&NTy::I64) {
-                    return Err(wall("native: ListLit with a non-scalar element"));
-                }
+                items.push(match tys.get(e) {
+                    Some(NTy::I64) => var(*e),
+                    Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
+                    _ => return Err(wall("native: ListLit with a non-scalar element")),
+                });
             }
             tys.insert(*dst, NTy::Vec);
-            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+            let items = items.join(", ");
             line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
