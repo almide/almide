@@ -662,6 +662,47 @@ fn c_sqrt(x: Float) -> Float = _
 
 テスト: `tests/extern_rust_abi_test.rs`（`rust` / `rs` / `c` の各ターゲット × 全引数型。rust 系は上の表のホスト型で一つのパッケージにまとめてビルド・実行、c は `extern "C"` のホスト関数で往復し、表にない型は一つずつ E090 になることを確かめる。`Ty` の全バリアントがどの行で被覆されるかは網羅 match で固定）、`tests/diagnostics/e090-*`。
 
+### 11.3 ホストとの境界での `Region`（ADR-0031 補遺、#4354）
+
+`Region` はホスト境界を**先頭アドレスと長さの二つの値** `(base, len)` で渡る。長さは常に Region 自身が保持している値で、呼び出し側が書いた数ではない。wasm では二つの値はメモリのアドレス幅で渡る: wasm32 では `i32` 二つ、memory64 では `i64` 二つ（今のエミッタは 32 ビットのメモリだけを宣言する）。ネイティブのホストは `(*mut u8, usize)`（`@extern(rust)`、§11.1）／`(uint8_t *, size_t)`（`@extern(c)`、§11.2）で受け取る。どの方向でも `Bytes` へのコピーは起きない。
+
+| 形 | 渡り方 | 所有と寿命 |
+|---|---|---|
+| `@export(wasm)` fn が `Region` を**返す**（push） | マルチバリューの戻り値 `(ptr, len)`。ビューのデータ先頭と長さで、Region レコードのアドレスではない | ホストがブロックの参照を一つ持つ。ホストが `ptr` をモジュールの `__region_release` に返すまでブロックは解放されず、場所も動かない。返さなければインスタンスの寿命まで残る（漏れであって、ぶら下がりではない） |
+| 同上、`ffi.slice` の部分 Region を返す | 親ブロック内の自分のアドレスと長さ | モジュール内の表がアドレス→ブロックを引く。部分 Region の参照が残る間は親も生きる。表にないアドレス（解放済み・未発行）の解放は trap、0 の解放は何もしない。空の Region は `(0, 0)` |
+| `@export(wasm)` fn が `Region` を**受け取る** | ホストが `(base, len)` を渡す（import に渡すのと同じ組） | 呼び出しの間だけ貸される読み取り専用の Region。何も所有せず、長さはホストの申告（信頼する一行）。アクセスはその長さで境界検査される。本体が top-level `var` に入れる・返す・クロージャに捕まえるのは E119 |
+| `@extern(wasm)` に `Region` を渡す（pull） | import の引数 `(base, len)` | 呼び出しの間だけ貸す。`ffi.alloc` の書き込み可能な Region ならホストがその場で書き込み、プログラムが読み戻す |
+| `@export(c)` fn が `Region` を受け取る | `(const uint8_t *, size_t)`、`@region(out = p)` なら `(uint8_t *, size_t)` で書き込み可 | 呼び出しの間だけ貸す。逃がすのは E119、それ以外の経路で残れば呼び出し後にプロセスを止める |
+| `@export(c)` fn が `Region` を返す | なし — `check` が E090 で拒否する | C の呼び出し側が解放できる形がないため。呼び出し側のバッファを `@region(out = p)` で受け取る |
+
+書き込める Region は `ffi.alloc` のものだけ（`ffi.region(b)` と `ffi.slice` は読み取り専用）。ホストが push で受け取った `ffi.alloc` の Region に書き込み、次の export がプログラム側のコピー（top-level `var`）を通して読む。
+
+```almide
+import ffi
+
+var inbox: Region = ffi.region(bytes.new())
+
+@export(wasm, "inbox_open")
+effect fn inbox_open(n: Int) -> Region = {
+  inbox = ffi.alloc(n)!
+  inbox
+}
+
+@export(wasm, "inbox_show")
+effect fn inbox_show() -> Unit = println(bytes.to_string_lossy(ffi.read(inbox, 0, ffi.len(inbox))!))
+```
+
+```js
+const [ptr, len] = instance.exports.inbox_open(16n);   // i32 二つ
+new Uint8Array(instance.exports.memory.buffer, ptr, len).set(data);
+instance.exports.inbox_show();
+instance.exports.__region_release(ptr);                // ホストの参照を返す
+```
+
+`--host js` のグルーは Region を返す export を `f(…) → [ptr, len]` で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
+
+仕組み: `crates/almide-wasm/src/extern_region.rs`（IR 書き換え: 受け取りは `ffi.__lend` を呼ぶラッパ、返却は `ffi.__export_view` を返すラッパ）と `crates/almide-wasm/src/region_export.rs`（アダプタ・アドレス表・`__region_release`）。テスト: `spec/wasm_host_js/region_export_push.almd`（push、部分 Region と解放、受け取り）、`spec/wasm_host_js/region_extern_pull.almd`（pull）、`crates/almide-wasm/tests/ffi_host_boundary.rs`、`tests/ffi_host_boundary_test.rs`（E119、`@export(c)`）。
+
 ---
 
 ## 12. ファイル解決順序

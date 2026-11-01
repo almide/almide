@@ -53,8 +53,6 @@ export async function after(m) {
   }
   say(`tail after the parent's release: ${text(sub, subLen)}`);
   release(sub);
-  assert.throws(() => release(sub), WebAssembly.RuntimeError, "a second release of an address traps");
-  say("a second release traps");
 
   // An empty Region crosses as (0, 0); releasing 0 is a no-op.
   const [z, zLen] = m.inbox_tail(16);
@@ -74,4 +72,9 @@ export async function after(m) {
   churn(4000);
   assert.equal(raw.memory.buffer.byteLength, settled, "memory grew: a released share leaks");
   say("released shares free their blocks");
+
+  // Last, since a trap ends the instance: a second release of an address
+  // traps (the WASI build reports it as exit 1).
+  assert.throws(() => release(sub), (e) => e instanceof m.AlmideExit || e instanceof WebAssembly.RuntimeError);
+  say("a second release traps");
 }
