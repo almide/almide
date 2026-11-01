@@ -627,7 +627,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
         source_to_ir_with(source, &[])?
     };
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
-    require_native_concurrency_support(&ir)?;
+    let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
     // strict-walls (the probe_native trap recorded in the trust-spine ledger).
@@ -663,6 +663,16 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     // (literals, other top-level lets, operators that cannot abort) stays
     // materialized at each use: it can neither fail nor be observed.
     let mut ir = ir;
+    // The shared accumulator tail-recursion rewrite (#2577), from the same
+    // preconditions the wasm leg and the standard codegen apply it: one
+    // recursive call per non-leaf instead of two. Skipped, as there, when the
+    // program brackets a budget/timeout region (its loop head would be a
+    // charge the meter sees).
+    if !almide_ir::meter_plan::program_has_regions(&ir) {
+        for f in ir.functions.iter_mut() {
+            almide_ir::accum_tre::rewrite(f, &mut ir.var_table);
+        }
+    }
     let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
     let mut eager = false;
     for tl in ir.top_lets.iter_mut() {

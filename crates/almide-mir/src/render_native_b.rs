@@ -888,8 +888,11 @@ pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
 /// dies with the arm, so it moves (its `.clone()` copied it a second time);
 /// a value that outlives the arm keeps `copy`.
 fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
+    // A value the arm itself defined dies with the arm's block: the join takes
+    // it by move (a list of strings or a generated record included — copying
+    // one deep-cloned every element, #4006 no-perf-loss audit).
     match t {
-        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr if arm_own => var(v),
+        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr | NTy::VecStr | NTy::Rec(_) if arm_own => var(v),
         _ => copy,
     }
 }
@@ -922,6 +925,12 @@ pub(crate) fn render_int_binop(
         IntOp::Div => {
             used_shims.push(shim("__chk_div").expect("\"__chk_div\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_div({l}, {r})")
+        }
+        // A literal divisor takes the standard route's constant remainder
+        // (render_native_rem.rs); it can never be 0 or -1, so no abort is lost.
+        IntOp::Mod if literal_rem_divisor(b).is_some() => {
+            used_shims.push(rem_const_shim());
+            format!("almide_rem_const::<{}>({l})", literal_rem_divisor(b).unwrap_or_default())
         }
         IntOp::Mod => {
             used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);

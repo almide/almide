@@ -167,29 +167,6 @@ pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
     })
 }
 
-/// The generated tuple struct of `fields`, appended on first use (a tuple
-/// no signature spells, built in a body: a map literal's pairs).
-pub(crate) fn tuple_type_of(fields: Vec<NTy>) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.cases.is_none() && d.list_of.is_none() && d.alias.is_none() && d.option_of.is_none() && d.result_of.is_none() && d.map_of.is_none() && d.fields == fields) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Tuple<{fields:?}>"),
-            fields,
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: None,
-            map_of: None,
-        });
-        (r.len() - 1) as u16
-    })
-}
-
 /// The generated `AlmideMap<key, value>` alias, appended on first use.
 pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
     RECS.with(|r| {
@@ -253,6 +230,21 @@ pub(crate) fn list_type_of(e: NTy) -> u16 {
             result_of: None,
             map_of: None,
         });
+        (r.len() - 1) as u16
+    })
+}
+
+/// The generated struct of an untyped block whose slot kinds its stores give
+/// (`render_native_slots`): field `fK` holds slot `K`. Appended on first use
+/// at the end, like a list type, so no earlier index moves.
+pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        let name = format!("slots {fields:?}");
+        if let Some(i) = r.iter().position(|d| d.name == name) {
+            return i as u16;
+        }
+        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, alias: None, default_tag: None });
         (r.len() - 1) as u16
     })
 }
@@ -446,6 +438,20 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
             set.push_str("            _ => {}\n        }\n    }\n");
             out.push_str(&get);
             out.push_str(&set);
+            // A borrowed read of a boxed record slot (crate::render_native_borrow_read):
+            // `None` past the case's payload, where the owned read gives the default.
+            if let NTy::Rec(_) = kind {
+                let mut get_ref = format!("    fn s{k}_{suf}_ref(&self) -> Option<&{ty}> {{\n        match self {{\n");
+                for (t, fs) in cases {
+                    if fs.get(k - 1) != Some(&kind) {
+                        continue;
+                    }
+                    let binds: Vec<String> = (0..fs.len()).map(|j| if j == k - 1 { "f".into() } else { "_".into() }).collect();
+                    get_ref.push_str(&format!("            Self::C{t}({}) => Some(&**f),\n", binds.join(", ")));
+                }
+                get_ref.push_str("            _ => None,\n        }\n    }\n");
+                out.push_str(&get_ref);
+            }
         }
     }
     // from_slots: a scalar-only constructor built as an i64 slot list.
@@ -630,10 +636,10 @@ pub(crate) fn derive_records(
     let mut results: BTreeSet<String> = BTreeSet::new();
     let mut maps: BTreeSet<String> = BTreeSet::new();
     let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
-    let uses_value = tuples.iter().any(crate::lower::is_value_ty);
     // Anonymous records: always a generated struct, even all-scalar (a
     // by-value Rust struct, not the `Vec<i64>` slot block a heap list needs).
     let mut anons: BTreeSet<String> = BTreeSet::new();
+    let uses_value = tuples.iter().any(crate::lower::is_value_ty);
     // A generic instance's bound fields may name further instances: close over them.
     let mut work: Vec<Ty> = tuples.to_vec();
     let mut seen_inst: BTreeSet<String> = BTreeSet::new();
