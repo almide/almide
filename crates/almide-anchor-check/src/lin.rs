@@ -1439,10 +1439,16 @@ fn map_len(s: &[u8]) -> Option<usize> {
 
 /// Does `cert` (from `at`) spell `tpl`, each hole filled by text of its
 /// kind? The index after it.
-pub fn matches(tpl: &[Tok], cert: &[u8], mut at: usize) -> Option<usize> {
-    for t in tpl {
+pub fn matches(tpl: &[Tok], cert: &[u8], at: usize) -> Option<usize> {
+    matches_at(tpl, cert, at).ok()
+}
+
+/// [`matches`], or where it stops: (template token, certificate offset).
+pub fn matches_at(tpl: &[Tok], cert: &[u8], mut at: usize) -> Result<usize, (usize, usize)> {
+    for (k, t) in tpl.iter().enumerate() {
         let s = &cert[at.min(cert.len())..];
-        at += match t {
+        let here = at;
+        at += (|| -> Option<usize> { Some(match t {
             Tok::Lit(l) => s.starts_with(l.as_bytes()).then_some(l.len())?,
             Tok::Hole(Hole::Pf) => pf_len(s)?,
             Tok::Hole(Hole::Pfs) => many_len(s, pf_len),
@@ -1460,9 +1466,9 @@ pub fn matches(tpl: &[Tok], cert: &[u8], mut at: usize) -> Option<usize> {
                     0
                 }
             }
-        };
+        }) })().ok_or((k, here))?;
     }
-    Some(at)
+    Ok(at)
 }
 
 /// A certificate's procedures, as the bounds witness's `Q` stretches
@@ -1505,9 +1511,19 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
         let hp = heap.get(&id).cloned().unwrap_or_default();
         let skel = translate(&m, id, s, &hp, &table, alloc).map_err(|e| format!("linear certificate: function {id}: {e}"))?;
         let tpl = template(id, &skel);
-        match matches(&tpl, st.as_bytes(), 0) {
-            Some(n) if n == st.len() => {}
-            _ => return Err(format!("linear certificate: procedure {id} is not the translation of its function")),
+        match matches_at(&tpl, st.as_bytes(), 0) {
+            Ok(n) if n == st.len() => {}
+            Ok(n) => return Err(format!("linear certificate: procedure {id} is not the translation of its function (text past the template at {n})")),
+            Err((k, at)) => {
+                let want = match &tpl[k] {
+                    Tok::Lit(l) => format!("`{}`", &l[..l.len().min(40)]),
+                    Tok::Hole(h) => format!("{h:?}"),
+                };
+                return Err(format!(
+                    "linear certificate: procedure {id} is not the translation of its function (at {at}: want {want}, read `{}`)",
+                    &st[at..(at + 40).min(st.len())]
+                ));
+            }
         }
         prims += skel.sites.len();
         // `Q<id>{ ` then the precondition's facts: empty when `|` follows.
