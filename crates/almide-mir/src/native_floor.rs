@@ -956,6 +956,11 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
         if header_items().contains(key) || !taken.insert(key) || !texts.insert(item.text) {
             continue;
         }
+        // A runtime module that needs a crate (`almide_codegen::runtime_crate_deps`)
+        // cannot ride the native program, which links no dependency.
+        if let Some((dep, _)) = almide_codegen::runtime_crate_deps(item.text).first() {
+            return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
+        }
         out.push(item.text);
         for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
             if !taken.contains(r.as_str()) {
