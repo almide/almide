@@ -1,0 +1,43 @@
+// A `guard … else continue` inside an `if` arm in a loop skips the REST of the
+// iteration, including the loop-body statements after the `if` (#4386). The v1
+// render once rewrote the nested `continue` to `()`, so the `.` after the `if`
+// still ran on the skipped element (`.x2..x4.` instead of `.x2.x4.`).
+fn under_if(xs: List[Int]) -> String = {
+  var out = ""
+  for x in xs {
+    let label = "x${x}"
+    if x > 1 then {
+      guard x != 3 else continue
+      out = out + label
+    } else ()
+    out = out + "."
+  }
+  out
+}
+
+fn under_if_while(n: Int) -> Int = {
+  var i = 0
+  var s = 0
+  while i < n {
+    i = i + 1
+    if i > 1 then {
+      guard i != 3 else continue
+      s = s + 10
+    } else ()
+    s = s + 1
+  }
+  s
+}
+
+test "guard continue inside an if arm skips the rest of the for body" {
+  let got = under_if([1, 2, 3, 4])
+  println(got)
+  assert_eq(got, ".x2.x4.")
+}
+
+test "guard continue inside an if arm skips the rest of the while body" {
+  // i = 1: +1; i = 2: +11; i = 3: skipped; i = 4: +11
+  let got = under_if_while(4)
+  println(int.to_string(got))
+  assert_eq(got, 23)
+}
