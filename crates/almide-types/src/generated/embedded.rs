@@ -5732,8 +5732,14 @@ local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r
 
 
 @memory_unsafe
-local fn __lend(base: Handle, len: Int) -> Region =
-  { owner: bytes.new(), base: base, off: 0, len: if len < 0 then 0 else len, writable: false, keep: () => () }
+local fn __lend(base: Handle, len: Int) -> Region = {
+  owner: bytes.new(),
+  base: base,
+  off: 0,
+  len: if len < 0 then 0 else len,
+  writable: false,
+  keep: () => (),
+}
 
 
 
