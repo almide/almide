@@ -336,8 +336,10 @@ TRUSTED: that running the arms of one block concurrently is observation-equal
 to that sequential order, which is what the certificate judges. Its
 preconditions, each checked by the lift (a program that fails one keeps the
 standard codegen; `fan_native::tests` refuse each): every arm is a direct
-call of a user function whose arguments are literals or immutable locals (no
-`var` reaches an arm, and no top-level value); every argument and result is of
+call of a user function, or an expression of literals, operators, `if` and
+direct calls (an inlined call), over immutable locals (no `var` reaches an
+arm, and no top-level value) that become the lifted function's parameters;
+every argument and result is of
 a type that may cross a thread (scalars, `String`, and lists, options,
 results, tuples and records of them; no function value); the program has no
 metered region; and no arm holds a higher-order call. Native values DO carry
