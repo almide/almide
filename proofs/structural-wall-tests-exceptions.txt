@@ -1,0 +1,21 @@
+# Stdlib-test leg exceptions (proofs/structural-wall.sh --stdlib-tests, #4005 A4):
+# the spec/stdlib test modules whose judged artifact the proven checkers or the
+# anchor check REJECT, one per line — file<TAB>property<TAB>function<TAB>issue.
+# `anchors` rows (function `-`) name an artifact almide-anchor-check rejects;
+# every other property names one rejected witness, as in structural-wall-exceptions.txt.
+# SHRINK-ONLY: the leg fails on a rejection no row names AND on a row that no
+# longer rejects. A row is a known defect, never a way to make a new one green.
+# Seeded by the leg's first run (2026-11-01, f2f325292 + the leg's fixes).
+spec/stdlib/fs_fold_lines_chunked_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/io_read_line_opt_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/list_completion_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/option_completeness_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/option_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/pipe_chain_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/random_choice_pair_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/random_seeded_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/random_shuffle_pair_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/random_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/stdlib_smoke_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/thread_shared_string_test.almd	anchors	-	#4005: an rc call the ownership witness records no event for (or an event with no call)
+spec/stdlib/map_keyed_count_test.almd	anchors	-	#4005: a bounds check whose list local is rewritten before the access it guards
