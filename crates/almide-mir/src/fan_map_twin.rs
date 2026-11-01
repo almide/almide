@@ -164,3 +164,63 @@ pub(crate) fn twin_only<'a>(fns: impl IntoIterator<Item = &'a MirFunction>) -> B
     under.into_iter().filter(|n| !live.contains(n)).collect()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MAP: &str = "effect fn step(x: Int, k: Int) -> Result[Int, String] = ok(x * k)\n\
+                       effect fn main() -> Unit = {\n  let k = 3\n  let ys = fan.map([1, 2, 3], (x) => step(x, k))!\n  println(int.to_string(list.len(ys)))\n}\n";
+
+    fn lift(src: &str) -> Result<IrProgram, crate::lower::LowerError> {
+        crate::fan_native::lift_fan_arms(crate::pipeline::source_to_ir_for_tests(src).expect("ir"))
+    }
+
+    #[test]
+    fn a_map_over_scalar_captures_takes_the_registered_twin() {
+        lift(MAP).expect("admitted");
+        let twins: Vec<String> = TWINS.with(|t| t.borrow().iter().cloned().collect());
+        assert_eq!(twins.len(), 1, "{twins:?}");
+        let declared = crate::mir_ops::self_host_runtime()
+            .iter()
+            .flat_map(|(_, pairs)| pairs.iter())
+            .any(|(impl_fn, call)| *impl_fn == twins[0] && call.starts_with("fan."));
+        assert!(declared, "{} is a body the registry declares for a fan call", twins[0]);
+    }
+
+    // The precondition (TRUSTED_BASE "fan arms on threads"): the closure block
+    // the elements share is a slab of plain words, so a capture of a heap
+    // value declines the program.
+    #[test]
+    fn a_map_capturing_a_heap_value_is_refused() {
+        let src = "effect fn step(x: Int, s: String) -> Result[Int, String] = ok(x + string.len(s))\n\
+                   effect fn main() -> Unit = {\n  let s = \"ab\"\n  let ys = fan.map([1, 2], (x) => step(x, s))!\n  println(int.to_string(list.len(ys)))\n}\n";
+        let e = lift(src).expect_err("a heap capture is refused");
+        assert!(e.to_string().contains("of a non-scalar type"), "{e}");
+    }
+
+    #[test]
+    fn a_map_capturing_a_var_is_refused() {
+        let ir = crate::pipeline::source_to_ir_for_tests(MAP).expect("ir");
+        let mut ir = ir;
+        for v in ir.var_table.entries.iter_mut().filter(|v| v.name.as_str() == "k") {
+            v.mutability = Mutability::Var;
+        }
+        let e = crate::fan_native::lift_fan_arms(ir).expect_err("a var capture is refused");
+        assert!(e.to_string().contains("captures the `var`"), "{e}");
+    }
+
+    // The twin's bodies are dead in the render and still JUDGED: every one
+    // is in the certificate set proofs/native-wall.sh checks, and none is in
+    // the Rust source.
+    #[test]
+    fn the_bodies_a_twin_replaces_are_certified_and_not_rendered() {
+        let (rust, certs) = crate::pipeline::try_render_rust_source_certified(MAP).expect("renders");
+        assert!(rust.contains("almide_v1_fan_map("), "the call renders as the twin");
+        let names: Vec<&str> = certs.iter().map(|(n, _)| n.as_str()).collect();
+        for body in ["fan_map", "__fan_map_go"] {
+            assert!(names.contains(&body), "`{body}` is in the certificate set: {names:?}");
+            assert!(!rust.contains(&format!("fn {}(", crate::render_native::mangle(body))), "`{body}` is not rendered");
+        }
+    }
+}
