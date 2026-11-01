@@ -295,15 +295,16 @@ fn decimals_render_and_read_as_rust_does() {
 /// the code only a real artifact reaches).
 #[test]
 fn the_net_block_validates_against_its_derived_imports() {
-    use wasm_encoder::{EntityType, GlobalSection, ImportSection, MemorySection, MemoryType};
+    use wasm_encoder::{GlobalSection, MemorySection, MemoryType};
     let abi = net_abi(&resolve()).expect("abi");
     let texts = NetTexts::new(0, &abi);
     let mut types: Vec<(Vec<ValType>, Vec<ValType>)> = Vec::new();
-    let imp = NetImports { base: 0 };
+    // The real p3 import table first (the shims call its fixed indices:
+    // the waitable sets, the subtasks), then the net block after it.
+    let t = P3Types::new(&mut types);
+    let base = base_import_list(&t);
+    let imp = NetImports { base: IMPORTS };
     let list = imp.import_list(&abi, &mut types);
-    let t_fs = type_index(&mut types, &[ValType::I32; 5], &[ValType::I64]);
-    let t_realloc = type_index(&mut types, &[ValType::I32; 4], &[ValType::I32]);
-    let t_reserve = type_index(&mut types, &[ValType::I32], &[]);
     let helper = NetFns::types(&mut types);
     let mut m = Module::new();
     let mut ts = TypeSection::new();
@@ -311,33 +312,33 @@ fn the_net_block_validates_against_its_derived_imports() {
         ts.ty().function(p.iter().copied(), r.iter().copied());
     }
     m.section(&ts);
-    let mut is = ImportSection::new();
-    for (_, md, n, t) in &list {
-        is.import(md, n, EntityType::Function(*t));
-    }
-    m.section(&is);
-    let f_alloc = NET_IMPORTS;
-    let f_reserve = NET_IMPORTS + 1;
-    let fns = NetFns::at(NET_IMPORTS + 2);
+    let blocks: Vec<&[(u32, &str, &str, u32)]> = vec![&base, &list];
+    m.section(&build_import_section(&blocks));
+    // `$alloc`, `$reserve`, `$await`, then the net block.
+    let f_alloc = IMPORTS + NET_IMPORTS;
+    let f_reserve = f_alloc + 1;
+    let f_await = f_alloc + 2;
+    let fns = NetFns::at(f_alloc + 3);
     let mut funcs = FunctionSection::new();
-    funcs.function(t_realloc);
-    funcs.function(t_reserve);
-    NetFns::declare(&mut funcs, t_fs, &helper);
+    funcs.function(t.realloc);
+    funcs.function(t.exit);
+    funcs.function(t.fut_read);
+    NetFns::declare(&mut funcs, t.fs, &helper);
     m.section(&funcs);
     let mut mems = MemorySection::new();
     mems.memory(MemoryType { minimum: 8, maximum: None, memory64: false, shared: false, page_size_log2: None });
     m.section(&mems);
     // plen, ppos, heap, then the net globals.
     let mut gs = GlobalSection::new();
-    let t = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
+    let gt = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
     for _ in 0..3 {
-        gs.global(t, &ConstExpr::i32_const(0));
+        gs.global(gt, &ConstExpr::i32_const(0));
     }
     NetGlobals::emit(&mut gs);
     m.section(&gs);
     let g = P3Globals {
         park: 0, f_alloc, g_plen: 0, g_ppos: 1, g_in_rx: 0, g_in_fut: 0, g_out_tx: 0, g_out_fut: 0, g_err_tx: 0,
-        g_err_fut: 0, g_wset: 0, g_slots: 0, g_slotn: 0, f_reserve, f_await: 0, g_env: 0, g_envn: 0, heap: 2,
+        g_err_fut: 0, g_wset: 0, g_slots: 0, g_slotn: 0, f_reserve, f_await, g_env: 0, g_envn: 0, heap: 2,
     };
     let mut code = CodeSection::new();
     let mut alloc = Function::new([]);
@@ -346,6 +347,9 @@ fn the_net_block_validates_against_its_derived_imports() {
     let mut reserve = Function::new([]);
     reserve.instructions().end();
     code.function(&reserve);
+    let mut wait = Function::new([]);
+    wait.instructions().local_get(1).end();
+    code.function(&wait);
     push_net_shims(&mut code, g, &abi, &texts, NetParts { fns, ng: NetGlobals::at(3), imp });
     m.section(&code);
     let bytes = m.finish();
