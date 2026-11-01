@@ -671,6 +671,10 @@ mod cow;
 pub(crate) use cow::{emit_cow, emit_map_reserve};
 
 #[cfg(test)]
+#[path = "runtime_alloc_cap_test.rs"]
+mod cap_test;
+
+#[cfg(test)]
 mod tests {
     use wasm_encoder::{CodeSection, Function};
 
