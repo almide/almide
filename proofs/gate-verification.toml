@@ -117,7 +117,11 @@
 # #4372: two new CI-prose gate rows explicitly map four still-uncompensated
 # limits (future consumers, live integration, unmodeled inputs, coordinated edits).
 # This is the bidirectional inventory count described above, not a relaxed ratchet.
-# uncompensated_blind_ceiling = "41"
+# #4005 A4 (2026-11-01): the UTF-8 producer ledger gate maps two limits it does
+# not cover (a cited test that holds the invalid corpus without routing it into
+# its producer, and an unevidenced none / message / typed / obligation verdict
+# that is wrong) as UNCOMPENSATED: 41 -> 43, a newly mapped blind spot.
+# uncompensated_blind_ceiling = "43"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1655,3 +1659,13 @@ evidence = "#4372 (2026-10-31): unchanged helper passes all 12 tests (16 since 2
 measures = "whether the committed classification, bootstrap and artifact-reuse positive/negative regression controls all pass"
 varies = "#4372 controls: original helper exit 0; allow-all classifier mutant exit 1; digest-bypass mutant exit 1; 2026-11-01 scratch mutants each exit 1: generated-block check disabled, docs/GRAMMAR.md re-admitted, docs/stdlib re-admitted, docs-only GRAMMAR/cli exclusion dropped, an Emit & Format document check guarded by the lane, the checks job explicit `if` dropped"
 blind = "defects outside the enumerated control inputs -> UNCOMPENSATED (source review and live integration verification remain necessary); coordinated corruption of implementation and expected test answers -> UNCOMPENSATED (independent review remains necessary)"
+
+[[gate]]
+path = "scripts/check-utf8-producers.py"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-11-01, #4005 A4, #4395): `--self-test` runs in CI and is kept as the drill. It forges 17 trees and ledgers and requires each to be refused for its own reason: an unledgered String producer (a plain return, a String inside a declared record, a String handed to a callback), a return type declared nowhere, an unledgered host op, prim, minting source and emitter helper, Almide evidence that feeds no invalid byte, never checks with utf8_ok, never calls its producer, or is missing, Rust host evidence with no invalid byte, the open list above and below its ceiling, an open row without its fix, and an empty ledger. The first real run, against the drafted ledger, refused 18 rows before they were fixed: zlib tests that checked through a helper the gate did not yet follow, json and url tests that never named stringify / to_string, and the serve-export test's `\\xff` that an over-strict byte pattern missed."
+measures = "which declared String producers lack a ledger row: the public stdlib signatures, host op numbers, self-hosted prims, prim.alloc_str minting sources and emitter helpers. Also whether each validates/construction row's cited test exists, calls its producer, checks with the utf8_ok oracle and holds a byte no UTF-8 contains, and the open rows against open_ceiling. Read from docs/stdlib/*.md, stdlib/*.almd, crates/almide-wasm/src, crates/almide-wasm-run/src, crates/almide-wasi/src and proofs/utf8-producers.toml"
+varies = "landing (2026-11-01): 18 problems on the first run of the drafted ledger -> 0; 19 open rows, moving down as the host-boundary fix lands"
+blind = "a cited test that holds the invalid corpus and calls its producer but never routes the one into the other (the check is textual) -> UNCOMPENSATED; a wrong none / message / typed / obligation verdict, which needs no evidence -> UNCOMPENSATED; whether a cited test passes -> spec/stdlib/utf8_string_producers_test.almd run by `almide test spec/` on native and wasm, and tests/utf8_host_boundary_test.rs under cargo test; a String the incumbent emitter mints inline while lowering a stdlib call (neither a helper nor a stdlib source) -> spec/stdlib/utf8_string_producers_test.almd, which runs those calls on wasm; a host fn row's `ops` list (declared, not derived) -> tests/utf8_host_boundary_test.rs; the native leg's Strings (Rust String, and the runtime's unchecked conversions) -> scripts/check-runtime-unsafe.sh"
