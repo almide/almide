@@ -390,8 +390,11 @@ for row in open(os.path.join(out, "index")):
             if key not in exceptions:
                 fail.append(f"{fx}: [{prop}] {fn} REJECTED and no exception names it: {w[:200]!r}")
     fixtures_ok += all_ok
-    if all_ok and vrc != "0":
-        fail.append(f"{fx}: every witness accepts, but almide-verify's bundle outcome is exit {vrc}")
+    # The stdlib-test leg: a bundle declaring uncertified frames is
+    # INCOMPLETE (exit 3) by almide-verify's own reading, and exactly then.
+    want = "3" if (mode == "tests" and uncert) else "0"
+    if all_ok and vrc != want:
+        fail.append(f"{fx}: every witness accepts, but almide-verify's bundle outcome is exit {vrc} (want {want})")
 ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
 for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
