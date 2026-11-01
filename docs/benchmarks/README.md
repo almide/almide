@@ -75,7 +75,7 @@ No VM, no GC, no interpreter — native compiles through Rust to machine code, a
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Program (`almide build --target wasm`, as shipped) | develop | released v0.68.0-rc2 |
 |---|---:|---:|
-| Hello, world | **325 B** | **325 B** |
+ | Hello, world | **325 B** | **325 B** |
 
 The develop column is the develop build at 437b8f127, before v0.68.0 is tagged (`almide --version`: `almide 0.68.0 (dev, 437b8f127)`), measured 2026-10-20; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.68.0-rc2 release asset (`almide 0.68.0 (release, fcba2bcd5)`, `gh release download v0.68.0-rc2 -R almide/almide`), measured 2026-10-20. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
