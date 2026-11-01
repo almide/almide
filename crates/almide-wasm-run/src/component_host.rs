@@ -177,7 +177,7 @@ fn run_component_here(bytes: &[u8], args: &[String]) -> anyhow::Result<i32> {
     // (an op-65 program that also binds a udp socket) must not read a
     // `permission denied` the core route never answers.
     // The crate's builder enables neither UDP nor name lookup by default.
-    wasi.inherit_network().allow_udp(true).allow_ip_name_lookup(true);
+    wasi.inherit_network().allow_tcp(true).allow_udp(true).allow_ip_name_lookup(true);
     // #4022: the granted roots of `[permissions] fs`, or the cwd and the temp
     // dir without the key — never the whole host filesystem at `/`. Each sits
     // at its own host path, so an absolute path names the same file as native.

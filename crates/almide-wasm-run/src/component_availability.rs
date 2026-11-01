@@ -12,7 +12,8 @@
 /// answers, the fan prefetch triple (40..=42) and env.os / fs.temp_dir /
 /// env.cwd (27 / 28 / 33) among them — and UDP and name lookup (140..=145,
 /// #4306) over wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
-/// (wasi_p3_net.rs).
+/// (wasi_p3_net.rs), and the tcp family (91..=103 but the body-less
+/// `tcp_read_exact`, #3620) over `tcp-socket` (wasi_p3_tcp.rs).
 pub fn serves(op: i32, p3: bool) -> bool {
     // 74: the instance-parallel fan offer (#3003), answered "not served" by
     // both component shims — the guest then runs its chunks sequentially.
@@ -21,6 +22,7 @@ pub fn serves(op: i32, p3: bool) -> bool {
     let extra = p3
         && (matches!(op, 26 | 29 | 36 | 37 | 40..=49 | 65 | 77)
             || almide_wasm::host_ops::UDP.contains(&op)
+            || crate::wasi_p3::tcp_served(op)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -110,7 +112,7 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 /// E081 there.
 pub fn serves_service(op: i32) -> bool {
     let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
-    let net = almide_wasm::host_ops::UDP.contains(&op);
+    let net = almide_wasm::host_ops::UDP.contains(&op) || almide_wasm::host_ops::TCP.contains(&op);
     matches!(op, 70..=72 | 75) || (!fs && !net && serves(op, true))
 }
 

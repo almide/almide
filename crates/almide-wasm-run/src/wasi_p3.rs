@@ -491,6 +491,9 @@ include!("wasi_p3_serve_arena.rs");
 include!("wasi_p3_net.rs");
 include!("wasi_p3_net_fns.rs");
 include!("wasi_p3_net_shim.rs");
+// TCP over the same sockets imports (#3620): wasi_p3_tcp.rs.
+include!("wasi_p3_tcp.rs");
+include!("wasi_p3_tcp_shim.rs");
 #[cfg(test)]
 #[path = "tests/p3_net_test.rs"]
 mod net_tests;
