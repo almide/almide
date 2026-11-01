@@ -59,9 +59,19 @@ impl<'a> Interpreter<'a> {
         // `value.__set_path_steps` is the native runtime's in-place walk; its
         // registry body (stdlib/json_path.almd) only forwards to the bundled
         // pure walk `value.__set_path_pure`, which the pool does not lower —
-        // so the oracle runs that walk directly, as the wasm leg does.
+        // so the oracle runs that walk's bundled body directly, as the wasm
+        // leg does. The call arrives from inside the pool tier (the registry
+        // `value.set_path` body), where the module dispatch never reaches the
+        // bundled tier, so the body is taken from that tier here; the walk
+        // reads the public Value surface only, which the floor answers.
         if module.as_str() == "value" && func.as_str() == "__set_path_steps" {
-            return self.dispatch_module_resolved(module, almide_base::intern::sym("__set_path_pure"), evaled);
+            let pure = almide_base::intern::sym("__set_path_pure");
+            let Some(def) = self.bundled_fn(module, pure) else {
+                return self.dispatch_module_resolved(module, pure, evaled);
+            };
+            let root = self.root_scope();
+            let flow = self.call_function(def, evaled, &root);
+            return self.sync_at_pool_boundary(def, flow);
         }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
