@@ -62,10 +62,10 @@
 9537	spec/wasm_cross/bytes_negative_offset_family.almd
 1853	spec/wasm_cross/bytes_new_exhaustion.almd
 2193	spec/wasm_cross/bytes_pad_ceiling_oom.almd
-7020	spec/wasm_cross/bytes_param_writeback.almd
-2761	spec/wasm_cross/bytes_push_growth.almd
-1947	spec/wasm_cross/bytes_push_inplace.almd
-15282	spec/wasm_cross/bytes_rawptr.almd
+7011	spec/wasm_cross/bytes_param_writeback.almd
+2740	spec/wasm_cross/bytes_push_growth.almd
+1926	spec/wasm_cross/bytes_push_inplace.almd
+15261	spec/wasm_cross/bytes_rawptr.almd
 2932	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 3143	spec/wasm_cross/bytes_repeat_size_ceiling.almd
 20279	spec/wasm_cross/bytes_search_edit_family.almd
