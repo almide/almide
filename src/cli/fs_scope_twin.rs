@@ -62,7 +62,7 @@ pub(crate) fn scoped_twin(src: &str, entries: &BTreeSet<String>) -> (String, BTr
         }
     }
     let mut out = format!(
-        "\n// The scoped twin of the fs runtime (#4084): src/cli/fs_scope_twin.rs.\n#[allow(unused_imports, dead_code, unused_variables, unused_mut, unused_parens)]\nmod {TWIN_MOD} {{\nuse super::*;\nuse std::path::Path;\nuse almide_sfs::FsScopedPathExt as _;\n"
+        "\n// The scoped twin of the fs runtime (#4084): src/cli/fs_scope_twin.rs.\n#[allow(unused_imports, dead_code, unused_variables, unused_mut, unused_parens)]\nmod {TWIN_MOD} {{\nuse super::*;\nuse super::{rt}::*;\nuse std::path::Path;\nuse almide_sfs::FsScopedPathExt as _;\n", rt = almide::codegen::RUNTIME_MODULE
     );
     for i in &items {
         if keep.contains(&i.name) {

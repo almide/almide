@@ -783,6 +783,7 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
 
 mod runtime_crates;
 pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
+pub use runtime_namespace::RUNTIME_MODULE;
 mod runtime_namespace;
 pub mod rust_idents;
 

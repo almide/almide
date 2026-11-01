@@ -482,7 +482,7 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     };
     let user = wrap_fs_calls(user, &guards, &twinned);
     let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
-    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}{twin}", list.join(", "));
+    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{}{twin}", list.join(", "), fs_scope_guards());
     if head.is_empty() {
         splice_after_inner_attrs(&user, &prelude)
     } else {
@@ -492,22 +492,28 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
 
 /// The guard macros and the scope cell `inject_fs_scope` splices in. The
 /// scope's own items (`fs_scope_*`, `fs_scoped_*`, `almide_sfs`) are the
-/// runtime's: fs.rs includes them through almide-rt-core fs_beneath_core.rs.
+/// runtime's: fs.rs includes them through almide-rt-core fs_beneath_core.rs,
+/// and they live in the spliced runtime's private module (#4345), so the
+/// guards, at the crate root, name them through it ([`fs_scope_guards`]).
+fn fs_scope_guards() -> String {
+    FS_SCOPE_GUARDS.replace("__RT__::", &format!("{}::", almide::codegen::RUNTIME_MODULE))
+}
+
 const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 fn __almide_fs_scope_check(path: &str) -> Result<(), String> {
     __ALMIDE_FS_SCOPE.get_or_init(|| {
         let raw: Vec<String> = __ALMIDE_FS_SCOPE_ROOTS.iter().map(|r| r.to_string()).collect();
-        fs_scoped_install(Some(&raw));
+        __RT__::fs_scoped_install(Some(&raw));
     });
-    if fs_scoped_admits(path) { Ok(()) } else { Err(fs_scope_refusal(path)) }
+    if __RT__::fs_scoped_admits(path) { Ok(()) } else { Err(__RT__::fs_scope_refusal(path)) }
 }
 fn __almide_fs_fix<T, E: std::ops::Deref<Target = str> + From<String>>(r: Result<T, E>, path: &str) -> Result<T, E> {
-    match r { Err(e) if fs_scoped_refused_in(&e) => Err(E::from(fs_scope_refusal(path))), r => r }
+    match r { Err(e) if __RT__::fs_scoped_refused_in(&e) => Err(E::from(__RT__::fs_scope_refusal(path))), r => r }
 }
 macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }
 macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => __almide_fs_fix(($f)(__almide_p, __almide_q), &__almide_s), Err(e) => Err(e.into()) } }}; }
-macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = __RT__::fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_root { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from((&*__almide_p).split('\0').next().unwrap_or("")); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = std::env::temp_dir().to_string_lossy().into_owned(); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
 "#;
