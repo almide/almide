@@ -596,12 +596,25 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
 /// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
 /// the functions the Rust source was rendered from, not a sibling lowering.
 pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
-    render_native_parts(source)
+    render_native_parts(source).map(|(rust, certs, _)| (rust, certs))
 }
 
-/// The body of [`try_render_rust_source_certified`]: the native render and
-/// the certificates of the MIR it rendered from.
-fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
+/// The capabilities `main` reaches in the native render of `source`, as
+/// capability ids: `certificate::reachable_caps` over the exact MIR the
+/// native renderer rendered from (host ops counted at their call sites, as
+/// `cap_witness` counts them). The native leg's capability report, held to
+/// the wasm leg's (`cert_project::caps`) for the same program.
+pub fn native_capability_reach(source: &str) -> Result<std::collections::BTreeSet<u32>, LowerError> {
+    let (_, _, functions) = render_native_parts(source)?;
+    let program: std::collections::BTreeMap<String, crate::MirFunction> =
+        functions.into_iter().map(|f| (f.name.to_string(), f)).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    Ok(crate::certificate::reachable_caps("main", &program, &mut seen).into_iter().map(|c| c.id()).collect())
+}
+
+/// The body of [`try_render_rust_source_certified`]: the native render, the
+/// certificates of the MIR it rendered from, and that MIR.
+fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>, Vec<crate::MirFunction>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
     if almide_base::env::flag("ALMIDE_DUMP_MIR") {
@@ -745,16 +758,14 @@ fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>), 
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
-    let rust = crate::render_native::try_render_native_program(
-        &MirProgram {
-            functions,
-            exports: Vec::new(),
-            // Rung 1 walls every top-let above, so there are no mutable-global slots.
-            mutable_global_count: 0,
-        },
-        &sigs,
-    )?;
-    Ok((rust, certs))
+    let program = MirProgram {
+        functions,
+        exports: Vec::new(),
+        // Rung 1 walls every top-let above, so there are no mutable-global slots.
+        mutable_global_count: 0,
+    };
+    let rust = crate::render_native::try_render_native_program(&program, &sigs)?;
+    Ok((rust, certs, program.functions))
 }
 
 
