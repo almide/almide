@@ -87,12 +87,29 @@ fn prog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
     }
 }
 
-/// `progs_at`: the stretches separated by `;`, to the end of the bytes.
-fn parse(s: &[u8]) -> Option<Vec<Vec<Item>>> {
+/// One stretch: a routine program after `R` (rbounds.rs, #4005 A4), else a
+/// list-element program — RoutineBoundsCert.v's `stretch_at`.
+enum Stretch {
+    List(Vec<Item>),
+    Routine(Vec<crate::rbounds::Item>),
+}
+
+/// `stretches_at`: the stretches separated by `;`, to the end of the bytes.
+fn parse(s: &[u8]) -> Option<Vec<Stretch>> {
     let mut out = Vec::new();
     let mut i = 0;
     loop {
-        let (p, j) = prog_at(s, i)?;
+        let first = (i..s.len()).find(|&k| !is_space(s[k]));
+        let (p, j) = match first {
+            Some(k) if s[k] == b'R' => {
+                let (p, j) = crate::rbounds::parse_routine(s, k + 1)?;
+                (Stretch::Routine(p), j)
+            }
+            _ => {
+                let (p, j) = prog_at(s, i)?;
+                (Stretch::List(p), j)
+            }
+        };
         out.push(p);
         match s.get(j) {
             None => return Some(out),
@@ -174,7 +191,10 @@ fn check(mut kn: Known, items: &[Item]) -> Option<Known> {
 /// an empty known set.
 pub(crate) fn check_bounds_cert(witness: &[u8]) -> bool {
     match parse(witness) {
-        Some(ps) => ps.iter().all(|p| check(Known::new(), p).is_some()),
+        Some(ps) => ps.iter().all(|p| match p {
+            Stretch::List(p) => check(Known::new(), p).is_some(),
+            Stretch::Routine(p) => crate::rbounds::accepts(p),
+        }),
         None => false,
     }
 }

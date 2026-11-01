@@ -25,6 +25,8 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust Certified.v >/dev/null
 "$COQC" -Q . AlmideTrust InitCert.v >/dev/null
 "$COQC" -Q . AlmideTrust FieldCert.v >/dev/null
+"$COQC" -Q . AlmideTrust RoutineBounds.v >/dev/null
+"$COQC" -Q . AlmideTrust RoutineBoundsCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
