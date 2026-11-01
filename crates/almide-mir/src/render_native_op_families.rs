@@ -471,7 +471,7 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // costs no allocation and no free, as the standard codegen's
                 // borrowed `&str` literal does; an edit copies it first.
                 line!(
-                    "let mut {}: AlmideString = {{ static S: almide_str_block::AlmideStrStatic<{}> = almide_str_block::AlmideStrStatic::new(\"{lit}\"); AlmideString::from_static(&S) }};",
+                    "let mut {}: AlmideString = {{ static S: crate::almide_str_block::AlmideStrStatic<{}> = crate::almide_str_block::AlmideStrStatic::new(\"{lit}\"); AlmideString::from_static(&S) }};",
                     var(*dst),
                     s.len()
                 );
