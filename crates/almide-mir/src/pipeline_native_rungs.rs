@@ -350,6 +350,17 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
             "native: multi-module program — outside rung 1".into(),
         ));
     }
+    let mut ir = ir;
+    // The shared accumulator tail-recursion rewrite (#2577), from the same
+    // preconditions the wasm leg and the standard codegen apply it: one
+    // recursive call per non-leaf instead of two. Skipped, as there, when the
+    // program brackets a budget/timeout region (its loop head would be a
+    // charge the meter sees).
+    if !almide_ir::meter_plan::program_has_regions(&ir) {
+        for f in ir.functions.iter_mut() {
+            almide_ir::accum_tre::rewrite(f, &mut ir.var_table);
+        }
+    }
     // #4006: an immutable top-level `let` lowers the way the witness path
     // threads it — each reference materializes the CONST initializer
     // (`value_or_global`), and a computed one walls in the lowering. A
