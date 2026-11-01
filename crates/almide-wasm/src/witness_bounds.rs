@@ -339,12 +339,20 @@ pub(crate) fn prim_count() -> usize {
 }
 
 /// A self-host body holding prim accesses was lowered (func.rs): its anchor
-/// serial and its heap-typed wasm parameter positions.
-pub(crate) fn heap_params(serial: u64, params: &[u32]) {
+/// serial and its heap-typed wasm parameter positions, each with the
+/// stride its block's len word counts in when it has one (`p=s`).
+pub(crate) fn heap_params(serial: u64, params: &[(u32, Option<u32>)]) {
     let list = if params.is_empty() {
         "-".to_string()
     } else {
-        params.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+        params
+            .iter()
+            .map(|(p, s)| match s {
+                Some(s) => format!("{p}={s}"),
+                None => p.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(",")
     };
     with(|s| {
         s.heaps.push_str(&format!("{serial}:{list} "));

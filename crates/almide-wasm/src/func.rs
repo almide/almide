@@ -588,11 +588,10 @@ pub(crate) fn lower_fn(
     })?;
     crate::witness::anchor::seal(anchor_serial, &f);
     if crate::witness::bounds::prim_count() > prims_before {
-        let heap: Vec<u32> = params
+        let heap: Vec<(u32, Option<u32>)> = params
             .iter()
             .enumerate()
-            .filter(|(_, (_, ty))| ty.is_heap_param())
-            .map(|(i, _)| i as u32 + env_shift)
+            .filter_map(|(i, (_, ty))| ty.heap_param(ctx.types).map(|s| (i as u32 + env_shift, s)))
             .collect();
         crate::witness::bounds::heap_params(anchor_serial, &heap);
     }
