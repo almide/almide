@@ -116,7 +116,7 @@ fn prove(f: &[L], t: &L) -> Option<String> {
         return Some(format!("({j}:1)1"));
     }
     let mut idx: BTreeMap<V, usize> = BTreeMap::new();
-    let mut row = |l: &L, idx: &mut BTreeMap<V, usize>| -> (Vec<(usize, i128)>, i128) {
+    let row = |l: &L, idx: &mut BTreeMap<V, usize>| -> (Vec<(usize, i128)>, i128) {
         let mut m: BTreeMap<usize, i128> = BTreeMap::new();
         for (v, a) in &l.t {
             let n = idx.len();
@@ -358,9 +358,9 @@ impl Sim<'_> {
                         }
                     }
                 }
-                It::Test { a, b, sgn, thn, els } | It::Branch { thn, els } if true => {
+                It::Test { thn, els, .. } | It::Branch { thn, els } => {
                     let (ft, fe) = match it {
-                        It::Test { a: _, b: _, .. } => {
+                        It::Test { a, b, sgn, .. } => {
                             let (a, b) = (from_lin(a), from_lin(b));
                             let pa = no_wrap(&f, &a);
                             let pb = no_wrap(&f, &b);
@@ -406,9 +406,7 @@ impl Sim<'_> {
                             f = g;
                         }
                     }
-                    let _ = (a, b);
                 }
-                It::Test { .. } | It::Branch { .. } => unreachable!(),
                 It::Loop { body } => {
                     // Houdini: the entry facts, minus what a back edge loses.
                     let mut cand = f.clone();
