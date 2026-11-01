@@ -511,13 +511,14 @@ impl Emitter<'_> {
                         // takes +1; an owned one is the cursor's own), and
                         // the cursor releases its credit after the loop.
                         let owned = self.rc_owned_result(iterable);
-                        if !owned {
-                            self.rc_inc_top();
-                        }
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
+                        self.f.instructions().local_set(bh);
+                        if !owned {
+                            self.f.instructions().local_get(bh).call(crate::F_INC);
+                        }
                         if let Some(w) = self.witness.as_mut() {
                             w.cursor_take(owned, bh);
                         }
@@ -531,7 +532,6 @@ impl Emitter<'_> {
                         self.owned_ty.insert(bh, SliceTy::Map(kh, vh));
                         {
                             let mut i = self.f.instructions();
-                            i.local_set(bh);
                             i.local_get(bh)
                                 .i32_const(almide_layout::PAYLOAD as i32)
                                 .i32_add()
@@ -594,16 +594,17 @@ impl Emitter<'_> {
                 // test. An owned subject is the cursor's own credit. The +1
                 // is recorded as a HOLD for almide-anchor-check.
                 let owned = self.rc_owned_result(iterable);
-                if !owned {
-                    let scr = self.scr_i32_local;
-                    self.f.instructions().local_set(scr).local_get(scr).call(crate::F_INC);
-                    crate::witness::bounds::hold(self.f);
-                    self.f.instructions().local_get(scr);
-                }
                 let drop_list = self.dec_fn_of(iter_ty);
                 let base = self.hold_i32()?;
                 let count = self.hold_i32()?;
                 let cur = self.hold_i32()?;
+                self.f.instructions().local_set(base);
+                // The +1 is taken through the cursor local itself, so the RC
+                // byte check holds the cursor's `a` to this call (#4278 B1).
+                if !owned {
+                    self.f.instructions().local_get(base).call(crate::F_INC);
+                    crate::witness::bounds::hold(self.f);
+                }
                 if let Some(w) = self.witness.as_mut() {
                     w.cursor_take(owned, base);
                 }
@@ -611,7 +612,6 @@ impl Emitter<'_> {
                 // edge out of the body releases it through its exit plan.
                 self.rc_owned.insert(base);
                 self.owned_ty.insert(base, iter_ty);
-                self.f.instructions().local_set(base);
                 self.f
                     .instructions()
                     .local_get(base)

@@ -48,15 +48,23 @@ impl WitnessRecorder {
         }
     }
 
-    /// `for (k, v) in m` (stmts.rs `lower_forin`): the cursor takes its credit
-    /// on the subject before the loop — an OWNED subject is the cursor's own
-    /// block (`i`), a borrowed one is shared (`a`, the route's `rc_inc_top`,
-    /// a holder line of its own beside the block's owner). The cursor local
+    /// A `for` loop over a map or a list (stmts.rs `lower_forin`): the
+    /// cursor takes its credit on the subject before the loop — an OWNED
+    /// subject is the cursor's own block (`i`), a borrowed one is shared
+    /// (`a`, the `rc_inc` the route takes through the cursor local, a holder
+    /// line of its own beside the block's owner). The cursor local
     /// `local` holds it (not an owner: no dec-old, no iteration-end release),
     /// so the release that settles it is resolved per path through `local`.
     pub fn cursor_take(&mut self, owned: bool, local: u32) {
         let o = self.fresh_obj(local, false);
-        self.ops(o, if owned { "i" } else { "a" });
+        if owned {
+            self.ops(o, "i");
+        } else {
+            // The +1 is taken through the cursor local (`local.get local;
+            // call $rc_inc`), so its event names that local and the RC byte
+            // check holds it to that call (#4278 B1).
+            self.held_ops(local, "a");
+        }
     }
 
     /// After the loop the cursor releases its credit (`d`). An exit from the
