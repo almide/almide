@@ -121,12 +121,24 @@ fn coefs(l: &L) -> BTreeMap<V, i128> {
     m
 }
 
+/// The search's effort per module, in simplex pivots ([`lp::pivots`]) — a
+/// step count, not wall time, so what is certified is the same on every
+/// machine and the counted class can be ratcheted. A body the search did not
+/// reach within it stays counted. `ALMIDE_LIN_PIVOTS` overrides it for an
+/// experiment; the wall runs the default.
+pub const PIVOT_BUDGET: u64 = 2_000_000;
+
 thread_local! {
-    static DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    static BUDGET: std::cell::Cell<u64> = const { std::cell::Cell::new(PIVOT_BUDGET) };
 }
 
 fn past_deadline() -> bool {
-    DEADLINE.with(|d| d.get().is_some_and(|t| std::time::Instant::now() > t))
+    lp::pivots() > BUDGET.with(std::cell::Cell::get)
+}
+
+/// The budget the last [`certify_table`] ran under, and the pivots it took.
+pub fn effort() -> (u64, u64) {
+    (BUDGET.with(std::cell::Cell::get), lp::pivots())
 }
 
 fn prove(f: &[L], t: &L) -> Option<String> {
@@ -842,8 +854,9 @@ pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, St
 
 /// [`certify`], and the positions certified.
 pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, String>, BTreeSet<usize>), String> {
-    let budget = std::env::var("ALMIDE_LIN_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(60u64);
-    DEADLINE.with(|d| d.set(Some(std::time::Instant::now() + std::time::Duration::from_secs(budget))));
+    let budget = std::env::var("ALMIDE_LIN_PIVOTS").ok().and_then(|s| s.parse().ok()).unwrap_or(PIVOT_BUDGET);
+    BUDGET.with(|b| b.set(budget));
+    lp::reset_pivots();
     let m = lin::Module::read(wasm)?;
     let exported = lin::exported_or_tabled(wasm, m.imports)?;
     let mut refused: BTreeMap<usize, String> = BTreeMap::new();

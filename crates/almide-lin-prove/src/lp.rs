@@ -165,7 +165,23 @@ pub fn farkas(facts: &[(Vec<(usize, i128)>, i128)], target: &(Vec<(usize, i128)>
     Some((out, mu))
 }
 
+thread_local! {
+    static PIVOTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Simplex pivots taken on this thread since the last [`reset_pivots`]: the
+/// prover's effort, counted in steps so its budget is the same on every
+/// machine.
+pub fn pivots() -> u64 {
+    PIVOTS.with(std::cell::Cell::get)
+}
+
+pub fn reset_pivots() {
+    PIVOTS.with(|c| c.set(0));
+}
+
 fn pivot(t: &mut [Vec<Q>], basis: &mut [usize], r: usize, c: usize, cols: usize) -> Option<()> {
+    PIVOTS.with(|n| n.set(n.get() + 1));
     let p = t[r][c];
     for x in t[r].iter_mut() {
         *x = x.div(p)?;

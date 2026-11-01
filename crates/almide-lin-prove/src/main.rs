@@ -31,6 +31,8 @@ fn main() {
             for (p, why) in refused {
                 let _ = writeln!(std::io::stderr(), "uncertified\t{p}\t{}\t{}\t{why}", name(p), n(p));
             }
+            let (budget, used) = almide_lin_prove::effort();
+            let _ = writeln!(std::io::stderr(), "effort\t{used}\tof\t{budget}\tpivots");
         }
         Err(e) => {
             let _ = writeln!(std::io::stderr(), "LIN PROVE FAIL: {e}");

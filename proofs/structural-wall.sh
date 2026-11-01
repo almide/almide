@@ -352,6 +352,7 @@ for row in open(os.path.join(out, "index")):
 # judged by the same three verdicts. A refusal has no exception row: what the
 # prover could not prove is left out of the certificate, never put in it.
 lin = {"certified": [0, 0], "uncertified": [0, 0]}
+effort = [0, 0, set()]  # pivots taken, the most any module took, the budgets
 for row in open(os.path.join(out, "index")):
     k, fx = row.rstrip("\n").split("\t")
     cpath = os.path.join(out, k + ".lcert")
@@ -359,6 +360,8 @@ for row in open(os.path.join(out, "index")):
         continue
     for l in open(os.path.join(out, k + ".lprove")).read().splitlines():
         parts = l.split("\t")
+        if parts[0] == "effort" and len(parts) == 5:
+            effort[0] += int(parts[1]); effort[1] = max(effort[1], int(parts[1])); effort[2].add(parts[3])
         if parts[0] in lin and len(parts) >= 4:
             lin[parts[0]][0] += 1
             lin[parts[0]][1] += int(parts[3])
@@ -372,7 +375,8 @@ for row in open(os.path.join(out, "index")):
     else:
         fail.append(f"{fx}: the linear certificate: extracted checker exit {rc}, almide-verify {'ACCEPT' if vok else 'REJECT'}")
 print(f"  [bounds/linear] {lin['certified'][0]} self-host body(ies) certified ({lin['certified'][1]} prim site(s)), "
-      f"{lin['uncertified'][0]} left in the counted class ({lin['uncertified'][1]} prim site(s))")
+      f"{lin['uncertified'][0]} left in the counted class ({lin['uncertified'][1]} prim site(s)); "
+      f"search budget {'/'.join(sorted(effort[2])) or '-'} pivot(s) per module, {effort[0]} taken, at most {effort[1]} by one module")
 ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
 for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
