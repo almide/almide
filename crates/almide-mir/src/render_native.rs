@@ -249,6 +249,7 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
         .collect();
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
+    fan_rendered_reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
@@ -281,6 +282,14 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
     push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
     crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    if fan_rendered() {
+        // #4006 family H: the fan runtime ahead of every other item (its
+        // output macros shadow std's for all that follows), and every exit
+        // through the trap wait.
+        let at = out.find("\n\n").map_or(0, |i| i + 2);
+        out.insert_str(at, &fan_glue());
+        out = route_exits(&out);
+    }
     Ok(out)
 }
 
@@ -338,6 +347,7 @@ fn render_fn(
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
+    let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
     let mut out = String::new();
     let mut indent = 1usize;
@@ -374,6 +384,9 @@ fn render_fn(
     }
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
+        if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)? {
+            continue;
+        }
         // #3639: `s = s + x` / `string.push(s, x)` grows `s` in place.
         if let Some(append) = crate::render_native_append::str_self_append(func, i, &tys) {
             line!("{append}");
@@ -968,3 +981,5 @@ pub(crate) fn render_dup(
 }
 
 include!("render_native_b.rs");
+include!("render_native_fan.rs");
+include!("render_native_rem.rs");
