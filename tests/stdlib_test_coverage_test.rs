@@ -696,7 +696,7 @@ fn report(path: &str, stdlib: &BTreeSet<String>, cov: &Coverage, unlowered: &[St
     let total = stdlib.len();
     let mut out = format!(
         "# Stdlib test coverage (native / wasm)\n\nMeasured by tests/stdlib_test_coverage_test.rs from the compiler's IR \
-         (calls reachable from test blocks / main / top lets) over {programs} programs.\n\n\
+         (calls reachable from test blocks / main / abort sites / top lets whose value the test observes) over {programs} programs.\n\n\
          | | functions |\n|---|---:|\n| public | {total} |\n| native covered | {n} |\n| wasm covered | {w} |\n\
          | both legs | {both} |\n| missing a leg | {} |\n\n## Per module\n\n| module | fns | native | wasm | both |\n|---|---:|---:|---:|---:|\n",
         total - both
