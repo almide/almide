@@ -122,6 +122,13 @@ pub(crate) fn infer(
                 }
             }
             for (j, k2) in cross {
+                // A declared host import (`@extern(wasm, ..)`) releases no
+                // argument: its params stay borrowed whatever its callers
+                // hand it, so a site lends rather than moving a credit the
+                // host would leak (the call-mode witness signs it so too).
+                if table.infos[j].import.is_some() {
+                    continue;
+                }
                 if let Some(t) = table.infos[j].params.get(k2)
                     && crate::rc_ownership::rc_droppable_ty(types, *t)
                     && !owned[j][k2]
