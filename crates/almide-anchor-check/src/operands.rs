@@ -145,6 +145,19 @@ pub(crate) fn load_parts(t: &T) -> Option<(&T, u64)> {
     }
 }
 
+/// A memory address as (base, byte offset): `base + c` with the access's
+/// static offset folded in, so `(B + 4) + off 0` and `B + off 4` name one
+/// slot (#4278 B1, the slot consume's store over its release's load).
+pub(crate) fn effective(addr: &T, off: u64) -> (&T, i64) {
+    match op(addr, "i32.add") {
+        Some([b, c]) => match cst(c) {
+            Some(c) => (b, c + off as i64),
+            None => (addr, off as i64),
+        },
+        _ => (addr, off as i64),
+    }
+}
+
 /// The address a loaded value was read from.
 pub(crate) fn loaded_from(t: &T) -> Option<&T> {
     match pl(t) {

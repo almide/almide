@@ -259,13 +259,18 @@ impl Emitter<'_> {
         if !self.elem_is_handle(ty) {
             return Ok(());
         }
+        // The slot's address is `eh` itself when `off` is 0; the NULL store
+        // carries `off` in its memarg (the RC check folds both to one slot).
         self.slot_release(|em| {
-            em.f.instructions().local_get(eh).i32_const(off as i32).i32_add();
+            em.f.instructions().local_get(eh);
+            if off != 0 {
+                em.f.instructions().i32_const(off as i32).i32_add();
+            }
             em.emit_release_slot_at(ty);
             Ok(())
         })?;
-        let at = MemArg { offset: 0, align: 2, memory_index: 0 };
-        self.f.instructions().local_get(eh).i32_const(off as i32).i32_add().i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
+        let at = MemArg { offset: u64::from(off), align: 2, memory_index: 0 };
+        self.f.instructions().local_get(eh).i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
         Ok(())
     }
 
