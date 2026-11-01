@@ -79,3 +79,14 @@ fn a_slot_read_again_or_in_a_loop_is_copied() {
         "fn main() -> Unit = {\n  let t: (Int, String) = (4, \"xy\")\n  var acc = \"\"\n  for i in 0..<3 {\n    acc = acc + t.1\n  }\n  println(acc)\n}\n",
     );
 }
+
+/// A string literal renders as an immortal static block: one grown in place
+/// copies before it writes, so the literal reads the same on every
+/// evaluation, in a loop too.
+#[test]
+fn a_static_literal_grown_in_place_copies_first() {
+    same(
+        "literal_grow",
+        "fn main() -> Unit = {\n  var s = \"ab\"\n  s = s + \"x\"\n  println(s)\n  for i in 0..<3 {\n    var t = \"k\"\n    t = t + \"z\"\n    println(t)\n  }\n  println(\"k\")\n}\n",
+    );
+}
