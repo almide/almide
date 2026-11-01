@@ -647,6 +647,15 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
     else {
         return e;
     };
+    // A `continue` else in a NESTED block (an `if` arm, a match arm inside a
+    // loop body) leaves the LOOP iteration, not just this block: `()` here
+    // would fall through to the loop-body statements after the enclosing
+    // expression (#4386). Only the loop body's own statement list
+    // (`rewrite_guard_stmt_list`) may read `continue` as "skip the rest".
+    // Leave the guard in place; the lowering walls it honestly.
+    if matches!(&stmts[i].kind, IrStmtKind::Guard { else_, .. } if matches!(else_.kind, IrExprKind::Continue)) {
+        return e;
+    }
     *changed = true;
     let ty = e.ty.clone();
     let span = e.span.clone();
@@ -669,16 +678,8 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
         },
         changed,
     );
-    // The ELSE branch (`cond` false) is `E`, except `continue` → `()` (see doc).
-    let else_branch = match &else_.kind {
-        IrExprKind::Continue => IrExpr {
-            kind: IrExprKind::Unit,
-            ty: Ty::Unit,
-            span: else_.span,
-            def_id: else_.def_id,
-        },
-        _ => else_,
-    };
+    // The ELSE branch (`cond` false) is `E` (a `continue` else declined above).
+    let else_branch = else_;
     let if_expr = IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(cond),
