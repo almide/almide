@@ -797,6 +797,9 @@ fn every_public_stdlib_fn_is_tested_on_both_legs() {
          spec/wasm_cross / spec/embedded_cross fixture (byte-compared on both legs).",
         problems.join("\n")
     );
+    // At MAX_ROWS = 0 clippy 1.97's deny-level absurd_extreme_comparisons reads
+    // `<=` as `==`; the check stays `<=` so it keeps its message once a row exists.
+    #[allow(clippy::absurd_extreme_comparisons)]
     assert!(
         listed.len() <= MAX_ROWS,
         "{LEDGER} has {} rows but MAX_ROWS is {MAX_ROWS}: the ledger only shrinks",
