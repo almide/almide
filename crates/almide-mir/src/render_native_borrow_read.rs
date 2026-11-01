@@ -14,7 +14,8 @@
 //!   feeds address arithmetic and loads only), or dropped;
 //! * nothing writes, rebinds or moves the block it was read from while the
 //!   value is still used — the only ops that name the block's root up to the
-//!   value's last use are address arithmetic over it and its loads.
+//!   value's last use are address arithmetic over it, its loads and its
+//!   scalar slot reads.
 //!
 //! Anything else keeps the owned copy.
 
@@ -75,6 +76,8 @@ fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap
                 Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => {
                     args.len() == 1 && root.get(&args[0]) == Some(&d)
                 }
+                // A scalar slot read (a variant's tag, a field) only reads.
+                Op::ListGetScalar { list, idx, .. } => *list == d && *idx != d,
                 _ => false,
             };
         if !ok {
@@ -103,6 +106,7 @@ fn block_untouched(func: &MirFunction, from: usize, to: usize, base: ValueId, ro
             Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [base],
             Op::IntBinOp { op: IntOp::Add, .. } => true,
             Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, .. } => true,
+            Op::ListGetScalar { list, .. } => *list == base,
             _ => false,
         };
         if !ok {
