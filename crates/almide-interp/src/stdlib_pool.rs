@@ -155,6 +155,13 @@ pub(crate) fn bundled_body(module: Sym, func: Sym) -> Option<&'static IrFunction
     bundled_module(module)?.get(&func).filter(|d| !matches!(d.body.kind, almide_ir::IrExprKind::Hole))
 }
 
+/// `func` is an `@intrinsic` stub (a `Hole` body) the auto-imported bundled
+/// `module` declares: a bare call to it from that module's own body means
+/// `module.func`.
+pub(crate) fn bundled_stub(module: Sym, func: Sym) -> bool {
+    bundled_module(module).and_then(|m| m.get(&func)).is_some_and(|d| matches!(d.body.kind, almide_ir::IrExprKind::Hole))
+}
+
 fn bundled_module(module: Sym) -> BundledBodies {
     let name = module.as_str();
     if !almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED.contains(&name) {

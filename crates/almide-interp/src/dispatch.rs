@@ -183,6 +183,13 @@ impl<'a> Interpreter<'a> {
         //     `html.concat` is html's own, however many loaded modules (or
         //     the program) spell a `to_string`. The program root (space 0)
         //     has no owner and keeps the flat-table order below.
+        // 2d. The executing module's own `@intrinsic` sibling (a `Hole`
+        //     body: `to_string_lossy(b)` inside `bytes.__bytes_to_text`): the
+        //     same call spelled `module.f`, resolved through the module
+        //     dispatch a qualified call takes, keyed on the declaration.
+        if let Some(module) = self.own_module_intrinsic(name) {
+            return Some(self.eval_module_call(module, name, args, scope));
+        }
         let func = self.own_module_sibling(name)?;
         Some(self.eval_lowered_fn_call(func, args, scope))
     }
@@ -205,6 +212,18 @@ impl<'a> Interpreter<'a> {
     /// Step 2d of [`Self::eval_named_ctor_or_sibling`]: the executing
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
+    /// The executing module, when it declares `name` as an `@intrinsic`
+    /// stub (a `Hole` body) — the declaration, not the spelling, decides.
+    pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
+        if let Some(module) = self.cur_bundled.get() {
+            return crate::stdlib_pool::bundled_stub(module, name).then_some(module);
+        }
+        let space = self.cur_space.get();
+        let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
+        let stub = self.module_fns.get(&(owner, name))?;
+        matches!(stub.body.kind, almide_ir::IrExprKind::Hole).then_some(owner)
+    }
+
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
         if let Some(module) = self.cur_bundled.get() {
             return self.bundled_fn(module, name);
