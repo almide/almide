@@ -596,6 +596,12 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
 /// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
 /// the functions the Rust source was rendered from, not a sibling lowering.
 pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
+    render_native_parts(source)
+}
+
+/// The body of [`try_render_rust_source_certified`]: the native render and
+/// the certificates of the MIR it rendered from.
+fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
     if almide_base::env::flag("ALMIDE_DUMP_MIR") {
