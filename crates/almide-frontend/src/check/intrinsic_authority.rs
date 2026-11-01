@@ -1,6 +1,7 @@
 //! E085: the runtime boundary used outside the stdlib — an `@intrinsic` /
-//! `@wasm_intrinsic` declaration (#2152 item 3), or a reference to the `prim`
-//! module (#3025).
+//! `@wasm_intrinsic` declaration (#2152 item 3), a `@prim_op` machine-op
+//! declaration (#4006: it names what a prim fn IS to the MIR lowering), or a
+//! reference to the `prim` module (#3025).
 //!
 //! An `@intrinsic("almide_rt_fs_write")` declaration binds a fn name to a
 //! runtime symbol directly. The capability story (`--profile critical`,
@@ -155,7 +156,7 @@ impl Checker {
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
         let Some(attr) = attrs
             .iter()
-            .find(|a| matches!(a.name.as_str(), "intrinsic" | "wasm_intrinsic"))
+            .find(|a| matches!(a.name.as_str(), "intrinsic" | "wasm_intrinsic" | "prim_op"))
         else {
             return;
         };

@@ -195,6 +195,21 @@ pub(crate) fn rec_field(i: u16, k: usize) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).filter(|d| d.cases.is_none() && d.list_of.is_none() && d.alias.is_none()).and_then(|d| d.fields.get(k).copied()))
 }
 
+/// Generated type `i` is a struct whose every field is an i64 lane value.
+pub(crate) fn all_scalar_struct(i: u16) -> bool {
+    RECS.with(|r| {
+        r.borrow().get(i as usize).is_some_and(|d| {
+            d.cases.is_none() && d.list_of.is_none() && d.alias.is_none() && d.option_of.is_none() && d.result_of.is_none()
+                && !d.fields.is_empty() && d.fields.iter().all(|f| *f == NTy::I64)
+        })
+    })
+}
+
+/// The number of fields of a generated struct.
+pub(crate) fn field_count(i: u16) -> usize {
+    RECS.with(|r| r.borrow().get(i as usize).map_or(0, |d| d.fields.len()))
+}
+
 /// The element kind of a generated list type (`None` for a struct or enum).
 pub(crate) fn list_elem(i: u16) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.list_of))
@@ -378,6 +393,14 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             }
             es.iter().for_each(|e| collect_tuples(e, out));
         }
+        // An anonymous record: the same uniform slots as a tuple, in its
+        // type's field order (the order the lowering stores them in).
+        Ty::Record { fields } => {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
+            fields.iter().for_each(|(_, e)| collect_tuples(e, out));
+        }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
             if !matches!(a[0], Ty::Int | Ty::Bool | Ty::String) && !out.contains(t) {
                 out.push(t.clone());
@@ -451,6 +474,9 @@ pub(crate) fn derive_records(
     let mut options: BTreeSet<String> = BTreeSet::new();
     let mut results: BTreeSet<String> = BTreeSet::new();
     let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
+    // Anonymous records: always a generated struct, even all-scalar (a
+    // by-value Rust struct, not the `Vec<i64>` slot block a heap list needs).
+    let mut anons: BTreeSet<String> = BTreeSet::new();
     // A generic instance's bound fields may name further instances: close over them.
     let mut work: Vec<Ty> = tuples.to_vec();
     let mut seen_inst: BTreeSet<String> = BTreeSet::new();
@@ -461,6 +487,10 @@ pub(crate) fn derive_records(
         }
         if let Ty::Tuple(es) = t {
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
+        }
+        if let Ty::Record { fields } = t {
+            decls.entry(tuple_key(t)).or_insert((false, vec![(0, fields.iter().map(|(_, f)| f.clone()).collect())]));
+            anons.insert(tuple_key(t));
         }
         if let Ty::Applied(TypeConstructorId::List, a) = t {
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
@@ -508,7 +538,7 @@ pub(crate) fn derive_records(
         }
     }
     // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
-    let scalar = |n: &str| decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
+    let scalar = |n: &str| !anons.contains(n) && decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
     let mut set: BTreeSet<String> = decls.keys().filter(|n| !scalar(n)).cloned().collect();
     SCALAR_INSTANCES.with(|si| {
         *si.borrow_mut() = decls.keys().filter(|n| n.starts_with("Named(") && scalar(n)).cloned().collect();
@@ -522,7 +552,9 @@ pub(crate) fn derive_records(
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => NTy::VecStr,
             Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
-            Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
+            Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => {
+                return Some(Err(tuple_key(t)))
+            }
             Ty::Bytes if uses_bytes => return Some(Err(BYTES_KEY.to_string())),
             Ty::Named(_, args) if !args.is_empty() && set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             Ty::Named(_, args) if !args.is_empty() && scalar(&tuple_key(t)) => NTy::Vec,

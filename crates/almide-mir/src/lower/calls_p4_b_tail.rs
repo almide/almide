@@ -218,20 +218,25 @@ impl LowerCtx {
         self.ops.push(Op::Drop { v: msg });
     }
 
-    /// Lower a `prim.*` PRIMITIVE-FLOOR call to an [`Op::Prim`], mapped by name, NOT
-    /// a real `CallFn`/runtime symbol. Since #3025 `prim` is not user surface (E085
-    /// refuses the spelling outside the stdlib) and MIR lowers only the program's own
-    /// functions, so the only prim calls that reach here are the ones lowering itself
-    /// synthesizes: `prim.handle`/`prim.die` (the main-die and unwrap-die desugars)
-    /// and the frontend's `almide_rt_prim_budget_*`/`timeout_*` RuntimeCalls. Returns
-    /// the result `dst`, or `None` for a Unit op.
+    /// Lower a `prim.*` PRIMITIVE-FLOOR call. `prim` is not user surface (E085,
+    /// #3025); the calls that reach here are a linked self-host body's (the
+    /// native self-host link lowers stdlib bodies into MIR, #4006), the ones
+    /// lowering itself synthesizes (`prim.handle`/`prim.die` in the main-die and
+    /// unwrap-die desugars) and the frontend's `almide_rt_prim_budget_*` /
+    /// `timeout_*` RuntimeCalls. A prim fn's op is read from its `@prim_op`
+    /// declaration ([`crate::prim_ops`]), never from its name. Returns the result
+    /// `dst`, or `None` for a Unit op.
     pub(crate) fn lower_prim_call(
         &mut self,
         func: &str,
         args: &[IrExpr],
     ) -> Result<Option<ValueId>, LowerError> {
-        let kind = self.prim_kind_for_name(func)?;
-        self.emit_prim_call(func, args, kind)
+        if let Some(kind) = self.region_prim_kind(func) {
+            return self.emit_prim_call(func, args, kind);
+        }
+        let span = args.first().and_then(|a| a.span);
+        let op = crate::prim_ops::declared(func).map_err(|e| LowerError::at(span, e))?;
+        self.lower_declared_prim(func, args, op, span)
     }
 
 }

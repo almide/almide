@@ -105,7 +105,7 @@ fn native_sig_subset_check(
         matches!(t, Ty::Named(n, args) if args.is_empty() && crate::render_native_rec::rec_index(n.as_str()).is_some())
             || matches!(t, Ty::Bytes)
             || crate::render_native_rec::is_scalar_instance(t)
-            || (matches!(t, Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
+            || (matches!(t, Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
             || heap_carrier_of(t).is_some()
     };
@@ -487,7 +487,7 @@ fn native_sig_kind(
         // #4006: a heap Option / a Result outside the scalar carriers rides its
         // generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => heap_carrier_of(t).map(NativeSigKind::Rec),
-        Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) => {
+        Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) => {
             crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec)
         }
         _ => None,

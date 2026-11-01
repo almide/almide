@@ -12,7 +12,7 @@
 //! frozen pattern-matches alike — so any new mention of the spanless form
 //! (either kind) shows up and gets reviewed.
 
-const BASELINE: usize = 157;
+const BASELINE: usize = 155;
 
 #[test]
 fn spanless_wall_count_only_goes_down() {
