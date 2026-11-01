@@ -485,6 +485,9 @@ fn hc_fn_teardown(cx: HcCx<'_>) -> Function {
     i.i32_eqz().if_(BlockType::Empty);
     hc_ld(&mut i, blk, HC_SNDDONE);
     i.i32_eqz().if_(BlockType::Empty);
+    // A sync cancel traps on a waitable still in a set: each leaves first.
+    hc_ld(&mut i, blk, HC_SUB);
+    i.i32_const(0).call(I_WS_JOIN);
     hc_ld(&mut i, blk, HC_SUB);
     i.call(I_SUBTASK_CANCEL).local_set(n);
     hc_ld(&mut i, blk, HC_SUB);
@@ -502,6 +505,8 @@ fn hc_fn_teardown(cx: HcCx<'_>) -> Function {
     hc_ld(&mut i, blk, HC_TRL_PEND);
     i.if_(BlockType::Empty);
     hc_ld(&mut i, blk, HC_TRL_TX);
+    i.i32_const(0).call(I_WS_JOIN);
+    hc_ld(&mut i, blk, HC_TRL_TX);
     i.call(cx.imp.trl_cancel).drop();
     hc_ld(&mut i, blk, HC_TRL_TX);
     i.call(I_HTTP_REQ_FDROPW);
@@ -509,6 +514,8 @@ fn hc_fn_teardown(cx: HcCx<'_>) -> Function {
     i.end();
     hc_ld(&mut i, blk, HC_STR_PEND);
     i.if_(BlockType::Empty);
+    hc_ld(&mut i, blk, HC_STR_TX);
+    i.i32_const(0).call(I_WS_JOIN);
     hc_ld(&mut i, blk, HC_STR_TX);
     i.call(cx.imp.str_cancel).drop();
     hc_ld(&mut i, blk, HC_STR_TX);
@@ -523,6 +530,8 @@ fn hc_fn_teardown(cx: HcCx<'_>) -> Function {
     i.i32_const(1).i32_eq().if_(BlockType::Empty);
     hc_ld(&mut i, blk, HC_RPEND);
     i.if_(BlockType::Empty);
+    hc_ld(&mut i, blk, HC_BODY_RX);
+    i.i32_const(0).call(I_WS_JOIN);
     hc_ld(&mut i, blk, HC_BODY_RX);
     i.call(cx.imp.body_cancel).local_set(n);
     hc_st(&mut i, blk, HC_TOTAL, |i| {
