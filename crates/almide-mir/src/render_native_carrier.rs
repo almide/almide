@@ -347,6 +347,21 @@ pub(super) fn render_carrier_op(
                 let (o, e) = result_payloads(i)?;
                 // The arm of the innermost tag test of this Result, if any.
                 let arm = st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
+                // A borrow-only read inside its tag test (render_native_borrow_read):
+                // a reference into the carrier, no copy of the payload.
+                if let Some(then) = arm {
+                    let (k, side, other) = if then { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
+                    let by_ref = match k {
+                        NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), "v")),
+                        NTy::Str => Some((NTy::StrRef, "&str".to_string(), "&v[..]")),
+                        _ => None,
+                    };
+                    if let (true, Some((t, ty, val))) = (st.borrow_reads.contains(d), by_ref) {
+                        tys.insert(*d, t);
+                        emit(out, indent, &format!("let mut {}: {ty} = match &{b} {{ {side}(v) => {val}, {other}(_) => unreachable!() }};", var(*d)));
+                        return Some(Ok(true));
+                    }
+                }
                 match (arm, st.hoisted.get(d).copied()) {
                     (Some(true), _) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
                     (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),
