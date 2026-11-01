@@ -11,18 +11,7 @@
 # with no row fails, a covered row fails as STALE) and shrink-only (MAX_ROWS).
 # A fn proofs/target-availability.toml declares unavailable on the embedded leg
 # cites that declaration's issue.
-
-net.lookup_host :: wasm :: pending #4306 — UDP sockets and name resolution are not served on the embedded leg yet (proofs/target-availability.toml); spec/stdlib/net_test.almd runs it natively
-net.udp_bind :: wasm :: pending #4306 — UDP sockets and name resolution are not served on the embedded leg yet (proofs/target-availability.toml); spec/stdlib/net_test.almd runs it natively
-net.udp_local_port :: wasm :: pending #4306 — UDP sockets and name resolution are not served on the embedded leg yet (proofs/target-availability.toml); spec/stdlib/net_test.almd runs it natively
-net.udp_recv_from :: wasm :: pending #4306 — UDP sockets and name resolution are not served on the embedded leg yet (proofs/target-availability.toml); spec/stdlib/net_test.almd runs it natively
-net.udp_send_to :: wasm :: pending #4306 — UDP sockets and name resolution are not served on the embedded leg yet (proofs/target-availability.toml); spec/stdlib/net_test.almd runs it natively
-process.child_pid :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-process.kill :: wasm :: pending #4350 — its both-leg fixture spec/embedded_cross/process_kill_syscall.almd does not type-check on develop; PR #4379 fixes it; spec/stdlib/process_start_test.almd runs it natively
-process.poll :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-process.read_new_stderr :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-process.read_new_stdout :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-process.start :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-process.stop :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-process.wait :: wasm :: pending #4308 — a started child needs an almide:process host capability; no WASI standard serves one (proofs/target-availability.toml); spec/stdlib/process_start_test.almd runs it natively
-uuid.v7 :: wasm :: pending #4307 — the strictly increasing stamp needs a monotonic cell on the embedded leg (proofs/target-availability.toml); spec/stdlib/uuid_v7_test.almd runs it natively
+#
+# Empty since the merge of sec-post-rc1b (#4379), which serves uuid.v7 (#4307),
+# UDP and name resolution (#4306) and the process.start family (#4308) on the
+# embedded leg: every public fn is tested on both legs.

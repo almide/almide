@@ -11,10 +11,14 @@
 //! (`almide::wasm_leg::lower_entry_unlinked`), and the call targets are read off
 //! the IR before any linking or inlining — so a UFCS call (`s.trim()`), a pipe
 //! stage (`xs |> list.map(f)`) and a plain call all count, which a grep of the
-//! source text cannot see. Only code reachable from a `test` block, `main` or a
-//! top-level `let` counts: a helper nothing calls is not a test. A few calls
-//! are erased by lowering (the time constructors, the snapshot and abort
-//! assertions); those are read from the program's tokens (`qualified_spellings`).
+//! source text cannot see. Only code reachable from a `test` block, `main`, an
+//! abort site or a top-level `let` counts, and only a call whose value the run
+//! OBSERVES (`Observe`): one that reaches an assertion, a byte-compared output
+//! or a decision that gates one, or that has no value to read. Calling a
+//! function and dropping its result is not a test of it. A few calls are erased
+//! by lowering (the time constructors, the snapshot and abort assertions);
+//! those are read from the program's tokens, on observed lines only
+//! (`qualified_spellings`).
 //!
 //! WHICH PROGRAMS RUN ON WHICH LEG — the same sets CI executes:
 //!   - a `spec/**` file with a `test` block (the rule `almide test` uses to find
@@ -45,7 +49,7 @@
 //! (function → native / wasm, with the first program that covers each leg);
 //! `ALMIDE_UPDATE_STDLIB_COVERAGE=1` rewrites the ledger's rows from the
 //! measurement (keeping each row's reason) and then fails, so the diff is reviewed.
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use almide::ir::visit::{walk_expr, IrVisitor};
@@ -59,7 +63,7 @@ const AVAILABILITY: &str = "proofs/target-availability.toml";
 
 /// The ledger's row count. It may only fall: a row is removed when a test
 /// covers the leg it names.
-const MAX_ROWS: usize = 14;
+const MAX_ROWS: usize = 0;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -105,81 +109,370 @@ enum Leg {
     Wasm,
 }
 
-/// Collects the stdlib surfaces a function body calls and the user functions
-/// it reaches.
-struct Calls<'a> {
+/// The calls whose arguments a run OBSERVES. In every program: the assertion
+/// family (a failing one fails the test) and `panic` (an abort is a verdict);
+/// every `testing.*` fn is an assertion. In a program whose output a cross
+/// net byte-compares (`compared`), also everything that writes that output.
+const ASSERT_SINKS: &[&str] = &["assert", "assert_eq", "assert_ne", "panic"];
+const OUTPUT_SINKS: &[&str] = &["println", "eprintln", "print", "eprint", "io.print", "io.eprint", "io.write", "process.exit"];
+
+/// What a program's tests OBSERVE. A stdlib call counts only when its value
+/// reaches an observation — an assertion's argument, a byte-compared output,
+/// or a branch, match or loop that decides whether one runs — through `let`s,
+/// user-fn parameters and returns (a fixpoint over the program), or when the
+/// call has nothing to observe (its value is `Unit`, or `Unit` behind a `!`
+/// whose err fails the test). A call whose result nobody reads is not a test
+/// of it. The analysis is deliberately coarse where it is generous: a lambda's
+/// body is observed when the call it is passed to is, and a branch condition is
+/// observed when either arm holds an observation.
+struct Observe<'a> {
     stdlib: &'a BTreeSet<String>,
+    compared: bool,
+    fns: HashMap<&'a str, &'a almide::ir::IrFunction>,
+    /// User fns whose body holds an observation, transitively.
+    sink_fns: HashSet<&'a str>,
+    obs_vars: HashSet<almide::ir::VarId>,
+    obs_fns: HashSet<&'a str>,
+    reached: Vec<&'a str>,
+    seen: HashSet<&'a str>,
+    changed: bool,
+    /// Inside an abort site: whichever call aborts IS the observation.
+    force: bool,
     called: BTreeSet<String>,
-    user: Vec<String>,
+    reached_lines: BTreeSet<usize>,
+    observed_lines: BTreeSet<usize>,
 }
 
-impl Calls<'_> {
-    fn note(&mut self, name: &str) {
-        if std::env::var("ALMIDE_STDLIB_COVERAGE_PROBE").is_ok() {
-            eprintln!("probe call: {name}");
-        }
-        if self.stdlib.contains(name) {
-            self.called.insert(name.to_string());
-        } else {
-            self.user.push(name.to_string());
-        }
+fn call_name(target: &CallTarget) -> Option<String> {
+    match target {
+        CallTarget::Module { module, func, .. } => Some(format!("{}.{}", module.as_str(), func.as_str())),
+        CallTarget::Method { method, .. } => Some(method.as_str().to_string()),
+        CallTarget::Named { name } => Some(name.as_str().to_string()),
+        CallTarget::Computed { .. } => None,
     }
 }
 
-impl IrVisitor for Calls<'_> {
+/// Does `e` hold an observation (a sink call, or a call into a user fn that does)?
+struct HasSink<'o, 'a> {
+    o: &'o Observe<'a>,
+    found: bool,
+}
+
+impl IrVisitor for HasSink<'_, '_> {
     fn visit_expr(&mut self, e: &IrExpr) {
-        match &e.kind {
-            IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => match target {
-                CallTarget::Module { module, func, .. } => self.note(&format!("{}.{}", module.as_str(), func.as_str())),
-                CallTarget::Method { method, .. } => self.note(method.as_str()),
-                CallTarget::Named { name } => self.note(name.as_str()),
-                CallTarget::Computed { .. } => {}
-            },
-            IrExprKind::FnRef { name } => self.note(name.as_str()),
-            IrExprKind::RuntimeCall { symbol, .. } => self.note(symbol.as_str()),
-            _ => {}
+        if self.found {
+            return;
+        }
+        if let IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } = &e.kind
+            && let Some(n) = call_name(target)
+            && (self.o.is_sink(&n) || self.o.sink_fns.contains(n.as_str()))
+        {
+            self.found = true;
+            return;
         }
         walk_expr(self, e);
     }
 }
 
-/// The stdlib functions `ir` calls from code reachable from a test, `main` or
-/// a top-level `let`.
-fn reachable_calls(ir: &IrProgram, stdlib: &BTreeSet<String>) -> BTreeSet<String> {
-    let by_name: HashMap<&str, &almide::ir::IrFunction> = ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
-    let mut calls = Calls { stdlib, called: BTreeSet::new(), user: Vec::new() };
-    for tl in &ir.top_lets {
-        calls.visit_expr(&tl.value);
+/// Walks each direct child of an expression with one observation flag.
+struct Children<'o, 'a> {
+    o: &'o mut Observe<'a>,
+    obs: bool,
+}
+
+impl IrVisitor for Children<'_, '_> {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        let obs = self.obs;
+        self.o.expr(e, obs);
     }
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
-    let mut work: Vec<&almide::ir::IrFunction> =
-        ir.functions.iter().filter(|f| f.is_test || f.name.as_str() == "main").collect();
-    while let Some(f) = work.pop() {
-        if !seen.insert(f.name.as_str()) {
-            continue;
+    fn visit_stmt(&mut self, s: &almide::ir::IrStmt) {
+        self.o.stmt(s);
+    }
+}
+
+fn pattern_vars(p: &almide::ir::IrPattern, out: &mut Vec<almide::ir::VarId>) {
+    use almide::ir::IrPattern as P;
+    match p {
+        P::Bind { var, .. } => out.push(*var),
+        P::As { var, inner, .. } => {
+            out.push(*var);
+            pattern_vars(inner, out)
         }
-        calls.visit_expr(&f.body);
-        for name in std::mem::take(&mut calls.user) {
-            if let Some(g) = by_name.get(name.as_str()) {
-                work.push(g);
+        P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => ps.iter().for_each(|q| pattern_vars(q, out)),
+        P::List { elements, rest } => {
+            elements.iter().for_each(|q| pattern_vars(q, out));
+            if let Some(r) = rest {
+                pattern_vars(r, out)
             }
         }
+        P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_vars(inner, out),
+        P::RecordPattern { fields, .. } => {
+            for f in fields {
+                if let Some(q) = &f.pattern {
+                    pattern_vars(q, out)
+                }
+            }
+        }
+        P::Wildcard | P::Literal { .. } | P::None => {}
     }
-    // Calls the top-level lets made into user functions.
+}
+
+impl<'a> Observe<'a> {
+    fn new(ir: &'a IrProgram, stdlib: &'a BTreeSet<String>, compared: bool) -> Self {
+        let fns: HashMap<&str, &almide::ir::IrFunction> = ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        let mut o = Observe {
+            stdlib,
+            compared,
+            fns,
+            sink_fns: HashSet::new(),
+            obs_vars: HashSet::new(),
+            obs_fns: HashSet::new(),
+            reached: Vec::new(),
+            seen: HashSet::new(),
+            changed: false,
+            force: false,
+            called: BTreeSet::new(),
+            reached_lines: BTreeSet::new(),
+            observed_lines: BTreeSet::new(),
+        };
+        // sink_fns: a least fixpoint over the call graph.
+        loop {
+            let mut grew = false;
+            for f in &ir.functions {
+                let name = f.name.as_str();
+                if o.sink_fns.contains(name) {
+                    continue;
+                }
+                let mut h = HasSink { o: &o, found: false };
+                h.visit_expr(&f.body);
+                if h.found {
+                    o.sink_fns.insert(name);
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        o
+    }
+
+    fn is_sink(&self, name: &str) -> bool {
+        ASSERT_SINKS.contains(&name)
+            || name.starts_with("testing.")
+            || (self.compared && OUTPUT_SINKS.contains(&name))
+    }
+
+    fn has_sink(&self, e: &IrExpr) -> bool {
+        let mut h = HasSink { o: self, found: false };
+        h.visit_expr(e);
+        h.found
+    }
+
+    fn stmts_have_sink(&self, ss: &[almide::ir::IrStmt]) -> bool {
+        let mut h = HasSink { o: self, found: false };
+        ss.iter().for_each(|s| h.visit_stmt(s));
+        h.found
+    }
+
+    fn mark_var(&mut self, v: almide::ir::VarId) {
+        if self.obs_vars.insert(v) {
+            self.changed = true;
+        }
+    }
+
+    fn reach(&mut self, name: &str, obs: bool) -> Option<&'a almide::ir::IrFunction> {
+        let (k, f) = self.fns.get_key_value(name).map(|(k, f)| (*k, *f))?;
+        if self.seen.insert(k) {
+            self.reached.push(k);
+        }
+        if obs && self.obs_fns.insert(k) {
+            self.changed = true;
+        }
+        Some(f)
+    }
+
+    fn param_obs(&self, f: &almide::ir::IrFunction, i: usize) -> bool {
+        f.params.get(i).is_none_or(|p| self.obs_vars.contains(&p.var))
+    }
+
+    fn expr(&mut self, e: &IrExpr, obs: bool) {
+        let obs = obs || self.force;
+        if let Some(sp) = &e.span {
+            self.reached_lines.insert(sp.line);
+            if obs {
+                self.observed_lines.insert(sp.line);
+            }
+        }
+        match &e.kind {
+            IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+                let name = call_name(target);
+                let recv = match target {
+                    CallTarget::Method { object, .. } => Some(&**object),
+                    CallTarget::Computed { callee } => {
+                        self.expr(callee, obs);
+                        None
+                    }
+                    _ => None,
+                };
+                let Some(name) = name else {
+                    args.iter().for_each(|a| self.expr(a, obs));
+                    return;
+                };
+                if self.is_sink(&name) {
+                    recv.into_iter().chain(args.iter()).for_each(|a| self.expr(a, true));
+                    return;
+                }
+                if let Some(f) = self.reach(&name, obs) {
+                    for (i, a) in recv.into_iter().chain(args.iter()).enumerate() {
+                        let o = self.param_obs(f, i);
+                        self.expr(a, o);
+                    }
+                    return;
+                }
+                if self.stdlib.contains(&name) && (obs || e.ty == almide::types::Ty::Unit) {
+                    self.called.insert(name);
+                }
+                recv.into_iter().chain(args.iter()).for_each(|a| self.expr(a, obs));
+            }
+            IrExprKind::FnRef { name } => {
+                if self.reach(name.as_str(), obs).is_none() && obs && self.stdlib.contains(name.as_str()) {
+                    self.called.insert(name.as_str().to_string());
+                }
+            }
+            IrExprKind::Var { id } => {
+                if obs {
+                    self.mark_var(*id)
+                }
+            }
+            IrExprKind::Block { stmts, expr } => {
+                stmts.iter().for_each(|s| self.stmt(s));
+                if let Some(t) = expr {
+                    self.expr(t, obs)
+                }
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                let c = obs || self.has_sink(then) || self.has_sink(else_);
+                self.expr(then, obs);
+                self.expr(else_, obs);
+                self.expr(cond, c);
+            }
+            IrExprKind::Match { subject, arms } => {
+                let mut s = obs;
+                for arm in arms {
+                    let mut vs = Vec::new();
+                    pattern_vars(&arm.pattern, &mut vs);
+                    s |= self.has_sink(&arm.body)
+                        || arm.guard.as_ref().is_some_and(|g| self.has_sink(g))
+                        || vs.iter().any(|v| self.obs_vars.contains(v));
+                }
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        self.expr(g, s);
+                    }
+                    self.expr(&arm.body, obs);
+                }
+                self.expr(subject, s);
+            }
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                body.iter().for_each(|st| self.stmt(st));
+                let s = self.stmts_have_sink(body)
+                    || self.obs_vars.contains(var)
+                    || var_tuple.as_ref().is_some_and(|vs| vs.iter().any(|v| self.obs_vars.contains(v)));
+                self.expr(iterable, s);
+            }
+            IrExprKind::While { cond, body } => {
+                body.iter().for_each(|st| self.stmt(st));
+                let s = self.stmts_have_sink(body);
+                self.expr(cond, s);
+            }
+            // `expr!`: a `Unit` value behind it has nothing to read, and its err
+            // fails the test or ends the run.
+            IrExprKind::Try { expr } => {
+                let o = obs || e.ty == almide::types::Ty::Unit;
+                self.expr(expr, o);
+            }
+            _ => walk_expr(&mut Children { o: self, obs }, e),
+        }
+    }
+
+    fn stmt(&mut self, s: &almide::ir::IrStmt) {
+        use almide::ir::IrStmtKind as K;
+        match &s.kind {
+            K::Bind { var, value, .. } | K::Assign { var, value } => {
+                let o = self.obs_vars.contains(var);
+                self.expr(value, o);
+            }
+            K::BindDestructure { pattern, value } => {
+                let mut vs = Vec::new();
+                pattern_vars(pattern, &mut vs);
+                let o = vs.iter().any(|v| self.obs_vars.contains(v));
+                self.expr(value, o);
+            }
+            K::IndexAssign { target, index, value } | K::MapInsert { target, key: index, value } => {
+                let o = self.obs_vars.contains(target);
+                self.expr(index, o);
+                self.expr(value, o);
+            }
+            K::FieldAssign { target, value, .. } => {
+                let o = self.obs_vars.contains(target);
+                self.expr(value, o);
+            }
+            // A guard decides whether the rest of the body runs.
+            K::Guard { cond, else_ } => {
+                self.expr(cond, true);
+                self.expr(else_, false);
+            }
+            K::Expr { expr } => self.expr(expr, false),
+            _ => almide::ir::visit::walk_stmt(&mut Children { o: self, obs: false }, s),
+        }
+    }
+
+    /// One pass from the roots: tests, `main`, abort sites, top-level lets.
+    fn pass(&mut self, ir: &'a IrProgram) {
+        self.reached.clear();
+        self.seen.clear();
+        for tl in &ir.top_lets {
+            let o = self.obs_vars.contains(&tl.var);
+            self.expr(&tl.value, o);
+        }
+        for f in &ir.functions {
+            let n = f.name.as_str();
+            if f.is_test || n == "main" || n.starts_with("__almd_abort_site_") {
+                self.reach(n, false);
+            }
+        }
+        let mut i = 0;
+        while i < self.reached.len() {
+            let name = self.reached[i];
+            i += 1;
+            let f = self.fns[name];
+            let site = name.starts_with("__almd_abort_site_");
+            let tail = self.obs_fns.contains(name) || (self.compared && name == "main");
+            let saved = self.force;
+            self.force = site;
+            self.expr(&f.body, tail);
+            self.force = saved;
+        }
+    }
+}
+
+/// The stdlib calls a program's tests observe, and the source lines an
+/// observed expression of a reached fn sits on (for the token half).
+fn observed_calls(ir: &IrProgram, stdlib: &BTreeSet<String>, compared: bool) -> (BTreeSet<String>, BTreeSet<usize>, BTreeSet<usize>) {
+    let mut o = Observe::new(ir, stdlib, compared);
     loop {
-        let pending: Vec<String> = std::mem::take(&mut calls.user);
-        let next: Vec<&almide::ir::IrFunction> =
-            pending.iter().filter_map(|n| by_name.get(n.as_str()).copied()).filter(|f| !seen.contains(f.name.as_str())).collect();
-        if next.is_empty() {
+        o.changed = false;
+        o.pass(ir);
+        if !o.changed {
             break;
         }
-        for f in next {
-            if seen.insert(f.name.as_str()) {
-                calls.visit_expr(&f.body);
-            }
-        }
     }
-    calls.called
+    o.called.clear();
+    o.reached_lines.clear();
+    o.observed_lines.clear();
+    o.pass(ir);
+    (o.called, o.observed_lines, o.reached_lines)
 }
 
 /// Calls the lowering ERASES leave no IR call to read: the ADR-0001 time
@@ -187,17 +480,25 @@ fn reachable_calls(ir: &IrProgram, stdlib: &BTreeSet<String>) -> BTreeSet<String
 /// crates/almide-frontend/src/lower/calls_time.rs), `testing.assert_snapshot`
 /// and `testing.assert_aborts` (desugared into abort sites, lower/calls.rs and
 /// lower/calls_abort_site.rs). So the IR's calls are joined by the program's
-/// qualified spellings read from its TOKENS — `<module> . <fn>` naming a
-/// public function, which a comment or a string literal cannot spell. This
-/// half does not apply reachability; the IR half carries UFCS and pipes.
-fn qualified_spellings(text: &str, stdlib: &BTreeSet<String>) -> BTreeSet<String> {
+/// qualified spellings read from its TOKENS — `<module> . <fn>` naming a public
+/// function, which a comment or a string literal cannot spell — counted only
+/// on a line where an OBSERVED expression of a reached fn sits (the erased
+/// form keeps the call's span), or, for an assertion itself, a reached line.
+fn qualified_spellings(
+    text: &str,
+    stdlib: &BTreeSet<String>,
+    observed: &BTreeSet<usize>,
+    reached: &BTreeSet<usize>,
+) -> BTreeSet<String> {
     use almide::lexer::{Lexer, TokenType};
     let toks = Lexer::tokenize(text);
     let mut out = BTreeSet::new();
     for w in toks.windows(3) {
         if w[0].token_type == TokenType::Ident && w[1].token_type == TokenType::Dot && w[2].token_type == TokenType::Ident {
             let name = format!("{}.{}", w[0].value, w[2].value);
-            if stdlib.contains(&name) {
+            let line = w[0].line;
+            let counts = if name.starts_with("testing.") { reached.contains(&line) } else { observed.contains(&line) };
+            if counts && stdlib.contains(&name) {
                 out.insert(name);
             }
         }
@@ -208,6 +509,9 @@ fn qualified_spellings(text: &str, stdlib: &BTreeSet<String>) -> BTreeSet<String
 struct Program {
     rel: String,
     legs: Vec<Leg>,
+    /// A cross net byte-compares this program's output on its legs, so what
+    /// it prints is observed.
+    compared: bool,
 }
 
 fn programs(root: &Path) -> Vec<Program> {
@@ -220,6 +524,7 @@ fn programs(root: &Path) -> Vec<Program> {
     let mut files = Vec::new();
     test_files(&root.join("spec"), &mut files);
     let mut out: BTreeMap<String, BTreeSet<Leg>> = BTreeMap::new();
+    let mut compared: BTreeSet<String> = BTreeSet::new();
     for path in files {
         let rel = path.strip_prefix(root).expect("under root").to_string_lossy().replace('\\', "/");
         let text = std::fs::read_to_string(&path).expect("readable");
@@ -231,6 +536,7 @@ fn programs(root: &Path) -> Vec<Program> {
         }
     }
     for rel in parity {
+        compared.insert(rel.clone());
         let legs = out.entry(rel).or_default();
         legs.insert(Leg::Native);
         legs.insert(Leg::Wasm);
@@ -250,6 +556,7 @@ fn programs(root: &Path) -> Vec<Program> {
         for path in fixtures {
             let rel = path.strip_prefix(root).expect("under root").to_string_lossy().replace('\\', "/");
             let text = std::fs::read_to_string(&path).expect("readable");
+            compared.insert(rel.clone());
             let legs = out.entry(rel).or_default();
             legs.insert(Leg::Native);
             if !text.lines().any(|l| l.trim().starts_with("// @xt-allow:")) {
@@ -261,6 +568,7 @@ fn programs(root: &Path) -> Vec<Program> {
     // spec/serve_cross fixtures its source names, on both legs.
     let serve = std::fs::read_to_string(root.join("tests/http_serve_cross_test.rs")).expect("serve net");
     for rel in serve.split('"').filter(|s| s.starts_with("spec/serve_cross/") && s.ends_with(".almd")) {
+        compared.insert(rel.to_string());
         let legs = out.entry(rel.to_string()).or_default();
         legs.insert(Leg::Native);
         legs.insert(Leg::Wasm);
@@ -268,7 +576,7 @@ fn programs(root: &Path) -> Vec<Program> {
     let probe = std::env::var("ALMIDE_STDLIB_COVERAGE_PROBE").ok();
     out.into_iter()
         .filter(|(rel, _)| probe.as_deref().is_none_or(|p| rel == p))
-        .map(|(rel, legs)| Program { rel, legs: legs.into_iter().collect() })
+        .map(|(rel, legs)| Program { compared: compared.contains(&rel), rel, legs: legs.into_iter().collect() })
         .collect()
 }
 
@@ -294,8 +602,11 @@ fn measure(root: &Path, stdlib: &BTreeSet<String>) -> (Coverage, Vec<String>, us
                             let r = std::panic::catch_unwind(|| almide::wasm_leg::lower_entry_unlinked(&path, &text))
                                 .unwrap_or_else(|_| Err("front panicked".into()));
                             let r = r.map(|ir| {
-                                let mut called = reachable_calls(&ir, stdlib);
-                                called.extend(qualified_spellings(&text, stdlib));
+                                let (mut called, observed, reached) = observed_calls(&ir, stdlib, p.compared);
+                                called.extend(qualified_spellings(&text, stdlib, &observed, &reached));
+                                if std::env::var("ALMIDE_STDLIB_COVERAGE_PROBE").is_ok() {
+                                    eprintln!("probe {}: observed {:?}", p.rel, called);
+                                }
                                 called
                             });
                             (ci * chunk + i, r)
