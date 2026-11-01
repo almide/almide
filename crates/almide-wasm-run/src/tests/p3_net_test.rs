@@ -81,6 +81,8 @@ fn harness() -> H {
     code.function(&net_fn_ip_fmt(&abi, &texts, fns));
     code.function(&net_fn_sa(&abi, &texts));
     code.function(&stand_in());
+    code.function(&stand_in());
+    code.function(&stand_in());
     m.section(&code);
     let mut data = DataSection::new();
     data.active(0, &ConstExpr::i32_const(texts.base as i32), texts.blob.iter().copied());

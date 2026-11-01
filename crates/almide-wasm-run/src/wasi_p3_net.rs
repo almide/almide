@@ -66,6 +66,10 @@ const NET_SCR_EL2: u64 = 32;
 const NET_SCR_SA: u64 = 64;
 const NET_SCR_HEAD: u64 = 128;
 const NET_SCR_TAIL: u64 = 160;
+/// The tcp copy race's waitable-set event (waitable @0, payload @4) and
+/// accept's one-handle landing.
+const NET_SCR_EV: u64 = 112;
+const NET_SCR_ACCEPT: u64 = 120;
 const NET_SCR_SPAN: u64 = 192;
 
 /// The `error-code` cases of wasi:sockets/types, by name, and the class
@@ -133,6 +137,14 @@ struct NetAbi {
     ec_class: Vec<almide_rt_core::net_core::NetErrorClass>,
     /// The imports in index order: module, name, core params, core results.
     imports: Vec<(&'static str, &'static str, Vec<ValType>, Vec<ValType>)>,
+    /// tcp result payload offsets: create's, bind / connect's (and the
+    /// futures' `result<_, error-code>`), listen's stream, get-local-address's;
+    /// receive's `tuple<stream, future>` fields.
+    tcp_create_payload: u64,
+    tcp_unit_payload: u64,
+    tcp_listen_payload: u64,
+    tcp_local_payload: u64,
+    tcp_recv_fields: [u64; 2],
 }
 
 const NET_TYPES_IFACE: &str = "wasi:sockets/types@0.3.0";
@@ -146,7 +158,34 @@ const NI_RECEIVE: u32 = 3;
 const NI_LOCAL: u32 = 4;
 const NI_DROP: u32 = 5;
 const NI_RESOLVE: u32 = 6;
-const NET_IMPORTS: u32 = 7;
+// The tcp block (#3620, the net/tcp design step 4): the socket's funcs (all
+// sync lowers), then the builtins of the streams and futures they hand over
+// — every copy the `[async-lower]` form, every cancel the baseline sync one
+// (no 🚝 builtin, ADR-0023 step 1) — and the async-lowered `wait-for` a
+// timeout races a copy against.
+const NI_T_CREATE: u32 = 7;
+const NI_T_BIND: u32 = 8;
+const NI_T_CONNECT: u32 = 9;
+const NI_T_LISTEN: u32 = 10;
+const NI_T_SEND: u32 = 11;
+const NI_T_RECEIVE: u32 = 12;
+const NI_T_LOCAL: u32 = 13;
+const NI_T_DROP: u32 = 14;
+const NI_T_LREAD: u32 = 15; // listen's stream<tcp-socket>: read one client
+const NI_T_LDROP: u32 = 16;
+const NI_T_SNEW: u32 = 17; // send's stream<u8>: the guest keeps the writable end
+const NI_T_SWRITE: u32 = 18;
+const NI_T_SCANCEL: u32 = 19;
+const NI_T_SDROP: u32 = 20;
+const NI_T_SFREAD: u32 = 21; // send's future<result<_, error-code>>
+const NI_T_SFDROP: u32 = 22;
+const NI_T_RREAD: u32 = 23; // receive's stream<u8>
+const NI_T_RCANCEL: u32 = 24;
+const NI_T_RDROP: u32 = 25;
+const NI_T_RFREAD: u32 = 26; // receive's future<result<_, error-code>>
+const NI_T_RFDROP: u32 = 27;
+const NI_T_WAIT: u32 = 28; // [async-lower] monotonic-clock.wait-for
+const NET_IMPORTS: u32 = 29;
 
 fn net_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<NetAbi> {
     use wit_parser::{Type, TypeDefKind};
@@ -327,6 +366,47 @@ fn net_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<NetAbi> {
     imports.push((NET_TYPES_IFACE, "[resource-drop]udp-socket", vec![ValType::I32], vec![]));
     let (p, r) = sig(&f_resolve)?;
     imports.push((NET_LOOKUP_IFACE, "resolve-addresses", p, r));
+    let tcp = tcp_abi(resolve, types, &result_parts, &tuple_offsets)?;
+    for (name, f) in [
+        ("[static]tcp-socket.create", &tcp.f_create),
+        ("[method]tcp-socket.bind", &tcp.f_bind),
+        ("[method]tcp-socket.connect", &tcp.f_connect),
+        ("[method]tcp-socket.listen", &tcp.f_listen),
+        ("[method]tcp-socket.send", &tcp.f_send),
+        ("[method]tcp-socket.receive", &tcp.f_receive),
+        ("[method]tcp-socket.get-local-address", &tcp.f_local),
+    ] {
+        let (p, r) = sig(f)?;
+        imports.push((NET_TYPES_IFACE, name, p, r));
+    }
+    {
+        use ValType::{I32, I64};
+        let drop = (vec![I32], vec![]);
+        let copy = (vec![I32, I32, I32], vec![I32]);
+        let cancel = (vec![I32], vec![I32]);
+        let fut = (vec![I32, I32], vec![I32]);
+        for (name, (p, r)) in [
+            ("[resource-drop]tcp-socket", drop.clone()),
+            ("[async-lower][stream-read-0][method]tcp-socket.listen", copy.clone()),
+            ("[stream-drop-readable-0][method]tcp-socket.listen", drop.clone()),
+            ("[stream-new-0][method]tcp-socket.send", (vec![], vec![I64])),
+            ("[async-lower][stream-write-0][method]tcp-socket.send", copy.clone()),
+            ("[stream-cancel-write-0][method]tcp-socket.send", cancel.clone()),
+            ("[stream-drop-writable-0][method]tcp-socket.send", drop.clone()),
+            ("[async-lower][future-read-1][method]tcp-socket.send", fut.clone()),
+            ("[future-drop-readable-1][method]tcp-socket.send", drop.clone()),
+            ("[async-lower][stream-read-0][method]tcp-socket.receive", copy.clone()),
+            ("[stream-cancel-read-0][method]tcp-socket.receive", cancel.clone()),
+            ("[stream-drop-readable-0][method]tcp-socket.receive", drop.clone()),
+            ("[async-lower][future-read-1][method]tcp-socket.receive", fut.clone()),
+            ("[future-drop-readable-1][method]tcp-socket.receive", drop.clone()),
+        ] {
+            imports.push((NET_TYPES_IFACE, name, p, r));
+        }
+        // `wait-for(duration)` lowered async: the duration flat, the packed
+        // subtask status back.
+        imports.push(("wasi:clocks/monotonic-clock@0.3.0", "[async-lower]wait-for", vec![I64], vec![I32]));
+    }
     assert_eq!(imports.len() as u32, NET_IMPORTS);
     // The shapes the shim pushes: create (family, retptr); bind (self, the
     // address, retptr); send (self, data ptr/len, the option's
@@ -336,6 +416,12 @@ fn net_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<NetAbi> {
     let want = [2, 2 + flat_len, 5 + flat_len, 2, 2, 1, 3];
     for ((_, n, p, r), w) in imports.iter().zip(want) {
         anyhow::ensure!(p.len() == w && p.iter().all(|t| *t == ValType::I32) && r.is_empty(), "{n}'s core signature drifted");
+    }
+    // tcp: create / bind / connect / listen / receive / get-local-address
+    // into a retptr; send answers its future flat.
+    let want_tcp: [(usize, usize); 7] = [(2, 0), (2 + flat_len, 0), (2 + flat_len, 0), (2, 0), (2, 1), (2, 0), (2, 0)];
+    for ((_, n, p, r), (wp, wr)) in imports[NI_T_CREATE as usize..].iter().zip(want_tcp) {
+        anyhow::ensure!(p.len() == wp && r.len() == wr && p.iter().chain(r).all(|t| *t == ValType::I32), "{n}'s core signature drifted");
     }
 
     Ok(NetAbi {
@@ -361,6 +447,11 @@ fn net_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<NetAbi> {
         lookup_payload,
         ec_class,
         imports,
+        tcp_create_payload: tcp.create_payload,
+        tcp_unit_payload: tcp.unit_payload,
+        tcp_listen_payload: tcp.listen_payload,
+        tcp_local_payload: tcp.local_payload,
+        tcp_recv_fields: tcp.recv_fields,
     })
 }
 
@@ -372,8 +463,10 @@ struct NetImports {
 }
 
 impl NetImports {
+    /// The block ships whole when the op set names a udp or a tcp op; the
+    /// p1-style prune drops the family a program never dispatches to.
     fn plan(host_ops: &[i32], base: u32) -> (Option<Self>, u32) {
-        if host_ops.iter().any(|op| almide_wasm::host_ops::UDP.contains(op)) {
+        if host_ops.iter().any(|op| almide_wasm::host_ops::UDP.contains(op) || tcp_served(*op)) {
             (Some(NetImports { base }), base + NET_IMPORTS)
         } else {
             (None, base)
@@ -433,6 +526,8 @@ struct NetTexts {
     mapped: NetPiece,
     /// One (address, length) entry per `error-code` case: its class text.
     ec_table: i32,
+    /// The tcp family's pieces (wasi_p3_tcp.rs).
+    tcp: TcpTexts,
 }
 
 /// Markers no text of the core contains: a private-use host and handle /
@@ -514,6 +609,7 @@ impl NetTexts {
             closed: [put(cl_pre.as_bytes()), put(cl_post.as_bytes())],
             negative: [put(neg_pre.as_bytes()), put(neg_post.as_bytes())],
             mapped: put(b"::ffff:"),
+            tcp: TcpTexts::cut(&mut put, abi),
             ec_table: 0,
             blob: Vec::new(),
             base,
@@ -548,13 +644,33 @@ struct NetGlobals {
     buf: u32,
     bufcap: u32,
     addrs: u32,
+    /// The tcp stream table (base, count, capacity) and listener table.
+    st_tab: u32,
+    st_n: u32,
+    st_cap: u32,
+    ls_tab: u32,
+    ls_n: u32,
+    ls_cap: u32,
 }
 
 impl NetGlobals {
-    const COUNT: u32 = 6;
+    const COUNT: u32 = 12;
 
     fn at(first: u32) -> Self {
-        NetGlobals { tab: first, n: first + 1, cap: first + 2, buf: first + 3, bufcap: first + 4, addrs: first + 5 }
+        NetGlobals {
+            tab: first,
+            n: first + 1,
+            cap: first + 2,
+            buf: first + 3,
+            bufcap: first + 4,
+            addrs: first + 5,
+            st_tab: first + 6,
+            st_n: first + 7,
+            st_cap: first + 8,
+            ls_tab: first + 9,
+            ls_n: first + 10,
+            ls_cap: first + 11,
+        }
     }
 
     fn emit(globals: &mut GlobalSection) {
@@ -580,10 +696,13 @@ struct NetFns {
     ip_fmt: u32,
     sa: u32,
     resolve: u32,
+    /// The tcp shim (the fs_call ABI) and its copy-with-deadline helper.
+    tcp: u32,
+    tcp_await: u32,
 }
 
 impl NetFns {
-    const COUNT: u32 = 10;
+    const COUNT: u32 = 12;
 
     fn at(first: u32) -> Self {
         NetFns {
@@ -597,6 +716,8 @@ impl NetFns {
             ip_fmt: first + 7,
             sa: first + 8,
             resolve: first + 9,
+            tcp: first + 10,
+            tcp_await: first + 11,
         }
     }
 
@@ -614,6 +735,7 @@ impl NetFns {
             (&[I32, I32], &[I32]),              // ip_fmt (dst, el) -> dst
             (&[I32, I32], &[]),                 // sa (el, port) -> () into NET_SCR_SA
             (&[I32, I32], &[I32]),              // resolve (host ptr, len) -> count
+            (&[I32, I32, I64, I32], &[I32]),    // tcp_await (end, rc, ms, write) -> word
         ]
         .into_iter()
         .map(|(p, r)| type_index(types, p, r))
@@ -622,9 +744,14 @@ impl NetFns {
 
     /// The function-section entries, in index order.
     fn declare(functions: &mut FunctionSection, t_fs: u32, helper_types: &[u32]) {
-        assert_eq!(helper_types.len() as u32 + 1, Self::COUNT);
+        assert_eq!(helper_types.len() as u32 + 2, Self::COUNT);
+        let (helpers, tcp_helpers) = helper_types.split_at(9);
         functions.function(t_fs);
-        for t in helper_types {
+        for t in helpers {
+            functions.function(*t);
+        }
+        functions.function(t_fs);
+        for t in tcp_helpers {
             functions.function(*t);
         }
     }

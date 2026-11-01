@@ -53,7 +53,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let sabi = if service { Some(serve_abi(&resolve)?) } else { None };
     // UDP and name lookup (#4306): the sockets block ships when the op set
     // names the udp family; the serve world imports no sockets.
-    let wants_net = host_ops.iter().any(|op| almide_wasm::host_ops::UDP.contains(op));
+    let wants_udp = host_ops.iter().any(|op| almide_wasm::host_ops::UDP.contains(op));
+    let wants_tcp = host_ops.iter().any(|op| tcp_served(*op));
+    let wants_net = wants_udp || wants_tcp;
     if service && wants_net {
         anyhow::bail!("the serve export reaches wasi:sockets, which its world does not import (check_service refuses it)");
     }
@@ -322,7 +324,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     code.function(&shim_print(err_port, park, f_await, true));
     code.function(&shim_exit(f_report));
     let env_ops = env.ops();
-    code.function(&shim_fs_call(g, &abi, (f_fs_self, f_http, serve_fns.map(|s| s.op), net_fns.map(|n| n.shim)), f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
+    code.function(&shim_fs_call(g, &abi, (f_fs_self, f_http, serve_fns.map(|s| s.op), (net_fns.filter(|_| wants_udp).map(|n| n.shim), net_fns.filter(|_| wants_tcp).map(|n| n.tcp))), f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g, f_report));
