@@ -1,0 +1,59 @@
+# proofs/stdlib-test-coverage.txt — see tests/stdlib_test_coverage_test.rs
+#
+# One row per public stdlib function that no test calls on a leg:
+#   module.fn :: native | wasm | both :: why
+# Equality-pinned and shrink-only (MAX_ROWS).
+
+duration.us :: both :: no test calls it on this leg yet
+fs.append_bytes :: both :: no test calls it on this leg yet
+int16.bor :: both :: no test calls it on this leg yet
+int16.bxor :: both :: no test calls it on this leg yet
+int16.is_even :: both :: no test calls it on this leg yet
+int16.wrap_sub :: both :: no test calls it on this leg yet
+int32.band :: both :: no test calls it on this leg yet
+int32.bnot :: both :: no test calls it on this leg yet
+int32.is_odd :: both :: no test calls it on this leg yet
+int32.wrap_sub :: both :: no test calls it on this leg yet
+int64.bor :: both :: no test calls it on this leg yet
+int64.bxor :: both :: no test calls it on this leg yet
+int64.from_wrapping :: both :: no test calls it on this leg yet
+io.eprint :: both :: no test calls it on this leg yet
+io.read_all :: both :: no test calls it on this leg yet
+io.read_to_end :: wasm :: no test calls it on this leg yet
+io.stderr :: both :: no test calls it on this leg yet
+net.ip_to_string :: wasm :: no test calls it on this leg yet
+net.is_loopback :: wasm :: no test calls it on this leg yet
+net.lookup_host :: wasm :: no test calls it on this leg yet
+net.parse_ip :: wasm :: no test calls it on this leg yet
+net.udp_bind :: wasm :: no test calls it on this leg yet
+net.udp_local_port :: wasm :: no test calls it on this leg yet
+net.udp_recv_from :: wasm :: no test calls it on this leg yet
+net.udp_send_to :: wasm :: no test calls it on this leg yet
+process.child_pid :: wasm :: no test calls it on this leg yet
+process.kill :: wasm :: no test calls it on this leg yet
+process.poll :: wasm :: no test calls it on this leg yet
+process.read_new_stderr :: both :: no test calls it on this leg yet
+process.read_new_stdout :: wasm :: no test calls it on this leg yet
+process.start :: wasm :: no test calls it on this leg yet
+process.stop :: wasm :: no test calls it on this leg yet
+process.wait :: wasm :: no test calls it on this leg yet
+regex.captures_all :: both :: no test calls it on this leg yet
+regex.escape :: both :: no test calls it on this leg yet
+regex.full_match :: both :: no test calls it on this leg yet
+regex.replace_first_with :: both :: no test calls it on this leg yet
+regex.replace_with :: both :: no test calls it on this leg yet
+uint16.bor :: both :: no test calls it on this leg yet
+uint16.bxor :: both :: no test calls it on this leg yet
+uint16.is_odd :: both :: no test calls it on this leg yet
+uint16.min_value :: both :: no test calls it on this leg yet
+uint16.rotate_left :: both :: no test calls it on this leg yet
+uint16.wrap_mul :: both :: no test calls it on this leg yet
+uint32.band :: both :: no test calls it on this leg yet
+uint32.bxor :: both :: no test calls it on this leg yet
+uint32.is_even :: both :: no test calls it on this leg yet
+uint32.min_value :: both :: no test calls it on this leg yet
+uint32.wrap_sub :: both :: no test calls it on this leg yet
+uint8.band :: both :: no test calls it on this leg yet
+uint8.bor :: both :: no test calls it on this leg yet
+uint8.is_even :: both :: no test calls it on this leg yet
+uuid.v7 :: wasm :: no test calls it on this leg yet
