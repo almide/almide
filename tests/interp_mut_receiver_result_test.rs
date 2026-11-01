@@ -7,7 +7,7 @@
 //! `some(7)` (found by the map.upsert / map.merge inspections, seeds 1793524353
 //! and 1793524523). Every case runs through BOTH pipelines: the driver's
 //! `wasm_leg::lower_to_ir` (rewritten) and the oracle's
-//! lower / optimize / mono / ir_link (not rewritten).
+//! lower then `almide_driver::link_ir` (not rewritten).
 
 /// The driver's front: the move-mode rewrite runs.
 fn run_rewritten(source: &str) -> almide_interp::RunOutcome {
@@ -26,10 +26,11 @@ fn run_unrewritten(source: &str) -> almide_interp::RunOutcome {
     let mut checker = almide::check::Checker::from_env(canon.env);
     let diags = checker.infer_program(&mut prog);
     assert!(!diags.iter().any(|d| d.level == almide::diagnostic::Level::Error), "check errors");
+    // The one driver's stage order (`almide_driver::link_ir`); the move-mode
+    // rewrite is the lowering front's own step (`wasm_leg::lower_to_ir`), not
+    // the driver's, so this front still runs without it.
     let mut ir = almide::lower::lower_program(&prog, &checker.env, &checker.type_map);
-    almide::optimize::optimize_program(&mut ir);
-    almide::mono::monomorphize(&mut ir);
-    almide::ir_link::ir_link(&mut ir);
+    almide_driver::link_ir(&mut ir);
     almide_interp::Interpreter::new(&ir).run_main()
 }
 

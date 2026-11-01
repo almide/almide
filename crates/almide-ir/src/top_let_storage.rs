@@ -877,8 +877,9 @@ mod tests {
             let rust_fn = crate::escape_user_fn_name(sym(n));
             assert!(!crate::is_runtime_item_name(rust_fn.as_str()), "user fn `{n}` reaches Rust as `{rust_fn}`, a runtime name");
         }
-        // A global may be spelled in any case.
-        let names = ["mk", "almide_abort", "almide_fn_x", "ALMIDE_STDOUT_BUF", "AlmideMatrix", "x", "N"];
+        // A global may be spelled in any case, a runtime static's spelling too.
+        let stdout_buf = format!("{}STDOUT_BUF", crate::RUNTIME_CONST_SPACE);
+        let names = ["mk", "almide_abort", "almide_fn_x", stdout_buf.as_str(), "AlmideMatrix", "x", "N"];
         for n in names {
             for origin in [None, Some("cfg".to_string()), Some("a_b".to_string())] {
                 let vi = crate::VarInfo { name: sym(n), ty: Ty::Int, mutability: crate::Mutability::Let, span: None,
@@ -887,8 +888,13 @@ mod tests {
                 assert!(!crate::is_runtime_item_name(&st), "global `{n}` ({origin:?}) is the static `{st}`, a runtime name");
             }
         }
-        for rt in ["almide_rt_matrix_mul", "almide_abort", "AlmideMatrix", "ALMIDE_MATRIX_MAX_ELEMS",
-            "ALMIDE_RT_ERRTEXT_ESCAPED", "almide_runtime", "almide_kernel"] {
+        // The runtime's constants are spelled in its upper-case space (`runtime/rs`'s
+        // matrix bound, almide-base's escaped-text table).
+        let consts = ["MATRIX_MAX_ELEMS", "RT_ERRTEXT_ESCAPED"].map(|c| format!("{}{c}", crate::RUNTIME_CONST_SPACE));
+        for rt in ["almide_rt_matrix_mul", "almide_abort", "AlmideMatrix", "almide_runtime", "almide_kernel"]
+            .into_iter()
+            .chain(consts.iter().map(String::as_str))
+        {
             assert!(crate::is_runtime_item_name(rt), "`{rt}` is the runtime's own spelling");
         }
         for not_rt in ["mk", "sha256", "request", "almide_fn_mk", "ALMIDE_G_x", "ALMIDE_RT_3_cfg_x", "Value"] {
