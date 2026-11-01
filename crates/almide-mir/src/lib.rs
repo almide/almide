@@ -40,6 +40,7 @@ pub mod mir_ops;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;
 pub mod pipeline;
+pub mod prim_ops;
 pub mod purity;
 pub mod render_native;
 mod lambda_sigs;
