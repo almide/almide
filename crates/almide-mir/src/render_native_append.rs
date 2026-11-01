@@ -34,7 +34,9 @@ use std::collections::BTreeMap;
 /// `ops[i]`, by shape alone — the window [`str_self_append`] may render as
 /// `s.push_str(x)`, which writes `s` while it reads `x`.
 pub(crate) fn self_append_window(func: &MirFunction, i: usize) -> Option<(ValueId, ValueId, ValueId)> {
-    let [Op::CallFn { dst: Some(d), name, args, .. }, Op::Drop { v }, Op::SetLocal { local, src }] =
+    // The old value's drop is `Drop`, or `DropListStr` for a list that owns
+    // its heap elements (a `List[String]` accumulator).
+    let [Op::CallFn { dst: Some(d), name, args, .. }, Op::Drop { v } | Op::DropListStr { v }, Op::SetLocal { local, src }] =
         func.ops.get(i..i + 3)?
     else {
         return None;
