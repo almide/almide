@@ -289,6 +289,24 @@ effect fn main() -> Unit = {
         }
     }
 
+    /// A plain `main` calling the pure intrinsic env.os is admitted: its op
+    /// reaches nothing. The control: an effect intrinsic (env.cwd) in a fn
+    /// re-declared plain is still refused.
+    #[test]
+    fn a_pure_intrinsic_is_admitted_in_a_plain_fn_and_an_effect_one_is_not() {
+        let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, d) = emit_recorded("env_os_pure.almd", "import env\n\nfn main() -> Unit = {\n  let _ = env.os()\n}\n");
+        let (flat, graph) = cert_project::caps(&d).expect("caps");
+        assert!(flat.iter().all(|(_, w)| accepts(almide_verify::Property::Caps, w)), "{flat:?}");
+        assert!(accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+        let (_, mut d) = emit_recorded("env_cwd.almd", "import env\n\neffect fn here() -> String = env.cwd() ?? \"\"\n\neffect fn main() -> Unit = {\n  println(here()!)\n}\n");
+        d.fns.iter_mut().filter(|f| f.name == "here").for_each(|f| f.declared = Some(Declared::Pure));
+        let (flat, graph) = cert_project::caps(&d).expect("caps");
+        let w = &flat.iter().find(|(n, _)| n == "here").expect("here's witness").1;
+        assert!(!accepts(almide_verify::Property::Caps, w), "an env read in a plain fn must be refused: {w:?}");
+        assert!(!accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+    }
+
     #[test]
     fn nothing_is_recorded_unless_a_sweep_collects() {
         let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());

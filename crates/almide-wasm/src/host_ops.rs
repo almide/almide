@@ -47,7 +47,12 @@ fn fs_core_caps(op: i32) -> Option<&'static [u32]> {
         1 | 4..=6 | 11..=14 | 22..=25 | 38 | 39 => &[FS_READ],
         2 | 3 | 7..=10 | 15 | 16 | 20 | 21 => &[FS_WRITE],
         19 => &[FS_READ, FS_WRITE],
-        26..=29 | 33 | 37 => &[ENV],
+        26 | 28 | 29 | 33 | 37 => &[ENV],
+        // env.os (C-189) is declared a plain `fn`: the host answers the
+        // platform's fixed name ("wasi" on wasm), no environment read, so the
+        // op reaches no capability — what the checker admits in a plain fn,
+        // the certificate admits too (a test below holds the declaration).
+        27 => &[],
         30 => &[STDOUT],
         32 => &[ENTROPY],
         34 | 36 => &[CLOCK],
@@ -211,6 +216,17 @@ mod tests {
             assert_eq!(caps_of(op), Some(&[NET][..]), "op {op}");
         }
         assert_eq!(caps_of(119), None, "an op no family declares");
+    }
+
+    /// env.os's op carries no capability exactly because env.os is declared
+    /// a plain `fn` (stdlib/env.almd): an effect declaration there would make
+    /// the empty row a hidden capability.
+    #[test]
+    fn the_env_os_op_is_capability_free_because_env_os_is_declared_pure() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib/env.almd")).expect("env.almd");
+        let decl = src.lines().find(|l| l.contains(" os(") && l.contains("fn ")).expect("env.os declared");
+        assert!(!decl.contains("effect"), "env.os is declared `{decl}`: an effect fn's op must name its capability");
+        assert_eq!(caps_of(crate::fs_meta::OP_ENV_OS), Some(&[][..]));
     }
 
     #[test]
