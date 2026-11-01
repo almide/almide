@@ -15,8 +15,10 @@ effect fn Tape.close(self) -> Result[Unit, String] = ok(())
 
 type Note: HttpMessage = { text: String }
 
-fn Note.header(self, name: String) -> String? = if name == "X-Note" then some(self.text)
-else none
+fn Note.header(self, name: String) -> String? = {
+  let text = self.text
+  if name == "X-Note" then some(text) else none
+}
 
 fn Note.header_values(self, name: String) -> List[String] = if name == "X-Note" then [
   self.text
@@ -45,9 +47,9 @@ fn Csv.to_text(self) -> String = self.rows
 
 test "a user type meets Read, Write and Close with plain names" {
   let t = Tape { data: bytes.from_string("abc") }
-  assert_eq(io.read(t, 3), ok(bytes.from_string("abc")))
-  assert_eq(io.write(t, bytes.from_string("x")), ok(()))
-  assert_eq(io.close(t), ok(()))
+  assert_eq(io.read(t, 3) ?? bytes.new(), bytes.from_string("abc"))
+  assert_eq(result.is_ok(io.write(t, bytes.from_string("x"))), true)
+  assert_eq(result.is_ok(io.close(t)), true)
 }
 
 test "a user type meets HttpMessage with plain names" {
