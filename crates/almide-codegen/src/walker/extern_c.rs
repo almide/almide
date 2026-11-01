@@ -297,10 +297,7 @@ fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
             c_params.push(format!("{name}: {ptr}, {name}_len: usize"));
             let lent = format!("__almide_lent_{name}");
             lends.push_str(&format!("    let {lent} = {};\n", render_lent_region(&render_type(ctx, &p.ty), name, writable)));
-            call_args.push(match p.borrow {
-                ParamBorrow::Own => format!("{lent}.clone()"),
-                _ => format!("&{lent}"),
-            });
+            call_args.push(super::c_export_region_arg(p, &lent));
             ends.push_str(&format!("    almide_rt_ffi_lent_end(&{lent}.keep, \"{symbol}\", \"{name}\");\n"));
             continue;
         }
