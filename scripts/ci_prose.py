@@ -23,50 +23,122 @@ import zipfile
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 MAX_ZIP = 128 * 1024 * 1024
 MAX_BINARY = 256 * 1024 * 1024
-ROOT_DOCS = {"README.md", "README.ja.md", "README.zh-CN.md", "CLAUDE.md", "CHANGELOG.md"}
-TOP_DOCS = {"SPEC.md", "CHEATSHEET.md", "ARCHITECTURE.md", "GRAMMAR.md",
+# Every file here was audited for readers outside the prose lane's own checks
+# (include_str!, Rust/Almide tests, gates in jobs the lane skips). A reader
+# found later is a reason to remove the path, not to widen the lane's checks.
+ROOT_DOCS = {"README.md", "README.ja.md", "README.zh-CN.md", "CLAUDE.md", "CHANGELOG.md",
+             "SUPPORT.md", "SECURITY.md"}
+# docs/GRAMMAR.md is not here: crates/almide-syntax/tests/grammar_assign_rule.rs
+# parses its `assign` rule.
+TOP_DOCS = {"SPEC.md", "CHEATSHEET.md", "ARCHITECTURE.md",
             "status.md", "how-it-works.md", "written-in-almide.md"}
+# Hand-written pages whose generated blocks are re-derived by Emit & Format.
+# A change touching a block or a marker leaves the lane (structured_change).
+DOCS_PAGES = {"docs/benchmarks/README.md"}
+# docs/stdlib is not here: its pages are generated signature indexes that Rust
+# tests parse (native_result_ownership, stdlib_inspection, name_keyed_sites).
+DOCS_DIRS = {"roadmap", "specs", "design", "project"}
+# HTML comments carry generated-block markers and roadmap metadata.
+COMMENT = re.compile(r"<!--|-->")
+BLOCK_START = re.compile(r"<!--.*(generated:start|BEGIN GENERATED|:\s*begin\s*-->)")
+BLOCK_END = re.compile(r"<!--.*(generated:end|END GENERATED|:\s*end\s*-->)")
+HUNK = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 def prose_path(path):
     p = PurePosixPath(path)
     if p.is_absolute() or ".." in p.parts or "\n" in path or "\r" in path:
         return False
-    if path in ROOT_DOCS:
+    if path in ROOT_DOCS or path in DOCS_PAGES:
         return True
+    if len(p.parts) == 3 and p.parts[:2] == (".claude", "commands") and p.suffix == ".md":
+        return True  # agent slash-command prompts; nothing in the build reads them
     if p.suffix != ".md" or not p.parts or p.parts[0] != "docs":
         return False
     if len(p.parts) == 2:
         return p.name in TOP_DOCS
     if path == "docs/project/CLAUDE_TEMPLATE.md" or path == "docs/specs/cli.md":
         return False  # compiled template / Rust-test-consumed toolchain text
+    if path == "docs/roadmap/README.md":
+        return False  # generated whole by docs/roadmap/generate-readme.sh
     if path.startswith("docs/specs/als/"):
         return False  # normative contract surfaces stay outside the narrow lane
-    return p.parts[1] in {"roadmap", "stdlib", "specs", "design", "project"}
+    return p.parts[1] in DOCS_DIRS
 
 
 def git(*args):
     return subprocess.check_output(["git", *args], stderr=subprocess.DEVNULL)
 
 
-def classify(base, head="HEAD"):
+def blocks(text):
+    """1-based line numbers inside generated blocks, markers included. An
+    unclosed block runs to the end of the file."""
+    inside, depth = set(), 0
+    for number, line in enumerate(text.splitlines(), 1):
+        if BLOCK_START.search(line):
+            depth += 1
+        if depth:
+            inside.add(number)
+        if BLOCK_END.search(line) and depth:
+            depth -= 1
+    return inside
+
+
+def structured_change(base, head, path):
+    """Whether a changed line is an HTML comment or lies inside a generated
+    block, on either side of the diff."""
+    def text(ref):
+        if not git("--literal-pathspecs", "ls-tree", ref, "--", path):
+            return ""
+        return git("show", f"{ref}:{path}").decode("utf-8", "strict")
+    old, new = blocks(text(base)), blocks(text(head))
+    diff = git("--literal-pathspecs", "diff", "-U0", "--no-renames", "--no-ext-diff", "--no-color",
+               base, head, "--", path).decode("utf-8", "strict")
+    old_line = new_line = None
+    for line in diff.splitlines():
+        hunk = HUNK.match(line)
+        if hunk:
+            old_line, new_line = int(hunk.group(1)), int(hunk.group(2))
+        elif old_line is None or line.startswith("\\"):
+            continue
+        elif line.startswith("-"):
+            if old_line in old or COMMENT.search(line):
+                return True
+            old_line += 1
+        elif line.startswith("+"):
+            if new_line in new or COMMENT.search(line):
+                return True
+            new_line += 1
+    return False
+
+
+def classify_reason(base, head="HEAD"):
     if not SHA.fullmatch(base or "") or base == "0" * 40:
-        return False
+        return False, "no comparable base commit"
     try:
         git("rev-parse", "--verify", base + "^{commit}")
         git("merge-base", "--is-ancestor", base, head)
         paths = git("diff", "--name-only", "--no-renames", "-z", base, head).split(b"\0")
         paths = [p.decode("utf-8", "strict") for p in paths if p]
-        if not paths or not all(prose_path(p) for p in paths):
-            return False
+        if not paths:
+            return False, "empty change set"
+        for path in paths:
+            if not prose_path(path):
+                return False, f"not an allowlisted prose path: {path}"
         for path in paths:
             for ref in (base, head):
                 row = git("--literal-pathspecs", "ls-tree", ref, "--", path)
                 if row and not row.startswith(b"100644 blob "):
-                    return False  # symlink, executable, submodule, or mode change
-        return True
+                    return False, f"not a regular file on both sides: {path}"
+            if structured_change(base, head, path):
+                return False, f"touches a generated block or HTML comment: {path}"
+        return True, f"{len(paths)} allowlisted prose path(s)"
     except (subprocess.CalledProcessError, UnicodeError):
-        return False
+        return False, "range or file unreadable"
+
+
+def classify(base, head="HEAD"):
+    return classify_reason(base, head)[0]
 
 
 def event_base(event_name, event):
@@ -201,9 +273,11 @@ def main():
         try:
             event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
             base = event_base(os.environ.get("GITHUB_EVENT_NAME", ""), event)
-            ok = classify(base)
+            ok, reason = classify_reason(base)
         except (OSError, ValueError, KeyError):
-            base, ok = "", False
+            base, ok, reason = "", False, "event unreadable"
+        # json.dumps: a path cannot smuggle a newline-led workflow command.
+        print("prose lane: " + json.dumps(reason))
         output("prose_only", str(ok).lower())
         output("base_sha", base if ok else "")
     else:
