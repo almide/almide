@@ -350,7 +350,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     }
     let net_texts = nabi.as_ref().map(|a| NetTexts::new(park, a));
     if let (Some(a), Some(nt), Some(fns), Some(ng), Some(imp)) = (&nabi, &net_texts, net_fns, net_globals, net) {
-        push_net_shims(&mut code, g, a, nt, fns, ng, imp);
+        push_net_shims(&mut code, g, a, nt, NetParts { fns, ng, imp });
     }
     let fs_to = fs_import_at.map(|import_at| SpliceTargets {
         import_at,
