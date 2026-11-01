@@ -472,46 +472,10 @@ pub fn manifest_bound(allow: &[String]) -> BTreeSet<u32> {
 pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<(String, String)>, String), String> {
     let manifest = allow.map(manifest_bound);
     let m = decode(&decls.bytes)?;
-    let n_imports = m.imports.len() as u32;
-    // The source declaration of each defined function, renumbered into the
-    // bytes' index space (the declare post-pass map).
-    let base_imports = n_imports - decls.stubs.len() as u32;
-    let mut declared: BTreeMap<usize, (String, Declared)> = BTreeMap::new();
-    let mut meter: BTreeMap<usize, u32> = BTreeMap::new();
-    for f in &decls.fns {
-        let g = crate::imports::remap_index(f.index, &decls.stubs, base_imports);
-        let Some(j) = g.checked_sub(n_imports).map(|j| j as usize).filter(|&j| j < m.bodies.len()) else { continue };
-        if let Some(d) = f.declared {
-            declared.insert(j, (f.name.clone(), d));
-        }
-        meter.insert(j, f.meter_clock_reads);
-    }
-    // A declared import is pure when its extern's source declaration is a
-    // plain `fn`; any other foreign import carries FOREIGN_EFFECT too.
-    let pure_import = |f: u32| {
-        f.checked_sub(base_imports)
-            .and_then(|k| decls.stub_declared.get(k as usize))
-            .is_some_and(|d| *d == Declared::Pure)
-    };
-    // The closures each body creates (defined positions), and the set of
-    // created closures: a `call_indirect` reaching one is charged to its
-    // creator through this edge, not to the caller.
-    let mut creates: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); m.bodies.len()];
-    let mut attributed: BTreeSet<usize> = BTreeSet::new();
-    let defined = |pre: u32| {
-        crate::imports::remap_index(pre, &decls.stubs, base_imports)
-            .checked_sub(n_imports)
-            .map(|j| j as usize)
-            .filter(|&j| j < m.bodies.len())
-    };
-    for &(owner, closure) in &decls.creations {
-        if let (Some(o), Some(c)) = (defined(owner), defined(closure)) {
-            creates[o].insert(c);
-            attributed.insert(c);
-        }
-    }
-    let callees: Vec<BTreeSet<usize>> =
-        m.bodies.iter().enumerate().map(|(j, b)| &graph_edges(&m, b, &attributed) | &creates[j]).collect();
+    let ix = DeclIndex::new(&m, decls);
+    let (declared, meter) = source_declarations(&ix, decls);
+    let callees = call_graph(&m, &ix, decls);
+    let pure_import = |f: u32| ix.pure_import(decls, f);
     let direct: Vec<BTreeSet<u32>> = m
         .bodies
         .iter()
@@ -524,6 +488,70 @@ pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<
         .map(|(&j, (name, _))| (name.clone(), format!("{}|{}", ids(bound[j].iter().copied()), ids(reach(&direct, &callees, j)))))
         .collect();
     Ok((flat, condensed_graph(&direct, &callees, &bound)))
+}
+
+/// The declaration table's indices renumbered into the bytes' index space
+/// (the declare post-pass map).
+struct DeclIndex<'d> {
+    stubs: &'d [u32],
+    n_imports: u32,
+    base_imports: u32,
+    bodies: usize,
+}
+
+impl<'d> DeclIndex<'d> {
+    fn new(m: &Module, decls: &'d PassDecls) -> Self {
+        let n_imports = m.imports.len() as u32;
+        DeclIndex { stubs: &decls.stubs, n_imports, base_imports: n_imports - decls.stubs.len() as u32, bodies: m.bodies.len() }
+    }
+
+    /// A pre-declare index's position among the defined functions.
+    fn defined(&self, pre: u32) -> Option<usize> {
+        crate::imports::remap_index(pre, self.stubs, self.base_imports)
+            .checked_sub(self.n_imports)
+            .map(|j| j as usize)
+            .filter(|&j| j < self.bodies)
+    }
+
+    /// A declared import is pure when its extern's source declaration is a
+    /// plain `fn`; any other foreign import carries FOREIGN_EFFECT too.
+    fn pure_import(&self, decls: &PassDecls, f: u32) -> bool {
+        f.checked_sub(self.base_imports)
+            .and_then(|k| decls.stub_declared.get(k as usize))
+            .is_some_and(|d| *d == Declared::Pure)
+    }
+}
+
+type Declarations = (BTreeMap<usize, (String, Declared)>, BTreeMap<usize, u32>);
+
+/// Each defined function's source declaration and its fuel meter's clock
+/// reads, by defined position.
+fn source_declarations(ix: &DeclIndex<'_>, decls: &PassDecls) -> Declarations {
+    let mut declared = BTreeMap::new();
+    let mut meter = BTreeMap::new();
+    for f in &decls.fns {
+        let Some(j) = ix.defined(f.index) else { continue };
+        if let Some(d) = f.declared {
+            declared.insert(j, (f.name.clone(), d));
+        }
+        meter.insert(j, f.meter_clock_reads);
+    }
+    (declared, meter)
+}
+
+/// Every body's callees: its direct calls and the `call_indirect` targets no
+/// body is recorded creating, plus the closures it creates — a created
+/// closure is charged to its creator through that edge, not to its caller.
+fn call_graph(m: &Module, ix: &DeclIndex<'_>, decls: &PassDecls) -> Vec<BTreeSet<usize>> {
+    let mut creates: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); m.bodies.len()];
+    let mut attributed: BTreeSet<usize> = BTreeSet::new();
+    for &(owner, closure) in &decls.creations {
+        if let (Some(o), Some(c)) = (ix.defined(owner), ix.defined(closure)) {
+            creates[o].insert(c);
+            attributed.insert(c);
+        }
+    }
+    m.bodies.iter().zip(creates).map(|(b, made)| &graph_edges(m, b, &attributed) | &made).collect()
 }
 
 /// One condensed node: the members' bound intersection, direct
