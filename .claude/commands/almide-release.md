@@ -66,6 +66,9 @@ Each release automatically includes:
 - Version format: `v{major}.{minor}.{patch}`
 - Release notes must be in English
 - The release workflow takes ~10 minutes to complete all builds
+- A notes-only pull request is not part of CI's documentation lane:
+  `scripts/check-release-notes.sh` and the release workflow read `docs/releases/`,
+  so it rebuilds the compiler and runs every Emit & Format check
 - If a build fails, first establish whether anything was published. Failure
   before publication and recovery of a published release are different cases.
   Do not treat a failed build as permission to delete or re-tag a published
