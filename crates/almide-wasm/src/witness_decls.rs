@@ -64,6 +64,10 @@ pub struct PassDecls {
     pub fns: Vec<DeclFn>,
     /// Pre-declare indices of the `@extern(wasm, ..)` stubs, ascending.
     pub stubs: Vec<u32>,
+    /// What each stub's extern declares, parallel to `stubs`: a plain `fn`
+    /// extern's import reaches FOREIGN only, an `effect fn` extern's also
+    /// FOREIGN_EFFECT (cert_project.rs).
+    pub stub_declared: Vec<Declared>,
     /// The pass's finished module (post-declare, pre-`to_wasi`).
     pub bytes: Vec<u8>,
 }
@@ -180,20 +184,50 @@ effect fn main() -> Unit = {
     }
 
     #[test]
-    fn an_extern_stub_is_renumbered_and_a_plain_caller_of_it_is_refused() {
+    fn an_extern_stub_is_renumbered_and_a_plain_caller_of_a_pure_one_records_foreign_within_its_bound() {
         let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());
         let src = "@extern(wasm, \"js\", \"js_add\")\nfn js_add(a: Int, b: Int) -> Int\n\nfn sum(a: Int) -> Int = js_add(a, 1)\n\neffect fn main() -> Unit = {\n  println(int.to_string(sum(2)))\n}\n";
         let (_, d) = emit_recorded("extern.almd", src);
         assert_eq!(d.stubs.len(), 1, "one @extern stub: {:?}", d.stubs);
+        assert_eq!(d.stub_declared, [Declared::Pure], "js_add is a plain fn extern");
         // The stub became an import: its name no longer lands on a body.
         let named = cert_project::decl_names(&d).expect("decl names");
         let imports = cert_project::function_imports(&d.bytes).expect("imports");
         let stub_at = named.iter().find(|(_, n)| *n == "js_add").map(|(i, _)| *i).expect("js_add renumbered");
         assert!(stub_at < imports, "js_add is an import now (index {stub_at} of {imports})");
-        // A plain fn reaching a foreign host function is outside its bound.
+        // A plain fn reaching a pure-declared foreign function: FOREIGN is
+        // recorded, never hidden, and it is inside the plain fn's bound —
+        // the checker admits the call, and so does the certificate.
         let (flat, graph) = cert_project::caps(&d).expect("caps");
         let sum = flat.iter().find(|(n, _)| n == "sum").expect("sum's caps witness");
-        assert!(sum.1.ends_with(&cap::FOREIGN.to_string()), "{sum:?}");
+        let reach: Vec<&str> = sum.1.split('|').nth(1).unwrap_or("").split(' ').collect();
+        assert!(reach.contains(&cap::FOREIGN.to_string().as_str()), "{sum:?}");
+        assert!(!reach.contains(&cap::FOREIGN_EFFECT.to_string().as_str()), "{sum:?}");
+        assert!(accepts(almide_verify::Property::Caps, &sum.1), "{sum:?}");
+        assert!(accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+    }
+
+    /// The negative control: an `effect fn` extern carries FOREIGN_EFFECT,
+    /// which no plain fn's bound admits. The checker refuses a plain fn
+    /// calling one (it is an effect call), so the control re-declares the
+    /// effect caller as plain in the table — the producer bug the certificate
+    /// exists to catch.
+    #[test]
+    fn a_plain_caller_of_an_effect_extern_is_refused() {
+        let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());
+        let src = "@extern(wasm, \"js\", \"js_load\")\neffect fn js_load(a: Int) -> Int\n\neffect fn sum(a: Int) -> Int = js_load(a)!\n\neffect fn main() -> Unit = {\n  println(int.to_string(sum(2)!))\n}\n";
+        let (_, mut d) = emit_recorded("extern_effect.almd", src);
+        assert_eq!(d.stub_declared, [Declared::Effect], "js_load is an effect fn extern");
+        let (flat, graph) = cert_project::caps(&d).expect("caps");
+        let sum = flat.iter().find(|(n, _)| n == "sum").expect("sum's caps witness");
+        let reach: Vec<&str> = sum.1.split('|').nth(1).unwrap_or("").split(' ').collect();
+        assert!(reach.contains(&cap::FOREIGN.to_string().as_str()), "{sum:?}");
+        assert!(reach.contains(&cap::FOREIGN_EFFECT.to_string().as_str()), "{sum:?}");
+        assert!(accepts(almide_verify::Property::Caps, &sum.1), "an effect fn admits it: {sum:?}");
+        assert!(accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+        d.fns.iter_mut().filter(|f| f.name == "sum").for_each(|f| f.declared = Some(Declared::Pure));
+        let (flat, graph) = cert_project::caps(&d).expect("caps");
+        let sum = flat.iter().find(|(n, _)| n == "sum").expect("sum's caps witness");
         assert!(!accepts(almide_verify::Property::Caps, &sum.1), "{sum:?}");
         assert!(!accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
     }

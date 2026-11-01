@@ -238,3 +238,42 @@ fn the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused() {
     assert!(text(&o.stderr).contains("is not the module"), "{}", text(&o.stderr));
     assert!(o.stdout.is_empty(), "no verdict on a stale file: {}", text(&o.stdout));
 }
+
+/// A plain `fn` calling a pure-declared `@extern` builds with the verifier
+/// installed (the checker admits it, and the certificate agrees), and its
+/// capability report still lists FOREIGN: foreign code is reachable, never
+/// hidden. `spec/wasm_host_js/unmarked_promise.almd` was refused by its own
+/// build gate before (`REJECT caps greet`).
+#[test]
+fn a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign() {
+    let stage = Stage::new("pure-extern", true);
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_host_js/unmarked_promise.almd");
+    std::fs::copy(&src, stage.dir.join("app.almd")).expect("source");
+    let built = Command::new(stage.dir.join(exe("almide")))
+        .args(["build", "app.almd", "--target", "wasm", "--host", "js", "-o", "js_out.wasm"])
+        .env("PATH", &stage.empty_path)
+        .current_dir(&stage.dir)
+        .output()
+        .expect("staged almide builds");
+    assert!(built.status.success(), "{}\n{}", text(&built.stdout), text(&built.stderr));
+    assert!(stage.dir.join("js_out.wasm").is_file(), "the gate wrote the artifact");
+
+    let out = stage.dir.join("app.bundle");
+    let o = stage.verify(&["app.almd", "--emit", &out.display().to_string()]);
+    assert_eq!(o.status.code(), Some(0), "{}\n{}", text(&o.stdout), text(&o.stderr));
+    let bundle = almide_verify::bundle::parse(&std::fs::read(&out).expect("bundle written")).expect("a bundle");
+    let foreign = 8.to_string();
+    let caps = |f: &str| {
+        let w = bundle
+            .witnesses
+            .iter()
+            .find(|w| w.function == f && w.property.name() == "caps")
+            .unwrap_or_else(|| panic!("{f}'s caps witness"));
+        text(&w.bytes)
+    };
+    for f in ["greet", "poke", "read"] {
+        let w = caps(f);
+        let reach: Vec<&str> = w.trim().split('|').nth(1).unwrap_or("").split(' ').collect();
+        assert!(reach.contains(&foreign.as_str()), "{f} reaches foreign code and says so: {w}");
+    }
+}

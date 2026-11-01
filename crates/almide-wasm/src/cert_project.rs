@@ -23,7 +23,8 @@
 //!   argument, read as an `i32.const` from the operand stack at the call; an
 //!   op the stack does not show as a constant, or an op the table below does
 //!   not know, is [`SENTINEL`], which no function declares), and a program
-//!   `@extern(wasm, ..)` import is [`cap::FOREIGN`]. `exit` and `host_read`
+//!   `@extern(wasm, ..)` import is [`cap::FOREIGN`], plus
+//!   [`cap::FOREIGN_EFFECT`] when the extern is declared `effect fn`. `exit` and `host_read`
 //!   (the transfer of a result an op already produced) carry none. The
 //!   CALL GRAPH is every `call` / `return_call` / `ref.func` to a defined
 //!   function plus, for `call_indirect`, every element-segment function of
@@ -62,13 +63,20 @@ pub mod cap {
     pub const CLOCK: u32 = 5;
     pub const STDIN: u32 = 6;
     pub const NET: u32 = 7;
-    /// A program-declared `@extern(wasm, ..)` host function.
+    /// A program-declared `@extern(wasm, ..)` host function, pure-declared
+    /// or not: every call of one records it, so the report always shows
+    /// that foreign code is reachable.
     pub const FOREIGN: u32 = 8;
     /// Starting and signalling child processes (ops 80..=90 and 146..=151,
     /// the private `almide:process/spawn` capability, ADR-0025), and assert_aborts's
     /// child run (op 117). `almide_mir::Capability::Process` has this id. Past [`super::SENTINEL`]
     /// so the sentinel keeps its small value.
     pub const PROC: u32 = 10;
+    /// The host effects of an `@extern(wasm, ..)` declared `effect fn`: such
+    /// an import records FOREIGN and this. A pure-declared extern records
+    /// FOREIGN alone, which [`super::PURE_BOUND`] admits — the extern's
+    /// purity is its author's declaration, FFI's trust (proofs/TRUSTED_BASE.md).
+    pub const FOREIGN_EFFECT: u32 = 11;
 }
 
 /// A host operation the projector cannot name: no function declares it, so
@@ -79,13 +87,15 @@ pub mod cap {
 pub const SENTINEL: u32 = 9;
 
 /// What an `effect fn` declares: every modeled capability.
-const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC];
+const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC, cap::FOREIGN_EFFECT];
 /// What a plain `fn` declares: the console output. `println` is admitted in
 /// any function (ADR-0022: a plain `fn` writes and aborts, never reads).
-/// Stdin, files, the clock, entropy, the environment, the network and
-/// foreign imports need `effect fn` — `io.read_byte` / `io.read_n_bytes`
-/// were plain `fn` stdin readers until #3248 and this bound admitted them.
-const PURE_BOUND: &[u32] = &[cap::STDOUT];
+/// Stdin, files, the clock, entropy, the environment, the network and an
+/// effect-declared foreign import need `effect fn` — `io.read_byte` /
+/// `io.read_n_bytes` were plain `fn` stdin readers until #3248 and this bound
+/// admitted them. FOREIGN reached through a pure-declared extern is admitted:
+/// the checker lets a plain `fn` call one, and the bound says the same.
+const PURE_BOUND: &[u32] = &[cap::STDOUT, cap::FOREIGN];
 
 /// The capabilities one `almide.fs_call` op reaches: its family's declared
 /// capabilities (`host_ops.rs`, one declaration with the op ranges, #4338).
@@ -465,11 +475,18 @@ pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<
         }
         meter.insert(j, f.meter_clock_reads);
     }
+    // A declared import is pure when its extern's source declaration is a
+    // plain `fn`; any other foreign import carries FOREIGN_EFFECT too.
+    let pure_import = |f: u32| {
+        f.checked_sub(base_imports)
+            .and_then(|k| decls.stub_declared.get(k as usize))
+            .is_some_and(|d| *d == Declared::Pure)
+    };
     let direct: Vec<BTreeSet<u32>> = m
         .bodies
         .iter()
         .enumerate()
-        .map(|(j, b)| direct_caps(&m, b, meter.get(&j).copied().unwrap_or(0)))
+        .map(|(j, b)| direct_caps(&m, b, meter.get(&j).copied().unwrap_or(0), &pure_import))
         .collect();
     let bound = least_bounds(&direct, &callees, &declared, manifest.as_ref());
     let flat = declared
@@ -570,7 +587,7 @@ fn components(callees: &[BTreeSet<usize>]) -> Vec<usize> {
 /// which the declaration table charges to the region opener, not this frame
 /// (witness_decls.rs, `DeclFn::meter_clock_reads`, #3041): they name no
 /// capability here. Any read beyond that count is the source's.
-fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
+fn direct_caps(m: &Module, b: &Body, meter_reads: u32, pure_import: &dyn Fn(u32) -> bool) -> BTreeSet<u32> {
     let mut out = BTreeSet::new();
     for &f in b.funcs.iter().filter(|&&f| (f as usize) < m.imports.len()) {
         match m.imports[f as usize].0.as_str() {
@@ -585,6 +602,9 @@ fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
             },
             _ => {
                 out.insert(cap::FOREIGN);
+                if !pure_import(f) {
+                    out.insert(cap::FOREIGN_EFFECT);
+                }
             }
         }
     }
@@ -633,7 +653,14 @@ fn least_bounds(
     let fixed = |j: usize| {
         declared.get(&j).map(|(_, d)| match d {
             Declared::Pure => PURE_BOUND.iter().copied().collect::<BTreeSet<u32>>(),
-            Declared::Effect => EFFECT_BOUND.iter().copied().filter(|c| manifest.is_none_or(|m| m.contains(c))).collect(),
+            // FOREIGN is no host effect of its own (what an effect extern
+            // does is FOREIGN_EFFECT, which the manifest governs), so an
+            // `effect fn` admits it wherever a plain `fn` does.
+            Declared::Effect => EFFECT_BOUND
+                .iter()
+                .copied()
+                .filter(|&c| c == cap::FOREIGN || manifest.is_none_or(|m| m.contains(&c)))
+                .collect(),
         })
     };
     let mut bound: Vec<BTreeSet<u32>> = (0..direct.len()).map(|j| fixed(j).unwrap_or_else(|| direct[j].clone())).collect();
@@ -717,12 +744,12 @@ mod tests {
         // #3041: two wall-clock reads and a file read; one read is the meter's.
         let m = Module::default();
         let b = Body { fs_ops: vec![Some(OP_METER_CLOCK), Some(1), Some(OP_METER_CLOCK)], ..Body::default() };
-        assert_eq!(direct_caps(&m, &b, 0), [cap::FS_READ, cap::CLOCK].into());
-        assert_eq!(direct_caps(&m, &b, 1), [cap::FS_READ, cap::CLOCK].into(), "the second read is the frame's own");
-        assert_eq!(direct_caps(&m, &b, 2), [cap::FS_READ].into());
+        assert_eq!(direct_caps(&m, &b, 0, &|_| false), [cap::FS_READ, cap::CLOCK].into());
+        assert_eq!(direct_caps(&m, &b, 1, &|_| false), [cap::FS_READ, cap::CLOCK].into(), "the second read is the frame's own");
+        assert_eq!(direct_caps(&m, &b, 2, &|_| false), [cap::FS_READ].into());
         // A read the stack does not show as the constant is never discounted.
         let hidden = Body { fs_ops: vec![None], ..Body::default() };
-        assert_eq!(direct_caps(&m, &hidden, 1), [SENTINEL].into());
+        assert_eq!(direct_caps(&m, &hidden, 1, &|_| false), [SENTINEL].into());
     }
 
     /// A module importing `almide.fs_call` whose `main` calls it once, with

@@ -694,9 +694,10 @@ fn emit_program_pass(
         .filter_map(|(i, info)| {
             let (module, name) = info.import.clone()?;
             let narrow = crate::extern_region::address_params(program_fns[i].0);
-            Some(imports::Declared { index: info.wasm_index, module, name, narrow })
+            let effect = program_fns[i].0.declares_effect();
+            Some(imports::Declared { index: info.wasm_index, module, name, narrow, effect })
         })
-        .chain(crate::fan::js_async::declared_protocol(&table, &work))
+        .chain(crate::fan::js_async::declared_protocol(&table, &work, &|hook| program_fns[hook].0.declares_effect()))
         .collect();
     let pre_declare = bytes;
     let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
@@ -730,6 +731,7 @@ fn record_decls(
     if !crate::witness::decls::collecting() {
         return;
     }
+    let stub_declared = stubs.iter().map(|d| if d.effect { Declared::Effect } else { Declared::Pure }).collect();
     let stubs = stubs.iter().map(|d| d.index).collect();
     // #3041: a fn synthesized from an effect fn's body keeps its origin's
     // declaration (`IrFunction::declares_effect`).
@@ -763,7 +765,7 @@ fn record_decls(
             fns.push(DeclFn { index, name, declared: None, meter_clock_reads });
         }
     }
-    crate::witness::decls::record(PassDecls { fns, stubs, bytes: bytes.to_vec() });
+    crate::witness::decls::record(PassDecls { fns, stubs, stub_declared, bytes: bytes.to_vec() });
 }
 
 /// The module a program fn belongs to: its qualified key minus `.<fn name>`

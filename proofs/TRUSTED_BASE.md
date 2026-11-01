@@ -843,6 +843,20 @@ the wrong string. That gap is covered only by differential evidence
 (output-parity baseline + org suites), whose reach is measured by
 `proofs/coverage.sh`.
 
+### FFI: an `@extern`'s declared purity is the author's claim
+
+An `@extern(wasm, ..)` import is code outside the program, and the
+capability certificate cannot see into it. Every call of one records
+FOREIGN (`cert_project::cap::FOREIGN`), so the report always shows that
+foreign code is reachable. Whether that code has host effects is what the
+extern's declaration says: a plain `fn` extern records FOREIGN alone, which a
+plain `fn`'s bound admits, as the checker does, and an `effect fn` extern
+also records FOREIGN_EFFECT, which only an `effect fn` admits. The purity of a
+plain `fn` extern is trusted, not checked. It is the author's declaration,
+the same trust every FFI boundary takes. Pinned by
+`witness_decls::tests::a_plain_caller_of_an_effect_extern_is_refused` and
+`tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign`.
+
 ### The five 2026-07-03 trusted-zone bug classes and their regression pins
 
 | class | what broke | pin (gate or fixture) |

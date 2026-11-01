@@ -36,6 +36,9 @@ pub(crate) struct Declared {
     /// in the stub's place wraps the `i64` values the emitter computes; on
     /// memory64 they stay `i64` and no shim is made.
     pub(crate) narrow: Vec<u32>,
+    /// The extern is declared `effect fn` (the capability witness's
+    /// FOREIGN_EFFECT); a plain `fn` extern is pure by its declaration.
+    pub(crate) effect: bool,
 }
 
 /// One narrowed import: its stub, the import's own type, and the shim that
