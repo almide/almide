@@ -1238,7 +1238,7 @@ fn split(t: &T) -> (Vec<&T>, i64) {
             go(a, v, c);
             go(b, v, c);
         } else if let Some([a, T::Const(k)]) = op(t, "i32.sub") {
-            *c -= k;
+            *c -= *k;
             go(a, v, c);
         } else {
             v.push(t);
