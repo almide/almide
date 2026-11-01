@@ -1299,6 +1299,7 @@ impl Flow<'_, '_> {
     /// - inside the loop every write of `p` is `p - 1` after the exit test
     ///   (so `p >= 1` there and the walk never wraps);
     /// - `B` keeps its count from each `len` read to the access.
+    ///
     /// So at the loop head `p <= len(B) - e`, at the access `1 <= p`, and
     /// `0 <= p - d <= len(B) - e - d <= len(B) - 1`.
     fn walk(&self, cmp: usize, acc: usize, addr: &T, off: u64, width: u64) -> Result<(), String> {
