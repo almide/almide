@@ -348,7 +348,9 @@ Definition check_pbounds_cert (s : string) : bool :=
    reads and writes only inside its blocks, with their representation. *)
 Theorem check_pbounds_cert_sound : forall s,
   check_pbounds_cert s = true ->
-  exists ps, parse_pstretches s = Some ps /    (forall x, In (POld x) ps -> RoutineBoundsCert.stretch_ok x = true) /    forall f gs kq cq nq body lb ok bm e t o,
+  exists ps, parse_pstretches s = Some ps /\
+    (forall x, In (POld x) ps -> RoutineBoundsCert.stretch_ok x = true) /\
+    forall f gs kq cq nq body lb ok bm e t o,
       RoutineProcs.plook (procs_of ps) f = Some (gs, (kq, cq, nq), body) ->
       RoutineProcs.wf_lay lb -> (forall y, ok (bm y)) -> RoutineBounds.i64 e ->
       RoutineProcs.resp gs bm -> RoutineProcs.psound lb bm kq cq nq e ->
