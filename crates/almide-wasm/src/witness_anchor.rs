@@ -117,7 +117,7 @@ fn ends(raw: &[u8]) -> Option<Vec<usize>> {
     let mut out = Vec::new();
     while !r.eof() {
         r.read().ok()?;
-        out.push(r.original_position());
+        out.push(r.original_position() as usize);
     }
     Some(out)
 }

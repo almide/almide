@@ -319,13 +319,13 @@ Qed.
 
 (* A passed test (unsigned, or signed of a not-negative index) makes the
    index known against a count of its block. *)
-Lemma ptest_known : forall lb e x n s g cap,
+Lemma ptest_known : forall (e : Env) x n s g cap,
   i64 e -> 0 < s -> 0 <= e n -> e n * s <= cap -> cap < 2 ^ 63 ->
   (g = true -> 0 <= e x) ->
   failsp g (e n) (e x) = false ->
   0 <= e x /\ (e x + 1) * s <= cap.
 Proof.
-  intros lb e x n s g cap Hi Hs Hn Hns Hcap Hg Hf.
+  intros e x n s g cap Hi Hs Hn Hns Hcap Hg Hf.
   destruct g; unfold failsp in Hf.
   - apply Z.leb_gt in Hf. specialize (Hg eq_refl). split; [exact Hg | nia].
   - unfold fails in Hf. assert (Hn63 : 0 <= e n < 2 ^ 63) by nia.
@@ -539,7 +539,7 @@ Proof.
     assert (Hgx : g = true -> 0 <= e x).
     { intro Hg1. subst g. simpl in Hg. exact (nonneg_spec lb bm kn cn nn e x Hs Hg). }
     destruct (Hwf (bm x)) as [_ Hcap].
-    destruct (ptest_known lb e x n s g _ Hi Hsp Hn0 Hns Hcap Hgx H) as [Hx0 Hxs].
+    destruct (ptest_known e x n s g _ Hi Hsp Hn0 Hns Hcap Hgx H) as [Hx0 Hxs].
     apply (IHHrun Hok Hi gs ((x, s) :: kn) cn nn r Hr); [| exact Hc].
     split; [| exact (proj2 Hs)].
     intros x1 s1 Hin. destruct Hin as [Heq | Hin]; [injection Heq as <- <-; tauto | exact (proj1 Hs x1 s1 Hin)].
@@ -553,7 +553,7 @@ Proof.
     assert (Hgx : g = true -> 0 <= e x).
     { intro Hg1. subst g. simpl in Hg. exact (nonneg_spec lb bm kn cn nn e x Hs Hg). }
     destruct (Hwf (bm x)) as [_ Hcap].
-    destruct (ptest_known lb e x n s g _ Hi Hsp Hn0 Hns Hcap Hgx H) as [Hx0 Hxs].
+    destruct (ptest_known e x n s g _ Hi Hsp Hn0 Hns Hcap Hgx H) as [Hx0 Hxs].
     assert (Hs' : psound lb bm ((x, s) :: kn) cn nn e).
     { split; [| exact (proj2 Hs)].
       intros x1 s1 Hin. destruct Hin as [Heq | Hin]; [injection Heq as <- <-; tauto | exact (proj1 Hs x1 s1 Hin)]. }
