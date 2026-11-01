@@ -71,7 +71,9 @@ fn unwrap_or_joins_and_meter_prims_witness_exactly() {
     // closure moves into the join on the none arm, the list's closure shares
     // and moves on the some arm, the join moves out. Borrowed, the fallback
     // had no owner and the frame declined (`unwrap-or:unowned-fresh-fallback`).
-    assert_eq!(get("closure_or"), "ibd\nibd\n{|im}\n{|am}\nim\n");
+    // Since #4278 retired the arm-internal class, the list.get arm's share of
+    // the closure it reads out is the arm's own logged event (`am`, arm_rc.rs).
+    assert_eq!(get("closure_or"), "ibd\nam\nibd\n{|im}\n{|am}\nim\n");
     assert!(accepted(&get("closure_or")));
     // A var fallback leaves the join a view of a bound carrier's payload or
     // of the fallback (#2755): the bind's share lands on that view and the

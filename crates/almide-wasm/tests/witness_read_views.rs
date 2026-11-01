@@ -54,8 +54,12 @@ fn a_named_produced_operand_block_is_read_through_its_tail() {
     assert!(accepted(cert), "the portable checker must accept {cert:?}");
     assert!(cert.starts_with("ibbbbbbbbambambbbbbbbbd\nid\nibd\n"), "{cert:?}");
     // A lambda whose interpolation names `f(x)` first.
+    // `value.as_string(v) ?? "?"`: the arm shares the payload it reads out
+    // and hands it on, an event since #4278 retired the arm-internal class
+    // (`am`, arm_rc.rs), where the share used to be counted as the arm's own.
     let w = witnesses("generic_record_fn_field");
-    assert_eq!(w["<lambda#0>"], "ibd\nibd\nibd\nim\nim\n");
+    assert!(accepted(&w["<lambda#0>"]), "the portable checker must accept {:?}", w["<lambda#0>"]);
+    assert_eq!(w["<lambda#0>"], "ibd\nibd\nam\nibd\nim\nim\n");
     for fixture in ["env_set_overlay", "ord_recursive", "witness_straightline", "json_gltf_walk", "top_let_stored_in_container"] {
         let w = witnesses(fixture);
         let cert = &w["main"];
