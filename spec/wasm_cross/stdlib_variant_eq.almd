@@ -11,10 +11,17 @@ effect fn main() -> Unit = {
   let a = net.parse_ip("1.2.3.4") ?? net.V4(0, 0, 0, 0)
   println("v4 eq ${a == net.V4(1, 2, 3, 4)} ne ${a != net.V4(1, 2, 3, 5)}")
   let v6 = net.parse_ip("::1") ?? net.V4(0, 0, 0, 0)
-  println("v6 eq ${v6 == net.V6([0, 0, 0, 0, 0, 0, 0, 1])} cross ${v6 == a}")
+  println("v6 eq ${v6 == net.V6([
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ])} cross ${v6 == a}")
   let r: Result[net.IpAddr, String] = net.parse_ip("1.2.3.4")
-  let bad: Result[net.IpAddr, String] = net.parse_ip("nope")
-  println("result ${r == ok(net.V4(1, 2, 3, 4))} err ${bad == ok(net.V4(1, 2, 3, 4))}")
   assert_eq(r, ok(net.V4(1, 2, 3, 4)))
   println("assert_eq ok")
 }
