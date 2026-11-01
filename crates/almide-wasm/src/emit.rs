@@ -300,6 +300,8 @@ fn emit_program_pass(
         // closure walled with `call:<fn>`.
         'one_fn: {
             if let Some(r) = &table.infos[i].refuse {
+                let vars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
+                crate::prim_shape::log_fn(f.name.as_str(), fn_module(qual.as_deref(), f), &vars, &f.body, Some(r));
                 lowered.push(Err(r.clone()));
                 break 'one_fn;
             }
@@ -383,6 +385,8 @@ fn emit_program_pass(
                     if let Some(sp) = crate::decline_site::take_pending() {
                         fail_lines.insert(i, sp.line);
                     }
+                    let vars: Vec<VarId> = params.iter().map(|(v, _)| *v).collect();
+                    crate::prim_shape::log_fn(f.name.as_str(), cur_module, &vars, &f.body, Some(&r));
                     lowered.push(Err(r))
                 }
                 // E083: a compiler defect is fatal for the whole program — a

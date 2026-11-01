@@ -586,7 +586,7 @@ pub(crate) fn lower_fn(
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
     crate::witness::anchor::seal(anchor_serial, &f);
-    crate::prim_shape::log_fn(&fn_name, cur_module, &params.iter().map(|(v, _)| *v).collect::<Vec<_>>(), body);
+    crate::prim_shape::log_fn(&fn_name, cur_module, &params.iter().map(|(v, _)| *v).collect::<Vec<_>>(), body, None);
     Ok((f, calls))
 }
 

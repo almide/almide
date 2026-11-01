@@ -16,7 +16,8 @@
 //!
 //! Nothing here is trusted: it names what is to be certified and counts what
 //! is not yet. `ALMIDE_PRIM_SHAPE_LOG=<path>` appends one line per site of
-//! every body the emitter lowered (module, function, site, op, shape).
+//! every body the emitter lowered (module, function, site, op, shape), and of
+//! every body it declined (shape `declined`, then the reason).
 
 use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use almide_ir::{BinOp, CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarId};
@@ -185,7 +186,9 @@ impl Ctx<'_> {
 }
 
 /// Log the shape of every prim memory op in `body` (see the module doc).
-pub(crate) fn log_fn(name: &str, module: Option<&str>, params: &[VarId], body: &IrExpr) {
+/// A body the emitter declined (`declined`: its reason) logs each site as
+/// `declined`, the reason in a sixth column.
+pub(crate) fn log_fn(name: &str, module: Option<&str>, params: &[VarId], body: &IrExpr, declined: Option<&str>) {
     let Some(path) = std::env::var_os("ALMIDE_PRIM_SHAPE_LOG") else { return };
     let mut scan = Scan::default();
     scan.visit_expr(body);
@@ -196,7 +199,11 @@ pub(crate) fn log_fn(name: &str, module: Option<&str>, params: &[VarId], body: &
     let cx = Ctx { scan: &scan, params: &params };
     let mut out = String::new();
     for (n, (func, a)) in scan.sites.iter().enumerate() {
-        out.push_str(&format!("{}\t{name}\t{n}\t{func}\t{}\n", module.unwrap_or("-"), cx.classify(func, a)));
+        let m = module.unwrap_or("-");
+        match declined {
+            None => out.push_str(&format!("{m}\t{name}\t{n}\t{func}\t{}\n", cx.classify(func, a))),
+            Some(r) => out.push_str(&format!("{m}\t{name}\t{n}\t{func}\tdeclined\t{}\n", r.replace(['\t', '\n'], " "))),
+        }
     }
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {

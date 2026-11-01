@@ -566,6 +566,13 @@ fn link_self_host(
     loop {
         let mut needed = HashSet::new();
         scan_program(ir, &impls, &loaded, &mut needed);
+        // ALMIDE_LINK_ALL_SELF_HOST=1: demand every registered surface, so
+        // the emitter lowers every self-host body (the probe that measures
+        // the prim shapes of everything linkable, #4005; the program's own
+        // reachability still prunes what ships).
+        if almide_base::env::flag("ALMIDE_LINK_ALL_SELF_HOST") {
+            needed.extend(registry.keys().cloned());
+        }
         // Deterministic load order: module indices, names, and layouts
         // must not depend on hash-seed iteration order.
         let mut needed: Vec<String> = needed.into_iter().collect();
