@@ -1218,6 +1218,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_ABORT_SITE=value` | runtime | the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand |
 | `ALMIDE_ALLOC_COUNT` | instrument | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
+| `ALMIDE_BASELINE_BIN=value` | harness | a compiler from before the sockets route: tests/net_wasm_default_route_test.rs byte-compares a socket-free program's preview 1 module against it |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
 | `ALMIDE_BENCH_MAIN_NS=value` | harness | the file `almide bench` points a benched native binary at: the spliced `main` timer writes its elapsed nanoseconds there (#2980, the main-only boundary) |
 | `ALMIDE_BIN=value` | harness | path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH) |
@@ -1276,6 +1277,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DUMP_VERIFY` | debug | print the native render's verification transcript |
 | `ALMIDE_DUMP_WMIR=value` | debug | print the lowered wasm-leg op stream of every fn whose name contains the value |
 | `ALMIDE_DWARF_FIXTURES=value` | harness | the DWARF line-table span-resolution measurement (`crates/almide-wasm/tests/dwarf_lines.rs`, ignored test): the `.almd` files to measure, comma-separated (#1315) |
+| `ALMIDE_EXPECT_BASELINE` | harness | make tests/net_wasm_default_route_test.rs fail instead of skipping the byte comparison when ALMIDE_BASELINE_BIN is unset |
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FAKE_RUSTC_VERSION=value` | harness | the version a fake `rustc` reports in tests/rustc_floor_test.rs, which forwards every other invocation to `ALMIDE_REAL_RUSTC` (the rustc-floor refusal's probe) |
@@ -1341,6 +1343,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SIZE_PRESSURE=value` | harness | the allocation pressure (`plain` / `quarantine` / `ballast`) a size-ratchet child builds its one fixture under, for the determinism check (#3143); the ratchet sets it on the processes it spawns |
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
+| `ALMIDE_STDLIB_COVERAGE_PROBE=value` | harness | the one program (its repo-relative path) tests/stdlib_test_coverage_test.rs measures, for probing a single fixture |
+| `ALMIDE_STDLIB_COVERAGE_REPORT=value` | harness | where tests/stdlib_test_coverage_test.rs writes its per-function coverage table (scripts/check-stdlib-test-coverage.sh) |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
 | `ALMIDE_SURVIVE_OVERLAY=value` | harness | RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change |
 | `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | harness | RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read |
@@ -1366,6 +1370,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
+| `ALMIDE_UPDATE_STDLIB_COVERAGE` | harness | rewrite the stdlib test-coverage ledger's rows from the measured run |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
