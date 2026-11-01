@@ -325,6 +325,54 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
     Some(fields)
 }
 
+/// The heap slot reads of an owned block that can MOVE the value out instead
+/// of copying it: outside every loop, and after the read the block is only
+/// dropped, addressed, or read at its other slots. Nothing reads the slot
+/// again, so taking it leaves every later observation as the copy would.
+pub(super) fn movable_loads(func: &MirFunction, base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>) -> BTreeSet<ValueId> {
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let mut out = BTreeSet::new();
+    let mut depth = 0usize;
+    for (i, op) in func.ops.iter().enumerate() {
+        match op {
+            Op::LoopStart => depth += 1,
+            Op::LoopEnd => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
+        let Some(&(b, Some(off))) = args.first().and_then(|a| base_of.get(a)) else { continue };
+        let Some(k) = slot_of(Some(off)) else { continue };
+        if depth != 0 {
+            continue;
+        }
+        let mut movable = true;
+        for later in &func.ops[i + 1..] {
+            let fine = match later {
+                Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } => *v == b,
+                Op::Prim { kind: PrimKind::Handle, args, .. } => args.first() == Some(&b),
+                Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } => rooted(a, b) || rooted(y, b),
+                Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => args.first().is_some_and(|a| {
+                    base_of.get(a).is_some_and(|(r, o)| *r == b && o.is_some() && slot_of(*o).is_some_and(|s| s != k))
+                }),
+                _ => false,
+            };
+            if fine {
+                continue;
+            }
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(later, &mut reads);
+            if reads.iter().any(|v| *v == b || rooted(v, b)) {
+                movable = false;
+                break;
+            }
+        }
+        if movable {
+            out.insert(*d);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::slot_kinds;

@@ -75,6 +75,9 @@ pub(crate) struct AddrState {
     arms: Vec<(Option<ValueId>, bool)>,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
+    /// Heap slot reads of an owned record that move the value out
+    /// (`render_native_slots::movable_loads`): nothing reads the slot again.
+    moves: BTreeSet<ValueId>,
 }
 
 impl AddrState {
@@ -185,6 +188,7 @@ impl AddrState {
         }
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
+        let moves = slots::movable_loads(func, &base_of);
         let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
         let alloc_rec = func
             .ops
@@ -247,6 +251,7 @@ impl AddrState {
             pending: BTreeMap::new(),
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
+            moves,
         }
     }
 }
@@ -469,6 +474,16 @@ pub(crate) fn render_addr_op(
             if let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
                 if let Some(f) = crate::render_native_rec::rec_field(i, k).filter(|f| *f != NTy::I64) {
                     tys.insert(*d, f);
+                    // The last read of the slot of an owned record moves the value out.
+                    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
+                        line!(
+                            "let mut {}: {} = std::mem::take(&mut {}.f{k});",
+                            var(*d),
+                            crate::render_native_rec::owned_ty(f),
+                            var(ad.base)
+                        );
+                        return Ok(true);
+                    }
                     line!(
                         "let mut {}: {} = {}.f{k}.clone();",
                         var(*d),
