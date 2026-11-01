@@ -18718,12 +18718,6 @@ else {
   else __sbs_cmp_at(ah, bh, la, lb, k + 1)
 }
 
-fn __sbs_gt(a: String, b: String) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  __sbs_cmp_at(ha + 12, hb + 12, prim.load32(ha + 4), prim.load32(hb + 4), 0) > 0
-}
-
 
 fn __sbs_le_h(ah: Int, bh: Int) -> Bool = __sbs_cmp_at(
   ah + 12,
