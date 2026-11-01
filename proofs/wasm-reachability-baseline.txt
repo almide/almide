@@ -67,7 +67,6 @@ json.stringify :: UNPROBEABLE :: no candidate shape builds natively
 json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
-net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
 net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
 net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared capability not in this brick
 net.tcp_local_port :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_local_port needs a declared capability not in this brick
