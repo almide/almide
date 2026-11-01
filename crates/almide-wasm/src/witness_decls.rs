@@ -68,6 +68,11 @@ pub struct PassDecls {
     /// extern's import reaches FOREIGN only, an `effect fn` extern's also
     /// FOREIGN_EFFECT (cert_project.rs).
     pub stub_declared: Vec<Declared>,
+    /// `(creator, closure)`: each lifted lambda that is a funcref-table entry,
+    /// at its pre-declare index, beside the body that builds it. The
+    /// capability witness charges a closure's reach to its creator, not to a
+    /// fn that only calls it as an argument (cert_project.rs).
+    pub creations: Vec<(u32, u32)>,
     /// The pass's finished module (post-declare, pre-`to_wasi`).
     pub bytes: Vec<u8>,
 }
@@ -230,6 +235,58 @@ effect fn main() -> Unit = {
         let sum = flat.iter().find(|(n, _)| n == "sum").expect("sum's caps witness");
         assert!(!accepts(almide_verify::Property::Caps, &sum.1), "{sum:?}");
         assert!(!accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+    }
+
+    /// `relay` and `use_it` only call the closure they are handed; `make`
+    /// builds it and reads the file inside it.
+    const CLOSURE_ARG: &str = "import fs\n\neffect fn make() -> (String) -> String = (p) => fs.read_text(p) ?? \"\"\n\nfn use_it(f: (String) -> String) -> String = f(\"notes.txt\")\n\nfn relay(f: (String) -> String) -> String = use_it(f)\n\neffect fn main() -> Unit = {\n  let f = make()!\n  println(relay(f))\n}\n";
+
+    fn reach_of(flat: &[(String, String)], name: &str) -> Vec<u32> {
+        let w = &flat.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("{name}'s caps witness: {flat:?}")).1;
+        w.trim().split('|').nth(1).unwrap_or("").split(' ').filter_map(|c| c.parse().ok()).collect()
+    }
+
+    /// Effect polymorphism: a closure argument's capabilities are its
+    /// creator's. Two plain fns pass and call an FS-reading closure and are
+    /// accepted, each reporting the PARAMETRIC reach rather than nothing;
+    /// the creator `make` is charged the read.
+    #[test]
+    fn a_closure_argument_is_charged_to_its_creator_and_its_callers_reach_parametric() {
+        let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, d) = emit_recorded("closure_arg.almd", CLOSURE_ARG);
+        assert!(!d.creations.is_empty(), "make's lambda is recorded as make's: {:?}", d.creations);
+        let (flat, graph) = cert_project::caps(&d).expect("caps");
+        for f in ["use_it", "relay"] {
+            let reach = reach_of(&flat, f);
+            assert!(!reach.contains(&cap::FS_READ), "{f} is not charged its argument's read: {reach:?}");
+            if f == "use_it" {
+                assert!(reach.contains(&cap::PARAMETRIC), "use_it reports the parametric reach: {reach:?}");
+            }
+        }
+        assert!(reach_of(&flat, "make").contains(&cap::FS_READ), "the creator is charged: {flat:?}");
+        assert!(flat.iter().all(|(_, w)| accepts(almide_verify::Property::Caps, w)), "{flat:?}");
+        assert!(accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+    }
+
+    /// The negative controls. The checker refuses both shapes in source, so
+    /// each re-declares an effect fn plain in the table: the producer bug the
+    /// certificate exists to catch. (i) A plain fn whose OWN body reads a
+    /// file; (ii) a plain fn that creates the FS-reading closure.
+    #[test]
+    fn a_plain_reader_and_a_plain_creator_of_a_reading_closure_are_refused() {
+        let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());
+        let own = "import fs\n\neffect fn read_it(p: String) -> String = fs.read_text(p) ?? \"\"\n\neffect fn main() -> Unit = {\n  println(read_it(\"x\")!)\n}\n";
+        for (src, plain) in [(own, "read_it"), (CLOSURE_ARG, "make")] {
+            let (_, mut d) = emit_recorded("closure_neg.almd", src);
+            let (flat, graph) = cert_project::caps(&d).expect("caps");
+            assert!(accepts(almide_verify::Property::CapsTransitive, &graph), "the control is accepted as declared: {graph}");
+            assert!(flat.iter().all(|(_, w)| accepts(almide_verify::Property::Caps, w)), "{flat:?}");
+            d.fns.iter_mut().filter(|f| f.name == plain).for_each(|f| f.declared = Some(Declared::Pure));
+            let (flat, graph) = cert_project::caps(&d).expect("caps");
+            let w = &flat.iter().find(|(n, _)| n == plain).expect("the re-declared fn's witness").1;
+            assert!(!accepts(almide_verify::Property::Caps, w), "{plain} declared plain must be refused: {w:?}");
+            assert!(!accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
+        }
     }
 
     #[test]
