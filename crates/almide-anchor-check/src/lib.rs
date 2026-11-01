@@ -424,6 +424,17 @@ impl<'a> Ctx<'_, 'a> {
     ///   (operands.rs `covers` holds it there), so no second test exists.
     fn check_guard(&self, at: At) -> Result<usize, String> {
         let b = self.body(at)?;
+        // A fresh block's own size (#4281): `i32.const N; call $alloc`,
+        // anchored at the call — the access below reads inside its N bytes.
+        if let Op::Call { function_index } = b.ops[at.op] {
+            if self.alloc == u32::MAX || function_index != self.alloc {
+                return Err(format!("c: anchored at a call of {function_index}, not $alloc"));
+            }
+            if at.op == 0 || !matches!(b.ops[at.op - 1], Op::I32Const { .. }) {
+                return Err("c: the allocation's size is not a constant".into());
+            }
+            return Ok(at.op);
+        }
         if at.op >= 1 && matches!(b.ops[at.op], Op::If { .. }) {
             if !matches!(b.ops[at.op - 1], Op::I32GeU | Op::I32Eqz) {
                 return Err(format!("c: the `if`'s test is {:?}, not a compare", b.ops[at.op - 1]));
@@ -604,11 +615,22 @@ pub fn check_bounds_held(
     holds: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
+    check_bounds_alloc(bodies, bounds, anch, judges, holds, u32::MAX, rep)
+}
+
+/// [`check_bounds_held`] knowing `$alloc` (a function index, as a `call`
+/// names it): a `c` may then be a fresh block's own allocation (#4281).
+pub fn check_bounds_alloc(
+    bodies: &[Body<'_>],
+    bounds: &str,
+    anch: &str,
+    judges: &[At],
+    holds: &[At],
+    alloc: u32,
+    rep: &mut Report,
+) -> Result<(), String> {
     let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
-    let ctx = Ctx {
-        bodies,
-        alloc: u32::MAX,
-    };
+    let ctx = Ctx { bodies, alloc };
     if bounds.trim().is_empty() && anch.trim().is_empty() {
         return Ok(());
     }
@@ -877,7 +899,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
+    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, alloc, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines)) = rc_lines {
         let mut r = RcReport::default();
