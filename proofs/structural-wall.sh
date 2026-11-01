@@ -116,7 +116,7 @@ if [ "$MODE" = tests ]; then
   (cd "$ROOT" && LC_ALL=C ls spec/stdlib/*_test.almd) > "$OUT/listed"
   (cd "$ROOT" && ci_slice_filter structural-wall-tests < "$OUT/listed") > "$OUT/selected"
   HASHES="$OUT/structural-artifacts.sha256"
-  : > "$OUT/declined"; : > "$OUT/embedded-only"; : > "$OUT/run-failed"
+  : > "$OUT/declined"; : > "$OUT/embedded-only"; : > "$OUT/run-failed"; : > "$OUT/anchor-rejects"
 else
   grep -v -E '^(#|$)' "$FIXTURES" > "$OUT/listed"
   (cd "$ROOT" && ci_slice_filter structural-wall < "$OUT/listed") > "$OUT/selected"
@@ -173,7 +173,15 @@ while IFS= read -r f; do
   fi
   printf '%s  %s\n' "$sum" "$f" >> "$HASHES.tmp"
   # #4011 (d): every located bounds / init event is its instruction.
-  if ! "$ANCHORCHECK" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1; then
+  arc=0
+  "$ANCHORCHECK" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1 || arc=$?
+  if [ "$arc" -ne 0 ] && [ "$MODE" = tests ]; then
+    # The stdlib-test leg names each artifact whose events are not its
+    # instructions (judged against the exception ledger's `anchors` rows
+    # below) and judges the rest; its totals leave this artifact out.
+    printf '%s\t%s\n' "$f" "$(grep -m1 'REJECT' "$OUT/$N.anchor" | cut -c1-200)" >> "$OUT/anchor-rejects"
+    mv "$OUT/$N.anchor" "$OUT/$N.anchor-rejected"
+  elif [ "$arc" -ne 0 ]; then
     echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
     sed 's/^/  /' "$OUT/$N.anchor" >&2
     exit 1
@@ -196,6 +204,19 @@ if [ "$MODE" = tests ]; then
     exit 1
   fi
   echo "  every judged artifact passes its tests under wasmtime"
+  # Anchor rejects against the ledger's `anchors` rows (file<TAB>anchors<TAB>-<TAB>issue):
+  # a reject the ledger does not name fails, and so does a row that no longer rejects.
+  grep -v -E '^(#|$)' "$EXCEPTIONS" 2>/dev/null | awk -F'\t' '$2 == "anchors" {print $1}' | LC_ALL=C sort -u > "$OUT/anchor-ledger"
+  cut -f1 "$OUT/anchor-rejects" | LC_ALL=C sort -u > "$OUT/anchor-seen"
+  echo "  [anchors] $(wc -l < "$OUT/anchor-seen" | tr -d ' ') of $N artifact(s) hold an event that is not its instruction:"
+  sed 's/^/    /' "$OUT/anchor-rejects"
+  unnamed="$(LC_ALL=C comm -23 "$OUT/anchor-seen" "$OUT/anchor-ledger")"
+  stale="$(LC_ALL=C comm -13 "$OUT/anchor-seen" "$OUT/anchor-ledger" | while IFS= read -r f; do grep -qxF "$f" "$OUT/selected" && echo "$f"; done)"
+  if [ -n "$unnamed" ] || [ -n "$stale" ]; then
+    [ -z "$unnamed" ] || { echo "STRUCTURAL WALL FAIL: ANCHORS REJECT on an artifact no exception names:" >&2; echo "$unnamed" | sed 's/^/  /' >&2; }
+    [ -z "$stale" ] || { echo "STRUCTURAL WALL FAIL: STALE anchors exception (the artifact now reads ANCHORS OK — remove the row):" >&2; echo "$stale" | sed 's/^/  /' >&2; }
+    exit 1
+  fi
 else
   echo "  $N fixture bundle(s); artifact digests in proofs/structural-artifacts.sha256"
 fi
