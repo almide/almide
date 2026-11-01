@@ -249,10 +249,6 @@ impl LowerCtx {
         inclusive: bool,
         out: &mut Vec<CallArg>,
     ) -> Result<ArgOutcome, LowerError> {
-        // `a..=MAX` would pass MAX + 1, which wraps to MIN (an empty list).
-        if inclusive && matches!(end.kind, IrExprKind::LitInt { value } if value == i64::MAX) {
-            return Err(LowerError::at(end.span, "an inclusive Range ending at Int max cannot materialize through an exclusive end (MAX + 1 wraps)"));
-        }
         let range_mark = self.ops.len();
         let (s_v, e_v0) = match (
             self.lower_scalar_value(start),
@@ -267,27 +263,8 @@ impl LowerCtx {
                 ));
             }
         };
-        let mut e_v = e_v0;
-        if inclusive {
-            let one = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: one, value: 1 });
-            let e2 = self.fresh_value();
-            self.ops.push(Op::IntBinOp {
-                dst: e2,
-                op: crate::IntOp::Add,
-                a: e_v,
-                b: one,
-            });
-            e_v = e2;
-        }
         let repr = repr_of(&a.ty)?;
-        let dst = self.fresh_value();
-        self.ops.push(Op::CallFn {
-            dst: Some(dst),
-            name: "list.range".to_string(),
-            args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
-            result: Some(repr),
-        });
+        let dst = self.materialize_int_range(s_v, e_v0, inclusive, repr);
         out.push(self.materialized_call_arg(dst, repr, &a.ty));
         Ok(ArgOutcome::Pushed)
     }
@@ -841,5 +818,84 @@ impl LowerCtx {
         // The view block itself: tracked with NO element set → plain block-only Drop.
         self.live_heap_handles.push(list);
         Some(list)
+    }
+}
+
+impl LowerCtx {
+    /// Materialize the Int range `s..e` (or `s..=e`) as an owned list (#4355).
+    ///
+    /// Exclusive: `list.range(s, e)`. Inclusive: NOT `list.range(s, e + 1)`,
+    /// which wraps to an empty list at `e == Int max`. The count is computed
+    /// without overflow — `e - s + 1` when `e >= s`, saturated to Int max when
+    /// the true span does not fit (so the allocation aborts out of memory, as
+    /// an exclusive range that large does) — `list.range(0, count)` allocates
+    /// it, and a fill loop writes `s + k` into slot `k`.
+    pub(crate) fn materialize_int_range(&mut self, s: ValueId, e: ValueId, inclusive: bool, repr: crate::Repr) -> ValueId {
+        let konst = |me: &mut Self, value: i64| {
+            let v = me.fresh_value();
+            me.ops.push(Op::ConstInt { dst: v, value });
+            v
+        };
+        let bin = |me: &mut Self, op: crate::IntOp, a: ValueId, b: ValueId| {
+            let v = me.fresh_value();
+            me.ops.push(Op::IntBinOp { dst: v, op, a, b });
+            v
+        };
+        let dst = self.fresh_value();
+        if !inclusive {
+            self.ops.push(Op::CallFn {
+                dst: Some(dst),
+                name: "list.range".to_string(),
+                args: vec![CallArg::Scalar(s), CallArg::Scalar(e)],
+                result: Some(repr),
+            });
+            return dst;
+        }
+        let zero = konst(self, 0);
+        let one = konst(self, 1);
+        let max = konst(self, i64::MAX);
+        let ok = bin(self, crate::IntOp::Ge, e, s);
+        let d = bin(self, crate::IntOp::Sub, e, s);
+        // The true span e - s overflowed iff e and s differ in sign and d's
+        // sign differs from e's.
+        let x1 = bin(self, crate::IntOp::Xor, e, s);
+        let x2 = bin(self, crate::IntOp::Xor, e, d);
+        let x3 = bin(self, crate::IntOp::And, x1, x2);
+        let ovf = bin(self, crate::IntOp::Lt, x3, zero);
+        let dmax = bin(self, crate::IntOp::Eq, d, max);
+        let sat = bin(self, crate::IntOp::Or, ovf, dmax);
+        let d1 = bin(self, crate::IntOp::Add, d, one);
+        let span = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: sat, dst: Some(span) });
+        self.ops.push(Op::Else { val: Some(max) });
+        self.ops.push(Op::EndIf { val: Some(d1) });
+        let count = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: ok, dst: Some(count) });
+        self.ops.push(Op::Else { val: Some(span) });
+        self.ops.push(Op::EndIf { val: Some(zero) });
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "list.range".to_string(),
+            args: vec![CallArg::Scalar(zero), CallArg::Scalar(count)],
+            result: Some(repr),
+        });
+        // Fill: slot k holds s + k.
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        let k = konst(self, 0);
+        let slot = konst(self, i64::from(crate::lower::layout::SLOT_SIZE));
+        let header = konst(self, i64::from(crate::lower::layout::BLOCK_HEADER));
+        self.ops.push(Op::LoopStart);
+        let more = bin(self, crate::IntOp::Lt, k, count);
+        self.ops.push(Op::LoopBreakUnless { cond: more });
+        let off = bin(self, crate::IntOp::Mul, k, slot);
+        let base = bin(self, crate::IntOp::Add, h, header);
+        let at = bin(self, crate::IntOp::Add, base, off);
+        let val = bin(self, crate::IntOp::Add, s, k);
+        self.ops.push(Op::Prim { kind: crate::PrimKind::Store { width: 8 }, dst: None, args: vec![at, val] });
+        let k1 = bin(self, crate::IntOp::Add, k, one);
+        self.ops.push(Op::SetLocal { local: k, src: k1 });
+        self.ops.push(Op::LoopEnd);
+        dst
     }
 }

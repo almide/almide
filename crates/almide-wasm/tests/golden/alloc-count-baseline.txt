@@ -261,6 +261,7 @@
 17	9	93	17	spec/wasm_cross/fold_heap_acc.almd
 62	32	448	62	spec/wasm_cross/fold_init_rebinds_source.almd
 6	0	88	6	spec/wasm_cross/for_in_forms.almd
+19	11	212	19	spec/wasm_cross/for_in_list_value_semantics.almd
 ~	spec/wasm_cross/fs_call_head_family.almd
 ~	spec/wasm_cross/fs_composition_family.almd
 ~	spec/wasm_cross/fs_error_path_escape.almd
@@ -707,6 +708,7 @@
 16	8	53	16	spec/wasm_cross/range_head_fold_edges.almd
 4	0	61	4	spec/wasm_cross/range_head_fold_huge.almd
 0	0	0	0	spec/wasm_cross/range_inclusive_end_at_max.almd
+7	4	156	7	spec/wasm_cross/range_inclusive_runtime_max.almd
 1	0	20	0	spec/wasm_cross/range_materialize_oom.almd
 4330	4233	190772	4330	spec/wasm_cross/rc_alloc_stress.almd
 150001	149996	1040006	150001	spec/wasm_cross/rc_reclaim_churn.almd

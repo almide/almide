@@ -512,11 +512,6 @@ impl LowerCtx {
             return Ok(());
         }
         let IrExprKind::Range { start, end, inclusive } = &value.kind else { unreachable!() };
-        // `a..=MAX` materializes as `list.range(a, MAX + 1)`, and MAX + 1 wraps
-        // to MIN: the list would come out empty. Refuse the shape here.
-        if *inclusive && matches!(end.kind, IrExprKind::LitInt { value } if value == i64::MAX) {
-            return Err(LowerError::at(end.span, "an inclusive Range ending at Int max cannot materialize through an exclusive end (MAX + 1 wraps)"));
-        }
         let range_mark = self.ops.len();
         let (s_v, e_v0) = match (self.lower_scalar_value(start), self.lower_scalar_value(end)) {
             (Some(sv), Some(ev)) => (sv, ev),
@@ -529,22 +524,8 @@ impl LowerCtx {
                 ));
             }
         };
-        let mut e_v = e_v0;
-        if *inclusive {
-            let one = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: one, value: 1 });
-            let e2 = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: e2, op: crate::IntOp::Add, a: e_v, b: one });
-            e_v = e2;
-        }
         let repr = repr_of(ty)?;
-        let dst = self.fresh_value();
-        self.ops.push(Op::CallFn {
-            dst: Some(dst),
-            name: "list.range".to_string(),
-            args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
-            result: Some(repr),
-        });
+        let dst = self.materialize_int_range(s_v, e_v0, *inclusive, repr);
         self.value_of.insert(var, dst);
         self.seed_call_module_heap_read_shape(dst, ty, "list", "range", true);
         self.seed_call_module_heap_drop_route(dst, ty);

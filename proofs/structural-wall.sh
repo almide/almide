@@ -284,11 +284,11 @@ for p, (a, t) in stats.items():
 # record, and how many of them carry no check of their own token count
 # (elided by #3345 and re-derived by the checker). Only accepted witnesses.
 import re as _re
-toks = {k: 0 for k in "acws"}
+toks = {k: 0 for k in "acwse"}
 for w in accepts["bounds"]:
-    for t in _re.findall(r"[acws](?=\d)", w):
+    for t in _re.findall(r"[acwse](?=\d)", w):
         toks[t] += 1
-print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
+print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['e']} loop exit test(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
 # #4013 coverage: the construction sites the init witnesses record (list
 # literals today; every other allocation site records nothing).
 sites = sum(len([x for x in w.split(";") if x.strip()]) for w in accepts["init"])
