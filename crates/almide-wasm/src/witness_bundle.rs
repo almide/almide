@@ -90,6 +90,7 @@ fn records_inner(
     let judge_anchors = super::bounds::take_judges();
     let hold_anchors = super::bounds::take_holds();
     let prim_anchors = super::bounds::take_prims();
+    let heap_params = super::bounds::take_heaps();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let (seals, remaps) = super::anchor::take_all();
@@ -142,6 +143,9 @@ fn records_inner(
     ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids, &rc_helpers)?
         // #4005 A4: every self-host prim access the pass emitted, located.
         + &format!("prims {}\n", locate.text(&pick(prim_anchors))?)
+        // #4005 A4: each self-host body's heap-typed parameters, by its
+        // shipped position (a body that did not ship is left out).
+        + &format!("selfhost {}\n", locate.heaps(&pick(heap_params)))
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -404,6 +408,17 @@ impl Locator {
             },
             _ => t.to_string(),
         }
+    }
+
+    /// `serial:params` tokens as `position:params`, the bodies that shipped.
+    fn heaps(&self, w: &str) -> String {
+        w.split_whitespace()
+            .filter_map(|t| {
+                let (k, ps) = t.split_once(':')?;
+                Some(format!("{}:{ps}", self.position(k.parse().ok()?)?))
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// The shipped position of body `serial`, when it shipped.

@@ -299,6 +299,7 @@ pub(crate) fn lower_fn(
     let no_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
     let mut f = Function::new(local_decls);
     let anchor_serial = crate::witness::anchor::begin_fn();
+    let prims_before = crate::witness::bounds::prim_count();
     let mut calls: HashSet<usize> = HashSet::new();
     {
         let mut em = Emitter {
@@ -586,6 +587,15 @@ pub(crate) fn lower_fn(
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
     crate::witness::anchor::seal(anchor_serial, &f);
+    if crate::witness::bounds::prim_count() > prims_before {
+        let heap: Vec<u32> = params
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, ty))| ty.is_heap_param())
+            .map(|(i, _)| i as u32 + env_shift)
+            .collect();
+        crate::witness::bounds::heap_params(anchor_serial, &heap);
+    }
     crate::prim_shape::log_fn(&fn_name, cur_module, &params.iter().map(|(v, _)| *v).collect::<Vec<_>>(), body, None);
     Ok((f, calls))
 }

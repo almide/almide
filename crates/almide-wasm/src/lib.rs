@@ -552,6 +552,25 @@ impl SliceTy {
         }
     }
 
+    /// A parameter of this type holds a heap block's base (#4005 A4: the
+    /// linear certificate binds it to a block). Unit and closures are left
+    /// out: no self-host body addresses them.
+    fn is_heap_param(self) -> bool {
+        match self {
+            SliceTy::Scalar(s) => matches!(s, Scalar::Str | Scalar::Bytes),
+            SliceTy::Option(_)
+            | SliceTy::Result(..)
+            | SliceTy::List(_)
+            | SliceTy::Map(..)
+            | SliceTy::Set(_)
+            | SliceTy::Tuple(_)
+            | SliceTy::Named(_)
+            | SliceTy::Value
+            | SliceTy::Matrix => true,
+            SliceTy::Fn(_) | SliceTy::Unit => false,
+        }
+    }
+
     /// Slot width of this value inside an aggregate (record field, variant
     /// case field, option slot, list element). Every 8-byte VALUE type is
     /// an 8-byte slot — f64 included (the two-way version silently gave

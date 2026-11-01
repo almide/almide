@@ -99,6 +99,15 @@ struct State {
     /// each: every one the procedure certificate must cover or count.
     prims: String,
     done_prims: Vec<(usize, String)>,
+    /// How many prim anchors this run recorded (a body compares before and
+    /// after to know it holds one).
+    prim_count: usize,
+    /// The pass's self-host bodies (#4005 A4): `serial:params`, the body's
+    /// anchor serial and its heap-typed parameters (comma-separated wasm
+    /// parameter positions, `-` for none) — the linear certificate's
+    /// translation binds each to a block.
+    heaps: String,
+    done_heaps: Vec<(usize, String)>,
     /// A site outlived its stretch: the witness is made unparseable, so it
     /// is rejected rather than read short.
     broken: bool,
@@ -170,6 +179,10 @@ impl State {
         let prims = std::mem::take(&mut self.prims);
         if !prims.is_empty() {
             self.done_prims.push((self.pass, prims.trim_end().to_string()));
+        }
+        let heaps = std::mem::take(&mut self.heaps);
+        if !heaps.is_empty() {
+            self.done_heaps.push((self.pass, heaps.trim_end().to_string()));
         }
         let stretches = std::mem::take(&mut self.stretches);
         let anchors = std::mem::take(&mut self.stretch_anchors);
@@ -316,6 +329,25 @@ pub(crate) fn prim(at: &wasm_encoder::Function) {
     with(|s| {
         s.prims.push_str(&a);
         s.prims.push(' ');
+        s.prim_count += 1;
+    });
+}
+
+/// How many prim anchors have been recorded so far this run.
+pub(crate) fn prim_count() -> usize {
+    state().lock().expect("bounds sink").as_ref().map_or(0, |s| s.prim_count)
+}
+
+/// A self-host body holding prim accesses was lowered (func.rs): its anchor
+/// serial and its heap-typed wasm parameter positions.
+pub(crate) fn heap_params(serial: u64, params: &[u32]) {
+    let list = if params.is_empty() {
+        "-".to_string()
+    } else {
+        params.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+    };
+    with(|s| {
+        s.heaps.push_str(&format!("{serial}:{list} "));
     });
 }
 
@@ -333,6 +365,7 @@ pub fn take() -> Vec<(usize, String)> {
     *taken_judges().lock().expect("bounds judges") = std::mem::take(&mut s.done_judges);
     *taken_holds().lock().expect("bounds holds") = std::mem::take(&mut s.done_holds);
     *taken_prims().lock().expect("bounds prims") = std::mem::take(&mut s.done_prims);
+    *taken_heaps().lock().expect("bounds heaps") = std::mem::take(&mut s.done_heaps);
     s.done
 }
 
@@ -367,6 +400,18 @@ fn taken_prims() -> &'static Mutex<Vec<(usize, String)>> {
 /// The prim-access anchors of the passes the last [`take`] flushed.
 pub fn take_prims() -> Vec<(usize, String)> {
     std::mem::take(&mut *taken_prims().lock().expect("bounds prims"))
+}
+
+fn taken_heaps() -> &'static Mutex<Vec<(usize, String)>> {
+    use std::sync::OnceLock;
+    static P: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// The self-host bodies' heap parameters of the passes the last [`take`]
+/// flushed (`serial:params` tokens).
+pub fn take_heaps() -> Vec<(usize, String)> {
+    std::mem::take(&mut *taken_heaps().lock().expect("bounds heaps"))
 }
 
 fn taken_anchors() -> &'static Mutex<Vec<(usize, String)>> {
