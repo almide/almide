@@ -17,7 +17,11 @@
 //! Nothing here is trusted: it names what is to be certified and counts what
 //! is not yet. `ALMIDE_PRIM_SHAPE_LOG=<path>` appends one line per site of
 //! every body the emitter lowered (module, function, site, op, shape), and of
-//! every body it declined (shape `declined`, then the reason).
+//! every body it declined (shape `declined`, then the reason). Each line is
+//! buffered under its emission pass; the pass that SHIPS is written, so the
+//! log names what the artifact contains — or, under
+//! `ALMIDE_LINK_ALL_SELF_HOST`, the first pass, which lowers every linked
+//! body (the census of what any program could link).
 
 use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use almide_ir::{BinOp, CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarId};
@@ -185,11 +189,40 @@ impl Ctx<'_> {
     }
 }
 
+fn passes() -> &'static std::sync::Mutex<(usize, std::collections::BTreeMap<usize, String>)> {
+    static P: std::sync::OnceLock<std::sync::Mutex<(usize, std::collections::BTreeMap<usize, String>)>> =
+        std::sync::OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+/// An emission pass begins (witness_frames.rs `mark_pass`).
+pub(crate) fn begin_pass(pass: usize) {
+    if let Ok(mut g) = passes().lock() {
+        if pass == 1 {
+            g.1.clear();
+        }
+        g.0 = pass;
+    }
+}
+
+/// Pass `pass` shipped: write its lines (the first pass's under link-all).
+pub(crate) fn shipped(pass: usize) {
+    let Some(path) = almide_base::env::var("ALMIDE_PRIM_SHAPE_LOG") else { return };
+    let pick = if almide_base::env::flag("ALMIDE_LINK_ALL_SELF_HOST") { 1 } else { pass };
+    let out = passes().lock().ok().and_then(|mut g| g.1.remove(&pick)).unwrap_or_default();
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = f.write_all(out.as_bytes());
+    }
+}
+
 /// Log the shape of every prim memory op in `body` (see the module doc).
 /// A body the emitter declined (`declined`: its reason) logs each site as
 /// `declined`, the reason in a sixth column.
 pub(crate) fn log_fn(name: &str, module: Option<&str>, params: &[VarId], body: &IrExpr, declined: Option<&str>) {
-    let Some(path) = almide_base::env::var("ALMIDE_PRIM_SHAPE_LOG") else { return };
+    if almide_base::env::var("ALMIDE_PRIM_SHAPE_LOG").is_none() {
+        return;
+    }
     let mut scan = Scan::default();
     scan.visit_expr(body);
     if scan.sites.is_empty() {
@@ -205,8 +238,8 @@ pub(crate) fn log_fn(name: &str, module: Option<&str>, params: &[VarId], body: &
             Some(r) => out.push_str(&format!("{m}\t{name}\t{n}\t{func}\tdeclined\t{}\n", r.replace(['\t', '\n'], " "))),
         }
     }
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = f.write_all(out.as_bytes());
+    if let Ok(mut g) = passes().lock() {
+        let pass = g.0;
+        g.1.entry(pass).or_default().push_str(&out);
     }
 }
