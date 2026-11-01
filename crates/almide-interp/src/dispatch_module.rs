@@ -62,16 +62,30 @@ impl<'a> Interpreter<'a> {
         // so the oracle runs that walk's bundled body directly, as the wasm
         // leg does. The call arrives from inside the pool tier (the registry
         // `value.set_path` body), where the module dispatch never reaches the
-        // bundled tier, so the body is taken from that tier here; the walk
-        // reads the public Value surface only, which the floor answers.
+        // bundled tier, so the body is taken from that tier here. The walk
+        // reads the public Value surface only, which the BOUNDARY tier
+        // answers over Values (#4401: run inside the pool tier, its helpers
+        // reached heap prims with Value operands and abstained): the args are
+        // read back out of the arena, the body runs at the boundary, and its
+        // Value result passes the pool's own return sync untouched.
         if module.as_str() == "value" && func.as_str() == "__set_path_steps" {
             let pure = almide_base::intern::sym("__set_path_pure");
             let Some(def) = self.bundled_fn(module, pure) else {
                 return self.dispatch_module_resolved(module, pure, evaled);
             };
+            let mut synced = Vec::with_capacity(evaled.len());
+            for (v, p) in evaled.iter().zip(&def.params) {
+                match self.sync_value(v, &p.ty) {
+                    Ok(r) => synced.push(r.unwrap_or_else(|| v.clone())),
+                    Err(why) => return Flow::Unsupported(why),
+                }
+            }
+            let depth = std::mem::replace(&mut self.pool_depth, 0);
             let root = self.root_scope();
-            let flow = self.call_function(def, evaled, &root);
-            return self.sync_at_pool_boundary(def, flow);
+            let flow = self.call_function(def, synced, &root);
+            let flow = self.sync_block_return(def, flow);
+            self.pool_depth = depth;
+            return flow;
         }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
