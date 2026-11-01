@@ -5727,6 +5727,16 @@ local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r
 
 
 
+
+
+
+
+@memory_unsafe
+local fn __lend(base: Handle, len: Int) -> Region =
+  { owner: bytes.new(), base: base, off: 0, len: if len < 0 then 0 else len, writable: false, keep: () => () }
+
+
+
 @memory_unsafe
 @intrinsic("almide_rt_ffi_load")
 local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
@@ -7503,19 +7513,14 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 
 
 
+
+
+
 /// Appends data verbatim; creates the file if missing.
 @ordered
+@intrinsic("almide_rt_fs_append_bytes")
 @category("FS.write")
-effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
-  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
-  else bytes.new()
-  __as_append(fs.write_bytes(path, bytes.__concat(old, data)))
-}
-
-local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
-  ok(x) => ok(x),
-  err(e) => err(["fs.read_bytes", "fs.write_bytes"] |> list.find((call) => string.starts_with(e, call)) |> option.map((call) => "fs.append_bytes" + string.drop(e, string.len(call))) ?? e),
-}
+effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
@@ -18158,8 +18163,11 @@ pub const SRC_LIST_PARTITION: &str = r#"
 
 
 
+
+
+
 fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
-  if i >= n then yi * 1048576 + ni
+  if i >= n then yi
   else {
     let v = prim.load64(sh + 12 + i * 8)
     if f(v) then {
@@ -18175,14 +18183,14 @@ fn list_partition(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
   let no = prim.alloc_list(n)
-  let packed = __lpart_fill(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
-  prim.store32(prim.handle(yes) + 4, packed / 1048576)
-  prim.store32(prim.handle(no) + 4, prim.band(packed, 1048575))
+  let yi = __lpart_fill(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
+  prim.store32(prim.handle(yes) + 4, yi)
+  prim.store32(prim.handle(no) + 4, n - yi)
   (yes, no)
 }
 
 fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
-  if i >= n then yi * 1048576 + ni
+  if i >= n then yi
   else {
     let v = prim.load64(sh + 12 + i * 8)
     if f(v) then {
@@ -18200,9 +18208,9 @@ fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) 
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
   let no = prim.alloc_list(n)
-  let packed = __lpart_fill_rc(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
-  prim.store32(prim.handle(yes) + 4, packed / 1048576)
-  prim.store32(prim.handle(no) + 4, prim.band(packed, 1048575))
+  let yi = __lpart_fill_rc(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
+  prim.store32(prim.handle(yes) + 4, yi)
+  prim.store32(prim.handle(no) + 4, n - yi)
   (yes, no)
 }
 "#;
@@ -31405,6 +31413,10 @@ fn __rx_back(t: Int, ts: Int) -> Int = {
 fn __rx_flags(pat0: Int) -> Int =
   if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 then __rx_flag_scan(pat0 + 2, 0) else 0
 
+
+
+fn __rx_flags_in(pat0: Int, pe: Int) -> Int = if pat0 + 1 < pe then __rx_flags(pat0) else 0
+
 fn __rx_flag_scan(p: Int, acc: Int) -> Int = {
   let b = prim.load8(p)
   if b == 109 then __rx_flag_scan(p + 1, prim.bor(acc, 1))
@@ -31444,7 +31456,7 @@ fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at:
   prim.store64(m + 128, 0)
   prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))
   prim.store64(m + 144, 0)
-  prim.store64(m + 152, if prim.band(__rx_flags(pat0), 2) == 2 then 1 else 0)
+  prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   vm
 }
 
@@ -32238,7 +32250,7 @@ fn __rx_work_size(n: Int, width: Int, ns: Int) -> Int = {
 }
 
 
-fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Int = {
+fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, pe: Int, track: Int) -> Int = {
   let k = n * width
   let l0 = w + 32 * 8
   let l1 = l0 + (16 + 2 * k + k * ns + k) * 8
@@ -32260,7 +32272,7 @@ fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: I
   let _13 = __rx_wset(w, 17, 0)
   let _s = __rx_wset(w, 20, 3 * k + 8)
   let _h = __rx_wset(w, 22, 0)
-  let _i = __rx_wset(w, 24, if prim.band(__rx_flags(pat0), 2) == 2 then 1 else 0)
+  let _i = __rx_wset(w, 24, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   let _14 = __rx_list_init(l0, k, ns)
   __rx_list_init(l1, k, ns)
 }
@@ -32710,7 +32722,7 @@ fn __rx_program(p0: Int, pe: Int) -> List[Int] = {
 
 
 
-fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> List[Int] = {
+fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, pe: Int, track: Int) -> List[Int] = {
   let pa = ph + 12
   if prim.load32(ph + 4) == 0 then prim.alloc_list(0)
   else {
@@ -32721,7 +32733,7 @@ fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Lis
     let ns = r0 + regs
     let work = prim.alloc_list(__rx_work_size(n, width, ns))
     let w = prim.handle(work) + 12
-    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, track)
+    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, pe, track)
     let _1 = __rx_wset(w, 18, r0)
     let _2 = __rx_wset(w, 19, regs)
     work
@@ -33106,7 +33118,7 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let st = __rx_find_start(p0, pe, t0, m)
   if __rx_gave_up(m) then {
     let prog = __rx_program(p0, pe)
-    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
     let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
     __rx_find_start(p0, pe, t0, m) >= 0
   } else st >= 0
@@ -33126,7 +33138,7 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let r = __rx_exec(p0, pe, t0, m)
   if __rx_gave_up(m) then {
     let prog = __rx_program(p0, pe)
-    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
     let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
     let w = __rx_work_at(prim.handle(work))
     if w != 0 then __rx_pike(w, t0, 1, te, 0) >= 0
@@ -33152,14 +33164,14 @@ fn __rx_sub(a: Int, b: Int) -> String = {
 
 fn __rx_vm_find(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> Int = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   __rx_find_start(p0, pe, t0, m)
 }
 
 fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc: List[String] = []
   __rx_find_all_go(p0, pe, t0, m, acc)
@@ -33167,7 +33179,7 @@ fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] 
 
 fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> String = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc = ""
   __rx_replace_go(p0, pe, t0, m, rep, acc)
@@ -33175,7 +33187,7 @@ fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> S
 
 fn __rx_vm_split(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc: List[String] = []
   __rx_split_go(p0, pe, t0, t0, m, acc)
@@ -33428,7 +33440,7 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
 
 fn __rx_vm_captures(p0: Int, pe: Int, t0: Int, te: Int, ncap: Int, bd: Int, m: Int) -> List[String]? = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let w = __rx_work_at(prim.handle(work))
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let ms = if w != 0 then __rx_pike(w, t0, 0, 0 - 1, 0)
@@ -33531,7 +33543,7 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
 
 fn __rx_vm_scan(p0: Int, pe: Int, t0: Int, te: Int, m: Int, ncap: Int, bd: Int, first: Bool) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let head: List[String] = [int.to_string(ncap + 1)]
   __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)
@@ -37865,10 +37877,13 @@ else {
 
 
 
+
+
 fn __rev_walk(src: Int, send: Int, dst_base: Int, out_end: Int) -> Int = if src >= send then 0
 else {
   let b = prim.load8(src)
-  let cl = __cp_len(b)
+  let w = __cp_len(b)
+  let cl = if w > send - src then send - src else w
   let off = out_end - cl
   let dst = dst_base + off
   let _x = __rev_copy_n(src, dst, cl)
@@ -38255,7 +38270,10 @@ fn __empty_replace(s: String, to: String) -> String = {
   let send = sbase + slen
   let th = prim.handle(to)
   let tlen = prim.load32(th + 4)
-  let nchars = __rep_nchars(sbase, send, 0)
+
+
+
+  let nchars = if slen <= 0 then 0 else 1 + __rep_nchars(sbase + 1, send, 0)
   let rlen = (nchars + 1) * tlen + slen
   let buf = prim.alloc_str(rlen)
   let dbase = prim.handle(buf) + 12
@@ -38705,12 +38723,15 @@ else {
 }
 
 
+
+
 fn __to_lower_prev(start: Int, i: Int) -> Int =
   if i > start and prim.load8(i - 1) >= 128 and prim.load8(i - 1) < 192 then __to_lower_prev(
     start,
     i - 1,
   )
-  else i - 1
+  else if i > start then i - 1
+  else start
 
 
 
