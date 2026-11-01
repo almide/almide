@@ -73,6 +73,8 @@ pub(crate) struct AddrState {
     arms: Vec<(Option<ValueId>, bool)>,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
+    /// Payload reads that render as a borrow into their block.
+    borrow_reads: BTreeSet<ValueId>,
 }
 
 impl AddrState {
@@ -335,6 +337,7 @@ impl AddrState {
             pending: BTreeMap::new(),
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
+            borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
         }
     }
 }
@@ -550,6 +553,20 @@ pub(crate) fn render_addr_op(
                 let Some((acc, t)) = enum_read(i, k, false) else {
                     return Err(wall("native: a heap read of an enum slot of several heap kinds"));
                 };
+                // A borrow-only read of a boxed record: a reference into the block.
+                if let NTy::Rec(j) = t {
+                    if st.borrow_reads.contains(d) && crate::render_native_rec::has_default(t) {
+                        let s = crate::render_native_rec::struct_name(j);
+                        let r = acc.replacen("()", "_ref()", 1);
+                        tys.insert(*d, NTy::RecRef(j));
+                        line!(
+                            "let {v}_d: {s}; let mut {v}: &{s} = match {b}.{r} {{ Some(r) => r, None => {{ {v}_d = {s}::default(); &{v}_d }} }};",
+                            v = var(*d),
+                            b = var(ad.base)
+                        );
+                        return Ok(true);
+                    }
+                }
                 tys.insert(*d, t);
                 line!("let mut {}: {} = {}.{acc};", var(*d), crate::render_native_rec::owned_ty(t), var(ad.base));
                 return Ok(true);

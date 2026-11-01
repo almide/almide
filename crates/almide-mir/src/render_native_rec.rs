@@ -308,6 +308,20 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
             set.push_str("            _ => {}\n        }\n    }\n");
             out.push_str(&get);
             out.push_str(&set);
+            // A borrowed read of a boxed record slot (crate::render_native_borrow_read):
+            // `None` past the case's payload, where the owned read gives the default.
+            if let NTy::Rec(_) = kind {
+                let mut get_ref = format!("    fn s{k}_{suf}_ref(&self) -> Option<&{ty}> {{\n        match self {{\n");
+                for (t, fs) in cases {
+                    if fs.get(k - 1) != Some(&kind) {
+                        continue;
+                    }
+                    let binds: Vec<String> = (0..fs.len()).map(|j| if j == k - 1 { "f".into() } else { "_".into() }).collect();
+                    get_ref.push_str(&format!("            Self::C{t}({}) => Some(&**f),\n", binds.join(", ")));
+                }
+                get_ref.push_str("            _ => None,\n        }\n    }\n");
+                out.push_str(&get_ref);
+            }
         }
     }
     // from_slots: a scalar-only constructor built as an i64 slot list.
