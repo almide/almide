@@ -404,10 +404,15 @@ impl Emitter<'_> {
                 }
                 for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
                     // The overwritten field's credit goes with it.
+                    // #4278 B1: the slot's consume (`r`) — the store below
+                    // writes the same slot.
                     if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-                        self.f.instructions().local_get(hold).i32_load(slot_memarg(off));
-                        self.fw_field(ty, None, k);
-                        self.f.instructions().call(dec);
+                        self.slot_release(|em| {
+                            em.f.instructions().local_get(hold).i32_load(slot_memarg(off));
+                            em.fw_field(ty, None, k);
+                            em.f.instructions().call(dec);
+                            Ok(())
+                        })?;
                     }
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;

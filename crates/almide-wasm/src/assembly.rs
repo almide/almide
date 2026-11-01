@@ -9,6 +9,7 @@ use wasm_encoder::{
 
 use crate::func::Pool;
 use crate::work::FnWork;
+use crate::helper_sig::HelperSig;
 use crate::*;
 
 pub(crate) struct AssembleIn<'a> {
@@ -66,46 +67,46 @@ impl HelperLits {
     }
 }
 
-/// The 37 fixed-slot helper bodies, in F_* slot order.
-fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function)> {
+/// The 37 fixed-slot helper bodies in F_* slot order, each with its RC signature.
+fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function, Option<HelperSig>)> {
     vec![
-        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT)),
-        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT)),
-        (F_APPEND_COPY, emit_append_copy()),
-        (F_ITOA, emit_itoa()),
-        (F_APPEND_I64, emit_append_i64()),
-        (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base)),
-        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed(), lit.oom_probe)),
-        (F_INT_TO_STRING, emit_int_to_string()),
-        (F_CONCAT, emit_concat()),
-        (F_STR_EQ, emit_str_eq()),
-        (F_LIST_GET_8, emit_list_get(Scalar::Int)),
-        (F_LIST_GET_4, emit_list_get(Scalar::Str)),
-        (F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
-        (F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
-        (F_LIST_JOIN, emit_list_join()),
-        (F_BLOCK_COPY, emit_block_copy()),
-        (F_BUF_TO_BLOCK, emit_buf_to_block()),
-        (F_STR_LEN_CHARS, emit_str_len_chars()),
-        (F_SCAN_W64, emit_scan_w64()),
-        (F_SCAN_W32, emit_scan_w32()),
-        (F_SCAN_STR, emit_scan_str()),
-        (F_F16_TO_F64, emit_f16_to_f64()),
-        (F_CP_OFF, emit_cp_off()),
-        (F_STR_SLICE, emit_str_slice()),
-        (F_STR_REPEAT, emit_str_repeat(lit.repeat_msg)),
-        (F_STR_CMP, emit_str_cmp()),
-        (F_STR_REPLACE, emit_str_replace()),
-        (F_COPY, emit_copy()),
-        (F_FREE, emit_free(counters, crate::canonical_alloc::armed())),
-        (F_INC, emit_inc()),
-        (F_DEC_FLAT, emit_dec_flat()),
-        (F_COW, emit_cow()),
-        (F_STR_APPEND, emit_str_append()),
-        (F_BYTES_PUSH, emit_bytes_push()),
-        (F_LINE_GROW, emit_line_grow()),
-        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT)),
-        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT)),
+        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT), None),
+        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT), None),
+        (F_APPEND_COPY, emit_append_copy(), None),
+        (F_ITOA, emit_itoa(), None),
+        (F_APPEND_I64, emit_append_i64(), None),
+        (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base), None),
+        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed(), lit.oom_probe), None),
+        (F_INT_TO_STRING, emit_int_to_string(), None),
+        (F_CONCAT, emit_concat(), None),
+        (F_STR_EQ, emit_str_eq(), None),
+        (F_LIST_GET_8, emit_list_get(Scalar::Int), None),
+        (F_LIST_GET_4, emit_list_get(Scalar::Str), None),
+        crate::helper_sig::signed(F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
+        crate::helper_sig::signed(F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
+        (F_LIST_JOIN, emit_list_join(), None),
+        (F_BLOCK_COPY, emit_block_copy(), None),
+        (F_BUF_TO_BLOCK, emit_buf_to_block(), None),
+        (F_STR_LEN_CHARS, emit_str_len_chars(), None),
+        (F_SCAN_W64, emit_scan_w64(), None),
+        (F_SCAN_W32, emit_scan_w32(), None),
+        (F_SCAN_STR, emit_scan_str(), None),
+        (F_F16_TO_F64, emit_f16_to_f64(), None),
+        (F_CP_OFF, emit_cp_off(), None),
+        (F_STR_SLICE, emit_str_slice(), None),
+        (F_STR_REPEAT, emit_str_repeat(lit.repeat_msg), None),
+        (F_STR_CMP, emit_str_cmp(), None),
+        (F_STR_REPLACE, emit_str_replace(), None),
+        (F_COPY, emit_copy(), None),
+        (F_FREE, emit_free(counters, crate::canonical_alloc::armed()), None),
+        (F_INC, emit_inc(), None),
+        (F_DEC_FLAT, emit_dec_flat(), None),
+        crate::helper_sig::signed(F_COW, emit_cow()),
+        crate::helper_sig::signed(F_STR_APPEND, emit_str_append()),
+        crate::helper_sig::signed(F_BYTES_PUSH, emit_bytes_push()),
+        (F_LINE_GROW, emit_line_grow(), None),
+        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT), None),
+        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT), None),
     ]
 }
 
@@ -466,12 +467,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // unconditionally so the grounding gate keeps its subject.
     let static_helpers = static_helpers(&lits, counters);
     debug_assert!(
-        static_helpers.iter().enumerate().all(|(i, (idx, _))| *idx == F_PRINTLN_BLOCK + i as u32),
+        static_helpers.iter().enumerate().all(|(i, (idx, _, _))| *idx == F_PRINTLN_BLOCK + i as u32),
         "static helper list must mirror the F_* slot order exactly"
     );
-    for (idx, f) in &static_helpers {
+    for (idx, f, sig) in &static_helpers {
         if used.contains(idx) {
             code.function(f);
+            if let Some(sig) = sig {
+                crate::witness::rc::helper(*idx, sig);
+            }
         } else {
             let mut stub = Function::new([]);
             stub.instructions().unreachable().end();
@@ -535,7 +539,15 @@ fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global
     }
 }
 
-fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
+/// A per-program helper's body and its declared RC signature (#4278 B1).
+fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> (Function, Option<HelperSig>) {
+    match crate::helper_sig::per_program(h) {
+        Some((f, sig)) => (f, Some(sig)),
+        None => (helper_body_unsigned(h, work, helper_snapshot, hpos), None),
+    }
+}
+
+fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
     match h {
     Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
         work.helper_base.get(),
@@ -623,7 +635,8 @@ pub(crate) fn resolve_extras(
             _ => crate::fan::js_async::helper_result(h).unwrap_or_else(|| runtime_alloc::helper_result(h)),
         };
         let ti = work.itype(params, ret);
-        let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);
+        let (f, sig) = helper_body(h, work, helper_snapshot.as_slice(), hpos);
+        sig.iter().for_each(|s| crate::witness::rc::helper(extra_base + extra_fns.len() as u32, s));
         extra_fns.push((ti, f));
     }
     let mut entry_fn_indices: Vec<u32> = Vec::new();
@@ -731,7 +744,7 @@ fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
 /// `__heap` / the `@export` fns, and the WASI transforms park their
 /// buffers on their own page rather than calling `$alloc`.
 fn used_static_helpers<'a>(
-    helpers: &[(u32, Function)],
+    helpers: &[(u32, Function, Option<HelperSig>)],
     roots: impl Iterator<Item = &'a Function>,
     seeds: &[u32],
 ) -> std::collections::HashSet<u32> {
@@ -758,7 +771,7 @@ fn used_static_helpers<'a>(
         if !scanned.insert(idx) {
             continue;
         }
-        if let Some((_, f)) = helpers.iter().find(|(i, _)| *i == idx) {
+        if let Some((_, f, _)) = helpers.iter().find(|(i, _, _)| *i == idx) {
             for callee in called_function_indices(f) {
                 note(&mut used, &mut pending, callee);
             }

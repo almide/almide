@@ -42,9 +42,13 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
+        // #4278 B1: the receiver's credit — a dying var's, emptied here, or
+        // an owned temporary's — moves into the upserts through `mh`, its one
+        // byte-check event. A shared-path judge releases it there.
         if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         if self.lower_arg(b, None, ArgMode::Borrow)? != got {
             return unsup("map-merge-ty");
@@ -81,8 +85,13 @@ impl Emitter<'_> {
         for (hold, ty, off) in [(kh, k, koff), (vh, v, voff)] {
             self.f.instructions().local_get(cur).i32_const(off as i32).i32_add();
             self.load_ty_slot_at(ty);
-            self.share_handle_top(ty);
+            self.arm_share_handle_top(ty);
             self.f.instructions().local_set(hold);
+        }
+        // #4278 B1: the key's share moves in through `kh`; a present key
+        // gives it back there.
+        if self.elem_is_handle(k) {
+            self.witness_rc_hold_move(kh);
         }
         self.emit_map_set_judged(mh, kh, vh, (k, v), fns)?;
         let mut i = self.f.instructions();

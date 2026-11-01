@@ -556,16 +556,26 @@ pub(crate) fn emit_copy_elems(inc_elems: u32) -> Function {
 
 /// `$cow_elems(block) -> block`: `$cow`; when it copied (the result is a
 /// different block), the copy takes its element credits.
-pub(crate) fn emit_cow_elems(inc_elems: u32) -> Function {
+pub(crate) fn emit_cow_elems(inc_elems: u32) -> (Function, crate::helper_sig::HelperSig) {
+    use crate::helper_sig::{HelperSig, Mode};
     let block = 0u32;
+    // #4278 B1: the block is consumed — handed to `$cow`, whose own
+    // signature consumes it — and `$cow`'s answer (the block itself, or its
+    // copy) is the owned result.
+    let mut sig = HelperSig::new(&[Mode::C]);
+    let out = sig.object(None);
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
+    // `$cow` takes the block and answers the owned result.
+    sig.op(block as usize, 'm');
+    sig.op(out, 'i');
     i.local_get(block).call(F_COW).local_tee(1).local_get(block).i32_ne().if_(BlockType::Empty);
     i.local_get(1).call(inc_elems);
     i.end();
     i.local_get(1);
+    sig.op(out, 'm');
     i.end();
-    f
+    (f, sig)
 }
 
 /// `$drop_fn(block)` (#2010 closures, ruling B): a pool-static Fn block
@@ -639,7 +649,6 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
         Helper::DropList { elem_dec } => emit_drop_list(*elem_dec),
         Helper::IncElems => emit_inc_elems(),
         Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
-        Helper::CowElems { inc_elems } => emit_cow_elems(*inc_elems),
         Helper::DropMapSpine { side_clear } => emit_drop_map_spine(*side_clear),
         Helper::DropEntries { stride, slots, side_clear } => emit_drop_entries(*stride, *slots, *side_clear),
         Helper::IncEntries { stride, slots } => emit_inc_entries(*stride, *slots),

@@ -331,6 +331,11 @@ impl Emitter<'_> {
         i.local_get(hb).call(F_CONCAT);
         i.local_get(hu).call(F_DEC_FLAT);
         i.local_get(hb).call(F_DEC_FLAT);
+        let _ = i;
+        // #4278 B1: both halves are the arm's own temporaries.
+        self.arm_temp_released();
+        self.arm_temp_released();
+        let mut i = self.f.instructions();
         i.end();
         let _ = i;
         for _ in 0..4 {

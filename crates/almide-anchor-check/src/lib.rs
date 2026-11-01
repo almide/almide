@@ -711,14 +711,68 @@ pub fn bundle_witness(bundle: &[u8], property: &str) -> Result<String, String> {
     Ok(String::new())
 }
 
-/// #4277's lines: the rc_inc routine, the release routines, and per
-/// certified frame its position and live RC events.
+/// Every record of `property` in the bundle, as `(function, bytes)`.
+pub fn bundle_records(bundle: &[u8], property: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let mut i = bundle.iter().position(|&b| b == b'\n').ok_or("bundle: no header")? + 1;
+    while i < bundle.len() {
+        let j = i + bundle[i..].iter().position(|&b| b == b'\n').ok_or("bundle: unterminated line")?;
+        let line = std::str::from_utf8(&bundle[i..j]).map_err(|e| e.to_string())?;
+        i = j + 1;
+        if let Some(rest) = line.strip_prefix("witness ") {
+            let mut parts = rest.splitn(3, ' ');
+            let (p, n, f) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            let n: usize = n.parse().map_err(|_| format!("bundle: bad length in `{line}`"))?;
+            let w = bundle.get(i..i + n).ok_or("bundle: witness past the end")?;
+            if p == property {
+                out.push((f.to_string(), String::from_utf8(w.to_vec()).map_err(|e| e.to_string())?));
+            }
+            i += n + 1;
+        }
+    }
+    Ok(out)
+}
+
+/// #4278 B1: per signed runtime helper (function index), whether it consumes
+/// each parameter — read from the bundle's `rc-sig` record the anchor file
+/// names for it (the record the proven checker judges against the helper's
+/// lines). A helper the anchor file signs must carry its own `rc` frame, so
+/// its logged events are held to its shipped body here like any frame's;
+/// a name with no record, or a signed helper with no frame, is refused.
+fn helper_sigs(
+    bundle: &[u8],
+    imports: u32,
+    frames: &[(usize, String)],
+    helpers: &[(usize, String)],
+) -> Result<std::collections::HashMap<u32, Vec<bool>>, String> {
+    let records = bundle_records(bundle, "rc-sig")?;
+    let mut sigs = std::collections::HashMap::new();
+    for (pos, name) in helpers {
+        let (_, rec) = records
+            .iter()
+            .find(|(f, _)| f == name)
+            .ok_or_else(|| format!("rc: helper {name} at position {pos} has no rc-sig record in the bundle"))?;
+        if !frames.iter().any(|(p, _)| p == pos) {
+            return Err(format!("rc: signed helper {name} at position {pos} has no rc line"));
+        }
+        let modes = rec.split('|').next().unwrap_or("");
+        let consume: Vec<bool> = modes.split_whitespace().map(|m| m != "0").collect();
+        sigs.insert(imports + *pos as u32, consume);
+    }
+    Ok(sigs)
+}
+
+/// #4277's lines: the rc_inc routine, the release routines, per certified
+/// frame its position and live RC events, the arm and routine windows, and
+/// (#4278 B1) per signed runtime helper its position and the name of the
+/// bundle's `rc-sig` record that declares it.
 pub type RcLines = (
     Option<u32>,
     std::collections::HashSet<u32>,
     Vec<(usize, String)>,
     Vec<(usize, usize, usize)>,
     Vec<(usize, usize, usize)>,
+    Vec<(usize, String)>,
 );
 
 /// The anchor file read by [`parse_anchors`]: `(alloc, init anchors, bounds
@@ -794,8 +848,18 @@ pub fn parse_anchors_held(text: &str) -> Result<AnchorsHeld, String> {
             };
             let arms = windows(rest.get(i + 2), "rcarms");
             let routines = windows(rest.get(i + 3), "rcroutines");
+            let helpers = rest
+                .get(i + 4)
+                .and_then(|l| l.strip_prefix("rchelpers"))
+                .unwrap_or("")
+                .split_whitespace()
+                .map(|t| {
+                    let (p, n) = t.split_once(':').ok_or_else(|| format!("anchors: bad rchelpers token `{t}`"))?;
+                    Ok((p.parse().map_err(|_| format!("anchors: bad rchelpers position `{t}`"))?, n.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             rest.truncate(i);
-            Some((inc, decs, frames, arms, routines))
+            Some((inc, decs, frames, arms, routines, helpers))
         }
     };
     let mut lines = rest.into_iter();
@@ -865,9 +929,10 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     )?;
     check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
-    if let Some((inc, decs, frames, arms, routines)) = rc_lines {
+    if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs }, &judges, &frames, &[arms, routines], &mut r)?;
+        let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;
+        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs, sigs: &sigs }, &judges, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

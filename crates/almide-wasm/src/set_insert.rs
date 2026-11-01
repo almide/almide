@@ -57,7 +57,7 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
         }
         // present: the set is the result as it came
-        self.emit_release_hold(xh, e);
+        self.arm_release_hold(xh, e, x);
         {
             let mut i = self.f.instructions();
             i.else_();

@@ -465,7 +465,8 @@ impl Emitter<'_> {
         // The source: a block this op holds a credit on — taken from a dying
         // var or an owned temporary, else a share of the live value. The
         // helpers write only what that credit holds alone.
-        if self.owned_reuse_source(v, &[steps, x], Some(SliceTy::Value))?.is_none() {
+        let reused = self.owned_reuse_source(v, &[steps, x], Some(SliceTy::Value))?.is_some();
+        if !reused {
             self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
         }
         let hv = self.hold_i32()?;
@@ -519,6 +520,16 @@ impl Emitter<'_> {
         i.local_get(hr).i32_const(msg as i32).i32_store(slot_memarg(PAY));
         i.local_get(hv).call(dec_value);
         i.local_get(hx).call(dec_value);
+        let _ = i;
+        // #4278 B1: the err path gives both credits back — a reused source's
+        // is the copy-on-write helper's fresh result, the arm's own block.
+        if reused {
+            self.arm_temp_released();
+        } else {
+            self.arm_retained_released(v);
+        }
+        self.arm_retained_released(x);
+        let mut i = self.f.instructions();
         i.else_();
         i.local_get(hr).i32_const(0).i32_store(slot_memarg(TAG));
         i.local_get(hr);

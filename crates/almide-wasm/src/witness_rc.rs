@@ -40,6 +40,10 @@ struct State {
     next_window: u64,
     /// Per pass, each closed window's id and `(serial, from, to)`.
     window_ids: HashMap<usize, HashMap<u64, (u64, usize, usize)>>,
+    /// Per pass, every shipped runtime helper that declares an RC signature
+    /// (#4278 B1, helper_sig.rs): its emitted function index, its `rc-sig`
+    /// record and its body's anchor events.
+    helpers: HashMap<usize, Vec<(u32, String, String)>>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -89,6 +93,22 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
             e.push_str(&format!("#{}", window.unwrap_or(0)));
         }
         e.push(' ');
+    });
+}
+
+/// #4278 B1: an event held to the instruction window `window` names (an
+/// [`site_id`] closed by [`site_window`]) — a container slot's replaced
+/// occupant (`r`), released inside that window before the slot is stored.
+pub(crate) fn event_at(kind: char, local: Option<u32>, window: u64) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| {
+        let e = s.open.entry(serial).or_default();
+        e.push(kind);
+        match local {
+            Some(l) => e.push_str(&l.to_string()),
+            None => e.push('-'),
+        }
+        e.push_str(&format!("#{window} "));
     });
 }
 
@@ -193,6 +213,14 @@ pub(crate) fn routine(id: u64, from: usize, to: usize) {
     });
 }
 
+/// The runtime helper at emitted index `f` ships with the declared
+/// signature `sig` (#4278 B1).
+pub(crate) fn helper(f: u32, sig: &crate::helper_sig::HelperSig) {
+    with(|s| {
+        s.helpers.entry(s.pass).or_default().push((f, sig.record(), sig.events()));
+    });
+}
+
 /// `f` was handed out as a release routine.
 pub(crate) fn release_fn(f: u32) {
     with(|s| {
@@ -202,13 +230,15 @@ pub(crate) fn release_fn(f: u32) {
 
 /// One pass's RC record: its frames `(serial, name, events)`, its release
 /// routines, its arm windows and its compound-routine windows, each
-/// `(serial, from, to)`, and the windows by the id an `m` event names.
+/// `(serial, from, to)`, the windows by the id an `m` event names, and its
+/// signed runtime helpers `(emitted index, rc-sig record, events)`.
 pub type Taken = (
     Vec<(u64, String, String)>,
     BTreeSet<u32>,
     Vec<(u64, usize, usize)>,
     Vec<(u64, usize, usize)>,
     HashMap<u64, (u64, usize, usize)>,
+    Vec<(u32, String, String)>,
 );
 
 /// The shipped pass's RC record.
@@ -227,5 +257,6 @@ pub fn take(pass: usize) -> Taken {
         s.arms.remove(&pass).unwrap_or_default(),
         s.routines.remove(&pass).unwrap_or_default(),
         s.window_ids.remove(&pass).unwrap_or_default(),
+        s.helpers.remove(&pass).unwrap_or_default(),
     )
 }

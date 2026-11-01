@@ -62,26 +62,45 @@ pub(crate) fn emit_map_reserve() -> Function {
 /// the original releases one ref, and the mutation proceeds on the
 /// unique copy — value semantics moved from bind time to mutation
 /// time, unobservably.
-pub(crate) fn emit_cow() -> Function {
+pub(crate) fn emit_cow() -> (Function, crate::helper_sig::HelperSig) {
+    use crate::helper_sig::{HelperSig, Mode};
     // params: 0=block; locals: 1=copy
     let (block, copy) = (0u32, 1u32);
+    // #4278 B1: the judge consumes its argument on every path — handed back
+    // (a static, or a uniquely held block), or released once copied.
+    let mut sig = HelperSig::new(&[Mode::C]);
+    let fresh = sig.object(None);
+    let b = block as usize;
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    sig.branch();
     i.local_get(block).return_();
+    sig.op(b, 'm');
+    sig.exit();
     i.end();
+    sig.arm();
+    sig.join();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_le_u().if_(BlockType::Empty);
+    sig.branch();
     i.local_get(block).return_();
+    sig.op(b, 'm');
+    sig.exit();
     i.end();
+    sig.arm();
+    sig.join();
     i.local_get(block).call(F_BLOCK_COPY).local_set(copy);
+    sig.op(fresh, 'i');
     // The original releases the caller's ref through `$dec_flat` (rc > 1
     // here, so it only decrements): the judge takes its argument on every
     // path — handed back, or released — which is what the RC byte check's
     // every-path rule reads (#4278, #4304). An inline `rc - 1` store was
     // the same arithmetic but no release the check can see.
     i.local_get(block).call(F_DEC_FLAT);
+    sig.rc(b, 'd');
     i.local_get(copy);
+    sig.op(fresh, 'm');
     i.end();
-    f
+    (f, sig)
 }

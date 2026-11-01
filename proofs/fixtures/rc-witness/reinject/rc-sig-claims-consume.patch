@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/runtime_str.rs b/crates/almide-wasm/src/runtime_str.rs
+index 17934bb21..40be13813 100644
+--- a/crates/almide-wasm/src/runtime_str.rs
++++ b/crates/almide-wasm/src/runtime_str.rs
+@@ -171,7 +171,9 @@ pub(crate) fn emit_str_append() -> (Function, crate::helper_sig::HelperSig) {
+     // #4278 B1: the accumulator is consumed on every path (appended in
+     // place and returned, or released once outgrown); the appended string
+     // is only read.
+-    let mut sig = HelperSig::new(&[Mode::C, Mode::B]);
++    // RE-INJECTED (#4278 B1 drill): the appended string declared CONSUMED,
++    // which the body never releases, stores or returns.
++    let mut sig = HelperSig::new(&[Mode::C, Mode::C]);
+     let fresh = sig.object(None);
+     let d = dst as usize;
+     let (p, q, endp, want) = (5u32, 6u32, 7u32, 8u32);

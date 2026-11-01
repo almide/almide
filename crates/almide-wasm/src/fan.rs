@@ -152,6 +152,9 @@ impl Emitter<'_> {
                     }
                     i.block(BlockType::Empty).loop_(BlockType::Empty);
                 }
+                // #4278 B1: `map`'s accumulator is the arm's own block — born
+                // here, it leaves in the ok result or is released with an err.
+                let acc_obj = if herr.is_some() { self.witness.as_mut().map(|w| w.temp_born()) } else { None };
                 self.hof_elem_into(elem, bh, ch, ih, param);
                 self.witness_callback_open(cb, None);
                 if closure.is_some() {
@@ -268,6 +271,14 @@ impl Emitter<'_> {
                     // collected are released with their accumulator.
                     let acc_dec = self.dec_fn_of(SliceTy::List(self.types.intern(b)));
                     self.f.instructions().else_().local_get(hacc).call(acc_dec);
+                    if let (Some(o), Some(w)) = (acc_obj, self.witness.as_mut()) {
+                        w.branch_open();
+                        w.branch_arm();
+                        w.temp_ops(o, "m");
+                        w.branch_arm();
+                        w.temp_ops(o, "d");
+                        w.branch_close();
+                    }
                 }
                 {
                     let mut i = self.f.instructions();

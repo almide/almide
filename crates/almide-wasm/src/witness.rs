@@ -494,6 +494,19 @@ impl WitnessRecorder {
         self.held_ops(local, "m")
     }
 
+    /// [`Self::move_local`] into a routine's hold (#4278 B1): the ownership
+    /// op only — the credit's byte-check event is the hold move the routine
+    /// logs (`h<hold>`), one event per credit.
+    pub fn move_local_into_hold(&mut self, local: u32) -> bool {
+        if !self.bound.contains_key(&local) {
+            return false;
+        }
+        if !self.branches.dead() {
+            self.log.push(Ev::LOp(local, 'm'));
+        }
+        true
+    }
+
     /// A droppable Var argument at a call site: the site's `rc_inc` is
     /// the share (`a`), and the credit moves into the callee (`m`).
     pub fn arg_share_move(&mut self, local: u32) -> bool {

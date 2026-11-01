@@ -25,11 +25,16 @@
 #      proofs/poisoned-certs/<property>/<issue>-<name>.cert, the copy
 #      proofs/structural-wall.sh has all three verdicts reject on every
 #      trust-spine run (REINJECT_UPDATE=1 rewrites the copy).
+# An rc drill with a <name>.sig file is a SIGNATURE drill (#4278 B1): the
+# patch makes a runtime helper declare an RC signature its body does not
+# keep, and the rejection is almide-verify's verdict on that helper's
+# `rc-sig` record (pinned as its REJECT line).
 # An rc drill with a <name>.count file is a COUNT drill instead: re-injected,
 # the frame must still be ACCEPTED with exactly the named class moved by the
-# named delta (e.g. `routine-internal +1`) and every other count unchanged —
+# named delta (e.g. `before an abort +1`) and every other count unchanged —
 # a lost event that degrades to a counted class, never to an accepted frame
-# credit (the hold-move window, #4278's routine-internal debt).
+# credit. (#4278 B1 retired every window class, so no rc drill is a count
+# drill today.)
 # A patch that no longer applies fails this script too: regenerate it
 # against the current emitter rather than letting the drill go stale.
 #
@@ -110,8 +115,20 @@ verdict() {
     fi
     # The ownership witness must still be ACCEPTED (certified or incomplete):
     # the bug is one only the bytes show.
-    "$TARGET/debug/almide-verify" bundle "$wt/a.bundle" > /dev/null 2>&1
-    case $? in 0|3) ;; *) echo "bundle-rejected"; return ;; esac
+    "$TARGET/debug/almide-verify" bundle "$wt/a.bundle" > "$wt/verify.out" 2>&1
+    case $? in
+      0|3) ;;
+      *)
+        # A SIGNATURE drill (<name>.sig, #4278 B1): a runtime helper's
+        # declared RC signature lies about its body. The lie is the helper's
+        # own certificate's to catch: almide-verify REJECTS its `rc-sig`
+        # record (the proven checker and the Rocq kernel judge the same
+        # record on every structural-wall run). Its REJECT line is pinned.
+        if [ -f "$DIR/$1.sig" ] && grep -E '^REJECT +rc-sig ' "$wt/verify.out" > "$wt/witness.w"; then
+          echo 1; return
+        fi
+        echo "bundle-rejected"; return ;;
+    esac
     "$TARGET/debug/almide-anchor-check" "$wt/a.anchors.wasm" "$wt/a.bundle" "$wt/a.anchors" > "$wt/witness.w" 2>&1
     echo "$?"
     return
@@ -159,10 +176,10 @@ for name in "${names[@]}"; do
     read -r cls delta < "$DIR/$name.count"
     got=$(python3 -c '
 import re, sys
-keys = ["rebind", "judge", "arm-internal", "routine-internal", "element", "consumed"]
+keys = ["rebind", "judge", "signed"]
 def counts(p):
     t = open(p).read()
-    m = re.search(r"(\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) arm-internal call\(s\), (\d+) routine-internal call\(s\), (\d+) element call\(s\), (\d+) consumed", t)
+    m = re.search(r"(\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) signed", t)
     return dict(zip(keys, map(int, m.groups()))) if m else None
 a, b = counts(sys.argv[1]), counts(sys.argv[2])
 if a is None or b is None:

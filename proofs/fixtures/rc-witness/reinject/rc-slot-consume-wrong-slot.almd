@@ -1,0 +1,14 @@
+// #4278 B1 drill: the in-place remove's slot consume stores its NULL one
+// slot past the slot it released, while the release's `r` event stays. The
+// RC check holds a slot consume to a later store over the same (base, total
+// offset); a store to a neighbouring slot is not one, so the frame rejects.
+effect fn main() -> Unit = {
+  var m: Map[String, String] = map.new()
+  for i in 0..<6 {
+    m = map.set(m, "k${i}", "v${i}")
+  }
+  for i in 0..<3 {
+    m = map.remove(m, "k${i}")
+  }
+  println("${map.len(m)}")
+}
