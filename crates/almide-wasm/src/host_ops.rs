@@ -177,6 +177,24 @@ pub fn names_socket_op<'a>(ops: impl IntoIterator<Item = &'a i32>) -> bool {
     ops.into_iter().any(|op| SOCKET_FAMILIES.iter().any(|f| f.contains(op)))
 }
 
+/// The http client families: the string and framed client (#1710), the
+/// full-response client (ADR-0023 step 4) and the call handle (§4.3).
+/// WASI preview 1 has no http either, so a build whose op set names one of
+/// them ships as the WASI 0.3 component, over `wasi:http` (the same
+/// routing as [`SOCKET_FAMILIES`]).
+pub const HTTP_CLIENT_FAMILIES: &[RangeInclusive<i32>] = &[HTTP_STRING, HTTP_RESPONSE, HTTP_CALL];
+
+/// Whether `ops` names an op of an [`HTTP_CLIENT_FAMILIES`] family.
+pub fn names_http_client_op<'a>(ops: impl IntoIterator<Item = &'a i32>) -> bool {
+    ops.into_iter().any(|op| HTTP_CLIENT_FAMILIES.iter().any(|f| f.contains(op)))
+}
+
+/// Whether `ops` names an op only the WASI 0.3 command component can
+/// serve on a stock runtime: a socket or an http client op.
+pub fn names_component_op<'a>(ops: impl IntoIterator<Item = &'a i32>) -> bool {
+    ops.into_iter().any(|op| SOCKET_FAMILIES.iter().chain(HTTP_CLIENT_FAMILIES).any(|f| f.contains(op)))
+}
+
 /// The family `op` belongs to, if any.
 pub fn family_of(op: i32) -> Option<&'static str> {
     FAMILIES.iter().find(|(_, r)| r.contains(&op)).map(|(n, _)| *n)

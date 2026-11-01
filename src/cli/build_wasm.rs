@@ -113,8 +113,11 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     }
     // The artifact needs a host that grants the subprocess capability: say
     // so at build time, since a stock runtime will refuse it at load.
-    if shape.sockets {
+    if shape.p3_default && almide_wasm::host_ops::names_socket_op(host_ops) {
         err(&almide_wasm_run::component_availability::sockets_grant_note(output));
+    }
+    if shape.p3_default && almide_wasm::host_ops::names_http_client_op(host_ops) {
+        err(&almide_wasm_run::component_availability::http_grant_note(output));
     }
     if proc_op.is_some() {
         err(&format!(
@@ -182,10 +185,11 @@ fn serves_http(host_ops: &[i32]) -> bool {
 struct WasmPackage {
     component: bool,
     serve_export: bool,
-    /// The op set names a sockets op (tcp, udp, name lookup): WASI preview 1
-    /// has no sockets, so the default build is the WASI 0.3 component
-    /// (`component_availability::needs_sockets`, the net/tcp design step 4).
-    sockets: bool,
+    /// The op set names a socket op (tcp, udp, name lookup) or an http
+    /// client op: WASI preview 1 has neither, so the default build is the
+    /// WASI 0.3 component (`component_availability::needs_component`, the
+    /// net/tcp design step 4 and ADR-0023 §4.3).
+    p3_default: bool,
     direct_p2: bool,
     direct_p3: bool,
 }
@@ -202,16 +206,16 @@ impl WasmPackage {
     /// route is also what an fs program takes below).
     fn decide(host_ops: &[i32], component: bool) -> Self {
         let serve_export = serves_http(host_ops);
-        let sockets = !serve_export && almide_wasm_run::component_availability::needs_sockets(host_ops);
-        let component = component || serve_export || sockets;
-        let direct_p2 = component && !serve_export && (sockets || !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER"));
+        let p3_default = !serve_export && almide_wasm_run::component_availability::needs_component(host_ops);
+        let component = component || serve_export || p3_default;
+        let direct_p2 = component && !serve_export && (p3_default || !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER"));
         // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
         // component — stdio over component-model streams on the async
         // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
         // env opt-in until the fan lowering lands on the same plumbing and
         // the corpus gates cover it.
-        // A sockets program is the p3 component without the switch.
-        let direct_p3 = direct_p2 && (sockets || almide_base::env::flag("ALMIDE_COMPONENT_P3"));
+        // A socket or http client program is the p3 component without the switch.
+        let direct_p3 = direct_p2 && (p3_default || almide_base::env::flag("ALMIDE_COMPONENT_P3"));
         let direct_p2 = direct_p2 && !fs_via_adapter(host_ops, direct_p2, direct_p3);
         if direct_p2
             && let Err(message) = almide_wasm_run::component_availability::check(host_ops, direct_p3)
@@ -219,7 +223,7 @@ impl WasmPackage {
             err(&message);
             std::process::exit(1);
         }
-        WasmPackage { component, serve_export, sockets, direct_p2, direct_p3 }
+        WasmPackage { component, serve_export, p3_default, direct_p2, direct_p3 }
     }
 
     /// Turn the renderer's `almide.*` module into the artifact that ships.
@@ -397,9 +401,14 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::WasmPackage;
-    use almide_wasm::host_ops::{FAMILIES, SOCKET_FAMILIES};
+    use almide_wasm::host_ops::{FAMILIES, HTTP_CLIENT_FAMILIES, SOCKET_FAMILIES};
 
-    /// The packaging `decide` chose before the sockets route (the 0.69 rule),
+    /// The families the default build routes to the WASI 0.3 component.
+    fn routed(op: i32) -> bool {
+        SOCKET_FAMILIES.iter().chain(HTTP_CLIENT_FAMILIES).any(|f| f.contains(&op))
+    }
+
+    /// The packaging `decide` chose before the component route (the 0.69 rule),
     /// for a build without `--component` and with no switch set.
     fn before(host_ops: &[i32]) -> (bool, bool, bool, bool) {
         let serve_export = super::serves_http(host_ops);
@@ -410,42 +419,39 @@ mod tests {
         (p.component, p.serve_export, p.direct_p2, p.direct_p3)
     }
 
-    /// Every op of every family outside `SOCKET_FAMILIES` packages as it did
-    /// before the sockets route, alone and beside an http.serve op: a
-    /// non-net program builds the artifact it built before.
+    /// Every op of every family outside the routed ones packages as it did
+    /// before the component route, alone and beside an http.serve op: a
+    /// program with no socket or http client op builds the artifact it built
+    /// before.
     #[test]
-    fn an_op_set_with_no_socket_op_packages_as_before() {
-        let ops: Vec<i32> = FAMILIES
-            .iter()
-            .flat_map(|(_, r)| r.clone())
-            .filter(|op| !SOCKET_FAMILIES.iter().any(|f| f.contains(op)))
-            .collect();
-        assert!(ops.len() > 50, "the family table shrank to {} non-socket ops", ops.len());
+    fn an_op_set_with_no_socket_or_http_client_op_packages_as_before() {
+        let ops: Vec<i32> = FAMILIES.iter().flat_map(|(_, r)| r.clone()).filter(|op| !routed(*op)).collect();
+        assert!(ops.len() > 50, "the family table shrank to {} unrouted ops", ops.len());
         for op in ops {
             for set in [vec![op], vec![op, 70]] {
                 let p = WasmPackage::decide(&set, false);
-                assert!(!p.sockets, "{set:?} read as a sockets program");
+                assert!(!p.p3_default, "{set:?} read as a component program");
                 assert_eq!(shape(&p), before(&set), "{set:?} changed its packaging");
             }
         }
     }
 
-    /// Every op the p3 shim serves of a sockets family makes the default
-    /// build the WASI 0.3 component; beside http.serve it stays the serve
-    /// export (whose own audit refuses it).
+    /// Every op the p3 shim serves of a socket or http client family makes
+    /// the default build the WASI 0.3 component; beside http.serve it stays
+    /// the serve export (whose own audit refuses it).
     #[test]
-    fn a_socket_op_makes_the_default_build_the_p3_component() {
-        let served: Vec<i32> = SOCKET_FAMILIES
+    fn a_socket_or_http_client_op_makes_the_default_build_the_p3_component() {
+        let served: Vec<i32> = FAMILIES
             .iter()
-            .flat_map(|r| r.clone())
-            .filter(|op| almide_wasm_run::component_availability::serves(*op, true))
+            .flat_map(|(_, r)| r.clone())
+            .filter(|op| routed(*op) && almide_wasm_run::component_availability::serves(*op, true))
             .collect();
-        assert!(served.len() >= 16, "only {} socket ops are served", served.len());
+        assert!(served.len() >= 16 + 14, "only {} routed ops are served", served.len());
         for op in served {
             let p = WasmPackage::decide(&[op, 30], false);
-            assert!(p.sockets && p.component && p.direct_p3 && !p.serve_export, "op {op}: {:?}", shape(&p));
+            assert!(p.p3_default && p.component && p.direct_p3 && !p.serve_export, "op {op}: {:?}", shape(&p));
             let s = WasmPackage::decide(&[op, 70], false);
-            assert!(!s.sockets && s.serve_export && !s.direct_p3, "op {op} beside serve: {:?}", shape(&s));
+            assert!(!s.p3_default && s.serve_export && !s.direct_p3, "op {op} beside serve: {:?}", shape(&s));
         }
     }
 }
