@@ -223,7 +223,9 @@ mod tests {
     /// the empty row a hidden capability.
     #[test]
     fn the_env_os_op_is_capability_free_because_env_os_is_declared_pure() {
-        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib/env.almd")).expect("env.almd");
+        // The embedded copy of stdlib/env.almd (a shipped crate never reads
+        // the checkout, #3361).
+        let src = almide_types::embedded::SRC_ENV;
         let decl = src.lines().find(|l| l.contains(" os(") && l.contains("fn ")).expect("env.os declared");
         assert!(!decl.contains("effect"), "env.os is declared `{decl}`: an effect fn's op must name its capability");
         assert_eq!(caps_of(crate::fs_meta::OP_ENV_OS), Some(&[][..]));
