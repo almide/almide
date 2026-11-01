@@ -117,7 +117,10 @@
 # #4372: two new CI-prose gate rows explicitly map four still-uncompensated
 # limits (future consumers, live integration, unmodeled inputs, coordinated edits).
 # This is the bidirectional inventory count described above, not a relaxed ratchet.
-# uncompensated_blind_ceiling = "41"
+# The stdlib test-coverage gate (2026-11-01) maps two of its own: a call
+# whose result no assertion reads, and a token-half spelling in an unreached
+# helper (41 -> 43).
+# uncompensated_blind_ceiling = "43"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1655,3 +1658,17 @@ evidence = "#4372 (2026-10-31): unchanged helper passes all 12 tests. In isolate
 measures = "whether the committed classification, bootstrap and artifact-reuse positive/negative regression controls all pass"
 varies = "#4372 controls: original helper exit 0; allow-all classifier mutant exit 1; digest-bypass mutant exit 1"
 blind = "defects outside the enumerated control inputs -> UNCOMPENSATED (source review and live integration verification remain necessary); coordinated corruption of implementation and expected test answers -> UNCOMPENSATED (independent review remains necessary)"
+
+[[gate]]
+path = "scripts/check-stdlib-test-coverage.sh"
+# The shell runs one cargo test target and exits with its status; the
+# structured read (the inspection ledger, the coverage ledger, the availability
+# matrix, the compiler's IR) is in Rust, tests/stdlib_test_coverage_test.rs,
+# which CI also runs directly in the test-rust shards.
+reads = "scalar"
+wired_by = "Makefile"
+class = "NEGATIVE_TESTED"
+evidence = "2026-11-01 (branch stdlib-test-coverage, GCE n2-standard-8): green on the committed tree (1306 of 1320 public fns tested on both legs, 14 ledger rows). Five controls, each restored after: deleting spec/stdlib/fs_append_bytes_test.almd went red `+ fs.append_bytes has no test on either leg and no ledger row`; dropping the uuid.v7 row went red `+ uuid.v7 has no test on the wasm leg`; a row reason without an issue went red twice (`names no tracking issue`, and `target-availability.toml declares it unavailable on the embedded leg under #4307; the row must cite #4307`); marking spec/stdlib/regex_callback_escape_test.almd `// wasm:skip` went red on all five regex fns it alone covers on wasm; restored, green"
+measures = "per public stdlib fn, whether a test reachable on the native leg and on the wasm leg calls it (calls read off the compiler's lowered IR, plus the qualified spellings lowering erases), diffed against the equality-pinned rows of proofs/stdlib-test-coverage.txt under the MAX_ROWS ceiling"
+varies = "2026-11-01: the first measurement read 53 fns missing a leg (36 on both); the branch's tests brought it to 14, all wasm-only, each pending a declared host service (#4306, #4307, #4308) or a broken fixture (#4350)"
+blind = "a test that calls a fn but asserts nothing about its result -> UNCOMPENSATED (review: the gate counts calls, not assertions); a qualified spelling in a helper no test reaches is counted by the token half -> UNCOMPENSATED (only the lowering-erased surfaces need it); a call whose native and wasm results differ -> .github/workflows/ci-cross-target.yml"

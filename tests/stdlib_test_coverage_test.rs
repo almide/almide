@@ -35,6 +35,11 @@
 //! leg with no row fails (a function lost its test, or a new one arrived
 //! without one), and a row whose leg is now covered fails as STALE (shrink it in
 //! the same change). `MAX_ROWS` must equal the row count and may only fall.
+//! Every row's `why` names the issue that tracks it (`#NNNN`); a function that
+//! `proofs/target-availability.toml` declares unavailable on the embedded leg
+//! (the leg `almide test --target wasm` runs) must cite that declaration's
+//! `issue`, so a missing wasm test and a declared missing wasm service cannot
+//! drift apart.
 //!
 //! `ALMIDE_STDLIB_COVERAGE_REPORT=<path>` writes the per-function table
 //! (function → native / wasm, with the first program that covers each leg);
@@ -50,10 +55,11 @@ const LEDGER: &str = "proofs/stdlib-test-coverage.txt";
 const INSPECTION: &str = "proofs/stdlib-inspection.toml";
 const FALLBACK: &str = "proofs/wasm-fallback-baseline.txt";
 const PARITY: &str = "proofs/output-parity-baseline.txt";
+const AVAILABILITY: &str = "proofs/target-availability.toml";
 
 /// The ledger's row count. It may only fall: a row is removed when a test
 /// covers the leg it names.
-const MAX_ROWS: usize = 0;
+const MAX_ROWS: usize = 14;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -270,7 +276,7 @@ fn programs(root: &Path) -> Vec<Program> {
 /// fn → leg → the first program (in path order) that calls it on that leg.
 type Coverage = BTreeMap<String, BTreeMap<Leg, String>>;
 
-fn measure(root: &Path, stdlib: &BTreeSet<String>) -> (Coverage, Vec<String>) {
+fn measure(root: &Path, stdlib: &BTreeSet<String>) -> (Coverage, Vec<String>, usize) {
     let progs = programs(root);
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
     let chunk = progs.len().div_ceil(threads).max(1);
@@ -319,7 +325,28 @@ fn measure(root: &Path, stdlib: &BTreeSet<String>) -> (Coverage, Vec<String>) {
             Err(e) => unlowered.push(format!("{}: {}", p.rel, e.lines().next().unwrap_or(""))),
         }
     }
-    (cov, unlowered)
+    (cov, unlowered, progs.len())
+}
+
+/// fn → the `issue` of its `[[unavailable]]` row in the availability matrix,
+/// for the rows whose `legs` include the embedded leg.
+fn embedded_unavailable(root: &Path) -> BTreeMap<String, String> {
+    let text = std::fs::read_to_string(root.join(AVAILABILITY)).expect("availability matrix");
+    let mut out = BTreeMap::new();
+    for block in text.split("\n[[unavailable]]\n").skip(1) {
+        let field = |k: &str| {
+            block.lines().find_map(|l| l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string))
+        };
+        let legs = block.lines().find_map(|l| l.strip_prefix("legs = [")).unwrap_or("");
+        if let (Some(f), true) = (field("fn"), legs.contains("\"embedded\"")) {
+            out.insert(f, field("issue").unwrap_or_default());
+        }
+    }
+    out
+}
+
+fn cites_issue(why: &str) -> bool {
+    why.split('#').skip(1).any(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit()))
 }
 
 fn legs_word(native: bool, wasm: bool) -> Option<&'static str> {
@@ -331,7 +358,7 @@ fn legs_word(native: bool, wasm: bool) -> Option<&'static str> {
     }
 }
 
-fn report(path: &str, stdlib: &BTreeSet<String>, cov: &Coverage, unlowered: &[String]) {
+fn report(path: &str, stdlib: &BTreeSet<String>, cov: &Coverage, unlowered: &[String], programs: usize) {
     let mut per_module: BTreeMap<&str, [usize; 4]> = BTreeMap::new();
     let mut rows = String::new();
     let (mut n, mut w, mut both) = (0, 0, 0);
@@ -359,7 +386,7 @@ fn report(path: &str, stdlib: &BTreeSet<String>, cov: &Coverage, unlowered: &[St
     let total = stdlib.len();
     let mut out = format!(
         "# Stdlib test coverage (native / wasm)\n\nMeasured by tests/stdlib_test_coverage_test.rs from the compiler's IR \
-         (calls reachable from test blocks / main / top lets).\n\n\
+         (calls reachable from test blocks / main / top lets) over {programs} programs.\n\n\
          | | functions |\n|---|---:|\n| public | {total} |\n| native covered | {n} |\n| wasm covered | {w} |\n\
          | both legs | {both} |\n| missing a leg | {} |\n\n## Per module\n\n| module | fns | native | wasm | both |\n|---|---:|---:|---:|---:|\n",
         total - both
@@ -383,11 +410,11 @@ fn every_public_stdlib_fn_is_tested_on_both_legs() {
     let root = root();
     let stdlib = public_functions(&root);
     assert!(stdlib.len() > 1000, "the inspection ledger names {} functions — the list went blind", stdlib.len());
-    let (cov, unlowered) = measure(&root, &stdlib);
+    let (cov, unlowered, programs) = measure(&root, &stdlib);
     assert!(cov.len() > 100, "only {} functions measured as called — the sweep went blind", cov.len());
 
     if let Ok(path) = std::env::var("ALMIDE_STDLIB_COVERAGE_REPORT") {
-        report(&path, &stdlib, &cov, &unlowered);
+        report(&path, &stdlib, &cov, &unlowered, programs);
     }
 
     let missing: BTreeMap<&str, &str> = stdlib
@@ -430,6 +457,19 @@ fn every_public_stdlib_fn_is_tested_on_both_legs() {
             _ => {}
         }
     }
+    let unavailable = embedded_unavailable(&root);
+    for (f, (_, why)) in &listed {
+        if !cites_issue(why) {
+            problems.push(format!("  ? {f}: the row's reason names no tracking issue (`#NNNN`): {why:?}"));
+        }
+        if let Some(issue) = unavailable.get(f) {
+            if !issue.is_empty() && !why.contains(issue.as_str()) {
+                problems.push(format!(
+                    "  ? {f}: {AVAILABILITY} declares it unavailable on the embedded leg under {issue}; the row must cite {issue}"
+                ));
+            }
+        }
+    }
     for f in listed.keys() {
         if !missing.contains_key(f.as_str()) {
             if stdlib.contains(f) {
@@ -442,8 +482,8 @@ fn every_public_stdlib_fn_is_tested_on_both_legs() {
     assert!(
         problems.is_empty(),
         "stdlib test coverage ({LEDGER}) out of date:\n{}\n\nA public stdlib fn needs a test that calls it on BOTH \
-         legs: a spec/stdlib/*_test.almd (run by `almide test spec/` on native and `--target wasm`), or a fixture \
-         in proofs/output-parity-baseline.txt.",
+         legs: a spec/stdlib/*_test.almd (run by `almide test spec/` on native and `--target wasm`), or a \
+         spec/wasm_cross / spec/embedded_cross fixture (byte-compared on both legs).",
         problems.join("\n")
     );
     assert!(
