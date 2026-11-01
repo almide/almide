@@ -167,6 +167,22 @@ pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
     })
 }
 
+thread_local! {
+    static DECLARED_MAPS: std::cell::RefCell<std::collections::BTreeMap<crate::ValueId, u16>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The generated map type each value of the function being rendered is
+/// declared as (its signature's, its callees', through joins and rebinds).
+pub(crate) fn set_declared(m: std::collections::BTreeMap<crate::ValueId, u16>) {
+    DECLARED_MAPS.with(|d| *d.borrow_mut() = m);
+}
+
+/// The declared generated map type of `v` (`map.new()`'s result).
+pub(crate) fn declared_map(v: crate::ValueId) -> Option<u16> {
+    DECLARED_MAPS.with(|d| d.borrow().get(&v).copied())
+}
+
 /// The generated `AlmideMap<key, value>` alias, appended on first use.
 pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
     RECS.with(|r| {

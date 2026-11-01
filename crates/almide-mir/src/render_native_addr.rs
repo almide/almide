@@ -142,7 +142,7 @@ impl AddrState {
         };
         let own = sig_of(func.name.as_str()).unwrap_or_default();
         let declared = carrier::carrier_values(func, &own, &sig_of);
-        crate::native_moves::set_declared(
+        crate::render_native_rec::set_declared(
             declared.iter().filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some()).map(|(v, i)| (*v, *i)).collect(),
         );
         for (v, i) in declared {

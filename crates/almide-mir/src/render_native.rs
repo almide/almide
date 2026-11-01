@@ -412,10 +412,9 @@ fn render_fn(
         line!("let __almd_probe_guard = __AlmdProbeGuard;");
         line!("let _ = &__almd_probe_guard;");
     }
-    let dying = crate::native_moves::dying_at(func);
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
-        crate::native_moves::set_dying(dying.get(&i).cloned().unwrap_or_default());
+        crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
         if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)? {
             continue;
         }

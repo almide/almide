@@ -44,7 +44,6 @@ pub mod prim_ops;
 pub mod purity;
 pub mod render_native;
 mod lambda_sigs;
-mod native_moves;
 mod fan_native;
 mod render_native_addr;
 mod render_native_closure;

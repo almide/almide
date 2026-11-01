@@ -145,9 +145,6 @@ pub(crate) fn render_set_local(
         NTy::Res => format!("{}.clone()", var(*src)),
         NTy::VecStr => format!("{}.clone()", var(*src)),
         NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
-        // An owned generated value not read again (`m = map.set(m, k, v)`'s
-        // new map) moves into the local: v0's move, not an O(n) copy.
-        NTy::Rec(_) if crate::native_moves::dies_here(*src) => format!("std::mem::take(&mut {})", var(*src)),
         NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(*src)),
         NTy::Opt => var(*src),
         NTy::ResStr => format!("{}.clone()", var(*src)),
@@ -453,8 +450,8 @@ fn render_declared_floor_call(
     let OpSink { tys, out, indent, used_shims } = s;
     let rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
     let dying: Vec<bool> =
-        args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::native_moves::dies_here(*v))).collect();
-    let dst_map = dst.and_then(crate::native_moves::declared_map);
+        args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
+    let dst_map = dst.and_then(crate::render_native_rec::declared_map);
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
     used_shims.push(crate::native_floor::FLOOR_HEADER);
     used_shims.extend(floor.items.iter().copied());
