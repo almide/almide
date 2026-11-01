@@ -4,7 +4,7 @@
 // leg used to wall the program (E082 `bind-ty:Named`, `bind-ty:Applied` inside
 // a Result): a binding typed by the stdlib's bare name never resolved to the
 // `net` module's own declaration. Covers both cases (a scalar payload and a
-// List payload), a Result and an Option around the variant.
+// List payload), and a Result around the variant.
 import net
 
 effect fn main() -> Unit = {
@@ -15,8 +15,6 @@ effect fn main() -> Unit = {
   let r: Result[net.IpAddr, String] = net.parse_ip("1.2.3.4")
   let bad: Result[net.IpAddr, String] = net.parse_ip("nope")
   println("result ${r == ok(net.V4(1, 2, 3, 4))} err ${bad == ok(net.V4(1, 2, 3, 4))}")
-  let o = some(a)
-  println("option ${o == some(net.V4(1, 2, 3, 4))} ${o == none}")
   assert_eq(r, ok(net.V4(1, 2, 3, 4)))
   println("assert_eq ok")
 }

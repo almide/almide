@@ -51,6 +51,17 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
     types
         .by_name
         .get(name)
+        // A stdlib type spelled with its module (`net.IpAddr`, the type a
+        // `net.V4(..)` constructor carries) is that module's declaration,
+        // which the table holds under its bare name (#4383): `==` and
+        // `assert_eq` then reach the derived structural equality a user
+        // variant gets, instead of walling `bind-ty:Named`.
+        .or_else(|| {
+            let (module, bare) = name.rsplit_once('.')?;
+            (almide_types::stdlib_info::stdlib_owned_type_owner(bare) == Some(module))
+                .then(|| types.by_name.get(bare))
+                .flatten()
+        })
         .map(|&i| SliceTy::Named(i))
         .or_else(|| (name == "Value").then_some(SliceTy::Value))
         // The ADR-0001 clock types are an i64 of nanoseconds; an annotated
@@ -75,12 +86,8 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
         // declaration of that name lives under `self.X` / `m.X` and must
         // never be reached from the bare spelling by suffix.
         .or_else(|| {
-            // ...and it names exactly that module's declaration (#4383): a
-            // `net.IpAddr` binding resolves to `net`'s own decl, so `==`
-            // and `assert_eq` reach the same derived structural equality a
-            // user variant gets.
-            if let Some(owner) = almide_types::stdlib_info::stdlib_owned_type_owner(name) {
-                return types.by_name.get(&format!("{owner}.{name}")).map(|&i| SliceTy::Named(i));
+            if almide_types::stdlib_info::stdlib_owned_type_owner(name).is_some() {
+                return None;
             }
             named_suffix_unique(types, name)
         })
