@@ -49,7 +49,11 @@ spec/wasm_cross/exit_code_passthrough.almd
 spec/wasm_cross/exit_code_upper_bound.almd
 spec/wasm_cross/expr_stmt_comment.almd
 spec/wasm_cross/fan_any_allfail.almd
+spec/wasm_cross/fan_block_err_list_order.almd
 spec/wasm_cross/fan_race_mapper.almd
+spec/wasm_cross/fan_record_err_source_order.almd
+spec/wasm_cross/fan_sibling_trap.almd
+spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 spec/wasm_cross/flight_pid_control.almd
 spec/wasm_cross/float_clamp_invalid.almd
 spec/wasm_cross/float_concrete.almd
