@@ -111,7 +111,7 @@ fn native_sig_subset_check(
             || crate::lower::is_value_ty(t)
     };
     let sig_ok = |t: &Ty| {
-        matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+        crate::render_native_rec::is_lane_scalar(t) || matches!(t, Ty::String)
             || is_scalar_option(t)
             || is_native_result(t)
             || is_string_result_ty(t)
@@ -225,7 +225,7 @@ fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::Ty;
     matches!(t, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2
-            && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float | Ty::Unit)
+            && (crate::render_native_rec::is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit))
             && matches!(a[1], Ty::String))
 }
 
@@ -298,7 +298,7 @@ fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
     matches!(t, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float))
+        if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]))
 }
 
 /// #4006 family B: rewrite every scalar-Option window onto the native
@@ -396,27 +396,32 @@ fn native_sig_kind(
     use crate::render_native::NativeSigKind;
 
     match t {
-        Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
-        Ty::Float => Some(NativeSigKind::F64),
+        // The 64-bit floats are real `f64`s; every other lane scalar (the
+        // sized integers, a Float32's f32 bits) rides the i64 lane as is.
+        t if crate::render_native_rec::is_f64_scalar(t) => Some(NativeSigKind::F64),
+        // A narrow integer: its declared width (the one the lowering re-wraps
+        // to) is its call-boundary type (#4006).
+        t if crate::lower::narrow_int_width(t).is_some() => {
+            let (bits, signed) = crate::lower::narrow_int_width(t)?;
+            Some(NativeSigKind::Narrow { bits: bits as u8, signed })
+        }
+        t if crate::render_native_rec::is_lane_scalar(t) => Some(NativeSigKind::I64),
         Ty::String => Some(NativeSigKind::Str),
         // T1-3: the native Result carrier (return position only — the
         // param gate rejects Result params before this table is read).
         t if is_native_result_ty(t) => Some(NativeSigKind::Res),
         t if is_string_result_ty(t) => Some(NativeSigKind::ResStr),
         Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
+            if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]) =>
         {
             Some(NativeSigKind::ListI64)
         }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => {
             Some(NativeSigKind::ListStr)
         }
-        // #4006: the other all-scalar slot blocks — a List[Float] (each slot
-        // the f64 bits) and an all-scalar tuple — ride the same `Vec<i64>`.
-        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Float) => {
-            Some(NativeSigKind::ListI64)
-        }
-        Ty::Tuple(es) if !es.is_empty() && es.iter().all(|e| matches!(e, Ty::Int | Ty::Bool | Ty::Float)) => {
+        // #4006: an all-scalar tuple rides the same `Vec<i64>` (a List[Float]
+        // already did above: each slot holds the f64 bits).
+        Ty::Tuple(es) if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar) => {
             Some(NativeSigKind::ListI64)
         }
         // #4006 family B: an Option of a scalar rides the `Option<i64>` carrier.
@@ -511,6 +516,25 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
             sigs.insert(func.name.as_str().to_string(), (ps, r));
         }
     }
+    // The narrow-integer call ABI (#4006) is for an all-scalar signature
+    // called by name. A function value shares the closure tables' i64 lane,
+    // and a signature with a heap kind keeps its existing spelling, so both
+    // take the lane kinds.
+    let fn_values: std::collections::BTreeSet<&str> = functions
+        .iter()
+        .flat_map(|f| f.ops.iter())
+        .filter_map(|op| match op {
+            crate::Op::FuncRef { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    for (name, (ps, r)) in sigs.iter_mut() {
+        let scalar = |k: &NativeSigKind| matches!(k, NativeSigKind::I64 | NativeSigKind::F64 | NativeSigKind::Narrow { .. });
+        if fn_values.contains(name.as_str()) || !ps.iter().chain(r.iter()).all(scalar) {
+            ps.iter_mut().for_each(|k| *k = k.lane());
+            *r = r.map(NativeSigKind::lane);
+        }
+    }
     // LIFTED lambdas exist only as MirFunctions (no IR sig): param 0 is the env
     // block (`&[i64]`), the rest are the lambda's own params — SCALAR reprs only
     // in this slab (a heap-param lambda walls the program: all-or-nothing, and
@@ -536,8 +560,8 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
                 };
                 if let (Some(ps), Some(ret)) = (ps, ret) {
                     let mut all = vec![crate::render_native::NativeSigKind::ListI64];
-                    all.extend(ps);
-                    sigs.insert(f.name.clone(), (all, ret));
+                    all.extend(ps.into_iter().map(NativeSigKind::lane));
+                    sigs.insert(f.name.clone(), (all, ret.map(NativeSigKind::lane)));
                     continue;
                 }
             }
@@ -688,6 +712,10 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     rewrite_native_result_str_windows(&ir, &mut functions);
     rewrite_native_option_windows(&ir, &mut functions);
     crate::native_slot_rewrite::rewrite_slot_ops(&mut functions, crate::lower::mutable_global_slot_count());
+    // Narrow-width arithmetic computes in its declared integer type (#4006).
+    for f in functions.iter_mut() {
+        crate::native_narrow_rewrite::rewrite_narrow_ops(f)?;
+    }
     if functions.iter().any(|f| f.name == SLOT_INIT) {
         if let Some(main) = functions.iter_mut().find(|f| f.name == "main") {
             main.ops.insert(

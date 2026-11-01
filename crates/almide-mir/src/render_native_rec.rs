@@ -40,13 +40,28 @@ pub(crate) struct RecDecl {
     pub result_of: Option<(NTy, NTy)>,
 }
 
+/// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
+/// decision `lower::repr_of` makes once): Int, Bool, the sized integers, and
+/// the floats as their bits. A `RawPtr` is an address, not a value, so it has
+/// no native spelling and stays out.
+pub(crate) fn is_lane_scalar(t: &almide_lang::types::Ty) -> bool {
+    !matches!(t, almide_lang::types::Ty::RawPtr)
+        && matches!(crate::lower::repr_of(t), Ok(crate::Repr::Scalar { .. }))
+}
+
+/// A lane scalar the native render holds as a real `f64` (the 64-bit floats;
+/// a `Float32` keeps its f32 bits in the lane, like every other lane value).
+pub(crate) fn is_f64_scalar(t: &almide_lang::types::Ty) -> bool {
+    matches!(t, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float64)
+}
+
 /// The `Option`/`Result` types a generated carrier stands for: everything the
 /// scalar carriers (`Option<i64>`, `Result<i64, String>`, `Result<String,
 /// String>`) do not cover, read off the declared type.
 fn is_heap_carrier(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::Unit);
+    let scalar = |t: &Ty| is_lane_scalar(t) || matches!(t, Ty::Unit);
     match t {
         Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => !scalar(&a[0]) && !matches!(a[0], Ty::Unit),
         Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
@@ -498,7 +513,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             fields.iter().for_each(|(_, e)| collect_tuples(e, out));
         }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-            if !matches!(a[0], Ty::Int | Ty::Bool | Ty::String) && !out.contains(t) {
+            if !(is_lane_scalar(&a[0]) || matches!(a[0], Ty::String)) && !out.contains(t) {
                 out.push(t.clone());
             }
             a.iter().for_each(|e| collect_tuples(e, out));
@@ -649,9 +664,11 @@ pub(crate) fn derive_records(
     // Some(Ok(kind)) | Some(Err(name of a generated type)) | None (no spelling).
     let kind = |t: &Ty, set: &BTreeSet<String>| -> Option<Result<NTy, String>> {
         Some(Ok(match t {
-            Ty::Int | Ty::Bool | Ty::Float => NTy::I64,
+            t if is_lane_scalar(t) => NTy::I64,
             Ty::String => NTy::Str,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) => NTy::Vec,
+            // A list of lane scalars, an all-scalar tuple: one i64 slot block.
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_lane_scalar(&a[0]) => NTy::Vec,
+            Ty::Tuple(es) if es.iter().all(is_lane_scalar) => NTy::Vec,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => NTy::VecStr,
             Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
