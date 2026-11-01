@@ -677,7 +677,9 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     }
     // #4006: the registry bodies the program calls, linked as certified MIR.
     let linked = link_native_self_host(&mut functions, &ir)?;
-    if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
+    // A body only a parallel fan.map twin reaches never runs (crate::fan_map_twin).
+    let twin_only = crate::fan_map_twin::twin_only(functions.iter());
+    if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f) && !twin_only.contains(&f.name)) {
         return Err(LowerError::Unsupported(format!(
             "native: fn `{}` passes a heap value to its own tail call — no loop conversion on this render (#3550)",
             f.name
