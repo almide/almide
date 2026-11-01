@@ -38,6 +38,9 @@ pub(crate) struct RecDecl {
     /// A `Result` outside the `NTy::Res` / `NTy::ResStr` carriers:
     /// `Result<ok, err>`. It has no `Default`, so no struct or enum holds one.
     pub result_of: Option<(NTy, NTy)>,
+    /// A `Map[K, V]`: v0's runtime `AlmideMap<key, value>`, so the declared
+    /// floor's map bodies take it as is.
+    pub map_of: Option<(NTy, NTy)>,
 }
 
 /// The `Option`/`Result` types a generated carrier stands for: everything the
@@ -54,6 +57,11 @@ fn is_heap_carrier(t: &almide_lang::types::Ty) -> bool {
         }
         _ => false,
     }
+}
+
+/// The (key, value) kinds of a generated map type.
+pub(crate) fn map_kinds(i: u16) -> Option<(NTy, NTy)> {
+    RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.map_of))
 }
 
 /// The payload kind of a generated `Option` carrier.
@@ -95,7 +103,7 @@ pub(crate) fn bytes_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None });
+        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -111,7 +119,7 @@ pub(crate) fn value_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == VALUE_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None });
+        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -138,6 +146,52 @@ pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: Some((ok, err)),
+            map_of: None,
+        });
+        (r.len() - 1) as u16
+    })
+}
+
+/// The generated tuple struct of `fields`, appended on first use (a tuple
+/// no signature spells, built in a body: a map literal's pairs).
+pub(crate) fn tuple_type_of(fields: Vec<NTy>) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.cases.is_none() && d.list_of.is_none() && d.alias.is_none() && d.option_of.is_none() && d.result_of.is_none() && d.map_of.is_none() && d.fields == fields) {
+            return i as u16;
+        }
+        r.push(RecDecl {
+            name: format!("Tuple<{fields:?}>"),
+            fields,
+            cases: None,
+            list_of: None,
+            alias: None,
+            default_tag: None,
+            option_of: None,
+            result_of: None,
+            map_of: None,
+        });
+        (r.len() - 1) as u16
+    })
+}
+
+/// The generated `AlmideMap<key, value>` alias, appended on first use.
+pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.map_of == Some((key, value))) {
+            return i as u16;
+        }
+        r.push(RecDecl {
+            name: format!("Map<{key:?}, {value:?}>"),
+            fields: Vec::new(),
+            cases: None,
+            list_of: None,
+            alias: None,
+            default_tag: None,
+            option_of: None,
+            result_of: None,
+            map_of: Some((key, value)),
         });
         (r.len() - 1) as u16
     })
@@ -159,6 +213,7 @@ pub(crate) fn option_type_of(payload: NTy) -> u16 {
             default_tag: None,
             option_of: Some(payload),
             result_of: None,
+            map_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -181,6 +236,7 @@ pub(crate) fn list_type_of(e: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: None,
+            map_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -402,6 +458,10 @@ pub(crate) fn struct_defs() -> String {
                 out.push_str(&format!("type {} = {a};\n\n", struct_name(i as u16)));
                 continue;
             }
+            if let Some((k, v)) = d.map_of {
+                out.push_str(&format!("/// `{}`\ntype {} = AlmideMap<{}, {}>;\n\n", d.name, struct_name(i as u16), owned_ty(k), owned_ty(v)));
+                continue;
+            }
             if let Some(p) = d.option_of {
                 out.push_str(&format!("/// `{}`\ntype {} = Option<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(p)));
                 continue;
@@ -447,6 +507,14 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
             if !matches!(a[0], Ty::Int | Ty::Bool | Ty::String) && !out.contains(t) {
+                out.push(t.clone());
+            }
+            a.iter().for_each(|e| collect_tuples(e, out));
+        }
+        // A map of non-Float keys: v0's runtime `AlmideMap` (a Float key would
+        // compare by its i64 bits, not as a float).
+        Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 && !matches!(a[0], Ty::Float) => {
+            if !out.contains(t) {
                 out.push(t.clone());
             }
             a.iter().for_each(|e| collect_tuples(e, out));
@@ -522,6 +590,7 @@ pub(crate) fn derive_records(
     // Generated `Option<T>` / `Result<T, E>` carriers (by table key).
     let mut options: BTreeSet<String> = BTreeSet::new();
     let mut results: BTreeSet<String> = BTreeSet::new();
+    let mut maps: BTreeSet<String> = BTreeSet::new();
     let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
     let uses_value = tuples.iter().any(crate::lower::is_value_ty);
     // A generic instance's bound fields may name further instances: close over them.
@@ -538,6 +607,12 @@ pub(crate) fn derive_records(
         if let Ty::Applied(TypeConstructorId::List, a) = t {
             decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
             lists.insert(tuple_key(t));
+        }
+        if let Ty::Applied(TypeConstructorId::Map, a) = t {
+            if a.len() == 2 && !matches!(a[0], Ty::Float) {
+                decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
+                maps.insert(tuple_key(t));
+            }
         }
         if let Ty::Applied(c, a) = t {
             if is_heap_carrier(t) {
@@ -582,7 +657,7 @@ pub(crate) fn derive_records(
     }
     // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
     // (A generated carrier is never a slot block, whatever its payloads.)
-    let scalar = |n: &str| !options.contains(n) && !results.contains(n) && decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
+    let scalar = |n: &str| !options.contains(n) && !results.contains(n) && !maps.contains(n) && decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
     let mut set: BTreeSet<String> = decls.keys().filter(|n| !scalar(n)).cloned().collect();
     SCALAR_INSTANCES.with(|si| {
         *si.borrow_mut() = decls.keys().filter(|n| n.starts_with("Named(") && scalar(n)).cloned().collect();
@@ -603,7 +678,7 @@ pub(crate) fn derive_records(
             Ty::Named(_, args) if !args.is_empty() && scalar(&tuple_key(t)) => NTy::Vec,
             // An Option field or element holds its carrier; a Result never
             // does (it has no `Default` to start a struct or a list from).
-            Ty::Applied(TypeConstructorId::Option, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
+            Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Map, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             _ => return None,
         }))
     };
@@ -611,7 +686,7 @@ pub(crate) fn derive_records(
     // A struct or enum starts from `Default`, which the runtime `Value` lacks:
     // only a list, Option or Result holds one.
     let defaults_ok = |n: &String| {
-        lists.contains(n) || options.contains(n) || results.contains(n) || fields_of(n).iter().all(|t| !crate::lower::is_value_ty(t))
+        lists.contains(n) || options.contains(n) || results.contains(n) || maps.contains(n) || fields_of(n).iter().all(|t| !crate::lower::is_value_ty(t))
     };
     loop {
         let before = set.len();
@@ -624,7 +699,7 @@ pub(crate) fn derive_records(
     let edges: BTreeMap<String, Vec<String>> = set
         .iter()
         .map(|n| {
-            let e = if decls[n].0 || lists.contains(n) { Vec::new() } else { fields_of(n).iter().filter_map(|t| kind(t, &set)?.err()).collect() };
+            let e = if decls[n].0 || lists.contains(n) || maps.contains(n) { Vec::new() } else { fields_of(n).iter().filter_map(|t| kind(t, &set)?.err()).collect() };
             (n.clone(), e)
         })
         .collect();
@@ -649,7 +724,7 @@ pub(crate) fn derive_records(
     let mut rank: BTreeMap<String, usize> = BTreeMap::new();
     let case_ok = |fs: &Vec<Ty>, below: usize, rank: &BTreeMap<String, usize>, set: &BTreeSet<String>| {
         fs.iter().all(|t| match kind(t, set) {
-            Some(Err(m)) => lists.contains(&m) || options.contains(&m) || m == BYTES_KEY || m == VALUE_KEY || rank.get(&m).is_some_and(|r| *r < below),
+            Some(Err(m)) => lists.contains(&m) || options.contains(&m) || maps.contains(&m) || m == BYTES_KEY || m == VALUE_KEY || rank.get(&m).is_some_and(|r| *r < below),
             _ => true,
         })
     };
@@ -660,6 +735,7 @@ pub(crate) fn derive_records(
                 continue;
             }
             let fin = lists.contains(n)
+                || maps.contains(n)
                 || options.contains(n)
                 || results.contains(n)
                 || if decls[n].0 {
@@ -700,22 +776,26 @@ pub(crate) fn derive_records(
         .iter()
         .map(|n| {
             if n == VALUE_KEY {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None };
             }
             if n == BYTES_KEY {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None };
             }
             let (is_enum, cases) = &decls[n];
+            if maps.contains(n) {
+                let (k, v) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)) };
+            }
             if options.contains(n) {
                 let p = spell(&cases[0].1[0]);
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None };
             }
             if results.contains(n) {
                 let (o, e) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)) };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None };
             }
             if lists.contains(n) {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None };
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None };
             }
             if *is_enum {
                 let r = rank[n];
@@ -729,9 +809,10 @@ pub(crate) fn derive_records(
                     alias: None,
                     option_of: None,
                     result_of: None,
+                    map_of: None,
                 }
             } else {
-                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None }
+                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None }
             }
         })
         .collect()
