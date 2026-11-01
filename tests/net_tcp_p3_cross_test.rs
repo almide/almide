@@ -89,3 +89,81 @@ fn tcp_fixtures_run_alike_on_native_and_the_p3_component() {
     }
     assert!(problems.is_empty(), "{} fixture(s) diverge:\n\n{}", problems.len(), problems.join("\n\n"));
 }
+
+const UNGRANTED: &str = r#"import net
+
+effect fn main() -> Unit = {
+  match net.tcp_listen("127.0.0.1", 0) {
+    ok(_) => println("listening"),
+    err(e) => println(e),
+  }
+  match net.tcp_connect("127.0.0.1", 8080) {
+    ok(_) => println("connected"),
+    err(e) => println(e),
+  }
+}
+"#;
+
+/// C-378: a stock run without the network grant loads and runs, and each
+/// bind or connect it attempts fails as access-denied.
+#[test]
+fn an_ungranted_component_reads_the_permission_text() {
+    if !wasmtime_runs_p3() {
+        return;
+    }
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("ungranted.almd");
+    std::fs::write(&src, UNGRANTED).expect("write");
+    let wasm = scratch.path().join("ungranted.wasm");
+    let built = Command::new(almide_bin())
+        .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "--component", "-o", wasm.to_str().expect("utf8")])
+        .env("ALMIDE_COMPONENT_P3", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("almide build");
+    assert!(built.status.success(), "the p3 build failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    let mut run = Command::new("wasmtime");
+    run.arg("run").arg(&wasm);
+    let seen = observe(run, "wasmtime run");
+    assert_eq!(
+        (seen.0.as_str(), seen.1),
+        ("tcp_listen(127.0.0.1:0): permission denied\ntcp_connect(127.0.0.1:8080): permission denied\n", Some(0)),
+        "{seen:?}"
+    );
+}
+
+/// An op-65 program runs on `almide run --target wasm` as its p3 component
+/// (ADR-0023 step 7); one that also speaks tcp runs there with the network
+/// the core-module route serves, and answers as native.
+const MIXED: &str = r#"import http
+import io
+import net
+
+effect fn main() -> Unit = {
+  match http.get_response("http://127.0.0.1:1/") {
+    ok(_) => println("http ok"),
+    err(_) => println("http err"),
+  }
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let c = net.tcp_connect("127.0.0.1", net.tcp_local_port(l)!)!
+  let s = net.tcp_accept(l)!
+  io.write(c, bytes.from_string("hi"))!
+  println("got ${bytes.to_string(io.read_exact(s, 2)!) ?? "?"}")
+  println("done")
+}
+"#;
+
+#[test]
+fn an_op_65_program_that_speaks_tcp_runs_on_the_embedded_lane_as_native_does() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("mixed.almd");
+    std::fs::write(&src, MIXED).expect("write");
+    let mut native = Command::new(almide_bin());
+    native.arg("run").arg(&src);
+    let native = observe(native, "almide run");
+    assert_eq!(native.0, "http err\ngot hi\ndone\n", "native: {native:?}");
+    let mut wasm = Command::new(almide_bin());
+    wasm.arg("run").arg(&src).args(["--target", "wasm"]);
+    let wasm = observe(wasm, "almide run --target wasm");
+    assert_eq!((&wasm.0, wasm.1), (&native.0, native.1), "the embedded lane diverged:\n{}", wasm.2);
+}
