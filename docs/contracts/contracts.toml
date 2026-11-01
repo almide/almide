@@ -4391,6 +4391,7 @@ evidence  = [
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_spec_fixtures_read_the_same_on_native_embedded_and_p3" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_server_classes_read_the_same_on_native_embedded_and_p3" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "a_non_utf8_body_reads_as_the_lossy_decode_on_native_embedded_and_p3" },
+  { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "a_non_utf8_header_value_reads_as_the_lossy_decode_on_native_embedded_and_p3" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "a_url_userinfo_is_sent_as_basic_credentials_on_native_embedded_and_p3" },
 ]
 [[contract]]
