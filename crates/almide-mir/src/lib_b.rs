@@ -120,6 +120,14 @@ pub enum PrimKind {
     NativeSlotLoad { slot: u32 },
     /// `slot = args[0]`.
     NativeSlotStore { slot: u32 },
+    /// ── NATIVE-ONLY narrow integer arithmetic (#4006) ────────────────────
+    /// Inserted exclusively by `native_narrow_rewrite`: a ring op (`Add`,
+    /// `Sub`, `Mul`) whose only reader is the lowering's re-wrap to a narrow
+    /// declared width, fused with that re-wrap. `dst = args[0] op args[1]`
+    /// computed in the `bits`-wide integer type (wrapping), then widened back
+    /// to the lane (sign-extended when `signed`, zero-extended otherwise) —
+    /// exactly the value the re-wrap produces. No ownership event.
+    NativeNarrowBin { op: IntOp, bits: u8, signed: bool },
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no

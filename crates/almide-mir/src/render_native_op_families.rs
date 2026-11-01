@@ -321,6 +321,33 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
             line!("ALMD_SLOT_{}.store({}, std::sync::atomic::Ordering::Relaxed);", slot, v);
         }
+        // ── #4006: narrow integer arithmetic (native_narrow_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::NativeNarrowBin { op, bits, signed },
+            dst: Some(d),
+            args,
+        } if args.len() == 2 => {
+            let ty = match (*bits, *signed) {
+                (8, true) => "i8",
+                (16, true) => "i16",
+                (32, true) => "i32",
+                (8, false) => "u8",
+                (16, false) => "u16",
+                (32, false) => "u32",
+                _ => return Err(wall(format!("native: a narrow op at width {bits}"))),
+            };
+            let f = match op {
+                crate::IntOp::Add => "wrapping_add",
+                crate::IntOp::Sub => "wrapping_sub",
+                crate::IntOp::Mul => "wrapping_mul",
+                other => return Err(wall(format!("native: a narrow {other:?}"))),
+            };
+            if args.iter().any(|a| tys.get(a) != Some(&NTy::I64)) {
+                return Err(wall("native: a narrow op over a non-integer operand"));
+            }
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = (({} as {ty}).{f}({} as {ty})) as i64;", var(*d), var(args[0]), var(args[1]));
+        }
         // ── #4006 family B: the native scalar-Option carrier (native_option_rewrite) ──
         Op::Prim {
             kind: crate::PrimKind::OptMakeSome,
@@ -486,13 +513,18 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
         // i64 slot values (the wasm leg stores the same bits).
         Op::ListLit { dst, elems } => {
+            // A real `f64` element goes into its slot as its bits — the value
+            // the MIR (and the wasm leg) stores there.
+            let mut items = Vec::with_capacity(elems.len());
             for e in elems {
-                if tys.get(e) != Some(&NTy::I64) {
-                    return Err(wall("native: ListLit with a non-scalar element"));
-                }
+                items.push(match tys.get(e) {
+                    Some(NTy::I64) => var(*e),
+                    Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
+                    _ => return Err(wall("native: ListLit with a non-scalar element")),
+                });
             }
             tys.insert(*dst, NTy::Vec);
-            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+            let items = items.join(", ");
             line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
