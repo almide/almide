@@ -1,5 +1,5 @@
 // `include!`d part of wasi_p3.rs (#3620, the net/tcp design step 4): TCP on
-// the WASI 0.3 component over wasi:sockets@0.3 `tcp-socket`, the ops
+// the WASI 0.3 component over wasi:sockets@0.3.0 `tcp-socket`, the ops
 // 91..=103 the embedded host serves with native's net core in the interim.
 // The same guest bodies (stdlib/net_wasm.almd) call the same ops; this shim
 // answers what native's `net_core` answers (C-377, C-378, C-379):

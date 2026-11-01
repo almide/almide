@@ -487,7 +487,7 @@ fn mem64(offset: u64) -> MemArg {
 include!("wasi_p3_serve.rs");
 include!("wasi_p3_serve_arena.rs");
 
-// UDP and name lookup over wasi:sockets@0.3 (#4306): wasi_p3_net.rs.
+// UDP and name lookup over wasi:sockets@0.3.0 (#4306): wasi_p3_net.rs.
 include!("wasi_p3_net.rs");
 include!("wasi_p3_net_fns.rs");
 include!("wasi_p3_net_shim.rs");
