@@ -487,6 +487,9 @@ fn mem64(offset: u64) -> MemArg {
 include!("wasi_p3_serve.rs");
 include!("wasi_p3_serve_arena.rs");
 
+// UDP and name lookup over wasi:sockets@0.3 (#4306): wasi_p3_net.rs.
+include!("wasi_p3_net.rs");
+
 // The p3 transform itself (`to_p3`): wasi_p3_emit.rs.
 include!("wasi_p3_emit.rs");
 
@@ -636,6 +639,7 @@ mod wit_tests {
             ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
             ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
             ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
+            ("sockets.wit", include_str!("../wit/p3/deps/sockets/package.wit")),
         ] {
             resolve.push_str(name, text).unwrap_or_else(|e| panic!("wit {name}: {e}"));
         }
@@ -650,6 +654,7 @@ mod wit_tests {
             ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
             ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
             ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
+            ("sockets.wit", include_str!("../wit/p3/deps/sockets/package.wit")),
         ] {
             resolve2.push_str(name, text).unwrap_or_else(|e| panic!("wit {name}: {e}"));
         }

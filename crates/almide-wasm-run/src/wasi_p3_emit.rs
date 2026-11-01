@@ -27,6 +27,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
         ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
         ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
+        ("sockets.wit", include_str!("../wit/p3/deps/sockets/package.wit")),
     ] {
         resolve
             .push_str(name, text)
@@ -50,6 +51,13 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let abi = fs_abi(&resolve)?;
     let habi = if http_types { Some(http_abi(&resolve)?) } else { None };
     let sabi = if service { Some(serve_abi(&resolve)?) } else { None };
+    // UDP and name lookup (#4306): the sockets block ships when the op set
+    // names the udp family; the serve world imports no sockets.
+    let wants_net = host_ops.iter().any(|op| almide_wasm::host_ops::UDP.contains(op));
+    if service && wants_net {
+        anyhow::bail!("the serve export reaches wasi:sockets, which its world does not import (check_service refuses it)");
+    }
+    let nabi = if wants_net { Some(net_abi(&resolve)?) } else { None };
     // The stat result's WIT-derived footprint must fit its park slot.
     assert!(STATRET + abi.stat_size <= MSG2, "STATRET reaches the messages");
 
@@ -85,7 +93,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         IMPORTS
     };
     let (env, n_env) = EnvImports::plan(host_ops, env_base, wants_http);
+    let (net, n_net) = NetImports::plan(host_ops, n_env);
     let t = P3Types::new(&mut types);
+    let net_types = net.map(|_| NetFns::types(&mut types));
     // An armed module's counters (#2407) get the exit report the core host
     // would print (wasi_p3_alloc.rs); a shipped module has none.
     let alloc = if service { None } else { AllocGlobals::find(&exports, heap_global) };
@@ -101,6 +111,10 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         None => Vec::new(),
     };
     let env_import_list = env.import_list(t.retptr, t.wait);
+    let net_import_list = match (net, &nabi) {
+        (Some(n), Some(a)) => n.import_list(a, &mut types),
+        _ => Vec::new(),
+    };
     let mut blocks: Vec<&[(u32, &str, &str, u32)]> = vec![&import_list];
     if http_types {
         blocks.push(&http_import_list);
@@ -109,6 +123,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         blocks.push(&serve_list);
     }
     blocks.push(&env_import_list);
+    blocks.push(&net_import_list);
     // The fs service (#3140): its page sits right past the park, and its
     // imports the artifact does not already carry follow the env block.
     let has = |m: &str, n: &str| blocks.iter().flat_map(|b| b.iter()).any(|(_, bm, bn, _)| *bm == m && *bn == n);
@@ -117,7 +132,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         anyhow::bail!("the serve export reaches the filesystem, which its world does not import (check_service refuses it)");
     }
     let fs_span: u64 = fs.as_ref().map_or(0, |_| FS_PAGE);
-    let n_imports = n_env + fs.as_ref().map_or(0, |f| f.splice.fresh_imports());
+    let n_imports = n_net + fs.as_ref().map_or(0, |f| f.splice.fresh_imports());
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
     // Shim order mirrors the almide.* import order (println, eprintln,
@@ -150,7 +165,10 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     // The fs service's functions come last, after every optional shim.
     let serve_first = after_http + u32::from(alloc.is_some());
     let serve_fns = service.then_some(ServeFns { op: serve_first, handle: serve_first + 1, cell: serve_first + 2 });
-    let fs_first = serve_first + 3 * u32::from(service);
+    // The net shim and its helpers (#4306), then the fs service's.
+    let net_first = serve_first + 3 * u32::from(service);
+    let net_fns = net.map(|_| NetFns::at(net_first));
+    let fs_first = net_first + NetFns::COUNT * u32::from(net.is_some());
 
     // Globals: originals, then plen, ppos, the stream state: stdout/stderr
     // writable ends + completion futures, stdin readable + its future.
@@ -196,6 +214,12 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         ServeGlobals::emit(&mut globals);
         ServeGlobals::at(fs_first_global)
     });
+    // The net shim's globals, last.
+    let net_globals = net.map(|_| {
+        let ng = NetGlobals::at(globals.len());
+        NetGlobals::emit(&mut globals);
+        ng
+    });
 
     let fs_types = fs.as_ref().map(|f| f.splice.register_types(&mut types));
     let mut type_sec = TypeSection::new();
@@ -205,11 +229,11 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let mut imports = build_import_section(&blocks);
     assert_eq!(
         blocks.iter().map(|b| b.len() as u32).sum::<u32>(),
-        n_env,
+        n_net,
         "import count drift"
     );
     let f_fs_self = shim_base + 3;
-    let mut next_import = n_env;
+    let mut next_import = n_net;
     let fs_targets = P3FsTargets { blocks: &blocks, shims: (f_fs_self, f_await, f_alloc, f_reserve) };
     let fs_import_at = fs
         .as_ref()
@@ -247,6 +271,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         for ti in [t.fs, t.call, t.rw] {
             functions.function(ti);
         }
+    }
+    if let Some(nt) = &net_types {
+        NetFns::declare(&mut functions, t.fs, nt);
     }
     // The fs service's shipped functions, last; its dispatcher is what
     // shim_fs_call forwards the fs ops to.
@@ -295,7 +322,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     code.function(&shim_print(err_port, park, f_await, true));
     code.function(&shim_exit(f_report));
     let env_ops = env.ops();
-    code.function(&shim_fs_call(g, &abi, (f_fs_self, f_http, serve_fns.map(|s| s.op)), f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
+    code.function(&shim_fs_call(g, &abi, (f_fs_self, f_http, serve_fns.map(|s| s.op), net_fns.map(|n| n.shim)), f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g, f_report));
@@ -320,6 +347,10 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         let arena = ServeArena::new(heap_global, g);
         code.function(&shim_serve_handle(g, sg, sf, (a, st, &arena), main_index + shift));
         code.function(&shim_serve_cell());
+    }
+    let net_texts = nabi.as_ref().map(|a| NetTexts::new(park, a));
+    if let (Some(a), Some(nt), Some(fns), Some(ng), Some(imp)) = (&nabi, &net_texts, net_fns, net_globals, net) {
+        push_net_shims(&mut code, g, a, nt, fns, ng, imp);
     }
     let fs_to = fs_import_at.map(|import_at| SpliceTargets {
         import_at,
@@ -352,6 +383,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
     if let Some(t) = &serve_texts {
+        data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
+    }
+    if let Some(t) = &net_texts {
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
 
