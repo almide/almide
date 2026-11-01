@@ -23,11 +23,14 @@ but as an `effect fn` its call yields a `Result` too: write
 `fn`s: they compute over text and need no capability.
 
 **Targets.** Native serves every function. `almide run --target wasm` (the
-embedded host) serves the TCP family and the address functions; UDP and
-`lookup_host` are native only for now. A stock artifact
-(`almide build --target wasm`) refuses the socket functions at build time (the
-p1 standard has no sockets). `parse_ip`, `ip_to_string` and `is_loopback` are
-pure and run everywhere.
+embedded host) serves every function too. The WASI 0.3 component
+(`ALMIDE_COMPONENT_P3=1 almide build --target wasm --component`) serves UDP and
+`lookup_host` over `wasi:sockets@0.3`; run it with the network granted
+(`wasmtime run -S inherit-network -S allow-ip-name-lookup app.wasm`), or a bind
+reads `udp_bind(<host>:<port>): permission denied`. A default stock artifact
+(`almide build --target wasm`, WASI preview 1) refuses the socket functions at
+build time, because preview 1 has no sockets. `parse_ip`, `ip_to_string` and
+`is_loopback` are pure and run everywhere.
 
 ## TCP client
 

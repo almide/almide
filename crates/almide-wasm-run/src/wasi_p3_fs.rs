@@ -224,7 +224,7 @@ struct FsService {
 /// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
 /// clock, 60 monotonic clock, plus the fs (through the spliced service), http
 /// and env (26 / 29 / 36 / 37) families; anything else = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Option<u32>, Option<u32>), f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve, f_net): (u32, Option<u32>, Option<u32>, Option<u32>), f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
     let P3Globals { park, g_plen, g_ppos, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
     let (op, a_len, b_ptr, b_len) = (0u32, 2u32, 3u32, 4u32);
     let n = 6u32;
@@ -260,6 +260,20 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
             i.local_get(pidx);
         }
         i.call(s).return_();
+        i.end();
+    }
+
+    // ops 140..=145 (UDP and name lookup, #4306): the net shim over
+    // wasi:sockets@0.3 (wasi_p3_net.rs), when the op set earned its imports.
+    if let Some(nf) = f_net {
+        let udp = almide_wasm::host_ops::UDP;
+        i.local_get(op).i32_const(*udp.start()).i32_ge_s();
+        i.local_get(op).i32_const(*udp.end()).i32_le_s();
+        i.i32_and().if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(nf).return_();
         i.end();
     }
 
