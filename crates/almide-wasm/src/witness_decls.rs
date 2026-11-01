@@ -295,11 +295,11 @@ effect fn main() -> Unit = {
     #[test]
     fn a_pure_intrinsic_is_admitted_in_a_plain_fn_and_an_effect_one_is_not() {
         let _g = ARMED.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, d) = emit_recorded("env_os_pure.almd", "fn main() -> Unit = {\n  let _ = env.os()\n}\n");
+        let (_, d) = emit_recorded("env_os_pure.almd", "import env\n\nfn main() -> Unit = {\n  let _ = env.os()\n}\n");
         let (flat, graph) = cert_project::caps(&d).expect("caps");
         assert!(flat.iter().all(|(_, w)| accepts(almide_verify::Property::Caps, w)), "{flat:?}");
         assert!(accepts(almide_verify::Property::CapsTransitive, &graph), "{graph}");
-        let (_, mut d) = emit_recorded("env_cwd.almd", "effect fn here() -> String = env.cwd() ?? \"\"\n\neffect fn main() -> Unit = {\n  println(here()!)\n}\n");
+        let (_, mut d) = emit_recorded("env_cwd.almd", "import env\n\neffect fn here() -> String = env.cwd() ?? \"\"\n\neffect fn main() -> Unit = {\n  println(here()!)\n}\n");
         d.fns.iter_mut().filter(|f| f.name == "here").for_each(|f| f.declared = Some(Declared::Pure));
         let (flat, graph) = cert_project::caps(&d).expect("caps");
         let w = &flat.iter().find(|(n, _)| n == "here").expect("here's witness").1;
