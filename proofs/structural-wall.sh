@@ -116,7 +116,7 @@ if [ "$MODE" = tests ]; then
   (cd "$ROOT" && LC_ALL=C ls spec/stdlib/*_test.almd) > "$OUT/listed"
   (cd "$ROOT" && ci_slice_filter structural-wall-tests < "$OUT/listed") > "$OUT/selected"
   HASHES="$OUT/structural-artifacts.sha256"
-  : > "$OUT/declined"; : > "$OUT/embedded-only"; : > "$OUT/run-failed"; : > "$OUT/anchor-rejects"
+  : > "$OUT/declined"; : > "$OUT/embedded-only"; : > "$OUT/run-failed"; : > "$OUT/anchor-rejects"; : > "$OUT/run-host-limited"
 else
   grep -v -E '^(#|$)' "$FIXTURES" > "$OUT/listed"
   (cd "$ROOT" && ci_slice_filter structural-wall < "$OUT/listed") > "$OUT/selected"
@@ -146,7 +146,14 @@ while IFS= read -r f; do
     # The judged bytes pass their tests on a stock runtime (the
     # `ALMIDE_TEST_WASM_RUNNER=wasmtime` lane's invocation).
     if ! (cd "$ROOT" && timeout 600 "$WASMTIME" --dir=/ -S inherit-env=y --env=ALMIDE_CWD="$ROOT" "$OUT/$N.wasm" < /dev/null) > "$OUT/$N.run" 2>&1; then
-      echo "$f" >> "$OUT/run-failed"
+      # An import the stock runtime does not define (`almide:process/spawn`,
+      # served by the embedded host only) is the host's limit, not a verdict
+      # on the bytes: counted and named. Any other failure fails the leg.
+      if grep -q 'unknown import' "$OUT/$N.run"; then
+        printf '%s\t%s\n' "$f" "$(grep -m1 -o 'unknown import: `[^`]*`' "$OUT/$N.run")" >> "$OUT/run-host-limited"
+      else
+        echo "$f" >> "$OUT/run-failed"
+      fi
     fi
   elif ! (cd "$ROOT" && "$ALMIDE" build "$f" --target wasm -o "$OUT/$N.wasm") > "$OUT/$N.err" 2>&1; then
     echo "STRUCTURAL WALL FAIL: 'almide build --target wasm' refused a certified fixture: $f" >&2
@@ -203,7 +210,8 @@ if [ "$MODE" = tests ]; then
     done < "$OUT/run-failed"
     exit 1
   fi
-  echo "  every judged artifact passes its tests under wasmtime"
+  echo "  every other judged artifact passes its tests under wasmtime; $(wc -l < "$OUT/run-host-limited" | tr -d ' ') import what the stock runtime does not define:"
+  sed 's/^/    /' "$OUT/run-host-limited"
   # Anchor rejects against the ledger's `anchors` rows (file<TAB>anchors<TAB>-<TAB>issue):
   # a reject the ledger does not name fails, and so does a row that no longer rejects.
   grep -v -E '^(#|$)' "$EXCEPTIONS" 2>/dev/null | awk -F'\t' '$2 == "anchors" {print $1}' | LC_ALL=C sort -u > "$OUT/anchor-ledger"
