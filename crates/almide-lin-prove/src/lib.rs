@@ -756,6 +756,18 @@ pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, St
                 let pre: Vec<L> = cands.into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
                 next.insert(pos, Contract { pre });
             }
+            if std::env::var_os("ALMIDE_LIN_DEBUG").is_some() {
+                for (p, r) in &results {
+                    eprintln!("round {_round}: {p}: {}", match r { Ok(_) => "ok".to_string(), Err(e) => e.clone() });
+                }
+                for s in &sites {
+                    eprintln!("  site -> {}: args {:?}", s.callee, s.args.iter().map(|(p, l, ok)| format!("{p}:{}{}", l.text(), if *ok { "!" } else { "" })).collect::<Vec<_>>());
+                    eprintln!("    facts {}", s.facts.iter().map(L::text).collect::<Vec<_>>().join(" "));
+                }
+                for (p, c) in &next {
+                    eprintln!("  pre {p}: {}", c.pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
+                }
+            }
             if next == contracts {
                 break;
             }
