@@ -69,7 +69,10 @@ pub(crate) fn result_payloads(i: u16) -> Option<(NTy, NTy)> {
 /// A value of kind `t` has a `Default` (a carrier's absent payload reads as one).
 pub(crate) fn has_default(t: NTy) -> bool {
     match t {
-        NTy::Rec(i) | NTy::RecRef(i) => RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.result_of.is_none())),
+        // A Result carrier and the runtime `Value` have none.
+        NTy::Rec(i) | NTy::RecRef(i) => {
+            RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.result_of.is_none() && d.name != VALUE_KEY))
+        }
         NTy::Res | NTy::ResStr => false,
         _ => true,
     }
@@ -93,6 +96,49 @@ pub(crate) fn bytes_index() -> u16 {
             return i as u16;
         }
         r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None });
+        (r.len() - 1) as u16
+    })
+}
+
+/// The table key of the stdlib's dynamic `Value` type.
+pub(crate) const VALUE_KEY: &str = "Ty::Value";
+
+/// The generated `Value` type: v0's own runtime enum (`AlmideValue`), so a
+/// declared-floor body takes it as is. Appended on first use, like `Bytes`.
+pub(crate) fn value_index() -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.name == VALUE_KEY) {
+            return i as u16;
+        }
+        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None });
+        (r.len() - 1) as u16
+    })
+}
+
+/// `t` is the generated `Value` type.
+pub(crate) fn is_value(t: NTy) -> bool {
+    matches!(t, NTy::Rec(i) | NTy::RecRef(i) if rec_index(VALUE_KEY) == Some(i))
+}
+
+/// The generated `Result<ok, err>` carrier, appended on first use (a
+/// declared-floor call returns one the program's signatures never spell).
+pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.result_of == Some((ok, err))) {
+            return i as u16;
+        }
+        r.push(RecDecl {
+            name: format!("Result<{ok:?}, {err:?}>"),
+            fields: Vec::new(),
+            cases: None,
+            list_of: None,
+            alias: None,
+            default_tag: None,
+            option_of: None,
+            result_of: Some((ok, err)),
+        });
         (r.len() - 1) as u16
     })
 }
@@ -394,6 +440,11 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
         Ty::Bytes if !out.contains(t) => out.push(t.clone()),
+        t if crate::lower::is_value_ty(t) => {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
+        }
         // An instantiated generic record or variant: its own generated type.
         Ty::Named(_, args) if !args.is_empty() => {
             if !out.contains(t) {
@@ -451,6 +502,7 @@ pub(crate) fn derive_records(
     let mut options: BTreeSet<String> = BTreeSet::new();
     let mut results: BTreeSet<String> = BTreeSet::new();
     let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
+    let uses_value = tuples.iter().any(crate::lower::is_value_ty);
     // A generic instance's bound fields may name further instances: close over them.
     let mut work: Vec<Ty> = tuples.to_vec();
     let mut seen_inst: BTreeSet<String> = BTreeSet::new();
@@ -524,6 +576,7 @@ pub(crate) fn derive_records(
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
             Ty::Tuple(_) | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             Ty::Bytes if uses_bytes => return Some(Err(BYTES_KEY.to_string())),
+            t if uses_value && crate::lower::is_value_ty(t) => return Some(Err(VALUE_KEY.to_string())),
             Ty::Named(_, args) if !args.is_empty() && set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
             Ty::Named(_, args) if !args.is_empty() && scalar(&tuple_key(t)) => NTy::Vec,
             // An Option field or element holds its carrier; a Result never
@@ -533,9 +586,14 @@ pub(crate) fn derive_records(
         }))
     };
     let fields_of = |n: &str| decls[n].1.iter().flat_map(|(_, fs)| fs.iter()).cloned().collect::<Vec<Ty>>();
+    // A struct or enum starts from `Default`, which the runtime `Value` lacks:
+    // only a list, Option or Result holds one.
+    let defaults_ok = |n: &String| {
+        lists.contains(n) || options.contains(n) || results.contains(n) || fields_of(n).iter().all(|t| !crate::lower::is_value_ty(t))
+    };
     loop {
         let before = set.len();
-        set = set.iter().filter(|n| fields_of(n).iter().all(|t| kind(t, &set).is_some())).cloned().collect();
+        set = set.iter().filter(|n| fields_of(n).iter().all(|t| kind(t, &set).is_some()) && defaults_ok(n)).cloned().collect();
         if set.len() == before {
             break;
         }
@@ -569,7 +627,7 @@ pub(crate) fn derive_records(
     let mut rank: BTreeMap<String, usize> = BTreeMap::new();
     let case_ok = |fs: &Vec<Ty>, below: usize, rank: &BTreeMap<String, usize>, set: &BTreeSet<String>| {
         fs.iter().all(|t| match kind(t, set) {
-            Some(Err(m)) => lists.contains(&m) || options.contains(&m) || m == BYTES_KEY || rank.get(&m).is_some_and(|r| *r < below),
+            Some(Err(m)) => lists.contains(&m) || options.contains(&m) || m == BYTES_KEY || m == VALUE_KEY || rank.get(&m).is_some_and(|r| *r < below),
             _ => true,
         })
     };
@@ -599,7 +657,7 @@ pub(crate) fn derive_records(
     set.retain(|n| !cyclic.contains(n));
     loop {
         let before = set.len();
-        set = set.iter().filter(|n| fields_of(n).iter().all(|t| kind(t, &set).is_some())).cloned().collect();
+        set = set.iter().filter(|n| fields_of(n).iter().all(|t| kind(t, &set).is_some()) && defaults_ok(n)).cloned().collect();
         if set.len() == before {
             break;
         }
@@ -607,6 +665,9 @@ pub(crate) fn derive_records(
     let mut names: Vec<String> = set.iter().cloned().collect();
     if uses_bytes {
         names.push(BYTES_KEY.to_string());
+    }
+    if uses_value {
+        names.push(VALUE_KEY.to_string());
     }
     let spell = |t: &Ty| match kind(t, &set) {
         Some(Ok(k)) => k,
@@ -616,6 +677,9 @@ pub(crate) fn derive_records(
     names
         .iter()
         .map(|n| {
+            if n == VALUE_KEY {
+                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None };
+            }
             if n == BYTES_KEY {
                 return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None };
             }
