@@ -5,7 +5,7 @@ fn main() -> Unit = {
   var x: Int32 = 7
   var i = 0
   while i < 3000000 {
-    x = step(x, int32.from_int_wrapping(i))
+    x = step(x, int32.from_wrapping(i))
     i = i + 1
   }
   println(int32.to_string(x))

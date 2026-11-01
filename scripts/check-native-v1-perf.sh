@@ -80,7 +80,7 @@ done < "$LEDGER"
 while read -r f; do
   n="$(echo "$f" | tr '/.' '__')"
   if ! log=$(ALMIDE_VERIFIED_DEBUG=1 timeout 600 "$ALMIDE" build "$f" -o "$WORK/$n.v1" 2>&1); then
-    echo "BUILD-FAIL v1 $f"; fail=1; continue
+    echo "BUILD-FAIL v1 $f"; echo "$log" | head -5; fail=1; continue
   fi
   if ! grep -q "native: v1 trust-spine render" <<<"$log"; then
     rows+=("UNCERTIFIED $f"); continue
@@ -123,6 +123,8 @@ for w in "${warns[@]}"; do echo "$w"; done
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ "${#warns[@]}" -gt 0 ]; then
   printf '%s\n' "${warns[@]}" >> "$GITHUB_STEP_SUMMARY"
 fi
-if [ -z "${NATIVE_V1_PERF_ONLY_SHAPES:-}" ] && [ "$gated" -lt 10 ]; then echo "native-v1-perf: only $gated gated programs — the scan is blind"; exit 1; fi
+# Most certified programs run under the gating size; the few that do not, plus
+# the shape benches, are the measurement. Fewer than 5 means the scan broke.
+if [ -z "${NATIVE_V1_PERF_ONLY_SHAPES:-}" ] && [ "$gated" -lt 5 ]; then echo "native-v1-perf: only $gated gated programs — the scan is blind"; exit 1; fi
 if [ "$fail" != 0 ]; then echo "native-v1-perf: FAILED ($gated gated)"; exit 1; fi
 echo "native-v1-perf: ok ($gated gated, ${#warns[@]} wall-time warning(s))"

@@ -6,7 +6,7 @@ fn main() -> Unit = {
   while r < 20000 {
     var i = 0
     while i < 36 {
-      n = n + string.len(string.char_at(s, i) ?? "")
+      n = n + string.len(string.get(s, i) ?? "")
       i = i + 1
     }
     r = r + 1
