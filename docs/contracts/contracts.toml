@@ -5841,6 +5841,7 @@ evidence  = [
   { path = "spec/embedded_cross/process_start_run_end_stops_children.almd", class = "fixture" },
   { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_cross_fixture_sees_both_legs_stop_the_child", class = "fixture" },
   { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_wasm_host_stops_an_unwaited_child_on_every_exit_route", class = "fixture" },
+]
 [[contract]]
 id        = "C-446"
 spec      = "ALS-D7"
