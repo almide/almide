@@ -35,13 +35,13 @@ but not listed fails, and so does a version listed but no longer used.
 
 | component | version | what it does | what checks it independently |
 |---|---|---|---|
-| rustc | **1.96.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
-| LLVM | the copy inside that rustc (the 22.1 series for 1.96; `rustc -vV` prints it) | native code generation | as rustc |
+| rustc | **1.97.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
+| LLVM | the copy inside that rustc (the 22.1 series for 1.97; `rustc -vV` prints it) | native code generation | as rustc |
 | rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus with stock rustc at the recorded Ferrocene upstream pin (#573) | compatibility evidence only; the qualified Ferrocene binary is not used by this lane |
 | rustc (stable, perf) | **1.99.1** (`RUST_STABLE_TOOLCHAIN`) | builds the handwritten-Rust side of the perf ratio in `perf-ratchet` and `perf-profile-arm`; nothing shipped is built with it | the ratio gates themselves; pinning it keeps their baseline still |
 | rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation (branch coverage, MC/DC) and Miri over `almide-str`; nothing shipped is built with them | — |
-| wasmtime (embedded crate) | **49.0.4** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
-| wasmtime (stock CLI in CI) | **49.0.1** | runs built `.wasm` artifacts in the CI gates, one version everywhere | the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares `almide-wasm-vm` against |
+| wasmtime (embedded crate) | **50.0.1** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
+| wasmtime (stock CLI in CI) | **50.0.1** | runs built `.wasm` artifacts in the CI gates, one version everywhere | the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares `almide-wasm-vm` against |
 | almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
 | OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
 
@@ -120,7 +120,7 @@ a `.bat` / `.cmd` passed arguments through cmd.exe unescaped before 1.77.2,
 which would re-open shell injection through `process.exec`). So every native
 build (`almide run` / `build` / `test` / `bench`, the cdylib and install
 routes) reads `rustc --version` before rustc or cargo runs, and refuses
-anything below rustc 1.96.0 — `MIN_RUSTC` in `src/cli/rustc_floor.rs`, the
+anything below rustc 1.97.0 — `MIN_RUSTC` in `src/cli/rustc_floor.rs`, the
 one place it is written: max(1.77.2, the `RUST_TOOLCHAIN` the generated code
 is verified with). It is raised when a std fix Almide relies on lands; the
 constant's comment lists the advisory each bump covers.

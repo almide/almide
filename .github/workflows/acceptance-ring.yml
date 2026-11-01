@@ -37,7 +37,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
   CARGO_INCREMENTAL: "0"
   GIT_TERMINAL_PROMPT: "0"
 
@@ -160,8 +160,8 @@ jobs:
         if: needs.prose-changes.outputs.prose_only != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
       - name: Install wasmtime
         if: needs.prose-changes.outputs.prose_only != 'true'
         # `almide test` executes its wasm leg on the wasmtime CLI; without it
@@ -169,7 +169,7 @@ jobs:
         # leg driver would fail the run (deliberately — a ring that quietly
         # tests only native is the #983 skip-as-pass shape again).
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           bash compiler/scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"

@@ -39,7 +39,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.96.0"  # same runner-class toolchain as acceptance-ring.yml
+  RUST_TOOLCHAIN: "1.97.0"  # same runner-class toolchain as acceptance-ring.yml
   CARGO_INCREMENTAL: "0"
   GIT_TERMINAL_PROMPT: "0"
 
@@ -147,11 +147,11 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           bash canary/scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"

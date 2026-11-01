@@ -24,9 +24,9 @@ unsafe_code = "forbid"
 name = "almide"
 version = "0.69.0"
 edition = "2024"
-# Runner-class MSRV: the binary embeds the wasmtime 49 host (the commissioned
+# Runner-class MSRV: the binary embeds the wasmtime 50 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
-rust-version = "1.96"
+rust-version = "1.97"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
@@ -79,7 +79,7 @@ lsp-server = "0.10"
 crossbeam-channel = "0.5"
 lsp-types = "0.97"
 wit-component = "0.262"
-wasi-preview1-component-adapter-provider = "49.0.1"
+wasi-preview1-component-adapter-provider = "50.0.1"
 
 [features]
 default = ["embedded-host"]
