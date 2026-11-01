@@ -59,7 +59,7 @@ pub enum Property {
 }
 
 impl Property {
-    pub const ALL: [Property; 8] = [
+    pub const ALL: [Property; 9] = [
         Property::Ownership,
         Property::Names,
         Property::Caps,
