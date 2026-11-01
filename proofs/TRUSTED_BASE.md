@@ -131,6 +131,17 @@ These four are trusted by necessity; everything else is proven against them:
 4. **ALS validity** — that the formal semantics captures the INTENDED meaning.
    This is the one item checked empirically (interp + dojo + use), never proved.
 
+## Trusted representation invariants (gated, to be discharged)
+
+A runtime fact that some reads rely on and that no proof covers yet. Unlike
+the four items above, each row is meant to go: it names the issue that
+replaces it with a checked certificate. Until then a gate keeps it honest, and
+the row lists where it does not hold yet.
+
+| invariant | the reads that depend on it | how it is kept | where it does not hold yet | discharge |
+|---|---|---|---|---|
+| **A String block's payload is valid UTF-8.** On the wasm leg, the bytes at `handle + 12`, whose length is at `handle + 4`, are well-formed UTF-8 (RFC 3629). Native Strings are Rust `String`s, and Rust keeps this invariant for them. | **U1**: these read continuation bytes after a lead byte and do not check the end: `__to_upper_cp` (stdlib/string_to_upper.almd), `__to_lower_cp` (string_to_lower), `__cls_cp` (string_class), `__trim_cp` (string_trim), `__ws_all` (string_first_last), `__jp_cp` (json_parse), `__rx_cp` (regex_engine). **U2**: in these, a lead byte's width moves a pointer or sizes a copy, unchecked against the end: `string.first` / `string.last` (`__cp_len` + `__copy_n`, string_first_last), `__pad_copy` (string_pad), `__rev_copy_n` (string_reverse; it writes each character at the output's tail), `__copy_bytes` (string_chars), `__rep_copy` (string_search; the empty-needle replace walks character starts), and the regex engine's `__rx_eol` / `__rx_bol` / `__rx_back` / `__rx_at_boundary` / `__rx_copy`. **U3**: these size an output block from UTF-8 widths: the case mappers' `alloc_str(blen * 3 + 8)` (string_to_upper, string_to_lower) and `__jp_utf8_write` (json_parse) into a span-sized block. | `proofs/utf8-producers.toml`, gated by `scripts/check-utf8-producers.py` (CI `checks`; `--self-test` is its kept drill). It ledgers every producer that can put bytes into a String block, and the row set is derived from declarations: the public stdlib signatures, the host op declarations, the self-hosted `prim.*` calls, the `prim.alloc_str` minting sources and the emitter's helpers. A new producer without a row fails. Each row either validates or builds by construction, and cites a test that feeds invalid bytes (`spec/stdlib/utf8_*_producers_test.almd` on both targets, `tests/utf8_host_boundary_test.rs`). | The ledger's `open` rows, shrink-only under `open_ceiling`. On the stock preview-1 shim, these hand raw host bytes to the guest: environment values, `env.vars`, argv, the working directory, the temp root, the temp creators' paths, and directory names (ops 10, 11, 21, 23, 26, 28, 29, 33, 39, 77, 122). The component shim's string http client (ops 43–49) stages the body unchecked. `fs.write_bytes`'s self-hosted body copies a Bytes payload into a String block internally (stdlib/fs_write_bytes.almd). | #4395 |
+
 ## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
