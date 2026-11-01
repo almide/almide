@@ -355,10 +355,10 @@ fn shim_tcp(g: P3Globals, a: &NetAbi, t: &NetTexts, parts: NetParts) -> Function
                 tcp_slot_put(i, cx, l, tl, streams);
                 tcp_init_stream(i, l, tl);
             } else {
-                i.i32_const(ret).i32_load(net_m32(a.tcp_listen_payload)).local_set(l.i1);
+                i.i32_const(ret).i32_load(net_m32(a.tcp_listen_payload)).local_set(tl.x);
                 tcp_slot_put(i, cx, l, tl, listeners);
                 i.local_get(tl.p).local_get(l.s).i32_store(net_m32(TL_SOCK));
-                i.local_get(tl.p).local_get(l.i1).i32_store(net_m32(TL_STREAM));
+                i.local_get(tl.p).local_get(tl.x).i32_store(net_m32(TL_STREAM));
             }
             i.local_get(l.w).local_get(l.j).i64_extend_i32_u().call(fns.dec).local_set(l.w);
             net_answer(i, g, ng, l, 0);
