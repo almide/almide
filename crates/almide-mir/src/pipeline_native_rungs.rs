@@ -283,6 +283,22 @@ fn heap_carrier_values(ir: &almide_ir::IrProgram, f: &crate::MirFunction) -> std
     crate::render_native_addr::carrier_values(f, &own, &sig).into_keys().collect()
 }
 
+/// A LIFTED effect fn: declared `-> Int | Bool | Unit` (not a Result), whose
+/// body can err, so its compiled ABI is the wrapped `Result[T, String]`
+/// carrier on this leg. A never-err one returns its raw value (#3058), and
+/// the entry `main` keeps its own exit convention (the same exclusion
+/// `effect_abi_facts` makes for the auto-wrap ABI).
+fn returns_lifted_carrier(f: &almide_ir::IrFunction) -> bool {
+    use almide_lang::types::Ty;
+    f.is_effect
+        && match f.ret_ty {
+            Ty::Int | Ty::Bool => true,
+            Ty::Unit => f.name.as_str() != "main",
+            _ => false,
+        }
+        && !crate::lower::is_never_err_lifted(f.name.as_str())
+}
+
 /// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
 /// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
 fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
@@ -371,9 +387,7 @@ fn rewrite_native_result_windows_over<'a>(
                 // the verifier flagging the raw LoadHandle as UseAfterFree.
                 // A NEVER-ERR one returns its raw scalar instead: the shared
                 // chain settled every call site against that (#3058).
-                || (f.is_effect
-                    && matches!(f.ret_ty, Ty::Int | Ty::Bool)
-                    && !crate::lower::is_never_err_lifted(f.name.as_str()))
+                || returns_lifted_carrier(f)
         })
         .map(|f| f.name.as_str().to_string())
         .collect();
@@ -504,16 +518,13 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
             continue;
         }
         let params: Option<Vec<_>> = func.params.iter().map(|p| native_sig_kind(&p.ty, record_layouts, variant_layouts)).collect();
-        let ret = if matches!(func.ret_ty, Ty::Unit) {
-            Some(None)
-        } else if func.is_effect
-            && matches!(func.ret_ty, Ty::Int | Ty::Bool)
-            && !crate::lower::is_never_err_lifted(func.name.as_str())
-        {
+        let ret = if returns_lifted_carrier(func) {
             // A LIFTED effect fn returns the wrapped carrier on this leg
             // (the same widening `result_fns` applies above): its declared
             // scalar would type the call dst I64 while the value is Res.
             Some(Some(NativeSigKind::Res))
+        } else if matches!(func.ret_ty, Ty::Unit) {
+            Some(None)
         } else {
             native_sig_kind(&func.ret_ty, record_layouts, variant_layouts).map(Some)
         };
