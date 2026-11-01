@@ -12,7 +12,8 @@
 /// answers, the fan prefetch triple (40..=42) and env.os / fs.temp_dir /
 /// env.cwd (27 / 28 / 33) among them — and UDP and name lookup (140..=145,
 /// #4306) over wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
-/// (wasi_p3_net.rs).
+/// (wasi_p3_net.rs), and the tcp family (91..=103 but the body-less
+/// `tcp_read_exact`, #3620) over `tcp-socket` (wasi_p3_tcp.rs).
 pub fn serves(op: i32, p3: bool) -> bool {
     // 74: the instance-parallel fan offer (#3003), answered "not served" by
     // both component shims — the guest then runs its chunks sequentially.
@@ -21,8 +22,31 @@ pub fn serves(op: i32, p3: bool) -> bool {
     let extra = p3
         && (matches!(op, 26 | 29 | 36 | 37 | 40..=49 | 65 | 77)
             || almide_wasm::host_ops::UDP.contains(&op)
+            || crate::wasi_p3::tcp_served(op)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
+}
+
+/// Whether `host_ops` names an op of a sockets family
+/// (`almide_wasm::host_ops::SOCKET_FAMILIES`): WASI preview 1 has no
+/// sockets, so such a program is built as the WASI 0.3 component by default
+/// (the net/tcp design step 4, C-377), as an `http.serve` program is built as
+/// the serve export. Read from the op set and the families' declared ranges,
+/// never from a function's name; a socket op the p3 shim does not serve is
+/// then [`check`]'s E081, not a preview 1 build.
+pub fn needs_sockets(host_ops: &[i32]) -> bool {
+    almide_wasm::host_ops::names_socket_op(host_ops)
+}
+
+/// The line `almide build` prints for a sockets component: the grant a stock
+/// runtime needs (net/tcp design Q7), the name-lookup flag when the op set
+/// can resolve a name.
+pub fn sockets_grant_note(output: &str) -> String {
+    format!(
+        "note: {output} is a WASI 0.3 component that uses wasi:sockets (preview 1 has no sockets); a stock runtime denies \
+         every socket address unless the run grants it: `wasmtime run -S inherit-network {output}`, plus \
+         `-S allow-ip-name-lookup` when a host argument is a name rather than an IP literal"
+    )
 }
 
 /// The p1-served ops the p3 component does NOT serve, each with the reason
@@ -110,7 +134,7 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 /// E081 there.
 pub fn serves_service(op: i32) -> bool {
     let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
-    let net = almide_wasm::host_ops::UDP.contains(&op);
+    let net = almide_wasm::host_ops::UDP.contains(&op) || almide_wasm::host_ops::TCP.contains(&op);
     matches!(op, 70..=72 | 75) || (!fs && !net && serves(op, true))
 }
 

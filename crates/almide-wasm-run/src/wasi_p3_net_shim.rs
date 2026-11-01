@@ -439,4 +439,6 @@ fn push_net_shims(code: &mut CodeSection, g: P3Globals, a: &NetAbi, t: &NetTexts
     code.function(&net_fn_ip_fmt(a, t, fns));
     code.function(&net_fn_sa(a, t));
     code.function(&net_fn_resolve(g, a, t, parts));
+    code.function(&shim_tcp(g, a, t, parts));
+    code.function(&tcp_fn_await(g, t, parts.imp));
 }
