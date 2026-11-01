@@ -186,3 +186,41 @@ fn the_udp_ops_reach_the_network_only_and_a_grant_without_net_refuses_them() {
         assert!(!reach.is_subset(&net_grant(&without)), "{name}: a grant without Net still admits {reach:?}");
     }
 }
+
+/// A program naming the full-response client (op 65, which only the p3 shim
+/// serves) runs on `almide run --target wasm` as its p3 component
+/// (ADR-0023 step 7). One that also binds a udp socket used to be E081 there
+/// (no single route served both); it now runs as the component, whose host
+/// grants the network as the core-module route does, and answers as native.
+const MIXED: &str = r#"import http
+import net
+
+effect fn main() -> Unit = {
+  match http.get_response("http://127.0.0.1:1/") {
+    ok(_) => println("http ok"),
+    err(_) => println("http err"),
+  }
+  let a = net.udp_bind("127.0.0.1", 0)!
+  let b = net.udp_bind("127.0.0.1", 0)!
+  let pb = net.udp_local_port(b)!
+  net.udp_send_to(a, bytes.from_string("hi"), "127.0.0.1", pb)!
+  let p = net.udp_recv_from(b, 16)!
+  println("got ${bytes.to_string(p.data) ?? "?"} from ${p.host}")
+  println("done")
+}
+"#;
+
+#[test]
+fn an_op_65_program_that_binds_udp_runs_on_the_embedded_lane_as_native_does() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("mixed.almd");
+    std::fs::write(&src, MIXED).expect("write");
+    let mut native = Command::new(almide_bin());
+    native.arg("run").arg(&src);
+    let native = observe(native, "almide run");
+    assert_eq!(native.0, "http err\ngot hi from 127.0.0.1\ndone\n", "native: {native:?}");
+    let mut wasm = Command::new(almide_bin());
+    wasm.arg("run").arg(&src).args(["--target", "wasm"]);
+    let wasm = observe(wasm, "almide run --target wasm");
+    assert_eq!((&wasm.0, wasm.1), (&native.0, native.1), "the embedded lane diverged:\n{}", wasm.2);
+}
