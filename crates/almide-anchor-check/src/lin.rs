@@ -44,6 +44,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use wasmparser::{BlockType, Operator as Op, Parser, Payload, ValType};
 
+/// wasmparser's operator, for the prover's reading of call sites.
+pub use wasmparser::Operator as WasmOp;
+
 pub type Slot = u32;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1510,7 +1513,7 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
 }
 
 /// Defined function positions an export or an element segment names.
-fn exported_or_tabled(wasm: &[u8], imports: u32) -> Result<BTreeSet<usize>, String> {
+pub fn exported_or_tabled(wasm: &[u8], imports: u32) -> Result<BTreeSet<usize>, String> {
     let mut out = BTreeSet::new();
     for payload in Parser::new(0).parse_all(wasm) {
         match payload.map_err(|e| e.to_string())? {

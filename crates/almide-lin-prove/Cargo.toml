@@ -1,0 +1,20 @@
+[package]
+name = "almide-lin-prove"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "The UNTRUSTED prover for the linear bounds certificates (#4005 A4): fills the holes of almide-anchor-check's translation with contracts, loop invariants and Farkas proofs"
+
+# Untrusted: nothing it writes is believed. The proven checker
+# (RoutineLinCert.check_lbounds_cert, its extraction and almide-verify) and
+# almide-anchor-check's translation check judge every certificate it emits.
+[dependencies]
+almide-anchor-check = { path = "../almide-anchor-check" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "almide-lin-prove"
+path = "src/main.rs"
