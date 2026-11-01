@@ -2,7 +2,8 @@
 //! shim over wasi:sockets@0.3 `tcp-socket` answers what native answers.
 //! C-377, C-378 and C-379 promise the same transcript on native, the
 //! embedded lane and the stock WASI 0.3 component; their fixtures
-//! (spec/embedded_cross, the judge's own) are built as the component, run on
+//! (spec/embedded_cross, the judge's own) are built as the component by the
+//! default `almide build --target wasm` (a socket op routes there), run on
 //! a stock wasmtime with the network granted (`-S inherit-network=y`), and
 //! compared with the native run — stdout and the exit code identical, and
 //! each program reaching its closing `done` line, so two legs that fail
@@ -68,8 +69,8 @@ fn tcp_fixtures_run_alike_on_native_and_the_p3_component() {
         assert!(native.0.ends_with("done\n"), "{name}: native did not finish:\n{}\n{}", native.0, native.2);
         let wasm = scratch.path().join(format!("{name}.wasm"));
         let built = Command::new(almide_bin())
-            .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "--component", "-o", wasm.to_str().expect("utf8")])
-            .env("ALMIDE_COMPONENT_P3", "1")
+            .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "-o", wasm.to_str().expect("utf8")])
+            .env_remove("ALMIDE_COMPONENT_P3")
             .stdin(Stdio::null())
             .output()
             .expect("almide build");
@@ -116,8 +117,8 @@ fn an_ungranted_component_reads_the_permission_text() {
     std::fs::write(&src, UNGRANTED).expect("write");
     let wasm = scratch.path().join("ungranted.wasm");
     let built = Command::new(almide_bin())
-        .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "--component", "-o", wasm.to_str().expect("utf8")])
-        .env("ALMIDE_COMPONENT_P3", "1")
+        .args(["build", src.to_str().expect("utf8"), "--target", "wasm", "-o", wasm.to_str().expect("utf8")])
+        .env_remove("ALMIDE_COMPONENT_P3")
         .stdin(Stdio::null())
         .output()
         .expect("almide build");
