@@ -1,0 +1,43 @@
+// @contract: C-032
+// #4392: a rule table of 40 Regex values applied in turn to every line, the
+// shape of a secret scanner. 0.69.0-rc1 kept compiled patterns in a 16-entry
+// LRU list, so past 16 rules every match recompiled its pattern (2x slower,
+// same answers). The native runtime now keeps every pattern of such a cycle
+// compiled; this fixture holds the answers to what they were: every
+// operation, every rule, three rounds, the same bytes on both targets. The
+// cost is gated by check-perf-ratio.sh's REGEX CYCLE relation.
+import regex
+
+fn rule(i: Int) -> Regex = match i % 4 {
+  0 => regex.new("k${i}-[A-Za-z0-9_-]{8,}"),
+  1 => regex.new("(t${i})=([0-9]+)"),
+  2 => regex.new("^#${i}\\b"),
+  _ => regex.new("x${i}(a|b)*y"),
+}
+
+fn scan(rules: List[Regex], line: String) -> String = rules |> list.enumerate |> list.filter_map(((i, r)) => {
+  let all = regex.find_all(r, line)
+  if list.is_empty(all) then none
+  else {
+    let caps = (regex.captures(r, line) ?? []) |> list.map((c) => c ?? "-")
+    some("${i}:${list.join(all, ",")}|${list.join(caps, ",")}|${regex.replace(r, line, "_")}")
+  }
+}) |> list.join(" ; ")
+
+fn main() -> Unit = {
+  let rules = list.range(0, 40) |> list.map((i) => rule(i))
+  let lines = [
+    "token k0-abcdefghij and k4-XYZ_123456 and k8-short",
+    "t1=42 t5=7 t33=900 t9=",
+    "#2 heading",
+    "#22 heading",
+    "x3abbay x7y x39aby x11c",
+    "nothing to see here"
+  ]
+  for round in list.range(0, 3) {
+    for line in lines {
+      println("${round} ${scan(rules, line)}")
+    }
+  }
+  println("matched=${rules |> list.filter((r) => list.any(lines, (l) => regex.is_match(r, l))) |> list.len}")
+}

@@ -231,6 +231,15 @@ nothing is published that `bench.py` did not produce.
   at its last use moves into the result, and the text is written into one
   buffer. `check-perf-ratio.sh` holds native ≤ wasm on this row and on both
   wordfreq rows (the NATIVE <= WASM block).
+- **`regexcycle-8` / `regexcycle-32` are the rule-table rows** (#4392): N
+  `Regex` values applied in turn to every line of a four-line text, the same
+  number of matches at either N. No Rust reference — the relation between the
+  rows is gated (`check-perf-ratio.sh`, REGEX CYCLE, ceiling 1.5x on both
+  legs). 0.69.0-rc1 kept compiled patterns in a 16-entry LRU list, so a cycle
+  of more than 16 recompiled every pattern on every match: 3.27x with the fix
+  reverted against 1.03x with it (GCE n2-standard-4). The native cache now
+  holds 1024 patterns under a hash index and evicts at random when full, so a
+  cycle longer than that still keeps most of it compiled.
 
 ## Run
 

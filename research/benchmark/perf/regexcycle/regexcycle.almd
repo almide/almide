@@ -1,0 +1,37 @@
+// regexcycle (#4392): N Regex values applied in turn to every line, the shape
+// of a secret scanner's rule table. The argument is `N:total` — N patterns and
+// `total` matches in all, so the work per row is the same whatever N is, and
+// `regexcycle-32` / `regexcycle-8` (check-perf-ratio.sh's REGEX CYCLE
+// relation) measures only what applying 32 patterns in turn costs over 8.
+// 0.69.0-rc1 recompiled every pattern on every match once N passed the
+// 16-entry compiled-pattern cache: the relation read 3.27x natively.
+import regex
+import env
+
+fn arg_part(parts: List[String], i: Int, fallback: Int) -> Int = int.parse(list.get(parts, i) ?? "") ?? fallback
+
+effect fn main() -> Unit = {
+  let parts = string.split(list.get(env.args(), 0) ?? "8:1000", ":")
+  let n = arg_part(parts, 0, 8)
+  let total = arg_part(parts, 1, 1000)
+  let rules = list.range(0, n) |> list.map((i) => regex.new("k" + int.to_string(i) + "-[A-Za-z0-9_-]{20,}"))
+  let lines = [
+    "const x = process.env.FOO + 'hello world this is a line of code'",
+    "let token = \"k3-abcdefghijklmnopqrstuvwxyz0123\" // leaked",
+    "fn main() { println(\"k12-short\") }",
+    "url = https://example.com/k7-ABCDEFGHIJKLMNOPQRSTUVWX_yz?q=1"
+  ]
+  let rounds = total / (n * list.len(lines))
+  var hits = 0
+  var chars = 0
+  for _ in list.range(0, rounds) {
+    for line in lines {
+      for r in rules {
+        let found = regex.find_all(r, line)
+        hits = hits + list.len(found)
+        chars = chars + list.fold(found, 0, (acc, s) => acc + string.len(s))
+      }
+    }
+  }
+  println("rounds=${rounds} hits=${hits} chars=${chars}")
+}
