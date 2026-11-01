@@ -23,6 +23,8 @@
      LLen n r s        n := a count of r's block at stride s (0 <= n, s·n <= cap);
      LAlloc h r sz     h := a fresh block, now region r, of capacity >= sz;
      LWf r             the block lies in the 32-bit address space (wasm32);
+     LStatic r b c     region r := the static block at address b of
+                       capacity c (a literal the data segment holds);
      LAsn x l          x := l, with a proof that l does not wrap (an
                        invertible step `x := x + d` keeps every fact on x);
      LSetR x lo hi     x := a value the instruction bounds (a byte load);
@@ -379,6 +381,7 @@ Inductive LProg : Type :=
   | LLen (n r : Slot) (s : Z) (k : LProg)
   | LAlloc (h r : Slot) (sz : Lin) (lo hi : Pf) (k : LProg)
   | LWf (r : Slot) (k : LProg)
+  | LStatic (r : Slot) (b0 c0 : Z) (k : LProg)
   | LSet (x : Slot) (k : LProg)
   | LSetR (x : Slot) (lo hi : Z) (k : LProg)
   | LAsn (x : Slot) (l : Lin) (lo hi : Pf) (k : LProg)
@@ -412,7 +415,7 @@ Definition plook (P : Procs) (f : nat) : option Proc :=
 Fixpoint writes (p : LProg) : list Slot :=
   match p with
   | LEnd | LCont _ | LBrk | LTrap | LRet _ => []
-  | LAcc _ _ _ _ _ _ _ k | LSto _ _ _ _ _ _ _ k | LWf _ k => writes k
+  | LAcc _ _ _ _ _ _ _ k | LSto _ _ _ _ _ _ _ k | LWf _ k | LStatic _ _ _ k => writes k
   | LHandle h _ k | LLen h _ _ k | LAlloc h _ _ _ _ k | LSet h k | LSetR h _ _ k | LAsn h _ _ _ k => h :: writes k
   | LTest _ _ _ _ _ _ thn els k | LBranch thn els k => writes thn ++ writes els ++ writes k
   | LLoop _ _ b k => writes b ++ writes k
@@ -424,7 +427,7 @@ Fixpoint rebinds (p : LProg) : list Slot :=
   | LEnd | LCont _ | LBrk | LTrap | LRet _ => []
   | LAcc _ _ _ _ _ _ _ k | LSto _ _ _ _ _ _ _ k | LWf _ k | LHandle _ _ k | LLen _ _ _ k
   | LSet _ k | LSetR _ _ _ k | LAsn _ _ _ _ k => rebinds k
-  | LAlloc _ r _ _ _ k => r :: rebinds k
+  | LAlloc _ r _ _ _ k | LStatic r _ _ k => r :: rebinds k
   | LTest _ _ _ _ _ _ thn els k | LBranch thn els k => rebinds thn ++ rebinds els ++ rebinds k
   | LLoop _ _ b k => rebinds b ++ rebinds k
   | LCall _ _ _ outs _ _ k => map fst outs ++ rebinds k
@@ -480,6 +483,9 @@ Inductive lrun : Bm -> Env -> LProg -> list Ev -> Out -> Prop :=
       ok b -> wrap (eval (val bm e) sz) <= CAP (lb b) ->
       lrun (bupd bm r b) (upd e h (base b)) k t o -> lrun bm e (LAlloc h r sz lo hi k) t o
   | LRWf : forall bm e r k t o, lrun bm e k t o -> lrun bm e (LWf r k) t o
+  | LRStatic : forall bm e r b0 c0 b k t o,
+      ok b -> base b = b0 -> CAP (lb b) = c0 ->
+      lrun (bupd bm r b) e k t o -> lrun bm e (LStatic r b0 c0 k) t o
   | LRSet : forall bm e x v k t o,
       is_i64 v -> lrun bm (upd e x v) k t o -> lrun bm e (LSet x k) t o
   | LRSetR : forall bm e x lo hi v k t o,
@@ -707,6 +713,7 @@ Fixpoint lcheck (P : Procs) (C : Ctx) (F : Facts) (p : LProg) {struct p} : optio
   | LWf r k =>
       lcheck P C (lneg (v1 (VB r)) :: lneg (v1 (VC r)) ::
                   ladd (ladd (v1 (VB r)) (v1 (VC r))) (kz (PAYLOAD - ADDR + 1)) :: F) k
+  | LStatic r b0 c0 k => lcheck P C (eqs (VB r) (kz b0) ++ eqs (VC r) (kz c0) ++ kill_region F r) k
   | LSet x k => lcheck P C (kill F (VS x)) k
   | LSetR x lo hi k => lcheck P C (lsub (kz lo) (v1 (VS x)) :: lsub (v1 (VS x)) (kz hi) :: kill F (VS x)) k
   | LAsn x l lo hi k => lcheck P C (asn_facts F x l lo hi) k
@@ -1003,6 +1010,8 @@ Proof.
     + rewrite (Hw y (ni_tl _ _ _ Hy)). exact (upd_ni e h _ y _ Hy).
     + rewrite (Hr y (ni_tl _ _ _ Hy)). exact (bupd_ni bm r b y _ Hy).
   - (* Wf *) exact (IHHrun bm2 e2 Hs).
+  - (* Static *) destruct (IHHrun bm2 e2 Hs) as [Hw Hr]. split; intros y Hy; [exact (Hw y Hy) |].
+    rewrite (Hr y (ni_tl _ _ _ Hy)). exact (bupd_ni bm r b y _ Hy).
   - (* Set *) destruct (IHHrun bm2 e2 Hs) as [Hw Hr]. split; intros y Hy; [| apply Hr; exact Hy].
     rewrite (Hw y (ni_tl _ _ _ Hy)). exact (upd_ni e x _ y _ Hy).
   - (* SetR *) destruct (IHHrun bm2 e2 Hs) as [Hw Hr]. split; intros y Hy; [| apply Hr; exact Hy].
@@ -1120,6 +1129,26 @@ Proof.
         lia.
       * unfold kill_region. unfold rho'. apply kill_sound, kill_sound, kill_sound. exact HF.
   - apply i64_upd; [exact Hi | apply base_i64].
+  - intro y. unfold bupd. destruct (Nat.eqb y r); [exact Hb | apply Ho].
+Qed.
+
+Lemma val_static : forall bm e r b v,
+  val lb base (bupd bm r b) e v = rupd (rupd (val lb base bm e) (VB r) (base b)) (VC r) (CAP (lb b)) v.
+Proof.
+  intros bm e r b [y | y | y]; unfold val, rupd, bupd; simpl; [reflexivity | |]; destruct (Nat.eqb y r); reflexivity.
+Qed.
+
+Lemma good_static : forall bm e F r b0 c0 b, good bm e F -> ok b -> base b = b0 -> CAP (lb b) = c0 ->
+  good (bupd bm r b) e (eqs (VB r) (kz b0) ++ eqs (VC r) (kz c0) ++ kill_region F r).
+Proof.
+  intros bm e F r b0 c0 b [HF [Hi Ho]] Hb Hb0 Hc0.
+  set (rho' := rupd (rupd (val lb base bm e) (VB r) (base b)) (VC r) (CAP (lb b))).
+  split; [| split; [exact Hi |]].
+  - apply (lsat_ext rho'); [intro v; symmetry; apply val_static |].
+    repeat apply lsat_app.
+    + apply eqs_sound. evals. unfold rho', rupd. simpl. rewrite Nat.eqb_refl. exact Hb0.
+    + apply eqs_sound. evals. unfold rho', rupd. simpl. rewrite Nat.eqb_refl. exact Hc0.
+    + unfold kill_region, rho'. apply kill_sound, kill_sound. exact HF.
   - intro y. unfold bupd. destruct (Nat.eqb y r); [exact Hb | apply Ho].
 Qed.
 
@@ -1405,6 +1434,7 @@ Proof.
     apply negb_true_iff in Hmh. apply negb_true_iff in Hmb. apply negb_true_iff in Hmc.
     exact (IHHrun C _ rr (good_alloc bm e F h r sz lo hi b Hg H Hnw Hmh Hmb Hmc H0) Hc).
   - (* Wf *) exact (IHHrun C _ rr (good_wf bm e F r Hg) Hc).
+  - (* Static *) exact (IHHrun C _ rr (good_static bm e F r b0 c0 b Hg H H0 H1) Hc).
   - (* Set *) exact (IHHrun C _ rr (good_kill_upd bm e F x v Hg H) Hc).
   - (* SetR *) exact (IHHrun C _ rr (good_setr bm e F x lo hi v Hg H H0) Hc).
   - (* Asn *) exact (IHHrun C _ rr (good_asn bm e F x l lo hi Hg) Hc).

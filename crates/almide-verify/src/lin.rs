@@ -46,6 +46,7 @@ pub(crate) enum Item {
     Len(Nat, Nat, Z),
     Alloc { h: Nat, r: Nat, sz: Lin, lo: Pf, hi: Pf },
     Wf(Nat),
+    Static(Nat, Z, Z),
     Set(Nat),
     SetR(Nat, Z, Z),
     Asn { x: Nat, l: Lin, lo: Pf, hi: Pf },
@@ -235,6 +236,12 @@ fn lprog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
             b'f' => {
                 let (rg, k) = nat_at(s, r)?;
                 (Item::Wf(rg), k)
+            }
+            b'g' => {
+                let (rg, k) = nat_at(s, r)?;
+                let (b0, k) = z_at(s, k)?;
+                let (c0, k) = z_at(s, k)?;
+                (Item::Static(rg, b0, c0), k)
             }
             b's' => {
                 let (x, k) = nat_at(s, r)?;
@@ -538,7 +545,7 @@ fn writes(items: &[Item], out: &mut Vec<Nat>) {
 fn rebinds(items: &[Item], out: &mut Vec<Nat>) {
     for it in items {
         match it {
-            Item::Alloc { r, .. } => out.push(r.clone()),
+            Item::Alloc { r, .. } | Item::Static(r, _, _) => out.push(r.clone()),
             Item::Call { outs, .. } => out.extend(outs.iter().map(|q| q.0.clone())),
             Item::Test { thn, els, .. } | Item::Branch(thn, els) => {
                 rebinds(thn, out);
@@ -672,6 +679,12 @@ fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
                 g.extend(f);
                 f = g;
             }
+            Item::Static(r, b0, c0) => {
+                let mut g = eqs(&Var::B(r.clone()), &kz(b0.clone()));
+                g.extend(eqs(&Var::C(r.clone()), &kz(c0.clone())));
+                g.extend(kill_region(&f, r));
+                f = g;
+            }
             Item::Set(x) => f = kill(&f, &Var::S(x.clone())),
             Item::SetR(x, lo, hi) => {
                 let vx = v1(Var::S(x.clone()));
@@ -767,6 +780,9 @@ mod tests {
         assert!(!check_bounds_cert(b"c0 s0 a0 ; Q3{ | | 0 | R{} }"));
         assert!(!check_bounds_cert(b"Q3{ | | 0 | h0,7 f7 A7,4,4 [s0:1]0 (4:1 0:1)1 (4:1)1 (3:1 1:-1)1 R{} }"));
         assert!(check_bounds_cert(b"Q3{ | | 0 | h0,7 f7 A7,4,4 [s0:1]0 (4:1 0:1)1 (4:1)1 (3:1 1:1)1 R{} }"));
+        let st = |off: &str| format!("Q1{{ | | 0 | g2,144,18756 A2,1,{off} []0 ()1 (0:1)1 (1:1 3:1)1 R{{}} }}");
+        assert!(check_bounds_cert(st("256").as_bytes()));
+        assert!(!check_bounds_cert(st("18912").as_bytes()));
     }
 
     // RoutineLin.v's controls, as bytes: the same programs inside a

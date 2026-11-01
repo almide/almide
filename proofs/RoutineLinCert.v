@@ -27,6 +27,7 @@
              | 'n' N N Z                     LLen n r s
              | 'a' N N lin pf pf             LAlloc h r sz lo hi
              | 'f' N                         LWf r
+             | 'g' N Z Z                     LStatic r b c
              | 's' N                         LSet x
              | 'r' N Z Z                     LSetR x lo hi
              | '=' N lin pf pf               LAsn x l lo hi
@@ -183,6 +184,9 @@ Fixpoint lprog_at (fuel : nat) (cs : list ascii) : option (LProg * list ascii) :
             let* (k, r6) := lprog_at f r5 in Some (LAlloc h rg sz lo hi k, r6)
           else if ch c "f"%char then
             let* (rg, r1) := nat_at r in let* (k, r2) := lprog_at f r1 in Some (LWf rg k, r2)
+          else if ch c "g"%char then
+            let* (rg, r1) := nat_at r in let* (b0, r2) := z_at r1 in let* (c0, r3) := z_at r2 in
+            let* (k, r4) := lprog_at f r3 in Some (LStatic rg b0 c0 k, r4)
           else if ch c "s"%char then
             let* (x, r1) := nat_at r in let* (k, r2) := lprog_at f r1 in Some (LSet x k, r2)
           else if ch c "r"%char then
@@ -389,4 +393,17 @@ Example accepts_recursive_walk : check_lbounds_cert (walk_text "1") = true.
 Proof. reflexivity. Qed.
 
 Example rejects_walk_two_bytes : check_lbounds_cert (walk_text "2") = false.
+Proof. reflexivity. Qed.
+
+(* A read of a static literal block: region 2 := the block at 144 of
+   capacity 18756, the byte at payload offset 100 (address 256). Facts:
+   0 `b2 - 144`, 1 `144 - b2`, 2 `c2 - 18756`, 3 `18756 - c2`. One byte
+   past the capacity is refused. *)
+Definition static_text (off : string) : string :=
+  "Q1{ | | 0 | g2,144,18756 A2,1," ++ off ++ " []0 ()1 (0:1)1 (1:1 3:1)1 R{} }".
+
+Example accepts_static_read : check_lbounds_cert (static_text "256") = true.
+Proof. reflexivity. Qed.
+
+Example rejects_static_past_cap : check_lbounds_cert (static_text "18912") = false.
 Proof. reflexivity. Qed.
