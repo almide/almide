@@ -87,3 +87,12 @@ pub fn text_by_wasi(errno: u16) -> Option<&'static str> {
 pub const WRITE_ZERO_TEXT: &str = "failed to write whole buffer";
 /// Rust's own `read_to_string` `InvalidData` message — likewise host-independent.
 pub const INVALID_UTF8_TEXT: &str = "stream did not contain valid UTF-8";
+
+/// A HOST-LIMITATION row (#4391 rule 4): WASI `ilseq` (25), which a stock
+/// runtime answers when a directory holds an entry whose name is not UTF-8
+/// (wasmtime's `fd_readdir` refuses the whole listing). Native lists such a
+/// name as its lossy decode, so no native leg answers this: it is the wasm
+/// renderers' classified text for a refusal they cannot get past, never a
+/// raw `wasi errno 25`.
+pub const FS_HOST_ILSEQ_WASI: u16 = 25;
+pub const FS_HOST_ILSEQ_TEXT: &str = "the WASI host refuses a name that is not valid UTF-8";

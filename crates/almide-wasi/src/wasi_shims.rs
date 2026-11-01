@@ -511,7 +511,9 @@ fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, log: env_overlay::OverlayLo
     let (a_ptr, a_len) = (1u32, 2u32);
     let (p, endp, klen, vlen, best, j, s, count) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32);
     let (stage, need) = (13u32, 14u32);
-    let mut f = Function::new([(10, ValType::I32)]);
+    // 15..=24 = the UTF-8 check's scratch, 25 = bad, 26 = its byte count.
+    let (ll, bad, nbytes) = (lossy_locals(15), 25u32, 26u32);
+    let mut f = Function::new([(22, ValType::I32)]);
     let mut i = f.instructions();
 
     // ── overlay scan (one entry per name) ──
@@ -551,6 +553,13 @@ fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, log: env_overlay::OverlayLo
     i.local_get(s).local_get(vlen).i32_add().i32_load8_u(mem8(0)).i32_eqz().br_if(1);
     i.local_get(vlen).i32_const(1).i32_add().local_set(vlen);
     i.br(0).end().end();
+    // A value that is not UTF-8 is `none`, as native's `std::env::var(..).ok()`
+    // answers (C-133, #4391): the host's bytes never become a String.
+    i.i32_const(0).local_set(bad);
+    crate::utf8_lossy::emit_lossy(&mut i, (s, vlen), nbytes, None, Some(bad), ll);
+    i.local_get(bad).if_(BlockType::Empty);
+    i.i64_const(2).i64_const(32).i64_shl().return_();
+    i.end();
     i.local_get(s).global_set(g_ppos);
     i.local_get(vlen).global_set(g_plen);
     i.local_get(vlen).i64_extend_i32_u().return_();
@@ -594,7 +603,11 @@ fn shim_frames(park: u64, (g_plen, g_ppos): (u32, u32), (i_sizes, i_get): (u32, 
     // 15=klen 16=vlen
     let (argc, idx, s, n, out, frames_base) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
     let (stage, need) = (11u32, 12u32);
-    let mut f = Function::new([(if ovl.is_some() { 12 } else { 8 }, ValType::I32)]);
+    // Past the frame locals: the UTF-8 walk's scratch, bad, its byte count
+    // and the write position.
+    let base = 5 + if ovl.is_some() { 12 } else { 8 };
+    let (ll, bad, nbytes, wpos) = (lossy_locals(base), base + 10, base + 11, base + 12);
+    let mut f = Function::new([(base - 5 + 13, ValType::I32)]);
     let mut i = f.instructions();
     i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // args_sizes_get
     i.if_(BlockType::Empty);
@@ -606,8 +619,9 @@ fn shim_frames(park: u64, (g_plen, g_ppos): (u32, u32), (i_sizes, i_get): (u32, 
     // is argc*4 + bufsize; frames need at most bufsize + 4*argc more. An argv
     // past the park's page stages above the heap instead of answering the
     // empty list for a process that WAS given arguments (#2120).
+    // A lossily decoded argv frame takes at most 3 bytes per byte in.
     i.local_get(argc).i32_const(8).i32_mul();
-    i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_const(2).i32_mul().i32_add().local_set(need);
+    i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_const(4).i32_mul().i32_add().local_set(need);
     // The overlay's frames are each shorter than their log entry.
     if let Some(log) = ovl {
         i.local_get(need).global_get(log.g_len).i32_add().local_set(need);
@@ -634,9 +648,25 @@ fn shim_frames(park: u64, (g_plen, g_ppos): (u32, u32), (i_sizes, i_get): (u32, 
     i.local_get(s).local_get(n).i32_add().i32_load8_u(mem8(0)).i32_eqz().br_if(1);
     i.local_get(n).i32_const(1).i32_add().local_set(n);
     i.br(0).end().end();
-    i.local_get(out).local_get(n).i32_store(mem(0));
-    i.local_get(out).i32_const(4).i32_add().local_get(s).local_get(n).memory_copy(0, 0);
-    i.local_get(out).i32_const(4).i32_add().local_get(n).i32_add().local_set(out);
+    if ovl.is_some() {
+        // An environ string that is not UTF-8 is left out, as native's
+        // `env.vars` leaves a variable `env::var` cannot read (#4391).
+        i.i32_const(0).local_set(bad);
+        crate::utf8_lossy::emit_lossy(&mut i, (s, n), nbytes, None, Some(bad), ll);
+        i.local_get(bad).i32_eqz().if_(BlockType::Empty);
+        i.local_get(out).local_get(n).i32_store(mem(0));
+        i.local_get(out).i32_const(4).i32_add().local_get(s).local_get(n).memory_copy(0, 0);
+        i.local_get(out).i32_const(4).i32_add().local_get(n).i32_add().local_set(out);
+        i.end();
+    } else {
+        // An argument that is not UTF-8 is its lossy decode, as native's
+        // `env.args` gives it (#4391 rule 1).
+        i.i32_const(0).local_set(nbytes);
+        i.i32_const(4).local_set(wpos);
+        crate::utf8_lossy::emit_lossy(&mut i, (s, n), nbytes, Some((out, wpos)), None, ll);
+        i.local_get(out).local_get(nbytes).i32_store(mem(0));
+        i.local_get(out).local_get(wpos).i32_add().local_set(out);
+    }
     i.local_get(idx).i32_const(1).i32_add().local_set(idx);
     i.br(0).end().end();
     if let Some(log) = ovl {
@@ -651,4 +681,20 @@ fn shim_frames(park: u64, (g_plen, g_ppos): (u32, u32), (i_sizes, i_get): (u32, 
     i.unreachable();
     i.end();
     f
+}
+
+/// The UTF-8 walk's ten scratch locals from `base` on.
+fn lossy_locals(base: u32) -> crate::utf8_lossy::LossyLocals {
+    crate::utf8_lossy::LossyLocals {
+        k: base,
+        b0: base + 1,
+        extra: base + 2,
+        lo: base + 3,
+        hi: base + 4,
+        vlen: base + 5,
+        ok: base + 6,
+        j: base + 7,
+        c: base + 8,
+        chars: base + 9,
+    }
 }

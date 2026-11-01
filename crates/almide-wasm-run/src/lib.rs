@@ -29,6 +29,9 @@ pub use host_fs_scope::{scope as fs_scope, set_scope as set_fs_scope};
 /// The stock-WASI transform (`to_wasi`, `P1_SERVED_OPS`, …): its own crate
 /// since #2554 (it never needed the engine); the path stays.
 pub use almide_wasi as wasi;
+// The engine itself, for tests that host a stock artifact on imports of their
+// own (tests/stock_p1_raw_bytes_test.rs, #4391).
+pub use wasmtime;
 pub mod wasi_p2;
 pub mod wasi_p3;
 

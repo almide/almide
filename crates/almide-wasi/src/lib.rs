@@ -80,6 +80,7 @@ pub const P1_SERVED_OPS: &[i32] = &[
 
 pub mod env_overlay;
 pub mod fs_service;
+pub mod utf8_lossy;
 mod proc_service;
 mod prune;
 pub use proc_service::{is_proc_op, proc_case, proc_op_of_case, wants_proc, PROC_CHILD_OPS, PROC_OPS};

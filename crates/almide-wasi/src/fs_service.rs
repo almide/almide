@@ -189,9 +189,12 @@ pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
     }
     // The bounded reader's two refusals (#4201) under pseudo-errnos past
     // every WASI code: `$read_fd` answers them, the texts are almide-base's.
+    // The host-limitation row (#4391): a stock runtime's `ilseq` refusal of
+    // a name that is not UTF-8, classified instead of `wasi errno 25`.
     for (code, text) in [
         (1001, almide_base::fs_errno::FS_READ_NOT_REGULAR_TEXT),
         (1002, almide_base::fs_errno::FS_READ_TOO_LARGE_TEXT),
+        (u32::from(almide_base::fs_errno::FS_HOST_ILSEQ_WASI), almide_base::fs_errno::FS_HOST_ILSEQ_TEXT),
     ] {
         let (at, len) = place(text.as_bytes());
         tail.push_str(&format!(

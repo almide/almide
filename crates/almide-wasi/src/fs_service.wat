@@ -685,7 +685,60 @@
       (br $next)))
     (local.get $i))
 
-  ;; `str::lines` as frames: split on '\n', a '\r' before the '\n' dropped,
+  ;; `String::from_utf8_lossy` of (p, n) written at dst: each well-formed
+  ;; sequence copied, one U+FFFD per maximal invalid subpart (#4391 rule 2,
+  ;; what native's `to_string_lossy` gives a directory entry's name). At most
+  ;; 3 bytes out per byte in; answers the bytes written.
+  (func $lossy_copy (param $dst i32) (param $p i32) (param $n i32) (result i32)
+    (local $i i32) (local $w i32) (local $b0 i32) (local $c i32) (local $x i32) (local $lo i32) (local $hi i32) (local $v i32) (local $j i32)
+    (block $done (loop $next
+      (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+      (local.set $b0 (i32.load8_u (i32.add (local.get $p) (local.get $i))))
+      (local.set $x (i32.const 0))
+      (local.set $lo (i32.const 128))
+      (local.set $hi (i32.const 191))
+      (if (i32.lt_u (local.get $b0) (i32.const 128))
+        (then
+          (i32.store8 (i32.add (local.get $dst) (local.get $w)) (local.get $b0))
+          (local.set $w (i32.add (local.get $w) (i32.const 1)))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $next)))
+      (if (i32.and (i32.ge_u (local.get $b0) (i32.const 194)) (i32.le_u (local.get $b0) (i32.const 223)))
+        (then (local.set $x (i32.const 1))))
+      (if (i32.and (i32.ge_u (local.get $b0) (i32.const 224)) (i32.le_u (local.get $b0) (i32.const 239)))
+        (then (local.set $x (i32.const 2))))
+      (if (i32.and (i32.ge_u (local.get $b0) (i32.const 240)) (i32.le_u (local.get $b0) (i32.const 244)))
+        (then (local.set $x (i32.const 3))))
+      (if (i32.eq (local.get $b0) (i32.const 224)) (then (local.set $lo (i32.const 160))))
+      (if (i32.eq (local.get $b0) (i32.const 237)) (then (local.set $hi (i32.const 159))))
+      (if (i32.eq (local.get $b0) (i32.const 240)) (then (local.set $lo (i32.const 144))))
+      (if (i32.eq (local.get $b0) (i32.const 244)) (then (local.set $hi (i32.const 143))))
+      ;; v = the bytes this unit consumes: the lead plus each valid continuation
+      (local.set $v (i32.const 1))
+      (local.set $j (i32.const 1))
+      (block $cdone (loop $cnext
+        (br_if $cdone (i32.gt_u (local.get $j) (local.get $x)))
+        (br_if $cdone (i32.ge_u (i32.add (local.get $i) (local.get $j)) (local.get $n)))
+        (local.set $c (i32.load8_u (i32.add (local.get $p) (i32.add (local.get $i) (local.get $j)))))
+        (br_if $cdone (i32.lt_u (local.get $c) (select (local.get $lo) (i32.const 128) (i32.eq (local.get $j) (i32.const 1)))))
+        (br_if $cdone (i32.gt_u (local.get $c) (select (local.get $hi) (i32.const 191) (i32.eq (local.get $j) (i32.const 1)))))
+        (local.set $v (i32.add (local.get $v) (i32.const 1)))
+        (local.set $j (i32.add (local.get $j) (i32.const 1)))
+        (br $cnext)))
+      (if (i32.and (i32.ne (local.get $x) (i32.const 0)) (i32.eq (local.get $v) (i32.add (local.get $x) (i32.const 1))))
+        (then
+          (memory.copy (i32.add (local.get $dst) (local.get $w)) (i32.add (local.get $p) (local.get $i)) (local.get $v))
+          (local.set $w (i32.add (local.get $w) (local.get $v))))
+        (else
+          (i32.store8 (i32.add (local.get $dst) (local.get $w)) (i32.const 0xEF))
+          (i32.store8 offset=1 (i32.add (local.get $dst) (local.get $w)) (i32.const 0xBF))
+          (i32.store8 offset=2 (i32.add (local.get $dst) (local.get $w)) (i32.const 0xBD))
+          (local.set $w (i32.add (local.get $w) (i32.const 3)))))
+      (local.set $i (i32.add (local.get $i) (local.get $v)))
+      (br $next)))
+    (local.get $w))
+
+    ;; `str::lines` as frames: split on '\n', a '\r' before the '\n' dropped,
   ;; no phantom line after a trailing newline (C-225).
   (func $lines (param $p i32) (param $l i32) (result i32 i32)
     (local $i i32) (local $s i32) (local $cnt i32) (local $out i32) (local $w i32) (local $e i32)
@@ -1025,10 +1078,17 @@
         (local.set $cookie (i64.load (i32.add (local.get $buf) (local.get $off))))
         (if (i32.eqz (call $is_dot (local.get $np) (local.get $nl)))
           (then
-            (local.set $node (call $alloc (i32.add (local.get $nl) (i32.const 8))))
+            ;; A name that is not UTF-8 is listed as its lossy decode (#4391).
+            (if (call $utf8_ok (local.get $np) (local.get $nl))
+              (then
+                (local.set $node (call $alloc (i32.add (local.get $nl) (i32.const 8))))
+                (i32.store offset=4 (local.get $node) (local.get $nl))
+                (memory.copy (i32.add (local.get $node) (i32.const 8)) (local.get $np) (local.get $nl)))
+              (else
+                (local.set $node (call $alloc (i32.add (i32.mul (local.get $nl) (i32.const 3)) (i32.const 8))))
+                (i32.store offset=4 (local.get $node)
+                  (call $lossy_copy (i32.add (local.get $node) (i32.const 8)) (local.get $np) (local.get $nl)))))
             (i32.store (local.get $node) (i32.const 0))
-            (i32.store offset=4 (local.get $node) (local.get $nl))
-            (memory.copy (i32.add (local.get $node) (i32.const 8)) (local.get $np) (local.get $nl))
             (if (local.get $tail)
               (then (i32.store (local.get $tail) (local.get $node)))
               (else (local.set $head (local.get $node))))
