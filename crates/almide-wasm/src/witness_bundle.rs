@@ -91,7 +91,7 @@ fn records_inner(
     let hold_anchors = super::bounds::take_holds();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
-    let seals = super::anchor::take();
+    let (seals, remaps) = super::anchor::take_all();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
 
     let mut records = Vec::new();
@@ -122,7 +122,7 @@ fn records_inner(
     let anchor_file = match fmap {
         None => String::new(),
         Some(fmap) => {
-    let locate = Locator::new(emitted, shipped, seals, fmap)?;
+    let locate = Locator::new(emitted, shipped, seals, remaps, fmap)?;
     format!(
         "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
         {
@@ -276,6 +276,9 @@ struct Locator {
     ords: std::collections::HashMap<usize, Vec<usize>>,
     /// Emitted global index -> shipped, read off the paired bodies.
     globals: std::collections::HashMap<u32, u32>,
+    /// Per serial of a body rewritten after sealing (tco.rs), its recorded
+    /// end offsets -> the rewritten body's (witness_anchor.rs `retarget`).
+    remaps: std::collections::HashMap<u64, std::collections::HashMap<usize, usize>>,
 }
 
 /// Each emitted instruction's index in the shipped body: the two walk in
@@ -343,6 +346,7 @@ impl Locator {
         emitted: &[u8],
         shipped: &[u8],
         seals: std::collections::HashMap<u64, u64>,
+        remaps: std::collections::HashMap<u64, std::collections::HashMap<usize, usize>>,
         fmap: &[Option<u32>],
     ) -> Result<Self, String> {
         let em = bodies(emitted)?;
@@ -366,13 +370,14 @@ impl Locator {
                 ords.insert(i, align(&em[i].0, sraw, &mut globals)?);
             }
         }
-        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords, globals })
+        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords, globals, remaps })
     }
 
     /// Body `serial`'s instructions between byte offsets `from` and `to`, as
     /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
     /// `None` for a body that did not ship or an empty window.
     fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
+        let (from, to) = (self.remap(serial, from)?, self.remap(serial, to)?);
         let &i = self.pos.get(&serial)?;
         let j = self.ships_at[i]?;
         let ends = &self.ends[i];
@@ -403,9 +408,18 @@ impl Locator {
         self.pos.get(&serial).and_then(|&i| self.ships_at[i])
     }
 
+    /// A recorded end offset of body `serial` in the body that shipped.
+    fn remap(&self, serial: u64, off: usize) -> Option<usize> {
+        match self.remaps.get(&serial) {
+            Some(m) => m.get(&off).copied(),
+            None => Some(off),
+        }
+    }
+
     fn token(&self, t: &str) -> String {
         let Some((k, off)) = t.split_once('@') else { return "-".to_string() };
         let (Ok(k), Ok(off)) = (k.parse::<u64>(), off.parse::<usize>()) else { return "?".to_string() };
+        let Some(off) = self.remap(k, off) else { return "?".to_string() };
         let Some(&i) = self.pos.get(&k) else { return "-".to_string() };
         let Some(j) = self.ships_at[i] else { return "-".to_string() };
         match self.ends[i].iter().position(|&e| e == off) {

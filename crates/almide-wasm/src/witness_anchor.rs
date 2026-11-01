@@ -31,6 +31,10 @@ struct State {
     /// emitted while another is open).
     open: Vec<u64>,
     sealed: HashMap<u64, u64>,
+    /// A sealed body rewritten after sealing (the self-tail-call loop
+    /// conversion, tco.rs): its recorded end offsets, mapped to the end
+    /// offsets of the instructions they became.
+    remaps: HashMap<u64, HashMap<usize, usize>>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -99,12 +103,65 @@ pub(crate) fn seal(k: u64, f: &wasm_encoder::Function) {
     s.sealed.insert(k, body_digest(&v[skip..]));
 }
 
-/// The sealed bodies, `serial -> digest`.
-pub fn take() -> HashMap<u64, u64> {
+fn encoded(f: &wasm_encoder::Function) -> Vec<u8> {
+    let mut v = Vec::new();
+    wasm_encoder::Encode::encode(f, &mut v);
+    let skip = v.iter().position(|b| b & 0x80 == 0).map_or(0, |i| i + 1);
+    v.split_off(skip)
+}
+
+/// The end offset of each instruction of an encoded body (locals skipped).
+fn ends(raw: &[u8]) -> Option<Vec<usize>> {
+    let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(raw, 0));
+    let mut r = body.get_operators_reader().ok()?;
+    let mut out = Vec::new();
+    while !r.eof() {
+        r.read().ok()?;
+        out.push(r.original_position());
+    }
+    Some(out)
+}
+
+/// A sealed body `old` was rewritten into `new` (tco.rs `loop_convert`;
+/// `origin[n]` is the instruction of `old` that `new`'s instruction `n` came
+/// from). Every body sealed as `old` now names `new`, and each recorded end
+/// offset maps to the end of the LAST instruction its instruction became —
+/// a rewritten self tail call's `br`, any other instruction itself.
+pub(crate) fn retarget(old: &wasm_encoder::Function, new: &wasm_encoder::Function, origin: &[u32]) {
+    let mut g = state().lock().expect("anchor sink");
+    let Some(s) = g.as_mut() else { return };
+    let (ro, rn) = (encoded(old), encoded(new));
+    let d = body_digest(&ro);
+    let serials: Vec<u64> = s.sealed.iter().filter(|&(_, &v)| v == d).map(|(&k, _)| k).collect();
+    if serials.is_empty() {
+        return;
+    }
+    let (Some(eo), Some(en)) = (ends(&ro), ends(&rn)) else { return };
+    let mut map = HashMap::new();
+    for (n, &o) in origin.iter().enumerate() {
+        if let (Some(&from), Some(&to)) = (eo.get(o as usize), en.get(n)) {
+            map.insert(from, to);
+        }
+    }
+    let dn = body_digest(&rn);
+    for k in serials {
+        s.sealed.insert(k, dn);
+        s.remaps.insert(k, map.clone());
+    }
+}
+
+/// The sealed bodies, `serial -> digest`, and the remapped offsets of the
+/// bodies rewritten after sealing.
+pub fn take_all() -> (HashMap<u64, u64>, HashMap<u64, HashMap<usize, usize>>) {
     state()
         .lock()
         .expect("anchor sink")
         .take()
-        .map(|s| s.sealed)
+        .map(|s| (s.sealed, s.remaps))
         .unwrap_or_default()
+}
+
+/// The sealed bodies, `serial -> digest`.
+pub fn take() -> HashMap<u64, u64> {
+    take_all().0
 }

@@ -368,7 +368,10 @@ fn emit_program_pass(
                                 let rvt = info.ret.map(SliceTy::val_type);
                                 let mut origin = Vec::new();
                                 tco::loop_convert(&body, &pvts, rvt, info.wasm_index, &mut origin)
-                                    .inspect(|_| dbg.remap(debug_lines::Body::Program(i), &origin))
+                                    .inspect(|new| {
+                                        dbg.remap(debug_lines::Body::Program(i), &origin);
+                                        crate::witness::anchor::retarget(&body, new, &origin);
+                                    })
                                     .unwrap_or(body)
                             } else {
                                 body
