@@ -2,13 +2,12 @@
    BYTES, riding inside the existing `bounds` witness (no bundle format
    change).
 
-   A self-host body's procedure (RoutineProcs.v) travels in its function's
-   bounds witness as a stretch that begins with `P`. Within one witness a
-   procedure stretch is only PARSED (`check_pbounds_cert`: every other
-   stretch is parsed and judged exactly as `check_rbounds_cert` judges it,
-   `check_pbounds_cert_sound`);
-   its verdict is the BUNDLE's: `check_procs_bundle` gathers the procedure
-   stretches of every witness of one build into one table and accepts when
+   The structural leg writes ONE bounds witness per program, every
+   function's stretches joined by `;`. A self-host body's procedure
+   (RoutineProcs.v) travels in it as a stretch that begins with `P`.
+   `check_pbounds_cert` judges every other stretch exactly as
+   `check_rbounds_cert` does, and gathers the procedure stretches into one
+   table, keyed by function id: it accepts when no id is declared twice and
    every procedure's body is accepted under its declared precondition, its
    calls proving their callees' (`procs_ok`). That a procedure with a
    non-empty precondition is called only from such bodies is held per build
@@ -324,74 +323,46 @@ Definition pstretch_ok (x : PStretch) : bool :=
   | PProc _ => true
   end.
 
-(* The `bounds` property's per-witness checker from A4 items 4–5 on: the
-   procedure stretches only parsed here, their verdict the bundle's. *)
-Definition check_pbounds_cert (s : string) : bool :=
-  match parse_pstretches s with
-  | Some ps => forallb pstretch_ok ps
-  | None => false
-  end.
-
 Definition procs_of (ps : list PStretch) : RoutineProcs.Procs :=
   flat_map (fun x => match x with PProc d => [d] | POld _ => [] end) ps.
 
-(* The bundle's procedure verdict: every witness parses, no id is declared
-   twice, and every procedure is accepted under its precondition. *)
 Fixpoint nodup_ids (P : RoutineProcs.Procs) : bool :=
   match P with
   | [] => true
   | (f, _) :: r => negb (existsb (fun q => Nat.eqb (fst q) f) r) && nodup_ids r
   end.
 
-Definition bundle_procs (ws : list string) : option RoutineProcs.Procs :=
-  fold_right (fun w acc =>
-    match acc, parse_pstretches w with
-    | Some p, Some ps => Some (procs_of ps ++ p)
-    | _, _ => None
-    end) (Some []) ws.
-
-Definition check_procs_bundle (ws : list string) : bool :=
-  match bundle_procs ws with
-  | Some P => nodup_ids P && RoutineProcs.procs_ok P
+(* The `bounds` property's checker from A4 items 4–5 on. *)
+Definition check_pbounds_cert (s : string) : bool :=
+  match parse_pstretches s with
+  | Some ps => forallb pstretch_ok ps && nodup_ids (procs_of ps) && RoutineProcs.procs_ok (procs_of ps)
   | None => false
   end.
 
 (* ── Soundness ────────────────────────────────────────────────────────── *)
 
-(* What the bundle's ACCEPT means: in the table it declares, every
-   procedure's every run from a state meeting its precondition — through
-   any depth of calls and recursion — reads and writes only inside its
-   blocks, with its blocks' representation. *)
-Theorem check_procs_bundle_sound : forall ws,
-  check_procs_bundle ws = true ->
-  exists P, bundle_procs ws = Some P /\ RoutineProcs.procs_ok P = true /\
-    forall f gs kq cq nq body lb ok bm e t o,
-      RoutineProcs.plook P f = Some (gs, (kq, cq, nq), body) ->
-      RoutineProcs.wf_lay lb -> (forall y, ok (bm y)) -> RoutineBounds.i64 e ->
-      RoutineProcs.resp gs bm -> RoutineProcs.psound lb bm kq cq nq e ->
-      RoutineProcs.prun P lb ok bm e body t o ->
-      Forall (RoutineProcs.pin lb ok) t.
-Proof.
-  intros ws H. unfold check_procs_bundle in H.
-  destruct (bundle_procs ws) as [P |] eqn:Hb; [| discriminate].
-  apply andb_true_iff in H. destruct H as [_ HP].
-  exists P. split; [reflexivity | split; [exact HP |]].
-  intros f gs kq cq nq body lb ok bm e t o Hf Hwf Hok Hi Hr Hs Hrun.
-  destruct (RoutineProcs.procs_ok_body P f gs (kq, cq, nq) body HP Hf) as [rb Hrb]. simpl in Hrb.
-  exact (proj1 (RoutineProcs.prun_sound P lb ok bm e body t o Hrun HP Hwf Hok Hi gs kq cq nq rb Hr Hs Hrb)).
-Qed.
-Print Assumptions check_procs_bundle_sound.
-
-(* And per witness: the old stretches keep their meaning. *)
+(* What ACCEPT means: every old stretch keeps its meaning (a list stretch
+   Spatial by SpatialCert, a routine stretch by RoutineBounds), and in the
+   table the witness declares, every procedure's every run from a state
+   meeting its precondition — through any depth of calls and recursion —
+   reads and writes only inside its blocks, with their representation. *)
 Theorem check_pbounds_cert_sound : forall s,
   check_pbounds_cert s = true ->
-  exists ps, parse_pstretches s = Some ps /\
-    (forall x, In (POld x) ps -> RoutineBoundsCert.stretch_ok x = true).
+  exists ps, parse_pstretches s = Some ps /    (forall x, In (POld x) ps -> RoutineBoundsCert.stretch_ok x = true) /    forall f gs kq cq nq body lb ok bm e t o,
+      RoutineProcs.plook (procs_of ps) f = Some (gs, (kq, cq, nq), body) ->
+      RoutineProcs.wf_lay lb -> (forall y, ok (bm y)) -> RoutineBounds.i64 e ->
+      RoutineProcs.resp gs bm -> RoutineProcs.psound lb bm kq cq nq e ->
+      RoutineProcs.prun (procs_of ps) lb ok bm e body t o ->
+      Forall (RoutineProcs.pin lb ok) t.
 Proof.
   intros s H. unfold check_pbounds_cert in H.
   destruct (parse_pstretches s) as [ps |] eqn:Hp; [| discriminate].
-  exists ps. split; [reflexivity |]. rewrite forallb_forall in H.
-  intros x Hin. exact (H _ Hin).
+  rewrite !andb_true_iff in H. destruct H as [[Hold _] HP].
+  exists ps. split; [reflexivity | split].
+  - rewrite forallb_forall in Hold. intros x Hin. exact (Hold _ Hin).
+  - intros f gs kq cq nq body lb ok bm e t o Hf Hwf Hok Hi Hr Hs Hrun.
+    destruct (RoutineProcs.procs_ok_body _ f gs (kq, cq, nq) body HP Hf) as [rb Hrb]. simpl in Hrb.
+    exact (proj1 (RoutineProcs.prun_sound _ lb ok bm e body t o Hrun HP Hwf Hok Hi gs kq cq nq rb Hr Hs Hrb)).
 Qed.
 Print Assumptions check_pbounds_cert_sound.
 
@@ -409,25 +380,26 @@ Proof. repeat split; reflexivity. Qed.
 Definition copy_text : string :=
   "P7{ 3:2 | | 1,2,8 | 2 | B{ | C2,1,8 a2,8,0,8 t3,2,1,8 F7{1:1 2:3} } }".
 
-Example accepts_copy_bundle :
-  check_pbounds_cert copy_text = true /\ check_procs_bundle [copy_text; "c0 a0"] = true.
+Example accepts_copy :
+  check_pbounds_cert copy_text = true /\ check_pbounds_cert (String.append "c0 a0 ; " copy_text) = true.
 Proof. split; reflexivity. Qed.
 
 (* The same body without the not-negative precondition: the signed test is
-   refused, in the bundle (the witness alone still parses). *)
+   refused. *)
 Example rejects_copy_unsigned_fact :
-  check_pbounds_cert "P7{ 3:2 | | 1,2,8 | | B{ | C2,1,8 a2,8,0,8 t3,2,1,8 F7{1:1 2:3} } }" = true /\
-  check_procs_bundle ["P7{ 3:2 | | 1,2,8 | | B{ | C2,1,8 a2,8,0,8 t3,2,1,8 F7{1:1 2:3} } }"] = false.
-Proof. split; reflexivity. Qed.
+  check_pbounds_cert "P7{ 3:2 | | 1,2,8 | | B{ | C2,1,8 a2,8,0,8 t3,2,1,8 F7{1:1 2:3} } }" = false.
+Proof. reflexivity. Qed.
 
-(* A call of a procedure no witness of the bundle declares: refused. *)
-Example rejects_undeclared_callee :
-  check_procs_bundle ["P7{ | | | | F8{} }"] = false.
+(* A call of a procedure the witness does not declare: refused. *)
+Example rejects_undeclared_callee : check_pbounds_cert "P7{ | | | | F8{} }" = false.
 Proof. reflexivity. Qed.
 
 (* One id declared twice: refused. *)
-Example rejects_duplicate_id :
-  check_procs_bundle ["P7{ | | | | }"; "P7{ | | | | }"] = false.
+Example rejects_duplicate_id : check_pbounds_cert "P7{ | | | | } ; P7{ | | | | }" = false.
+Proof. reflexivity. Qed.
+
+(* A procedure stretch beside a refused old stretch: refused. *)
+Example rejects_old_stretch_beside : check_pbounds_cert (String.append "R a0,1,0,1 ; " copy_text) = false.
 Proof. reflexivity. Qed.
 
 (* Malformed procedure bytes: refused per witness. *)
