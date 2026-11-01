@@ -68,6 +68,6 @@ fn a_slot_read_again_or_in_a_loop_is_copied() {
     );
     same(
         "tuple_loop",
-        "fn main() -> Unit = {\n  let t: (Int, String) = (4, \"xy\")\n  var acc = \"\"\n  for i in 0..3 {\n    acc = acc + t.1\n  }\n  println(acc)\n}\n",
+        "fn main() -> Unit = {\n  let t: (Int, String) = (4, \"xy\")\n  var acc = \"\"\n  for i in 0..<3 {\n    acc = acc + t.1\n  }\n  println(acc)\n}\n",
     );
 }
