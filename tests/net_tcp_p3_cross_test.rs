@@ -57,7 +57,10 @@ fn tcp_fixtures_run_alike_on_native_and_the_p3_component() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
     let scratch = tempfile::tempdir().expect("tempdir");
     let mut problems = Vec::new();
-    for name in ["net_tcp_loopback", "net_tcp_errors", "net_tcp_timeouts", "net_tcp_fan_handles", "net_huge_read_lengths"] {
+    // spec/embedded_cross/net_huge_read_lengths.almd is not here: it drives
+    // the unix family too, which WASI has no interface for (E081 on every
+    // stock artifact).
+    for name in ["net_tcp_loopback", "net_tcp_errors", "net_tcp_timeouts", "net_tcp_fan_handles"] {
         let src = dir.join(format!("{name}.almd"));
         let mut native = Command::new(almide_bin());
         native.arg("run").arg(&src);
