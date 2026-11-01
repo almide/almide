@@ -1,5 +1,5 @@
 // @leg: structural
-// @contract: C-XXX
+// @contract: C-446
 // #4354 (ADR-0031 amendment A1, A4 push): an `@export(wasm)` fn returning a
 // Region crosses as `(ptr, len)` through wasm's multi-value return, in the
 // memory's address width (two i32 on wasm32). The pair is the view's data
