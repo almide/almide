@@ -155,7 +155,7 @@ fn the_stock_artifact_reads_non_utf8_host_bytes_as_native_does() {
         .output()
         .expect("native");
     let native = (String::from_utf8_lossy(&native.stdout).into_owned(), native.status.code().unwrap_or(-1));
-    let want = "args=[[97, 239, 191, 189, 98]]\nbad none\nok some fine\nlisted bad=false ok=true\n";
+    let want = "args=[\"[97, 239, 191, 189, 98]\"]\nbad none\nok some fine\nlisted bad=false ok=true\n";
     assert_eq!(native, (want.to_string(), 0), "native");
     let mut bad = b"A4391_BAD=".to_vec();
     bad.extend_from_slice(RAW);

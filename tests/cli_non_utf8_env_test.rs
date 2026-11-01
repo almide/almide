@@ -95,7 +95,7 @@ effect fn main() -> Unit = println("${env.args() |> list.map((a) => hx(a))}")
     assert_eq!(built.0, Some(0), "almide build: {}", built.2);
     // #4391 rule 1: the built binary, `almide run` and `almide run --target
     // wasm` all hand the program the argument's lossy decode.
-    let want = "[[97, 239, 191, 189, 98]]\n";
+    let want = "[\"[97, 239, 191, 189, 98]\"]\n";
     let (code, out, err) = seen(Command::new(&bin).arg(OsStr::from_bytes(b"a\x80b")));
     assert_eq!((code, out.as_str()), (Some(0), want), "built binary:\n{err}");
     for target in [None, Some("wasm")] {
@@ -157,9 +157,9 @@ effect fn main() -> Unit = {{
     .unwrap();
     let pre = dir.bytes().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
     let want = format!(
-        "list ok [[102, 239, 191, 189, 103], [111, 107]]\n\
-         walk ok [[{pre}, 47, 102, 239, 191, 189, 103], [{pre}, 47, 111, 107]]\n\
-         glob ok [[{pre}, 47, 102, 239, 191, 189, 103], [{pre}, 47, 111, 107]]\n"
+        "list ok [\"[102, 239, 191, 189, 103]\", \"[111, 107]\"]\n\
+         walk ok [\"[{pre}, 47, 102, 239, 191, 189, 103]\", \"[{pre}, 47, 111, 107]\"]\n\
+         glob ok [\"[{pre}, 47, 102, 239, 191, 189, 103]\", \"[{pre}, 47, 111, 107]\"]\n"
     );
     for target in [None, Some("wasm")] {
         let mut c = Command::new(almide());
