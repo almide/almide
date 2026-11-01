@@ -260,7 +260,7 @@ pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == name) {
             return i as u16;
         }
-        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, alias: None, default_tag: None });
+        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, alias: None, default_tag: None });
         (r.len() - 1) as u16
     })
 }
