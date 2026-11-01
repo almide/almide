@@ -145,7 +145,7 @@ while IFS= read -r f; do
     esac
     # The judged bytes pass their tests on a stock runtime (the
     # `ALMIDE_TEST_WASM_RUNNER=wasmtime` lane's invocation).
-    if ! (cd "$ROOT" && timeout 600 "$WASMTIME" --dir=/ -S inherit-env=y --env=ALMIDE_CWD="$ROOT" "$OUT/$N.wasm") > "$OUT/$N.run" 2>&1; then
+    if ! (cd "$ROOT" && timeout 600 "$WASMTIME" --dir=/ -S inherit-env=y --env=ALMIDE_CWD="$ROOT" "$OUT/$N.wasm" < /dev/null) > "$OUT/$N.run" 2>&1; then
       echo "$f" >> "$OUT/run-failed"
     fi
   elif ! (cd "$ROOT" && "$ALMIDE" build "$f" --target wasm -o "$OUT/$N.wasm") > "$OUT/$N.err" 2>&1; then
