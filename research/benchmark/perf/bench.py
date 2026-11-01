@@ -136,6 +136,14 @@ SUITE = [
     # twins and the one-buffer stringify. No Rust reference: a hand-written
     # JSON writer and parser is not the comparison this row is for.
     ("jsonround",      "jsonround/jsonround.almd",     [],              "100000",  "1000",  "bytes", ["native", "wasm"]),
+    # regexcycle (#4392): N Regex values applied in turn to every line (a
+    # secret scanner's rule table), the same number of matches in all at any
+    # N. No Rust reference: the relation between the 32- and the 8-pattern row
+    # is the gate (check-perf-ratio.sh, REGEX CYCLE), and it is ~1.0 only while
+    # every pattern stays compiled across the cycle — 0.69.0-rc1's 16-entry
+    # LRU recompiled all 32 on every match.
+    ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
+    ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -190,6 +198,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
     # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
     "jsonround": "100000",
+    # regexcycle (#4392): sized after the GCE reading below; both rows the
+    # same number of matches.
+    "regexcycle-8": "8:200000",
+    "regexcycle-32": "32:200000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

@@ -609,3 +609,62 @@ for bench in ("wordfreq", "wordfreq-group", "jsonround"):
     print(f"perf-ratio: {key:20s} {ratio:.3f}x the wasm leg (ceiling 1.00, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYNW
+
+# REGEX CYCLE RELATION (#4392). A Regex is applied many times, and a secret
+# scanner applies a few hundred of them in turn to every line. Both regexcycle
+# rows run the same number of matches; the 32-pattern row only cycles through
+# four times as many patterns. While every pattern stays compiled across the
+# cycle the two rows cost the same. 0.69.0-rc1 kept compiled patterns in a
+# 16-entry LRU list, so 32 patterns applied in turn each found their entry
+# evicted and recompiled on every match: with the fix reverted the native
+# relation read 3.27x on a GCE n2-standard-4 (0.519 s against 0.159 s), and
+# 1.03x with it (2026-11-01). The wasm leg keeps no cache (its walk reads the
+# pattern text) and reads 1.07x either way; it is gated so that a cache added
+# there cannot repeat the defect. Min of the interleaved rounds (the wasm
+# relations' rule); the defect is a whole multiple, far outside runner noise.
+REGEX_CYCLE_CEILING=1.5
+rx_out=$(mktemp -t perf-ratio-regex.XXXXXX.json)
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench regexcycle-8,regexcycle-32 \
+  --label ratchet-regexcycle --out "$rx_out"
+python3 - "$rx_out" "$BASELINE_FILE" "$REGEX_CYCLE_CEILING" "$MIN_SECONDS" <<'PYRX'
+import json, sys
+
+out_path, baseline_path, ceiling, min_s = sys.argv[1:5]
+ceiling, min_s = float(ceiling), float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"regexcycle-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the regex cycle relation was "
+                 "added without its recorded value; add the line on purpose.")
+    few = data["regexcycle-8"]["variants"][f"regexcycle-8/{leg}"]["min"]
+    many = data["regexcycle-32"]["variants"][f"regexcycle-32/{leg}"]["min"]
+    if few < min_s:
+        sys.exit(f"::error::perf-ratio: regexcycle-8/{leg} min {few}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = many / few
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: 32 Regex values applied in turn cost {ratio:.3f}x what 8 cost "
+              f"for the same number of matches on the {leg} leg (ceiling {ceiling:.2f}x, {many:.3f}s vs "
+              f"{few:.3f}s, recorded {baseline[key]:.3f}x). A pattern is being recompiled on every match "
+              "once the cycle outgrows what the runtime keeps compiled, which is how #4392 shipped in "
+              "0.69.0-rc1 (a 16-entry LRU list). Look at rx_cached in runtime/rs/src/regex.rs (native) "
+              "and at how stdlib/regex_engine.almd reaches its program (wasm). Keep the patterns "
+              "compiled; do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the 8-pattern row "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYRX
