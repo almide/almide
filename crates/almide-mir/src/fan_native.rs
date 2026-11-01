@@ -255,7 +255,8 @@ impl Lift<'_> {
         let call_ty = call.ty.clone();
         let mut body = call.clone();
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut call.kind else {
-            return Err("an arm that is not a direct call".into());
+            let shape: String = format!("{:?}", call.kind).chars().take(120).collect();
+            return Err(format!("an arm that is not a direct call: {shape}"));
         };
         let Some((_, ret, is_effect)) = self.user.get(name.as_str()).cloned() else {
             return Err(format!("an arm calling `{name}`, not a user function"));
