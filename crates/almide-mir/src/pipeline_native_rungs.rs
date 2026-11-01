@@ -110,7 +110,7 @@ fn native_sig_subset_check(
             || heap_carrier_of(t).is_some()
     };
     let sig_ok = |t: &Ty| {
-        matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+        crate::render_native_rec::is_lane_scalar(t) || matches!(t, Ty::String)
             || is_scalar_option(t)
             || is_native_result(t)
             || is_string_result_ty(t)
@@ -224,7 +224,7 @@ fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::Ty;
     matches!(t, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2
-            && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float | Ty::Unit)
+            && (crate::render_native_rec::is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit))
             && matches!(a[1], Ty::String))
 }
 
@@ -289,7 +289,7 @@ fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
     matches!(t, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool | Ty::Float))
+        if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]))
 }
 
 /// #4006 family B: rewrite every scalar-Option window onto the native
@@ -386,27 +386,26 @@ fn native_sig_kind(
     use crate::render_native::NativeSigKind;
 
     match t {
-        Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
-        Ty::Float => Some(NativeSigKind::F64),
+        // The 64-bit floats are real `f64`s; every other lane scalar (the
+        // sized integers, a Float32's f32 bits) rides the i64 lane as is.
+        t if crate::render_native_rec::is_f64_scalar(t) => Some(NativeSigKind::F64),
+        t if crate::render_native_rec::is_lane_scalar(t) => Some(NativeSigKind::I64),
         Ty::String => Some(NativeSigKind::Str),
         // T1-3: the native Result carrier (return position only — the
         // param gate rejects Result params before this table is read).
         t if is_native_result_ty(t) => Some(NativeSigKind::Res),
         t if is_string_result_ty(t) => Some(NativeSigKind::ResStr),
         Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
+            if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]) =>
         {
             Some(NativeSigKind::ListI64)
         }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => {
             Some(NativeSigKind::ListStr)
         }
-        // #4006: the other all-scalar slot blocks — a List[Float] (each slot
-        // the f64 bits) and an all-scalar tuple — ride the same `Vec<i64>`.
-        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Float) => {
-            Some(NativeSigKind::ListI64)
-        }
-        Ty::Tuple(es) if !es.is_empty() && es.iter().all(|e| matches!(e, Ty::Int | Ty::Bool | Ty::Float)) => {
+        // #4006: an all-scalar tuple rides the same `Vec<i64>` (a List[Float]
+        // already did above: each slot holds the f64 bits).
+        Ty::Tuple(es) if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar) => {
             Some(NativeSigKind::ListI64)
         }
         // #4006 family B: an Option of a scalar rides the `Option<i64>` carrier.
