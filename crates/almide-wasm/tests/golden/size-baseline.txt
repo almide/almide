@@ -298,7 +298,7 @@
 2497	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 2546	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 2948	spec/wasm_cross/general_recursion_tail.almd
-11334	spec/wasm_cross/generated_binder_hygiene.almd
+11342	spec/wasm_cross/generated_binder_hygiene.almd
 2388	spec/wasm_cross/generic_chain_unwrap_or.almd
 2382	spec/wasm_cross/generic_concat.almd
 2882	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
@@ -707,7 +707,7 @@
 3881	spec/wasm_cross/range_head_fold_edges.almd
 1971	spec/wasm_cross/range_head_fold_huge.almd
 1725	spec/wasm_cross/range_inclusive_end_at_max.almd
-2961	spec/wasm_cross/range_inclusive_runtime_max.almd
+2985	spec/wasm_cross/range_inclusive_runtime_max.almd
 2180	spec/wasm_cross/range_materialize_oom.almd
 11485	spec/wasm_cross/rc_alloc_stress.almd
 2684	spec/wasm_cross/rc_reclaim_churn.almd
