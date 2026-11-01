@@ -66,7 +66,7 @@ const PLAIN_PROGRAMS: &[(&str, &str)] = &[
     ("echo", "effect fn main() -> Unit = {\n  println(\"hi\")\n}\n"),
     ("pure_net", "import net\n\neffect fn main() -> Unit = {\n  match net.parse_ip(\"::1\") {\n    ok(ip) => println(\"${net.is_loopback(ip)}\"),\n    err(e) => println(e),\n  }\n}\n"),
     ("fs", "import fs\n\neffect fn main() -> Unit = {\n  match fs.read_text(\"/nonexistent\") {\n    ok(t) => println(t),\n    err(e) => println(e),\n  }\n}\n"),
-    ("env", "import env\n\neffect fn main() -> Unit = {\n  println(\"${env.millis() >= 0}\")\n}\n"),
+    ("clock", "effect fn main() -> Unit = {\n  println(\"${datetime.now_ms() >= 0}\")\n}\n"),
 ];
 
 /// A program with no socket op builds the preview 1 core module, prints no
@@ -121,7 +121,7 @@ fn a_socket_program_with_an_unserved_op_is_refused_at_build_and_check() {
     let stderr = String::from_utf8_lossy(&built.stderr);
     assert!(!built.status.success(), "a socket + unix program built:\n{stderr}");
     assert!(!out.exists(), "a refused build left an artifact");
-    assert!(stderr.contains("WASI 0.3 component"), "the refusal does not name the component it audited:\n{stderr}");
+    assert!(stderr.contains("E081") && stderr.contains("unix.connect"), "the refusal does not name the unserved call:\n{stderr}");
     let checked = Command::new(almide_bin())
         .args(["check", path.to_str().expect("utf8"), "--target", "wasm"])
         .stdin(Stdio::null())
