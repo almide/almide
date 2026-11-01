@@ -57,6 +57,7 @@ spec/wasm_cross/fan_race_mapper.almd
 spec/wasm_cross/fan_record_err_source_order.almd
 spec/wasm_cross/fan_sibling_trap.almd
 spec/wasm_cross/fan_trap_waits_for_elements_below.almd
+spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd
 spec/wasm_cross/flight_pid_control.almd
 spec/wasm_cross/float_clamp_invalid.almd
 spec/wasm_cross/float_concrete.almd

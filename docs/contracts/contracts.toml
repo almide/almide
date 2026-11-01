@@ -2683,6 +2683,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_sibling_trap.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_trap_waits_for_elements_below.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_list_map_trap_order.almd", class = "fixture" },
 ]
 
