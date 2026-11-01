@@ -865,8 +865,11 @@ pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
 /// dies with the arm, so it moves (its `.clone()` copied it a second time);
 /// a value that outlives the arm keeps `copy`.
 fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
+    // A value the arm itself defined dies with the arm's block: the join takes
+    // it by move (a list of strings or a generated record included — copying
+    // one deep-cloned every element, #4006 no-perf-loss audit).
     match t {
-        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr if arm_own => var(v),
+        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr | NTy::VecStr | NTy::Rec(_) if arm_own => var(v),
         _ => copy,
     }
 }
