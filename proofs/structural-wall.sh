@@ -209,7 +209,7 @@ import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
-      "bounds": "check_rbounds_cert", "init": "check_init_cert", "fields": "check_fields_cert", "rc-sig": "check_sig_cert"}
+      "bounds": "check_pbounds_cert", "init": "check_init_cert", "fields": "check_fields_cert", "rc-sig": "check_sig_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -298,7 +298,7 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -414,7 +414,7 @@ fi
 # bug and pins its witness to
 # these files. Every verdict must REJECT each one, on every run.
 for prop in bounds init fields; do
-  case "$prop" in bounds) PFN=check_rbounds_cert; PMOD=RoutineBoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; fields) PFN=check_fields_cert; PMOD=FieldCert ;; esac
+  case "$prop" in bounds) PFN=check_pbounds_cert; PMOD=RoutineProcsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; fields) PFN=check_fields_cert; PMOD=FieldCert ;; esac
   echo "== $(printf %s "$prop" | tr a-z A-Z) POISON LEG: every lost-${prop} witness is REJECTED by all three verdicts =="
   PPOISONED=("$ROOT"/proofs/poisoned-certs/$prop/*.cert)
   if [ ! -e "${PPOISONED[0]}" ]; then

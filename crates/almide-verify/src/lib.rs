@@ -30,6 +30,7 @@
 pub mod bundle;
 mod bounds;
 mod rbounds;
+mod procs;
 mod fields;
 mod init;
 mod modes;

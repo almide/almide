@@ -251,7 +251,7 @@ Definition proc_at (cs : list ascii) : option ((nat * (RoutineProcs.Grp * Routin
                                           match pprog_at fuel r9 with
                                           | Some (body, cl :: r10) =>
                                               if ch cl "}"%char then
-                                                Some ((fid, (gs, (map (fun q => (fst q, zn (snd q))) kq, cq, nq), body)), r10)
+                                                Some ((fid, (gs, (map (fun q => (fst q, zn (snd q))) kq, cq, nq), body)), skip_space r10)
                                               else None
                                           | _ => None
                                           end
