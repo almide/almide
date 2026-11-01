@@ -38,6 +38,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "reuse",
     // A self-hosted body names the stdlib fn it implements (crates/almide-types: `implements`)
     "implements",
+    // A representation-specialized self-hosted body (`map.set_skv`) names the
+    // stdlib fn it specializes, which the native floor serves it as
+    // (crates/almide-mir native_floor)
+    "specializes",
     // A parameter that runs concurrently (ADR-0020 §3.1, E008)
     "concurrent",
     // A stdlib fn whose effect on process-local state a sibling fan arm could
