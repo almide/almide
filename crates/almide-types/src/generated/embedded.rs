@@ -29892,78 +29892,78 @@ pub const SRC_PRIM: &str = r#"
 fn handle[A](ptr: A) -> Int = _
 
 
-@prim_op(load, width = 1)
+@prim_op(load, width=1)
 @intrinsic("almide_rt_prim_load8")
 fn load8(addr: Int) -> Int = _
 
 
-@prim_op(load, width = 4)
+@prim_op(load, width=4)
 @intrinsic("almide_rt_prim_load32")
 fn load32(addr: Int) -> Int = _
 
 
-@prim_op(load, width = 8)
+@prim_op(load, width=8)
 @intrinsic("almide_rt_prim_load64")
 fn load64(addr: Int) -> Int = _
 
 
-@prim_op(store, width = 4)
+@prim_op(store, width=4)
 @intrinsic("almide_rt_prim_store32")
 fn store32(addr: Int, val: Int) -> Unit = _
 
 
-@prim_op(store, width = 1)
+@prim_op(store, width=1)
 @intrinsic("almide_rt_prim_store8")
 fn store8(addr: Int, val: Int) -> Unit = _
 
 
-@prim_op(store, width = 8)
+@prim_op(store, width=8)
 @intrinsic("almide_rt_prim_store64")
 fn store64(addr: Int, val: Int) -> Unit = _
 
 
-@prim_op(int, op = bit_and)
+@prim_op(int, op=bit_and)
 @intrinsic("almide_rt_prim_band")
 fn band(a: Int, b: Int) -> Int = _
 
-@prim_op(int, op = bit_or)
+@prim_op(int, op=bit_or)
 @intrinsic("almide_rt_prim_bor")
 fn bor(a: Int, b: Int) -> Int = _
 
-@prim_op(int, op = bit_xor)
+@prim_op(int, op=bit_xor)
 @intrinsic("almide_rt_prim_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
-@prim_op(int, op = shl)
+@prim_op(int, op=shl)
 @intrinsic("almide_rt_prim_bshl")
 fn bshl(n: Int, bits: Int) -> Int = _
 
-@prim_op(int, op = shr)
+@prim_op(int, op=shr)
 @intrinsic("almide_rt_prim_bshr")
 fn bshr(n: Int, bits: Int) -> Int = _
 
 
-@prim_op(int, op = shr_u)
+@prim_op(int, op=shr_u)
 @intrinsic("almide_rt_prim_bshr_u")
 fn bshr_u(n: Int, bits: Int) -> Int = _
 
 
 
 
-@prim_op(alloc, block = bytes)
+@prim_op(alloc, block=bytes)
 @intrinsic("almide_rt_prim_alloc_str")
 fn alloc_str(byte_len: Int) -> String = _
 
 
 
-@prim_op(alloc, block = bytes)
+@prim_op(alloc, block=bytes)
 @intrinsic("almide_rt_prim_alloc_bytes")
 fn alloc_bytes(n: Int) -> Bytes = _
 
 
 
 
-@prim_op(alloc, block = slots)
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list(n: Int) -> List[Int] = _
 
@@ -29972,7 +29972,7 @@ fn alloc_list(n: Int) -> List[Int] = _
 
 
 
-@prim_op(alloc, block = slots)
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list_f64(n: Int) -> List[Float] = _
 
@@ -29981,7 +29981,7 @@ fn alloc_list_f64(n: Int) -> List[Float] = _
 
 
 
-@prim_op(alloc, block = slots)
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_set(n: Int) -> Set[Int] = _
 
@@ -29991,7 +29991,7 @@ fn alloc_set(n: Int) -> Set[Int] = _
 
 
 
-@prim_op(alloc, block = slots)
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
@@ -30000,7 +30000,7 @@ fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
 
 
-@prim_op(alloc, block = owned_slots)
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
@@ -30010,7 +30010,7 @@ fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
 
 
-@prim_op(alloc, block = owned_slots)
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
 
@@ -30020,7 +30020,7 @@ fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
 
 
 
-@prim_op(alloc, block = slots)
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_value(slots: Int) -> Value = _
 
@@ -30029,7 +30029,7 @@ fn alloc_value(slots: Int) -> Value = _
 
 
 
-@prim_op(alloc, block = owned_slots)
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_list_str[A](n: Int) -> List[A] = _
 
@@ -30037,7 +30037,7 @@ fn alloc_list_str[A](n: Int) -> List[A] = _
 
 
 
-@prim_op(alloc, block = owned_slots)
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_set_str[A](n: Int) -> Set[A] = _
 
@@ -30069,11 +30069,11 @@ fn load_handle[A](addr: Int) -> A = _
 
 
 
-@prim_op(rc, op = dec)
+@prim_op(rc, op=dec)
 @intrinsic("almide_rt_prim_rc_dec")
 fn rc_dec(addr: Int) -> Unit = _
 
-@prim_op(rc, op = inc)
+@prim_op(rc, op=inc)
 @intrinsic("almide_rt_prim_rc_inc")
 fn rc_inc(addr: Int) -> Unit = _
 
@@ -30253,11 +30253,11 @@ fn path_exists(path: String) -> Bool = _
 
 
 
-@prim_op(ptr, op = to_int)
+@prim_op(ptr, op=to_int)
 @intrinsic("almide_rt_prim_ptr_to_int")
 fn ptr_to_int(p: Handle) -> Int = _
 
-@prim_op(ptr, op = from_int)
+@prim_op(ptr, op=from_int)
 @intrinsic("almide_rt_prim_int_to_ptr")
 fn int_to_ptr(a: Int) -> Handle = _
 
@@ -30328,15 +30328,15 @@ fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 
 
 
-@prim_op(float_un, op = abs)
+@prim_op(float_un, op=abs)
 @intrinsic("almide_rt_prim_fabs")
 fn fabs(x: Float) -> Float = _
 
-@prim_op(float_un, op = sqrt)
+@prim_op(float_un, op=sqrt)
 @intrinsic("almide_rt_prim_fsqrt")
 fn fsqrt(x: Float) -> Float = _
 
-@prim_op(float_un, op = floor)
+@prim_op(float_un, op=floor)
 @intrinsic("almide_rt_prim_ffloor")
 fn ffloor(x: Float) -> Float = _
 
@@ -30344,67 +30344,67 @@ fn ffloor(x: Float) -> Float = _
 
 
 
-@prim_op(float_un, op = nearest)
+@prim_op(float_un, op=nearest)
 @intrinsic("almide_rt_prim_fnearest")
 fn fnearest(x: Float) -> Float = _
 
-@prim_op(float_un, op = ceil)
+@prim_op(float_un, op=ceil)
 @intrinsic("almide_rt_prim_fceil")
 fn fceil(x: Float) -> Float = _
 
-@prim_op(float_un, op = neg)
+@prim_op(float_un, op=neg)
 @intrinsic("almide_rt_prim_fneg")
 fn fneg(x: Float) -> Float = _
 
-@prim_op(float_bin, op = add)
+@prim_op(float_bin, op=add)
 @intrinsic("almide_rt_prim_fadd")
 fn fadd(a: Float, b: Float) -> Float = _
 
-@prim_op(float_bin, op = sub)
+@prim_op(float_bin, op=sub)
 @intrinsic("almide_rt_prim_fsub")
 fn fsub(a: Float, b: Float) -> Float = _
 
-@prim_op(float_bin, op = mul)
+@prim_op(float_bin, op=mul)
 @intrinsic("almide_rt_prim_fmul")
 fn fmul(a: Float, b: Float) -> Float = _
 
-@prim_op(float_bin, op = div)
+@prim_op(float_bin, op=div)
 @intrinsic("almide_rt_prim_fdiv")
 fn fdiv(a: Float, b: Float) -> Float = _
 
-@prim_op(float_bin, op = min)
+@prim_op(float_bin, op=min)
 @intrinsic("almide_rt_prim_fmin")
 fn fmin(a: Float, b: Float) -> Float = _
 
-@prim_op(float_bin, op = max)
+@prim_op(float_bin, op=max)
 @intrinsic("almide_rt_prim_fmax")
 fn fmax(a: Float, b: Float) -> Float = _
 
-@prim_op(float_bin, op = copysign)
+@prim_op(float_bin, op=copysign)
 @intrinsic("almide_rt_prim_fcopysign")
 fn fcopysign(a: Float, b: Float) -> Float = _
 
-@prim_op(float_cmp, op = lt)
+@prim_op(float_cmp, op=lt)
 @intrinsic("almide_rt_prim_flt")
 fn flt(a: Float, b: Float) -> Bool = _
 
-@prim_op(float_cmp, op = le)
+@prim_op(float_cmp, op=le)
 @intrinsic("almide_rt_prim_fle")
 fn fle(a: Float, b: Float) -> Bool = _
 
-@prim_op(float_cmp, op = gt)
+@prim_op(float_cmp, op=gt)
 @intrinsic("almide_rt_prim_fgt")
 fn fgt(a: Float, b: Float) -> Bool = _
 
-@prim_op(float_cmp, op = ge)
+@prim_op(float_cmp, op=ge)
 @intrinsic("almide_rt_prim_fge")
 fn fge(a: Float, b: Float) -> Bool = _
 
-@prim_op(float_cmp, op = eq)
+@prim_op(float_cmp, op=eq)
 @intrinsic("almide_rt_prim_feq")
 fn feq(a: Float, b: Float) -> Bool = _
 
-@prim_op(float_cmp, op = ne)
+@prim_op(float_cmp, op=ne)
 @intrinsic("almide_rt_prim_fne")
 fn fne(a: Float, b: Float) -> Bool = _
 
@@ -30458,7 +30458,7 @@ fn die(s: Int) -> Unit = _
 
 
 
-@prim_op(alloc, block = owned_slots)
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_map_kv")
 fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _
 "#;
