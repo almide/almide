@@ -347,6 +347,7 @@ fn render_fn(
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
+    let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
     let mut out = String::new();
     let mut indent = 1usize;
@@ -952,3 +953,4 @@ pub(crate) fn render_dup(
 
 include!("render_native_b.rs");
 include!("render_native_fan.rs");
+include!("render_native_rem.rs");

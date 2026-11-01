@@ -858,3 +858,16 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
 pub fn fan_timeline_prelude_text() -> String {
     prelude_fan::fan_timeline_prelude("")
 }
+
+/// The constant-divisor remainder runtime (`almide_rem_const`), for the
+/// certified native render (#4006): the same text the standard codegen
+/// emits, verbatim, so both routes spell `x % <literal>` alike.
+pub fn rem_const_prelude_text() -> String {
+    prelude_rem::rem_const_prelude("")
+}
+
+/// Whether `x % d` takes the [`rem_const_prelude_text`] form — one rule for
+/// both routes.
+pub fn rem_const_divisor(d: i64) -> bool {
+    prelude_rem::rem_const_applies(d)
+}

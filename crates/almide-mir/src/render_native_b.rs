@@ -900,6 +900,12 @@ pub(crate) fn render_int_binop(
             used_shims.push(shim("__chk_div").expect("\"__chk_div\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_div({l}, {r})")
         }
+        // A literal divisor takes the standard route's constant remainder
+        // (render_native_rem.rs); it can never be 0 or -1, so no abort is lost.
+        IntOp::Mod if literal_rem_divisor(b).is_some() => {
+            used_shims.push(rem_const_shim());
+            format!("almide_rem_const::<{}>({l})", literal_rem_divisor(b).unwrap_or_default())
+        }
         IntOp::Mod => {
             used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_mod({l}, {r})")
