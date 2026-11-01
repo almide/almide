@@ -74,15 +74,25 @@ pub trait SpawnHost {
     fn spawn_children(&self) -> &RunChildren;
 }
 
+/// The handle operand as the Int native names it by.
+fn handle_number(h: &str) -> Option<i64> {
+    h.trim().parse().ok()
+}
+
 /// Run `f` on the child behind handle `h` (native's `almide_proc_with`).
 fn with_child<R>(procs: &ProcTable, h: &str, f: impl FnOnce(&mut almide_rt_core::process_core::AlmideProcChild) -> R) -> Result<R, String> {
     let mut t = procs.lock().unwrap_or_else(|p| p.into_inner());
-    let c = h
-        .parse::<usize>()
-        .ok()
+    // Native's text names the handle as the Int it is (`almide_proc_with`);
+    // a handle operand that is not one is quoted, never embedded raw (C-418).
+    let n = handle_number(h);
+    let c = n
+        .and_then(|i| usize::try_from(i).ok())
         .and_then(|i| t.get_mut(i))
         .and_then(|c| c.as_mut())
-        .ok_or_else(|| format!("invalid ProcessChild handle: {h}"))?;
+        .ok_or_else(|| match n {
+            Some(i) => format!("invalid ProcessChild handle: {i}"),
+            None => format!("invalid ProcessChild handle: {}", almide_base::err_text::almide_rt_errtext_quote(h)),
+        })?;
     Ok(f(c))
 }
 

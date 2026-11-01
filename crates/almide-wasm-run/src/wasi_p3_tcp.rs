@@ -163,7 +163,7 @@ impl TcpTexts {
     fn cut(put: &mut dyn FnMut(&[u8]) -> NetPiece, abi: &NetAbi) -> Self {
         use almide_rt_core::net_core as nc;
         let split2 = |text: &str, mark: &str| -> (String, String) {
-            let (a, b) = text.split_once(mark).unwrap_or_else(|| panic!("net text {text:?} lost its marker {mark:?}"));
+            let (a, b) = text.split_once(mark).unwrap_or_else(|| panic!("net text {} lost its marker {}", almide_base::err_text::almide_rt_errtext_quote(text), almide_base::err_text::almide_rt_errtext_quote(mark)));
             (a.to_string(), b.to_string())
         };
         let num = NET_MARK_NUM.to_string();
