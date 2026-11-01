@@ -31,10 +31,14 @@ alias_combinator_rc  out-of-interp-scope capability: prim.handle of a Option (ou
 bytes_rawptr  out-of-interp-scope capability: ffi.region: no lowered body
 count_domain_nonbytes  out-of-interp-scope capability: io.read: no lowered body
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
+fs_append_bytes_true_append  out-of-interp-scope capability: fs.append_bytes: no lowered body
 fs_root_escape  out-of-interp-scope capability: fs.open_root: no lowered body
 http_response_headers  out-of-interp-scope capability: named call `to_string_lossy`
 io_write_ordering  out-of-interp-scope capability: io.write: no lowered body
 io_write_raw_bytes  out-of-interp-scope capability: io.write: no lowered body
+json_path_edges  out-of-interp-scope capability: prim.store64 with a non-address
+json_path_index_domain  out-of-interp-scope capability: prim.store64 with a non-address
+json_set_path_depth_bound  out-of-interp-scope capability: prim.store64 with a non-address
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write: no lowered body
 matrix_fma_ieee_specials  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
@@ -53,3 +57,5 @@ regex_repetition_depth  out-of-interp-scope capability: regex.new: no lowered bo
 regex_size_cap  out-of-interp-scope capability: regex.compile: no lowered body
 set_entries_reclaim  out-of-interp-scope capability: prim.handle of a container holding a String element, where the impl the interp RESOLVED declares element type Int — a public container fn resolves to its scalar core by name (the _str/_skv/_hval choice is a MIR pass the interp does not run), so this is that resolution and not the program's type; materializing anyway would compare heap values as raw i64 slots
 set_index_order  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
+stdlib_body_call_vs_user_namesake  out-of-interp-scope capability: prim.store64 with a non-address
+uuid_v7_monotonic  out-of-interp-scope capability: uuid.v7: no lowered body
