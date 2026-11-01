@@ -1,0 +1,23 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh): a recursive heap
+// enum walked by `match` — reading a payload subtree must not copy it.
+type Tree =
+  | Leaf
+  | Node(Tree, Int, Tree)
+
+fn build(d: Int) -> Tree = if d == 0 then Leaf else Node(build(d - 1), d, build(d - 1))
+
+fn total(t: Tree) -> Int = match t {
+  Leaf => 0,
+  Node(l, v, r) => total(l) + v + total(r),
+}
+
+fn main() -> Unit = {
+  let t = build(15)
+  var acc = 0
+  var i = 0
+  while i < 4 {
+    acc = acc + total(t)
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

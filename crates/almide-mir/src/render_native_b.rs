@@ -205,6 +205,8 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
     } else if crate::native_list_ops::is_list_concat(name) {
         render_list_concat(call, OpSink { tys, out, indent, used_shims })
+    } else if let Some(floor) = protocol_instance_floor(&call, tys) {
+        render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -432,6 +434,13 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
 /// A stdlib call its declaration puts on the native floor (`@intrinsic`, a
 /// per-type signature, a runtime body the header can carry): the runtime
 /// body is rendered beside the program and called as v0 calls it.
+/// The declared floor entry of the conformer a protocol-generic stdlib call
+/// answers with, given the kinds its args carry (`list.join` over strings).
+fn protocol_instance_floor(call: &NativeCall<'_>, tys: &BTreeMap<ValueId, NTy>) -> Option<&'static crate::native_floor::FloorFn> {
+    let kinds: Vec<NTy> = call.args.iter().map(|a| call_arg(a, tys).map(|(_, k)| k)).collect::<Result<_, _>>().ok()?;
+    crate::native_floor::declared(&crate::native_floor::protocol_instance(call.name, &kinds)?)
+}
+
 fn render_declared_floor_call(
     call: NativeCall<'_>,
     floor: &'static crate::native_floor::FloorFn,
@@ -873,8 +882,11 @@ pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
 /// dies with the arm, so it moves (its `.clone()` copied it a second time);
 /// a value that outlives the arm keeps `copy`.
 fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
+    // A value the arm itself defined dies with the arm's block: the join takes
+    // it by move (a list of strings or a generated record included — copying
+    // one deep-cloned every element, #4006 no-perf-loss audit).
     match t {
-        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr if arm_own => var(v),
+        NTy::Str | NTy::Vec | NTy::Res | NTy::ResStr | NTy::VecStr | NTy::Rec(_) if arm_own => var(v),
         _ => copy,
     }
 }

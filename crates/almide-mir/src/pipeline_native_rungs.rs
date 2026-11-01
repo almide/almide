@@ -108,6 +108,7 @@ fn native_sig_subset_check(
             || (matches!(t, Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
             || heap_carrier_of(t).is_some()
+            || crate::lower::is_value_ty(t)
     };
     let sig_ok = |t: &Ty| {
         crate::render_native_rec::is_lane_scalar(t) || matches!(t, Ty::String)
@@ -275,8 +276,16 @@ fn heap_carrier_of(t: &almide_lang::types::Ty) -> Option<u16> {
 
 /// The values of `f` whose declared type is a generated heap carrier.
 fn heap_carrier_values(ir: &almide_ir::IrProgram, f: &crate::MirFunction) -> std::collections::BTreeSet<crate::ValueId> {
+    heap_carrier_values_in(&|name: &str| ir.functions.iter().find(|d| d.name.as_str() == name), f)
+}
+
+/// [`heap_carrier_values`] over any declaration lookup.
+fn heap_carrier_values_in<'a>(
+    decl: &dyn Fn(&str) -> Option<&'a almide_ir::IrFunction>,
+    f: &crate::MirFunction,
+) -> std::collections::BTreeSet<crate::ValueId> {
     let sig = |name: &str| -> Option<crate::render_native_addr::CarrierSig> {
-        let d = ir.functions.iter().find(|d| d.name.as_str() == name)?;
+        let d = decl(name)?;
         Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)))
     };
     let own = sig(f.name.as_str()).unwrap_or_default();
@@ -368,7 +377,8 @@ fn rewrite_native_result_windows_over<'a>(
                 .collect(),
             _ => Vec::new(),
         };
-        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params);
+        let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
+        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params, &carriers);
     }
 }
 }
@@ -449,6 +459,8 @@ fn native_sig_kind(
         {
             Some(NativeSigKind::ListI64)
         }
+        // The stdlib's dynamic Value: v0's runtime `AlmideValue`.
+        t if crate::lower::is_value_ty(t) => Some(NativeSigKind::Rec(crate::render_native_rec::value_index())),
         Ty::Named(n, args) if args.is_empty() => crate::render_native_rec::rec_index(n.as_str()).map(NativeSigKind::Rec),
         Ty::Named(_, _) if crate::render_native_rec::is_scalar_instance(t) => Some(NativeSigKind::ListI64),
         Ty::Named(_, _) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
@@ -638,6 +650,16 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     // (literals, other top-level lets, operators that cannot abort) stays
     // materialized at each use: it can neither fail nor be observed.
     let mut ir = ir;
+    // The shared accumulator tail-recursion rewrite (#2577), from the same
+    // preconditions the wasm leg and the standard codegen apply it: one
+    // recursive call per non-leaf instead of two. Skipped, as there, when the
+    // program brackets a budget/timeout region (its loop head would be a
+    // charge the meter sees).
+    if !almide_ir::meter_plan::program_has_regions(&ir) {
+        for f in ir.functions.iter_mut() {
+            almide_ir::accum_tre::rewrite(f, &mut ir.var_table);
+        }
+    }
     let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
     let mut eager = false;
     for tl in ir.top_lets.iter_mut() {

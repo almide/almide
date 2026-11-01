@@ -436,7 +436,12 @@ fn render_fn(
             ops.nth(1);
             continue;
         }
-        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys) {
+        if let Some(push) = crate::render_native_append::list_push(func, i, &tys) {
+            line!("{push}");
+            ops.nth(2);
+            continue;
+        }
+        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys, &borrows.arms) {
             line!("{append}");
             ops.nth(1);
             continue;
@@ -464,6 +469,30 @@ fn render_fn(
             }
             Op::Dup { dst, src } if borrows.arms.contains(dst) => {
                 crate::borrow_join::render_arm(dst, src, &mut tys, &mut out, indent)?
+            }
+            // A copy of a value nothing reads again moves it (no clone).
+            Op::Dup { dst, src }
+                if tys
+                    .get(src)
+                    .is_some_and(|t| crate::render_native_move::last_use(func, i, *src, *t, &borrows.arms)) =>
+            {
+                let t = tys[src];
+                tys.insert(*dst, t);
+                line!("let mut {} = std::mem::take(&mut {});", var(*dst), var(*src));
+            }
+            Op::SetLocal { local, src }
+                if tys.get(src).is_some_and(|t| {
+                    tys.get(local).is_none_or(|l| l == t)
+                        && crate::render_native_move::last_use(func, i, *src, *t, &borrows.arms)
+                }) =>
+            {
+                let t = tys[src];
+                if tys.contains_key(local) {
+                    line!("{} = std::mem::take(&mut {});", var(*local), var(*src));
+                } else {
+                    tys.insert(*local, t);
+                    line!("let mut {} = std::mem::take(&mut {});", var(*local), var(*src));
+                }
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).
@@ -841,7 +870,17 @@ fn render_native_flow_op(
         }};
     }
     match op {
-        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } | Op::DropWrapperRec { .. } => {
+        Op::DropVariant { .. }
+        | Op::Drop { .. }
+        | Op::DropListStr { .. }
+        | Op::DropWrapperRec { .. }
+        | Op::DropValue { .. }
+        | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. }
+        | Op::DropResultValue { .. }
+        | Op::DropResultListValue { .. }
+        | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. } => {
             return render_native_drop_op(op, borrows, tys, out, *indent)
         }
         // Pure ownership bookkeeping — no native code.
@@ -922,6 +961,19 @@ fn render_native_drop_op(
         {
             line!("// drop: borrowed join, scope-end");
         }
+        // The Value-holding releases: the wasm leg's routine walks the block's
+        // tags to free it; a native value of a generated type (the runtime
+        // `Value`, a list of it, a carrier of it) frees like any owned Rust value.
+        Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v } => match tys.get(v) {
+            Some(NTy::Rec(_)) => line!("// drop(value-holding): scope-end"),
+            other => return Err(wall(format!("native: {} of a {other:?} value", op_name(op)))),
+        },
         Op::Drop { v } => {
             if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
                 return Err(wall(
