@@ -189,7 +189,7 @@ impl Ctx<'_> {
 /// A body the emitter declined (`declined`: its reason) logs each site as
 /// `declined`, the reason in a sixth column.
 pub(crate) fn log_fn(name: &str, module: Option<&str>, params: &[VarId], body: &IrExpr, declined: Option<&str>) {
-    let Some(path) = std::env::var_os("ALMIDE_PRIM_SHAPE_LOG") else { return };
+    let Some(path) = almide_base::env::var("ALMIDE_PRIM_SHAPE_LOG") else { return };
     let mut scan = Scan::default();
     scan.visit_expr(body);
     if scan.sites.is_empty() {
