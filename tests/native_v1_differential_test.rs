@@ -44,7 +44,8 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
     let bin = dir.join("prog_bin");
     std::fs::write(&rs, &rust).unwrap();
     let rc = Command::new("rustc")
-        .args(["-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
+        // The edition the product's native build compiles with (src/cli/build.rs).
+        .args(["--edition", "2021", "-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
         .output()
         .expect("rustc");
     assert!(
@@ -187,7 +188,7 @@ fn divzero_abort_matches_v0() {
     let rs = dir.join("prog.rs");
     let bin = dir.join("prog_bin");
     std::fs::write(&rs, &rust).unwrap();
-    let rc = Command::new("rustc").args(["-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()]).output().unwrap();
+    let rc = Command::new("rustc").args(["--edition", "2021", "-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()]).output().unwrap();
     assert!(rc.status.success(), "{}", String::from_utf8_lossy(&rc.stderr));
     let v1 = Command::new(&bin).output().unwrap();
     assert_eq!(v0.status.code(), v1.status.code(), "divzero exit code diverges");
