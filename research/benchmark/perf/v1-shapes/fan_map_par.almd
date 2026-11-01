@@ -1,0 +1,20 @@
+// fan.map on the certified native render (#4006 family H): 64 elements of a
+// remainder chain each, mapped in parallel. The certified render runs the
+// shipped parallel runtime over the certified lambda; this program's time is
+// the A/B against the standard codegen's fan.map_par route.
+// Usage: almide run fan_map_par.almd
+effect fn chain(seed: Int, steps: Int) -> Result[Int, String] = {
+  var acc = seed
+  var i = 0
+  while i < steps {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  ok(acc)
+}
+
+effect fn main() -> Unit = {
+  let steps = 2000000
+  let sums = fan.map(list.range(0, 64), (x) => chain(x, steps))!
+  println(int.to_string(list.fold(sums, 0, (a, b) => a + b)))
+}
