@@ -58,7 +58,9 @@ fn spread_records_witness_their_field_stores_and_release_a_produced_base() {
         // its hand-over, and the result moves out.
         ("bumped", "ibm\nim\n"),
         // A fresh list literal (and its element) moves into the slot.
-        ("tagged", "im\nim\nim\nim\n"),
+        // B1 (9b35d41ca) logs the overwritten `tags` slot's release as the
+        // slot's consume (`id`).
+        ("tagged", "im\nim\nim\nid\nim\n"),
         // A LOCAL base: born by the call, read by the spread (`b`) and by
         // `p.n`, released at the exit; the copy is a fresh bind of its own.
         ("local_base", "\nibbd\nibd\n"),
