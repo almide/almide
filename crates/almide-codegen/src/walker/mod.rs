@@ -325,7 +325,7 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
 /// The argument a C export wrapper hands its Almide fn for a lent `Region`
 /// param — a signature spelling (owned param: a clone of the lent view;
 /// borrowed: a reference to it), so it lives beside the param types.
-pub(crate) fn c_export_region_arg(p: &IrParam, lent: &str) -> String {
+fn c_export_region_arg(p: &IrParam, lent: &str) -> String {
     match p.borrow {
         ParamBorrow::Own => format!("{lent}.clone()"),
         _ => format!("&{lent}"),
