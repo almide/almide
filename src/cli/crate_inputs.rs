@@ -228,9 +228,7 @@ pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
         .as_bytes(),
     );
     let mut acc = format!("recipe={:016x};rustc={};", recipe, toolchain_identity());
-    let mut vars: Vec<(String, String)> = std::env::vars()
-        .filter(|(k, _)| env_shapes_the_binary(k))
-        .collect();
+    let mut vars = env_pairs(env_shapes_the_binary);
     vars.sort();
     for (k, v) in vars {
         acc.push_str(&format!("{}={};", k, v));
@@ -272,4 +270,19 @@ pub(super) fn toolchain_identity() -> &'static str {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace('\n', "|"))
             .unwrap_or_default()
     })
+}
+
+/// The environment's `(name, value)` pairs whose name `keep` selects, for a
+/// cache key. `std::env::vars` panics on the first variable that is not
+/// UTF-8 — any such variable anywhere in the environment made `almide run`
+/// and `almide build` abort (#4388). A name that is not UTF-8 is never one
+/// the key reads; a value that is not UTF-8 enters the key in its escaped
+/// `Debug` spelling, so it still separates two environments.
+pub(super) fn env_pairs(keep: impl Fn(&str) -> bool) -> Vec<(String, String)> {
+    std::env::vars_os()
+        .filter_map(|(k, v)| {
+            let k = k.into_string().ok()?;
+            keep(&k).then(|| (k, v.into_string().unwrap_or_else(|v| format!("{v:?}"))))
+        })
+        .collect()
 }

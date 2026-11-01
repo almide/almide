@@ -192,12 +192,14 @@ fn main() {
 fn run_main() {
     crate::diagnostic_render::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
-    let raw_args: Vec<String> = std::env::args().collect();
-    if raw_args.len() >= 2
-        && !raw_args[1].starts_with('-')
-        && (raw_args[1].ends_with(".almd") || raw_args[1].ends_with(".json"))
-    {
-        let mut new_args = vec![raw_args[0].clone(), "emit".to_string()];
+    // `args_os`, not `args`: `std::env::args` panics on an argument that is
+    // not UTF-8 (#4388). clap reports such an argument as a usage error.
+    let raw_args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let legacy = raw_args.get(1).and_then(|a| a.to_str()).is_some_and(|a| {
+        !a.starts_with('-') && (a.ends_with(".almd") || a.ends_with(".json"))
+    });
+    if legacy {
+        let mut new_args = vec![raw_args[0].clone(), "emit".into()];
         new_args.extend_from_slice(&raw_args[1..]);
         let cli = Cli::parse_from(new_args);
         dispatch(cli);

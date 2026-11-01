@@ -206,6 +206,47 @@ impl Emitter<'_> {
         Ok(SliceTy::Result(sh, sh))
     }
 
+    /// ret on stack → Result[String, String] whose ok text is decoded the
+    /// way native decodes a fetched body: `String::from_utf8_lossy`. The
+    /// http text family (ops 43..=49) answers the response bytes as the
+    /// server sent them on every wasm host, so without this an ok payload
+    /// could hold invalid UTF-8 where native holds U+FFFD — and every
+    /// String walker past it trusts the encoding (#4387). A valid payload
+    /// is kept as it is (one validation pass, no copy); only an invalid one
+    /// is rebuilt.
+    pub(crate) fn fs_result_text_lossy(&mut self) -> Result<SliceTy, EmitError> {
+        let t = self.fs_result_string()?;
+        let inv_pre = self.pool.intern("invalid UTF-8: invalid utf-8 sequence of ");
+        let inv_mid = self.pool.intern(" bytes from index ");
+        let inc_pre = self.pool.intern("invalid UTF-8: incomplete utf-8 byte sequence from index ");
+        let check = self.work.helper(crate::work::Helper::BytesToString { inv_pre, inv_mid, inc_pre });
+        let lossy = self.work.helper(crate::work::Helper::Utf8Lossy);
+        let hs = self.hold_i32()?;
+        let hb = self.hold_i32()?;
+        let hr = self.hold_i32()?;
+        let tag = slot_memarg(almide_layout::SUM_TAG);
+        let field = slot_memarg(almide_layout::SUM_FIELD);
+        let mut i = self.f.instructions();
+        i.local_set(hs);
+        i.local_get(hs).i32_load(tag).i32_eqz().if_(BlockType::Empty);
+        i.local_get(hs).i32_load(field).local_tee(hb).call(check).local_set(hr);
+        // The check's Result holds its own reference to a valid block, or a
+        // fresh message for an invalid one: release whichever it holds.
+        i.local_get(hr).i32_load(field).call(F_DEC_FLAT);
+        i.local_get(hr).i32_load(tag).if_(BlockType::Empty);
+        i.local_get(hs).local_get(hb).call(lossy).i32_store(field);
+        i.local_get(hb).call(F_DEC_FLAT);
+        i.end();
+        i.local_get(hr).call(F_DEC_FLAT);
+        i.end();
+        i.local_get(hs);
+        let _ = i;
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(t)
+    }
+
     /// ret on stack → Result[Unit, String] block on stack.
     pub(crate) fn fs_result_unit(&mut self) -> Result<SliceTy, EmitError> {
         let hret = self.hold_i64()?;
