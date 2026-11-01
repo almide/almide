@@ -5854,3 +5854,16 @@ evidence  = [
   { path = "spec/wasm_host_js/region_export_push.almd", class = "fixture" },
   { path = "spec/wasm_host_js/region_extern_pull.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-447"
+spec      = "ALS-R5"
+title     = "fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length"
+statement = "ALS-R5 (almide/almide#4382): `fs.append_bytes(path, data)` opens `path` for appending, creating the file when it is missing (never its parent), and writes `data` after whatever the file holds, bytes another call wrote included, on native, on the embedded wasm lane, on the stock WASI preview-1 artifact and on the WASI 0.3 component. The file's content is never read: an append to a file one byte past the 1 GiB whole-file read limit (C-431), which `fs.read_bytes` refuses with `File too large`, answers ok and grows the file by exactly `bytes.len(data)`, so what an append costs depends on the appended bytes alone. Every byte value 0..=255 is written verbatim, and an empty `data` leaves the file as it was. An error names the call and the path as written, `fs.append_bytes(\"<path>\"): <text>`, with the text the leg's classified errno table gives: a directory at `path` errs from the open, before anything is written, and a missing parent errs without being created. NOT covered: atomicity against a concurrent writer (no single program observes it), and the WASI 0.2 component, which carries no filesystem."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_append_bytes_true_append.almd", class = "fixture" },
+  { path = "spec/embedded_cross/append_bytes_past_read_bound.almd", class = "fixture" },
+  { path = "tests/fs_append_bytes_true_append_test.rs", name = "append_bytes_reaches_only_the_append_op", class = "fixture" },
+  { path = "tests/fs_append_bytes_true_append_test.rs", name = "appending_does_not_read_the_file_on_every_leg", class = "fixture" },
+]

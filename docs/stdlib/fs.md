@@ -147,7 +147,9 @@ effect fn main() -> Unit = {
 
 ### `fs.append_bytes(path: String, data: Bytes) -> Result[Unit, String]`
 
-Append `Bytes` to a file, creating it if it doesn't exist
+Append `Bytes` to a file, creating it if it doesn't exist. It is a true
+append on every target: the file is opened for appending and never read, so
+a call costs the bytes it appends, whatever the file's size (C-447).
 
 ```almd run
 import fs

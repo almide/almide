@@ -154,6 +154,7 @@ fn operation_name(op: i32) -> &'static str {
             60 => "datetime.monotonic_ns",
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes", 64 => "fs.read_bytes_if_exists",
+            66 => almide_wasm::host_ops::FS_APPEND_BYTES_CALL,
             73 => "panic",
             77 => "env.vars",
             91..=103 => "the net core (net.tcp_*)",
