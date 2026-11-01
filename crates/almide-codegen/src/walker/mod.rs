@@ -326,8 +326,17 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
 /// its type above (ADR-0013): a value holding a String in a structural
 /// position is copied into its host shape, and a `mut` one is copied back
 /// after the call through `after`.
+///
+/// A `Region` (ADR-0031) is two host arguments, its base and the length the
+/// runtime holds for it — `(*mut u8, usize)`, the pair `@extern(c)` hands a C
+/// callee (D3) and `@extern(wasm)` hands its host as `(base, len)` (#4353).
+/// A dual binding has one parameter shape on every host, and the host never
+/// names the runtime's `Region` record nor gets a length the caller typed.
 fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> String {
     let name = p.name.to_string();
+    if almide_lang::types::extern_abi::is_region(&p.ty) {
+        return format!("{name}.base, {name}.len.max(0) as usize");
+    }
     if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
         return name;
     }

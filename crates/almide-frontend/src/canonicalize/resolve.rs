@@ -25,16 +25,6 @@ pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
     sym(&format!("<in-scope:{}>|{}", scope.unwrap_or(""), name))
 }
 
-/// The key recording that the ENTRY program itself declares the record or
-/// variant `name` (#4322): its bare `types` entry is that declaration, not a
-/// dependency's bare dual-registration. Structure cannot tell the two apart —
-/// `type Item = { id: String }` beside a dependency's identical `mod type
-/// Item` compares equal — so the declaration says it. No source can spell
-/// the key, and it has no `.Name` suffix, so no module-key scan matches it.
-pub fn entry_own_type_key(name: &str) -> Sym {
-    sym(&format!("<entry-own:{}>", name))
-}
-
 /// The key under which a GENERIC type declaration's parameter list is
 /// recorded (#3403): `<type-params:Pair>` / `<type-params:m.Pair>` holds
 /// `Ty::Tuple` of the declared letters, in declaration order, beside the
@@ -77,6 +67,33 @@ pub fn register_builtin_named_type_keys(env: &mut crate::types::TypeEnv, decls: 
             && builtin_type_head(name.as_str(), TypeSpelling::Bare).is_some()
         {
             env.types.insert(builtin_named_type_key(scope, name.as_str()), Ty::Named(*name, Default::default()));
+        }
+    }
+}
+
+/// The key recording that the ENTRY program declares a type of this bare
+/// name (#4352, #4322): `<entry-own-type>|ToolCall`. The entry's own declaration
+/// owns its bare spelling there, whatever its shape — a dependency's
+/// same-named type, even a structurally identical one, is never what the
+/// entry's `ToolCall` means. Without the record the bare-name resolver could
+/// only compare structures, and read an entry `type ToolCall = { id: String }`
+/// as the bare alias of a dependency's `mod type ToolCall = { id: String }`,
+/// so the entry's own literal and field reads were E033 against the
+/// dependency's module. No source can spell the key, and it has no `.Name`
+/// suffix, so no scan for a module's `m.Name` key ever matches it.
+pub fn entry_own_type_key(name: &str) -> Sym {
+    sym(&format!("<entry-own-type>|{}", name))
+}
+
+/// Record [`entry_own_type_key`] for each type the entry program's `decls`
+/// declare, before any declaration body or signature resolves (declaration
+/// order is not meaningful, #2645).
+pub fn register_entry_own_type_keys(env: &mut crate::types::TypeEnv, decls: &[ast::Decl]) {
+    for decl in decls {
+        if let ast::Decl::Type { name, .. } = decl {
+            // Only the key's presence is read; `Unit` names no type, so no
+            // scan of the table reads the record as an alias or a record.
+            env.types.insert(entry_own_type_key(name.as_str()), Ty::Unit);
         }
     }
 }
@@ -405,13 +422,13 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
         if let Some(bare) = types.get(&sym(name)) {
             // The value test first: it rejects almost every entry without
             // resolving the key's text (#3509).
-            // The entry's own declaration wins whatever its structure (#4322):
-            // the module-system rule that a file's own type shadows an
-            // imported one of the same name.
-            let own = types.contains_key(&entry_own_type_key(name));
-            let is_alias_of_a_qualified = || !own && types.iter().any(|(k, v)| v == bare && user_module_owner(k));
+            // The entry's own declaration answers first (#4352): the
+            // structural test below cannot tell it from a dependency's bare
+            // alias when the two declare the same fields.
+            let declared_here = types.contains_key(&entry_own_type_key(name));
+            let is_alias_of_a_qualified = || types.iter().any(|(k, v)| v == bare && user_module_owner(k));
             match bare {
-                Ty::Record { .. } | Ty::Variant { .. } if !is_alias_of_a_qualified() => return Some(sym(name)),
+                Ty::Record { .. } | Ty::Variant { .. } if declared_here || !is_alias_of_a_qualified() => return Some(sym(name)),
                 // The entry program's own ALIAS of the name (#3401): not
                 // nominal, so it has no key to answer with, but it shadows an
                 // imported module's same-named record just as a local record

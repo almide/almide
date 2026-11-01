@@ -595,6 +595,8 @@ fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern
 | 名前付きレコード `P` | `&crate::P` |
 | バリアント / `Option[T]` / `Result[T, E]` / タプル | 所有（`crate::Sh` / `Option<T>` / `Result<T, E>` / `(A, B)`） |
 | 関数値 `(A) -> B` | `&dyn Fn(A) -> B`（借用 — 呼び出し中に呼ぶ） |
+| `Handle` | `*mut u8`（所有） |
+| `Region` | **二つの引数** `(base: *mut u8, len: usize)` — 下記 |
 | `mut v: T` | `&mut T`（`mut v: Bytes` は `&mut Vec<u8>`、`mut v: Matrix` は `&mut AlmideMatrix`。書き込みは呼び出し側の `var` に copy-on-write で反映） |
 
 戻り値はその型の生成コード表現（`Int` → `i64`、`String` → `String` …）で返す。生成コードの文字列は共有バッファ `AlmideString`（ADR-0013）だが、ホストは `String` のままでよい: ラッパが境界で変換する（`String` を含む `List` / `Set` / `Map` / `Option` / `Result` / タプルの引数はホスト側の `String` 形に複製して渡し、`mut` 引数は呼び出し後に書き戻し、戻り値は `AlmideString` 形に複製する。`AlmideString` をそのまま返すホストも受け付ける）。`Bytes` / `Matrix` の戻り値は生の `Vec<u8>` / `AlmideMatrix` でよい（ラッパが `.into()` する）。
@@ -616,6 +618,26 @@ fn fill(n: Int) -> Bytes = _
 
 規則は `extern_rust_borrow_mode`（`crates/almide-codegen/src/pass_borrow_inference_ownership.rs`）一箇所にあり、呼び出し側の借用とラッパの引数型が同じ規則を読む。
 
+`Region` 引数（ADR-0031）はホストに二つの引数として渡る: 先頭アドレス `*mut u8` と、ランタイムが保持している長さ `usize`。`@extern(c)` が C に渡す組（§11.2）、`@extern(wasm)` がホストに渡す `(base, len)` と同じ形で、ホストはランタイムの `Region` レコード型を名指ししない。長さは呼び出し側が書いた値ではなく Region 自身の長さ。読むなら `std::slice::from_raw_parts(base, len)`、書き込みは `ffi.alloc` で作った書き込み可能な Region に対してだけ許される（`ffi.region(b)` の Region は読み取り専用）。ポインタは呼び出し中だけ有効。
+
+```rust
+// native/sys.rs
+pub fn log(base: *mut u8, len: usize) {
+    let bytes = unsafe { std::slice::from_raw_parts(base, len) };
+    println!("{}", String::from_utf8_lossy(bytes));
+}
+```
+
+```almide
+import ffi
+
+@extern(wasm, "sys", "log")
+@extern(rust, "crate::sys", "log")
+fn log(buf: Region) -> Unit = _
+```
+
+`@extern(wasm)` と `@extern(rust)` を両方持つ束縛（#4353）では、どちらのホストも同じ位置に同じ二つの値を受け取る。wasm では Region 引数が `(base, len)` の import に分けられ、ネイティブ側の束縛は wasm には無関係。
+
 ### 11.2 `@extern(c, …)` の型
 
 `@extern(c, "lib", "f")` は `extern "C"` ブロックと安全なラッパを生成する。C を渡れる型は閉じた表（`almide_lang::types::extern_abi`）で、チェッカとレンダラが同じ表を読む。
@@ -626,7 +648,8 @@ fn fill(n: Int) -> Bytes = _
 | `Int8`〜`Int64` / `UInt8`〜`UInt64` | 同じ幅の整数 |
 | `Float` / `Float64` / `Float32` | `double` / `double` / `float` |
 | `Bool` | `int`（1 / 0） |
-| `RawPtr` | `*mut u8` |
+| `Handle` | `*mut u8` |
+| `Region`（引数） | `uint8_t *` と `size_t` の二引数 — 先頭アドレスとランタイムが保持する長さ（ADR-0031 D3） |
 | `String`（引数のみ） | `*const u8` — 最初の NUL までの NUL 終端コピー、呼び出し中のみ有効 |
 | `Unit`（戻り値のみ） | `void` |
 
