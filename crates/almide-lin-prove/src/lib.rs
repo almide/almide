@@ -161,6 +161,35 @@ struct Site {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Contract {
     pre: Vec<L>,
+    post: Vec<L>,
+}
+
+/// The slots a body writes and the regions it rebinds (RoutineLin's
+/// `writes` / `rebinds`).
+fn writes_rebinds(items: &[It], w: &mut BTreeSet<Slot>, r: &mut BTreeSet<Slot>) {
+    for it in items {
+        match it {
+            It::Handle { h, .. } | It::Len { n: h, .. } | It::Set(h) | It::SetR { x: h, .. } | It::Asn { x: h, .. } => {
+                w.insert(*h);
+            }
+            It::Alloc { h, r: g, .. } => {
+                w.insert(*h);
+                r.insert(*g);
+            }
+            It::Static { r: g, .. } => {
+                r.insert(*g);
+            }
+            It::Call { res, .. } => {
+                w.insert(*res);
+            }
+            It::Test { thn, els, .. } | It::Branch { thn, els } => {
+                writes_rebinds(thn, w, r);
+                writes_rebinds(els, w, r);
+            }
+            It::Loop { body } => writes_rebinds(body, w, r),
+            _ => {}
+        }
+    }
 }
 
 struct Sim<'a> {
@@ -168,6 +197,7 @@ struct Sim<'a> {
     contracts: &'a BTreeMap<usize, Contract>,
     fills: Vec<String>,
     sites: Vec<Site>,
+    rets: Vec<Vec<L>>,
     conts: Vec<Vec<Vec<L>>>,
     probe: usize,
     err: Option<String>,
@@ -457,6 +487,9 @@ impl Sim<'_> {
                 It::Brk => return finish(joins, None, Some(f)),
                 It::Trap => return finish(joins, None, None),
                 It::Ret => {
+                    if self.probe == 0 {
+                        self.rets.push(f.clone());
+                    }
                     let p = self.proofs(&f, post)?;
                     self.fill(p);
                     return finish(joins, None, None);
@@ -502,7 +535,26 @@ impl Sim<'_> {
                     if self.probe == 0 {
                         self.sites.push(Site { callee: *g, facts: f.clone(), args: sargs.clone() });
                     }
-                    f = kill(&f, &V::S(*res));
+                    // The postcondition, translated back (RoutineLin's tr_out).
+                    let post_c = self.contracts.get(g).map(|c| c.post.clone()).unwrap_or_default();
+                    let (mut wr, mut rb) = (BTreeSet::new(), BTreeSet::new());
+                    if let Some(sk) = self.skels.get(g) {
+                        writes_rebinds(&sk.body, &mut wr, &mut rb);
+                    }
+                    let rslot = self.skels.get(g).map_or(u32::MAX, |k| k.rslot);
+                    let tro = |v: &V| -> Option<L> {
+                        match v {
+                            V::S(q) if *q == rslot => Some(v1(V::S(*res))),
+                            V::S(q) if wr.contains(q) => None,
+                            V::S(q) => valid.iter().find(|(p, _)| p == q).map(|(_, l)| l.clone()),
+                            V::B(r2) | V::C(r2) if rb.contains(r2) => None,
+                            V::B(r2) => reps.iter().find(|(a, _)| a == r2).map(|(_, r)| v1(V::B(*r))),
+                            V::C(r2) => reps.iter().find(|(a, _)| a == r2).map(|(_, r)| v1(V::C(*r))),
+                        }
+                    };
+                    let mut g2: Vec<L> = post_c.iter().filter_map(|c| tr_lin(&tro, c)).collect();
+                    g2.extend(kill(&f, &V::S(*res)));
+                    f = g2;
                 }
             }
         }
@@ -653,6 +705,40 @@ fn site_candidates(s: &Site) -> Vec<L> {
         .collect()
 }
 
+/// The postcondition every return entails, over the result slot, the
+/// slots the body never writes and its region parameters.
+fn infer_post(sk: &Skel, rets: &[Vec<L>]) -> Vec<L> {
+    let Some(first) = rets.first() else { return Vec::new() };
+    let (mut w, mut rb) = (BTreeSet::new(), BTreeSet::new());
+    writes_rebinds(&sk.body, &mut w, &mut rb);
+    let keep = |v: &V| match v {
+        V::S(x) => *x == sk.rslot || !w.contains(x),
+        V::B(r) | V::C(r) => *r >= RPARAM && !rb.contains(r),
+    };
+    let rows: Vec<Row> = first.iter().map(|l| row_of(l, |v| if keep(v) { Pv::New(v.clone()) } else { Pv::Old(v.clone()) })).collect();
+    let Some(out) = project(rows) else { return Vec::new() };
+    let mut post: Vec<L> = out
+        .into_iter()
+        .filter(|(m, _)| m.keys().any(|k| matches!(k, Pv::New(V::S(x)) if *x == sk.rslot)))
+        .filter_map(|(m, c)| {
+            let t = m.into_iter().map(|(k, a)| match k { Pv::New(v) => Some((v, a)), Pv::Old(_) => None }).collect::<Option<Vec<_>>>()?;
+            Some(L { t, c })
+        })
+        .filter(|c| rets.iter().all(|f| entailed(f, c)))
+        .take(40)
+        .collect();
+    let mut i = 0;
+    while i < post.len() {
+        let rest: Vec<L> = post.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, l)| l.clone()).collect();
+        if entailed(&rest, &post[i]) {
+            post.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    post
+}
+
 /// Does the site entail candidate `c` (callee terms)?
 fn site_entails(s: &Site, c: &L) -> bool {
     let reps = region_map(&s.facts, &s.args);
@@ -667,13 +753,15 @@ fn site_entails(s: &Site, c: &L) -> bool {
 }
 
 /// One procedure proven: its certificate stretch, or why not.
-fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contract>, pos: usize) -> (Result<String, String>, Vec<Site>) {
+#[allow(clippy::type_complexity)]
+fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contract>, pos: usize) -> (Result<String, String>, Vec<Site>, Vec<Vec<L>>) {
     let sk = &skels[&pos];
     let pre = contracts.get(&pos).map(|c| c.pre.clone()).unwrap_or_default();
-    let mut sim = Sim { skels, contracts, fills: Vec::new(), sites: Vec::new(), conts: Vec::new(), probe: 0, err: None };
+    let post = contracts.get(&pos).map(|c| c.post.clone()).unwrap_or_default();
+    let mut sim = Sim { skels, contracts, fills: Vec::new(), sites: Vec::new(), rets: Vec::new(), conts: Vec::new(), probe: 0, err: None };
     sim.fills.push(pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
-    sim.fills.push(String::new());
-    let r = sim.lcheck(None, &[], pre, &sk.body);
+    sim.fills.push(post.iter().map(L::text).collect::<Vec<_>>().join(" "));
+    let r = sim.lcheck(None, &post, pre, &sk.body);
     let _ = sim.skels;
     match r {
         Some((None, None)) => {
@@ -686,10 +774,10 @@ fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contrac
                     Tok::Hole(_) => out.push_str(&it.next().unwrap_or_default()),
                 }
             }
-            (Ok(out), sim.sites)
+            (Ok(out), sim.sites, sim.rets)
         }
-        Some(_) => (Err("a path does not end in a return".into()), sim.sites),
-        None => (Err(sim.err.unwrap_or_else(|| "refused".into())), sim.sites),
+        Some(_) => (Err("a path does not end in a return".into()), sim.sites, sim.rets),
+        None => (Err(sim.err.unwrap_or_else(|| "refused".into())), sim.sites, sim.rets),
     }
 }
 
@@ -744,19 +832,26 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usi
         let mut results = BTreeMap::new();
         for _round in 0..8 {
             let mut sites: Vec<Site> = Vec::new();
+            let mut rets: BTreeMap<usize, Vec<Vec<L>>> = BTreeMap::new();
             results.clear();
             for &pos in &table {
-                let (r, s) = prove_proc(&skels, &contracts, pos);
+                let (r, s, rt) = prove_proc(&skels, &contracts, pos);
                 sites.extend(s);
+                rets.insert(pos, rt);
                 results.insert(pos, r);
             }
             let mut next: BTreeMap<usize, Contract> = BTreeMap::new();
             for &pos in &table {
+                let post = infer_post(&skels[&pos], rets.get(&pos).map_or(&[][..], Vec::as_slice));
                 if entry.contains(&pos) {
+                    next.insert(pos, Contract { pre: Vec::new(), post });
                     continue;
                 }
                 let mine: Vec<&Site> = sites.iter().filter(|s| s.callee == pos).collect();
-                let Some(first) = mine.first() else { continue };
+                let Some(first) = mine.first() else {
+                    next.insert(pos, Contract { pre: Vec::new(), post });
+                    continue;
+                };
                 let cands = site_candidates(first);
                 let mut pre: Vec<L> = cands.into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
                 // Drop what the rest implies.
@@ -769,7 +864,7 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usi
                         i += 1;
                     }
                 }
-                next.insert(pos, Contract { pre });
+                next.insert(pos, Contract { pre, post });
             }
             if std::env::var_os("ALMIDE_LIN_DEBUG").is_some() {
                 for (p, r) in &results {
