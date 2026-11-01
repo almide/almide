@@ -797,7 +797,7 @@ Example signed_test_negative_index_not_spatial :
   let e : Env := fun x => match x with 1%nat => 1 | _ => -2 end in
   let t := [ELoad 0%nat (poff e 2%nat 8 0) 8 0%nat] in
   prun [] one_slot (fun b => b = 0%nat) (fun _ => 0%nat) e
-       (PCheck 2 1 8 true (PAcc 2 8 0 8 PEnd)) t (Done e) /\
+       (PCheck 2%nat 1%nat 8 true (PAcc 2%nat 8 0 8 PEnd)) t (Done e) /\
   ~ Spatial (map (palloc_ev one_slot) [0%nat] ++ t).
 Proof.
   simpl. split.
