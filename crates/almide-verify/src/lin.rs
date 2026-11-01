@@ -33,6 +33,8 @@ pub(crate) struct Lin {
 }
 
 type Pf = (Vec<(Nat, Z)>, Z);
+/// A call argument: parameter, value, no-wrap proofs when a contract names it.
+type Arg = (Nat, Lin, Option<(Pf, Pf)>);
 type Facts = Vec<Lin>;
 type St = Option<Facts>;
 
@@ -53,7 +55,7 @@ pub(crate) enum Item {
     Cont(Vec<Pf>),
     Brk,
     Trap,
-    Call { f: Nat, args: Vec<(Nat, Lin, Option<(Pf, Pf)>)>, reps: Vec<(Nat, Nat)>, outs: Vec<(Nat, Nat)>, res: Nat, pfs: Vec<Pf> },
+    Call { f: Nat, args: Vec<Arg>, reps: Vec<(Nat, Nat)>, outs: Vec<(Nat, Nat)>, res: Nat, pfs: Vec<Pf> },
     Ret(Vec<Pf>),
 }
 
@@ -171,7 +173,7 @@ fn map_at(s: &[u8], i: usize) -> Option<((Nat, Nat), usize)> {
     Some(((a, b), i))
 }
 
-fn arg_at(s: &[u8], i: usize) -> Option<((Nat, Lin, Option<(Pf, Pf)>), usize)> {
+fn arg_at(s: &[u8], i: usize) -> Option<(Arg, usize)> {
     let (p, i) = nat_at(s, i)?;
     let i = tok(s, i, b':')?;
     let (l, i) = lin_at(s, i)?;

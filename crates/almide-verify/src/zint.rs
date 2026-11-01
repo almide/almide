@@ -41,8 +41,8 @@ fn add_mag(a: &[u32], b: &[u32]) -> Vec<u32> {
 fn sub_mag(a: &[u32], b: &[u32]) -> Vec<u32> {
     let mut out = Vec::with_capacity(a.len());
     let mut borrow = 0i64;
-    for i in 0..a.len() {
-        let mut d = i64::from(a[i]) - i64::from(*b.get(i).unwrap_or(&0)) - borrow;
+    for (i, &x) in a.iter().enumerate() {
+        let mut d = i64::from(x) - i64::from(*b.get(i).unwrap_or(&0)) - borrow;
         borrow = 0;
         if d < 0 {
             d += 1 << 32;
@@ -137,15 +137,6 @@ impl Z {
     pub(crate) fn mul(&self, o: &Z) -> Z {
         let mag = mul_mag(&self.mag, &o.mag);
         Z { neg: !mag.is_empty() && self.neg != o.neg, mag }
-    }
-
-    /// Converts a small non-negative value to an index; `None` past usize.
-    pub(crate) fn as_index(&self) -> Option<usize> {
-        if self.neg || self.mag.len() > 2 {
-            return None;
-        }
-        let v = u64::from(*self.mag.first().unwrap_or(&0)) | (u64::from(*self.mag.get(1).unwrap_or(&0)) << 32);
-        usize::try_from(v).ok()
     }
 }
 
