@@ -1,13 +1,12 @@
-// ── stmts.rs, assignment and field-assignment lowering ──
-//
-// include!-spliced into `stmts.rs` at module level (the 800-line file
-// discipline). The imports are stmts.rs's own.
+//! `Assign` and field-assignment lowering (split from stmts.rs).
+
+use super::*;
 
 impl Emitter<'_> {
     /// `Assign` lowering — the share/dec discipline (RC-3/RC-5) plus the
     /// growing-accumulator window, split from `lower_stmt` for the
     /// complexity budget.
-    fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
+    pub(crate) fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
                 let moved = self.take_moved_temp(value);
                 if self.routine(|r: &bool| *r, |em| em.try_str_append_assign(var, value))? {
                     return Ok(());

@@ -688,4 +688,5 @@ impl Emitter<'_> {
 
 }
 
-include!("stmts_assign.rs");
+#[path = "stmts_assign.rs"]
+mod assign;

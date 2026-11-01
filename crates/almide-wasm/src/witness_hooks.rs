@@ -634,4 +634,5 @@ impl Emitter<'_> {
     }
 }
 
-include!("witness_hooks_tail.rs");
+#[path = "witness_hooks_tail.rs"]
+mod hooks_tail;

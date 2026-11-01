@@ -1,7 +1,7 @@
-// ── witness_hooks.rs, the inlined predicate, fan, fold, view and assign hooks ──
-//
-// include!-spliced into `witness_hooks.rs` at module level (the 800-line file
-// discipline). The imports are witness_hooks.rs's own.
+//! The inlined-predicate, find, fan, fold, view, assign and decline witness
+//! hooks (split from witness_hooks.rs).
+
+use super::*;
 
 impl Emitter<'_> {
     /// #2755: a Bool predicate callback inlined by `list.any` / `all` /

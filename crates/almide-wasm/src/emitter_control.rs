@@ -1,7 +1,7 @@
-// ── emitter.rs, value-position control flow and the sum-shape test ──
-//
-// include!-spliced into `emitter.rs` at module level (the 800-line file
-// discipline). The imports are emitter.rs's own.
+//! Value-position control flow (`if`, `match`) and the sum-shape test
+//! (split from emitter.rs).
+
+use super::*;
 
 impl Emitter<'_> {
     /// Value-position control flow (`if`, `match`) — the block type comes
@@ -43,7 +43,7 @@ impl Emitter<'_> {
 }
 
 /// Kinds `lower_sum` owns (constructors and unwraps).
-fn is_sum_shape(k: &IrExprKind) -> bool {
+pub(crate) fn is_sum_shape(k: &IrExprKind) -> bool {
     matches!(
         k,
         IrExprKind::OptionNone

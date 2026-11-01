@@ -711,4 +711,6 @@ pub(crate) fn heapish_ret(t: SliceTy) -> bool {
 #[path = "witness_tests.rs"]
 mod tests;
 
-include!("witness_recorder_tail.rs");
+#[path = "witness_recorder_tail.rs"]
+mod recorder_tail;
+pub use recorder_tail::balanced;
