@@ -581,7 +581,8 @@ pub(crate) fn derive_records(
         }
     }
     // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
-    let scalar = |n: &str| decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
+    // (A generated carrier is never a slot block, whatever its payloads.)
+    let scalar = |n: &str| !options.contains(n) && !results.contains(n) && decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
     let mut set: BTreeSet<String> = decls.keys().filter(|n| !scalar(n)).cloned().collect();
     SCALAR_INSTANCES.with(|si| {
         *si.borrow_mut() = decls.keys().filter(|n| n.starts_with("Named(") && scalar(n)).cloned().collect();

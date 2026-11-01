@@ -276,8 +276,16 @@ fn heap_carrier_of(t: &almide_lang::types::Ty) -> Option<u16> {
 
 /// The values of `f` whose declared type is a generated heap carrier.
 fn heap_carrier_values(ir: &almide_ir::IrProgram, f: &crate::MirFunction) -> std::collections::BTreeSet<crate::ValueId> {
+    heap_carrier_values_in(&|name: &str| ir.functions.iter().find(|d| d.name.as_str() == name), f)
+}
+
+/// [`heap_carrier_values`] over any declaration lookup.
+fn heap_carrier_values_in<'a>(
+    decl: &dyn Fn(&str) -> Option<&'a almide_ir::IrFunction>,
+    f: &crate::MirFunction,
+) -> std::collections::BTreeSet<crate::ValueId> {
     let sig = |name: &str| -> Option<crate::render_native_addr::CarrierSig> {
-        let d = ir.functions.iter().find(|d| d.name.as_str() == name)?;
+        let d = decl(name)?;
         Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)))
     };
     let own = sig(f.name.as_str()).unwrap_or_default();
@@ -369,7 +377,8 @@ fn rewrite_native_result_windows_over<'a>(
                 .collect(),
             _ => Vec::new(),
         };
-        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params);
+        let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
+        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params, &carriers);
     }
 }
 }
