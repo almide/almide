@@ -242,6 +242,15 @@ fn rc_lines(
                     None => Some(t.to_string()),
                 })
                 .collect();
+            // A body the self-tail-call loop conversion rewrote after sealing
+            // records each carried local's release at the loop-back, where
+            // the bytes hold none (witness_hooks.rs `witness_loop_back`):
+            // the rc translation check has no rule for that yet, so its
+            // frame is left out, as it was before the body's anchors were
+            // retargeted.
+            if locate.rewritten(*k) {
+                return None;
+            }
             locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
         })
         .collect();
@@ -383,7 +392,12 @@ impl Locator {
     /// Body `serial`'s instructions between byte offsets `from` and `to`, as
     /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
     /// `None` for a body that did not ship or an empty window.
+    /// Only rc reads windows, and a rewritten body's rc frame is left out
+    /// (`rc_lines`), so its windows are too.
     fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
+        if self.rewritten(serial) {
+            return None;
+        }
         let (from, to) = (self.remap(serial, from)?, self.remap(serial, to)?);
         let &i = self.pos.get(&serial)?;
         let j = self.ships_at[i]?;
@@ -419,6 +433,11 @@ impl Locator {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// Was body `serial` rewritten after sealing (tco.rs)?
+    fn rewritten(&self, serial: u64) -> bool {
+        self.remaps.contains_key(&serial)
     }
 
     /// The shipped position of body `serial`, when it shipped.
