@@ -428,7 +428,7 @@ fn render_fn(
             ops.nth(2);
             continue;
         }
-        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys) {
+        if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys, &borrows.arms) {
             line!("{append}");
             ops.nth(1);
             continue;

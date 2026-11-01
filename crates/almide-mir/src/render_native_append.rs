@@ -75,15 +75,29 @@ fn touches(func: &MirFunction, v: ValueId) -> usize {
 /// an append loop is amortized linear (C-131) where a fresh list per append
 /// was quadratic. Taken under the string window's conditions: `xs` an owned
 /// list local, `d` touched by no other op, `ys` not `xs` itself.
-pub(crate) fn list_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>) -> Option<String> {
+pub(crate) fn list_self_append(
+    func: &MirFunction,
+    i: usize,
+    tys: &BTreeMap<ValueId, NTy>,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> Option<String> {
     let (s, x, d) = self_append_window(func, i)?;
     let st = *tys.get(&s)?;
     if !matches!(st, NTy::Vec | NTy::VecStr | NTy::Rec(_)) || func.ret == Some(d) || touches(func, d) != 2 {
         return None;
     }
     let (_, own) = crate::native_list_ops::as_slice(&var(s), st)?;
-    let (xs, x_own) = crate::native_list_ops::as_slice(&var(x), *tys.get(&x)?)?;
-    (own == x_own).then(|| format!("{}.extend_from_slice({xs});", var(s)))
+    let xt = *tys.get(&x)?;
+    let (xs, x_own) = crate::native_list_ops::as_slice(&var(x), xt)?;
+    if own != x_own {
+        return None;
+    }
+    // An owned appended list nothing reads again moves its elements over
+    // (no per-element copy).
+    if xt == st && crate::render_native_move::last_use(func, i, x, xt, borrow_arms) {
+        return Some(format!("{}.append(&mut {});", var(s), var(x)));
+    }
+    Some(format!("{}.extend_from_slice({xs});", var(s)))
 }
 
 /// `list.push(xs, e)` (#4006, no-perf-loss rule): the lowering builds a fresh
