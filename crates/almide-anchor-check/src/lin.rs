@@ -804,6 +804,9 @@ impl<'m, 'a> Tr<'m, 'a> {
             Op::LocalSet { local_index } | Op::LocalTee { local_index } => {
                 let x = *local_index;
                 let v = self.pop(stack)?;
+                // A value still on the stack that names x is x's OLD value:
+                // it moves to a fresh slot before x changes.
+                self.spill(out, stack, &BTreeSet::from([x]));
                 self.assign(out, x, v);
                 if matches!(op, Op::LocalTee { .. }) {
                     stack.push(match self.tys[x as usize] {
