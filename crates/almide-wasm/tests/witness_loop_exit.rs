@@ -35,7 +35,7 @@ fn accepted(cert: &str) -> bool {
 /// The 14 frames that declined `loop-exit` before #2758 admitted the shape,
 /// with their exact certificates.
 const PINNED: [(&str, &str, &str); 14] = [
-    ("guard_value_exit_in_loop", "effect_int_for", "\n\n{|im}\nim\n"),
+    ("guard_value_exit_in_loop", "effect_int_for", "\nad\n\n{|im}\nim\n"),
     ("guard_value_exit_in_loop", "effect_int_nested", "\n\n{|im}\nim\n"),
     ("guard_value_exit_in_loop", "effect_int_while", "\n{|im}\nim\n"),
     ("guard_value_exit_in_loop", "effect_str_for", "\n{ibamd|ibd}\n\n\n{|im}\n\n{|im}\nim\n"),
