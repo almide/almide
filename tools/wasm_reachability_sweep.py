@@ -75,6 +75,28 @@ def memory_unsafe_fns():
                         _MEMORY_UNSAFE.add((name[:-5], fn))
     return _MEMORY_UNSAFE
 
+_LITERAL_MEDIA = None
+LITERAL_MEDIA_RX = re.compile(r"^@literal_media\((\w+)\)\s*\n(?:@[^\n]*\n)*(?:effect )?fn (\w+)", re.M)
+# A media type the checker accepts in a `@literal_media` position (E117: a
+# literal `type/subtype`, neither script-capable nor stdlib-owned).
+MEDIA_TYPE_LITERAL = '"text/csv"'
+
+
+def literal_media_params(module, fn):
+    """The params `@literal_media(param)` declares on stdlib/<module>.almd's
+    `fn`: the checker reads each as a compile-time media-type literal, so a
+    probe's `"a"` there is a type error of the probe, not the leg's wall."""
+    global _LITERAL_MEDIA
+    if _LITERAL_MEDIA is None:
+        _LITERAL_MEDIA = {}
+        d = os.path.join(REPO, "stdlib")
+        for name in os.listdir(d):
+            if name.endswith(".almd"):
+                with open(os.path.join(d, name), encoding="utf-8") as fh:
+                    for param, f in LITERAL_MEDIA_RX.findall(fh.read()):
+                        _LITERAL_MEDIA.setdefault((name[:-5], f), set()).add(param)
+    return _LITERAL_MEDIA.get((module, fn), set())
+
 # Type -> a literal that inhabits it. Reachability only needs the call to RENDER,
 # so an argument that would panic at runtime (an out-of-range index) is fine; an
 # argument that does not TYPE is not, and lands in UNPROBEABLE.
@@ -274,18 +296,24 @@ def constructed(name, depth, tv, args=()):
         if inner:
             tv = inner[0]
     out = []
-    for c in CONSTRUCTORS.get(name, []):
-        parts = [synth_ty(p["type"], depth + 1, tv) for p in c["params"]]
+    # A constructor whose params need no type variable first: its call types
+    # without guessing a bound the interface JSON does not carry
+    # (`http.json(1, "a")` before the Body-generic `http.response`).
+    for c in sorted(CONSTRUCTORS.get(name, []), key=lambda c: has_type_var(c["params"])):
+        lit = literal_media_params(c["module"], c["name"])
+        parts = [[MEDIA_TYPE_LITERAL] if p["name"] in lit else synth_ty(p["type"], depth + 1, tv)
+                 for p in c["params"]]
         if all(parts):
             out.append(f"{c['module']}.{c['name']}({', '.join(x[0] for x in parts)})")
     return out
 
 
-def synth_args(params, tv="1"):
-    """One argument spelling per param (first candidate), or None."""
+def synth_args(params, tv="1", literal_media=()):
+    """One argument spelling per param (first candidate), or None. A param
+    in `literal_media` is the declared media-type literal."""
     out = []
     for prm in params:
-        c = synth_ty(prm["type"], tv=tv)
+        c = [MEDIA_TYPE_LITERAL] if prm.get("name") in literal_media else synth_ty(prm["type"], tv=tv)
         if not c:
             return None
         out.append((c[0], prm["type"].get("kind")))
@@ -354,7 +382,7 @@ def classify(f):
     insts = TYPE_VAR_INSTANTIATIONS if generic else TYPE_VAR_INSTANTIATIONS[:1]
     verdict = None
     for lit, ty in insts:
-        args = synth_args(f["params"], lit)
+        args = synth_args(f["params"], lit, literal_media_params(f["module"], f["name"]))
         if args is None:
             verdict = verdict or ("UNPROBEABLE", "parameter type outside the synthesizer")
             continue
