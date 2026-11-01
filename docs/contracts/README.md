@@ -273,7 +273,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-235 | Unary operators: `not` negation and prefix minus evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-236 | Tuple construction, destructuring, indexing, and structural equality are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-237 | Option/Result constructor literals build and eliminate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 9 |
+| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 10 |
 | C-239 | Collection literals, indexing, and the empty spellings behave identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-241 | Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets | 0.57.1 | active | fixture | 1 |
@@ -482,4 +482,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-444 | A Bytes value nested in a rendered value prints as the list of its byte values, identically on every target | 0.69.0 | active | fixture | 1 |
 | C-445 | The embedded wasm host stops a process.start child neither waited on nor stopped when the run ends by main's return, process.exit or an effect error, as native does | 0.69.0 | active | fixture | 0 |
 | C-446 | A Region crosses the wasm host boundary as (base, len) in the memory's address width: an exported Region stays the host's to write until it releases the address, and a Region lent across the boundary is read and written in place | 0.69.0 | active | fixture | 0 |
+| C-448 | net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native | 0.69.0 | active | fixture | 0 |
 

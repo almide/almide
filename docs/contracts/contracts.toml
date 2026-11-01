@@ -5852,3 +5852,17 @@ evidence  = [
   { path = "spec/wasm_host_js/region_export_push.almd", class = "fixture" },
   { path = "spec/wasm_host_js/region_extern_pull.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-448"
+spec      = "ALS-R5"
+title     = "net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native"
+statement = "ALS-R5 (almide/almide#4306): a program calling `net.udp_bind`, `net.udp_local_port`, `net.udp_send_to`, `net.udp_recv_from`, `io.close` of a `UdpSocket` or `net.lookup_host`, built as a WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --target wasm --component`), imports `wasi:sockets/types@0.3.0` and `wasi:sockets/ip-name-lookup@0.3.0` and no interface outside the WASI 0.3 command world; a component whose program calls none of them imports no `wasi:sockets` interface. Run on a stock wasmtime with the network granted (`-S inherit-network -S allow-ip-name-lookup`), the component answers C-442's and C-443's programs with the same stdout and exit code as the native leg, byte for byte: the same handle numbering (the lowest free slot, reused after a close), datagram boundaries and max-bytes rule, the sender's address as the native leg prints it, and every err text from the one table C-443 states. An IP literal (IPv4, IPv6, or IPv6 in brackets) is read by the native leg's grammar and never reaches the host's resolver. Run without the network grant, a bind is an `err` reading that table's permission text: `udp_bind(127.0.0.1:0): permission denied` for `udp_bind(\"127.0.0.1\", 0)`. Evidence: tests/net_udp_p3_cross_test.rs builds spec/embedded_cross/net_udp_loopback.almd and net_udp_errors.almd as the component, runs each natively and on wasmtime, and requires both legs to reach the program's closing `done` line with identical stdout and exit code; a second test builds an echo program and a bind program and reads the imports and the ungranted bind."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/net_udp_loopback.almd", class = "fixture" },
+  { path = "spec/embedded_cross/net_udp_errors.almd", class = "fixture" },
+  { path = "tests/net_udp_p3_cross_test.rs", name = "udp_and_lookup_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_udp_p3_cross_test.rs", name = "sockets_ship_only_with_udp_ops_and_a_missing_grant_is_the_permission_text", class = "fixture" },
+]
