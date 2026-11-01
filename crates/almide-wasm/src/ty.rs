@@ -75,8 +75,12 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
         // declaration of that name lives under `self.X` / `m.X` and must
         // never be reached from the bare spelling by suffix.
         .or_else(|| {
-            if almide_types::stdlib_info::stdlib_owned_type_owner(name).is_some() {
-                return None;
+            // ...and it names exactly that module's declaration (#4383): a
+            // `net.IpAddr` binding resolves to `net`'s own decl, so `==`
+            // and `assert_eq` reach the same derived structural equality a
+            // user variant gets.
+            if let Some(owner) = almide_types::stdlib_info::stdlib_owned_type_owner(name) {
+                return types.by_name.get(&format!("{owner}.{name}")).map(|&i| SliceTy::Named(i));
             }
             named_suffix_unique(types, name)
         })

@@ -304,6 +304,7 @@ statement = "`==` / `!=` and every containment / dedup / key-lookup op compare C
 since     = "0.24.0"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/stdlib_variant_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/compound_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/deep_eq_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_eq.almd", class = "fixture" },

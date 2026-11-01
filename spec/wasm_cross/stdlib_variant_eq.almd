@@ -1,0 +1,25 @@
+// @contract: C-015
+// #4383: `==`, `!=` and `assert_eq` on a STDLIB variant (`net.IpAddr`) use the
+// same derived structural equality as a user variant, on both targets. The wasm
+// leg used to wall the program (E082 `bind-ty:Named`, `bind-ty:Applied` inside
+// a Result): a binding typed by the stdlib's bare name never resolved to the
+// `net` module's own declaration. Covers both cases (a scalar payload and a
+// List payload), a Result and an Option around the variant, and a List of it.
+import net
+
+fn same(a: net.IpAddr, b: net.IpAddr) -> Bool = a == b
+
+effect fn main() -> Unit = {
+  let a = net.parse_ip("1.2.3.4") ?? net.V4(0, 0, 0, 0)
+  println("v4 eq ${a == net.V4(1, 2, 3, 4)} ne ${a != net.V4(1, 2, 3, 5)}")
+  let v6 = net.parse_ip("::1") ?? net.V4(0, 0, 0, 0)
+  println("v6 eq ${v6 == net.V6([0, 0, 0, 0, 0, 0, 0, 1])} cross ${v6 == a}")
+  println("result ${net.parse_ip("1.2.3.4") == ok(net.V4(1, 2, 3, 4))}")
+  println("result err ${net.parse_ip("nope") == ok(net.V4(1, 2, 3, 4))}")
+  let o: net.IpAddr? = some(a)
+  println("option ${o == some(net.V4(1, 2, 3, 4))} ${o == none}")
+  println("list ${[a, v6] == [net.V4(1, 2, 3, 4), net.V6([0, 0, 0, 0, 0, 0, 0, 1])]}")
+  println("fn ${same(a, net.V4(1, 2, 3, 4))} ${same(a, v6)}")
+  assert_eq(net.parse_ip("1.2.3.4"), ok(net.V4(1, 2, 3, 4)))
+  println("assert_eq ok")
+}
