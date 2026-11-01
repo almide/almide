@@ -1,5 +1,5 @@
 diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
-index dc313186f..35d5492ec 100644
+index fc48a2604..9f03bc7b8 100644
 --- a/crates/almide-wasm/src/calls_modules.rs
 +++ b/crates/almide-wasm/src/calls_modules.rs
 @@ -80,11 +80,24 @@ impl Emitter<'_> {
@@ -28,10 +28,10 @@ index dc313186f..35d5492ec 100644
      }
  
 diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
-index 185b5d9f8..9cab0e819 100644
+index 29acc4999..d372eb3ce 100644
 --- a/crates/almide-wasm/src/witness_hooks.rs
 +++ b/crates/almide-wasm/src/witness_hooks.rs
-@@ -548,6 +548,8 @@ impl Emitter<'_> {
+@@ -564,6 +564,8 @@ impl Emitter<'_> {
      pub(crate) fn witness_rc_hold_move(&mut self, local: u32) {
          if self.witness.as_ref().is_some_and(|w| !w.dead()) {
              crate::witness::rc::event('h', Some(local));
@@ -40,10 +40,10 @@ index 185b5d9f8..9cab0e819 100644
          }
      }
  
-@@ -823,3 +825,9 @@ fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
-         P::Wildcard | P::Literal { .. } | P::None => {}
-     }
- }
+@@ -636,3 +638,9 @@ impl Emitter<'_> {
+ 
+ #[path = "witness_hooks_tail.rs"]
+ mod hooks_tail;
 +
 +thread_local! {
 +    // RE-INJECTED (#4277 drill)
