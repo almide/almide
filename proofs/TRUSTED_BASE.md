@@ -350,6 +350,28 @@ changes only atomically. Also trusted: the fan runtime text itself and the
 glue that routes this render's output and exits through it
 (`crates/almide-mir/src/render_native_fan.rs`).
 
+The same row covers `fan.map(xs, f)` (`crates/almide-mir/src/fan_map_twin.rs`).
+The MIR keeps the call as the certified SEQUENTIAL call the lowering routes it
+to — the self-host body the registry declares for it (`stdlib/fan_map.almd`),
+lowered, verified and witnessed; it is not rendered, and
+`fan_map_twin::tests` fails if it ever leaves the certificate set — and the
+render emits the standard codegen's parallel twin in its place:
+`almide_rt_fan_map_par` and the dealer, cost model and worker pool it runs on,
+the runtime text verbatim (`almide_codegen::fan_map_parallel_runtime_text`:
+`runtime/rs/src/fan.rs` and the parallel section of `list.rs` between their
+section markers, with the runtime's FFI module `sys.rs` for the dealer's CPU
+clock), each element calling the certified lambda through its typed dispatch
+table. TRUSTED: that the parallel twin is observation-equal to the certified
+sequential body (ADR-0024 D1/D5/D6: every element runs, the lowest-index err
+is the result, output in list order), and that runtime text. Its
+preconditions, each checked by the lift (`fan_map_twin::tests` refuse each):
+the function is a lambda literal whose captures are immutable locals of a
+scalar type (the closure block every element reads is a slab of plain words);
+the element and result types may cross a thread; and the lowering routes the
+call to a body the registry declares. A `fan` call of another shape
+(`fan.any_map`, or a map that fails a precondition) keeps the standard
+codegen.
+
 The receipt's claims are scoped to exactly this:
 
 - **The flight-grade property SET is complete on the value-semantics subset**:
