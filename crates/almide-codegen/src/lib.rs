@@ -875,7 +875,8 @@ pub fn rem_const_divisor(d: i64) -> bool {
 /// The parallel `fan.map` runtime, for the certified native render's
 /// `fan.map` twin (#4006 family H): `almide_rt_fan_map_par` and its settle
 /// step from the fan module, the dealer, cost model and worker pool of the
-/// list module's parallel section, and the thread-share marker — each the
+/// list module's parallel section, the runtime's FFI module (the dealer's
+/// CPU clock), and the thread-share marker — each the
 /// text the standard codegen emits, sliced verbatim between the markers
 /// that bound it in `runtime/rs/src/`. `None` when a marker moved (the
 /// render then declines rather than guess a boundary).
@@ -890,7 +891,10 @@ pub fn fan_map_parallel_runtime_text() -> Option<String> {
     };
     let map_par = slice(module("fan")?, "// `fan.map`'s PARALLEL twin", "// NO PRODUCER.")?;
     let dealer = slice(module("list")?, "// ── Parallel variants", "// ── Mutable operations ──")?;
-    Some(format!("{}\n{dealer}\n{map_par}", prelude_string::shared_thread_boundary_text()))
+    // The dealer reads a worker's CPU clock through the runtime's one FFI
+    // module, which comes whole.
+    let sys = module("sys")?;
+    Some(format!("{}\n{sys}\n{dealer}\n{map_par}", prelude_string::shared_thread_boundary_text()))
 }
 
 #[cfg(test)]
