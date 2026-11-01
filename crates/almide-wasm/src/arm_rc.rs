@@ -12,9 +12,7 @@
 //!   string, an error text) released before the arm answers — `i d`;
 //! - [`Emitter::arm_share_stored`]: a share of a value the arm read out of a
 //!   block (+1), handed to a new holder — the arm's result, a container slot,
-//!   a callee that consumes its parameter — `a m`;
-//! - [`Emitter::arm_share_released`]: a share the arm takes and gives back
-//!   inside itself — `a d`.
+//!   a callee that consumes its parameter — `a m`.
 //!
 //! The arm's declaration toward the frame is unchanged — its `ArgMode` per
 //! argument and its `Own` result (arm.rs) — and the frame's own events
@@ -36,13 +34,6 @@ impl Emitter<'_> {
     pub(crate) fn arm_share_stored(&mut self) {
         if let Some(w) = self.witness.as_mut() {
             w.view_share_move();
-        }
-    }
-
-    /// The arm takes a share and releases it again inside itself.
-    pub(crate) fn arm_share_released(&mut self) {
-        if let Some(w) = self.witness.as_mut() {
-            w.view_ops("ad");
         }
     }
 

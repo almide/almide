@@ -299,8 +299,13 @@ fn names_through(bodies: &[Body<'_>], imports: u32, b: &Body<'_>, judged: &HashS
 fn replaces(fl: &Flow<'_, '_>, b: &Body<'_>, k: usize) -> bool {
     let arg = fl.arg(k, 0, FUEL);
     let Some((addr, off)) = crate::operands::load_parts(&arg) else { return false };
+    let (base, at) = crate::operands::effective(addr, off);
     (k + 1..b.ops.len()).any(|k2| match store_width(&b.ops[k2]) {
-        Some((_, o)) => o == off && fl.same(addr, &fl.arg(k2, 0, FUEL)),
+        Some((_, o)) => {
+            let st = fl.arg(k2, 0, FUEL);
+            let (sbase, sat) = crate::operands::effective(&st, o);
+            sat == at && fl.same(base, sbase)
+        }
         None => false,
     })
 }
