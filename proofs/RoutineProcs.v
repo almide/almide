@@ -427,35 +427,6 @@ Proof.
     exact (nonneg_spec lb bm kn cn nn e x Hs Hn).
 Qed.
 
-Lemma prun_preserves : forall P lb ok bm e p t o,
-  prun P lb ok bm e p t o -> forall e', o = Done e' -> forall y, ~ In y (pkills p) -> e' y = e y.
-Proof.
-  intros P lb ok bm e p t o Hrun. induction Hrun; intros e'' Ho y Hy; simpl in Hy; try discriminate.
-  - injection Ho as <-. reflexivity.
-  - exact (IHHrun e'' Ho y Hy).
-  - exact (IHHrun e'' Ho y Hy).
-  - exact (IHHrun e'' Ho y Hy).
-  - exact (IHHrun e'' Ho y Hy).
-  - rewrite (IHHrun e'' Ho y (fun H => Hy (or_intror H))). unfold upd.
-    destruct (Nat.eqb y n) eqn:E; [apply Nat.eqb_eq in E; subst; exfalso; apply Hy; left; reflexivity | reflexivity].
-  - exact (IHHrun e'' Ho y Hy).
-  - exact (IHHrun e'' Ho y Hy).
-  - injection Ho as <-. reflexivity.
-  - rewrite (IHHrun e'' Ho y (fun H => Hy (or_intror H))). unfold upd.
-    destruct (Nat.eqb y x) eqn:E; [apply Nat.eqb_eq in E; subst; exfalso; apply Hy; left; reflexivity | reflexivity].
-  - rewrite (IHHrun e'' Ho y (fun H => Hy (or_intror H))). unfold upd.
-    destruct (Nat.eqb y x) eqn:E; [apply Nat.eqb_eq in E; subst; exfalso; apply Hy; left; reflexivity | reflexivity].
-  - rewrite (IHHrun e'' Ho y (fun H => Hy (or_intror H))). unfold upd.
-    destruct (Nat.eqb y x) eqn:E; [apply Nat.eqb_eq in E; subst; exfalso; apply Hy; left; reflexivity | reflexivity].
-  - exact (IHHrun e'' Ho y (fun H => Hy (in_or_app _ _ _ (or_intror H)))).
-  - rewrite (IHHrun2 e'' Ho y Hy). exact (IHHrun1 e1 eq_refl y (fun H => Hy (in_or_app _ _ _ (or_introl H)))).
-  - rewrite (IHHrun2 e'' Ho y (fun H => Hy (in_or_app _ _ _ (or_intror (in_or_app _ _ _ (or_intror H)))))).
-    exact (IHHrun1 e1 eq_refl y (fun H => Hy (in_or_app _ _ _ (or_introl H)))).
-  - rewrite (IHHrun2 e'' Ho y (fun H => Hy (in_or_app _ _ _ (or_intror (in_or_app _ _ _ (or_intror H)))))).
-    exact (IHHrun1 e1 eq_refl y (fun H => Hy (in_or_app _ _ _ (or_intror (in_or_app _ _ _ (or_introl H)))))).
-  - exact (IHHrun2 e'' Ho y Hy).
-Qed.
-
 Lemma wrap_small : forall v, - 2 ^ 63 <= v < 2 ^ 63 -> wrap v = v.
 Proof.
   intros v Hv. unfold wrap. rewrite Z.mod_small by lia. lia.
