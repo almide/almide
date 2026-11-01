@@ -397,9 +397,13 @@ bytes by `almide-anchor-check` (operands.rs `covers`), one rule per fact:
   changes size; its liveness is the ownership witness's).
 Each reads `s`'s count unchanged from every `len` read to the access (the
 existing count rule), and a loop-guarded read must lie inside its loop.
+On the 1001-fixture certified corpus (GCE, e23e4ea28): 1001/1001 bounds
+witnesses accepted by all three verdicts, recording 1083 loop exit tests
+(429 before) and 850 emitted checks, and ANCHORS OK on every artifact with
+1899 located accesses held to their guards (1018 before).
 The drills `string-test-one-byte-loose`, `string-loop-exit-loosened` and
 `string-prefix-length-test-loosened` (`scripts/witness-reinject.sh
-anchors`) each read ANCHORS REJECT, and 32 accept/refuse modules sit in
+anchors`) each read ANCHORS REJECT, and 33 accept/refuse modules sit in
 `crates/almide-anchor-check/tests/string_bytes.rs`. Not recorded: the
 string routines' own bodies, runtime routines owed to #4278's per-helper
 certificates — 25 byte reads in the emitter's helpers (runtime.rs 6,
