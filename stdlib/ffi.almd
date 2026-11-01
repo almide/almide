@@ -114,8 +114,14 @@ local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r
 // could keep past the call. Reached only by the compiler-made wrapper of
 // such an export.
 @memory_unsafe
-local fn __lend(base: Handle, len: Int) -> Region =
-  { owner: bytes.new(), base: base, off: 0, len: if len < 0 then 0 else len, writable: false, keep: () => () }
+local fn __lend(base: Handle, len: Int) -> Region = {
+  owner: bytes.new(),
+  base: base,
+  off: 0,
+  len: if len < 0 then 0 else len,
+  writable: false,
+  keep: () => (),
+}
 
 // A copy of the n bytes at base + off. Reached only by `read` / `to_bytes`,
 // after the bounds check.
