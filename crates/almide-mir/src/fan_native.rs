@@ -28,7 +28,8 @@
 //!   per-thread counter);
 //! - no arm holds a higher-order call (`list.map` under `fan` is a parallel
 //!   chunk map on the standard codegen; the sequential form would be slower),
-//!   and the program calls no `fan.map` / `fan.any_map` (likewise).
+//!   and every element-wise `fan` call is a `fan.map` the parallel twin
+//!   admits (crate::fan_map_twin; `fan.any_map` and any other declines).
 
 use almide_ir::visit::{walk_expr, IrVisitor};
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
