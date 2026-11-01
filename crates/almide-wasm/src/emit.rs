@@ -62,6 +62,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // ADR-0031 D3: a Region argument of an `@extern(wasm)` import is split
     // into (base, len) before anything reads the program; a Region return of
     // an `@export(wasm)` fn gets its adapter's wrapper (amendment A1).
+    // #4354: a Region parameter of an `@export(wasm)` fn is lent from the
+    // host's (base, len) first, so a fn that also returns one is wrapped next.
+    let lent = crate::extern_region::lend_region_params(ir);
+    let ir = lent.as_ref().unwrap_or(ir);
     let wrapped = crate::extern_region::wrap_region_exports(ir);
     let ir = wrapped.as_ref().unwrap_or(ir);
     let split = crate::extern_region::split_region_params(ir);
@@ -624,7 +628,22 @@ fn emit_program_pass(
                 ));
             }
             visited.extend(sub);
-            if region_exports.claim(f, &table.infos[i], &types, &export_name)? {
+            let claimed = region_exports.claim(f, &table.infos[i], &types, &export_name)?;
+            if claimed != crate::region_export::Claimed::Plain {
+                // The adapter passes the wrapper's parameters through, an
+                // address or length among them as a number in the memory's
+                // width, so the host marshals each as an `Int` (#4354).
+                let mut params = crate::host_exports::export_params(&table.infos[i].params, &types);
+                for k in crate::extern_region::address_params(f) {
+                    if let Some(s) = params.get_mut(k as usize) {
+                        *s = crate::host_exports::AbiShape::Int;
+                    }
+                }
+                let ret = match claimed {
+                    crate::region_export::Claimed::Region => crate::host_exports::ExportRet::Region,
+                    _ => crate::host_exports::export_ret(table.infos[i].ret, &types),
+                };
+                crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone(), params, ret);
                 export_owners.push(owner);
                 continue;
             }

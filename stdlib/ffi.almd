@@ -107,6 +107,16 @@ mod type RegionExportView = { owner: Bytes, off: Int, len: Int }
 @memory_unsafe
 local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r.off, len: r.len }
 
+// The Region an `@export(wasm)` fn's Region parameter is lent as (#4354):
+// the host's `(base, len)` inside the module's own memory, read-only and
+// owning nothing, for the one call. The length is the host's word; every
+// access is still checked against it, and E119 refuses the copies a body
+// could keep past the call. Reached only by the compiler-made wrapper of
+// such an export.
+@memory_unsafe
+local fn __lend(base: Handle, len: Int) -> Region =
+  { owner: bytes.new(), base: base, off: 0, len: if len < 0 then 0 else len, writable: false, keep: () => () }
+
 // A copy of the n bytes at base + off. Reached only by `read` / `to_bytes`,
 // after the bounds check.
 @memory_unsafe

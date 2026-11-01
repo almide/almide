@@ -38,6 +38,10 @@ pub(super) enum RetPlan {
     Block(AbiShape),
     /// A `Result` block: ok → the value, err → a thrown `AlmideError`.
     Unwrap(AbiShape),
+    /// A Region (ADR-0031 amendment A1, #4354): the adapter's two results,
+    /// `[ptr, len]`, as numbers. No copy: the host reads and writes the
+    /// module's memory at `ptr` and gives `ptr` back to `regionRelease`.
+    Region,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +133,7 @@ pub(super) fn plan_export(f: &HostFn, params: Option<&[AbiShape]>, ret: Option<&
     let vis = visible_ret(f);
     let ok = |s: &AbiShape| s.unsupported().is_none() && agrees(vis, s);
     let plan = match (ret, returns_result(f)) {
+        (Some(ExportRet::Region), _) if almide_lang::types::extern_abi::is_region(&f.ret) => Some(RetPlan::Region),
         (Some(ExportRet::Void), false) if matches!(vis, Ty::Unit) => Some(RetPlan::Void),
         (Some(ExportRet::Value(s)), false) if ok(s) => Some(match s {
             AbiShape::Int => RetPlan::Scalar(Marshal::Int),
@@ -235,6 +240,7 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan, entry: Entry) -> String 
         RetPlan::Void => "void".to_string(),
         RetPlan::Scalar(m) => ts_marshal(*m).to_string(),
         RetPlan::Block(s) | RetPlan::Unwrap(s) => ts_shape(s, true),
+        RetPlan::Region => "[ptr: number, len: number]".to_string(),
     };
     let ret = if entry == Entry::Async { format!("Promise<{ret}>") } else { ret };
     format!("export function {}({}): {ret};\n", f.name, params.join(", "))
@@ -300,6 +306,9 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
             consts.push_str(&format!("const {c} = {res};\n"));
             format!("    return takeResult({call}, {c}, \"{}\");\n", f.name)
         }
+        // Two results in the address width: i32 numbers on wasm32, BigInts
+        // on memory64, so both become numbers here.
+        (RetPlan::Region, _) => format!("    const [ptr, len] = {call};\n    return [Number(ptr), Number(len)];\n"),
     };
     let names: Vec<&str> = f.params.iter().map(|(p, _)| p.as_str()).collect();
     let guard = if entry == Entry::Guarded { format!("  idle(\"{}\");\n", f.name) } else { String::new() };

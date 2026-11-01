@@ -34,3 +34,7 @@ fan_async_overlap 17600
 extern_data_ptr_lifetime 13100
 # #4353: a Region param of a dual @extern(wasm) + @extern(rust) binding, one hook.
 extern_region_dual_binding 6500
+# #4354: Region exports wrapped as [ptr, len] + regionRelease, two effect fn exports (Result unwrapping).
+region_export_push 11700
+# #4354: two Region hooks (a lent alloc the host fills, a lent slice it reads).
+region_extern_pull 6200

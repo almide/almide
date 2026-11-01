@@ -332,10 +332,12 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
 /// callee (D3) and `@extern(wasm)` hands its host as `(base, len)` (#4353).
 /// A dual binding has one parameter shape on every host, and the host never
 /// names the runtime's `Region` record nor gets a length the caller typed.
+/// The base is the view's own start, `base + off`: an `ffi.slice` is handed
+/// as its sub-range, the same address the C glue computes.
 fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> String {
     let name = p.name.to_string();
     if almide_lang::types::extern_abi::is_region(&p.ty) {
-        return format!("{name}.base, {name}.len.max(0) as usize");
+        return format!("{name}.base.wrapping_add({name}.off.max(0) as usize), {name}.len.max(0) as usize");
     }
     if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
         return name;

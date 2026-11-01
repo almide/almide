@@ -291,3 +291,42 @@ effect fn main() -> Unit = println("x")
     }
     assert!(!out.contains("'ok1'"), "a read, a copy and local aliases were refused\n{out}");
 }
+
+/// #4354: an `@export(wasm)` fn's Region parameter is lent from the host's
+/// `(base, len)` for the call, so E119 holds it to the same rule — kept in a
+/// top-level `var` or returned is refused, read and copied out is not.
+#[test]
+fn a_region_lent_to_an_export_wasm_fn_escaping_is_e119() {
+    let almd = r#"import ffi
+
+var kept: Region = ffi.region(bytes.new())
+var saved: Bytes = bytes.new()
+
+@export(wasm, "w1")
+fn w1(buf: Region) -> Int = {
+  kept = buf
+  0
+}
+
+@export(wasm, "w2")
+fn w2(buf: Region) -> Region = buf
+
+@export(wasm, "w_ok")
+effect fn w_ok(buf: Region) -> Int = {
+  saved = ffi.read(buf, 0, ffi.len(buf))!
+  ffi.len(buf)
+}
+
+effect fn main() -> Unit = println("x")
+"#;
+    let (ok, stdout, stderr) = run_package("e119w", almd, "", &["check"]);
+    let out = format!("{stdout}{stderr}");
+    assert!(!ok, "check accepted escaping lent Regions:\n{out}");
+    for want in [
+        "a Region lent to @export(wasm) fn 'w1' escapes its call: it is stored in the top-level var `kept`",
+        "a Region lent to @export(wasm) fn 'w2' escapes its call: it is returned",
+    ] {
+        assert!(out.contains(want), "no E119 for `{want}`\n{out}");
+    }
+    assert!(!out.contains("'w_ok'"), "a read and a copy out were refused\n{out}");
+}
