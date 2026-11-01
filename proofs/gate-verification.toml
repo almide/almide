@@ -116,7 +116,7 @@
 # gated, and what stays trusted is named in proofs/TRUSTED_BASE.md (37 -> 36).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "36"
+# uncompensated_blind_ceiling = "38"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1429,6 +1429,16 @@ evidence = "#2777 landing (2026-09-27, PR #2791): native-musl.yml run 3634533368
 measures = "per-fixture: almide build --target x86_64-unknown-linux-musl success, `file` reporting the binary statically linked, and byte equality of its stdout with tests/native_musl/<fixture>/expected.txt"
 varies = "#2777 landing (2026-09-27, run 36345333688): the tls fixture read PASS for x86_64-unknown-linux-musl (static, 57 MB, 37 s cold build) and FAIL for the three forged runs; the wasmtime fixture (job 108693245937) read PASS (static, 372 MB, 198 s cold build). Per PR (ci.yml Almide gates, job 108694287996): PASS, step 44 s cold with no cache (3 s musl-tools, 41 s build)."
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-native-v1-perf.sh"
+reads = "scalar"
+wired_by = ".github/workflows/native-v1-perf-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4006 landing (2026-11-01, GCE c1-native, sec-c1-next 25197e951): the unforged run exited 0 over 15 gated programs with the six proofs/native-v1-perf-ledger.txt rows read as debt; the same run with ALMIDE_NATIVE_DRILL_NO_MOVES=1 NATIVE_V1_PERF_ONLY_SHAPES=1 (the render keeps every copy) exited 1 with `LOSS research/benchmark/perf/v1-shapes/push_swap.almd: v1 316495323 vs v0 18735135 instructions = 16.893x`; earlier runs on the branch read genuine losses before their fixes (append_accumulator_heap_linear 741.4x, tree_walk 14.4x, variant_result_one_credit_churn 9.75x), each exiting 1"
+measures = "per program on proofs/native-verified-floor.txt and research/benchmark/perf/v1-shapes/: the ratio of cachegrind I refs of the default `almide build` (certified v1) binary over the `--no-verified` (v0) binary, against 1.03 and the debt ledger's recorded ratio; report-only, the min-of-9 interleaved wall-time ratio on rows over 20M instructions (warning above 1.10)"
+varies = "2026-11-01: the gated count rose 9 -> 15 as the floor grew 264 -> 341; the ledger opened with six rows (1.116 - 1.618)"
+blind = "a v1 loss in a program under 1M instructions (startup dominates) -> UNCOMPENSATED; a shape no shape bench or certified program exercises -> UNCOMPENSATED; a memory-locality loss instruction counts miss -> scripts/check-perf-ratio.sh (wall time of the native benches; this gate only warns)"
 
 [[gate]]
 path = "scripts/check-spec-test-files.sh"
