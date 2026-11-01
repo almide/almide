@@ -434,14 +434,19 @@ fn carried_flags(calls: &[&[IrExpr]], params: &[almide_ir::IrParam]) -> Vec<bool
 /// a fresh owned heap value the loop-carried slot takes via drop-old/alloc-new; the in-loop
 /// general-reassign path materializes the (possibly nested) concat via try_lower_concat_str/list,
 /// and the OwnershipChecker `i(id)m` proof covers any fresh-owned producer regardless of nesting.
-fn concat_leftmost_is_var(e: &IrExpr, acc: VarId) -> bool {
+///
+/// The accumulator may be ANY leaf of the chain, not only the leftmost: a
+/// PREPEND `[x] + acc` (the cons-accumulator of #3550, `acc_down(x - 1, [x] +
+/// y)`) is the same fresh owned concat, and the old `acc` is read before the
+/// slot's drop-old/alloc-new exactly as in `acc + [x]`.
+fn concat_has_var_leaf(e: &IrExpr, acc: VarId) -> bool {
     match &e.kind {
         IrExprKind::Var { id } => *id == acc,
         IrExprKind::BinOp {
             op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr,
             left,
-            ..
-        } => concat_leftmost_is_var(left, acc),
+            right,
+        } => concat_has_var_leaf(left, acc) || concat_has_var_leaf(right, acc),
         _ => false,
     }
 }
@@ -450,7 +455,7 @@ fn is_self_append(e: &IrExpr, acc: VarId) -> bool {
     matches!(
         &e.kind,
         IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr, .. }
-    ) && concat_leftmost_is_var(e, acc)
+    ) && concat_has_var_leaf(e, acc)
 }
 
 /// A PURE Module call WRAPPING the growth (`string.take(acc + "x", 8)` — the
