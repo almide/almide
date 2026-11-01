@@ -316,6 +316,14 @@ impl LowerCtx {
             IrExprKind::List { elements } if Self::is_scalar_list_ty(&expr.ty) => {
                 self.try_lower_scalar_list_slots(elements)?
             }
+            // `some(first ?? e)` — a String `??` payload (the self-host
+            // `fan.map` carrying its lowest-index err): the `??` lowers to a
+            // fresh owned String through the same value-match the arm and bind
+            // positions use, untracked, and moves into the Some like a call
+            // result does.
+            IrExprKind::UnwrapOr { expr: operand, fallback } if matches!(expr.ty, Ty::String) => {
+                self.try_lower_option_unwrap_or(operand, fallback, false)?
+            }
             _ => return self.opt_heap_general_computed_piece(expr),
         };
         Some(piece)
