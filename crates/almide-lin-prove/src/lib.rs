@@ -111,9 +111,47 @@ fn fjoin(a: &St, b: &St) -> St {
 }
 
 /// A Farkas proof of `t` from `f`, as certificate text.
+/// A linear form's coefficients, summed per variable.
+fn coefs(l: &L) -> BTreeMap<V, i128> {
+    let mut m = BTreeMap::new();
+    for (v, a) in &l.t {
+        *m.entry(v.clone()).or_insert(0) += a;
+    }
+    m.retain(|_, a| *a != 0);
+    m
+}
+
+thread_local! {
+    static DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+fn past_deadline() -> bool {
+    DEADLINE.with(|d| d.get().is_some_and(|t| std::time::Instant::now() > t))
+}
+
 fn prove(f: &[L], t: &L) -> Option<String> {
     if let Some(j) = f.iter().position(|g| g == t) {
         return Some(format!("({j}:1)1"));
+    }
+    // One fact, scaled: λ·g = μ·t coefficientwise, λ·c_g >= μ·c_t.
+    let tc = coefs(t);
+    if let Some((v0, a0)) = tc.iter().next() {
+        for (j, g) in f.iter().enumerate() {
+            let gc = coefs(g);
+            let Some(&b0) = gc.get(v0) else { continue };
+            if (b0 > 0) != (*a0 > 0) || gc.len() != tc.len() {
+                continue;
+            }
+            // λ = |a0|, μ = |b0| (so λ·b0 = μ·a0).
+            let (lam, mu) = (a0.abs(), b0.abs());
+            if gc.iter().all(|(v, b)| tc.get(v).is_some_and(|a| lam * b == mu * a)) && lam * g.c >= mu * t.c {
+                let gg = gcd(lam, mu).max(1);
+                return Some(format!("({j}:{}){}", lam / gg, mu / gg));
+            }
+        }
+    }
+    if past_deadline() {
+        return None;
     }
     let mut idx: BTreeMap<V, usize> = BTreeMap::new();
     let row = |l: &L, idx: &mut BTreeMap<V, usize>| -> (Vec<(usize, i128)>, i128) {
@@ -663,6 +701,19 @@ fn project(mut rows: Vec<Row>) -> Option<Vec<Row>> {
     }
 }
 
+/// Per coefficient direction, only the tightest row (`a·x + c <= 0` with
+/// the largest `c`): the others follow from it.
+fn strongest(rows: Vec<Row>) -> Vec<Row> {
+    let mut best: BTreeMap<BTreeMap<Pv, i128>, i128> = BTreeMap::new();
+    for (m, c) in rows {
+        let e = best.entry(m).or_insert(c);
+        if c > *e {
+            *e = c;
+        }
+    }
+    best.into_iter().collect()
+}
+
 /// The candidate precondition one call site gives its callee.
 fn site_candidates(s: &Site) -> Vec<L> {
     let mut rows: Vec<Row> = s.facts.iter().map(|l| row_of(l, |v| Pv::Old(v.clone()))).collect();
@@ -690,7 +741,9 @@ fn site_candidates(s: &Site) -> Vec<L> {
         }
     }
     let Some(out) = project(rows) else { return Vec::new() };
-    out.into_iter()
+    strongest(out)
+        .into_iter()
+        .filter(|(m, _)| m.len() <= 4)
         .filter_map(|(m, c)| {
             let t: Vec<(V, i128)> = m
                 .into_iter()
@@ -701,7 +754,7 @@ fn site_candidates(s: &Site) -> Vec<L> {
                 .collect::<Option<_>>()?;
             Some(L { t, c })
         })
-        .take(200)
+        .take(80)
         .collect()
 }
 
@@ -789,6 +842,8 @@ pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, St
 
 /// [`certify`], and the positions certified.
 pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, String>, BTreeSet<usize>), String> {
+    let budget = std::env::var("ALMIDE_LIN_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(60u64);
+    DEADLINE.with(|d| d.set(Some(std::time::Instant::now() + std::time::Duration::from_secs(budget))));
     let m = lin::Module::read(wasm)?;
     let exported = lin::exported_or_tabled(wasm, m.imports)?;
     let mut refused: BTreeMap<usize, String> = BTreeMap::new();
@@ -831,6 +886,9 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usi
         let mut contracts: BTreeMap<usize, Contract> = BTreeMap::new();
         let mut results = BTreeMap::new();
         for _round in 0..8 {
+            if _round > 0 && past_deadline() {
+                break;
+            }
             let mut sites: Vec<Site> = Vec::new();
             let mut rets: BTreeMap<usize, Vec<Vec<L>>> = BTreeMap::new();
             results.clear();
@@ -854,9 +912,9 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usi
                 };
                 let cands = site_candidates(first);
                 let mut pre: Vec<L> = cands.into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
-                // Drop what the rest implies.
+                // Drop what the rest implies (a bounded effort).
                 let mut i = 0;
-                while i < pre.len() {
+                while i < pre.len() && pre.len() <= 48 && !past_deadline() {
                     let rest: Vec<L> = pre.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, l)| l.clone()).collect();
                     if entailed(&rest, &pre[i]) {
                         pre.remove(i);
