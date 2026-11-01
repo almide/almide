@@ -1,0 +1,39 @@
+// @contract: C-441
+// uuid.v7 (#4307) on every leg: each Uuid carries version 7 and the RFC 9562
+// variant, spells as 8-4-4-4-12 lowercase hex, and is strictly greater than
+// the one made before it in the same run. 2,000 calls in a tight loop make
+// many in one millisecond, so the order rests on the 12-bit counter, not on
+// the clock. The time and random parts differ run to run, so the fixture
+// prints only properties: the count, the version and variant bits, the text
+// shape, and that both the 64-bit stamp (bytes 0..8: the 48-bit millisecond,
+// the version nibble and the counter) and the whole Uuid strictly increase.
+import uuid
+
+fn version_ok(u: uuid.Uuid) -> Bool = int.bshr(bytes.get(uuid.to_bytes(u), 6) ?? 0, 4) == 7
+
+fn variant_ok(u: uuid.Uuid) -> Bool = int.bshr(bytes.get(uuid.to_bytes(u), 8) ?? 0, 6) == 2
+
+fn text_ok(u: uuid.Uuid) -> Bool = {
+  let s = uuid.to_string(u)
+  let groups = string.split(s, "-") |> list.map((g) => string.len(g))
+  groups == [8, 4, 4, 4, 12] and string.slice(s, 14, 15) == "7" and string.to_lower(s) == s
+}
+
+fn stamp_of(u: uuid.Uuid) -> Bytes = bytes.slice(uuid.to_bytes(u), 0, 8)
+
+effect fn main() -> Unit = {
+  var us = [uuid.v7()!]
+  for _ in list.range(1, 2000) {
+    us = us + [uuid.v7()!]
+  }
+  let pairs = list.zip(us, list.drop(us, 1))
+  println("count: ${list.len(us)}")
+  println("version 7: ${us |> list.all((u) => version_ok(u))}")
+  println("variant 10: ${us |> list.all((u) => variant_ok(u))}")
+  println("8-4-4-4-12 lowercase: ${us |> list.all((u) => text_ok(u))}")
+  println("16 bytes: ${us |> list.all((u) => bytes.len(uuid.to_bytes(u)) == 16)}")
+  println(
+    "stamps strictly increase: ${pairs |> list.all(((a, b)) => bytes.compare(stamp_of(a), stamp_of(b)) < 0)}",
+  )
+  println("uuids strictly increase: ${pairs |> list.all(((a, b)) => uuid.compare(a, b) < 0)}")
+}

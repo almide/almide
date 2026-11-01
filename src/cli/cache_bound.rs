@@ -235,7 +235,8 @@ pub(crate) fn bound_build_artifacts_now(project_dir: &Path, cap: u64, now: Syste
             files.push((entry.path(), modified, meta.len()));
         }
     };
-    for profile in ["debug", "release"] {
+    // `wasm`: the embedded leg's cached modules (`wasm_run_cache`).
+    for profile in ["debug", "release", "wasm"] {
         let dir = project_dir.join("target").join(profile);
         collect(&dir, "almide-");
         collect(&dir.join("deps"), "almide_out-");
@@ -384,6 +385,20 @@ mod tests {
         assert_eq!(bound_build_artifacts_now(&dir, 4_000, SystemTime::now()), 2);
         assert!(!old_bin.exists() && !old_obj.exists());
         assert!(new_bin.exists() && dep.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_wasm_run_cache_is_bounded_with_the_native_artifacts() {
+        let dir = scratch("wasm-artifacts");
+        let old_mod = dir.join("target/wasm/almide-aaaaaaaaaaaaaaaa");
+        let old_sum = dir.join("target/wasm/almide-aaaaaaaaaaaaaaaa.sha256");
+        let new_bin = dir.join("target/debug/almide-bbbbbbbbbbbbbbbb");
+        write_aged(&old_mod, 3_000, 50_000);
+        write_aged(&old_sum, 64, 50_000);
+        write_aged(&new_bin, 3_000, 1_000);
+        assert_eq!(bound_build_artifacts_now(&dir, 3_000, SystemTime::now()), 2);
+        assert!(!old_mod.exists() && !old_sum.exists() && new_bin.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

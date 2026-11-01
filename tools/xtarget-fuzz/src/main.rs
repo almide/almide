@@ -56,7 +56,10 @@ fn main() {
         "ladder" => cmd_ladder(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "stats" => cmd_stats(),
-        "catalogue" => Engine::new(&resolve_repo(&args[2..])).catalogue_names().iter().for_each(|n| println!("{n}")),
+        "catalogue" => Engine::new(&resolve_repo(&args[2..]))
+            .catalogue_names()
+            .iter()
+            .for_each(|n| println!("{n}")),
         "inspect" => inspect::cmd_inspect(&args[2..]),
         "-h" | "--help" | "help" => print_usage(),
         other => {
@@ -153,7 +156,9 @@ fn resolve_family(args: &[String]) -> Family {
     match flag_value(args, "--family") {
         None => Family::All,
         Some(s) => Family::parse(s).unwrap_or_else(|| {
-            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis, composition, shape)");
+            eprintln!(
+                "unknown --family {s:?} (expected: all, identity, synthesis, composition, shape)"
+            );
             std::process::exit(2);
         }),
     }
@@ -241,10 +246,8 @@ fn cmd_run(args: &[String]) {
         engine.corpus_len()
     );
 
-    let sink = Arc::new(
-        FindingSink::new(out_dir.clone(), family.label())
-            .expect("create findings dir"),
-    );
+    let sink =
+        Arc::new(FindingSink::new(out_dir.clone(), family.label()).expect("create findings dir"));
 
     // Shared campaign state.
     let next_index = Arc::new(AtomicU64::new(0));
@@ -341,7 +344,10 @@ fn worker_loop(
     let reference = crate::oracle::InterpOracle::new();
     // The ladder runs without the live-heap rung; the worker applies it to
     // clean programs itself (see below).
-    let tc_ladder = Toolchain { leak_check: false, ..tc.clone() };
+    let tc_ladder = Toolchain {
+        leak_check: false,
+        ..tc.clone()
+    };
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -384,7 +390,10 @@ fn worker_loop(
         };
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
-        let calls_focus = cfg.focus.as_ref().is_some_and(|f| ladder_source.contains(&format!("{f}(")));
+        let calls_focus = cfg
+            .focus
+            .as_ref()
+            .is_some_and(|f| ladder_source.contains(&format!("{f}(")));
         if calls_focus {
             stats.focus_hits.fetch_add(1, Ordering::Relaxed);
         }
@@ -407,13 +416,15 @@ fn worker_loop(
         // wall is the bug class #3309 is about (#3286, #3296: an accepted
         // program the wasm leg refuses), not subset-coverage debt.
         let outcome = match outcome {
-            Outcome::Walled { reason } if gen.project.is_some() => Outcome::Finding(oracle::Finding {
-                rung: Rung::WasmBuild,
-                kind: FindingKind::WasmBuildFailure,
-                summary: format!("wasm walled an accepted multi-module program: {reason}"),
-                native: None,
-                wasm: None,
-            }),
+            Outcome::Walled { reason } if gen.project.is_some() => {
+                Outcome::Finding(oracle::Finding {
+                    rung: Rung::WasmBuild,
+                    kind: FindingKind::WasmBuildFailure,
+                    summary: format!("wasm walled an accepted multi-module program: {reason}"),
+                    native: None,
+                    wasm: None,
+                })
+            }
             other => other,
         };
 
@@ -452,16 +463,41 @@ fn worker_loop(
                 // (with the rung armed, so the ladder reproduces the kind).
                 // A program that ends by `process.exit` released nothing on
                 // any leg, so it has no leak to judge.
-                let judged = tc.leak_check && gen.project.is_none() && !crate::generator::ends_without_unwinding(&gen.source);
-                if let Some(leak) = if judged { leak_at_exit(&tc, &file) } else { None } {
+                let judged = tc.leak_check
+                    && gen.project.is_none()
+                    && !crate::generator::ends_without_unwinding(&gen.source);
+                if let Some(leak) = if judged {
+                    leak_at_exit(&tc, &file)
+                } else {
+                    None
+                } {
                     stats.findings.fetch_add(1, Ordering::Relaxed);
                     if !sink.is_known(&leak) {
                         let minimized = match &gen.plan {
-                            Some(plan) => minimize::minimize_plan(&tc, plan, leak.kind, &work_dir, Some(&reference)),
-                            None => minimize::minimize(&tc, &gen.source, leak.kind, &work_dir, Some(&reference)),
+                            Some(plan) => minimize::minimize_plan(
+                                &tc,
+                                plan,
+                                leak.kind,
+                                &work_dir,
+                                Some(&reference),
+                            ),
+                            None => minimize::minimize(
+                                &tc,
+                                &gen.source,
+                                leak.kind,
+                                &work_dir,
+                                Some(&reference),
+                            ),
                         };
                         let evidence = minimized.finding.as_ref().unwrap_or(&leak);
-                        if sink.record(cfg.seed, index, &gen.origin, &gen.source, &minimized.source, evidence) {
+                        if sink.record(
+                            cfg.seed,
+                            index,
+                            &gen.origin,
+                            &gen.source,
+                            &minimized.source,
+                            evidence,
+                        ) {
                             eprintln!(
                                 "  ** FINDING [{:?}] seed={} index={} — {}",
                                 leak.kind, cfg.seed, index, leak.summary
@@ -475,7 +511,13 @@ fn worker_loop(
                 // A focused campaign's rejects are the generator's defects
                 // about that function: say which (XF_SHOW_SKIPS=1).
                 if std::env::var_os("XF_SHOW_SKIPS").is_some() {
-                    eprintln!("  reject #{index}: {}", diagnostics.lines().find(|l| l.contains("error")).unwrap_or(""));
+                    eprintln!(
+                        "  reject #{index}: {}",
+                        diagnostics
+                            .lines()
+                            .find(|l| l.contains("error"))
+                            .unwrap_or("")
+                    );
                 }
             }
             Outcome::Walled { reason } => {
@@ -493,7 +535,15 @@ fn worker_loop(
                 }
                 let mut reasons = stats.wall_reasons.lock().unwrap();
                 let key = if reason.len() > 160 {
-                    format!("{}…", &reason[..reason.char_indices().take_while(|(i, _)| *i < 160).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0)])
+                    format!(
+                        "{}…",
+                        &reason[..reason
+                            .char_indices()
+                            .take_while(|(i, _)| *i < 160)
+                            .last()
+                            .map(|(i, c)| i + c.len_utf8())
+                            .unwrap_or(0)]
+                    )
                 } else {
                     reason
                 };
@@ -529,12 +579,29 @@ fn worker_loop(
                 // into a generator artifact.
                 // A shape project is recorded whole (its bundle): the text
                 // minimizer shrinks one file, and the plan is the cell.
-                let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow) || gen.project.is_some() {
-                    minimize::Minimized { source: gen.source.clone(), finding: None }
+                let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow)
+                    || gen.project.is_some()
+                {
+                    minimize::Minimized {
+                        source: gen.source.clone(),
+                        finding: None,
+                    }
                 } else if let Some(plan) = &gen.plan {
-                    minimize::minimize_plan(&tc_ladder, plan, finding.kind, &work_dir, Some(&reference))
+                    minimize::minimize_plan(
+                        &tc_ladder,
+                        plan,
+                        finding.kind,
+                        &work_dir,
+                        Some(&reference),
+                    )
                 } else {
-                    minimize::minimize(&tc_ladder, &gen.source, finding.kind, &work_dir, Some(&reference))
+                    minimize::minimize(
+                        &tc_ladder,
+                        &gen.source,
+                        finding.kind,
+                        &work_dir,
+                        Some(&reference),
+                    )
                 };
                 let evidence = minimized.finding.as_ref().unwrap_or(&finding);
                 let was_new = sink.record(
@@ -624,7 +691,10 @@ fn run_metamorphic(
 /// attack list carried it as A2-1's second wedge). Stale pid dirs from
 /// killed invocations are swept by [`sweep_stale_scratch`] on startup.
 fn scratch_root(repo: &Path) -> PathBuf {
-    repo.join(format!("tools/xtarget-fuzz/.scratch/pid-{}", std::process::id()))
+    repo.join(format!(
+        "tools/xtarget-fuzz/.scratch/pid-{}",
+        std::process::id()
+    ))
 }
 
 /// Best-effort startup sweep: remove sibling `pid-*` dirs untouched for a
@@ -634,7 +704,9 @@ fn sweep_stale_scratch(repo: &Path) {
     let root = repo.join("tools/xtarget-fuzz/.scratch");
     let own = format!("pid-{}", std::process::id());
     let cutoff = std::time::SystemTime::now() - Duration::from_secs(24 * 3600);
-    let Ok(entries) = std::fs::read_dir(&root) else { return };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return;
+    };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
         if !name.starts_with("pid-") || name == own {
@@ -687,9 +759,14 @@ fn cmd_replay(args: &[String]) {
     let mut ladder_source = gen.source.clone();
     match &gen.project {
         Some(p) => {
-            file = p.write_to(&work_dir.join("shape")).expect("write the shape project");
+            file = p
+                .write_to(&work_dir.join("shape"))
+                .expect("write the shape project");
             ladder_source = p.entry_source().to_string();
-            eprintln!("(shape project written under {})", work_dir.join("shape").display());
+            eprintln!(
+                "(shape project written under {})",
+                work_dir.join("shape").display()
+            );
         }
         None => {
             let _ = std::fs::write(&file, &gen.source);
@@ -887,17 +964,27 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
     eprintln!("\n=== campaign summary ===");
     eprintln!("  elapsed          = {:.1}s", secs);
     eprintln!("  generated        = {g}");
-    eprintln!("  clean            = {}", stats.clean.load(Ordering::Relaxed));
+    eprintln!(
+        "  clean            = {}",
+        stats.clean.load(Ordering::Relaxed)
+    );
     eprintln!(
         "  generator rejects= {}",
         stats.generator_rejects.load(Ordering::Relaxed)
     );
-    eprintln!("  skipped          = {}", stats.skipped.load(Ordering::Relaxed));
+    eprintln!(
+        "  skipped          = {}",
+        stats.skipped.load(Ordering::Relaxed)
+    );
     let oracled = stats.self_checked.load(Ordering::Relaxed);
     eprintln!(
         "  self-checked     = {oracled} ({:.0}% — judged by the by-construction oracle, \
          so a shared-lowering bug is convictable)",
-        if g == 0 { 0.0 } else { oracled as f64 / g as f64 * 100.0 }
+        if g == 0 {
+            0.0
+        } else {
+            oracled as f64 / g as f64 * 100.0
+        }
     );
     let walls = stats.walled.load(Ordering::Relaxed);
     eprintln!("  walls (subset)   = {walls}");
@@ -912,7 +999,10 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
     } else {
         eprintln!("  unique findings  = {}", sink.count());
     }
-    eprintln!("  throughput       = {:.1} programs/min", g as f64 / secs * 60.0);
+    eprintln!(
+        "  throughput       = {:.1} programs/min",
+        g as f64 / secs * 60.0
+    );
     let hits = stats.focus_hits.load(Ordering::Relaxed);
     if hits > 0 {
         eprintln!(
@@ -973,10 +1063,16 @@ fn print_outcome(outcome: &Outcome) {
         Outcome::Finding(f) => {
             eprintln!("FINDING [{:?}] at rung {:?}: {}", f.kind, f.rung, f.summary);
             if let Some(n) = &f.native {
-                eprintln!("--- native stdout ({:.1}s) ---\n{}", n.duration_secs, n.stdout);
+                eprintln!(
+                    "--- native stdout ({:.1}s) ---\n{}",
+                    n.duration_secs, n.stdout
+                );
             }
             if let Some(w) = &f.wasm {
-                eprintln!("--- wasm stdout ({:.1}s) ---\n{}", w.duration_secs, w.stdout);
+                eprintln!(
+                    "--- wasm stdout ({:.1}s) ---\n{}",
+                    w.duration_secs, w.stdout
+                );
             }
         }
     }

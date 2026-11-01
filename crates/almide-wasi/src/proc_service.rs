@@ -5,7 +5,8 @@
 //! `almide:process/spawn.call` — the canonical-ABI lowering of
 //! `call: func(op: op, a: string, b: string) -> result<string, string>`
 //! (crates/almide-wasm-run/wit/process/spawn.wit) — which ships only when the
-//! module's op set names a process op (80..=90), the selection the environ
+//! module's op set names a process op (80..=90, or the `start` child's
+//! 146..=151), the selection the environ
 //! pair gets from op 26. A stock runtime has no such import and refuses the
 //! module at load, before `_start` runs: the failure is loud and early,
 //! never a wrong answer. A host that implements the import (the embedded
@@ -27,6 +28,27 @@ use wasm_encoder::{BlockType, Function, ValType};
 
 /// The process ops: `almide:process/spawn`'s `enum op`, case index = op − 80.
 pub const PROC_OPS: std::ops::RangeInclusive<i32> = 80..=90;
+/// The `process.start` child's ops (#4308): the cases after `run-with`, case
+/// index = op − [`CHILD_CASE_BIAS`]. 91..=139 serve other families.
+pub const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = 146..=151;
+/// `op − CHILD_CASE_BIAS` is a child op's WIT case index (11..=16).
+pub const CHILD_CASE_BIAS: i32 = *PROC_CHILD_OPS.start() - (*PROC_OPS.end() - *PROC_OPS.start() + 1);
+
+/// Is `op` one of `almide:process/spawn`'s operations?
+pub fn is_proc_op(op: i32) -> bool {
+    PROC_OPS.contains(&op) || PROC_CHILD_OPS.contains(&op)
+}
+
+/// The WIT case index of process op `op`.
+pub fn proc_case(op: i32) -> i32 {
+    if PROC_CHILD_OPS.contains(&op) { op - CHILD_CASE_BIAS } else { op - *PROC_OPS.start() }
+}
+
+/// The process op of WIT case `case` (the inverse of [`proc_case`]).
+pub fn proc_op_of_case(case: i32) -> i32 {
+    let base = *PROC_OPS.end() - *PROC_OPS.start() + 1;
+    if case >= base { case + CHILD_CASE_BIAS } else { case + *PROC_OPS.start() }
+}
 
 /// Where the import writes its `result<string, string>` (discriminant at +0,
 /// ptr at +4, len at +8): the park's free bytes between the newline byte and
@@ -36,7 +58,7 @@ const _: () = assert!(PROC_RET >= crate::NL + 8 && PROC_RET + 12 <= crate::MSG);
 
 /// Does the op set reach the subprocess service?
 pub fn wants_proc(host_ops: &[i32]) -> bool {
-    host_ops.iter().any(|op| PROC_OPS.contains(op))
+    host_ops.iter().copied().any(is_proc_op)
 }
 
 /// The forwarder: `(op, a_ptr, a_len, b_ptr, b_len) -> i64`, the `fs_call`
@@ -44,7 +66,12 @@ pub fn wants_proc(host_ops: &[i32]) -> bool {
 pub fn shim_proc(park: u64, g_plen: u32, g_ppos: u32, i_call: u32) -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();
+    // The case index: op − CHILD_CASE_BIAS for a child op, else op − 80
+    // (`select` keeps its first operand when the condition holds).
+    i.local_get(0).i32_const(CHILD_CASE_BIAS).i32_sub();
     i.local_get(0).i32_const(*PROC_OPS.start()).i32_sub();
+    i.local_get(0).i32_const(*PROC_CHILD_OPS.start()).i32_ge_s();
+    i.select();
     for p in 1..5u32 {
         i.local_get(p);
     }

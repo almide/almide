@@ -118,7 +118,10 @@ const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(http.new_request(\"GET\", \
 /// measured as the call's: the full form still runs on every diamond path
 /// and in every generated program.
 const PROBES: &[(&str, &str)] = &[
-    ("random.choice", "match v { some(_) => not list.is_empty({xs}), none => list.is_empty({xs}) }"),
+    (
+        "random.choice",
+        "match v { some(_) => not list.is_empty({xs}), none => list.is_empty({xs}) }",
+    ),
     ("random.shuffle", "list.len(v) == list.len({xs})"),
     // The probe's call has ended before the loop (its recipe waits), so
     // poll answers it; comparing that answer with `wait`'s would time a
@@ -129,16 +132,23 @@ const PROBES: &[(&str, &str)] = &[
 impl Verdict {
     /// [`Self::holds`], or its O(1) form when `cheap` and the table has one.
     pub fn property(&self, cheap: bool) -> &'static str {
-        PROBES.iter().find(|(f, _)| cheap && *f == self.func).map_or(self.holds, |(_, p)| *p)
+        PROBES
+            .iter()
+            .find(|(f, _)| cheap && *f == self.func)
+            .map_or(self.holds, |(_, p)| *p)
     }
 }
 
 /// The verdict for `module.func`, if the host decides its result.
 pub fn verdict_for(module: &str, func: &str) -> Option<&'static Verdict> {
-    VERDICTS.iter().find(|v| v.func.split_once('.') == Some((module, func)))
+    VERDICTS
+        .iter()
+        .find(|v| v.func.split_once('.') == Some((module, func)))
 }
 
 /// `tmpl` with each `{param}` replaced by the expression bound to it.
 pub fn fill(tmpl: &str, params: &[(&str, &str)]) -> String {
-    params.iter().fold(tmpl.to_string(), |s, (p, e)| s.replace(&format!("{{{p}}}"), e))
+    params.iter().fold(tmpl.to_string(), |s, (p, e)| {
+        s.replace(&format!("{{{p}}}"), e)
+    })
 }

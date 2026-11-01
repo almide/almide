@@ -5720,10 +5720,10 @@ local fn __address(b: Bytes) -> Handle = _
 
 
 
+mod type RegionExportView = { owner: Bytes, off: Int, len: Int }
+
 @memory_unsafe
-local fn __export_owner(r: Region) -> Bytes =
-  if r.len == bytes.len(r.owner) then r.owner
-  else panic("ffi: an @export(wasm) fn returned a sub-region of ${r.len} bytes; return the whole region and pass the offset")
+local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r.off, len: r.len }
 
 
 
@@ -10209,27 +10209,13 @@ local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
 
 
-local fn __http_response_ci_eq(a: String, b: String) -> Bool = string.len(a) == string.len(b) and __http_response_ci_at(
-  string.to_list(a),
-  string.to_list(b),
-  0,
-)
 
-local fn __http_response_ci_at(a: List[String], b: List[String], i: Int) -> Bool =
-  if i >= list.len(a) then true
-  else if __http_response_fold(list.get(a, i) ?? "") != __http_response_fold(list.get(b, i) ?? "") then false
-  else __http_response_ci_at(a, b, i + 1)
+@intrinsic("almide_rt_http___http_response_ascii_lower")
+local fn __http_response_ascii_lower(s: String) -> String = _
 
-local fn __http_response_fold(c: String) -> String = match string.index_of(
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  c,
-) {
-  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
-  none => c,
-}
 
 local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
-  if __http_response_body_headers() |> list.any((h) => __http_response_ci_eq(h, name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and http.__http_response_ascii_lower(h) == http.__http_response_ascii_lower(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
@@ -11202,6 +11188,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 
 
+@implements("http.__http_response_ascii_lower")
 fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
@@ -28082,6 +28069,7 @@ pub const SRC_NET_WASM: &str = r#"
 
 
 
+
 effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
 
 effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
@@ -28179,6 +28167,64 @@ effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] =
 fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
   ok("1") => true,
   _ => false,
+}
+
+
+
+
+
+effect fn __net_udp_bind(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_udp_local_port(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_udp_send_to(sock_port_host: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __net_udp_recv_from(sock: String, max: String) -> Result[Bytes, String] = _
+
+effect fn __net_udp_close(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_lookup_host(host: String, unused: String) -> Result[String, String] = _
+
+@implements("net.__os_udp_bind")
+effect fn __net_udp_bind_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_udp_bind(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.__os_udp_local_port")
+effect fn __net_udp_local_port_impl(sock: Int) -> Result[Int, String] = {
+  let t = __net_udp_local_port(int.to_string(sock), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.__os_udp_send_to")
+effect fn __net_udp_send_to_impl(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = {
+  let _ = __net_udp_send_to("${sock}\n${port}\n${host}", data)!
+  ok(())
+}
+
+@implements("net.__os_udp_recv_from")
+effect fn __net_udp_recv_from_impl(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = {
+  let framed = __net_udp_recv_from(int.to_string(sock), int.to_string(max))!
+  let cut = bytes.index_of(framed, bytes.from_string("\n")) ?? 0
+  let head = bytes.to_string_lossy(bytes.take(framed, cut))
+  let (port, ip) = match string.split(head, " ") {
+    [p, h] => (int.parse(p) ?? -1, h),
+    _ => (-1, ""),
+  }
+  ok((bytes.drop(framed, cut + 1), ip, port))
+}
+
+@implements("net.__os_udp_close")
+effect fn __net_udp_close_impl(sock: Int) -> Result[Unit, String] = {
+  let _ = __net_udp_close(int.to_string(sock), "")!
+  ok(())
+}
+
+@implements("net.__os_lookup_host")
+effect fn __net_lookup_host_impl(host: String) -> Result[List[String], String] = {
+  let t = __net_lookup_host(host, "")!
+  ok(string.split(t, "\n") |> list.filter((l) => l != ""))
 }
 "#;
 pub const SRC_OPTION: &str = r#"
@@ -30569,6 +30615,68 @@ effect fn __process_kill_impl(pid: Int, signal: Int) -> Result[Unit, String] = {
 }
 
 fn __process_pid_impl() -> Int = match __proc_pid("", "") {
+  ok(p) => int.parse(p) ?? -1,
+  _ => -1,
+}
+
+
+
+
+
+
+
+
+
+effect fn __proc_start(cmd: String, argv: String) -> Result[String, String] = _
+
+
+effect fn __proc_poll(h: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __proc_wait(h: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __proc_stop(h: String, grace_ms: String) -> Result[String, String] = _
+
+
+
+
+fn __proc_read_new(h: String, which: String) -> Result[String, String] = _
+
+fn __proc_child_pid(h: String, unused: String) -> Result[String, String] = _
+
+@implements("process.__os_start")
+effect fn __process_start_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let h = __proc_start(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
+  ok(int.parse(h) ?? -1)
+}
+
+@implements("process.__os_poll")
+effect fn __process_poll_impl(h: Int) -> Result[Bool, String] = {
+  let t = __proc_poll(int.to_string(h), "")!
+  ok(t == "1")
+}
+
+@implements("process.__os_wait")
+effect fn __process_wait_impl(h: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_wait(int.to_string(h), "")!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_stop")
+effect fn __process_stop_impl(h: Int, grace_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_stop(int.to_string(h), int.to_string(grace_ms))!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_read_new")
+fn __process_read_new_impl(h: Int, which: Int) -> String = __proc_read_new(
+  int.to_string(h),
+  int.to_string(which),
+) ?? ""
+
+@implements("process.__os_child_pid")
+fn __process_child_pid_impl(h: Int) -> Int = match __proc_child_pid(int.to_string(h), "") {
   ok(p) => int.parse(p) ?? -1,
   _ => -1,
 }
@@ -40797,9 +40905,42 @@ local fn __unwrapped(s: String) -> String =
 
 
 
+
 @intrinsic("almide_rt_uuid___v7_stamp")
 @category("Time")
 effect fn __v7_stamp(ms: Int) -> Int = _
+"#;
+pub const SRC_UUID_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+var v7_last: Int = -1
+
+@implements("uuid.__v7_stamp")
+fn uuid_v7_stamp(ms: Int) -> Int = {
+  let fresh = int.clamp(ms, 0, 281474976710655) * 4096
+  let next = if fresh > v7_last then fresh else v7_last + 1
+  v7_last = next
+  next
+}
 "#;
 pub const SRC_VALUE: &str = r#"/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
@@ -44101,6 +44242,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "unix_wasm" => Some(SRC_UNIX_WASM),
         "url" => Some(SRC_URL),
         "uuid" => Some(SRC_UUID),
+        "uuid_wasm" => Some(SRC_UUID_WASM),
         "value" => Some(SRC_VALUE),
         "value_core" => Some(SRC_VALUE_CORE),
         "value_utils" => Some(SRC_VALUE_UTILS),

@@ -125,6 +125,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 // ASCII-lowercase a field name through the same per-char fold get_header
 // uses, so the map key spelling agrees with native's to_ascii_lowercase.
+@implements("http.__http_response_ascii_lower")
 fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 // Every header flat, in slot order (the native Vec keeps wire order), repeats kept.

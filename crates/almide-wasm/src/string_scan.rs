@@ -50,8 +50,10 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hl).i32_ge_u().br_if(1);
-        i.local_get(hsc);
-        i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte());
+        let site = self.str_loop_exit();
+        self.f.instructions().local_get(hsc);
+        self.str_byte_at(site, hs, Some(hk));
+        i = self.f.instructions();
         i.i32_const(6).i32_shr_u().i32_const(2).i32_ne().i32_add();
         i.local_set(hsc);
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
@@ -84,9 +86,13 @@ impl Emitter<'_> {
         // pclen into hk: empty pad → 1 (a space)
         i.local_get(hp).i32_load(len_memarg()).i32_eqz();
         i.if_(BlockType::Result(ValType::I32));
+        let site = self.str_test();
+        i = self.f.instructions();
         i.i32_const(1);
         i.else_();
-        i.local_get(hp).i32_load8_u(str_byte()).local_set(hk);
+        self.str_byte_at(site, hp, None);
+        i = self.f.instructions();
+        i.local_set(hk);
         i.i32_const(1);
         i.local_get(hk).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hk).i32_const(0xE0).i32_ge_u().i32_add();
@@ -179,7 +185,9 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hst);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hl).i32_ge_u().br_if(1);
-        i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte());
+        let site = self.str_loop_exit();
+        self.str_byte_at(site, hs, Some(hk));
+        i = self.f.instructions();
         i.i32_const(10).i32_eq().if_(BlockType::Empty);
         i.local_get(hk).local_set(he);
         // strip the '\r' of a CRLF pair
@@ -246,8 +254,11 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hl).i32_ge_u().br_if(1);
+        let site = self.str_loop_exit();
         // w = 1 + (b>=0xC0) + (b>=0xE0) + (b>=0xF0)
-        i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte()).local_set(hw);
+        self.str_byte_at(site, hs, Some(hk));
+        i = self.f.instructions();
+        i.local_set(hw);
         i.i32_const(1);
         i.local_get(hw).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hw).i32_const(0xE0).i32_ge_u().i32_add();
@@ -298,9 +309,13 @@ impl Emitter<'_> {
         i.local_set(hs);
         i.local_get(hs).i32_load(len_memarg()).i32_eqz();
         i.if_(BlockType::Result(ValType::I32));
+        let site = self.str_test();
+        i = self.f.instructions();
         i.i32_const(0).call(F_ALLOC);
         i.else_();
-        i.local_get(hs).i32_load8_u(str_byte()).local_set(hw);
+        self.str_byte_at(site, hs, None);
+        i = self.f.instructions();
+        i.local_set(hw);
         i.i32_const(1);
         i.local_get(hw).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hw).i32_const(0xE0).i32_ge_u().i32_add();
@@ -361,9 +376,13 @@ impl Emitter<'_> {
         i.local_set(hs);
         i.local_get(hs).i32_load(len_memarg()).i32_eqz();
         i.if_(BlockType::Result(ValType::I32));
+        let site = self.str_test();
+        i = self.f.instructions();
         i.i32_const(0);
         i.else_();
-        i.local_get(hs).i32_load8_u(str_byte()).local_set(hcp);
+        self.str_byte_at(site, hs, None);
+        i = self.f.instructions();
+        i.local_set(hcp);
         i.i32_const(1);
         i.local_get(hcp).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hcp).i32_const(0xE0).i32_ge_u().i32_add();
@@ -384,8 +403,11 @@ impl Emitter<'_> {
         i.i32_const(1).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hw).i32_ge_u().br_if(1);
-        i.local_get(hcp).i32_const(6).i32_shl();
-        i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte());
+        // hw == len(s) here: the `else` of `len(s) != hw` above.
+        let site = self.str_loop_exit();
+        self.f.instructions().local_get(hcp).i32_const(6).i32_shl();
+        self.str_byte_at(site, hs, Some(hk));
+        i = self.f.instructions();
         i.i32_const(0x3F).i32_and().i32_or().local_set(hcp);
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
         i.br(0).end().end();
@@ -420,6 +442,9 @@ impl Emitter<'_> {
         i.local_set(hs);
         i.local_get(hs).i32_load(len_memarg()).i32_eqz();
         i.if_(BlockType::Result(ValType::I32));
+        // The first char's lead byte is read in this test's `else`.
+        let site = if last { None } else { self.str_test() };
+        i = self.f.instructions();
         i.i32_const(almide_layout::NULL_ADDR as i32);
         i.else_();
         if last {
@@ -434,7 +459,9 @@ impl Emitter<'_> {
             i.local_get(hs).i32_load(len_memarg()).local_get(hp).i32_sub().local_set(hl);
         } else {
             i.i32_const(0).local_set(hp);
-            i.local_get(hs).i32_load8_u(str_byte()).local_set(hl);
+            self.str_byte_at(site, hs, None);
+            i = self.f.instructions();
+            i.local_set(hl);
             i.i32_const(1);
             i.local_get(hl).i32_const(0xC0).i32_ge_u().i32_add();
             i.local_get(hl).i32_const(0xE0).i32_ge_u().i32_add();
@@ -474,8 +501,11 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hc);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hc).local_get(hn).i32_ge_u().br_if(1);
+        let site = self.str_loop_exit();
         // seq length from the lead byte: 1 + (b≥C0) + (b≥E0) + (b≥F0)
-        i.local_get(hs).local_get(hc).i32_add().i32_load8_u(str_byte()).local_set(hl);
+        self.str_byte_at(site, hs, Some(hc));
+        i = self.f.instructions();
+        i.local_set(hl);
         i.i32_const(1);
         i.local_get(hl).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hl).i32_const(0xE0).i32_ge_u().i32_add();

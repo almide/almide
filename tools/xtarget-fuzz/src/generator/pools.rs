@@ -17,26 +17,26 @@
 /// the inputs most likely to surface both the *known* case-fold gap and
 /// any *new* string op that forgets multibyte handling.
 pub const STRING_POOL: &[&str] = &[
-    "",               // empty: off-by-one and is_empty boundary
-    "hello",          // pure ASCII baseline
-    "Hello, World!",  // ASCII with punctuation/space
-    "日本語",          // CJK: 3 scalars, 9 UTF-8 bytes (byte-vs-char)
-    "café",           // precomposed é (2-byte scalar)
-    "cafe\u{0301}",   // e + combining acute (NFD form of "café")
-    "ß",              // length-changing uppercase: ß → SS
-    "ﬀ",              // ligature: uppercase → FF
-    "Ⅷ",              // roman numeral eight (cased non-letter)
-    "İ",              // dotted capital I (Turkish-ish fold hazard)
-    "ΑΒΓ",            // Greek capitals (full-Unicode case path)
-    "αβγ",            // Greek smalls
-    "Привет",         // Cyrillic
-    "😀",             // emoji: astral plane, 4 UTF-8 bytes
-    "👨‍👩‍👧",          // ZWJ family: grapheme vs scalar vs byte
-    "a\tb\nc",        // control chars (escape round-trip)
-    "  spaced  ",     // leading/trailing ASCII whitespace (trim)
+    "",                     // empty: off-by-one and is_empty boundary
+    "hello",                // pure ASCII baseline
+    "Hello, World!",        // ASCII with punctuation/space
+    "日本語",               // CJK: 3 scalars, 9 UTF-8 bytes (byte-vs-char)
+    "café",                 // precomposed é (2-byte scalar)
+    "cafe\u{0301}",         // e + combining acute (NFD form of "café")
+    "ß",                    // length-changing uppercase: ß → SS
+    "ﬀ",                    // ligature: uppercase → FF
+    "Ⅷ",                    // roman numeral eight (cased non-letter)
+    "İ",                    // dotted capital I (Turkish-ish fold hazard)
+    "ΑΒΓ",                  // Greek capitals (full-Unicode case path)
+    "αβγ",                  // Greek smalls
+    "Привет",               // Cyrillic
+    "😀",                   // emoji: astral plane, 4 UTF-8 bytes
+    "👨‍👩‍👧",                   // ZWJ family: grapheme vs scalar vs byte
+    "a\tb\nc",              // control chars (escape round-trip)
+    "  spaced  ",           // leading/trailing ASCII whitespace (trim)
     "\u{00A0}nbsp\u{2003}", // non-ASCII whitespace (trim Unicode gap)
-    "Ǆ",              // titlecase digraph
-    "ﬁle",            // fi ligature prefix
+    "Ǆ",                    // titlecase digraph
+    "ﬁle",                  // fi ligature prefix
 ];
 
 /// Float literals stressing formatting and rounding.
@@ -48,20 +48,20 @@ pub const STRING_POOL: &[&str] = &[
 /// if either target's formatter is wrong.
 pub const FLOAT_POOL: &[f64] = &[
     0.0,
-    -0.0,                  // signed zero: -0.0 prints "-0" or "0"?
+    -0.0, // signed zero: -0.0 prints "-0" or "0"?
     1.0,
     -1.0,
     0.1,
     0.2,
-    0.3,                   // 0.1 + 0.2 != 0.3 shape
-    3.141_592_653_589_793, // π: many significant digits
-    2.718_281_828_459_045, // e
-    1e300,                 // large finite
-    1e-300,                // small normal
-    5e-324,                // smallest positive subnormal (f64 MIN_POSITIVE/2^52)
+    0.3,                         // 0.1 + 0.2 != 0.3 shape
+    3.141_592_653_589_793,       // π: many significant digits
+    2.718_281_828_459_045,       // e
+    1e300,                       // large finite
+    1e-300,                      // small normal
+    5e-324,                      // smallest positive subnormal (f64 MIN_POSITIVE/2^52)
     1.797_693_134_862_315_7e308, // near f64::MAX
     123_456_789.123_456_79,
-    0.000_001,             // scientific-notation threshold
+    0.000_001, // scientific-notation threshold
     1_000_000.0,
     100.0,
     -42.5,
@@ -80,14 +80,14 @@ pub const INT_POOL: &[i64] = &[
     7,
     10,
     42,
-    255,                   // u8 boundary
+    255, // u8 boundary
     256,
-    -128,                  // i8 min
-    127,                   // i8 max
-    65535,                 // u16 boundary
-    2_147_483_647,         // i32 max
-    -2_147_483_648,        // i32 min
-    4_294_967_295,         // u32 max
+    -128,                       // i8 min
+    127,                        // i8 max
+    65535,                      // u16 boundary
+    2_147_483_647,              // i32 max
+    -2_147_483_648,             // i32 min
+    4_294_967_295,              // u32 max
     9_223_372_036_854_775_807,  // i64::MAX
     -9_223_372_036_854_775_808, // i64::MIN
     1_000_000,

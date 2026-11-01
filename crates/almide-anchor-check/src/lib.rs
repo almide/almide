@@ -31,7 +31,11 @@
 //! BOUNDS, per token: a `c` is `i64.ge_u` (the list compare) or `i32.eqz`
 //! (the Bytes room test), then `if` (empty), then `i32.const` — anchored at
 //! the const — and that `if` has no `else` and ends in `unreachable` (the
-//! abort); an `a` is a load (or a load then the `call` that releases what it
+//! abort); or (#4281, a string's byte) the surface's own `i32.ge_u` /
+//! `i32.eqz` test, then an `if` with an `else` — anchored at the `if` —
+//! whose `else` holds the access; an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
+//! `br_if` — straight inside a `loop` whose parent `block` it leaves to (a
+//! loop's exit test, operands.rs `loop_exit`); an `a` is a load (or a load then the `call` that releases what it
 //! loaded); a `w` is a store; a slot's located events lie in one function,
 //! in byte order (a `c` before the access it guards).
 //!
@@ -47,17 +51,20 @@
 //! file's optional `judges` line locates those judge calls.
 //!
 //! TRUSTED: that `alloc <index>` names `$alloc`, that a recorded judge site
-//! calls a copy-on-write judge, and the representation R (init); the rest of
+//! calls a copy-on-write judge, that a recorded loop hold calls rc_inc
+//! (#4280), and the representation R (init); the rest of
 //! operands.rs's TRUSTED list.
 
 use wasmparser::{BlockType, Operator as Op};
 
 mod decode;
+mod fields;
 mod operands;
 pub mod rc;
 pub use rc::{check_rc, RcReport};
 use decode::{branch_target, is_load};
 pub use decode::{decode, function_imports, store_width, Body};
+pub use fields::check_fields;
 
 /// A located event: a defined function's position and an instruction index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +74,7 @@ pub struct At {
 }
 
 /// An anchor token: located, unlocated (`-`), or broken (anything else).
-fn parse_at(t: &str) -> Result<Option<At>, String> {
+pub(crate) fn parse_at(t: &str) -> Result<Option<At>, String> {
     if t == "-" {
         return Ok(None);
     }
@@ -105,6 +112,16 @@ pub struct Report {
     pub bounds_unlocated: usize,
     /// Located accesses whose guard's operands were held to them.
     pub bounds_operands: usize,
+    /// #4013 / #4279: the fields witness's located construction sites,
+    /// their field stores, field accesses (of which `field_guarded` are
+    /// variant case fields held to their tag test), tag reads, and events
+    /// in bodies that did not ship.
+    pub field_sites: usize,
+    pub field_stores: usize,
+    pub field_accesses: usize,
+    pub field_guarded: usize,
+    pub field_tags: usize,
+    pub field_unlocated: usize,
     /// #4277, when the anchor file carries `rc` lines.
     pub rc: Option<RcReport>,
 }
@@ -398,8 +415,28 @@ impl<'a> Ctx<'_, 'a> {
         Ok(stores)
     }
 
-    fn check_guard(&self, at: At) -> Result<(), String> {
+    /// A `c`'s guard; its compare's index. Two shapes, each a compare whose
+    /// TRUE side never reaches the access:
+    /// - the compare, `if` (empty), `i32.const` — anchored at the const —
+    ///   and that `if` has no `else` and ends in `unreachable` (the abort);
+    /// - the surface's own test (#4281): the compare, then an `if` — anchored
+    ///   at the `if` — that has an `else`; the access lies in that `else`
+    ///   (operands.rs `covers` holds it there), so no second test exists.
+    fn check_guard(&self, at: At) -> Result<usize, String> {
         let b = self.body(at)?;
+        if at.op >= 1 && matches!(b.ops[at.op], Op::If { .. }) {
+            if !matches!(b.ops[at.op - 1], Op::I32GeU | Op::I32Eqz) {
+                return Err(format!("c: the `if`'s test is {:?}, not a compare", b.ops[at.op - 1]));
+            }
+            let d_in = *b.depth.get(at.op + 1).ok_or("c: the test's `if` has no body")?;
+            let has_else = (at.op + 1..b.ops.len())
+                .find(|&j| b.depth[j] == d_in && matches!(b.ops[j], Op::End | Op::Else))
+                .is_some_and(|j| matches!(b.ops[j], Op::Else));
+            if !has_else {
+                return Err("c: the test's `if` has no `else` to hold the access".into());
+            }
+            return Ok(at.op - 1);
+        }
         if at.op < 2 {
             return Err("c: no room for the compare".into());
         }
@@ -434,7 +471,7 @@ impl<'a> Ctx<'_, 'a> {
                 b.ops[end - 1]
             ));
         }
-        Ok(())
+        Ok(at.op - 2)
     }
 
     fn access(&self, at: At, write: bool) -> Result<(), String> {
@@ -554,6 +591,19 @@ pub fn check_bounds(
     judges: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
+    check_bounds_held(bodies, bounds, anch, judges, &[], rep)
+}
+
+/// [`check_bounds`] with the located loop HOLDS (#4280): each a `call` that
+/// takes +1 on a list a `for` loop iterates, before the loop.
+pub fn check_bounds_held(
+    bodies: &[Body<'_>],
+    bounds: &str,
+    anch: &str,
+    judges: &[At],
+    holds: &[At],
+    rep: &mut Report,
+) -> Result<(), String> {
     let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
     let ctx = Ctx {
         bodies,
@@ -582,18 +632,19 @@ pub fn check_bounds(
         // checker, so their mutual order is not a claim).
         let mut last: std::collections::HashMap<String, At> = std::collections::HashMap::new();
         // Per slot, its latest located check.
-        let mut guard: std::collections::HashMap<String, At> = std::collections::HashMap::new();
+        // Per slot, its latest located check: its anchor and its compare.
+        let mut guard: std::collections::HashMap<String, (At, usize)> = std::collections::HashMap::new();
         for (tok, a) in t.iter().zip(&g) {
             let kind = tok.chars().next().unwrap_or('?');
             let at = parse_at(a).map_err(what)?;
             match (kind, at) {
                 ('s', None) | ('x', None) => continue,
                 ('s' | 'x', Some(_)) => return Err(what(format!("`{tok}` carries an anchor"))),
-                ('c' | 'a' | 'w', None) => {
+                ('c' | 'e' | 'a' | 'w', None) => {
                     rep.bounds_unlocated += 1;
                     continue;
                 }
-                ('c' | 'a' | 'w', Some(at)) => {
+                ('c' | 'e' | 'a' | 'w', Some(at)) => {
                     if let Some(&p) = last.get(&tok[1..]) {
                         if p.func != at.func || at.op <= p.op {
                             return Err(what(format!("`{tok}` is not after its slot's earlier events in the same function")));
@@ -602,9 +653,22 @@ pub fn check_bounds(
                     last.insert(tok[1..].to_string(), at);
                     match kind {
                         'c' => {
-                            ctx.check_guard(at)
+                            let cmp = ctx.check_guard(at)
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            guard.insert(tok[1..].to_string(), at);
+                            guard.insert(tok[1..].to_string(), (at, cmp));
+                            rep.bounds_checks += 1;
+                        }
+                        'e' => {
+                            ctx.body(at).map_err(what)?;
+                            let flow = flows.entry(at.func).or_insert_with(|| {
+                                let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
+                                operands::Flow::new(&bodies[at.func], js)
+                                    .with_holds(holds.iter().filter(|h| h.func == at.func).map(|h| h.op).collect())
+                            });
+                            operands::loop_exit(flow, at.op)
+                                .map_err(|e| what(format!("`{tok}`: {e}")))?;
+                            // The exit test's compare: the one before the `br_if`.
+                            guard.insert(tok[1..].to_string(), (at, at.op - 1));
                             rep.bounds_checks += 1;
                         }
                         _ => {
@@ -618,8 +682,10 @@ pub fn check_bounds(
                             let flow = flows.entry(at.func).or_insert_with(|| {
                                 let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
                                 operands::Flow::new(&bodies[at.func], js)
+                                    .with_holds(holds.iter().filter(|h| h.func == at.func).map(|h| h.op).collect())
                             });
-                            operands::covers(flow, c.op - 2, at.op)
+                            let (c, cmp) = c;
+                            operands::covers(flow, cmp, at.op)
                                 .map_err(|e| what(format!("`{tok}` against its check at {}:{}: {e}", c.func, c.op)))?;
                             rep.bounds_operands += 1;
                         }
@@ -735,6 +801,11 @@ pub type RcLines = (
 /// judge, and an access a judge sits in front of is then refused); so are
 /// the `rcfns` / `rc` pair (measurement-gated, #4277).
 pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option<RcLines>), String> {
+    parse_anchors_held(text).map(|(a, i, b, j, _, r)| (a, i, b, j, r))
+}
+
+/// [`parse_anchors`] and the optional `holds` line after `judges` (#4280).
+pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, Vec<At>, Option<RcLines>), String> {
     let mut lines = text.lines();
     if lines.next() != Some("almide-anchors 1") {
         return Err("anchors: not an `almide-anchors 1` file".into());
@@ -759,7 +830,8 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option
             .map_err(|_| "anchors: bad alloc index".to_string())?,
     };
     let (init, bounds) = (field("init")?, field("bounds")?);
-    let mut rest: Vec<&str> = lines.collect();
+    // The optional `fields` line (#4279) is read by `fields_anchors`.
+    let mut rest: Vec<&str> = lines.filter(|l| !(*l == "fields" || l.starts_with("fields "))).collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
     let rc_lines = match rc_at {
         None => None,
@@ -823,14 +895,44 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option
             v
         }
     };
-    Ok((alloc, init, bounds, judges, rc_lines))
+    let holds = match lines.next() {
+        None => Vec::new(),
+        Some(l) => {
+            let rest = if l == "holds" {
+                ""
+            } else {
+                l.strip_prefix("holds ")
+                    .ok_or_else(|| format!("anchors: expected `holds`, read `{l}`"))?
+            };
+            let mut v = Vec::new();
+            for t in rest.split_whitespace() {
+                if let Some(at) = parse_at(t)? {
+                    v.push(at);
+                }
+            }
+            v
+        }
+    };
+    if let Some(l) = lines.next() {
+        return Err(format!("anchors: unexpected line `{l}`"));
+    }
+    Ok((alloc, init, bounds, judges, holds, rc_lines))
+}
+
+/// The anchor file's `fields` line (#4279): one token per fields-witness
+/// event, `;` between items; empty when the file has none.
+pub fn fields_anchors(text: &str) -> String {
+    text.lines()
+        .find_map(|l| if l == "fields" { Some("") } else { l.strip_prefix("fields ") })
+        .unwrap_or("")
+        .to_string()
 }
 
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
 /// anchor file (whose `alloc` is a function index, as a `call` names it).
 pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String> {
     let bodies = decode(wasm)?;
-    let (alloc, ia, ba, judges, rc_lines) = parse_anchors(anchors)?;
+    let (alloc, ia, ba, judges, holds, rc_lines) = parse_anchors_held(anchors)?;
     let mut rep = Report::default();
     check_init(
         &bodies,
@@ -839,7 +941,8 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
+    check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
+    check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
         let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;

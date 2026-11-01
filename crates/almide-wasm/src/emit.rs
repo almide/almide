@@ -624,7 +624,8 @@ fn emit_program_pass(
                 ));
             }
             visited.extend(sub);
-            if region_exports.claim(f, &table.infos[i], &export_name, &mut export_owners, &owner) {
+            if region_exports.claim(f, &table.infos[i], &types, &export_name)? {
+                export_owners.push(owner);
                 continue;
             }
             crate::host_exports::note_export(
@@ -670,9 +671,11 @@ fn emit_program_pass(
     let declared: Vec<imports::Declared> = table
         .infos
         .iter()
-        .filter_map(|info| {
+        .enumerate()
+        .filter_map(|(i, info)| {
             let (module, name) = info.import.clone()?;
-            Some(imports::Declared { index: info.wasm_index, module, name })
+            let narrow = crate::extern_region::address_params(program_fns[i].0);
+            Some(imports::Declared { index: info.wasm_index, module, name, narrow })
         })
         .chain(crate::fan::js_async::declared_protocol(&table, &work))
         .collect();

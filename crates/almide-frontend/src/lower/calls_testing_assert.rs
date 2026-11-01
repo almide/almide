@@ -52,8 +52,28 @@ fn bind_assert_operands(
 /// program's data reads `\n` / `\u{1b}` / `\u{202e}` and a newline cannot
 /// forge a line of the block. One rule on every lane and route: the program's
 /// own abort, both test lanes, both legs.
+///
+/// A top-level `Bytes` or `Unit` operand has no string form of its own
+/// (E089 refuses `"${b}"`), so it is shown as it prints inside a container
+/// (#4323): the octets `[1, 2]` and `()`. Interpolated bare, native met
+/// `{}` on a `Vec<u8>` / `()` and rustc refused the generated Rust (E0277).
 fn assert_shown(ctx: &mut LowerCtx, operand: IrExpr, span: Option<ast::Span>) -> IrExpr {
-    let rendered = ctx.render_declared(operand);
+    let rendered = match operand.ty {
+        Ty::Bytes => {
+            let octets = IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("bytes"),
+                    func: sym("to_list"),
+                    def_id: ctx.def_map.get(&sym("bytes.to_list")).copied(),
+                },
+                args: vec![operand],
+                type_args: vec![],
+            };
+            ctx.mk(octets, Ty::list(Ty::Int), span)
+        }
+        Ty::Unit => ctx.mk(IrExprKind::LitStr { value: "()".into() }, Ty::String, span),
+        _ => ctx.render_declared(operand),
+    };
     let text = if matches!(rendered.ty, Ty::String) {
         rendered
     } else {

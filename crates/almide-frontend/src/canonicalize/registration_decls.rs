@@ -251,9 +251,16 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
         // Bare-name dual-registration of a prefixed type, for unqualified access. Record it so a local same-name type may shadow it (#433).
         env.types.insert(sym(name), resolved);
         env.prefixed_bare_aliases.insert(sym(name));
+        env.types.remove(&crate::canonicalize::resolve::entry_own_type_key(name));
     } else if prefix.is_none() {
         // A local type owns the bare name now — it is no longer a dependency alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
+        // The ENTRY program's own record / variant (not a module's temporary
+        // unprefixed pass): its bare spelling names this declaration even when
+        // an imported module's same-named type has the same structure (#4322).
+        if env.alias_owner_module.is_none() && matches!(resolved, Ty::Record { .. } | Ty::Variant { .. }) {
+            env.types.insert(crate::canonicalize::resolve::entry_own_type_key(name), Ty::Unit);
+        }
     }
 }
 /// Record the declaration's parameter letters, in declared order, under the

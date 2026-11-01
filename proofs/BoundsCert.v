@@ -17,6 +17,7 @@
              | 'a' N                       PAccess N   (a read)
              | 'w' N                       PStore N    (a write)
              | 's' N                       PSet N      (the slot's index changes)
+             | 'e' N                       PExit N     (a loop's exit test, #4280)
              | 'L' '{' prog '}'            PLoop
              | 'B' '{' prog '|' prog '}'   PBranch
      N     ::= one or more decimal digits
@@ -67,7 +68,8 @@ Fixpoint prog_at (fuel : nat) (cs : list ascii) : option (Prog * list ascii) :=
       | c :: r =>
           if ch c "}"%char || is_bar c || is_semi c then Some (PEnd, cs)
           else if is_space c then prog_at f r
-          else if ch c "c"%char || ch c "a"%char || ch c "w"%char || ch c "s"%char then
+          else if ch c "c"%char || ch c "a"%char || ch c "w"%char || ch c "s"%char
+                  || ch c "e"%char then
             match number r with
             | Some (n, r1) =>
                 match prog_at f r1 with
@@ -75,6 +77,7 @@ Fixpoint prog_at (fuel : nat) (cs : list ascii) : option (Prog * list ascii) :=
                     let i := if ch c "c"%char then PCheck n k
                              else if ch c "a"%char then PAccess n k
                              else if ch c "w"%char then PStore n k
+                             else if ch c "e"%char then PExit n k
                              else PSet n k in
                     Some (i, r2)
                 | None => None
@@ -256,3 +259,26 @@ Proof. reflexivity. Qed.
 
 Example rejects_drill_store_check_dropped : check_bounds_cert "w0 w1 c2 a2" = false.
 Proof. reflexivity. Qed.
+
+(* #4280: a `for` loop over a list records its own stretch, the exit test
+   then the element read (`e0 a0`), anchored at the `br_if` and the load. *)
+Example parses_exit : parse_bounds "e0 a0" = Some [PExit 0 (PAccess 0 PEnd)].
+Proof. reflexivity. Qed.
+
+Example accepts_for_header : check_bounds_cert "c0 a0;e0 a0;e0 a0 c1 a1" = true.
+Proof. reflexivity. Qed.
+
+Example accepts_for_loop_bytes : check_bounds_cert "L{ e0 a0 s0 }" = true.
+Proof. reflexivity. Qed.
+
+(* The drill scripts/witness-reinject.sh bounds gets from an emitter that
+   reads the element before the loop's exit test (proofs/poisoned-certs/
+   bounds/4005-loop-exit-after-read.cert), and the other orders the checker
+   must refuse. *)
+Example rejects_drill_exit_after_read : check_bounds_cert "a0 e0" = false.
+Proof. reflexivity. Qed.
+
+Example rejects_exit_misplaced : check_bounds_cert "e0 L{ a0 s0 }" = false /\
+  check_bounds_cert "L{ e0 s0 a0 }" = false /\ check_bounds_cert "e1 a0" = false /\
+  check_bounds_cert "e a0" = false.
+Proof. repeat split; reflexivity. Qed.

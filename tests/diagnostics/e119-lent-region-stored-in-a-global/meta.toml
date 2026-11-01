@@ -1,0 +1,3 @@
+expects_code = "E119"
+expects_error = "escapes its call: it is stored in the top-level var `kept`"
+hint_substring = "copy what you need out with `ffi.read` / `ffi.to_bytes`"

@@ -149,7 +149,12 @@ fn respond(w: &mut impl Write, method: &str, path: &str, body: &[u8]) -> std::io
         return whole(w, code as u16, "text/plain", format!("s{code}").as_bytes());
     }
     if let Some(n) = num("/bytes/") {
-        return whole(w, 200, "application/octet-stream", &(0..n).map(|i| (i % 251) as u8).collect::<Vec<_>>());
+        return whole(
+            w,
+            200,
+            "application/octet-stream",
+            &(0..n).map(|i| (i % 251) as u8).collect::<Vec<_>>(),
+        );
     }
     if let Some(n) = num("/chunked/") {
         return chunked(w, "text/plain", (0..n).map(|i| format!("c{i:07}\n")));
@@ -179,7 +184,12 @@ fn reason(code: u16) -> &'static str {
 }
 
 fn whole(w: &mut impl Write, code: u16, ty: &str, body: &[u8]) -> std::io::Result<()> {
-    write!(w, "HTTP/1.1 {code} {}\r\nContent-Type: {ty}\r\nContent-Length: {}\r\n\r\n", reason(code), body.len())?;
+    write!(
+        w,
+        "HTTP/1.1 {code} {}\r\nContent-Type: {ty}\r\nContent-Length: {}\r\n\r\n",
+        reason(code),
+        body.len()
+    )?;
     w.write_all(body)?;
     w.flush()
 }
@@ -188,8 +198,14 @@ fn whole(w: &mut impl Write, code: u16, ty: &str, body: &[u8]) -> std::io::Resul
 /// write per chunk made the arrival pattern (how many reads, how many
 /// deliveries) the scheduler's — the inspection then measured the server's
 /// pacing, not the client's work.
-fn chunked(w: &mut impl Write, ty: &str, parts: impl Iterator<Item = String>) -> std::io::Result<()> {
-    let mut out = format!("HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nTransfer-Encoding: chunked\r\n\r\n").into_bytes();
+fn chunked(
+    w: &mut impl Write,
+    ty: &str,
+    parts: impl Iterator<Item = String>,
+) -> std::io::Result<()> {
+    let mut out =
+        format!("HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nTransfer-Encoding: chunked\r\n\r\n")
+            .into_bytes();
     for p in parts {
         out.extend_from_slice(format!("{:x}\r\n{p}\r\n", p.len()).as_bytes());
     }
@@ -205,7 +221,13 @@ mod tests {
     #[test]
     fn the_fixtures_echo_and_answer_their_routes() {
         let env = env();
-        let port: u16 = env.iter().find(|(k, _)| k == "XF_TCP_PORT").unwrap().1.parse().unwrap();
+        let port: u16 = env
+            .iter()
+            .find(|(k, _)| k == "XF_TCP_PORT")
+            .unwrap()
+            .1
+            .parse()
+            .unwrap();
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         s.write_all(b"ping").unwrap();
         let mut got = [0u8; 4];
@@ -213,7 +235,10 @@ mod tests {
         assert_eq!(&got, b"ping");
         let http = &env.iter().find(|(k, _)| k == "XF_HTTP").unwrap().1;
         let mut h = TcpStream::connect(http.as_str()).unwrap();
-        h.write_all(b"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi").unwrap();
+        h.write_all(
+            b"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi",
+        )
+        .unwrap();
         let mut resp = String::new();
         let _ = h.read_to_string(&mut resp);
         assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");

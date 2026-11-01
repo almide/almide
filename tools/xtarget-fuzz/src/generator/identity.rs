@@ -118,39 +118,89 @@ impl Cond {
 #[derive(Debug, Clone)]
 pub enum Block {
     /// `acc += n` … `acc -= n`
-    AddSub { acc: usize, n: i64, body: Vec<Block> },
+    AddSub {
+        acc: usize,
+        n: i64,
+        body: Vec<Block>,
+    },
     /// `let s = acc; acc += perturb;` … `acc = s`.
     /// THE #1322 shape: sound only if `let s = acc` copies the scalar
     /// instead of aliasing the mutable slot.
-    Snapshot { acc: usize, perturb: i64, body: Vec<Block> },
+    Snapshot {
+        acc: usize,
+        perturb: i64,
+        body: Vec<Block>,
+    },
     /// Three-way swap of two accumulators, twice.
-    Swap { a: usize, b: usize, body: Vec<Block> },
+    Swap {
+        a: usize,
+        b: usize,
+        body: Vec<Block>,
+    },
     /// `acc = 0 - acc` … `acc = 0 - acc`
     Negate { acc: usize, body: Vec<Block> },
     /// `acc = int.bxor(acc, n)` … same again (xor is self-inverse).
-    Xor { acc: usize, n: i64, body: Vec<Block> },
+    Xor {
+        acc: usize,
+        n: i64,
+        body: Vec<Block>,
+    },
     /// `acc = acc * m` … `acc = acc / m` — exact because the body is an
     /// identity, so the dividend is exactly `m × (opening value)`.
-    MulDiv { acc: usize, m: i64, body: Vec<Block> },
+    MulDiv {
+        acc: usize,
+        m: i64,
+        body: Vec<Block>,
+    },
     /// Round trip through named top-level fns (`xf_add` / `xf_sub`).
-    FnRound { acc: usize, n: i64, body: Vec<Block> },
+    FnRound {
+        acc: usize,
+        n: i64,
+        body: Vec<Block>,
+    },
     /// Round trip through two closures bound in scope.
-    ClosureRound { acc: usize, n: i64, body: Vec<Block> },
+    ClosureRound {
+        acc: usize,
+        n: i64,
+        body: Vec<Block>,
+    },
     /// `acc += match k {…}` … `acc -= match k {…}` on the SAME let-bound
     /// subject, so whichever arm is taken cancels itself.
-    MatchBalanced { acc: usize, arms: [i64; 3], body: Vec<Block> },
+    MatchBalanced {
+        acc: usize,
+        arms: [i64; 3],
+        body: Vec<Block>,
+    },
     /// `if c then {acc += n} else {acc -= n}` … then the mirror image.
-    BranchBalanced { acc: usize, n: i64, cond: Cond, body: Vec<Block> },
+    BranchBalanced {
+        acc: usize,
+        n: i64,
+        cond: Cond,
+        body: Vec<Block>,
+    },
     /// Both arms of a branch contain the SAME identity body, so the taken
     /// arm cannot matter — real lexical nesting inside a branch.
-    BranchNest { acc: usize, cond: Cond, body: Vec<Block> },
+    BranchNest {
+        acc: usize,
+        cond: Cond,
+        body: Vec<Block>,
+    },
     /// An identity body run `trips` times inside a `while` — identity^n.
-    WhileNest { acc: usize, trips: i64, body: Vec<Block> },
+    WhileNest {
+        acc: usize,
+        trips: i64,
+        body: Vec<Block>,
+    },
     /// Loop-CARRIED scalar state: `trips` iterations each adding `d`,
     /// compensated afterwards by the literal `d * trips`. With `alias`,
     /// the loop body reads the accumulator into a `let` first (#1322
     /// inside loop-carried state).
-    WhileCarry { acc: usize, d: i64, trips: i64, alias: bool },
+    WhileCarry {
+        acc: usize,
+        d: i64,
+        trips: i64,
+        alias: bool,
+    },
     /// `for i in 0..<t { acc += i }`, compensated by the triangular number.
     ForRange { acc: usize, trips: i64 },
     /// `for x in [..] { acc += x }` over a list whose elements sum to zero
@@ -296,7 +346,10 @@ impl Gen<'_> {
     fn body_nonempty(&mut self, depth: usize, acc: usize) -> Vec<Block> {
         let b = self.body(depth);
         if b.is_empty() {
-            vec![Block::Negate { acc, body: Vec::new() }]
+            vec![Block::Negate {
+                acc,
+                body: Vec::new(),
+            }]
         } else {
             b
         }
@@ -336,7 +389,10 @@ impl Gen<'_> {
             }
         }
         let acc = self.acc();
-        Block::Negate { acc, body: Vec::new() }
+        Block::Negate {
+            acc,
+            body: Vec::new(),
+        }
     }
 
     fn build(&mut self, which: usize, depth: usize) -> Option<Block> {
@@ -349,7 +405,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::AddSub { acc, n, body: self.body(depth) })
+                Some(Block::AddSub {
+                    acc,
+                    n,
+                    body: self.body(depth),
+                })
             }
             1 => {
                 let perturb = self.nonzero(1, 10_000);
@@ -358,7 +418,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::Snapshot { acc, perturb, body: self.body(depth) })
+                Some(Block::Snapshot {
+                    acc,
+                    perturb,
+                    body: self.body(depth),
+                })
             }
             2 => {
                 if self.n_accs < 2 {
@@ -366,9 +430,16 @@ impl Gen<'_> {
                 }
                 let a = acc;
                 let b = (a + 1 + self.rng.below(self.n_accs as u32 - 1) as usize) % self.n_accs;
-                Some(Block::Swap { a, b, body: self.body(depth) })
+                Some(Block::Swap {
+                    a,
+                    b,
+                    body: self.body(depth),
+                })
             }
-            3 => Some(Block::Negate { acc, body: self.body(depth) }),
+            3 => Some(Block::Negate {
+                acc,
+                body: self.body(depth),
+            }),
             4 => {
                 let n = self.rng.in_range(1, 65_535);
                 // |x ^ n| <= 2 * (|x| + n) for every i64 pair in range.
@@ -377,7 +448,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::Xor { acc, n, body: self.body(depth) })
+                Some(Block::Xor {
+                    acc,
+                    n,
+                    body: self.body(depth),
+                })
             }
             5 => {
                 let m = self.rng.in_range(2, 7);
@@ -386,7 +461,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::MulDiv { acc, m, body: self.body(depth) })
+                Some(Block::MulDiv {
+                    acc,
+                    m,
+                    body: self.body(depth),
+                })
             }
             6 => {
                 let n = self.rng.in_range(1, 10_000);
@@ -395,7 +474,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::FnRound { acc, n, body: self.body(depth) })
+                Some(Block::FnRound {
+                    acc,
+                    n,
+                    body: self.body(depth),
+                })
             }
             7 => {
                 let n = self.rng.in_range(1, 10_000);
@@ -404,7 +487,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::ClosureRound { acc, n, body: self.body(depth) })
+                Some(Block::ClosureRound {
+                    acc,
+                    n,
+                    body: self.body(depth),
+                })
             }
             8 => {
                 let arms = [
@@ -418,7 +505,11 @@ impl Gen<'_> {
                     return None;
                 }
                 self.bound = next;
-                Some(Block::MatchBalanced { acc, arms, body: self.body(depth) })
+                Some(Block::MatchBalanced {
+                    acc,
+                    arms,
+                    body: self.body(depth),
+                })
             }
             9 => {
                 let n = self.rng.in_range(1, 10_000);
@@ -428,15 +519,28 @@ impl Gen<'_> {
                 }
                 self.bound = next;
                 let cond = self.cond();
-                Some(Block::BranchBalanced { acc, n, cond, body: self.body(depth) })
+                Some(Block::BranchBalanced {
+                    acc,
+                    n,
+                    cond,
+                    body: self.body(depth),
+                })
             }
             10 => {
                 let cond = self.cond();
-                Some(Block::BranchNest { acc, cond, body: self.body_nonempty(depth, acc) })
+                Some(Block::BranchNest {
+                    acc,
+                    cond,
+                    body: self.body_nonempty(depth, acc),
+                })
             }
             11 => {
                 let trips = self.rng.in_range(1, MAX_TRIPS);
-                Some(Block::WhileNest { acc, trips, body: self.body(depth) })
+                Some(Block::WhileNest {
+                    acc,
+                    trips,
+                    body: self.body(depth),
+                })
             }
             12 => {
                 let d = self.nonzero(1, 1_000);
@@ -447,7 +551,12 @@ impl Gen<'_> {
                 }
                 self.bound = next;
                 let alias = self.rng.chance(1, 2);
-                Some(Block::WhileCarry { acc, d, trips, alias })
+                Some(Block::WhileCarry {
+                    acc,
+                    d,
+                    trips,
+                    alias,
+                })
             }
             13 => {
                 let trips = self.rng.in_range(1, 24);
@@ -534,7 +643,12 @@ pub fn plan(rng: &mut SplitMix64) -> Plan {
     let checkpoints = rng.chance(1, 2);
 
     let blocks = {
-        let mut g = Gen { rng, n_accs, bound: start_bound, budget: TOTAL_BLOCK_BUDGET };
+        let mut g = Gen {
+            rng,
+            n_accs,
+            bound: start_bound,
+            budget: TOTAL_BLOCK_BUDGET,
+        };
         let mut out = Vec::new();
         for _ in 0..n_blocks {
             if g.budget == 0 {
@@ -546,7 +660,11 @@ pub fn plan(rng: &mut SplitMix64) -> Plan {
         out
     };
 
-    Plan { accs, blocks, checkpoints }
+    Plan {
+        accs,
+        blocks,
+        checkpoints,
+    }
 }
 
 // ── rendering ──
@@ -703,7 +821,12 @@ impl Renderer {
                 let a = acc_name(*acc);
                 self.line(format!("{a} = {a} + 0"));
             }
-            Block::WhileCarry { acc, d, trips, alias } => {
+            Block::WhileCarry {
+                acc,
+                d,
+                trips,
+                alias,
+            } => {
                 let a = acc_name(*acc);
                 let i = self.name("it");
                 self.line(format!("var {i} = 0"));
@@ -777,7 +900,11 @@ fn acc_name(i: usize) -> String {
 /// Render a plan to `(source, expected_stdout)`. The two are produced by
 /// the same walk, so they cannot drift.
 pub fn render(plan: &Plan) -> (String, String) {
-    let mut r = Renderer { lines: Vec::new(), fresh: 0, indent: 1 };
+    let mut r = Renderer {
+        lines: Vec::new(),
+        fresh: 0,
+        indent: 1,
+    };
 
     for (i, v) in plan.accs.iter().enumerate() {
         r.line(format!("var {} = {v}", acc_name(i)));
@@ -987,7 +1114,10 @@ mod tests {
         for index in 0..300u64 {
             let p = plan(&mut SplitMix64::for_program(0xDEED, index));
             let (src, _) = render(&p);
-            assert!(parses(&src), "identity program {index} did not parse:\n{src}");
+            assert!(
+                parses(&src),
+                "identity program {index} did not parse:\n{src}"
+            );
         }
     }
 
@@ -1009,7 +1139,10 @@ mod tests {
     /// A non-identity source must not be mistaken for one.
     #[test]
     fn plain_sources_have_no_oracle() {
-        assert_eq!(expected_from_source("fn main() -> Unit = { println(\"x\") }"), None);
+        assert_eq!(
+            expected_from_source("fn main() -> Unit = { println(\"x\") }"),
+            None
+        );
     }
 
     /// The declared bound discipline: no rendered literal, and no
@@ -1044,7 +1177,10 @@ mod tests {
             for c in shrink(&p) {
                 let (src, expected) = render(&c);
                 assert!(parses(&src), "shrunk candidate did not parse:\n{src}");
-                assert_eq!(expected_from_source(&src).as_deref(), Some(expected.as_str()));
+                assert_eq!(
+                    expected_from_source(&src).as_deref(),
+                    Some(expected.as_str())
+                );
                 assert!(
                     c.size() < p.size() || (p.checkpoints && !c.checkpoints),
                     "candidate did not shrink"
@@ -1057,7 +1193,11 @@ mod tests {
     /// — the shrinker's fixed point.
     #[test]
     fn empty_plan_renders() {
-        let p = Plan { accs: vec![7], blocks: Vec::new(), checkpoints: false };
+        let p = Plan {
+            accs: vec![7],
+            blocks: Vec::new(),
+            checkpoints: false,
+        };
         let (src, expected) = render(&p);
         assert!(parses(&src));
         assert_eq!(expected, "a0=7\n");

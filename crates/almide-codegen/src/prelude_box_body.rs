@@ -16,8 +16,7 @@ unsafe impl<T: Sync> Sync for AlmideBox<T> {}
 impl<T> AlmideBox<T> {
     #[inline]
     pub fn new(x: T) -> Self {
-        let p = std::boxed::Box::into_raw(std::boxed::Box::new(x));
-        AlmideBox { almide_p: unsafe { std::ptr::NonNull::new_unchecked(p) }, almide_m: std::marker::PhantomData }
+        AlmideBox { almide_p: std::ptr::NonNull::from(std::boxed::Box::leak(std::boxed::Box::new(x))), almide_m: std::marker::PhantomData }
     }
     /// The value, moved out — `*b` on a `Box`.
     #[inline]
@@ -122,8 +121,8 @@ impl<T: Clone> Clone for AlmideBox<T> {
     fn clone(&self) -> Self {
         // The copy's cell is written by the step, before anything reads it:
         // the outermost clone drains every queued step before it returns.
-        let cell = std::boxed::Box::into_raw(std::boxed::Box::new(std::mem::MaybeUninit::<T>::uninit())) as *mut T;
-        let step: AlmideBoxCloneStep = (self.almide_p.as_ptr() as *const u8, cell as *mut u8, almide_box_clone_into::<T>);
+        let cell = std::ptr::NonNull::from(std::boxed::Box::leak(std::boxed::Box::new(std::mem::MaybeUninit::<T>::uninit()))).cast::<T>();
+        let step: AlmideBoxCloneStep = (self.almide_p.as_ptr() as *const u8, cell.as_ptr() as *mut u8, almide_box_clone_into::<T>);
         let running = ALMIDE_BOX_CLONE_Q.with(|q| q.get());
         if !running.is_null() {
             unsafe { (*running).push(step) };
@@ -136,7 +135,7 @@ impl<T: Clone> Clone for AlmideBox<T> {
                 unsafe { f(s, d) };
             }
         }
-        AlmideBox { almide_p: unsafe { std::ptr::NonNull::new_unchecked(cell) }, almide_m: std::marker::PhantomData }
+        AlmideBox { almide_p: cell, almide_m: std::marker::PhantomData }
     }
 }
 

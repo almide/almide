@@ -296,7 +296,10 @@ pub const NOMINALS: &[Nominal] = &[
         ],
         observe: "(http.header(http.response(200, {v}), \"Content-Type\") ?? \"-\", http.body(http.response(200, {v})))",
         observed: || pair(GenType::String, GenType::String),
-        digest: "string.len(http.body(http.response(200, {v})))",
+        // No reader leaves the bytes alone: making the response decodes them
+        // (`__self_to_text`), so a per-call digest through it would time the
+        // decode, not the call (#4337). The digest is constant, as a tuple's.
+        digest: "1",
         observe_calls_effect: false,
         refuses_var: false,
         in_flight: false,
@@ -321,6 +324,8 @@ pub const NOMINALS: &[Nominal] = &[
             "(match ffi.alloc(1) { ok(r) => r, err(e) => panic(e) })",
             "(match ffi.alloc(4) { ok(r) => r, err(e) => panic(e) })",
             "(match ffi.alloc(16) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.slice(ffi.region(bytes.from_list([1, 2, 3, 4])), 1, 2) { ok(r) => r, err(e) => panic(e) })",
+            "(match ffi.alloc(8) { ok(w) => match ffi.slice(w, 3, 4) { ok(r) => r, err(e) => panic(e) }, err(e) => panic(e) })",
         ],
         observe: "(ffi.len({v}), (ffi.is_writable({v}), bytes.to_list(ffi.to_bytes({v})!)))",
         observed: || pair(GenType::Int, pair(GenType::Bool, GenType::List(Box::new(GenType::Int)))),

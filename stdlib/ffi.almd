@@ -95,17 +95,17 @@ mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
 @intrinsic("almide_rt_ffi_address")
 local fn __address(b: Bytes) -> Handle = _
 
-// The block an `@export(wasm)` fn returning a Region hands its host
-// (ADR-0031 amendment A1). The host is given the block's data address and
-// length, and one share of the block, which it gives back through the
-// `__region_release` export. Only a whole view of its owner crosses: a
-// sub-region of a larger block (`ffi.slice`) has no block of its own, so the
-// export aborts instead of handing out an address it cannot take back.
-// Reached only by the compiler-made wrapper of such an export.
+// What an `@export(wasm)` fn returning a Region hands its host (ADR-0031
+// amendment A1): the Region's block, with one share of it, and where the view
+// sits in it. The emitter's adapter returns the view's data address and
+// length and files the address against the block, so `__region_release` can
+// give that share back. A sub-region crosses too: its address is inside its
+// parent's block, which the share keeps alive. Reached only by the
+// compiler-made wrapper of such an export.
+mod type RegionExportView = { owner: Bytes, off: Int, len: Int }
+
 @memory_unsafe
-local fn __export_owner(r: Region) -> Bytes =
-  if r.len == bytes.len(r.owner) then r.owner
-  else panic("ffi: an @export(wasm) fn returned a sub-region of ${r.len} bytes; return the whole region and pass the offset")
+local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r.off, len: r.len }
 
 // A copy of the n bytes at base + off. Reached only by `read` / `to_bytes`,
 // after the bounds check.

@@ -52,7 +52,11 @@ impl Emitter<'_> {
         };
         // The subprocess leaves (#2589, ADR-0025): two text operands in
         // a/b, a Result[String, String] answer.
-        let proc = PROC_LEAVES.iter().find(|(l, _)| *l == name).map(|&(_, op)| op);
+        let proc = PROC_LEAVES
+            .iter()
+            .find(|(l, _)| *l == name)
+            .map(|&(_, op)| op)
+            .or_else(|| crate::fs_meta::proc_child_op(name));
         if let Some(op) = framed.or(proc) {
             let [a, b] = args else { return unsup("host-leaf-arity") };
             self.fs_call_str2(a, b, op)?;

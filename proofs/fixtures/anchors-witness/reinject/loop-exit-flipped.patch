@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 5d5f6dd0a..03c01a156 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -602,7 +602,8 @@ impl Emitter<'_> {
+                 // #4280: the exit test guards the element read below; the
+                 // bounds witness records the pair as a stretch of its own.
+                 let site = crate::witness::bounds::loop_header();
+-                self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
++                // RE-INJECTED (#4280 operands drill): the exit test flipped.
++                self.f.instructions().local_get(cur).local_get(count).i32_ge_u().i32_eqz().br_if(1);
+                 crate::witness::bounds::exit(site, self.f);
+                 self.f
+                     .instructions()

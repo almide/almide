@@ -152,7 +152,7 @@ fn emit_writes_the_bundle_even_without_the_verifier() {
     let (verdicts, _) = almide_verify::bundle::verify(&bundle);
     let main_names: Vec<_> = verdicts.iter().filter(|v| v.function == "main").map(|v| v.property.name()).collect();
     assert_eq!(main_names, ["ownership", "caps"], "per-function witnesses for main");
-    for program_level in ["call-modes", "bounds", "init", "caps-transitive"] {
+    for program_level in ["call-modes", "bounds", "init", "fields", "caps-transitive"] {
         assert!(verdicts.iter().any(|v| v.property.name() == program_level), "the program-level {program_level} witness");
     }
     assert!(verdicts.iter().any(|v| v.property.name() == "names"), "the names witnesses of the shipped bytes");

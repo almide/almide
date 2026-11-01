@@ -144,9 +144,13 @@ impl Emitter<'_> {
         i.local_get(hs).local_get(hn).call(F_CP_OFF).local_set(hoff);
         i.local_get(hoff).local_get(hs).i32_load(len_memarg()).i32_ge_u();
         i.if_(BlockType::Result(ValType::I32));
+        let site = self.str_test();
+        i = self.f.instructions();
         i.i32_const(0);
         i.else_();
-        i.local_get(hs).local_get(hoff).i32_add().i32_load8_u(str_byte()).local_set(hw);
+        self.str_byte_at(site, hs, Some(hoff));
+        i = self.f.instructions();
+        i.local_set(hw);
         i.i32_const(1);
         i.local_get(hw).i32_const(0xC0).i32_ge_u().i32_add();
         i.local_get(hw).i32_const(0xE0).i32_ge_u().i32_add();
@@ -288,9 +292,17 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hs).local_get(hoff).i32_add().local_get(hk).i32_add();
-        i.i32_load8_u(str_byte());
-        i.local_get(hp).local_get(hk).i32_add().i32_load8_u(str_byte());
+        // p's byte k under the exit test; s's under it too for a prefix
+        // (k < len(p) <= len(s): the `else` of `len(p) >u len(s)` above).
+        let site_p = self.str_loop_exit();
+        if prefix {
+            let site_s = self.str_loop_exit();
+            self.str_byte_at(site_s, hs, Some(hk));
+        } else {
+            self.f.instructions().local_get(hs).local_get(hoff).i32_add().local_get(hk).i32_add().i32_load8_u(str_byte());
+        }
+        self.str_byte_at(site_p, hp, Some(hk));
+        i = self.f.instructions();
         i.i32_ne().if_(BlockType::Empty);
         i.i32_const(0).local_set(hr);
         i.br(2);
@@ -364,8 +376,12 @@ impl Emitter<'_> {
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte());
-        i.local_get(hp).local_get(hk).i32_add().i32_load8_u(str_byte());
+        // As in strip: a suffix reads s through its moved base, unrecorded.
+        let site_p = self.str_loop_exit();
+        let site_s = if at_end { None } else { self.str_loop_exit() };
+        self.str_byte_at(site_s, hs, Some(hk));
+        self.str_byte_at(site_p, hp, Some(hk));
+        i = self.f.instructions();
         i.i32_ne().if_(BlockType::Empty);
         i.i32_const(0).local_set(hr);
         i.br(2);

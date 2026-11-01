@@ -4,7 +4,8 @@
 // own, the one exception ADR-0025 makes to ADR-0023 §2.6 (no private host ABI
 // on stock runtimes). It is bounded three ways:
 //
-// - it ships only when the program's op set names a process op (80..=90):
+// - it ships only when the program's op set names a process op (80..=90,
+//   or the `start` child's 146..=151):
 //   a program that never starts a child never carries the import;
 // - a host that does not implement it refuses the module at load (stock
 //   wasmtime: "unknown import: `almide:process/spawn::call` has not been
@@ -19,7 +20,8 @@
 //           (param $b-ptr i32) (param $b-len i32) (param $ret i32)))
 // with the answer's bytes placed through the module's `cabi_realloc` export.
 // The embedded host (`almide run --target wasm`, `almide test`) serves the
-// same operations to the raw module as `almide.fs_call` ops 80..=90.
+// same operations to the raw module as `almide.fs_call` ops 80..=90 and
+// 146..=151.
 package almide:process;
 
 interface spawn {
@@ -65,6 +67,32 @@ interface spawn {
     /// the host's), stdin text piped in unless "", and a deadline unless 0
     /// (appended last, so the earlier cases keep their numbers).
     run-with,
+    /// The `process.start` child (#4308, R-process-03): a host resource. The
+    /// host keeps each started child in its own table — the pipes it drains,
+    /// the deadline, what was read so far — and the guest holds only its
+    /// handle, decimal text in `a`. These cases are host ops 146..=151
+    /// (case index = op − 135; host ops 91..=145 serve other families).
+    ///
+    /// a = cmd, b = [timeout-ms, dir, stdin] ++ argv, as `output`; starts the
+    /// child in its own process group and returns at once. ok = the handle;
+    /// err = the spawn error, named `process.start(…)`.
+    start,
+    /// a = handle. Never blocks. ok = `1` once the outcome is in (the child
+    /// exited and both pipes ended, or its deadline passed), else `0`.
+    poll,
+    /// a = handle. Blocks until the outcome; ok as `exec-status`, err is
+    /// exactly `exec timed out after <ms>ms` past the deadline.
+    wait,
+    /// a = handle, b = grace-ms. SIGTERM to the child's group, grace-ms to
+    /// end, then SIGKILL; ok as `exec-status` (code -1 when a signal ended
+    /// it). Again after the end answers the same outcome.
+    stop,
+    /// a = handle, b = `1` (stdout) or `2` (stderr). Never blocks. ok = the
+    /// text written since the last read; a UTF-8 sequence cut by the read
+    /// waits for its rest.
+    read-new,
+    /// a = handle. ok = the child's pid in decimal.
+    child-pid,
   }
 
   /// Run one operation.

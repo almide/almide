@@ -98,17 +98,21 @@ always comes from the Region.
   module's `__region_release` export. The host can write straight into an
   `ffi.alloc` Region the export returned, then call the next export, which
   reads it (a top-level `var` holds the program's copy). An empty Region
-  crosses as `(0, 0)`. Only a whole Region crosses: an export returning a
-  slice aborts. An `effect fn` export's `err` prints and traps.
+  crosses as `(0, 0)`. A slice crosses as its own address, with no copy:
+  the share keeps its parent alive until the host releases it. Releasing an
+  address twice traps. An `effect fn` export's `err` prints and traps.
 - *Pull.* A writable `ffi.alloc` Region passed to an `@extern(wasm)` or
-  `@extern(c)` fn is lent for that call, as `(base, len)` or
-  `(uint8_t*, size_t)`, and the foreign code fills it in place.
+  `@extern(c)` fn is lent for that call, as `(base, len)` in the memory's
+  address width (`i32` on wasm32) or `(uint8_t*, size_t)`, and the foreign
+  code fills it in place.
 - *C callers.* An `@export(c)` fn may take a Region parameter: the caller's
   `(const uint8_t*, size_t)`, read-only, or, for a parameter the declaration
   names with `@region(out = p)`, `(uint8_t*, size_t)`, writable. Either is lent
   for the one call. Every access is still checked against the length the
-  caller passed. A copy still held when the call returns stops the process
-  rather than outlive the caller's buffer.
+  caller passed. A copy the body stores in a top-level `var`, returns or
+  captures in a closure is E119 at check time. A copy kept some other way
+  stops the process when the call returns, rather than outlive the caller's
+  buffer.
 
 ```almide
 import ffi

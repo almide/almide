@@ -624,6 +624,7 @@ fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
         calls: Arc::default(),
         serve: Arc::default(),
         net: Arc::default(),
+        procs: Arc::default(),
         live_out: None,
         err_last: Arc::default(),
         par: None,

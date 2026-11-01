@@ -25,6 +25,16 @@ pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
     sym(&format!("<in-scope:{}>|{}", scope.unwrap_or(""), name))
 }
 
+/// The key recording that the ENTRY program itself declares the record or
+/// variant `name` (#4322): its bare `types` entry is that declaration, not a
+/// dependency's bare dual-registration. Structure cannot tell the two apart —
+/// `type Item = { id: String }` beside a dependency's identical `mod type
+/// Item` compares equal — so the declaration says it. No source can spell
+/// the key, and it has no `.Name` suffix, so no module-key scan matches it.
+pub fn entry_own_type_key(name: &str) -> Sym {
+    sym(&format!("<entry-own:{}>", name))
+}
+
 /// The key under which a GENERIC type declaration's parameter list is
 /// recorded (#3403): `<type-params:Pair>` / `<type-params:m.Pair>` holds
 /// `Ty::Tuple` of the declared letters, in declaration order, beside the
@@ -395,7 +405,11 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
         if let Some(bare) = types.get(&sym(name)) {
             // The value test first: it rejects almost every entry without
             // resolving the key's text (#3509).
-            let is_alias_of_a_qualified = || types.iter().any(|(k, v)| v == bare && user_module_owner(k));
+            // The entry's own declaration wins whatever its structure (#4322):
+            // the module-system rule that a file's own type shadows an
+            // imported one of the same name.
+            let own = types.contains_key(&entry_own_type_key(name));
+            let is_alias_of_a_qualified = || !own && types.iter().any(|(k, v)| v == bare && user_module_owner(k));
             match bare {
                 Ty::Record { .. } | Ty::Variant { .. } if !is_alias_of_a_qualified() => return Some(sym(name)),
                 // The entry program's own ALIAS of the name (#3401): not

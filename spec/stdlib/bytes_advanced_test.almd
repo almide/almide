@@ -107,3 +107,12 @@ test "bytes reads are +0.0 at an overflowing offset" {
   assert_eq(bytes.get_f32_le(b, 100) ?? 0.0, 0.0)
   assert_eq(bytes.get_u16_le(b, 0) ?? 0, 513)
 }
+
+// #4323: an assert over Bytes operands builds on both legs; a failure would
+// show the octets, as Bytes prints inside a container.
+test "assert_eq and assert_ne take Bytes operands" {
+  let a = bytes.zeros(2)
+  assert_eq(bytes.slice(a, 0, 2), bytes.slice(a, 0, 2))
+  assert_ne(a, bytes.from_list([1, 2]))
+  assert_eq(bytes.len(a), 2)
+}

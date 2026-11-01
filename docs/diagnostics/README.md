@@ -75,6 +75,7 @@ equal to the set of codes the compiler emits.
 | [E111](E111.md) | An inferred type passed the `type_size` compile-cost budget — a doubling chain such as `let t1 = (t0, t0)` (ADR-0030, #4114) |
 | [E112](E112.md) | Monomorphization passed the `generic_instances` budget — polymorphic recursion that needs an instance per call depth (ADR-0030) |
 | [E113](E113.md) | A `match` whose exhaustiveness check passed the `exhaustiveness_steps` compile-cost budget (ADR-0030) |
+| [E119](E119.md) | A Region lent to an `@export(c)` fn escapes its call: stored in a top-level `var`, returned, or captured by a closure (ADR-0031 amendment A2) |
 | [E114](E114.md) | A generic fn reaches itself — directly or through other generic fns — at a type that grows with every call (`depth((x, x), n - 1)` inside `depth[T]`): every level would need a new instance (#4287) |
 | [E116](E116.md) | A response's `Content-Type` written by name through `http.set_header` / `http.with_headers`: it is written from the body's type (ADR-0032, row 11e) |
 | [E117](E117.md) | `http.typed`'s media type is not a literal, is malformed, or is owned by a safe module (`text/html`, XML, SVG) |

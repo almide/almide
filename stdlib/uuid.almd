@@ -94,7 +94,8 @@ local fn __unwrapped(s: String) -> String =
 // ms * 4096 + a 12-bit counter, strictly increasing over the process: the
 // counter restarts at 0 in each new millisecond and, past 4095, carries into
 // the next one (RFC 9562 §6.2 method 1), so two v7 made in one millisecond
-// still order as they were made.
+// still order as they were made. Native runs runtime/rs/src/uuid.rs; the wasm
+// legs link stdlib/uuid_wasm.almd, the same rule over a guest global.
 @intrinsic("almide_rt_uuid___v7_stamp")
 @category("Time")
 effect fn __v7_stamp(ms: Int) -> Int = _

@@ -48,6 +48,7 @@
 66672	spec/wasm_cross/bytes_copy_from_negative_len.almd
 66176	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 72208	spec/wasm_cross/bytes_cursor_read_domain.almd
+67280	spec/wasm_cross/bytes_display.almd
 65776	spec/wasm_cross/bytes_equality_call_operands.almd
 67120	spec/wasm_cross/bytes_f16.almd
 68512	spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -260,6 +261,7 @@
 66048	spec/wasm_cross/fold_heap_acc.almd
 67056	spec/wasm_cross/fold_init_rebinds_source.almd
 65936	spec/wasm_cross/for_in_forms.almd
+66160	spec/wasm_cross/for_in_list_value_semantics.almd
 ~	spec/wasm_cross/fs_call_head_family.almd
 ~	spec/wasm_cross/fs_composition_family.almd
 ~	spec/wasm_cross/fs_error_path_escape.almd
@@ -966,6 +968,7 @@
 95696	spec/wasm_cross/url_authority_edges.almd
 98800	spec/wasm_cross/url_whatwg_probes.almd
 66208	spec/wasm_cross/user_box_recursive_enum.almd
+276832	spec/wasm_cross/uuid_v7_monotonic.almd
 66032	spec/wasm_cross/value_array_leak_loop.almd
 66304	spec/wasm_cross/value_array_tuple_tco.almd
 66192	spec/wasm_cross/value_as_array_leak_loop.almd

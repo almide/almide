@@ -74,26 +74,46 @@ enum Domain {
     /// n when P has a size. A numeral (an Int or Float printed by its own
     /// module) has no size of its own, so it scales by n leading zero digits,
     /// which every positional numeral reads as the same number.
-    Inverse { producer: String, payload: GenType, numeral: bool },
+    Inverse {
+        producer: String,
+        payload: GenType,
+        numeral: bool,
+    },
 }
 
 impl Domain {
     fn expr(&self, n: u64) -> String {
         match self {
-            Domain::Inverse { producer, payload, numeral: true } => format!("string.repeat(\"0\", {n}) + {producer}({})", small(payload)),
-            Domain::Inverse { producer, payload, numeral: false } if has_size(payload) => format!("{producer}({})", sized(payload, n)),
-            Domain::Inverse { producer, payload, .. } => format!("{producer}({})", small(payload)),
+            Domain::Inverse {
+                producer,
+                payload,
+                numeral: true,
+            } => format!("string.repeat(\"0\", {n}) + {producer}({})", small(payload)),
+            Domain::Inverse {
+                producer,
+                payload,
+                numeral: false,
+            } if has_size(payload) => format!("{producer}({})", sized(payload, n)),
+            Domain::Inverse {
+                producer, payload, ..
+            } => format!("{producer}({})", small(payload)),
         }
     }
 
     /// The argument grows with n.
     fn scales(&self) -> bool {
-        matches!(self, Domain::Inverse { numeral: true, .. }) || matches!(self, Domain::Inverse { payload, .. } if has_size(payload))
+        matches!(self, Domain::Inverse { numeral: true, .. })
+            || matches!(self, Domain::Inverse { payload, .. } if has_size(payload))
     }
 
     /// The domain of a one-parameter function returning a Result or an
     /// Option, from its signature and its module's catalogued functions.
-    fn derive(sig: &Signature, x: &GenType, ret: &GenType, catalogue: &[Signature]) -> Option<Domain> {
+    fn derive(
+        sig: &Signature,
+        x: &GenType,
+        ret: &GenType,
+        catalogue: &[Signature],
+    ) -> Option<Domain> {
         let payload = match ret {
             GenType::Result(p) | GenType::Option(p) => (**p).clone(),
             _ => return None,
@@ -103,8 +123,17 @@ impl Domain {
         let closed = HashMap::new();
         let producers: Vec<&Signature> = catalogue
             .iter()
-            .filter(|g| g.module == sig.module && g.func != sig.func && !g.effect && g.mut_param.is_none() && g.params.len() == 1)
-            .filter(|g| g.params[0].instantiate(&closed).as_ref() == Some(&payload) && g.ret.instantiate(&closed).as_ref() == Some(x))
+            .filter(|g| {
+                g.module == sig.module
+                    && g.func != sig.func
+                    && !g.effect
+                    && g.mut_param.is_none()
+                    && g.params.len() == 1
+            })
+            .filter(|g| {
+                g.params[0].instantiate(&closed).as_ref() == Some(&payload)
+                    && g.ret.instantiate(&closed).as_ref() == Some(x)
+            })
             .collect();
         let producer = match producers.as_slice() {
             [g] => *g,
@@ -115,8 +144,16 @@ impl Domain {
         };
         // A numeral is what the number type's own module prints it as
         // (`int.to_string`, `float.to_string`), not a character.
-        let numeral = *x == GenType::String && matches!((&payload, producer.module), (GenType::Int, "int") | (GenType::Float, "float"));
-        Some(Domain::Inverse { producer: format!("{}.{}", producer.module, producer.func), payload, numeral })
+        let numeral = *x == GenType::String
+            && matches!(
+                (&payload, producer.module),
+                (GenType::Int, "int") | (GenType::Float, "float")
+            );
+        Some(Domain::Inverse {
+            producer: format!("{}.{}", producer.module, producer.func),
+            payload,
+            numeral,
+        })
     }
 }
 
@@ -160,7 +197,9 @@ const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "w
 
 /// Element-typed parameters a search compares against: given a value no
 /// sized input holds, so the search scans to the end (its worst case).
-const SEARCH_PARAMS: &[&str] = &["x", "value", "elem", "item", "needle", "target", "sub", "pattern", "from"];
+const SEARCH_PARAMS: &[&str] = &[
+    "x", "value", "elem", "item", "needle", "target", "sub", "pattern", "from",
+];
 
 /// The arguments of a function whose operands must agree in shape (#3637):
 /// each named parameter takes its expression, `{n}` standing for the size,
@@ -346,7 +385,10 @@ const SHAPE_RECIPES: &[Recipe] = &[
 /// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
 /// in-domain leaves ([`recipe_leaf`]).
 pub fn shape_recipe(func: &str) -> Option<&'static [(&'static str, &'static str)]> {
-    SHAPE_RECIPES.iter().find(|r| r.func == func).map(|r| r.args)
+    SHAPE_RECIPES
+        .iter()
+        .find(|r| r.func == func)
+        .map(|r| r.args)
 }
 
 /// Parameter `param`'s recipe operand at size `n`, when it is a plain
@@ -386,7 +428,12 @@ struct Routed {
 /// costs O(L²) on both legs (the router's escape check walks the path's
 /// characters with `list.drop`), outside the timed difference but inside
 /// the run cap: the probe is run at a reduced `--n`.
-const ROUTED: &[Routed] = &[Routed { func: "http.param", param: "req", pattern: "GET /p/{id}", target: "\"/p/\" + string.repeat(\"a%C3%A9\", {n})" }];
+const ROUTED: &[Routed] = &[Routed {
+    func: "http.param",
+    param: "req",
+    pattern: "GET /p/{id}",
+    target: "\"/p/\" + string.repeat(\"a%C3%A9\", {n})",
+}];
 
 /// The panic a probe program stops with when a call whose input is
 /// in-domain (a [`SHAPE_RECIPES`] entry or a derived [`Domain`]) returned
@@ -405,7 +452,14 @@ pub const ERR_PATH: &str = "inspect: the probed call returned err";
 
 /// Functions that stop at the first `true` from their predicate: given a
 /// predicate that is always `false`, so they visit every element.
-const STOPS_ON_TRUE: &[&str] = &["any", "find", "find_index", "position", "find_map", "index_where"];
+const STOPS_ON_TRUE: &[&str] = &[
+    "any",
+    "find",
+    "find_index",
+    "position",
+    "find_map",
+    "index_where",
+];
 
 impl Target {
     /// `catalogue` is where a decoder's inverse is looked up ([`Domain`]).
@@ -421,7 +475,11 @@ impl Target {
     /// lowering from Int's, and an Int-only measurement never ran it
     /// (wasm `list.flat_map` over Strings allocated O(n²) bytes while its
     /// Int stamp was clean, 2026-10-16).
-    pub fn new_filled(sig: &Signature, catalogue: &[Signature], fill: GenType) -> Result<Target, String> {
+    pub fn new_filled(
+        sig: &Signature,
+        catalogue: &[Signature],
+        fill: GenType,
+    ) -> Result<Target, String> {
         let name = format!("{}.{}", sig.module, sig.func);
         let mut subst = sig.forced_bindings();
         let mut vars = Vec::new();
@@ -434,9 +492,12 @@ impl Target {
         // instantiations stay two different lowerings where the bound allows.
         for v in vars {
             let pick = match sig.bound_of(&v) {
-                Some(allowed) if !allowed.contains(&fill) => {
-                    allowed.iter().find(|t| **t != GenType::String).or(allowed.first()).cloned().unwrap_or_else(|| fill.clone())
-                }
+                Some(allowed) if !allowed.contains(&fill) => allowed
+                    .iter()
+                    .find(|t| **t != GenType::String)
+                    .or(allowed.first())
+                    .cloned()
+                    .unwrap_or_else(|| fill.clone()),
                 _ => fill.clone(),
             };
             subst.entry(v).or_insert(pick);
@@ -450,39 +511,69 @@ impl Target {
             r if sig.lifted => SigType::Result(Box::new(r.clone()), Box::new(SigType::String)),
             r => r.clone(),
         };
-        let ret = declared.instantiate(&subst).ok_or_else(|| format!("{name}: return type has no value form"))?;
-        let params: Vec<(String, SigType)> = sig.param_names.iter().cloned().zip(sig.params.iter().cloned()).collect();
+        let ret = declared
+            .instantiate(&subst)
+            .ok_or_else(|| format!("{name}: return type has no value form"))?;
+        let params: Vec<(String, SigType)> = sig
+            .param_names
+            .iter()
+            .cloned()
+            .zip(sig.params.iter().cloned())
+            .collect();
         let concrete = |t: &SigType| t.instantiate(&subst);
-        let recipe = SHAPE_RECIPES.iter().chain(effect_recipes::EFFECT_RECIPES).find(|r| r.func == name);
+        let recipe = SHAPE_RECIPES
+            .iter()
+            .chain(effect_recipes::EFFECT_RECIPES)
+            .find(|r| r.func == name);
         let routed = ROUTED.iter().find(|r| r.func == name);
         let param_at = |p: &str| params.iter().position(|(n, _)| n == p);
         if let Some(r) = routed {
-            if param_at(r.param).is_none_or(|i| concrete(&params[i].1) != Some(GenType::Nominal("HttpRequest"))) {
-                return Err(format!("{name}: routed `{}` is not an HttpRequest parameter", r.param));
+            if param_at(r.param)
+                .is_none_or(|i| concrete(&params[i].1) != Some(GenType::Nominal("HttpRequest")))
+            {
+                return Err(format!(
+                    "{name}: routed `{}` is not an HttpRequest parameter",
+                    r.param
+                ));
             }
             if recipe.is_none() {
-                return Err(format!("{name}: a routed function needs a shape recipe (its in-domain input)"));
+                return Err(format!(
+                    "{name}: a routed function needs a shape recipe (its in-domain input)"
+                ));
             }
         }
         if let Some(r) = recipe {
             // A recipe naming a parameter the signature no longer has would
             // silently fall back to the generic values that violate it.
             if let Some((p, _)) = r.args.iter().find(|(p, _)| param_at(p).is_none()) {
-                return Err(format!("{name}: shape recipe names `{p}`, which is not a parameter"));
+                return Err(format!(
+                    "{name}: shape recipe names `{p}`, which is not a parameter"
+                ));
             }
             // An empty size: a sizeless function whose recipe only keeps
             // its operands in domain (an assert's passing argument).
             if !r.size.is_empty() && param_at(r.size).is_none() {
-                return Err(format!("{name}: shape recipe's size `{}` is not a parameter", r.size));
+                return Err(format!(
+                    "{name}: shape recipe's size `{}` is not a parameter",
+                    r.size
+                ));
             }
-            if r.args.iter().any(|(p, e)| *p == r.size && !e.contains("{n}") && !e.contains("{sized")) {
-                return Err(format!("{name}: shape recipe's size `{}` does not take n", r.size));
+            if r.args
+                .iter()
+                .any(|(p, e)| *p == r.size && !e.contains("{n}") && !e.contains("{sized"))
+            {
+                return Err(format!(
+                    "{name}: shape recipe's size `{}` does not take n",
+                    r.size
+                ));
             }
         }
         // Effect functions name things the sandbox holds; their domain is
         // the sandbox's, not a value the harness derives.
         let domain = match (recipe, params.as_slice()) {
-            (None, [(_, p)]) if !sig.effect => concrete(p).and_then(|x| Domain::derive(sig, &x, &ret, catalogue)).map(|d| (0, d)),
+            (None, [(_, p)]) if !sig.effect => concrete(p)
+                .and_then(|x| Domain::derive(sig, &x, &ret, catalogue))
+                .map(|d| (0, d)),
             _ => None,
         };
         let size_param = match (recipe, &domain) {
@@ -492,21 +583,36 @@ impl Target {
             (None, None) => params
                 .iter()
                 .enumerate()
-                .position(|(i, (_, t))| sig.literal_at(i).is_none() && concrete(t).as_ref().is_some_and(has_size))
-                .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
+                .position(|(i, (_, t))| {
+                    sig.literal_at(i).is_none() && concrete(t).as_ref().is_some_and(has_size)
+                })
+                .or_else(|| {
+                    params.iter().position(|(n, t)| {
+                        *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str())
+                    })
+                }),
         };
         // A host-decided scalar rebound through its own call is a chain of
         // host choices; only a collection's length (its digest) is fixed.
         let rebind_param = params
             .iter()
             .position(|(_, t)| concrete(t).as_ref() == Some(&ret))
-            .filter(|_| sig.verdict.is_none() || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_)));
+            .filter(|_| {
+                sig.verdict.is_none()
+                    || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_))
+            });
         let forced = sig.forced_bindings();
-        let mut shown: Vec<String> = subst.iter().filter(|(k, _)| !forced.contains_key(*k)).map(|(_, t)| t.render()).collect();
+        let mut shown: Vec<String> = subst
+            .iter()
+            .filter(|(k, _)| !forced.contains_key(*k))
+            .map(|(_, t)| t.render())
+            .collect();
         shown.sort();
         shown.dedup();
         let generic = !shown.is_empty();
-        let literal = (0..params.len()).filter_map(|i| sig.literal_at(i).map(|l| (i, l))).collect();
+        let literal = (0..params.len())
+            .filter_map(|i| sig.literal_at(i).map(|l| (i, l)))
+            .collect();
         Ok(Target {
             name,
             params,
@@ -539,7 +645,9 @@ impl Target {
         if !self.never {
             return 0;
         }
-        (0..self.params.len()).find_map(|i| self.recipe_arg(i)?.trim().parse().ok()).unwrap_or(0)
+        (0..self.params.len())
+            .find_map(|i| self.recipe_arg(i)?.trim().parse().ok())
+            .unwrap_or(0)
     }
 
     /// A `-> Never` probe: the arguments bound, a line naming the exit to
@@ -550,7 +658,12 @@ impl Target {
         let mut s = self.arg_lets(0, None, &[]);
         let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
         let shown: Vec<String> = names.iter().map(|a| format!("${{{a}}}")).collect();
-        let _ = writeln!(s, "  println(\"{label}{} {}\")", self.func(), shown.join(" "));
+        let _ = writeln!(
+            s,
+            "  println(\"{label}{} {}\")",
+            self.func(),
+            shown.join(" ")
+        );
         if with_call {
             let _ = writeln!(s, "  {callee}({}){bang}", names.join(", "));
         }
@@ -567,12 +680,19 @@ impl Target {
     /// The recipe's expression for parameter `i`, if it names it.
     fn recipe_arg(&self, i: usize) -> Option<&'static str> {
         let pname = &self.params[i].0;
-        self.recipe?.args.iter().find(|(p, _)| p == pname).map(|(_, e)| *e)
+        self.recipe?
+            .args
+            .iter()
+            .find(|(p, _)| p == pname)
+            .map(|(_, e)| *e)
     }
 
     /// The derived in-domain argument for parameter `i`, if there is one.
     fn domain_arg(&self, i: usize) -> Option<&Domain> {
-        self.domain.as_ref().filter(|(at, _)| *at == i).map(|(_, d)| d)
+        self.domain
+            .as_ref()
+            .filter(|(at, _)| *at == i)
+            .map(|(_, d)| d)
     }
 
     /// Parameter `i`'s recipe expression at size `n`, `{i}` read as `counter`.
@@ -580,9 +700,17 @@ impl Target {
         let e = self.recipe_arg(i).unwrap_or_default();
         let ty = self.ty(i);
         let sized_v = ty.as_ref().map(|g| sized(g, n)).unwrap_or_default();
-        let elem_v = ty.as_ref().and_then(elem_of).map(|g| small(&g)).unwrap_or_default();
+        let elem_v = ty
+            .as_ref()
+            .and_then(elem_of)
+            .map(|g| small(&g))
+            .unwrap_or_default();
         let small_v = ty.as_ref().map(small).unwrap_or_default();
-        let sized_elem_v = ty.as_ref().and_then(elem_of).map(|g| sized(&g, n)).unwrap_or_default();
+        let sized_elem_v = ty
+            .as_ref()
+            .and_then(elem_of)
+            .map(|g| sized(&g, n))
+            .unwrap_or_default();
         // `{sized_flat}`: as `{sized}`, but a String element's digits run
         // least significant first, so two elements' common prefix does not
         // lengthen as n shrinks — "s100000000" against "s1000xxxxx" compares
@@ -590,7 +718,9 @@ impl Target {
         // byte-wise comparison shows as sublinear growth.
         let flat_v = match &ty {
             Some(GenType::List(e)) if **e == GenType::String => {
-                format!("list.range(0, {n}) |> list.map((i) => string.reverse(\"${{100000000 + i}}\"))")
+                format!(
+                    "list.range(0, {n}) |> list.map((i) => string.reverse(\"${{100000000 + i}}\"))"
+                )
             }
             _ => sized_v.clone(),
         };
@@ -598,7 +728,9 @@ impl Target {
         // consecutive numerals (`i * 7919 mod 1000003`), for an index keyed
         // on them: consecutive keys under a multiplicative hash cluster by n.
         let scattered_v = match &ty {
-            Some(GenType::List(e)) if **e == GenType::Int => format!("list.range(0, {n}) |> list.map((i) => i * 7919 % 1000003)"),
+            Some(GenType::List(e)) if **e == GenType::Int => {
+                format!("list.range(0, {n}) |> list.map((i) => i * 7919 % 1000003)")
+            }
             Some(GenType::List(e)) if **e == GenType::String => {
                 format!("list.range(0, {n}) |> list.map((i) => \"s${{i * 7919 % 1000003}}\")")
             }
@@ -624,8 +756,11 @@ impl Target {
     /// Parameter `i` is built by an encoder whose bytes differ by leg
     /// (a decoder's input): its own digest would differ by leg too.
     fn leg_dependent_input(&self, i: usize) -> bool {
-        self.recipe_arg(i)
-            .is_some_and(|e| super::catalogue::LEG_DEPENDENT_ENCODERS.iter().any(|(enc, _)| e.contains(&format!("{enc}("))))
+        self.recipe_arg(i).is_some_and(|e| {
+            super::catalogue::LEG_DEPENDENT_ENCODERS
+                .iter()
+                .any(|(enc, _)| e.contains(&format!("{enc}(")))
+        })
     }
 
     /// Parameter `i`'s recipe names the loop counter `{i}`: the direct
@@ -645,7 +780,16 @@ impl Target {
     /// what it answered (the diamond's handler prints its own lines, and an
     /// extra empty one would break their three-way comparison).
     fn in_handler(&self, r: &Routed, body: &str, n: u64, print_body: bool) -> String {
-        let inner: String = body.lines().map(|l| if l.is_empty() { "\n".to_string() } else { format!("  {l}\n") }).collect();
+        let inner: String = body
+            .lines()
+            .map(|l| {
+                if l.is_empty() {
+                    "\n".to_string()
+                } else {
+                    format!("  {l}\n")
+                }
+            })
+            .collect();
         let target = r.target.replace("{n}", &n.to_string());
         format!(
             "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", []))!\n  if http.status(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status(res)}}\")\n{}}}\n",
@@ -657,7 +801,9 @@ impl Target {
     /// Parameter `i`'s value grows with n.
     fn scales(&self, i: usize) -> bool {
         Some(i) == self.size_param
-            || self.recipe_arg(i).is_some_and(|e| e.contains("{n}") || e.contains("{sized"))
+            || self
+                .recipe_arg(i)
+                .is_some_and(|e| e.contains("{n}") || e.contains("{sized"))
             || self.domain_arg(i).is_some_and(Domain::scales)
     }
 
@@ -688,7 +834,10 @@ impl Target {
             SigType::Fn(ps, r) => self.lambda(ps, r),
             SigType::Int if Some(i) == self.size_param => n.to_string(),
             SigType::Int => small_int(pname).into(),
-            _ if SEARCH_PARAMS.contains(&pname.as_str()) => self.ty(i).map(|g| absent(&g)).unwrap_or_else(|| "()".into()),
+            _ if SEARCH_PARAMS.contains(&pname.as_str()) => self
+                .ty(i)
+                .map(|g| absent(&g))
+                .unwrap_or_else(|| "()".into()),
             _ => match self.ty(i) {
                 Some(g) if Some(i) == self.size_param => sized(&g, n),
                 Some(g) => small(&g),
@@ -724,7 +873,10 @@ impl Target {
         // A call that does not return runs once, last: there is no loop of
         // it to time (it is sizeless, so it is never timed).
         if self.never {
-            let s = format!("effect fn main() -> Unit = {{\n{}}}\n", self.never_body("", &self.name, "", with_call));
+            let s = format!(
+                "effect fn main() -> Unit = {{\n{}}}\n",
+                self.never_body("", &self.name, "", with_call)
+            );
             return format!("{}{s}", super::catalogue::imports_for(&s));
         }
         let mut s = String::from("effect fn main() -> Unit = {\n");
@@ -737,14 +889,22 @@ impl Target {
         // A string has no O(1) in-place step, and `x = x` is not free on
         // every leg: it is bound once and left alone.
         let slot = self.size_param.map(|i| {
-            let varies = !matches!(self.ty(i), Some(GenType::String)) && !self.ty(i).is_some_and(|t| t.refuses_var()) && !self.is_routed(i);
-            let kw = if varies || Some(i) == self.mut_param { "var" } else { "let" };
+            let varies = !matches!(self.ty(i), Some(GenType::String))
+                && !self.ty(i).is_some_and(|t| t.refuses_var())
+                && !self.is_routed(i);
+            let kw = if varies || Some(i) == self.mut_param {
+                "var"
+            } else {
+                "let"
+            };
             let _ = writeln!(s, "  {kw} x: {} = {}", self.render_param(i), self.arg(i, n));
             (i, varies)
         });
         // Every other value argument is bound to a typed `let` first: a bare
         // `ok(2)` leaves its error type unconstrained (E025).
-        let per_step: Vec<usize> = (0..self.params.len()).filter(|i| self.per_step(*i)).collect();
+        let per_step: Vec<usize> = (0..self.params.len())
+            .filter(|i| self.per_step(*i))
+            .collect();
         s.push_str(&self.arg_lets(n, self.size_param, &per_step));
         let _ = writeln!(s, "  var acc = 0\n  var i = 0\n  while i < {k} {{");
         // A per-step operand is rebuilt every iteration in BOTH programs (its
@@ -752,13 +912,27 @@ impl Target {
         // index's single path is that key's neighbourhood at this n, not the
         // order (map.get's String series moved ±15% between sizes).
         for &p in &per_step {
-            let _ = writeln!(s, "    let a{p}: {} = {}", self.render_param(p), self.recipe_expr(p, n, "i"));
+            let _ = writeln!(
+                s,
+                "    let a{p}: {} = {}",
+                self.render_param(p),
+                self.recipe_expr(p, n, "i")
+            );
         }
         if let Some((i, true)) = slot {
-            let _ = writeln!(s, "    x = {}", vary("x", &self.ty(i).unwrap_or(GenType::Int), n));
+            let _ = writeln!(
+                s,
+                "    x = {}",
+                vary("x", &self.ty(i).unwrap_or(GenType::Int), n)
+            );
         }
         if with_call {
-            let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.bound_call(slot.map(|(i, _)| i)));
+            let _ = writeln!(
+                s,
+                "    let r: {} = {}",
+                self.ret.render(),
+                self.bound_call(slot.map(|(i, _)| i))
+            );
             match self.verdict_digest("r", slot.map(|(i, _)| i), true) {
                 // Its value differs per leg and run: the verdict is the digest.
                 Some(d) => {
@@ -773,13 +947,29 @@ impl Target {
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
         if let Some(i) = self.size_param.filter(|i| !self.leg_dependent_input(*i)) {
-            let _ = writeln!(s, "  acc = acc + {}", digest("x", &self.ty(i).unwrap_or(GenType::Int)));
+            let _ = writeln!(
+                s,
+                "  acc = acc + {}",
+                digest("x", &self.ty(i).unwrap_or(GenType::Int))
+            );
         }
         let s = match self.routed {
-            Some(r) => self.in_handler(r, &format!("{}  http.response(200, \"${{acc}}\")\n", &s["effect fn main() -> Unit = {\n".len()..]), n, true),
+            Some(r) => self.in_handler(
+                r,
+                &format!(
+                    "{}  http.response(200, \"${{acc}}\")\n",
+                    &s["effect fn main() -> Unit = {\n".len()..]
+                ),
+                n,
+                true,
+            ),
             None => s + "  println(\"${acc}\")\n}\n",
         };
-        format!("{}{}{s}", self.stdin_header(n, k), super::catalogue::imports_for(&s))
+        format!(
+            "{}{}{s}",
+            self.stdin_header(n, k),
+            super::catalogue::imports_for(&s)
+        )
     }
 
     /// Criterion 2, the use-shapes: `k` steps that rebind the return-typed
@@ -787,15 +977,26 @@ impl Target {
     /// a self tail call and a fold callback. Each must cost what one step
     /// of the in-place form costs, not a copy of the value.
     pub fn rebind_programs(&self, n: u64, k: u64) -> Vec<(&'static str, String)> {
-        let Some(p) = self.rebind_param else { return Vec::new() };
+        let Some(p) = self.rebind_param else {
+            return Vec::new();
+        };
         let ty = self.ret.render();
-        let init = if Some(p) == self.size_param || self.recipe_arg(p).is_some() || self.domain_arg(p).is_some() { self.arg(p, n) } else { sized(&self.ret, n) };
+        let init = if Some(p) == self.size_param
+            || self.recipe_arg(p).is_some()
+            || self.domain_arg(p).is_some()
+        {
+            self.arg(p, n)
+        } else {
+            sized(&self.ret, n)
+        };
         // The other value arguments come from typed top-level fns, which the
         // tail shape's `go` can see as well as `main` (an inline `ok(2)`
         // leaves its error type unconstrained, E025). They are small, except
         // a recipe's operand that must keep its shape against the others.
         let mut consts = String::new();
-        for i in (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i) && !self.is_literal(*i)) {
+        for i in
+            (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i) && !self.is_literal(*i))
+        {
             // A size operand of another type than `x` does not shape it: a
             // map `get_or` looks its default up in is built at size 1, not
             // rebuilt at n by every step (a matrix operand of `x`'s type
@@ -803,7 +1004,12 @@ impl Target {
             let foreign_size = Some(i) == self.size_param && self.ty(i).as_ref() != Some(&self.ret);
             let shaped = self.recipe_arg(i).is_some() && self.scales(i) && !foreign_size;
             let m = if shaped { n } else { 1 };
-            let _ = writeln!(consts, "fn a{i}() -> {} = {}\n", self.render_param(i), self.arg(i, m));
+            let _ = writeln!(
+                consts,
+                "fn a{i}() -> {} = {}\n",
+                self.render_param(i),
+                self.arg(i, m)
+            );
         }
         let step = |v: &str| {
             let args: Vec<String> = (0..self.params.len())
@@ -822,7 +1028,10 @@ impl Target {
         // rebind). Every shape starts from an `ok` (`small` and the recipes
         // build no `err`), so a step that took the error path leaves an `err`
         // unless a later step turns it back into an `ok`.
-        let end = format!("{}  println(\"${{{d}}}\")\n", outcome_guard("x", &self.ret, self.in_domain(), "  "));
+        let end = format!(
+            "{}  println(\"${{{d}}}\")\n",
+            outcome_guard("x", &self.ret, self.in_domain(), "  ")
+        );
         // A handler-holding value has no `var` form (E008), so no loop.
         let loop_ok = !self.ret.refuses_var();
         let programs = vec![
@@ -857,7 +1066,10 @@ impl Target {
             .filter(|(label, _)| loop_ok || *label != "loop")
             .map(|(label, src)| {
                 let body = format!("{consts}{src}");
-                (label, format!("{}{body}", super::catalogue::imports_for(&body)))
+                (
+                    label,
+                    format!("{}{body}", super::catalogue::imports_for(&body)),
+                )
             })
             .collect()
     }
@@ -873,7 +1085,10 @@ impl Target {
     /// would read (`io.read_all` drains stdin): each path runs alone on the
     /// same input, and their outputs are compared.
     pub fn diamond_path_projects(&self, n: u64) -> Vec<Project> {
-        ["d", "l", "r"].iter().map(|v| self.diamond_project_of(n, &[v])).collect()
+        ["d", "l", "r"]
+            .iter()
+            .map(|v| self.diamond_project_of(n, &[v]))
+            .collect()
     }
 
     /// A call that consumes its whole input: its diamond runs each path alone.
@@ -887,7 +1102,17 @@ impl Target {
         // its literal into the call, and the paths never see it.
         let sig: Vec<String> = (0..self.params.len())
             .filter(|i| !self.is_literal(*i))
-            .map(|i| format!("{}a{i}: {}", if Some(i) == self.mut_param { "mut " } else { "" }, self.render_param(i)))
+            .map(|i| {
+                format!(
+                    "{}a{i}: {}",
+                    if Some(i) == self.mut_param {
+                        "mut "
+                    } else {
+                        ""
+                    },
+                    self.render_param(i)
+                )
+            })
             .collect();
         let inner_args = |inner: &str| -> Vec<String> {
             (0..self.params.len())
@@ -898,14 +1123,29 @@ impl Target {
                 })
                 .collect()
         };
-        let ret = if self.never { "Never".to_string() } else { self.ret.render() };
+        let ret = if self.never {
+            "Never".to_string()
+        } else {
+            self.ret.render()
+        };
         let kw = if self.effect { "effect fn" } else { "fn" };
-        let wrap = |inner: &str, bang: &str| format!("pub {kw} call({}) -> {ret} = {inner}({}){bang}\n", sig.join(", "), inner_args(inner).join(", "));
-        let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
+        let wrap = |inner: &str, bang: &str| {
+            format!(
+                "pub {kw} call({}) -> {ret} = {inner}({}){bang}\n",
+                sig.join(", "),
+                inner_args(inner).join(", ")
+            )
+        };
+        let mut main =
+            String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
         // A path that does not return is its program's last statement; it
         // reaches the call through user effect fns, whose call is a Result.
         if self.never {
-            let all = [("d", self.name.as_str(), ""), ("l", "left.call", "!"), ("r", "right.call", "!")];
+            let all = [
+                ("d", self.name.as_str(), ""),
+                ("l", "left.call", "!"),
+                ("r", "right.call", "!"),
+            ];
             for (v, callee, bang) in all.into_iter().filter(|(v, _, _)| paths.contains(v)) {
                 main.push_str(&self.never_body(&format!("{v} = "), callee, bang, true));
             }
@@ -913,19 +1153,38 @@ impl Target {
             let main = format!("{}{main}", super::catalogue::imports_for(&main));
             let base = wrap(&self.name, "");
             let path = wrap("base.call", "!");
-            let path = format!("{}import self.base\n\n{path}", super::catalogue::imports_for(&path));
+            let path = format!(
+                "{}import self.base\n\n{path}",
+                super::catalogue::imports_for(&path)
+            );
             let files = vec![
-                ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
-                ("app/src/base.almd".to_string(), format!("{}{base}", super::catalogue::imports_for(&base))),
+                (
+                    "app/almide.toml".to_string(),
+                    "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string(),
+                ),
+                (
+                    "app/src/base.almd".to_string(),
+                    format!("{}{base}", super::catalogue::imports_for(&base)),
+                ),
                 ("app/src/left.almd".to_string(), path.clone()),
                 ("app/src/right.almd".to_string(), path),
                 ("app/src/main.almd".to_string(), main),
             ];
-            return Project { files, entry: "app/src/main.almd".to_string() };
+            return Project {
+                files,
+                entry: "app/src/main.almd".to_string(),
+            };
         }
         main.push_str(&effect_recipes::prelude_for(&self.name, n).unwrap_or_default());
-        for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param && !self.per_step(*i) && !self.is_literal(*i)) {
-            let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
+        for i in (0..self.params.len())
+            .filter(|i| Some(*i) != self.mut_param && !self.per_step(*i) && !self.is_literal(*i))
+        {
+            let _ = writeln!(
+                main,
+                "  let a{i}: {} = {}",
+                self.render_param(i),
+                self.arg(i, n)
+            );
         }
         // Each path mutates its own var, so the three must agree on the
         // mutated value as well as on the return. A per-step operand is one
@@ -943,17 +1202,40 @@ impl Target {
         };
         // A path is a user `effect fn`, so its call is a Result to the
         // checker (`Signature::lifted`) where an intrinsic's need not be.
-        let bang = if self.effect && !matches!(self.ret, GenType::Result(_) | GenType::ResultNom(..)) { "!" } else { "" };
+        let bang =
+            if self.effect && !matches!(self.ret, GenType::Result(_) | GenType::ResultNom(..)) {
+                "!"
+            } else {
+                ""
+            };
         // Each path runs, is checked and prints before the next one runs, so
         // what a call writes itself (a child's inherited stdout) lands beside
         // its own value and the three thirds of the output compare.
-        let all = [("d", self.name.as_str()), ("l", "left.call"), ("r", "right.call")];
-        for (k, (v, callee)) in all.into_iter().enumerate().filter(|(_, (v, _))| paths.contains(v)) {
+        let all = [
+            ("d", self.name.as_str()),
+            ("l", "left.call"),
+            ("r", "right.call"),
+        ];
+        for (k, (v, callee)) in all
+            .into_iter()
+            .enumerate()
+            .filter(|(_, (v, _))| paths.contains(v))
+        {
             if let Some(m) = self.mut_param {
-                let _ = writeln!(main, "  var {v}m: {} = {}", self.render_param(m), self.arg(m, n));
+                let _ = writeln!(
+                    main,
+                    "  var {v}m: {} = {}",
+                    self.render_param(m),
+                    self.arg(m, n)
+                );
             }
             for i in (0..self.params.len()).filter(|i| self.per_step(*i)) {
-                let _ = writeln!(main, "  let {v}a{i}: {} = {}", self.render_param(i), self.recipe_expr(i, n, &k.to_string()));
+                let _ = writeln!(
+                    main,
+                    "  let {v}a{i}: {} = {}",
+                    self.render_param(i),
+                    self.recipe_expr(i, n, &k.to_string())
+                );
             }
             let bang = if v == "d" { "" } else { bang };
             let _ = writeln!(main, "  let {v}: {ret} = {callee}({}){bang}", path_args(v));
@@ -966,8 +1248,13 @@ impl Target {
                     let _ = writeln!(main, "  {}", render_print(&format!("{v}_o"), &self.ret));
                 }
                 None if self.verdict.is_some() && self.ret != GenType::Unit => {
-                    let d = self.verdict_digest_on(v, None, false, v).unwrap_or_default();
-                    let _ = writeln!(main, "  let {v}_held: Int = {d}\n  println(\"{v} = ${{{v}_held}}\")");
+                    let d = self
+                        .verdict_digest_on(v, None, false, v)
+                        .unwrap_or_default();
+                    let _ = writeln!(
+                        main,
+                        "  let {v}_held: Int = {d}\n  println(\"{v} = ${{{v}_held}}\")"
+                    );
                 }
                 None if self.ret != GenType::Unit => {
                     let _ = writeln!(main, "  {}", render_print(v, &self.ret));
@@ -979,31 +1266,54 @@ impl Target {
                 }
             }
             if let Some(m) = self.mut_param {
-                let _ = writeln!(main, "  {}", render_print(&format!("{v}m"), &self.ty(m).unwrap_or(GenType::Unit)));
+                let _ = writeln!(
+                    main,
+                    "  {}",
+                    render_print(&format!("{v}m"), &self.ty(m).unwrap_or(GenType::Unit))
+                );
             }
         }
         let main = match self.routed {
             Some(r) => {
                 let (head, body) = main.split_at(main.find("effect fn main").unwrap_or(0));
                 let body = &body["effect fn main() -> Unit = {\n".len()..];
-                format!("{head}{}", self.in_handler(r, &format!("{body}  http.response(200, \"\")\n"), n, false))
+                format!(
+                    "{head}{}",
+                    self.in_handler(r, &format!("{body}  http.response(200, \"\")\n"), n, false)
+                )
             }
             None => main + "}\n",
         };
-        let main = format!("{}{}{main}", self.stdin_header(n, 3), super::catalogue::imports_for(&main));
+        let main = format!(
+            "{}{}{main}",
+            self.stdin_header(n, 3),
+            super::catalogue::imports_for(&main)
+        );
         let base = wrap(&self.name, "");
         // A path names the types in its signature, so it imports their
         // modules as well as `base`.
         let path = wrap("base.call", bang);
-        let path = format!("{}import self.base\n\n{path}", super::catalogue::imports_for(&path));
+        let path = format!(
+            "{}import self.base\n\n{path}",
+            super::catalogue::imports_for(&path)
+        );
         let files = vec![
-            ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
-            ("app/src/base.almd".to_string(), format!("{}{base}", super::catalogue::imports_for(&base))),
+            (
+                "app/almide.toml".to_string(),
+                "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string(),
+            ),
+            (
+                "app/src/base.almd".to_string(),
+                format!("{}{base}", super::catalogue::imports_for(&base)),
+            ),
             ("app/src/left.almd".to_string(), path.clone()),
             ("app/src/right.almd".to_string(), path),
             ("app/src/main.almd".to_string(), main),
         ];
-        Project { files, entry: "app/src/main.almd".to_string() }
+        Project {
+            files,
+            entry: "app/src/main.almd".to_string(),
+        }
     }
 
     /// 1 when `v` (this target's result) holds its declared properties, else
@@ -1015,7 +1325,13 @@ impl Target {
 
     /// [`Self::verdict_digest`] where a per-step operand is the diamond
     /// path's own (`<path>a<i>`, [`Self::diamond_project_of`]).
-    fn verdict_digest_on(&self, v: &str, slot: Option<usize>, cheap: bool, path: &str) -> Option<String> {
+    fn verdict_digest_on(
+        &self,
+        v: &str,
+        slot: Option<usize>,
+        cheap: bool,
+        path: &str,
+    ) -> Option<String> {
         let verdict = self.verdict?;
         let names: Vec<(String, String)> = (0..self.params.len())
             .map(|i| {
@@ -1030,10 +1346,15 @@ impl Target {
                 (self.params[i].0.clone(), e)
             })
             .collect();
-        let names: Vec<(&str, &str)> = names.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
+        let names: Vec<(&str, &str)> = names
+            .iter()
+            .map(|(p, e)| (p.as_str(), e.as_str()))
+            .collect();
         let holds = super::verdicts::fill(verdict.property(cheap), &names);
         Some(match self.ret {
-            GenType::Result(_) => format!("(match {v} {{ ok(v) => if {holds} then 1 else 0, err(_) => 0 }})"),
+            GenType::Result(_) => {
+                format!("(match {v} {{ ok(v) => if {holds} then 1 else 0, err(_) => 0 }})")
+            }
             _ => format!("(match {v} {{ v => if {holds} then 1 else 0 }})"),
         })
     }
@@ -1046,16 +1367,29 @@ impl Target {
     /// The stdin a reader's probe runs on (`effect_recipes::stdin_for`), as
     /// the header line the harness reads ([`crate::oracle::sandbox::World::for_program`]).
     fn stdin_header(&self, n: u64, k: u64) -> String {
-        effect_recipes::stdin_for(&self.name, n, k).map(|(len, lines)| format!("// inspect-stdin: {len} {lines}\n")).unwrap_or_default()
+        effect_recipes::stdin_for(&self.name, n, k)
+            .map(|(len, lines)| format!("// inspect-stdin: {len} {lines}\n"))
+            .unwrap_or_default()
     }
 
     /// `let a<i>: T = <arg>` for every value parameter other than `skip`
     /// (callbacks stay inline: they are not values a `let` can type here).
     fn arg_lets(&self, n: u64, skip: Option<usize>, later: &[usize]) -> String {
         let mut s = String::new();
-        for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i) && !self.is_literal(*i) && !later.contains(i)) {
-            let kw = if Some(i) == self.mut_param { "var" } else { "let" };
-            let _ = writeln!(s, "  {kw} a{i}: {} = {}", self.render_param(i), self.arg(i, n));
+        for i in (0..self.params.len()).filter(|i| {
+            Some(*i) != skip && !self.is_fn(*i) && !self.is_literal(*i) && !later.contains(i)
+        }) {
+            let kw = if Some(i) == self.mut_param {
+                "var"
+            } else {
+                "let"
+            };
+            let _ = writeln!(
+                s,
+                "  {kw} a{i}: {} = {}",
+                self.render_param(i),
+                self.arg(i, n)
+            );
         }
         s
     }
@@ -1101,10 +1435,16 @@ fn render_sig(t: &SigType, subst: &HashMap<String, GenType>) -> String {
     match t {
         SigType::Fn(ps, r) => format!(
             "({}) -> {}",
-            ps.iter().map(|p| render_sig(p, subst)).collect::<Vec<_>>().join(", "),
+            ps.iter()
+                .map(|p| render_sig(p, subst))
+                .collect::<Vec<_>>()
+                .join(", "),
             render_sig(r, subst)
         ),
-        other => other.instantiate(subst).map(|g| g.render()).unwrap_or_else(|| "Unit".into()),
+        other => other
+            .instantiate(subst)
+            .map(|g| g.render())
+            .unwrap_or_else(|| "Unit".into()),
     }
 }
 
@@ -1132,7 +1472,9 @@ fn small(t: &GenType) -> String {
         GenType::Sized(name) => GenType::sized_literal(name, "2"),
         GenType::Bytes => "bytes.from_list([1, 2])".into(),
         GenType::Matrix => "matrix.from_lists([[1.5, 2.0], [0.5, 3.0]])".into(),
-        GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.string(\"x\"))])".into(),
+        GenType::Value => {
+            "value.object([(\"a\", value.int(1)), (\"snake_case\", value.string(\"x\"))])".into()
+        }
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
         GenType::Secret(e) => format!("secret.new({})", small(e)),
@@ -1142,7 +1484,11 @@ fn small(t: &GenType) -> String {
 /// The element type of a container (a Map's value).
 fn elem_of(t: &GenType) -> Option<GenType> {
     match t {
-        GenType::List(e) | GenType::Set(e) | GenType::Map(e) | GenType::Option(e) | GenType::Result(e) => Some((**e).clone()),
+        GenType::List(e)
+        | GenType::Set(e)
+        | GenType::Map(e)
+        | GenType::Option(e)
+        | GenType::Result(e) => Some((**e).clone()),
         _ => None,
     }
 }
@@ -1232,7 +1578,9 @@ fn outcome_guard(v: &str, t: &GenType, in_domain: bool, indent: &str) -> String 
         GenType::Option(_) if in_domain => {
             format!("{indent}match {v} {{\n{indent}  some(_) => (),\n{indent}  none => panic(\"{OFF_DOMAIN}: none\"),\n{indent}}}\n")
         }
-        GenType::Bool if in_domain => format!("{indent}if {v} then () else panic(\"{OFF_DOMAIN}: false\")\n"),
+        GenType::Bool if in_domain => {
+            format!("{indent}if {v} then () else panic(\"{OFF_DOMAIN}: false\")\n")
+        }
         _ => String::new(),
     }
 }
@@ -1248,10 +1596,16 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::List(_) => format!("list.len({v})"),
         GenType::Map(_) => format!("map.len({v})"),
         GenType::Option(_) => format!("(if option.is_some({v}) then 1 else 0)"),
-        GenType::Result(e) if matches!(&**e, GenType::Nominal(k) if nominal::get(k).is_some_and(|d| d.in_flight)) => {
-            format!("(match {v} {{ ok(fv) => {}, err(_) => 0 }})", digest("fv", e))
+        GenType::Result(e) if matches!(&**e, GenType::Nominal(k) if nominal::get(k).is_some_and(|d| d.in_flight)) =>
+        {
+            format!(
+                "(match {v} {{ ok(fv) => {}, err(_) => 0 }})",
+                digest("fv", e)
+            )
         }
-        GenType::Result(_) | GenType::ResultNom(..) => format!("(if result.is_ok({v}) then 1 else 0)"),
+        GenType::Result(_) | GenType::ResultNom(..) => {
+            format!("(if result.is_ok({v}) then 1 else 0)")
+        }
         GenType::Tuple2(..) => "1".into(),
         // A triple is the Qwen3 layers' (h, k, v): the first element's digest keeps the call live.
         GenType::Tuple3(a, ..) => digest(&format!("{v}.0"), a),
@@ -1263,7 +1617,9 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Matrix => format!("matrix.rows({v})"),
         GenType::Value => format!("string.len(json.stringify({v}))"),
         GenType::Set(_) => format!("set.len({v})"),
-        GenType::Nominal(k) => nominal::get(k).map_or_else(|| "1".into(), |d| nominal::fill(d.digest, v, 0)),
+        GenType::Nominal(k) => {
+            nominal::get(k).map_or_else(|| "1".into(), |d| nominal::fill(d.digest, v, 0))
+        }
         // What it holds, read through the one way out.
         GenType::Secret(e) => digest(&format!("secret.reveal({v})"), e),
     }
@@ -1276,7 +1632,10 @@ pub(crate) mod tests {
     /// The catalogued function `name`, instantiated (for tests elsewhere too).
     pub(crate) fn target(name: &str) -> Target {
         let catalogue = crate::generator::catalogue::build();
-        let sig = catalogue.iter().find(|s| format!("{}.{}", s.module, s.func) == name).unwrap_or_else(|| panic!("{name} not catalogued"));
+        let sig = catalogue
+            .iter()
+            .find(|s| format!("{}.{}", s.module, s.func) == name)
+            .unwrap_or_else(|| panic!("{name} not catalogued"));
         Target::new(sig, &catalogue).expect("target")
     }
 
@@ -1285,12 +1644,19 @@ pub(crate) mod tests {
     #[test]
     fn a_bounded_variable_is_inspected_at_its_conformers() {
         let catalogue = crate::generator::catalogue::build();
-        let sig = catalogue.iter().find(|s| s.module == "http" && s.func == "response").expect("http.response");
+        let sig = catalogue
+            .iter()
+            .find(|s| s.module == "http" && s.func == "response")
+            .expect("http.response");
         let int = Target::new_filled(sig, &catalogue, GenType::Int).expect("int target");
         let heap = Target::new_filled(sig, &catalogue, GenType::String).expect("heap target");
         assert!(int.generic && heap.generic);
         assert_eq!((int.vars.as_str(), heap.vars.as_str()), ("Bytes", "String"));
-        assert!(int.direct_program(4, 1, true).contains("x: Bytes = "), "{}", int.direct_program(4, 1, true));
+        assert!(
+            int.direct_program(4, 1, true).contains("x: Bytes = "),
+            "{}",
+            int.direct_program(4, 1, true)
+        );
         assert_eq!(target("list.map").vars, "Int");
     }
 
@@ -1304,17 +1670,43 @@ pub(crate) mod tests {
         assert!(direct.contains("http.typed(\"text/csv\", x)"), "{direct}");
         assert!(!direct.contains("let a0"), "{direct}");
         let project = t.diamond_project(4);
-        let file = |p: &str| project.files.iter().find(|(f, _)| f == p).map(|(_, s)| s.clone()).unwrap();
-        assert!(file("app/src/base.almd").contains("pub fn call(a1: Bytes) -> TypedBody = http.typed(\"text/csv\", a1)"), "{}", file("app/src/base.almd"));
-        assert!(file("app/src/left.almd").contains("pub fn call(a1: Bytes) -> TypedBody = base.call(a1)"), "{}", file("app/src/left.almd"));
+        let file = |p: &str| {
+            project
+                .files
+                .iter()
+                .find(|(f, _)| f == p)
+                .map(|(_, s)| s.clone())
+                .unwrap()
+        };
+        assert!(
+            file("app/src/base.almd")
+                .contains("pub fn call(a1: Bytes) -> TypedBody = http.typed(\"text/csv\", a1)"),
+            "{}",
+            file("app/src/base.almd")
+        );
+        assert!(
+            file("app/src/left.almd")
+                .contains("pub fn call(a1: Bytes) -> TypedBody = base.call(a1)"),
+            "{}",
+            file("app/src/left.almd")
+        );
         let main = file("app/src/main.almd");
-        assert!(main.contains("http.typed(\"text/csv\", a1)") && main.contains("left.call(a1)") && !main.contains("let a0"), "{main}");
+        assert!(
+            main.contains("http.typed(\"text/csv\", a1)")
+                && main.contains("left.call(a1)")
+                && !main.contains("let a0"),
+            "{main}"
+        );
     }
 
     /// Every catalogued function the probes give an in-domain input.
     pub(crate) fn in_domain_targets() -> Vec<Target> {
         let catalogue = crate::generator::catalogue::build();
-        catalogue.iter().filter_map(|s| Target::new(s, &catalogue).ok()).filter(Target::in_domain).collect()
+        catalogue
+            .iter()
+            .filter_map(|s| Target::new(s, &catalogue).ok())
+            .filter(Target::in_domain)
+            .collect()
     }
 
     /// #3636: the sized Value's stringified length must be a·n + b. With
@@ -1363,7 +1755,11 @@ pub(crate) mod tests {
         let guard = |v: &str| (format!("match {v} {{"), stop.clone());
         let has = |src: &str, v: &str| {
             let (head, arm) = guard(v);
-            src.lines().map(str::trim).collect::<Vec<_>>().windows(3).any(|w| w[0] == head && w[1] == "ok(_) => ()," && w[2] == format!("{arm},"))
+            src.lines()
+                .map(str::trim)
+                .collect::<Vec<_>>()
+                .windows(3)
+                .any(|w| w[0] == head && w[1] == "ok(_) => ()," && w[2] == format!("{arm},"))
         };
         let t = target("base64.decode");
         let direct = t.direct_program(1000, 4, true);
@@ -1371,7 +1767,12 @@ pub(crate) mod tests {
         // The baseline (no call) has no result to check.
         assert!(!t.direct_program(1000, 4, false).contains(ERR_PATH));
         let project = t.diamond_project(64);
-        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        let main = &project
+            .files
+            .iter()
+            .find(|(p, _)| p.ends_with("main.almd"))
+            .unwrap()
+            .1;
         for v in ["d", "l", "r"] {
             assert!(has(main, v), "{v}: {main}");
         }
@@ -1383,7 +1784,10 @@ pub(crate) mod tests {
         // A function whose return is not a Result has nothing to check.
         let t = target("list.map");
         assert!(!t.direct_program(1000, 4, true).contains(ERR_PATH));
-        assert!(t.rebind_programs(1000, 4).iter().all(|(_, s)| !s.contains(ERR_PATH)));
+        assert!(t
+            .rebind_programs(1000, 4)
+            .iter()
+            .all(|(_, s)| !s.contains(ERR_PATH)));
     }
 
     /// #3671: a decoder is given what its module's own producer of its input
@@ -1395,24 +1799,59 @@ pub(crate) mod tests {
     fn a_decoder_gets_what_its_module_encodes() {
         for (name, want) in [
             ("int.parse", "string.repeat(\"0\", 1000) + int.to_string(2)"),
-            ("float.parse", "string.repeat(\"0\", 1000) + float.to_string(1.5)"),
-            ("value.as_string", "value.string(string.repeat(\"aé\", 1000))"),
-            ("value.as_array", "value.array(list.range(0, 1000) |> list.map((i) => "),
-            ("url.decode_component", "url.encode_component(string.repeat(\"aé\", 1000))"),
+            (
+                "float.parse",
+                "string.repeat(\"0\", 1000) + float.to_string(1.5)",
+            ),
+            (
+                "value.as_string",
+                "value.string(string.repeat(\"aé\", 1000))",
+            ),
+            (
+                "value.as_array",
+                "value.array(list.range(0, 1000) |> list.map((i) => ",
+            ),
+            (
+                "url.decode_component",
+                "url.encode_component(string.repeat(\"aé\", 1000))",
+            ),
         ] {
             let t = target(name);
             assert!(t.in_domain() && t.size_param == Some(0), "{name}");
             let direct = t.direct_program(1000, 4, true);
-            assert!(direct.contains(&format!(" x: {} = {want}", t.render_param(0))), "{name}: {direct}");
+            assert!(
+                direct.contains(&format!(" x: {} = {want}", t.render_param(0))),
+                "{name}: {direct}"
+            );
             let project = t.diamond_project(64);
-            let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
-            assert!(main.contains(&format!("  let a0: {} = {}", t.render_param(0), want.replace("1000", "64"))), "{name}: {main}");
+            let main = &project
+                .files
+                .iter()
+                .find(|(p, _)| p.ends_with("main.almd"))
+                .unwrap()
+                .1;
+            assert!(
+                main.contains(&format!(
+                    "  let a0: {} = {}",
+                    t.render_param(0),
+                    want.replace("1000", "64")
+                )),
+                "{name}: {main}"
+            );
         }
         // A payload with no size: a constant input, not a size.
-        for (name, want) in [("value.as_float", "value.float(1.5)"), ("value.as_int", "value.int(2)"), ("value.as_bool", "value.bool(true)")] {
+        for (name, want) in [
+            ("value.as_float", "value.float(1.5)"),
+            ("value.as_int", "value.int(2)"),
+            ("value.as_bool", "value.bool(true)"),
+        ] {
             let t = target(name);
             assert!(t.in_domain() && t.size_param.is_none(), "{name}");
-            assert!(t.direct_program(1000, 4, true).contains(&format!("  let a0: Value = {want}\n")), "{name}");
+            assert!(
+                t.direct_program(1000, 4, true)
+                    .contains(&format!("  let a0: Value = {want}\n")),
+                "{name}"
+            );
         }
     }
 
@@ -1427,15 +1866,25 @@ pub(crate) mod tests {
         let t = target("string.byte_slice");
         assert!(t.direct_program(1000, 4, true).contains(&none));
         let project = t.diamond_project(64);
-        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        let main = &project
+            .files
+            .iter()
+            .find(|(p, _)| p.ends_with("main.almd"))
+            .unwrap()
+            .1;
         assert_eq!(main.matches(&none).count(), 3, "{main}");
         let falsy = format!("if r then () else panic(\"{OFF_DOMAIN}: false\")");
-        assert!(target("string.is_digit").direct_program(1000, 4, true).contains(&falsy));
+        assert!(target("string.is_digit")
+            .direct_program(1000, 4, true)
+            .contains(&falsy));
         // A search over generic values: its miss is the measurement.
         for name in ["list.find", "list.contains", "string.is_empty"] {
             let t = target(name);
             assert!(!t.in_domain(), "{name}");
-            assert!(!t.direct_program(1000, 4, true).contains(OFF_DOMAIN), "{name}");
+            assert!(
+                !t.direct_program(1000, 4, true).contains(OFF_DOMAIN),
+                "{name}"
+            );
         }
     }
 
@@ -1446,7 +1895,8 @@ pub(crate) mod tests {
     /// that drops one back to the generic values fails here.
     #[test]
     fn every_function_found_measuring_a_refusal_gets_an_in_domain_input() {
-        let covered: std::collections::BTreeSet<String> = in_domain_targets().into_iter().map(|t| t.name).collect();
+        let covered: std::collections::BTreeSet<String> =
+            in_domain_targets().into_iter().map(|t| t.name).collect();
         for name in [
             // voided by #3671
             "int.parse",
@@ -1483,7 +1933,8 @@ pub(crate) mod tests {
     /// fuzz-nightly builds one and runs it.
     #[test]
     fn every_in_domain_probe_takes_the_success_path() {
-        let bin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/almide");
+        let bin =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/almide");
         if !bin.exists() {
             eprintln!("skipping: no workspace almide binary");
             return;
@@ -1499,18 +1950,29 @@ pub(crate) mod tests {
             // In the fixed world the harness runs it in (ADR-0027 D2).
             let world = crate::oracle::sandbox::World::new(&dir).expect("sandbox");
             let mut cmd = std::process::Command::new(&bin);
-            cmd.arg("run").arg(&file).arg("--").args(crate::oracle::sandbox::ARGS);
+            cmd.arg("run")
+                .arg(&file)
+                .arg("--")
+                .args(crate::oracle::sandbox::ARGS);
             world.enter(&mut cmd);
             let out = cmd.output().expect("spawn almide");
             // A `-> Never` probe ends with its call's exit code.
             if out.status.code() != Some(t.expected_exit()) {
                 let stderr = String::from_utf8_lossy(&out.stderr);
-                let why = stderr.lines().find(|l| l.contains("inspect:") || l.contains("error")).unwrap_or("").to_string();
+                let why = stderr
+                    .lines()
+                    .find(|l| l.contains("inspect:") || l.contains("error"))
+                    .unwrap_or("")
+                    .to_string();
                 failed.push(format!("{}: exit {:?} {why}", t.name, out.status.code()));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(failed.is_empty(), "in-domain probes that did not take the success path:\n{}", failed.join("\n"));
+        assert!(
+            failed.is_empty(),
+            "in-domain probes that did not take the success path:\n{}",
+            failed.join("\n")
+        );
     }
 
     /// `http.param` answers `some` only for a request the router bound path
@@ -1528,24 +1990,55 @@ pub(crate) mod tests {
             assert!(direct.contains("  let h: HttpHandler = match http.router([http.route(\"GET /p/{id}\", (req) => {\n    let x: HttpRequest = req\n    let a1: String = \"id\"\n"), "{direct}");
             assert!(direct.contains("h(http.new_request(\"GET\", \"/p/\" + string.repeat(\"a%C3%A9\", 1000), \"\", []))!"), "{direct}");
             assert!(direct.contains(&format!("if http.status(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered")), "{direct}");
-            assert!(direct.contains("    http.response(200, \"${acc}\")\n  })]) {"), "{direct}");
-            assert_eq!(direct.contains("let r: Option[String] = http.param(x, a1)"), with_call, "{direct}");
+            assert!(
+                direct.contains("    http.response(200, \"${acc}\")\n  })]) {"),
+                "{direct}"
+            );
+            assert_eq!(
+                direct.contains("let r: Option[String] = http.param(x, a1)"),
+                with_call,
+                "{direct}"
+            );
         }
         let project = t.diamond_project(64);
-        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        let main = &project
+            .files
+            .iter()
+            .find(|(p, _)| p.ends_with("main.almd"))
+            .unwrap()
+            .1;
         assert!(main.starts_with("import http\nimport self.left\nimport self.right\n\neffect fn main() -> Unit = {\n  let h: HttpHandler = "), "{main}");
-        assert!(main.contains("    let a0: HttpRequest = req\n") && main.contains("    let l: Option[String] = left.call(a0, a1)\n"), "{main}");
-        assert_eq!(main.matches(&format!("none => panic(\"{OFF_DOMAIN}: none\")")).count(), 3, "{main}");
-        assert!(!main.contains("println(http.body(res))"), "the diamond prints only its three lines: {main}");
+        assert!(
+            main.contains("    let a0: HttpRequest = req\n")
+                && main.contains("    let l: Option[String] = left.call(a0, a1)\n"),
+            "{main}"
+        );
+        assert_eq!(
+            main.matches(&format!("none => panic(\"{OFF_DOMAIN}: none\")"))
+                .count(),
+            3,
+            "{main}"
+        );
+        assert!(
+            !main.contains("println(http.body(res))"),
+            "the diamond prints only its three lines: {main}"
+        );
     }
 
     /// A recipe that drifted from its function's signature is an error, not
     /// a silent fall-back to the shapes that function refuses.
     #[test]
     fn every_shape_recipe_names_a_catalogued_function_and_its_parameters() {
-        for r in SHAPE_RECIPES.iter().chain(super::effect_recipes::EFFECT_RECIPES) {
+        for r in SHAPE_RECIPES
+            .iter()
+            .chain(super::effect_recipes::EFFECT_RECIPES)
+        {
             let t = target(r.func);
-            assert!(t.recipe.is_some() && (r.size.is_empty() || t.size_param.is_some()), "{}", r.func);
+            assert!(
+                t.recipe.is_some() && (r.size.is_empty() || t.size_param.is_some()),
+                "{}",
+                r.func
+            );
         }
     }
 
@@ -1555,17 +2048,38 @@ pub(crate) mod tests {
     fn a_mutator_is_called_on_a_var_and_each_diamond_path_prints_its_own_copy() {
         let t = target("bytes.push");
         let direct = t.direct_program(1000, 4, true);
-        assert!(direct.contains("  var x: Bytes = bytes.zeros(1000)"), "{direct}");
+        assert!(
+            direct.contains("  var x: Bytes = bytes.zeros(1000)"),
+            "{direct}"
+        );
         assert!(direct.contains("let r: Unit = bytes.push(x, "), "{direct}");
         let project = t.diamond_project(1000);
-        let file = |suffix: &str| project.files.iter().find(|(p, _)| p.ends_with(suffix)).map(|(_, s)| s.clone()).unwrap();
-        assert!(file("base.almd").contains("pub fn call(mut a0: Bytes, a1: Int) -> Unit = bytes.push(a0, a1)"), "{}", file("base.almd"));
+        let file = |suffix: &str| {
+            project
+                .files
+                .iter()
+                .find(|(p, _)| p.ends_with(suffix))
+                .map(|(_, s)| s.clone())
+                .unwrap()
+        };
+        assert!(
+            file("base.almd")
+                .contains("pub fn call(mut a0: Bytes, a1: Int) -> Unit = bytes.push(a0, a1)"),
+            "{}",
+            file("base.almd")
+        );
         let main = file("main.almd");
         for v in ["d", "l", "r"] {
-            assert!(main.contains(&format!("  var {v}m: Bytes = bytes.zeros(1000)")), "{main}");
+            assert!(
+                main.contains(&format!("  var {v}m: Bytes = bytes.zeros(1000)")),
+                "{main}"
+            );
             assert!(main.contains(&format!("let {v}m_o: List[Int] = bytes.to_list({v}m)\n  println(\"{v}m = ${{{v}m_o}}\")")), "{main}");
         }
-        assert!(main.contains("println(\"d = ()\")"), "a Unit return prints its one value, not its string form (E089): {main}");
+        assert!(
+            main.contains("println(\"d = ()\")"),
+            "a Unit return prints its one value, not its string form (E089): {main}"
+        );
         if let Ok(dir) = std::env::var("XF_DUMP") {
             std::fs::write(format!("{dir}/direct.almd"), &direct).unwrap();
             for (p, s) in &project.files {

@@ -19,6 +19,8 @@
      PSet x k       the index slot is reassigned (to any i64)
      PLoop body k   the body runs any number of times, then k
      PBranch t e k  one of two arms runs, then k
+     PExit x k      a loop's exit test (#4280): `x >=u len` ends the
+                    stretch normally (the loop is left), otherwise k runs
 
    The checker accepts an access only when every path reaching it passes a
    check of the same slot with no reassignment in between. That turns the
@@ -59,7 +61,8 @@ Inductive Prog : Type :=
   | PCheck (x : Slot) (k : Prog)
   | PSet (x : Slot) (k : Prog)
   | PLoop (body : Prog) (k : Prog)
-  | PBranch (thn els : Prog) (k : Prog).
+  | PBranch (thn els : Prog) (k : Prog)
+  | PExit (x : Slot) (k : Prog).
 
 (* The block: HDR header bytes, LEN elements of W bytes, representation R. *)
 Record Layout := { HDR : Z; LEN : Z; W : Z; R : Repr }.
@@ -140,7 +143,17 @@ Inductive run (m : Mem) : Env -> Prog -> list Ev -> Outcome -> Prop :=
       run m e (PBranch thn els k) (t1 ++ t2) o
   | RBranchElseAbort : forall e thn els k t1,
       run m e els t1 Aborted ->
-      run m e (PBranch thn els k) t1 Aborted.
+      run m e (PBranch thn els k) t1 Aborted
+  (* #4280: the exit test of a loop. Passing it runs the rest; failing it
+     leaves, which ends this stretch with the slots as they are (the loop's
+     `br_if` to the block around it; what follows the loop is another run). *)
+  | RExitPass : forall e x k t o,
+      fails_check (L m x) (e x) = false ->
+      run m e k t o ->
+      run m e (PExit x k) t o
+  | RExitLeave : forall e x k,
+      fails_check (L m x) (e x) = true ->
+      run m e (PExit x k) [] (Done e).
 
 (* A whole program: allocate the blocks `bs`, then run the body. *)
 Definition alloc_ev (m : Mem) (b : Blk) : Ev := EAlloc b (bytes_of (Lb m b)) (R (Lb m b)).
@@ -164,7 +177,7 @@ Definition subset (a b : Known) : bool := forallb (mem b) a.
 Fixpoint kills (p : Prog) : list Slot :=
   match p with
   | PEnd => []
-  | PAccess _ k | PStore _ k | PCheck _ k => kills k
+  | PAccess _ k | PStore _ k | PCheck _ k | PExit _ k => kills k
   | PSet x k => x :: kills k
   | PLoop body k => kills body ++ kills k
   | PBranch t e k => kills t ++ kills e ++ kills k
@@ -190,6 +203,13 @@ Fixpoint check (kn : Known) (p : Prog) : option Known :=
       match check kn t, check kn e with
       | Some kt, Some ke => check (inter kt ke) k
       | _, _ => None
+      end
+  (* Past the test the slot is known; the leaving path keeps what was
+     known before it. What follows is known on both paths. *)
+  | PExit x k =>
+      match check (x :: kn) k with
+      | Some kb => Some (inter kn kb)
+      | None => None
       end
   end.
 
@@ -352,6 +372,22 @@ Proof.
     destruct (check kn thn) as [kt |] eqn:Ht; [| discriminate].
     destruct (check kn els) as [ke |] eqn:He; [| discriminate].
     destruct (IHHrun Hi kn ke Hs He) as [Ht1 _]. split; [exact Ht1 | discriminate].
+  - (* RExitPass *)
+    destruct (check (x :: kn) k) as [kb |] eqn:Hk; [| discriminate].
+    injection Hc as <-.
+    assert (Hs' : sound m (x :: kn) e).
+    { intros y Hy. simpl in Hy. apply orb_true_iff in Hy. destruct Hy as [Hy | Hy].
+      + apply Nat.eqb_eq in Hy. subst y. destruct (Hwf (B m x)) as [_ [Hlen _]].
+        exact (unsigned_ge_excludes (LEN (L m x)) (e x) Hlen (Hi x) H).
+      + exact (Hs y Hy). }
+    destruct (IHHrun Hi (x :: kn) kb Hs' Hk) as [Ht Ho]. split; [exact Ht |].
+    intros e' He'. destruct (Ho e' He') as [Hi' Hs1]. split; [exact Hi' |].
+    intros y Hy. exact (Hs1 y (proj2 (mem_inter _ _ _ Hy))).
+  - (* RExitLeave *)
+    destruct (check (x :: kn) k) as [kb |] eqn:Hk; [| discriminate].
+    injection Hc as <-. split; [constructor |].
+    intros e' He'. injection He' as <-. split; [exact Hi |].
+    intros y Hy. exact (Hs y (proj1 (mem_inter _ _ _ Hy))).
 Qed.
 Print Assumptions run_sound.
 
@@ -492,6 +528,44 @@ Proof. reflexivity. Qed.
 (* Rejected: a check of a different slot. *)
 Example rejects_other_slot : accepts (PCheck 1 (PAccess 0 PEnd)) = false.
 Proof. reflexivity. Qed.
+
+(* #4280, a `for` loop's element read: the exit test at the head, the read,
+   the counter's step. Accepted. Rejected: the read before the test, the
+   read after the step, the read of another slot, and a read after the loop
+   that relies on the exit test (the leaving path never passed it). *)
+Example accepts_for_loop : accepts (PLoop (PExit 0 (PAccess 0 (PSet 0 PEnd))) PEnd) = true.
+Proof. reflexivity. Qed.
+
+Example rejects_read_before_exit :
+  accepts (PLoop (PAccess 0 (PExit 0 (PSet 0 PEnd))) PEnd) = false.
+Proof. reflexivity. Qed.
+
+Example rejects_read_after_step :
+  accepts (PLoop (PExit 0 (PSet 0 (PAccess 0 PEnd))) PEnd) = false.
+Proof. reflexivity. Qed.
+
+Example rejects_exit_other_slot : accepts (PExit 1 (PAccess 0 PEnd)) = false.
+Proof. reflexivity. Qed.
+
+Example rejects_read_after_loop : accepts (PLoop (PExit 0 PEnd) (PAccess 0 PEnd)) = false.
+Proof. reflexivity. Qed.
+
+(* `for_loop_reads_spatial` (#4280): every run of the loop shape the
+   structural emitter records for `for x in xs` — any number of iterations,
+   the counter any i64 at entry and after each step — reads inside the
+   list's block. The exit test is the emitter's one unsigned compare of the
+   counter against the count captured at entry (`cur >=u count; br_if`),
+   which almide-anchor-check holds to the bytes; an i32 counter is the slot
+   value read unsigned, an i64 below 2^32. *)
+Corollary for_loop_reads_spatial : forall m bs e t o,
+  wf_mem m -> (forall x, In (B m x) bs) -> i64 e ->
+  run m e (PLoop (PExit 0 (PAccess 0 (PSet 0 PEnd))) PEnd) t o ->
+  Spatial (program_trace m bs t) /\ WellTyped (program_trace m bs t).
+Proof.
+  intros m bs e t o Hwf Hbs Hi Hrun.
+  exact (accepts_spatial m bs e _ t o Hwf Hbs accepts_for_loop Hi Hrun).
+Qed.
+Print Assumptions for_loop_reads_spatial.
 
 Local Open Scope Z_scope.
 

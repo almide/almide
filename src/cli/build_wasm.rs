@@ -150,7 +150,7 @@ pub(super) fn default_wasm_output(file: &str) -> String {
 /// component world declares — refuse the component build by name rather
 /// than let a transform fail on an import it cannot place.
 fn refuse_unpackageable(file: &str, host_ops: &[i32], component: bool, js_host: bool) -> Option<i32> {
-    let proc_op = host_ops.iter().copied().find(|op| (80..=90).contains(op));
+    let proc_op = host_ops.iter().copied().find(|op| almide_wasm_run::wasi::is_proc_op(*op));
     if component && let Some(op) = proc_op {
         err(&format!(
             "error[E081]: process.* (host op {op}) needs the private almide:process/spawn capability, which no component world declares (ADR-0025)\n  \

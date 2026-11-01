@@ -592,9 +592,13 @@ impl Emitter<'_> {
         let SliceTy::Named(ti) = ty else { return Ok(None) };
         let NamedDef::Record(def) = &self.types.def(ti) else { return Ok(None) };
         let mut slots = Vec::new();
+        let mut poss = Vec::new();
         for (fname, _) in fields {
-            match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                Some(fi) => slots.push((fi.ty, fi.offset)),
+            match def.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                Some(k) => {
+                    slots.push((def.fields[k].ty, def.fields[k].offset));
+                    poss.push(k);
+                }
                 None => return Ok(None),
             }
         }
@@ -637,20 +641,23 @@ impl Emitter<'_> {
         for &(e, _) in &takes {
             self.owned_call_marks.set_take(e, None);
         }
-        for (&(fty, off), &vh) in slots.iter().zip(&vals) {
+        for ((&(fty, off), &vh), &pos) in slots.iter().zip(&vals).zip(&poss) {
             // The overwritten field's credit goes with it (a moved slot is
             // NULL: a release of nothing).
             if self.elem_is_handle(fty) {
                 let dec = self.dec_fn_of(fty);
                 // #4278 B1: the overwritten field is the slot's consume (`r`).
                 self.slot_release(|em| {
-                    em.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                    em.f.instructions().local_get(hold).i32_load(slot_memarg(off));
+                    em.fw_field(ty, None, pos);
+                    em.f.instructions().call(dec);
                     Ok(())
                 })?;
             }
             self.f.instructions().local_get(hold);
             self.f.instructions().local_get(vh);
             self.store_ty_slot(fty, off);
+            self.fw_field(ty, None, pos);
         }
         self.empty_dying(id, idx);
         self.f.instructions().local_get(hold);
@@ -664,12 +671,14 @@ impl Emitter<'_> {
     /// The field read `e` (its record's address on the stack) when it was
     /// noted a slot take: load the slot, null it, and hand the value on
     /// owned. `false`: not a take — nothing emitted.
-    pub(crate) fn try_take_slot(&mut self, e: &IrExpr, fty: SliceTy) -> Result<bool, EmitError> {
+    pub(crate) fn try_take_slot(&mut self, e: &IrExpr, fty: SliceTy, (rty, pos): (SliceTy, usize)) -> Result<bool, EmitError> {
         let Some(off) = self.owned_call_marks.take_slot(e) else { return Ok(false) };
         let t = self.hold_i32()?;
         self.f.instructions().local_tee(t);
         self.load_ty_slot(fty, off);
+        self.fw_field(rty, None, pos);
         self.f.instructions().local_get(t).i32_const(0).i32_store(slot_memarg(off));
+        self.fw_field(rty, None, pos);
         self.release_i32();
         self.owned_call_marks.mark(e);
         Ok(true)

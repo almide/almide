@@ -71,6 +71,7 @@ kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
     call-modes)      fn="check_modes_cert" ;;
     bounds)          fn="check_bounds_cert" ;;
     init)            fn="check_init_cert" ;;
+    fields)          fn="check_fields_cert" ;;
     *) echo "kernel_verify: unknown checker mode $mode" >&2; return 2 ;;
   esac
   if [ "$expect" -eq 0 ]; then want=true; else want=false; fi
@@ -79,7 +80,7 @@ kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
 import sys
 w = open(sys.argv[1]).read()
 lit = '"' + w.replace('"', '""') + '"'
-print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.")
+print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert FieldCert.")
 print("From Stdlib Require Import String.")
 print("Open Scope string_scope.")
 print("Goal %s %s = %s." % (sys.argv[2], lit, sys.argv[3]))

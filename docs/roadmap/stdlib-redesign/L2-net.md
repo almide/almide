@@ -62,7 +62,7 @@
 - 綴り: `bind`・`send_to`・`recv_from` は Rust(F)・Python・OCaml と同じです。`local_port`・`close` は `tcp_` 族に合わせます。
 - 根拠の L0 規則: L1 R-L1-06、R-L0-15、R-L0-03（ソケットが先頭）。
 - (a) 7/9 が持っています。
-- (b) `wasi:sockets/udp` で wasm に乗ります。ADR-0023 の経路（p3 shim）に乗せ、新しい host op は足しません。組み込み host では ADR-0023 step 7（`wasmtime_wasi::p3` を組み込む）の後に動きます。それまでの行は `pending-port`。ADR-0027 D5 の loopback fixture に UDP の echo を足して検品します。
+- (b) 行き先は `wasi:sockets/udp`（名前の解決は `wasi:sockets/ip-name-lookup`）で、p3 component が運びます（後続 issue）。それまで組み込み host は、TCP の裁定（2026-10-12）と同じ形の**暫定** host op 140..=145 で native の rt-core（`net_core`）をそのまま使って答えます（#4306）。この op は TCP の 91..=103 と同じく、ADR-0023 step 7 で組み込み host が p3 component を動かす時点で撤去します。stock p1 には socket が無いので、その脚の行は `pending-port` のまま残ります。検品は `spec/embedded_cross/net_udp_loopback.almd` と `net_udp_errors.almd`（C-442 / C-443）です。
 - (c) 「UDP で送る」課題で、無ければ LLM は書けません。
 - (d) 追加。使用数 0。
 - ゲート案: TCP と UDP の族（開く・ポート・閉じる）が同じ形であることを確かめる行列テスト。native と wasm の cross fixture。

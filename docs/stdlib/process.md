@@ -39,10 +39,11 @@ they also take `!`: `process.child_pid(c)!`.
 
 **Targets** ([ADR-0025](../adr/0025-wasm-process-is-a-private-host-capability.md)).
 Native serves every function. `almide run --target wasm` and the wasm leg of
-`almide test` serve `exec`, `output`, `run`, `kill`, `pid` and `exit` with
-native's results — the same captured text, exit codes and err strings. The
-`start` family (`start`, `poll`, `wait`, `stop`, `read_new_stdout`,
-`read_new_stderr`, `child_pid`) is native only for now. `almide build
+`almide test` serve every function with native's results — the same
+captured text, incremental reads, exit codes, deadlines and err strings. A
+`start` child is a host resource there: the host keeps its pipes and its
+deadline, and a run's end stops the children it neither waited on nor
+stopped, as native's exit does. `almide build
 --target wasm` builds a program that starts a child, but its artifact imports
 the private `almide:process/spawn` interface, so a stock runtime such as
 `wasmtime run` refuses it at load; it runs on a host that implements that
