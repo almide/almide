@@ -246,8 +246,10 @@ impl IrMutVisitor for Lift<'_> {
 impl Lift<'_> {
     /// Rewrite one arm in place to a call of its lifted function.
     fn lift_arm(&mut self, arm: &mut IrExpr, at: Arm) -> Result<(), String> {
+        // The arm as written (`f(x)`), its scoped `f(x)!`, or the frontend's
+        // `ok(f(x))` lift of an infallible call: the call inside.
         let call = match &mut arm.kind {
-            IrExprKind::Unwrap { expr } => &mut **expr,
+            IrExprKind::Unwrap { expr } | IrExprKind::ResultOk { expr } => &mut **expr,
             _ => arm,
         };
         let call_ty = call.ty.clone();
@@ -369,11 +371,11 @@ mod tests {
     #[test]
     fn an_arm_with_a_closure_argument_is_refused() {
         assert!(!thread_crossable(
-            &Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+            &Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int), is_effect: false },
             &[],
             0
         ));
-        assert!(thread_crossable(&Ty::Applied(TC::List, vec![Ty::String]), &[], 0));
+        assert!(thread_crossable(&Ty::Applied(TC::List, vec![Ty::String].into()), &[], 0));
     }
 
     #[test]
