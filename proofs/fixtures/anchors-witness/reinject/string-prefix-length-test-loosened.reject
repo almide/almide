@@ -1,0 +1,1 @@
+ANCHORS REJECT: bounds stretch 0: `a1` against its check at 2:30: the check counts Def(7, 9, Const(127)), the access addresses Def(6, 31, Const(112)); no enclosing test bounds the count by the string's len
