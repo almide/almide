@@ -106,7 +106,7 @@ effect fn main() -> Unit = {
 }
 "#,
         stdout: "5 4 0\n264\n",
-        cert: "\n{|ibbd}\n\n{idx|}{|ibd}\n",
+        cert: "\n{|ibbd}\n{|ad}\n\n{idx|}{|ibd}\n",
     },
     Probe {
         label: "map walk, break out of the body",
