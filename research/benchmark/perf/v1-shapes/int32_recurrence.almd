@@ -1,12 +1,18 @@
-// v1-vs-v0 shape bench: a sized-int recurrence that does not fold.
-fn step(x: Int32, k: Int32) -> Int32 = x * 31 + k
+// v1-vs-v0 shape bench: a sized-int recurrence that does not fold — two
+// Int32 values feeding each other through `+`/`-`/`*` at the declared width
+// (the narrow ring ops and the narrow call ABI, #4006).
+fn step(x: Int32, y: Int32) -> Int32 = x * 31 + y
+
+fn back(x: Int32, y: Int32) -> Int32 = x * 17 - y
 
 fn main() -> Unit = {
-  var x: Int32 = 7
+  var h: Int32 = 7
+  var g: Int32 = 3
   var i = 0
   while i < 3000000 {
-    x = step(x, int32.from_wrapping(i))
+    h = step(h, g)
+    g = back(g, h)
     i = i + 1
   }
-  println(int32.to_string(x))
+  println(int32.to_string(h + g))
 }
