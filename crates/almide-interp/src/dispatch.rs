@@ -212,16 +212,16 @@ impl<'a> Interpreter<'a> {
     /// Step 2d of [`Self::eval_named_ctor_or_sibling`]: the executing
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
-    /// The executing module, when it declares `name` as an `@intrinsic`
-    /// stub (a `Hole` body) — the declaration, not the spelling, decides.
+    /// The executing auto-imported bundled module, when it declares `name`
+    /// as an `@intrinsic` stub (a `Hole` body) — the declaration, not the
+    /// spelling, decides. Only the bundled pool needs this: its sibling
+    /// lookup (`bundled_body`) skips stubs. A program-loaded module's stub
+    /// sibling (`env.__set` inside `env.set`) already resolves through
+    /// `own_module_sibling` and the interp's own intrinsic evaluation, which
+    /// must stay the interp's vote rather than the module bridge's copy.
     pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
-        if let Some(module) = self.cur_bundled.get() {
-            return crate::stdlib_pool::bundled_stub(module, name).then_some(module);
-        }
-        let space = self.cur_space.get();
-        let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
-        let stub = self.module_fns.get(&(owner, name))?;
-        matches!(stub.body.kind, almide_ir::IrExprKind::Hole).then_some(owner)
+        let module = self.cur_bundled.get()?;
+        crate::stdlib_pool::bundled_stub(module, name).then_some(module)
     }
 
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
