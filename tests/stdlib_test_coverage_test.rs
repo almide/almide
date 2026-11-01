@@ -90,12 +90,11 @@ fn test_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let is_link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
         if path.is_dir() && !is_link {
             test_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "almd") {
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                if text.contains("\ntest ") || text.starts_with("test ") {
-                    out.push(path);
-                }
-            }
+        } else if path.extension().is_some_and(|e| e == "almd")
+            && let Ok(text) = std::fs::read_to_string(&path)
+            && (text.contains("\ntest ") || text.starts_with("test "))
+        {
+            out.push(path);
         }
     }
 }
@@ -462,12 +461,13 @@ fn every_public_stdlib_fn_is_tested_on_both_legs() {
         if !cites_issue(why) {
             problems.push(format!("  ? {f}: the row's reason names no tracking issue (`#NNNN`): {why:?}"));
         }
-        if let Some(issue) = unavailable.get(f) {
-            if !issue.is_empty() && !why.contains(issue.as_str()) {
-                problems.push(format!(
-                    "  ? {f}: {AVAILABILITY} declares it unavailable on the embedded leg under {issue}; the row must cite {issue}"
-                ));
-            }
+        if let Some(issue) = unavailable.get(f)
+            && !issue.is_empty()
+            && !why.contains(issue.as_str())
+        {
+            problems.push(format!(
+                "  ? {f}: {AVAILABILITY} declares it unavailable on the embedded leg under {issue}; the row must cite {issue}"
+            ));
         }
     }
     for f in listed.keys() {
