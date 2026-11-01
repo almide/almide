@@ -355,7 +355,18 @@ pending_self_host_ceiling = 0
 # io.close (the tcp close) lose their stock-p1 leg, their last; evidence:
 # tests/net_tcp_p3_cross_test.rs and tests/net_udp_p3_cross_test.rs (C-377,
 # C-378, C-379, C-448).
-pending_port_ceiling = 9
+# 2026-11-01 (ADR-0023 §4.3): 9 -> 0. The same routing for the http client
+# families (`almide_wasm::host_ops::HTTP_CLIENT_FAMILIES`: the string and
+# framed client 43..=49, the full-response client 65, the call handle
+# 53..=59): preview 1 has no http either, so the default build is the WASI
+# 0.3 component over wasi:http, and its shim now serves the call handle
+# (`start` / `poll` / `read_new` / `wait` / `cancel` and the drop glue,
+# guest-enforced limits; crates/almide-wasm-run/src/wasi_p3_http_call.rs).
+# `almide build` prints the load-time grant (`-S http`). The nine http rows
+# lose their stock-p1 leg, their last; evidence: tests/http_call_handle_test.rs's
+# p3 leg, tests/http_call_p3_cross_test.rs, tests/http_response_cross_test.rs
+# (C-328, C-330, C-366).
+pending_port_ceiling = 0
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
