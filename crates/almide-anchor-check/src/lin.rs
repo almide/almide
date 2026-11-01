@@ -737,13 +737,12 @@ impl<'m, 'a> Tr<'m, 'a> {
         // A len word read off a counted heap parameter's base.
         if !store && w == 4 {
             let at = addr.add(&Lin::konst(off as i128));
-            if let Some(at) = at
-                && at.cst == 4
-                && at.terms.len() == 1
-                && let (V::S(h), 1) = (&at.terms[0].0, at.terms[0].1)
-                && let Some(&r) = self.base_of.get(h)
-                && let Some(&s) = self.stride.get(&r)
-            {
+            let h = at.as_ref().and_then(|at| match at.terms.as_slice() {
+                [(V::S(h), 1)] if at.cst == 4 => Some(*h),
+                _ => None,
+            });
+            let rs = h.and_then(|h| self.base_of.get(&h).copied()).and_then(|r| self.stride.get(&r).map(|s| (r, *s)));
+            if let Some((r, s)) = rs {
                 let n = self.fresh(ValType::I32);
                 out.push(It::Len { n, r, s });
                 return Ok(Av::I32(Lin::slot(n), true));
