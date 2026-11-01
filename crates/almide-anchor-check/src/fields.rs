@@ -138,7 +138,7 @@ impl<'b, 'a> Fx<'b, 'a> {
             ref o => return Err(format!("site: anchored at {o:?}, not the block's local.set / local.tee")),
         };
         self.allocation(b, a.op, l.z)?;
-        let d0 = b.depth[a.op];
+        let blk = Block { a, bl, tee, d0: b.depth[a.op] };
         let mut last = a.op;
         let mut seen = std::collections::BTreeSet::new();
         for &(i, at) in stores {
@@ -146,47 +146,39 @@ impl<'b, 'a> Fx<'b, 'a> {
             if at.func != a.func || at.op <= last {
                 return Err(format!("site: store s{i} is not after the site and its earlier stores"));
             }
-            let (o, w) = self.field(r, c, i)?;
-            let (sw, off) = store_width(&b.ops[at.op]).ok_or_else(|| format!("site: s{i} anchored at {:?}, not a store", b.ops[at.op]))?;
-            if u64::from(sw) != w || off != PAYLOAD + o {
-                return Err(format!("site: s{i} stores {sw} bytes at offset {off}, the layout says {w} at {}", PAYLOAD + o));
-            }
-            if b.depth[at.op] != d0 {
-                return Err(format!("site: s{i} is not at the site's control depth"));
-            }
-            let p = b.addr[at.op].ok_or_else(|| format!("site s{i}: the store's address has no known producer"))?;
-            let by_block = (p > a.op && matches!(b.ops[p], Op::LocalGet { local_index } if local_index == bl)) || (tee && p == a.op);
-            if !by_block {
-                return Err(format!("site s{i}: the store's address comes from {:?}, not the block's local after the allocation", b.ops[p]));
-            }
-            if let Some(k) = (a.op + 1..at.op).find(|&k| matches!(b.ops[k], Op::LocalSet { local_index } | Op::LocalTee { local_index } if local_index == bl)) {
-                return Err(format!("site s{i}: instruction {k} overwrites the block's local before the store"));
-            }
-            if is_variant(r) && i == 0 {
-                let v = b.args[at.op].get(1).copied().flatten();
-                if !v.is_some_and(|v| matches!(b.ops[v], Op::I32Const { value } if u64::try_from(value) == Ok(c))) {
-                    return Err(format!("site: the tag store does not store the case {c}"));
-                }
-            }
+            self.site_store(b, &blk, (r, c, i), at.op)?;
             seen.insert(at.op);
             last = at.op;
         }
-        for k in a.op + 1..last {
-            if b.depth[k] < d0 || (b.depth[k] == d0 && matches!(b.ops[k], Op::End | Op::Else)) {
-                return Err(format!("site: instruction {k} leaves the site's block"));
-            }
-            if branch_target(&b.ops[k], b.depth[k]).is_some_and(|t| t <= d0) {
-                return Err(format!("site: instruction {k} ({:?}) branches out of the site's window", b.ops[k]));
-            }
-            if store_width(&b.ops[k]).is_some() && !seen.contains(&k) {
-                if let Some(p) = b.addr[k] {
-                    if matches!(b.ops[p], Op::LocalGet { local_index } if local_index == bl) || (tee && p == a.op) {
-                        return Err(format!("site: instruction {k} stores into the block unrecorded"));
-                    }
-                }
+        blk.window(b, last, &seen)?;
+        Ok(stores.len())
+    }
+
+    /// The site's store `s i` (of kind `(r, c)`) at instruction `k`.
+    fn site_store(&self, b: &Body<'a>, blk: &Block, (r, c, i): (u64, u64, u64), k: usize) -> Result<(), String> {
+        let (o, w) = self.field(r, c, i)?;
+        let (sw, off) = store_width(&b.ops[k]).ok_or_else(|| format!("site: s{i} anchored at {:?}, not a store", b.ops[k]))?;
+        if u64::from(sw) != w || off != PAYLOAD + o {
+            return Err(format!("site: s{i} stores {sw} bytes at offset {off}, the layout says {w} at {}", PAYLOAD + o));
+        }
+        if b.depth[k] != blk.d0 {
+            return Err(format!("site: s{i} is not at the site's control depth"));
+        }
+        let p = b.addr[k].ok_or_else(|| format!("site s{i}: the store's address has no known producer"))?;
+        let by_block = (p > blk.a.op && blk.is_get(b, p)) || (blk.tee && p == blk.a.op);
+        if !by_block {
+            return Err(format!("site s{i}: the store's address comes from {:?}, not the block's local after the allocation", b.ops[p]));
+        }
+        if let Some(k) = (blk.a.op + 1..k).find(|&k| matches!(b.ops[k], Op::LocalSet { local_index } | Op::LocalTee { local_index } if local_index == blk.bl)) {
+            return Err(format!("site s{i}: instruction {k} overwrites the block's local before the store"));
+        }
+        if is_variant(r) && i == 0 {
+            let v = b.args[k].get(1).copied().flatten();
+            if !v.is_some_and(|v| matches!(b.ops[v], Op::I32Const { value } if u64::try_from(value) == Ok(c))) {
+                return Err(format!("site: the tag store does not store the case {c}"));
             }
         }
-        Ok(stores.len())
+        Ok(())
     }
 
     fn access(&self, r: u64, c: u64, i: u64, at: At, flows: &mut Flows<'b, 'a>) -> Result<bool, String> {
@@ -219,6 +211,43 @@ impl<'b, 'a> Fx<'b, 'a> {
 
 type Flows<'b, 'a> = std::collections::HashMap<usize, Flow<'b, 'a>>;
 
+/// A construction site's block: its anchor `a`, the local `bl` holding it
+/// (`tee` when the anchor is its `local.tee`), and the site's control depth.
+struct Block {
+    a: At,
+    bl: u32,
+    tee: bool,
+    d0: u32,
+}
+
+impl Block {
+    /// Instruction `p` is `local.get` of the block's local.
+    fn is_get(&self, b: &Body<'_>, p: usize) -> bool {
+        matches!(b.ops[p], Op::LocalGet { local_index } if local_index == self.bl)
+    }
+
+    /// Nothing in the window up to `last` leaves the site's block, and every
+    /// store through the block in it is one of the site's (`seen`).
+    fn window(&self, b: &Body<'_>, last: usize, seen: &std::collections::BTreeSet<usize>) -> Result<(), String> {
+        let d0 = self.d0;
+        for k in self.a.op + 1..last {
+            if b.depth[k] < d0 || (b.depth[k] == d0 && matches!(b.ops[k], Op::End | Op::Else)) {
+                return Err(format!("site: instruction {k} leaves the site's block"));
+            }
+            if branch_target(&b.ops[k], b.depth[k]).is_some_and(|t| t <= d0) {
+                return Err(format!("site: instruction {k} ({:?}) branches out of the site's window", b.ops[k]));
+            }
+            if store_width(&b.ops[k]).is_none() || seen.contains(&k) {
+                continue;
+            }
+            if b.addr[k].is_some_and(|p| self.is_get(b, p) || (self.tee && p == self.a.op)) {
+                return Err(format!("site: instruction {k} stores into the block unrecorded"));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Check the fields witness `fields` against its anchors `anch`.
 pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str, anch: &str, rep: &mut Report) -> Result<(), String> {
     if fields.trim().is_empty() && anch.trim().is_empty() {
@@ -228,24 +257,7 @@ pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str,
     if items.len() != groups.len() {
         return Err(format!("fields: {} items, {} anchor groups", items.len(), groups.len()));
     }
-    let mut fx = Fx { bodies, alloc, ro: operands::readonly_calls(bodies, imports), layouts: BTreeMap::new() };
-    for item in &items {
-        let t: Vec<&str> = item.split_whitespace().collect();
-        if t.first().is_some_and(|x| x.starts_with('L')) {
-            let what = |e: String| format!("fields layout `{item}`: {e}");
-            if t.len() < 4 || !(t.len() - 4).is_multiple_of(2) {
-                return Err(what("not `L R c C n N z S (o O w W)*`".into()));
-            }
-            let (r, c, n, z) = (num(t[0], 'L').map_err(what)?, num(t[1], 'c').map_err(what)?, num(t[2], 'n').map_err(what)?, num(t[3], 'z').map_err(what)?);
-            let mut fs = Vec::new();
-            for p in t[4..].chunks(2) {
-                fs.push((num(p[0], 'o').map_err(what)?, num(p[1], 'w').map_err(what)?));
-            }
-            if fx.layouts.insert((r, c), Layout { n, z, fields: fs }).is_some() {
-                return Err(what("a second layout for the kind".into()));
-            }
-        }
-    }
+    let fx = Fx { bodies, alloc, ro: operands::readonly_calls(bodies, imports), layouts: read_layouts(&items)? };
     let mut flows: Flows<'_, '_> = std::collections::HashMap::new();
     for (k, (item, group)) in items.iter().zip(&groups).enumerate() {
         let t: Vec<&str> = item.split_whitespace().collect();
@@ -264,42 +276,75 @@ pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str,
             rep.field_unlocated += 1;
             continue;
         }
-        match head.chars().next() {
+        fx.item(&t, &g, &mut flows, rep).map_err(what)?;
+    }
+    Ok(())
+}
+
+/// The witness's layout items (`L R c C n N z S (o O w W)*`), by kind.
+fn read_layouts(items: &[&str]) -> Result<BTreeMap<(u64, u64), Layout>, String> {
+    let mut layouts = BTreeMap::new();
+    for item in items {
+        let t: Vec<&str> = item.split_whitespace().collect();
+        if !t.first().is_some_and(|x| x.starts_with('L')) {
+            continue;
+        }
+        let what = |e: String| format!("fields layout `{item}`: {e}");
+        if t.len() < 4 || !(t.len() - 4).is_multiple_of(2) {
+            return Err(what("not `L R c C n N z S (o O w W)*`".into()));
+        }
+        let (r, c, n, z) = (num(t[0], 'L').map_err(what)?, num(t[1], 'c').map_err(what)?, num(t[2], 'n').map_err(what)?, num(t[3], 'z').map_err(what)?);
+        let mut fs = Vec::new();
+        for p in t[4..].chunks(2) {
+            fs.push((num(p[0], 'o').map_err(what)?, num(p[1], 'w').map_err(what)?));
+        }
+        if layouts.insert((r, c), Layout { n, z, fields: fs }).is_some() {
+            return Err(what("a second layout for the kind".into()));
+        }
+    }
+    Ok(layouts)
+}
+
+impl<'b, 'a> Fx<'b, 'a> {
+    /// One located non-layout item (`t` its tokens, `g` its anchors); the
+    /// error is the item's own, without its prefix.
+    fn item(&self, t: &[&str], g: &[Option<At>], flows: &mut Flows<'b, 'a>, rep: &mut Report) -> Result<(), String> {
+        match t[0].chars().next() {
             Some('k') => {
-                let (r, c) = (num(t[0], 'k').map_err(what)?, num(t.get(1).copied().unwrap_or(""), 'c').map_err(what)?);
-                let stores: Vec<u64> = t[2..].iter().map(|x| num(x, 's')).collect::<Result<_, _>>().map_err(what)?;
+                let (r, c) = (num(t[0], 'k')?, num(t.get(1).copied().unwrap_or(""), 'c')?);
+                let stores: Vec<u64> = t[2..].iter().map(|x| num(x, 's')).collect::<Result<_, _>>()?;
                 if g.len() != 1 + stores.len() {
-                    return Err(what(format!("{} anchors for {} events", g.len(), 1 + stores.len())));
+                    return Err(format!("{} anchors for {} events", g.len(), 1 + stores.len()));
                 }
-                let a = g[0].ok_or_else(|| what("unlocated site".into()))?;
+                let a = g[0].ok_or_else(|| "unlocated site".to_string())?;
                 let paired: Vec<(u64, Option<At>)> = stores.iter().enumerate().map(|(j, &i)| (i, g[j + 1])).collect();
-                rep.field_stores += fx.site(r, c, a, &paired).map_err(what)?;
+                rep.field_stores += self.site(r, c, a, &paired)?;
                 rep.field_sites += 1;
             }
             Some('a') => {
                 if t.len() != 3 || g.len() != 1 {
-                    return Err(what("an access is `a R c C f I`, with one anchor".into()));
+                    return Err("an access is `a R c C f I`, with one anchor".into());
                 }
-                let (r, c, i) = (num(t[0], 'a').map_err(what)?, num(t[1], 'c').map_err(what)?, num(t[2], 'f').map_err(what)?);
-                let at = g[0].ok_or_else(|| what("unlocated access".into()))?;
-                if fx.access(r, c, i, at, &mut flows).map_err(what)? {
+                let (r, c, i) = (num(t[0], 'a')?, num(t[1], 'c')?, num(t[2], 'f')?);
+                let at = g[0].ok_or_else(|| "unlocated access".to_string())?;
+                if self.access(r, c, i, at, flows)? {
                     rep.field_guarded += 1;
                 }
                 rep.field_accesses += 1;
             }
             Some('t') => {
                 if t.len() != 1 || g.len() != 1 {
-                    return Err(what("a tag read is `t R`, with one anchor".into()));
+                    return Err("a tag read is `t R`, with one anchor".into());
                 }
-                let r = num(t[0], 't').map_err(what)?;
-                if !fx.layouts.keys().any(|&(x, _)| x == r) {
-                    return Err(what("no layout of the representation".into()));
+                let r = num(t[0], 't')?;
+                if !self.layouts.keys().any(|&(x, _)| x == r) {
+                    return Err("no layout of the representation".into());
                 }
-                fx.tag(g[0].ok_or_else(|| what("unlocated tag read".into()))?).map_err(what)?;
+                self.tag(g[0].ok_or_else(|| "unlocated tag read".to_string())?)?;
                 rep.field_tags += 1;
             }
-            _ => return Err(what("unknown item".into())),
+            _ => return Err("unknown item".into()),
         }
+        Ok(())
     }
-    Ok(())
 }
