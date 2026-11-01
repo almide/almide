@@ -143,6 +143,27 @@ pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
     })
 }
 
+/// The generated `Option<payload>` carrier, appended on first use.
+pub(crate) fn option_type_of(payload: NTy) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.option_of == Some(payload)) {
+            return i as u16;
+        }
+        r.push(RecDecl {
+            name: format!("Option<{payload:?}>"),
+            fields: Vec::new(),
+            cases: None,
+            list_of: None,
+            alias: None,
+            default_tag: None,
+            option_of: Some(payload),
+            result_of: None,
+        });
+        (r.len() - 1) as u16
+    })
+}
+
 /// The generated list type of `e` elements, appended on first use (at the
 /// end, like `Bytes`, so no earlier index moves).
 pub(crate) fn list_type_of(e: NTy) -> u16 {

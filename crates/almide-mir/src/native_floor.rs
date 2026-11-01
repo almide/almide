@@ -95,6 +95,17 @@ pub(crate) enum FloorRet {
     /// `Result[Value, String]` — the generated `Result<AlmideValue,
     /// AlmideString>` carrier.
     ResValue,
+    /// `String?` — a runtime `Option<String>`, carried as the generated
+    /// `Option<AlmideString>`.
+    OptStr,
+    /// `Result[List[String], String]` — the generated carrier of a
+    /// `Vec<AlmideString>`.
+    ResListStr,
+    /// `Result[Bytes, String]` — the generated carrier of the runtime `Vec<u8>`.
+    ResBytes,
+    /// `Result[String?, String]` — the generated carrier of an
+    /// `Option<AlmideString>`.
+    ResOptStr,
     /// `Int? | Bool? | Float?` — a runtime `Option` of the scalar, carried as
     /// the native `Option<i64>` (`NTy::Opt`; a Float as its bits).
     Opt(Scalar),
@@ -199,6 +210,78 @@ pub fn declared_floor_source() -> String {
     out
 }
 
+/// `m.f` when `body` is exactly `m.f(p1, …, pn)` over `params`.
+fn forwarded_call(body: &almide_lang::ast::Expr, params: &[almide_lang::ast::Param]) -> Option<String> {
+    use almide_lang::ast::ExprKind;
+    let ExprKind::Call { callee, args, named_args, .. } = &body.kind else { return None };
+    let ExprKind::Member { object, field } = &callee.kind else { return None };
+    let ExprKind::Ident { name: module } = &object.kind else { return None };
+    let passes_params = named_args.is_empty()
+        && args.len() == params.len()
+        && args.iter().zip(params).all(|(a, p)| matches!(&a.kind, ExprKind::Ident { name } if *name == p.name));
+    (passes_params && almide_lang::stdlib_info::is_bundled_module(module.as_str())).then(|| format!("{module}.{field}"))
+}
+
+/// The conformer call a protocol-generic stdlib fn answers with at a call
+/// whose args carry `args`: `list.join[T: Text](xs: List[T], sep: T) =
+/// T.__join(xs, sep)` over a `Vec<AlmideString>` is `string.__join`. The
+/// type parameter is bound from the first param that spells it (`T` or
+/// `List[T]`), and the conformer's fn is named the way the checker names
+/// it (`requirement_fn_name`) in the conformer's own module.
+pub(crate) fn protocol_instance(call: &str, args: &[NTy]) -> Option<String> {
+    use almide_lang::ast::ExprKind;
+    let (module, func) = call.split_once('.')?;
+    let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    let (generics, params, body) = program.decls.iter().find_map(|d| match d {
+        Decl::Fn { name, generics, params, body: Some(body), attrs, .. }
+            if name.as_str() == func && !attrs.iter().any(|a| a.name.as_str() == "intrinsic") =>
+        {
+            Some((generics.as_ref()?, params, body))
+        }
+        _ => None,
+    })?;
+    let ExprKind::Call { callee, args: cargs, .. } = &body.kind else { return None };
+    let ExprKind::Member { object, field } = &callee.kind else { return None };
+    let (ExprKind::Ident { name: tp } | ExprKind::TypeName { name: tp }) = &object.kind else { return None };
+    if !generics.iter().any(|g| g.name == *tp) {
+        return None;
+    }
+    let passes_params = cargs.len() == params.len()
+        && cargs.iter().zip(params).all(|(a, p)| matches!(&a.kind, ExprKind::Ident { name } if *name == p.name));
+    if !passes_params || params.len() != args.len() {
+        return None;
+    }
+    // The conformer type the arg kinds bind the type parameter to.
+    let bound = params.iter().zip(args).find_map(|(p, k)| match &p.ty {
+        TypeExpr::Simple { name } if name == tp => conformer_of(*k),
+        TypeExpr::Generic { name, args: ta } if name.as_str() == "List" && ta.len() == 1 && simple(&ta[0]) == Some(tp.as_str()) => {
+            conformer_of_list(*k)
+        }
+        _ => None,
+    })?;
+    let conformer_module = bound.to_ascii_lowercase();
+    almide_lang::stdlib_info::is_bundled_module(&conformer_module)
+        .then(|| format!("{conformer_module}.{}", almide_lang::stdlib_info::requirement_fn_name(bound, field.as_str())))
+}
+
+/// The builtin type a native value of kind `k` is.
+fn conformer_of(k: NTy) -> Option<&'static str> {
+    match k {
+        NTy::Str | NTy::StrRef => Some("String"),
+        k if crate::render_native_rec::is_bytes(k) => Some("Bytes"),
+        _ => None,
+    }
+}
+
+/// The builtin element type of a native list of kind `k`.
+fn conformer_of_list(k: NTy) -> Option<&'static str> {
+    match k {
+        NTy::VecStr | NTy::VecStrRef => Some("String"),
+        NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(i).and_then(conformer_of),
+        _ => None,
+    }
+}
+
 fn derive(call: &str) -> Option<FloorFn> {
     derive_explained(call).ok()
 }
@@ -218,14 +301,21 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         .and_then(almide_lang::parse_cached)
         .ok_or("the module's source does not parse")?;
     let mut decls = program.decls.iter().filter_map(|d| match d {
-        Decl::Fn { name, effect, attrs, generics, params, return_type, .. } if name.as_str() == func => {
-            Some((effect, attrs, generics, params, return_type))
+        Decl::Fn { name, effect, attrs, generics, params, return_type, body, .. } if name.as_str() == func => {
+            Some((effect, attrs, generics, params, return_type, body))
         }
         _ => None,
     });
-    let (effect, attrs, generics, params, ret) = decls.next().ok_or("no declaration")?;
+    let (effect, attrs, generics, params, ret, body) = decls.next().ok_or("no declaration")?;
     if decls.next().is_some() {
         return Err("declared more than once".into());
+    }
+    // A body that is one call of another stdlib fn with its own params, in
+    // order, IS that fn: its floor entry is the callee's.
+    if !attrs.iter().any(|a| a.name.as_str() == "intrinsic") {
+        if let Some(target) = body.as_ref().and_then(|b| forwarded_call(b, params)) {
+            return derive_explained(&target).map_err(|e| format!("forwards to `{target}`: {e}"));
+        }
     }
     let is_effect = effect.unwrap_or(false);
     let symbol = attrs
@@ -249,7 +339,7 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
     let fret = floor_ret(ret, &type_params).ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
     // An effect fn's error reaches its caller through its declared Result,
     // the carrier the call site's `!` reads; any other effect return walls.
-    if is_effect && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr) {
+    if is_effect && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResBytes | FloorRet::ResOptStr) {
         return Err("an effect fn whose return is not a Result carrier".into());
     }
     let rt = runtime_index();
@@ -343,6 +433,9 @@ fn floor_ret(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
             if is_param(&args[0]) {
                 return Some(FloorRet::Elem(ElemRet::Opt));
             }
+            if simple(&args[0]) == Some("String") {
+                return Some(FloorRet::OptStr);
+            }
             scalar_of(simple(&args[0])?).map(FloorRet::Opt)
         }
         TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 && is_param(&args[0]) => {
@@ -362,8 +455,18 @@ fn floor_ret(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
             if simple(&args[1]) != Some("String") {
                 return None;
             }
+            match &args[0] {
+                TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some("String") => {
+                    return Some(FloorRet::ResListStr)
+                }
+                TypeExpr::Generic { name, args: a } if is_option_name(name.as_str()) && a.len() == 1 && simple(&a[0]) == Some("String") => {
+                    return Some(FloorRet::ResOptStr)
+                }
+                _ => {}
+            }
             match simple(&args[0])? {
                 "Unit" => Some(FloorRet::Res(None)),
+                "Bytes" => Some(FloorRet::ResBytes),
                 "String" => Some(FloorRet::ResStr),
                 n if n == VALUE_TYPE => Some(FloorRet::ResValue),
                 ok => scalar_of(ok).map(|k| FloorRet::Res(Some(k))),
@@ -419,6 +522,21 @@ fn is_type_param(s: &str) -> bool {
     s.len() == 1 && s.chars().all(|c| c.is_ascii_uppercase())
 }
 
+/// `(ok, err)` of a squashed `Result<ok,err>`, split at its top-level comma.
+fn result_parts(t: &str) -> Option<(&str, &str)> {
+    let inner = t.strip_prefix("Result<")?.strip_suffix('>')?;
+    let mut depth = 0i32;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '<' | '(' => depth += 1,
+            '>' | ')' => depth -= 1,
+            ',' if depth == 0 => return Some((&inner[..i], &inner[i + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn ret_agrees(r: FloorRet, rust: &str) -> bool {
     let t = squash(rust);
     let string = |x: &str| x == "AlmideString" || x == "String";
@@ -438,11 +556,15 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Elem(ElemRet::List) => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Value => t == "AlmideValue",
-        FloorRet::ResValue => t
-            .strip_prefix("Result<")
-            .and_then(|x| x.strip_suffix('>'))
-            .and_then(|x| x.split_once(','))
-            .is_some_and(|(ok, err)| ok == "AlmideValue" && string(err)),
+        FloorRet::ResValue => result_parts(&t).is_some_and(|(ok, err)| ok == "AlmideValue" && string(err)),
+        FloorRet::OptStr => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(string),
+        FloorRet::ResListStr => result_parts(&t).is_some_and(|(ok, err)| {
+            ok.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
+        }),
+        FloorRet::ResBytes => result_parts(&t).is_some_and(|(ok, err)| ok == "Vec<u8>" && string(err)),
+        FloorRet::ResOptStr => result_parts(&t).is_some_and(|(ok, err)| {
+            ok.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
+        }),
         FloorRet::Res(k) => t
             .strip_prefix("Result<")
             .and_then(|x| x.strip_suffix('>'))
@@ -1285,6 +1407,25 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
             let v = NTy::Rec(crate::render_native_rec::value_index());
             let r = crate::render_native_rec::result_type_of(v, NTy::Str);
             (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(r)))
+        }
+        FloorRet::OptStr => (
+            format!("({call}).map(AlmideString::from)"),
+            Some(NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str))),
+        ),
+        FloorRet::ResListStr => (
+            format!("({call}).map(|v| v.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()).map_err(AlmideString::from)"),
+            Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::VecStr, NTy::Str))),
+        ),
+        FloorRet::ResBytes => {
+            let b = NTy::Rec(crate::render_native_rec::bytes_index());
+            (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))
+        }
+        FloorRet::ResOptStr => {
+            let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str));
+            (
+                format!("({call}).map(|o| o.map(AlmideString::from)).map_err(AlmideString::from)"),
+                Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))),
+            )
         }
         FloorRet::ListStr => (
             format!("({call}).into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()"),
