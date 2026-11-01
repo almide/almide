@@ -763,6 +763,13 @@ fn render_else(
                 NTy::VecStr,
                 if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
             ),
+            // A type with no `Default` (a Result carrier) is declared unset:
+            // both arms assign it.
+            NTy::Rec(i) | NTy::RecRef(i) if !crate::render_native_rec::has_default(t) => (
+                format!("let mut {}: {};", var(*d), crate::render_native_rec::struct_name(i)),
+                NTy::Rec(i),
+                format!("{}.clone()", var(v)),
+            ),
             NTy::Rec(i) | NTy::RecRef(i) => (
                 format!("let mut {}: {} = Default::default();", var(*d), crate::render_native_rec::struct_name(i)),
                 NTy::Rec(i),

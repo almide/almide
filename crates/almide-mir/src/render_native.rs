@@ -561,6 +561,7 @@ fn finish_native_fn(
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
             Some(NTy::VecStr | NTy::VecStrRef) => "return Vec::new();",
+            Some(t @ (NTy::Rec(_) | NTy::RecRef(_))) if !crate::render_native_rec::has_default(t) => "unreachable!(\"strict cut\");",
             Some(NTy::Rec(_) | NTy::RecRef(_)) => "return Default::default();",
             Some(NTy::Opt) => "return None;",
             Some(NTy::ResStr) => "return Ok(AlmideString::new());",

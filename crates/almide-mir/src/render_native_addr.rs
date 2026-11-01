@@ -22,6 +22,10 @@ use crate::{Init, IntOp, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+#[path = "render_native_carrier.rs"]
+mod carrier;
+pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
+
 /// The index term of a slot address.
 #[derive(Clone, Copy, Debug)]
 enum Idx {
@@ -60,6 +64,15 @@ pub(crate) struct AddrState {
     alloc_rec: BTreeMap<ValueId, u16>,
     /// DynList allocs whose every stored element is a string.
     str_lists: BTreeSet<ValueId>,
+    /// A Result carrier's tag read → the carrier (its `if` selects the arm).
+    res_tags: BTreeMap<ValueId, ValueId>,
+    /// A Result carrier whose slot 0 was stored, waiting for its tag word.
+    pending: BTreeMap<ValueId, ValueId>,
+    /// The open `if`s: the Result whose tag each one tests, and whether the
+    /// render is in its then-arm (tag 1 = Err).
+    arms: Vec<(Option<ValueId>, bool)>,
+    /// Result payload reads hoisted above their tag test → the side their uses select.
+    hoisted: BTreeMap<ValueId, bool>,
 }
 
 impl AddrState {
@@ -94,6 +107,19 @@ impl AddrState {
                 }
                 _ => {}
             }
+        }
+        // #4006: heap Option/Result carriers, typed by the declared signatures
+        // (this function's and its callees') through joins and copies.
+        let carrier_k = |k: &NativeSigKind| match k {
+            NativeSigKind::Rec(i) if carrier::is_carrier(*i) => Some(*i),
+            _ => None,
+        };
+        let sig_of = |n: &str| -> Option<CarrierSig> {
+            sigs.get(n).map(|(ps, r)| (ps.iter().map(carrier_k).collect(), r.as_ref().and_then(carrier_k)))
+        };
+        let own = sig_of(func.name.as_str()).unwrap_or_default();
+        for (v, i) in carrier::carrier_values(func, &own, &sig_of) {
+            alloc_rec.entry(v).or_insert(i);
         }
         // A block stored into a typed parent's slot takes the slot's declared
         // kind: a list's element, a record's field, an enum slot's one record kind.
@@ -130,6 +156,8 @@ impl AddrState {
                 });
                 let kind = if let Some(e) = crate::render_native_rec::list_elem(i) {
                     Some(e)
+                } else if carrier::is_carrier(i) {
+                    slot.and_then(|k| carrier::slot_kind(i, k))
                 } else if let Some(k) = slot {
                     crate::render_native_rec::rec_field(i, k).or_else(|| {
                         let ks: Vec<NTy> = crate::render_native_rec::enum_slot_kinds(i, k)
@@ -214,6 +242,7 @@ impl AddrState {
             .iter()
             .filter_map(|op| match op {
                 Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                Op::Alloc { dst, init: Init::OptNone, .. } => alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i)),
                 // A scalar-only constructor of a heap variant is built as a slot list.
                 Op::ListLit { dst, .. } => alloc_rec
                     .get(dst)
@@ -255,7 +284,20 @@ impl AddrState {
                 _ => {}
             }
         }
-        AddrState { str_lists, alloc_rec, addr_operands, consts: BTreeMap::new(), scaled: BTreeSet::new(), addrs: BTreeMap::new(), reassigned, stored }
+        AddrState {
+            str_lists,
+            alloc_rec,
+            addr_operands,
+            consts: BTreeMap::new(),
+            scaled: BTreeSet::new(),
+            addrs: BTreeMap::new(),
+            reassigned,
+            stored,
+            res_tags: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            arms: Vec::new(),
+            hoisted: carrier::hoisted_sides(func),
+        }
     }
 }
 
@@ -365,6 +407,9 @@ pub(crate) fn render_addr_op(
         }};
     }
     let ty = |tys: &BTreeMap<ValueId, NTy>, v: &ValueId| tys.get(v).copied();
+    if let Some(r) = carrier::render_carrier_op(op, st, tys, out, indent) {
+        return r;
+    }
     match op {
         Op::ConstInt { dst, value } => {
             st.consts.insert(*dst, *value);

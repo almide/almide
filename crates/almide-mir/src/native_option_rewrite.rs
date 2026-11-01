@@ -26,7 +26,15 @@ use crate::{Init, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Rewrite every recognized scalar-Option window in `f`.
-pub fn rewrite_option_ops(f: &mut MirFunction, option_fns: &BTreeSet<String>, opt_params: &[ValueId]) {
+///
+/// `carriers` are the values whose declared type is a generated heap Option
+/// carrier (`render_native_carrier`): their `OptNone` is that carrier's.
+pub fn rewrite_option_ops(
+    f: &mut MirFunction,
+    option_fns: &BTreeSet<String>,
+    opt_params: &[ValueId],
+    carriers: &BTreeSet<ValueId>,
+) {
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = OptionTracker::default();
@@ -42,7 +50,7 @@ pub fn rewrite_option_ops(f: &mut MirFunction, option_fns: &BTreeSet<String>, op
                 t.opt_vals.insert(*dst);
                 t.minted.insert(*dst);
             }
-            Op::Alloc { dst, init: Init::OptNone, .. } => {
+            Op::Alloc { dst, init: Init::OptNone, .. } if !carriers.contains(dst) => {
                 out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(*dst), args: vec![] });
                 t.opt_vals.insert(*dst);
                 t.minted.insert(*dst);
