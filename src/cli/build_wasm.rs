@@ -113,10 +113,10 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     }
     // The artifact needs a host that grants the subprocess capability: say
     // so at build time, since a stock runtime will refuse it at load.
-    if shape.p3_default && almide_wasm::host_ops::names_socket_op(host_ops) {
+    if shape.p3_default && almide_wasm::host_ops::names_socket_op(&host_ops) {
         err(&almide_wasm_run::component_availability::sockets_grant_note(output));
     }
-    if shape.p3_default && almide_wasm::host_ops::names_http_client_op(host_ops) {
+    if shape.p3_default && almide_wasm::host_ops::names_http_client_op(&host_ops) {
         err(&almide_wasm_run::component_availability::http_grant_note(output));
     }
     if proc_op.is_some() {

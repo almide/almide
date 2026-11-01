@@ -39,6 +39,13 @@ const OP_HC_READ: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::HTTP_C
 const OP_HC_CANCEL: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::HTTP_CALL, 4);
 const OP_HC_STEP: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::HTTP_CALL, 5);
 const OP_HC_DROP: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::HTTP_CALL, 6);
+// The shim's last branch is `wait`: every other op of the range is matched
+// before it, so the range must hold exactly these seven.
+const _: () = assert!(
+    OP_HC_STATE == OP_HC_OPEN + 1 && OP_HC_WAIT == OP_HC_OPEN + 2 && OP_HC_READ == OP_HC_OPEN + 3
+        && OP_HC_CANCEL == OP_HC_OPEN + 4 && OP_HC_STEP == OP_HC_OPEN + 5 && OP_HC_DROP == OP_HC_OPEN + 6
+        && *almide_wasm::host_ops::HTTP_CALL.end() == OP_HC_DROP
+);
 
 /// The call-handle ops this shim serves: the family but the streaming step
 /// (op 58), which no stdlib surface emits since the streaming clients left.

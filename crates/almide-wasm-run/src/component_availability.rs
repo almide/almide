@@ -109,7 +109,19 @@ pub const COMPONENT_ONLY_OPS: &[i32] = &[65];
 /// Whether `almide run --target wasm` runs this op set as the p3 component:
 /// it names a component-only op and the p3 shim serves all of it.
 pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
-    host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op)) && check(host_ops, true).is_ok()
+    host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op))
+        && check(host_ops, true).is_ok()
+        && !host_ops.iter().any(|op| embedded_core_only(*op))
+}
+
+/// The ops the embedded lane serves on its core host only, although the p3
+/// shim serves them too: the call handle (ADR-0023 §4.3). Under the
+/// embedded component its transport is rt-core's whole-exchange client
+/// (`component_host::RtCoreTransport`), which answers a response only once
+/// it is complete — the handle's streamed reads and its cancel of a running
+/// exchange need the core host's call core.
+fn embedded_core_only(op: i32) -> bool {
+    almide_wasm::host_ops::HTTP_CALL.contains(&op)
 }
 
 /// The refusal for a program no single route of the embedded lane serves: it
@@ -118,6 +130,18 @@ pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
 /// can run all of it.
 pub fn embedded_split(host_ops: &[i32]) -> Option<String> {
     let only = host_ops.iter().copied().find(|op| COMPONENT_ONLY_OPS.contains(op))?;
+    if let Some(call) = host_ops.iter().copied().find(|op| embedded_core_only(*op)) {
+        return Some(format!(
+            "error[E081]: {} (host op {only}) runs only as the WASI 0.3 component and {} (host op {call}) only on the \
+             embedded core-module host, so no embedded route serves this program\n  \
+             reason: ADR-0023 decision 1 keeps the full-response client out of the core host, and the embedded \
+             component's transport answers an exchange only once it is complete, which the call handle's streamed \
+             reads and cancel cannot run on\n  \
+             note: the native target serves both, and so does the stock component `almide build --target wasm` builds",
+            operation_label(only),
+            operation_label(call),
+        ));
+    }
     let other = host_ops.iter().copied().find(|op| !serves(*op, true))?;
     Some(format!(
         "error[E081]: {} (host op {only}) runs only as the WASI 0.3 component and {} (host op {other}) only on the \
