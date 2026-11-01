@@ -19,6 +19,8 @@ pub(super) struct Creators<'a> {
     pub(super) main: Range<usize>,
     /// Per lifted lambda: the lambdas its own body lifted.
     pub(super) lambdas: &'a [Range<usize>],
+    /// Each funcref-table entry's function index, in `work.entries` order.
+    pub(super) entry_fn_indices: &'a [u32],
 }
 
 impl Creators<'_> {
@@ -26,12 +28,12 @@ impl Creators<'_> {
     /// closure a lambda that is a funcref-table entry. A creator lambda that
     /// is no table entry has no index here, and its closures are left out:
     /// unattributed, the capability witness charges their callers instead.
-    fn creations(&self, work: &FnWork, entry_fn_indices: &[u32], main_index: u32) -> Vec<(u32, u32)> {
+    fn creations(&self, work: &FnWork, main_index: u32) -> Vec<(u32, u32)> {
         let lambda_at: std::collections::HashMap<usize, u32> = work
             .entries
             .borrow()
             .iter()
-            .zip(entry_fn_indices)
+            .zip(self.entry_fn_indices)
             .filter_map(|(e, &idx)| match e {
                 TableEntry::Lambda(j) => Some((*j as usize, idx)),
                 _ => None,
@@ -60,7 +62,6 @@ pub(super) fn record_decls(
     program_fns: &[(&IrFunction, Option<String>, u32)],
     (main, main_index): (Option<&IrFunction>, u32),
     work: &FnWork,
-    entry_fn_indices: &[u32],
     stubs: &[imports::Declared],
     creators: &Creators<'_>,
     bytes: &[u8],
@@ -97,13 +98,13 @@ pub(super) fn record_decls(
         meter_clock_reads: reads("main"),
     });
     for (pos, e) in work.entries.borrow().iter().enumerate() {
-        if let (TableEntry::Lambda(j), Some(&index)) = (e, entry_fn_indices.get(pos)) {
+        if let (TableEntry::Lambda(j), Some(&index)) = (e, creators.entry_fn_indices.get(pos)) {
             let name = format!("<lambda#{j}>");
             let meter_clock_reads = reads(&name);
             fns.push(DeclFn { index, name, declared: None, meter_clock_reads });
         }
     }
-    let creations = creators.creations(work, entry_fn_indices, main_index);
+    let creations = creators.creations(work, main_index);
     crate::witness::decls::record(PassDecls { fns, stubs, stub_declared, creations, bytes: bytes.to_vec() });
 }
 
