@@ -1,8 +1,8 @@
 //! The primitive floor's machine ops, read from their declarations (#4006).
 //!
 //! Every fn of `stdlib/prim.almd` declares what it IS with exactly one
-//! `@prim_op(op, key = value…)`: `@prim_op(load, width = 4)` on `load32`,
-//! `@prim_op(alloc, block = owned_slots)` on `alloc_list_str`. The lowering
+//! `@prim_op(op, key = value…)`: `@prim_op(load, width=4)` on `load32`,
+//! `@prim_op(alloc, block=owned_slots)` on `alloc_list_str`. The lowering
 //! looks a prim call up here and dispatches on the decoded [`PrimOp`]; no
 //! prim fn's name appears in the compiler, so a prim is added or renamed in
 //! prim.almd alone and the op vocabulary below is the only thing MIR knows.
