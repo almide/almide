@@ -520,6 +520,45 @@
     }
 
     #[test]
+    fn nested_block_guard_continue_keeps_the_continue() {
+        // #4386: `if c then { guard g else continue; … } else ()` inside a loop. The
+        // nested block is not the loop body, so `continue` → `()` would fall through
+        // to the loop-body statements after the `if`. The desugar must keep it.
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        let unit = || ir_expr(IrExprKind::Unit, Ty::Unit);
+        let arm = body(vec![
+            stmt(IrStmtKind::Guard {
+                cond: ir_expr(IrExprKind::LitBool { value: false }, Ty::Bool),
+                else_: ir_expr(IrExprKind::Continue, Ty::Unit),
+            }),
+            stmt(IrStmtKind::Expr { expr: unit() }),
+        ]);
+        let b = body(vec![stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::If {
+                    cond: Box::new(ir_expr(IrExprKind::LitBool { value: true }, Ty::Bool)),
+                    then: Box::new(arm),
+                    else_: Box::new(unit()),
+                },
+                Ty::Unit,
+            ),
+        })]);
+        let desugared = crate::lower::desugar_guard(&b).expect("guard desugar fires");
+        struct ContinueHunter(bool);
+        impl IrVisitor for ContinueHunter {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if matches!(e.kind, IrExprKind::Continue) {
+                    self.0 = true;
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut h = ContinueHunter(false);
+        h.visit_expr(&desugared);
+        assert!(h.0, "a nested-block guard's `continue` must survive the desugar");
+    }
+
+    #[test]
     fn heap_option_record_unwrap_or_walls_not_miscompiles() {
         // `let t = list.get(xs, i) ?? { … }` over a `List[record]` (Option[record] `??`).
         // HISTORY: the Value-shaped option.value_unwrap_or corrupted the record field block, so
