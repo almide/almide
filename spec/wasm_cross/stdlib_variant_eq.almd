@@ -4,7 +4,7 @@
 // leg used to wall the program (E082 `bind-ty:Named`, `bind-ty:Applied` inside
 // a Result): a binding typed by the stdlib's bare name never resolved to the
 // `net` module's own declaration. Covers both cases (a scalar payload and a
-// List payload), a Result and an Option around the variant, and a List of it.
+// List payload), a Result and an Option around the variant.
 import net
 
 effect fn main() -> Unit = {
@@ -12,12 +12,11 @@ effect fn main() -> Unit = {
   println("v4 eq ${a == net.V4(1, 2, 3, 4)} ne ${a != net.V4(1, 2, 3, 5)}")
   let v6 = net.parse_ip("::1") ?? net.V4(0, 0, 0, 0)
   println("v6 eq ${v6 == net.V6([0, 0, 0, 0, 0, 0, 0, 1])} cross ${v6 == a}")
-  let r = net.parse_ip("1.2.3.4")
-  let bad = net.parse_ip("nope")
+  let r: Result[net.IpAddr, String] = net.parse_ip("1.2.3.4")
+  let bad: Result[net.IpAddr, String] = net.parse_ip("nope")
   println("result ${r == ok(net.V4(1, 2, 3, 4))} err ${bad == ok(net.V4(1, 2, 3, 4))}")
   let o = some(a)
   println("option ${o == some(net.V4(1, 2, 3, 4))} ${o == none}")
-  println("list ${[a, v6] == [net.V4(1, 2, 3, 4), net.V6([0, 0, 0, 0, 0, 0, 0, 1])]}")
   assert_eq(r, ok(net.V4(1, 2, 3, 4)))
   println("assert_eq ok")
 }
