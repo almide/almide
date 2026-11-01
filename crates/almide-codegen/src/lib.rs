@@ -851,3 +851,10 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     output.push_str(&user_code);
     output
 }
+
+/// The fan timeline runtime (prelude_fan.rs) as an inline program's text, for
+/// the certified native render's threaded fan groups (#4006 family H): the
+/// same runtime the standard codegen emits, verbatim.
+pub fn fan_timeline_prelude_text() -> String {
+    prelude_fan::fan_timeline_prelude("")
+}

@@ -396,6 +396,12 @@ fn parse_tokens_or_wall(
     )))
 }
 
+/// The IR the native rungs lower, for unit tests of an IR stage (fan_native.rs).
+#[cfg(test)]
+pub(crate) fn source_to_ir_for_tests(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
+    source_to_ir_with(source, &[])
+}
+
 fn source_to_ir_with(
     source: &str,
     modules: &[(String, almide_lang::ast::Program, bool)],
