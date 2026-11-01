@@ -28,7 +28,11 @@
 //!   (the transfer of a result an op already produced) carry none. The
 //!   CALL GRAPH is every `call` / `return_call` / `ref.func` to a defined
 //!   function plus, for `call_indirect`, every element-segment function of
-//!   the site's type. A function's DECLARED bound comes from its source
+//!   the site's type that no body is recorded creating; a created closure is
+//!   instead an edge from its CREATOR (`PassDecls::creations`), so a fn that
+//!   only calls a closure argument reaches [`cap::PARAMETRIC`], not the
+//!   closure's capabilities, which its creator's bound must hold. A
+//!   function's DECLARED bound comes from its source
 //!   (witness_decls.rs): a plain `fn` declares the console output (it never
 //!   reads, ADR-0022: stdin and argv readers are `effect fn`), an `effect fn` every
 //!   modeled capability; a function the source does not
@@ -77,6 +81,12 @@ pub mod cap {
     /// FOREIGN alone, which [`super::PURE_BOUND`] admits — the extern's
     /// purity is its author's declaration, FFI's trust (proofs/TRUSTED_BASE.md).
     pub const FOREIGN_EFFECT: u32 = 11;
+    /// The function makes a `call_indirect` whose closure's capabilities are
+    /// charged where that closure is created (its creator's bound holds
+    /// them), not here: the reach is PARAMETRIC — whatever its closure
+    /// arguments can do. Never hidden: the report names it, and every bound
+    /// admits it, since it is no authority of its own.
+    pub const PARAMETRIC: u32 = 12;
 }
 
 /// A host operation the projector cannot name: no function declares it, so
@@ -87,7 +97,7 @@ pub mod cap {
 pub const SENTINEL: u32 = 9;
 
 /// What an `effect fn` declares: every modeled capability.
-const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC, cap::FOREIGN_EFFECT];
+const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC, cap::FOREIGN_EFFECT, cap::PARAMETRIC];
 /// What a plain `fn` declares: the console output. `println` is admitted in
 /// any function (ADR-0022: a plain `fn` writes and aborts, never reads).
 /// Stdin, files, the clock, entropy, the environment, the network and an
@@ -95,7 +105,9 @@ const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC, cap::FOREIG
 /// `io.read_n_bytes` were plain `fn` stdin readers until #3248 and this bound
 /// admitted them. FOREIGN reached through a pure-declared extern is admitted:
 /// the checker lets a plain `fn` call one, and the bound says the same.
-const PURE_BOUND: &[u32] = &[cap::STDOUT, cap::FOREIGN];
+/// A closure argument's capabilities are its creator's (effect polymorphism,
+/// the closure carries them), so the parametric reach is admitted too.
+const PURE_BOUND: &[u32] = &[cap::STDOUT, cap::FOREIGN, cap::PARAMETRIC];
 
 /// The capabilities one `almide.fs_call` op reaches: its family's declared
 /// capabilities (`host_ops.rs`, one declaration with the op ranges, #4338).
@@ -461,7 +473,6 @@ pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<
     let manifest = allow.map(manifest_bound);
     let m = decode(&decls.bytes)?;
     let n_imports = m.imports.len() as u32;
-    let callees: Vec<BTreeSet<usize>> = m.bodies.iter().map(|b| graph_edges(&m, b)).collect();
     // The source declaration of each defined function, renumbered into the
     // bytes' index space (the declare post-pass map).
     let base_imports = n_imports - decls.stubs.len() as u32;
@@ -482,6 +493,25 @@ pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<
             .and_then(|k| decls.stub_declared.get(k as usize))
             .is_some_and(|d| *d == Declared::Pure)
     };
+    // The closures each body creates (defined positions), and the set of
+    // created closures: a `call_indirect` reaching one is charged to its
+    // creator through this edge, not to the caller.
+    let mut creates: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); m.bodies.len()];
+    let mut attributed: BTreeSet<usize> = BTreeSet::new();
+    let defined = |pre: u32| {
+        crate::imports::remap_index(pre, &decls.stubs, base_imports)
+            .checked_sub(n_imports)
+            .map(|j| j as usize)
+            .filter(|&j| j < m.bodies.len())
+    };
+    for &(owner, closure) in &decls.creations {
+        if let (Some(o), Some(c)) = (defined(owner), defined(closure)) {
+            creates[o].insert(c);
+            attributed.insert(c);
+        }
+    }
+    let callees: Vec<BTreeSet<usize>> =
+        m.bodies.iter().enumerate().map(|(j, b)| &graph_edges(&m, b, &attributed) | &creates[j]).collect();
     let direct: Vec<BTreeSet<u32>> = m
         .bodies
         .iter()
@@ -608,6 +638,9 @@ fn direct_caps(m: &Module, b: &Body, meter_reads: u32, pure_import: &dyn Fn(u32)
             }
         }
     }
+    if !b.indirect.is_empty() {
+        out.insert(cap::PARAMETRIC);
+    }
     let mut meter_left = meter_reads;
     for op in &b.fs_ops {
         if *op == Some(OP_METER_CLOCK) && meter_left > 0 {
@@ -624,7 +657,7 @@ const OP_METER_CLOCK: i32 = crate::fs_meta::OP_METER_CLOCK;
 
 /// The defined functions one body can transfer control to (positions in
 /// the defined-function list).
-fn graph_edges(m: &Module, b: &Body) -> BTreeSet<usize> {
+fn graph_edges(m: &Module, b: &Body, attributed: &BTreeSet<usize>) -> BTreeSet<usize> {
     let n_imports = m.imports.len() as u32;
     let mut out: BTreeSet<usize> = b.funcs.iter().filter_map(|&f| f.checked_sub(n_imports)).map(|j| j as usize).collect();
     let ty_of = |t: u32| m.types.get(t as usize).cloned().flatten();
@@ -632,6 +665,9 @@ fn graph_edges(m: &Module, b: &Body) -> BTreeSet<usize> {
         let want = ty_of(t);
         for &f in &m.elem_funcs {
             let Some(j) = f.checked_sub(n_imports) else { continue };
+            if attributed.contains(&(j as usize)) {
+                continue;
+            }
             let ft = m.func_types.get(j as usize).and_then(|&ti| ty_of(ti));
             if ft.is_some() && ft == want {
                 out.insert(j as usize);
@@ -659,7 +695,7 @@ fn least_bounds(
             Declared::Effect => EFFECT_BOUND
                 .iter()
                 .copied()
-                .filter(|&c| c == cap::FOREIGN || manifest.is_none_or(|m| m.contains(&c)))
+                .filter(|&c| c == cap::FOREIGN || c == cap::PARAMETRIC || manifest.is_none_or(|m| m.contains(&c)))
                 .collect(),
         })
     };
@@ -697,101 +733,5 @@ fn reach(direct: &[BTreeSet<u32>], callees: &[BTreeSet<usize>], start: usize) ->
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_known_op_names_a_capability_and_an_unknown_one_the_sentinel() {
-        assert_eq!(op_caps(1), &[cap::FS_READ]);
-        assert_eq!(op_caps(2), &[cap::FS_WRITE]);
-        assert_eq!(op_caps(32), &[cap::ENTROPY]);
-        assert_eq!(op_caps(34), &[cap::CLOCK]);
-        assert_eq!(op_caps(35), &[cap::STDIN]);
-        assert_eq!(op_caps(31), &[SENTINEL]);
-        assert!(op_caps(74).is_empty(), "the fan offer reaches no capability of its own");
-        assert_eq!(op_caps(117), &[cap::PROC]);
-        assert_eq!(op_caps(118), &[cap::ENV]);
-        assert_eq!(op_caps(-1), &[SENTINEL]);
-    }
-
-    #[test]
-    fn a_cycle_condenses_to_one_node_bounded_by_every_member() {
-        // 0 -> 1 -> 2 -> 1 (a cycle), 2 reaches FS_READ; 1 is declared pure.
-        let direct = vec![BTreeSet::new(), BTreeSet::new(), [cap::FS_READ].into()];
-        let callees: Vec<BTreeSet<usize>> = vec![[1].into(), [2].into(), [1].into()];
-        let comp = components(&callees);
-        assert_eq!(comp[1], comp[2]);
-        assert_ne!(comp[0], comp[1]);
-        let bound: Vec<BTreeSet<u32>> = vec![EFFECT_BOUND.iter().copied().collect(), PURE_BOUND.iter().copied().collect(), [cap::FS_READ, cap::STDOUT].into()];
-        let g = condensed_graph(&direct, &callees, &bound);
-        // The cycle's node: bound = pure ∩ {0,3} = {0}, direct {3} — rejected.
-        assert!(g.split(';').any(|n| n == "0|3|"), "{g}");
-    }
-
-    #[test]
-    fn an_undeclared_function_takes_the_least_bound_its_callees_need() {
-        // 0 declared pure, calls 1 (helper) which calls 2 (reaches FS_READ).
-        let direct = vec![BTreeSet::new(), BTreeSet::new(), [cap::FS_READ].into()];
-        let callees = vec![[1].into(), [2].into(), BTreeSet::new()];
-        let declared: BTreeMap<usize, (String, Declared)> = [(0, ("f".to_string(), Declared::Pure))].into();
-        let b = least_bounds(&direct, &callees, &declared, None);
-        assert_eq!(b[1], [cap::FS_READ].into());
-        assert_eq!(reach(&direct, &callees, 0), vec![cap::FS_READ]);
-    }
-
-    #[test]
-    fn only_the_meters_own_clock_reads_leave_the_frame() {
-        // #3041: two wall-clock reads and a file read; one read is the meter's.
-        let m = Module::default();
-        let b = Body { fs_ops: vec![Some(OP_METER_CLOCK), Some(1), Some(OP_METER_CLOCK)], ..Body::default() };
-        assert_eq!(direct_caps(&m, &b, 0, &|_| false), [cap::FS_READ, cap::CLOCK].into());
-        assert_eq!(direct_caps(&m, &b, 1, &|_| false), [cap::FS_READ, cap::CLOCK].into(), "the second read is the frame's own");
-        assert_eq!(direct_caps(&m, &b, 2, &|_| false), [cap::FS_READ].into());
-        // A read the stack does not show as the constant is never discounted.
-        let hidden = Body { fs_ops: vec![None], ..Body::default() };
-        assert_eq!(direct_caps(&m, &hidden, 1, &|_| false), [SENTINEL].into());
-    }
-
-    /// A module importing `almide.fs_call` whose `main` calls it once, with
-    /// the op pushed by `push_op`.
-    fn one_call(push_op: impl Fn(&mut wasm_encoder::InstructionSink<'_>)) -> Vec<u8> {
-        use wasm_encoder::{CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Module as Enc, TypeSection, ValType};
-        let mut types = TypeSection::new();
-        types.ty().function([ValType::I32; 5], [ValType::I64]);
-        types.ty().function([ValType::I32], []);
-        let mut imports = ImportSection::new();
-        imports.import("almide", "fs_call", EntityType::Function(0));
-        let mut funcs = FunctionSection::new();
-        funcs.function(1);
-        let mut exports = ExportSection::new();
-        exports.export("main", ExportKind::Func, 1);
-        let mut f = Function::new([]);
-        {
-            let mut i = f.instructions();
-            push_op(&mut i);
-            i.i32_const(0).i32_const(0).i32_const(0).i32_const(0).call(0).drop().end();
-        }
-        let mut code = CodeSection::new();
-        code.function(&f);
-        let mut m = Enc::new();
-        m.section(&types).section(&imports).section(&funcs).section(&exports).section(&code);
-        m.finish()
-    }
-
-    #[test]
-    fn fs_call_ops_reads_constant_ops_and_refuses_a_computed_one() {
-        // #4102: the embedded host's allow-list.
-        let constant = one_call(|i| {
-            i.i32_const(35);
-        });
-        assert_eq!(fs_call_ops(&constant).unwrap(), Some([35].into()));
-        let computed = one_call(|i| {
-            i.local_get(0);
-        });
-        assert_eq!(fs_call_ops(&computed).unwrap(), None, "an op the stack does not show cannot be bounded");
-        // Row 19: the host's list keeps the visible constants and drops the
-        // computed site, so it fails closed instead of vanishing.
-        assert_eq!(fs_call_ops_visible(&constant).unwrap(), [35].into());
-        assert_eq!(fs_call_ops_visible(&computed).unwrap(), BTreeSet::new());
-    }
-}
+#[path = "cert_project_tests.rs"]
+mod tests;
