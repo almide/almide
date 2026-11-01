@@ -153,11 +153,11 @@ fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &
     else if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
     let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
     let fallback = if has_fn_fields {
-        format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
+        format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, fields_str)
     } else if has_non_eq_fields {
-        format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+        format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, fields_str)
     } else {
-        format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+        format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, fields_str)
     };
     ctx.templates.render_with("struct_decl", None, &attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
         .unwrap_or(fallback)
@@ -194,7 +194,7 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
                     .collect::<Vec<_>>().join(", ");
                 let param_names = (0..types.len()).map(|i| format!("v{}", i))
                     .collect::<Vec<_>>().join(", ");
-                let fallback = format!("{}({})", v.name, &fields_str);
+                let fallback = format!("{}({})", v.name, fields_str);
                 ctx.templates.render_with("enum_variant", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("params", params_str.as_str()), ("param_names", param_names.as_str())])
                     .unwrap_or(fallback)
             }
@@ -238,9 +238,9 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
     else if has_hash { enum_attrs.push("has_hash"); }
     let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
     let fallback = if has_fn_fields {
-        format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, &variants_str)
+        format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, variants_str)
     } else {
-        format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
+        format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, variants_str)
     };
     let decl = ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
         .unwrap_or(fallback);

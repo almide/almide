@@ -32,7 +32,7 @@ impl Bridge {
             AlmideExpr::Map([xs_id, f_id]) => {
                 let xs = self.lower_expr(rec, *xs_id, vt)?;
                 let elem_ty = list_elem_ty(&xs.ty).ok_or(LowerError::MissingElementType)?;
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(&elem_ty), vt)?;
                 let ret_elem = lambda_ret_ty(&f).unwrap_or(elem_ty);
                 Ok(IrExpr {
                     kind: IrExprKind::Call {
@@ -51,7 +51,7 @@ impl Bridge {
             AlmideExpr::Filter([xs_id, p_id]) => {
                 let xs = self.lower_expr(rec, *xs_id, vt)?;
                 let elem_ty = list_elem_ty(&xs.ty).ok_or(LowerError::MissingElementType)?;
-                let p = self.lower_lambda_arg(rec, *p_id, &[elem_ty.clone()], vt)?;
+                let p = self.lower_lambda_arg(rec, *p_id, std::slice::from_ref(&elem_ty), vt)?;
                 Ok(IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Module {
@@ -106,7 +106,7 @@ impl Bridge {
             AlmideExpr::FlatMap([xs_id, f_id]) => {
                 let xs = self.lower_expr(rec, *xs_id, vt)?;
                 let elem_ty = list_elem_ty(&xs.ty).ok_or(LowerError::MissingElementType)?;
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(&elem_ty), vt)?;
                 // flat_map's lambda returns List[U]; overall result is
                 // List[U]. Try to recover U from the lambda's return
                 // type; if that's unresolved, fall back to List[Int]
@@ -132,7 +132,7 @@ impl Bridge {
             AlmideExpr::FilterMap([xs_id, f_id]) => {
                 let xs = self.lower_expr(rec, *xs_id, vt)?;
                 let elem_ty = list_elem_ty(&xs.ty).ok_or(LowerError::MissingElementType)?;
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(&elem_ty), vt)?;
                 // filter_map's lambda returns Option[U]; overall
                 // result is List[U]. Same fallback as flat_map.
                 let ret_inner = lambda_ret_ty(&f)
@@ -256,7 +256,7 @@ impl Bridge {
                         "compose marker only valid for unary lambda position".into(),
                     ));
                 };
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(elem_ty), vt)?;
                 let f_ret = lambda_ret_ty(&f).unwrap_or_else(|| elem_ty.clone());
                 let g = self.lower_lambda_arg(rec, *g_id, &[f_ret], vt)?;
                 compose_lambdas_fresh(&f, &g, vt)
@@ -267,8 +267,8 @@ impl Bridge {
                         "and-pred marker only valid for unary lambda position".into(),
                     ));
                 };
-                let p = self.lower_lambda_arg(rec, *p_id, &[elem_ty.clone()], vt)?;
-                let q = self.lower_lambda_arg(rec, *q_id, &[elem_ty.clone()], vt)?;
+                let p = self.lower_lambda_arg(rec, *p_id, std::slice::from_ref(elem_ty), vt)?;
+                let q = self.lower_lambda_arg(rec, *q_id, std::slice::from_ref(elem_ty), vt)?;
                 compose_predicates_fresh(&p, &q, vt)
             }
             AlmideExpr::Map(_) | AlmideExpr::Filter(_) | AlmideExpr::Fold(_)
@@ -286,7 +286,7 @@ impl Bridge {
                         "compose-fold marker only valid in fold's reducer position".into(),
                     ));
                 };
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(elem_ty), vt)?;
                 let f_ret = lambda_ret_ty(&f).unwrap_or_else(|| elem_ty.clone());
                 let g = self.lower_lambda_arg(rec, *g_id, &[acc_ty.clone(), f_ret], vt)?;
                 compose_map_into_fold_fresh(&f, &g, vt)
@@ -299,7 +299,7 @@ impl Bridge {
                         "compose-flatmap marker only valid in flat_map's lambda position".into(),
                     ));
                 };
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(elem_ty), vt)?;
                 let f_ret = lambda_ret_ty(&f).unwrap_or_else(|| Ty::list(elem_ty.clone()));
                 let g_elem = f_ret.inner().cloned().unwrap_or_else(|| elem_ty.clone());
                 let g = self.lower_lambda_arg(rec, *g_id, &[g_elem], vt)?;
@@ -313,7 +313,7 @@ impl Bridge {
                         "compose-map-filter marker only valid in filter_map's lambda position".into(),
                     ));
                 };
-                let f = self.lower_lambda_arg(rec, *f_id, &[elem_ty.clone()], vt)?;
+                let f = self.lower_lambda_arg(rec, *f_id, std::slice::from_ref(elem_ty), vt)?;
                 let f_ret = lambda_ret_ty(&f).unwrap_or_else(|| elem_ty.clone());
                 let p = self.lower_lambda_arg(rec, *p_id, &[f_ret], vt)?;
                 compose_map_filter_fresh(&f, &p, vt)
@@ -326,7 +326,7 @@ impl Bridge {
                         "compose-fm-fold marker only valid in fold's reducer position".into(),
                     ));
                 };
-                let fm = self.lower_lambda_arg(rec, *fm_id, &[elem_ty.clone()], vt)?;
+                let fm = self.lower_lambda_arg(rec, *fm_id, std::slice::from_ref(elem_ty), vt)?;
                 let fm_inner = lambda_ret_ty(&fm)
                     .and_then(|t| t.inner().cloned())
                     .unwrap_or_else(|| acc_ty.clone());
