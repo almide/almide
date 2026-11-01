@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench: per-codepoint reads of a string in a hot loop.
+fn main() -> Unit = {
+  let s = "abcdefghijklmnopqrstuvwxyz0123456789"
+  var n = 0
+  var r = 0
+  while r < 20000 {
+    var i = 0
+    while i < 36 {
+      n = n + string.len(string.char_at(s, i) ?? "")
+      i = i + 1
+    }
+    r = r + 1
+  }
+  println(int.to_string(n))
+}

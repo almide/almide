@@ -1,0 +1,7 @@
+# Known v1-slower-than-v0 programs (scripts/check-native-v1-perf.sh). A DEBT
+# list, not an allowance: each row is a certified program whose v1 render runs
+# more instructions than its v0 build, with the ratio it was found at (it may
+# only fall), the date found and the plan that removes it. A row goes as soon
+# as the program reads clean; the gate fails on a clean row left behind.
+#
+# program<TAB>ratio<TAB>found<TAB>plan
