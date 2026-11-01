@@ -28,6 +28,12 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
 use crate::*;
 
+/// The module's memory is 32-bit (wasm32); the assembler declares it from
+/// this. An address or length crossing
+/// the host boundary (a Region's `(base, len)`, ADR-0031 D3 / A1, #4354)
+/// takes this memory's width: `i32` here, the emitter's `i64` on memory64.
+pub(crate) const MEMORY64: bool = false;
+
 /// The export the host hands a Region's address back through.
 pub(crate) const RELEASE_EXPORT: &str = "__region_release";
 
@@ -73,7 +79,7 @@ impl RegionExport {
     }
 
     fn narrowed(&self, k: u32) -> bool {
-        !crate::assembly::MEMORY64 && self.narrow.contains(&k) && self.params.get(k as usize) == Some(&ValType::I64)
+        !MEMORY64 && self.narrow.contains(&k) && self.params.get(k as usize) == Some(&ValType::I64)
     }
 
     /// Does the adapter hand out a share the host gives back?

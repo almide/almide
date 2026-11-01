@@ -11,11 +11,6 @@ use crate::func::Pool;
 use crate::work::FnWork;
 use crate::*;
 
-/// The module's memory is 32-bit (wasm32). An address or length crossing
-/// the host boundary (a Region's `(base, len)`, ADR-0031 D3 / A1, #4354)
-/// takes this memory's width: `i32` here, the emitter's `i64` on memory64.
-pub(crate) const MEMORY64: bool = false;
-
 pub(crate) struct AssembleIn<'a> {
     pub(crate) table: &'a FnTable,
     pub(crate) work: &'a FnWork,
@@ -299,7 +294,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     memories.memory(MemoryType {
         minimum: pages,
         maximum,
-        memory64: MEMORY64,
+        memory64: crate::region_export::MEMORY64,
         shared: false,
         page_size_log2: None,
     });
