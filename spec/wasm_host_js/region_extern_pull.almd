@@ -1,0 +1,24 @@
+// @leg: structural
+// @contract: C-XXX
+// #4354 (ADR-0031 amendment A4 pull): a writable `ffi.alloc` Region passed
+// to an `@extern(wasm)` import is lent for that call as `(base, len)` in the
+// memory's address width (two i32 on wasm32), and the host fills it in
+// place. The program reads back what the host wrote, with no copy at the
+// boundary. A read-only slice lent the same way arrives as its own sub-range.
+// The hooks are region_extern_pull.host.mjs.
+import ffi
+
+@extern(wasm, "js", "js_fill")
+fn js_fill(buf: Region, first: Int) -> Int = _
+
+@extern(wasm, "js", "js_sum")
+fn js_sum(buf: Region) -> Int = _
+
+effect fn main() -> Unit = {
+  let r = ffi.alloc(6)!
+  let wrote = js_fill(r, 65)
+  let b = ffi.to_bytes(r)!
+  println("host wrote ${wrote} bytes: ${bytes.to_string_lossy(b)}")
+  let tail = ffi.slice(r, 2, 3)!
+  println("host summed the slice: ${js_sum(tail)}")
+}

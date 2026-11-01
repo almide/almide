@@ -11,6 +11,11 @@ use crate::func::Pool;
 use crate::work::FnWork;
 use crate::*;
 
+/// The module's memory is 32-bit (wasm32). An address or length crossing
+/// the host boundary (a Region's `(base, len)`, ADR-0031 D3 / A1, #4354)
+/// takes this memory's width: `i32` here, the emitter's `i64` on memory64.
+pub(crate) const MEMORY64: bool = false;
+
 pub(crate) struct AssembleIn<'a> {
     pub(crate) table: &'a FnTable,
     pub(crate) work: &'a FnWork,
@@ -144,7 +149,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // export-table global index is fixed once the globals are laid out, and
     // the call edges do not depend on it.
     let mut adapters: Vec<Function> = region_exports.iter().map(|e| crate::region_export::adapter(e, 0)).collect();
-    let mut release = (!adapters.is_empty()).then(|| crate::region_export::release(0));
+    let shares = region_exports.iter().any(crate::region_export::RegionExport::hands_out_share);
+    let mut release = shares.then(|| crate::region_export::release(0));
     // #2407: the allocation counters, APPENDED after the top-let globals so
     // no existing index moves — four i64 globals `$alloc` / `$free` bump,
     // present only under the `alloc_count` switch (a shipped module has
@@ -219,7 +225,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
     let adapter_ty = T_FN_BASE + table.infos.len() as u32 + work.itypes.borrow().len() as u32;
     for e in region_exports {
-        types.ty().function(e.params.clone(), [ValType::I32, ValType::I32]);
+        types.ty().function(e.export_params(), e.export_results());
     }
 
     let mut imports = ImportSection::new();
@@ -293,7 +299,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     memories.memory(MemoryType {
         minimum: pages,
         maximum,
-        memory64: false,
+        memory64: MEMORY64,
         shared: false,
         page_size_log2: None,
     });

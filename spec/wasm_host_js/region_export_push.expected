@@ -1,0 +1,7 @@
+ready
+inbox holds 16 bytes: host wrote this!
+tail at +5: wrote this!
+lent 11 bytes: wrote this!
+tail after the parent's release: wrote this!
+a second release traps
+released shares free their blocks
