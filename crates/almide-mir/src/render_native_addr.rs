@@ -242,7 +242,9 @@ impl AddrState {
             .iter()
             .filter_map(|op| match op {
                 Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
-                Op::Alloc { dst, init: Init::OptNone, .. } => alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i)),
+                Op::Alloc { dst, init: Init::OptNone | Init::ResOkScalar { .. }, .. } => {
+                    alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i))
+                }
                 // A scalar-only constructor of a heap variant is built as a slot list.
                 Op::ListLit { dst, .. } => alloc_rec
                     .get(dst)

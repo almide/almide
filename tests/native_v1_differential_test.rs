@@ -127,6 +127,7 @@ const CORPUS: &[(&str, &str)] = &[
     // ── #4006: the stdlib Value on v0's runtime enum; a Text-protocol call ──
     ("value_floor", "import json\n\nfn mk(n: Int) -> Value = value.int(n)\n\neffect fn main() -> Unit = {\n  println(json.stringify(mk(7)))\n  println(json.stringify(value.string(\"hi\")))\n  let p = json.parse(\"{\\\"a\\\": [1, true]}\")!\n  println(json.stringify(p))\n}\n"),
     ("list_join_strings", "fn j(xs: List[String]) -> String = list.join(xs, \", \")\n\nfn main() -> Unit = {\n  let xs = [\"a\", \"b\", \"c\"]\n  println(list.join(xs, \"-\"))\n  println(j(xs))\n}\n"),
+    ("result_int_int", "fn ck(x: Int) -> Result[Int, Int] = if x > 0 then ok(x) else err(0 - x)\n\nfn show(r: Result[Int, Int]) -> String = match r {\n  ok(v) => int.to_string(v),\n  err(e) => \"e\" + int.to_string(e),\n}\n\nfn main() -> Unit = {\n  println(show(ck(3)))\n  println(show(ck(-4)))\n}\n"),
     // The same one-slot block as `some(s)`, declared a list: stays a list.
     ("one_string_list", "fn one(s: String) -> List[String] = [s]\n\nfn main() -> Unit = {\n  let xs = one(\"solo\")\n  println(xs[0])\n  println(int.to_string(list.len(xs)))\n}\n"),
     // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
