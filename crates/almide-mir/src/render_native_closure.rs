@@ -16,7 +16,7 @@ use std::fmt::Write as _;
 
 fn kind_code(k: NativeSigKind) -> String {
     match k {
-        NativeSigKind::I64 => "i".into(),
+        NativeSigKind::I64 | NativeSigKind::Narrow { .. } => "i".into(),
         NativeSigKind::F64 => "f".into(),
         NativeSigKind::Str => "s".into(),
         NativeSigKind::ListI64 => "l".into(),
@@ -31,7 +31,7 @@ fn kind_code(k: NativeSigKind) -> String {
 /// The borrowed spelling of a param of kind `k`.
 fn param_spelling(k: NativeSigKind) -> String {
     match k {
-        NativeSigKind::I64 => "i64".into(),
+        NativeSigKind::I64 | NativeSigKind::Narrow { .. } => "i64".into(),
         NativeSigKind::F64 => "f64".into(),
         NativeSigKind::Str => "&str".into(),
         NativeSigKind::ListI64 => "&[i64]".into(),
@@ -46,7 +46,7 @@ fn param_spelling(k: NativeSigKind) -> String {
 /// The owned value kind a result of kind `k` binds as.
 fn owned_nty(k: NativeSigKind) -> NTy {
     match k {
-        NativeSigKind::I64 => NTy::I64,
+        NativeSigKind::I64 | NativeSigKind::Narrow { .. } => NTy::I64,
         NativeSigKind::F64 => NTy::F64,
         NativeSigKind::Str => NTy::Str,
         NativeSigKind::ListI64 => NTy::Vec,

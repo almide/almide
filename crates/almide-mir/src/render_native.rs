@@ -92,6 +92,35 @@ pub enum NativeSigKind {
     Opt,
     /// `Result<AlmideString, AlmideString>` — a `Result[String, String]`.
     ResStr,
+    /// A narrow integer (`Int8`..`UInt32`) crossing a call boundary as its
+    /// real Rust type (`i32`, `u8`, …): the value is the lane's i64 inside
+    /// the body, converted with `as` at the boundary (#4006). The MIR keeps
+    /// every narrow value re-wrapped, so both conversions are exact.
+    Narrow { bits: u8, signed: bool },
+}
+
+impl NativeSigKind {
+    /// The kind on the i64 lane: a narrow integer travels as `i64` where an
+    /// ABI is shared by dispatch (a closure table, a function value).
+    pub(crate) fn lane(self) -> Self {
+        match self {
+            NativeSigKind::Narrow { .. } => NativeSigKind::I64,
+            k => k,
+        }
+    }
+
+    /// The Rust spelling of a narrow integer kind (`None` for any other kind).
+    pub(crate) fn narrow_rust(self) -> Option<&'static str> {
+        let NativeSigKind::Narrow { bits, signed } = self else { return None };
+        Some(match (bits, signed) {
+            (8, true) => "i8",
+            (16, true) => "i16",
+            (32, true) => "i32",
+            (8, false) => "u8",
+            (16, false) => "u16",
+            _ => "u32",
+        })
+    }
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -254,6 +283,7 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
         verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
+        let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
@@ -318,7 +348,7 @@ fn seed_param_ntys(
             Some(NativeSigKind::ListStr) => NTy::VecStrRef,
             Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),
             Some(NativeSigKind::Str) => NTy::StrRef,
-            Some(NativeSigKind::I64) => NTy::I64,
+            Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
             Some(NativeSigKind::Opt) => NTy::Opt,
             Some(NativeSigKind::ResStr) => NTy::ResStr,
@@ -571,6 +601,47 @@ fn finish_native_fn(
         out = out.replace(CUT_RET_MARKER, cut_ret);
     }
     Ok((format!("{sig}{out}"), ret_nty))
+}
+
+/// #4006: a function whose declared signature holds a narrow integer crosses
+/// its call boundary in the real Rust type (`i32`, `u8`, …), the way the
+/// standard codegen spells it — the i64 lane at the boundary cost an
+/// Int32 recurrence a sign-extension per call on its dependency chain. The
+/// body renders on the lane as before, as `NAME__lane` (inlined into the
+/// boundary fn), and the boundary converts with `as`: exact both ways, since
+/// the MIR keeps every narrow value re-wrapped to its width. Only an
+/// all-scalar signature takes this ABI (the sig table lanes any other).
+fn narrow_abi_wrapper(func: &MirFunction, sigs: &NativeSigs, rendered: String) -> Result<String, LowerError> {
+    let Some((ps, ret)) = sigs.get(func.name.as_str()) else { return Ok(rendered) };
+    if !ps.iter().chain(ret.iter()).any(|k| k.narrow_rust().is_some()) {
+        return Ok(rendered);
+    }
+    let m = mangle(&func.name);
+    let head = format!("fn {m}(");
+    if !rendered.contains(&head) || ps.len() != func.params.len() {
+        return Err(wall("native: a narrow-ABI fn whose rendered head is not found"));
+    }
+    let lane = rendered.replacen(&head, &format!("#[inline(always)]\nfn {m}__lane("), 1);
+    let spell = |k: &NativeSigKind| -> Result<&'static str, LowerError> {
+        match k {
+            NativeSigKind::I64 => Ok("i64"),
+            NativeSigKind::F64 => Ok("f64"),
+            k => k.narrow_rust().ok_or_else(|| wall("native: a narrow-ABI fn with a non-scalar signature")),
+        }
+    };
+    let mut params = Vec::new();
+    let mut args = Vec::new();
+    for (p, k) in func.params.iter().zip(ps) {
+        params.push(format!("{}: {}", var(p.value), spell(k)?));
+        args.push(if k.narrow_rust().is_some() { format!("{} as i64", var(p.value)) } else { var(p.value) });
+    }
+    let call = format!("{m}__lane({})", args.join(", "));
+    let (ret_s, body) = match ret {
+        None => (String::new(), format!("{call};")),
+        Some(k) if k.narrow_rust().is_some() => (format!(" -> {}", spell(k)?), format!("{call} as {}", spell(k)?)),
+        Some(k) => (format!(" -> {}", spell(k)?), call),
+    };
+    Ok(format!("{lane}fn {m}({}){ret_s} {{\n    {body}\n}}\n", params.join(", ")))
 }
 
 /// The trailing return expression: a borrowed param is moved out as a fresh

@@ -1,11 +1,11 @@
 impl LowerCtx {
 
-    /// The name → `PrimKind` table for the prim calls lowering synthesizes (see
-    /// [`Self::lower_prim_call`]); any other `prim.*` name is stdlib-internal (#3025).
-    fn prim_kind_for_name(&self, func: &str) -> Result<crate::PrimKind, LowerError> {
+    /// The budget / timeout region prims the frontend synthesizes as RuntimeCalls
+    /// (not prim.almd fns, so they carry no `@prim_op`): `None` for any other name.
+    fn region_prim_kind(&self, func: &str) -> Option<crate::PrimKind> {
         if matches!(func, "budget_enter" | "budget_exhausted" | "budget_exit" | "budget_spend") {
             crate::charge_probe::note_budget_used();
-            return Ok(match func {
+            return Some(match func {
                 "budget_enter" => crate::PrimKind::BudgetEnter,
                 "budget_exhausted" => crate::PrimKind::BudgetExhausted,
                 "budget_spend" => crate::PrimKind::BudgetSpend,
@@ -14,19 +14,120 @@ impl LowerCtx {
         }
         if matches!(func, "timeout_enter" | "timeout_exit" | "timeout_hit") {
             crate::charge_probe::note_timeout_used();
-            return Ok(match func {
+            return Some(match func {
                 "timeout_enter" => crate::PrimKind::TimeoutEnter,
                 "timeout_hit" => crate::PrimKind::TimeoutHit,
                 _ => crate::PrimKind::TimeoutExit,
             });
         }
-        match func {
-            "handle" => Ok(crate::PrimKind::Handle),
-            "die" => Ok(crate::PrimKind::Die),
-            _ => Err(LowerError::Unsupported(format!(
-                "prim.{func} is internal to the standard library (#3025)"
-            ))),
+        None
+    }
+
+    /// Lower a prim call by its DECLARED op (`@prim_op`, [`crate::prim_ops`]).
+    fn lower_declared_prim(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        op: crate::prim_ops::PrimOp,
+        span: Option<almide_ir::Span>,
+    ) -> Result<Option<ValueId>, LowerError> {
+        use crate::prim_ops::PrimOp;
+        use crate::PrimKind;
+        match op {
+            PrimOp::Addr => self.emit_prim_call(func, args, PrimKind::Handle),
+            PrimOp::Abort => self.emit_prim_call(func, args, PrimKind::Die),
+            PrimOp::Load { width } => self.emit_prim_call(func, args, PrimKind::Load { width }),
+            PrimOp::LoadRef => self.emit_prim_call(func, args, PrimKind::LoadHandle),
+            PrimOp::Store { width } => self.emit_prim_call(func, args, PrimKind::Store { width }),
+            PrimOp::Direct(kind) => self.emit_prim_call(func, args, kind),
+            PrimOp::Int(int_op) => self.emit_prim_bitop(func, int_op, args, span),
+            PrimOp::Alloc(block) => self.emit_prim_alloc(func, args, block, span),
+            PrimOp::StoreOwned => self.emit_prim_store_owned(func, args, span),
+            PrimOp::Rc { .. } | PrimOp::Ptr | PrimOp::Host => Err(LowerError::at(
+                span,
+                format!("prim.{func} ({op:?}) is not lowered to MIR on this path"),
+            )),
         }
+    }
+
+    /// `@prim_op(int, op = …)`: a scalar `IntBinOp` over the two operands.
+    fn emit_prim_bitop(
+        &mut self,
+        func: &str,
+        op: crate::IntOp,
+        args: &[IrExpr],
+        span: Option<almide_ir::Span>,
+    ) -> Result<Option<ValueId>, LowerError> {
+        let [a, b] = args else {
+            return Err(LowerError::at(span, format!("prim.{func} takes two operands")));
+        };
+        let operand = |s: &mut Self, e: &IrExpr| {
+            s.lower_scalar_value(e)
+                .ok_or_else(|| LowerError::at(e.span, format!("prim.{func} operand is not a lowerable scalar")))
+        };
+        let a = operand(self, a)?;
+        let b = operand(self, b)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op, a, b });
+        Ok(Some(dst))
+    }
+
+    /// `@prim_op(alloc, block = …)`: a runtime-sized OWNED block (cert `i`, a
+    /// fresh object) the body fills through stores, moved out or dropped like any
+    /// heap value. A `bytes` block is a String/Bytes (`Init::DynStr`); `slots`
+    /// holds scalars (`Init::DynList`); `owned_slots` owns its heap elements, so
+    /// its scope-end drop is the recursive one and a `store_owned` moves each
+    /// element in.
+    fn emit_prim_alloc(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        block: crate::prim_ops::AllocBlock,
+        span: Option<almide_ir::Span>,
+    ) -> Result<Option<ValueId>, LowerError> {
+        use crate::prim_ops::AllocBlock;
+        let len = args
+            .first()
+            .and_then(|a| self.lower_scalar_value(a))
+            .ok_or_else(|| LowerError::at(span, format!("prim.{func} length is not a lowerable scalar")))?;
+        let init = match block {
+            AllocBlock::Bytes => crate::Init::DynStr { len },
+            AllocBlock::Slots => crate::Init::DynList { len },
+            AllocBlock::OwnedSlots => crate::Init::DynListStr { len },
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc { dst, repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }, init });
+        if block == AllocBlock::OwnedSlots {
+            self.value_drops.entry(dst).or_default().flat_elems = true;
+        }
+        Ok(Some(dst))
+    }
+
+    /// `@prim_op(store_owned)`: store the heap `piece`'s handle 8-wide into the
+    /// slot at `addr` and CONSUME the piece — the block now owns it (cert `m`).
+    fn emit_prim_store_owned(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        span: Option<almide_ir::Span>,
+    ) -> Result<Option<ValueId>, LowerError> {
+        use crate::PrimKind;
+        let [addr, piece] = args else {
+            return Err(LowerError::at(span, format!("prim.{func} takes a slot address and a value")));
+        };
+        let addr = self
+            .lower_scalar_value(addr)
+            .ok_or_else(|| LowerError::at(addr.span, format!("prim.{func} slot address is not a lowerable scalar")))?;
+        let IrExprKind::Var { id } = &piece.kind else {
+            return Err(LowerError::at(piece.span, format!("prim.{func} piece must be a heap variable (to consume)")));
+        };
+        let piece = self.value_for(*id)?;
+        let handle = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![piece] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, handle] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        Ok(None)
     }
 
     /// One argument of [`Self::emit_prim_call`].
@@ -82,8 +183,16 @@ impl LowerCtx {
         for a in args {
             lowered.push(self.lower_prim_call_one_arg(func, a, kind)?);
         }
-        // `prim.die` is the one Unit op `prim_kind_for_name` yields.
-        let dst = if matches!(kind, PrimKind::Die) { None } else { Some(self.fresh_value()) };
+        let dst = if matches!(kind, PrimKind::Die | PrimKind::Store { .. }) {
+            None
+        } else {
+            Some(self.fresh_value())
+        };
+        // A `load_ref` result is a BORROW of the slot's value — the block still owns
+        // it, so a `let` of it joins no scope-end drop set (that would double-free).
+        if let (PrimKind::LoadHandle, Some(d)) = (kind, dst) {
+            self.param_values.insert(d);
+        }
         self.ops.push(Op::Prim { kind, dst, args: lowered });
         Ok(dst)
     }

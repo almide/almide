@@ -42,6 +42,9 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // stdlib fn it specializes, which the native floor serves it as
     // (crates/almide-mir native_floor)
     "specializes",
+    // A prim fn's machine op, read by the MIR lowering (crates/almide-mir
+    // `prim_ops`); stdlib-only like `@intrinsic` (E085)
+    "prim_op",
     // A parameter that runs concurrently (ADR-0020 §3.1, E008)
     "concurrent",
     // A stdlib fn whose effect on process-local state a sibling fan arm could

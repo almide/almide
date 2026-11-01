@@ -137,6 +137,43 @@ impl AddrState {
         for (v, i) in declared {
             alloc_rec.entry(v).or_insert(i);
         }
+        // An if-value join holds one declared type on both arms: a typed join
+        // types its arms' values, and a typed arm types the join. Only for an
+        // all-scalar struct (built by value from its slot list), the one kind
+        // whose arms are otherwise untyped literals.
+        {
+            let mut edges: Vec<(ValueId, ValueId)> = Vec::new();
+            let mut ifs: Vec<Option<ValueId>> = Vec::new();
+            for op in &func.ops {
+                match op {
+                    Op::IfThen { dst, .. } => ifs.push(*dst),
+                    Op::Else { val } | Op::EndIf { val } => {
+                        if let (Some(v), Some(Some(d))) = (val, ifs.last()) {
+                            edges.push((*d, *v));
+                        }
+                        if matches!(op, Op::EndIf { .. }) {
+                            ifs.pop();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            loop {
+                let before = alloc_rec.len();
+                for (a, b) in &edges {
+                    let scalar_struct = |v: Option<&u16>| v.copied().filter(|i| crate::render_native_rec::all_scalar_struct(*i));
+                    if let Some(i) = scalar_struct(alloc_rec.get(a)) {
+                        alloc_rec.entry(*b).or_insert(i);
+                    }
+                    if let Some(i) = scalar_struct(alloc_rec.get(b)) {
+                        alloc_rec.entry(*a).or_insert(i);
+                    }
+                }
+                if alloc_rec.len() == before {
+                    break;
+                }
+            }
+        }
         // A block stored into a typed parent's slot takes the slot's declared
         // kind: a list's element, a record's field, an enum slot's one record kind.
         let mut handle_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
@@ -296,10 +333,11 @@ impl AddrState {
                 Op::Alloc { dst, init: Init::OptNone | Init::ResOkScalar { .. }, .. } => {
                     alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i))
                 }
-                // A scalar-only constructor of a heap variant is built as a slot list.
+                // A scalar-only constructor of a heap variant, or an all-scalar
+                // generated struct, is built as a slot list.
                 Op::ListLit { dst, .. } => alloc_rec
                     .get(dst)
-                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some())
+                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i))
                     .map(|i| (*dst, *i)),
                 _ => None,
             })
@@ -725,6 +763,25 @@ pub(crate) fn render_addr_op(
             let (acc, _) = enum_read(i, k as usize, true).ok_or_else(|| wall("native: a scalar read of a heap enum slot"))?;
             tys.insert(*dst, NTy::I64);
             line!("let mut {}: i64 = {}.{acc};", var(*dst), var(*list));
+            return Ok(true);
+        }
+        Op::ListLit { dst, elems } if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::all_scalar_struct(*i)) => {
+            // An all-scalar struct literal: slot K is field `fK` (a real f64
+            // goes in as its bits, the value the MIR stores there).
+            let i = st.alloc_rec[dst];
+            let mut fields = Vec::with_capacity(elems.len());
+            for (k, e) in elems.iter().enumerate() {
+                fields.push(match ty(tys, e) {
+                    Some(NTy::I64) => format!("f{k}: {}", var(*e)),
+                    Some(NTy::F64) => format!("f{k}: {}.to_bits() as i64", var(*e)),
+                    _ => return Err(wall("native: a heap element in an all-scalar struct literal")),
+                });
+            }
+            if fields.len() != crate::render_native_rec::field_count(i) {
+                return Err(wall("native: a struct literal of the wrong width"));
+            }
+            tys.insert(*dst, NTy::Rec(i));
+            line!("let mut {}: {n} = {n} {{ {} }};", var(*dst), fields.join(", "), n = crate::render_native_rec::struct_name(i));
             return Ok(true);
         }
         Op::ListLit { dst, elems } if st.alloc_rec.contains_key(dst) => {

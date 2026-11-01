@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 264 of 1007
+# rendered: 270 of 1007
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/allocation_within_limits.almd
 spec/wasm_cross/append_accumulator.almd
@@ -49,6 +49,7 @@ spec/wasm_cross/exit_code_out_of_range.almd
 spec/wasm_cross/exit_code_passthrough.almd
 spec/wasm_cross/exit_code_upper_bound.almd
 spec/wasm_cross/expr_stmt_comment.almd
+spec/wasm_cross/fallible_tuple_value_tail.almd
 spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_race_mapper.almd
 spec/wasm_cross/flight_pid_control.almd
@@ -57,6 +58,7 @@ spec/wasm_cross/float_concrete.almd
 spec/wasm_cross/float_no_contraction.almd
 spec/wasm_cross/float_parse.almd
 spec/wasm_cross/float_parse_special.almd
+spec/wasm_cross/float_round_exact.almd
 spec/wasm_cross/float_shortest_roundtrip.almd
 spec/wasm_cross/float_sign_minmax_ieee.almd
 spec/wasm_cross/float_signed_zero_minmax.almd
@@ -82,6 +84,7 @@ spec/wasm_cross/fuel_var_budget.almd
 spec/wasm_cross/fuel_wrapper_entry_exempt.almd
 spec/wasm_cross/fuel_zero_budget_inline.almd
 spec/wasm_cross/generic_unit_ctor_pinned.almd
+spec/wasm_cross/generics_mono.almd
 spec/wasm_cross/gleam_bool_shortcircuit.almd
 spec/wasm_cross/gleam_float_sci.almd
 spec/wasm_cross/gleam_int_radix.almd
@@ -102,6 +105,7 @@ spec/wasm_cross/guard_statement.almd
 spec/wasm_cross/hash_digests.almd
 spec/wasm_cross/heap_result_err_interp.almd
 spec/wasm_cross/heap_result_if_bind_chain.almd
+spec/wasm_cross/heap_result_if_record_arm.almd
 spec/wasm_cross/i64_min_literal.almd
 spec/wasm_cross/if_block_forms.almd
 spec/wasm_cross/if_let_forms.almd
@@ -141,6 +145,7 @@ spec/wasm_cross/match_result.almd
 spec/wasm_cross/math_atan_tanh.almd
 spec/wasm_cross/math_choose_exact.almd
 spec/wasm_cross/math_explog.almd
+spec/wasm_cross/math_log_gamma_negative.almd
 spec/wasm_cross/math_pow.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
@@ -223,6 +228,7 @@ spec/wasm_cross/time_negative_scale.almd
 spec/wasm_cross/time_negative_trap.almd
 spec/wasm_cross/time_ops_algebra.almd
 spec/wasm_cross/time_saturate.almd
+spec/wasm_cross/tm_list_tuple_fn_pass.almd
 spec/wasm_cross/tm_list_tuple_interp.almd
 spec/wasm_cross/tm_list_tuple_lit_print.almd
 spec/wasm_cross/tm_list_tuple_shadow_drop.almd

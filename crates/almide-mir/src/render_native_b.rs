@@ -236,9 +236,17 @@ fn render_user_fn_call(
     for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
         let (code, got) = call_arg(a, s.tys)?;
-        rendered_args.push(user_arg_in_declared_mode(name, want, code, got)?);
+        let arg = user_arg_in_declared_mode(name, want, code, got)?;
+        // A narrow param crosses in its real Rust type (#4006).
+        rendered_args.push(match callee_sig.and_then(|(ps, _)| ps.get(i)).and_then(|k| k.narrow_rust()) {
+            Some(t) => format!("({arg} as {t})"),
+            None => arg,
+        });
     }
-    let rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    let mut rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    if callee_sig.and_then(|(_, r)| *r).is_some_and(|k| k.narrow_rust().is_some()) {
+        rendered = format!("({rendered} as i64)");
+    }
     bind_user_fn_result(call, callee_sig, &rendered, s)
 }
 
@@ -253,7 +261,7 @@ fn declared_param_want(
     p: &crate::MirParam,
 ) -> Result<NTy, LowerError> {
     Ok(match callee_sig.and_then(|(ps, _)| ps.get(i)) {
-        Some(NativeSigKind::I64) => NTy::I64,
+        Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::ListStr) => NTy::VecStrRef,
@@ -370,7 +378,7 @@ fn bind_user_fn_result(
                 Some(NativeSigKind::ListStr) => NTy::VecStr,
                 Some(NativeSigKind::Rec(i)) => NTy::Rec(i),
                 Some(NativeSigKind::Str) => NTy::Str,
-                Some(NativeSigKind::I64) => NTy::I64,
+                Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
                 Some(NativeSigKind::Res) => NTy::Res,
                 Some(NativeSigKind::Opt) => NTy::Opt,
