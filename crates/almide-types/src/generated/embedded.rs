@@ -38273,7 +38273,8 @@ fn __empty_replace(s: String, to: String) -> String = {
 
 
 
-  let nchars = if slen <= 0 then 0 else 1 + __rep_nchars(sbase + 1, send, 0)
+  let nchars = if slen <= 0 then 0
+  else 1 + __rep_nchars(sbase + 1, send, 0)
   let rlen = (nchars + 1) * tlen + slen
   let buf = prim.alloc_str(rlen)
   let dbase = prim.handle(buf) + 12
