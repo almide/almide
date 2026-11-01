@@ -1868,6 +1868,11 @@ jobs:
           python3 scripts/check-rawptr-surface.py --self-test
           python3 scripts/check-rawptr-surface.py
 
+      - name: UTF-8 producer ledger (#4005 A4 — every String producer derived from its declaration validates or builds by construction, with invalid-byte evidence; the open list is shrink-only)
+        run: |
+          python3 scripts/check-utf8-producers.py --self-test
+          python3 scripts/check-utf8-producers.py
+
       - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime and the compiler-emitted code listed with a class and a reason)
         run: |
           bash scripts/check-runtime-unsafe.sh --self-test
