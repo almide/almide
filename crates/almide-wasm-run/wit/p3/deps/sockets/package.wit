@@ -4,8 +4,8 @@ package wasi:sockets@0.3.0;
 // name lookup (#4306, ops 140..=145, wasi_p3_net.rs). Every type is the
 // upstream declaration, case for case and field for field (the shim derives
 // its discriminants, payload offsets and flat shapes from these); a resource
-// lists only the methods the shim imports. Source: wasmtime-wasi's
-// `src/p3/wit/deps/sockets.wit` (the pinned crate), WASI 0.3.0.
+// lists only the methods the shim imports. Source: wasmtime-wasi 50.0.1's
+// `src/p3/wit/deps/sockets.wit`, WASI 0.3.0 (byte-identical to 49.0.4's).
 interface types {
   use wasi:clocks/types@0.3.0.{duration};
 
