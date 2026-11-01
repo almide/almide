@@ -665,6 +665,10 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     rewrite_native_result_str_windows(&ir, &mut functions);
     rewrite_native_option_windows(&ir, &mut functions);
     crate::native_slot_rewrite::rewrite_slot_ops(&mut functions, crate::lower::mutable_global_slot_count());
+    // Narrow-width arithmetic computes in its declared integer type (#4006).
+    for f in functions.iter_mut() {
+        crate::native_narrow_rewrite::rewrite_narrow_ops(f)?;
+    }
     if functions.iter().any(|f| f.name == SLOT_INIT) {
         if let Some(main) = functions.iter_mut().find(|f| f.name == "main") {
             main.ops.insert(
