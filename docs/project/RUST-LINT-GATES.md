@@ -79,6 +79,18 @@ regression controls in [`scripts/test_ci_prose.py`](../../scripts/test_ci_prose.
 failure behavior. The classifier prints its reason (`prose lane: "…"`) in the
 `Change class` job log of each workflow.
 
+### Reading a run
+
+Each workflow's classification job prints one line, `prose lane: "<reason>"`,
+followed by `prose_only=true|false`. CI calls this job `Change class`; the
+Acceptance Ring, Cross-Target and mutation sweep call it `prose-changes`. A
+`false` reason names the first path or line that kept the change out of the
+lane. When the lane is taken, the `Lane` step of Emit & Format prints
+`PROSE_LANE=true`, and the skipped steps show as skipped in the job view. In
+`Build (Linux)`, `verified exact-base compiler artifact <id>` means the base
+binary was reused. `prose compiler reuse unavailable (…)` means it was built
+again. Both are valid outcomes.
+
 ## Recorded exclusion: `cargo fmt --all -- --check`
 
 Not gated, on purpose, as of 2026-08-28:
