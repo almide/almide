@@ -138,9 +138,6 @@ impl crate::emitter::Emitter<'_> {
                 {
                     let mut i = self.f.instructions();
                     i.local_set(he);
-                    if *inclusive {
-                        i.local_get(he).i64_const(1).i64_add().local_set(he);
-                    }
                     // d = he - hs (wrapping); true span positive iff
                     // he > hs; positive overflow iff sign(he)!=sign(hs)
                     // and sign(d)!=sign(he) — then any past-cap value
@@ -156,6 +153,17 @@ impl crate::emitter::Emitter<'_> {
                     i.local_get(he).local_get(hs).i64_gt_s();
                     i.select();
                     i.local_set(hd);
+                    // #4355: an inclusive range counts its end too. `he + 1`
+                    // wrapped to i64::MIN at `he == i64::MAX` (an empty list);
+                    // the exclusive span plus one when he >= hs cannot wrap,
+                    // since the span above is at most RANGE_CAP + 1.
+                    if *inclusive {
+                        i.local_get(hd).i64_const(1).i64_add();
+                        i.i64_const(0);
+                        i.local_get(he).local_get(hs).i64_ge_s();
+                        i.select();
+                        i.local_set(hd);
+                    }
                     i.local_get(hd).i64_const(RANGE_CAP).i64_gt_s();
                     i.if_(BlockType::Empty);
                     i.i32_const(msg as i32);
