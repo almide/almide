@@ -99,6 +99,16 @@ fn parent_slot_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
     })
 }
 
+/// The heap kind a read of a typed parent's slot binds as: the declared kind,
+/// or an enum slot's one heap kind.
+fn slot_read_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
+    if rec::enum_cases(i).is_some() {
+        let heap: Vec<NTy> = rec::enum_slot_kinds(i, slot?).into_iter().filter(|t| *t != NTy::I64).collect();
+        return (heap.len() == 1).then(|| heap[0]);
+    }
+    parent_slot_kind(i, slot).filter(|t| *t != NTy::I64)
+}
+
 /// Type the untyped slot blocks of `func` into `alloc_rec` (block → generated
 /// type) and return the blocks that are `List[String]`.
 pub(super) fn type_blocks(
@@ -160,21 +170,7 @@ pub(super) fn type_blocks(
             _ => {}
         }
     }
-    let mut str_lists: BTreeSet<ValueId> = BTreeSet::new();
-    // Untyped blocks every store of which is a scalar: the `Vec<i64>` default.
-    let mut scalar_blocks: BTreeSet<ValueId> = BTreeSet::new();
-    loop {
-        let before = (alloc_rec.len(), str_lists.len(), scalar_blocks.len(), known.len());
-        // Down: a block stored into a typed parent's slot.
-        for op in &func.ops {
-            let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
-            let (Some(&(r, off)), Some(&vsrc)) = (f.base_of.get(&args[0]), f.handle_of.get(&args[1])) else { continue };
-            let Some(&i) = alloc_rec.get(&r) else { continue };
-            if let Some(NTy::Rec(j)) = parent_slot_kind(i, slot_of(off)) {
-                alloc_rec.entry(vsrc).or_insert(j);
-            }
-        }
-        let kind_of = |v: &ValueId, known: &BTreeMap<ValueId, NTy>, alloc_rec: &BTreeMap<ValueId, u16>, str_lists: &BTreeSet<ValueId>, scalar_blocks: &BTreeSet<ValueId>| {
+    let kind_of = |v: &ValueId, known: &BTreeMap<ValueId, NTy>, alloc_rec: &BTreeMap<ValueId, u16>, str_lists: &BTreeSet<ValueId>, scalar_blocks: &BTreeSet<ValueId>| {
             if let Some(i) = alloc_rec.get(v) {
                 Some(NTy::Rec(*i))
             } else if str_lists.contains(v) {
@@ -185,6 +181,41 @@ pub(super) fn type_blocks(
                 known.get(v).copied()
             }
         };
+    let mut str_lists: BTreeSet<ValueId> = BTreeSet::new();
+    // Untyped blocks every store of which is a scalar: the `Vec<i64>` default.
+    let mut scalar_blocks: BTreeSet<ValueId> = BTreeSet::new();
+    loop {
+        let before = (alloc_rec.len(), str_lists.len(), scalar_blocks.len(), known.len());
+        // Down and across first, to their own fixpoint: a declared kind
+        // reaches every block it can before any block is typed from its
+        // stores, so a store-typed struct never stands in for a declared type.
+        loop {
+        let inner = (alloc_rec.len(), known.len());
+        // Down: a block stored into a typed parent's slot.
+        for op in &func.ops {
+            let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
+            let (Some(&(r, off)), Some(&vsrc)) = (f.base_of.get(&args[0]), f.handle_of.get(&args[1])) else { continue };
+            let Some(&i) = alloc_rec.get(&r) else { continue };
+            if let Some(NTy::Rec(j)) = parent_slot_kind(i, slot_of(off)) {
+                alloc_rec.entry(vsrc).or_insert(j);
+            }
+        }
+        // A declared block type crosses a copy or a join, in either direction:
+        // both arms of an `if` and its result are one value's type.
+        for (d, s) in &dups {
+            for (x, y) in [(d, s), (s, d)] {
+                if let Some(&i) = alloc_rec.get(x) {
+                    alloc_rec.entry(*y).or_insert(i);
+                }
+            }
+        }
+        for (d, a, b) in &joins {
+            if let Some(&i) = [d, a, b].iter().find_map(|v| alloc_rec.get(*v)) {
+                for v in [d, a, b] {
+                    alloc_rec.entry(*v).or_insert(i);
+                }
+            }
+        }
         // The kinds of copies, joins and slot reads.
         for (d, s) in &dups {
             if let Some(t) = kind_of(s, &known, alloc_rec, &str_lists, &scalar_blocks) {
@@ -200,14 +231,18 @@ pub(super) fn type_blocks(
         for op in &func.ops {
             let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
             let Some(&(r, off)) = args.first().and_then(|a| f.base_of.get(a)) else { continue };
-            let t = match (alloc_rec.get(&r), str_lists.contains(&r)) {
-                (Some(&i), _) => parent_slot_kind(i, slot_of(off)).filter(|t| *t != NTy::I64),
-                (None, true) => Some(NTy::Str),
+            let t = match kind_of(&r, &known, alloc_rec, &str_lists, &scalar_blocks) {
+                Some(NTy::Rec(i) | NTy::RecRef(i)) => slot_read_kind(i, slot_of(off)),
+                Some(NTy::VecStr | NTy::VecStrRef) => Some(NTy::Str),
                 _ => None,
             };
             if let Some(t) = t {
                 known.entry(*d).or_insert(t);
             }
+        }
+        if (alloc_rec.len(), known.len()) == inner {
+            break;
+        }
         }
         // Up: an untyped block from the kinds its slots receive.
         for &(r, len) in &blocks {
