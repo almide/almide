@@ -59,6 +59,21 @@ fn spelled_type_names(iface: &serde_json::Value) -> Vec<String> {
     out
 }
 
+/// Does `module`'s bundled source declare `ty` as a public `type` (not a
+/// `mod type` or `local type`)? Read from the declaration, as
+/// `stdlib_owned_types` reads it; a runtime-backed or builtin row is public.
+fn declared_public(module: &str, ty: &str) -> bool {
+    let Some(src) = almide_lang::stdlib_info::bundled_source(module) else { return true };
+    let private = src.lines().any(|l| {
+        ["mod type ", "local type "].iter().any(|p| {
+            l.strip_prefix(p).is_some_and(|rest| {
+                rest.strip_prefix(ty).is_some_and(|after| !after.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
+            })
+        })
+    });
+    !private
+}
+
 /// The owning module compiled on its own spells its own types BARE — the
 /// identity every stdlib signature carries — for every row of the registry.
 #[test]
@@ -79,6 +94,13 @@ fn bundled_owner_modules_spell_their_own_types_bare() {
              the bare key: {scoped:?}"
         );
         for (_, ty) in almide_lang::stdlib_info::stdlib_owned_types().iter().filter(|(m, _)| *m == module) {
+            // A `mod` / `local` type that no public signature names is not part
+            // of the interface at all (ffi's `RegionExportView`, which only the
+            // compiler-made export wrapper reaches); where any type is spelled,
+            // the scoped check above holds it bare.
+            if !declared_public(module, ty) && !names.iter().any(|n| n.ends_with(&format!(".{ty}"))) {
+                continue;
+            }
             assert!(
                 names.iter().any(|n| n == ty),
                 "`almide compile {module} --json` never spells its own `{ty}` bare; spelled: {names:?}"

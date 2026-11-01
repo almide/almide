@@ -1,0 +1,9 @@
+import ffi
+
+@export(c, "count")
+fn count(buf: Region) -> Int = {
+  let f = () => ffi.len(buf)
+  f()
+}
+
+effect fn main() -> Unit = println("ok")

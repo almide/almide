@@ -61,7 +61,7 @@ fn harness() -> H {
     m.section(&mems);
     let mut ex = ExportSection::new();
     ex.export("memory", wasm_encoder::ExportKind::Memory, 0);
-    for (n, f) in [("esc", fns.esc), ("dec", fns.dec), ("int", fns.int), ("parse", fns.ip_parse), ("fmt", fns.ip_fmt)] {
+    for (n, f) in [("net_esc", fns.esc), ("net_dec", fns.dec), ("net_int", fns.int), ("net_ip_parse", fns.ip_parse), ("net_ip_fmt", fns.ip_fmt)] {
         ex.export(n, wasm_encoder::ExportKind::Func, f);
     }
     m.section(&ex);
@@ -95,11 +95,11 @@ fn harness() -> H {
     let inst = wasmtime::Instance::new(&mut store, &module, &[]).expect("instance");
     H {
         mem: inst.get_memory(&mut store, "memory").expect("memory"),
-        esc: inst.get_typed_func(&mut store, "esc").expect("esc"),
-        dec: inst.get_typed_func(&mut store, "dec").expect("dec"),
-        int: inst.get_typed_func(&mut store, "int").expect("int"),
-        parse: inst.get_typed_func(&mut store, "parse").expect("parse"),
-        fmt: inst.get_typed_func(&mut store, "fmt").expect("fmt"),
+        esc: inst.get_typed_func(&mut store, "net_esc").expect("esc"),
+        dec: inst.get_typed_func(&mut store, "net_dec").expect("dec"),
+        int: inst.get_typed_func(&mut store, "net_int").expect("int"),
+        parse: inst.get_typed_func(&mut store, "net_ip_parse").expect("parse"),
+        fmt: inst.get_typed_func(&mut store, "net_ip_fmt").expect("fmt"),
         store,
         abi,
     }
