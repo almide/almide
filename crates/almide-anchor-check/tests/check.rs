@@ -354,8 +354,10 @@ fn a_for_loops_exit_guarded_read_is_accepted() -> Result<(), String> {
 fn an_exit_test_with_another_compare_is_refused() {
     let body = FOR.replace("i32.ge_u", "i32.lt_u");
     assert!(for_loop(&body, "e0 a0", "1:12 1:18").unwrap_err().contains("i32.ge_u"));
+    // An `i32.eqz` exit is a walk-down's (#4281): its operand must be the
+    // cursor itself, not a compare's verdict.
     let body = FOR.replace("i32.ge_u br_if 1", "i32.ge_u i32.eqz br_if 1");
-    assert!(for_loop(&body, "e0 a0", "1:13 1:19").unwrap_err().contains("i32.ge_u"));
+    assert!(for_loop(&body, "e0 a0", "1:13 1:19").unwrap_err().contains("not a local"));
 }
 
 #[test]

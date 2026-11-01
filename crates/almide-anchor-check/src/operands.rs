@@ -848,7 +848,7 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
                 return list_slot(fl, &ix, counted, &addr, off, width, acc);
             }
             if width != 1 || off as i64 != PAYLOAD {
-                return Err(format!("the byte access is {width} bytes at offset {off}, not one payload byte"));
+                return Err(format!("the exit test counts slots of 1 bytes, the access is {width} bytes at offset {off}"));
             }
             // `i < cnt <= len(B)`: `cnt` is `len(B)`, or bounded by it.
             let below = |b: &T| -> Result<(), String> {
