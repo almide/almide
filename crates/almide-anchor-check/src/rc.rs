@@ -106,6 +106,14 @@ fn is_move(c: char) -> bool {
     matches!(c, 'm' | 'h')
 }
 
+/// The anchor file's `rcfns` line: the rc_inc routine's function index, if
+/// the module has one, and every release routine's.
+#[derive(Clone, Copy)]
+pub struct RcFns<'r> {
+    pub inc: Option<u32>,
+    pub releases: &'r HashSet<u32>,
+}
+
 /// What the RC check saw.
 #[derive(Default, Debug)]
 pub struct RcReport {
@@ -339,13 +347,13 @@ fn replaces(fl: &Flow<'_, '_>, b: &Body<'_>, k: usize) -> bool {
 pub fn check_rc(
     bodies: &[Body<'_>],
     imports: u32,
-    inc: Option<u32>,
-    releases: &HashSet<u32>,
+    rc_fns: RcFns<'_>,
     judges: &[crate::At],
     frames: &[(usize, String)],
     windows: &[Vec<(usize, usize, usize)>; 2],
     rep: &mut RcReport,
 ) -> Result<(), String> {
+    let RcFns { inc, releases } = rc_fns;
     for (pos, events) in frames {
         let judged: HashSet<usize> = judges.iter().filter(|j| j.func == *pos).map(|j| j.op).collect();
         let b = bodies.get(*pos).ok_or_else(|| format!("rc: no defined function at position {pos}"))?;
@@ -800,13 +808,13 @@ pub fn check_rc(
             false
         }
         let prefs: Vec<usize> = by_pref.iter().copied().filter(|&c| c < nc).collect();
-        for e in 0..evs.len() {
-            if got[e] || !movable(e) {
+        for (e, g) in got.iter_mut().enumerate() {
+            if *g || !movable(e) {
                 continue;
             }
             let mut seen = vec![false; nc];
             if share_path(e, &prefs, (&fits, &exclusive_events, &movable), &mut seen, &mut owner, &mut co) {
-                got[e] = true;
+                *g = true;
             }
         }
         // A `+1` / release past the join of an anchored `if` on the value its

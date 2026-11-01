@@ -59,7 +59,7 @@ mod decode;
 mod fields;
 mod operands;
 pub mod rc;
-pub use rc::{check_rc, RcReport};
+pub use rc::{check_rc, RcFns, RcReport};
 use decode::{branch_target, is_load};
 pub use decode::{decode, function_imports, store_width, Body};
 pub use fields::check_fields;
@@ -867,7 +867,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, function_imports(wasm), inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
+        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs }, &judges, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

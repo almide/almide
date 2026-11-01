@@ -133,7 +133,7 @@ fn records_inner(
         locate.text(&pick(fields_anchors))?,
         locate.text(&pick(judge_anchors))?,
         locate.text(&pick(hold_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcWindows { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids })?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -181,6 +181,14 @@ fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::
 ///
 /// An `m<local>#<window id>` event (a credit moved into an arm or a routine)
 /// renders as `m<local>@<from>-<to>`: that window's instruction ordinals.
+/// The rc sink's recorded windows: each taken arm's and compound routine's
+/// instruction window, and the window a move event's id names.
+struct RcWindows<'w> {
+    arms: &'w [(u64, usize, usize)],
+    routines: &'w [(u64, usize, usize)],
+    window_ids: &'w std::collections::HashMap<u64, (u64, usize, usize)>,
+}
+
 fn rc_lines(
     locate: &Locator,
     emitted: &[u8],
@@ -188,10 +196,9 @@ fn rc_lines(
     fmap: &[Option<u32>],
     frames: &[(u64, String)],
     releases: &std::collections::BTreeSet<u32>,
-    arms: &[(u64, usize, usize)],
-    routines: &[(u64, usize, usize)],
-    window_ids: &std::collections::HashMap<u64, (u64, usize, usize)>,
+    windows: RcWindows<'_>,
 ) -> Result<String, String> {
+    let RcWindows { arms, routines, window_ids } = windows;
     use crate::cert_project as cp;
     let (ei, si) = (
         cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
