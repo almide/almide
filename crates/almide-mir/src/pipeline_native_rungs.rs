@@ -389,6 +389,12 @@ fn native_sig_kind(
         // The 64-bit floats are real `f64`s; every other lane scalar (the
         // sized integers, a Float32's f32 bits) rides the i64 lane as is.
         t if crate::render_native_rec::is_f64_scalar(t) => Some(NativeSigKind::F64),
+        // A narrow integer: its declared width (the one the lowering re-wraps
+        // to) is its call-boundary type (#4006).
+        t if crate::lower::narrow_int_width(t).is_some() => {
+            let (bits, signed) = crate::lower::narrow_int_width(t)?;
+            Some(NativeSigKind::Narrow { bits: bits as u8, signed })
+        }
         t if crate::render_native_rec::is_lane_scalar(t) => Some(NativeSigKind::I64),
         Ty::String => Some(NativeSigKind::Str),
         // T1-3: the native Result carrier (return position only — the
@@ -498,6 +504,25 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
             sigs.insert(func.name.as_str().to_string(), (ps, r));
         }
     }
+    // The narrow-integer call ABI (#4006) is for an all-scalar signature
+    // called by name. A function value shares the closure tables' i64 lane,
+    // and a signature with a heap kind keeps its existing spelling, so both
+    // take the lane kinds.
+    let fn_values: std::collections::BTreeSet<&str> = functions
+        .iter()
+        .flat_map(|f| f.ops.iter())
+        .filter_map(|op| match op {
+            crate::Op::FuncRef { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    for (name, (ps, r)) in sigs.iter_mut() {
+        let scalar = |k: &NativeSigKind| matches!(k, NativeSigKind::I64 | NativeSigKind::F64 | NativeSigKind::Narrow { .. });
+        if fn_values.contains(name.as_str()) || !ps.iter().chain(r.iter()).all(scalar) {
+            ps.iter_mut().for_each(|k| *k = k.lane());
+            *r = r.map(NativeSigKind::lane);
+        }
+    }
     // LIFTED lambdas exist only as MirFunctions (no IR sig): param 0 is the env
     // block (`&[i64]`), the rest are the lambda's own params — SCALAR reprs only
     // in this slab (a heap-param lambda walls the program: all-or-nothing, and
@@ -523,8 +548,8 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
                 };
                 if let (Some(ps), Some(ret)) = (ps, ret) {
                     let mut all = vec![crate::render_native::NativeSigKind::ListI64];
-                    all.extend(ps);
-                    sigs.insert(f.name.clone(), (all, ret));
+                    all.extend(ps.into_iter().map(NativeSigKind::lane));
+                    sigs.insert(f.name.clone(), (all, ret.map(NativeSigKind::lane)));
                     continue;
                 }
             }

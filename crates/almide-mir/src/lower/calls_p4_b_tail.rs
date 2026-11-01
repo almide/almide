@@ -147,15 +147,7 @@ impl LowerCtx {
     /// multiplication is congruent mod 2^bits, so a product of wrapped factors and
     /// the wrap of the full product are the same value.
     pub(crate) fn wrap_to_declared_width(&mut self, v: ValueId, ty: &Ty) -> ValueId {
-        let (bits, signed) = match ty {
-            Ty::Int8 => (8u32, true),
-            Ty::Int16 => (16, true),
-            Ty::Int32 => (32, true),
-            Ty::UInt8 => (8, false),
-            Ty::UInt16 => (16, false),
-            Ty::UInt32 => (32, false),
-            _ => return v,
-        };
+        let Some((bits, signed)) = crate::lower::narrow_int_width(ty) else { return v };
         if signed {
             let shift = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: shift, value: (64 - bits) as i64 });
@@ -240,3 +232,4 @@ impl LowerCtx {
     }
 
 }
+
