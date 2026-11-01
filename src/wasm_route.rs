@@ -247,3 +247,32 @@ pub fn render_wasm_routed(
 ) -> Result<RoutedWasm, RouteError> {
     route_wasm(file, source_text, modules, None, opts, &mut |_| {})
 }
+
+/// The TEST lane's module (#2179): a file that declares tests lowers with the
+/// shared `__test_runner` synthesis (`lower_to_ir_tests_with_deps`), a
+/// main-only file as its program, through the same structural leg, emitted
+/// and validated. `gate` judges the lowered program before emission (the
+/// CLI's `[permissions]` refusal). `almide test --target wasm` renders
+/// through here, and so does the stdlib-test leg of proofs/structural-wall.sh
+/// (crates/almide-wasm/examples/emit_structural_bundle.rs `--tests`): the
+/// module the wall judges is the module the test lane runs. A refusal names
+/// its stage (`lower`, `permissions`, `emit`, `validate`).
+pub fn route_wasm_tests(
+    file: &str,
+    source_text: &str,
+    dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
+    run_filter: Option<&str>,
+    tests: bool,
+    gate: &dyn Fn(&IrProgram) -> Result<(), String>,
+) -> Result<RoutedWasm, (&'static str, String)> {
+    let lowered = if tests {
+        crate::wasm_leg::lower_to_ir_tests_with_deps(file, source_text, dep_paths, run_filter)
+    } else {
+        crate::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths)
+    };
+    let ir = lowered.map_err(|e| ("lower", e))?;
+    gate(&ir).map_err(|e| ("permissions", e))?;
+    let (bytes, host_ops) = almide_wasm::emit_program_with_ops(&ir).map_err(|e| ("emit", format!("{e:?}")))?;
+    wasmparser::validate(&bytes).map_err(|e| ("validate", e.to_string()))?;
+    Ok(RoutedWasm { bytes, host_ops: host_ops.iter().copied().collect() })
+}

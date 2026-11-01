@@ -178,33 +178,22 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     let wall = |stage: &str, detail: String| {
         if explain { err(&format!("[wall] {}: structural {}: {}", test_file, stage, detail)); }
     };
-    let lowered = if declared_tests > 0 {
-        almide::wasm_leg::lower_to_ir_tests_with_deps(test_file, source_text, &wasm_test_dep_paths(), run_filter)
-    } else {
-        almide::wasm_leg::lower_to_ir_with_deps(test_file, source_text, &wasm_test_dep_paths())
-    };
-    let ir = match lowered {
-        Ok(ir) => ir,
-        Err(e) => { wall("lower", e); return None; }
-    };
-    // `[permissions]` bound the wasm test lane as they bound the native one
-    // (#4159 audit: this lane ran a test the manifest forbids). A refusal
-    // falls to the native fallback, which refuses it with the report.
-    if wasm_test_permissions_refuse(test_file, &ir) {
-        wall("permissions", "[permissions] refuse this program".to_string());
-        return None;
-    }
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the counters as `almide run
     // --target wasm` does; the embedded run below prints the line.
     let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT").then(almide_wasm::alloc_count::CountGuard::set);
-    let (bytes, host_ops) = match almide_wasm::emit_program_with_ops(&ir) {
-        Ok(x) => x,
-        Err(e) => { wall("emit", format!("{e:?}")); return None; }
+    // `[permissions]` bound the wasm test lane as they bound the native one
+    // (#4159 audit: this lane ran a test the manifest forbids). A refusal
+    // falls to the native fallback, which refuses it with the report.
+    let gate = |ir: &almide::ir::IrProgram| {
+        if wasm_test_permissions_refuse(test_file, ir) { Err("[permissions] refuse this program".to_string()) } else { Ok(()) }
     };
-    if let Err(e) = wasmparser::validate(&bytes) {
-        wall("validate", e.to_string());
-        return None;
-    }
+    // The ONE rendering of a test module — proofs/structural-wall.sh's
+    // stdlib-test leg judges exactly these bytes.
+    let routed = almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(), run_filter, declared_tests > 0, &gate);
+    let (bytes, host_ops) = match routed {
+        Ok(r) => (r.bytes, r.host_ops),
+        Err((stage, detail)) => { wall(stage, detail); return None; }
+    };
     // The abort-site ops are test-only and embedded-only (ADR-0029): they are
     // not a wall of the leg, and there is no stock artifact to rewrite.
     let abort_sites = host_ops.iter().any(|op| almide_wasm::ABORT_SITE_OPS.contains(op));
