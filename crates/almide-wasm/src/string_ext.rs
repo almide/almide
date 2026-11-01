@@ -294,12 +294,14 @@ impl Emitter<'_> {
         i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
         // p's byte k under the exit test; s's under it too for a prefix
         // (k < len(p) <= len(s): the `else` of `len(p) >u len(s)` above).
+        // A suffix reads s at (len(s) - len(p)) + k: k < len(p) <= len(s).
         let site_p = self.str_loop_exit();
+        let site_s = self.str_loop_exit();
         if prefix {
-            let site_s = self.str_loop_exit();
             self.str_byte_at(site_s, hs, Some(hk));
         } else {
             self.f.instructions().local_get(hs).local_get(hoff).i32_add().local_get(hk).i32_add().i32_load8_u(str_byte());
+            self.str_read(site_s);
         }
         self.str_byte_at(site_p, hp, Some(hk));
         i = self.f.instructions();
@@ -361,6 +363,10 @@ impl Emitter<'_> {
         let hn = self.hold_i32()?;
         let hk = self.hold_i32()?;
         let hr = self.hold_i32()?;
+        // The base the compare reads s through: s itself, or (suffix) s
+        // moved by len(s) − len(affix) — into its own local, so s stays
+        // the block whose len bounds the read.
+        let hm = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hp);
         i.local_get(hp).i32_load(len_memarg()).local_set(hn);
@@ -369,17 +375,17 @@ impl Emitter<'_> {
         i.i32_const(0);
         i.else_();
         if at_end {
-            // Compare from len(s) − len(affix): move the base by that much.
-            i.local_get(hs).local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().i32_add().local_set(hs);
+            i.local_get(hs).local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().i32_add().local_set(hm);
         }
         i.i32_const(1).local_set(hr);
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
-        // As in strip: a suffix reads s through its moved base, unrecorded.
+        // s's byte under the exit test: k < len(p) <= len(s), at
+        // (len(s) − len(p)) + k for a suffix.
         let site_p = self.str_loop_exit();
-        let site_s = if at_end { None } else { self.str_loop_exit() };
-        self.str_byte_at(site_s, hs, Some(hk));
+        let site_s = self.str_loop_exit();
+        self.str_byte_at(site_s, if at_end { hm } else { hs }, Some(hk));
         self.str_byte_at(site_p, hp, Some(hk));
         i = self.f.instructions();
         i.i32_ne().if_(BlockType::Empty);
@@ -391,7 +397,7 @@ impl Emitter<'_> {
         i.local_get(hr);
         i.end();
         let _ = i;
-        for _ in 0..5 {
+        for _ in 0..6 {
             self.release_i32();
         }
         Ok(Some(Lowered::scalar(BOOL)))

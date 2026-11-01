@@ -186,6 +186,8 @@ impl Emitter<'_> {
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hk).local_get(hl).i32_ge_u().br_if(1);
         let site = self.str_loop_exit();
+        // the CR byte at he - 1 below: he = k < len(s), and he > start >= 0
+        let site_cr = self.str_loop_exit();
         self.str_byte_at(site, hs, Some(hk));
         i = self.f.instructions();
         i.i32_const(10).i32_eq().if_(BlockType::Empty);
@@ -199,6 +201,8 @@ impl Emitter<'_> {
             .i32_const(1)
             .i32_sub()
             .i32_load8_u(str_byte());
+        self.str_read(site_cr);
+        i = self.f.instructions();
         i.i32_const(13).i32_eq().if_(BlockType::Empty);
         i.local_get(he).i32_const(1).i32_sub().local_set(he);
         i.end();
@@ -447,7 +451,10 @@ impl Emitter<'_> {
             i.local_get(hs).i32_load(len_memarg()).i32_const(1).i32_sub().local_set(hp);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
             i.local_get(hp).i32_eqz().br_if(1);
-            i.local_get(hs).local_get(hp).i32_add().i32_load8_u(str_byte());
+            // a walk down from len - 1 (non-empty here) while p != 0
+            let walk = self.str_loop_exit();
+            self.str_byte_at(walk, hs, Some(hp));
+            i = self.f.instructions();
             i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().br_if(1);
             i.local_get(hp).i32_const(1).i32_sub().local_set(hp);
             i.br(0).end().end();

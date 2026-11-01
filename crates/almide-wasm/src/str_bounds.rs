@@ -43,6 +43,12 @@ impl Emitter<'_> {
         site
     }
 
+    /// A byte read under the test `site` was just emitted (its address
+    /// computed by the caller).
+    pub(crate) fn str_read(&mut self, site: Option<bounds::Site>) {
+        bounds::access(site, false, self.f);
+    }
+
     /// The read `s + k` (`None`: byte 0, `s`) under the test `site`
     /// recorded; the byte is left on the stack as an i32.
     pub(crate) fn str_byte_at(&mut self, site: Option<bounds::Site>, s: u32, k: Option<u32>) {
