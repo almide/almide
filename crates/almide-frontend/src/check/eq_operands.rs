@@ -167,6 +167,15 @@ pub(crate) fn operands_agree(env: &TypeEnv, a: &Ty, b: &Ty, sa: &LitShape, sb: &
                 either_compatible()
             }
         }
+        _ => structural_agree(env, a, b, sa, sb, depth),
+    }
+}
+
+/// [`operands_agree`] over the structural shapes: containers, tuples and
+/// records element by element, and the shapes related by declaration.
+fn structural_agree(env: &TypeEnv, a: &Ty, b: &Ty, sa: &LitShape, sb: &LitShape, depth: u32) -> bool {
+    let either_compatible = || a.compatible(b) || b.compatible(a);
+    match (a, b) {
         (Ty::Applied(i1, a1), Ty::Applied(i2, a2)) if i1 == i2 && a1.len() == a2.len() => {
             a1.iter().zip(a2).enumerate().all(|(i, (x, y))| {
                 if *i1 == TypeConstructorId::List {
