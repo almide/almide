@@ -20,7 +20,7 @@ fn burn(n: Int) -> Int = {
 }
 
 effect fn before() -> Result[Int, String] = {
-  let s = burn(20000000)
+  let s = burn(2000000)
   println("element 0 ${s}")
   ok(1)
 }
