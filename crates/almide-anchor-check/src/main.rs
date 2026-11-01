@@ -33,6 +33,24 @@ fn main() {
         }
         return;
     }
+    // `--lin-verify <artifact.wasm> <anchors> <cert>`: the linear
+    // certificate is the translation of the functions it names (lin.rs).
+    if args.first().map(String::as_str) == Some("--lin-verify") {
+        let (Some(w), Some(a), Some(c)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
+        let (w, a, c) = (
+            std::fs::read(w).unwrap_or_default(),
+            std::fs::read_to_string(a).unwrap_or_default(),
+            std::fs::read_to_string(c).unwrap_or_default(),
+        );
+        match almide_anchor_check::lin::verify(&w, &a, c.trim_end()) {
+            Ok(r) => println!("LIN OK: {} procedure(s), {} prim site(s) certified, {} counted", r.procs, r.sites, r.counted),
+            Err(e) => {
+                println!("LIN REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),
