@@ -189,7 +189,7 @@
 5291	spec/wasm_cross/env_set_overlay.almd
 5877	spec/wasm_cross/env_set_refusal.almd
 1969	spec/wasm_cross/env_sleep_pause.almd
-15305	spec/wasm_cross/env_vars_remove.almd
+15312	spec/wasm_cross/env_vars_remove.almd
 3825	spec/wasm_cross/err_arm_takes_let_match_type.almd
 35019	spec/wasm_cross/err_text_operand_escape_families.almd
 2045	spec/wasm_cross/error_operators.almd
@@ -300,7 +300,7 @@
 2461	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 2558	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 2958	spec/wasm_cross/general_recursion_tail.almd
-11028	spec/wasm_cross/generated_binder_hygiene.almd
+11032	spec/wasm_cross/generated_binder_hygiene.almd
 2352	spec/wasm_cross/generic_chain_unwrap_or.almd
 2355	spec/wasm_cross/generic_concat.almd
 2918	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
@@ -509,7 +509,7 @@
 3413	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 1868	spec/wasm_cross/loop_push_trailing_increment.almd
 7759	spec/wasm_cross/map_core_trio.almd
-11860	spec/wasm_cross/map_entries_reclaim.almd
+11867	spec/wasm_cross/map_entries_reclaim.almd
 9262	spec/wasm_cross/map_entry_loop.almd
 6780	spec/wasm_cross/map_filter.almd
 10647	spec/wasm_cross/map_fold.almd
