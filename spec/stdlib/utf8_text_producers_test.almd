@@ -1,0 +1,228 @@
+// The UTF-8 producer evidence for the text formats: url, json and value,
+// html, path and regex (#4005 A4, proofs/utf8-producers.toml). The decoders
+// (percent escapes, JSON \u escapes) are fed every escape that spells an
+// invalid sequence; the rest are fed the invalid-byte corpus through the
+// validating front door and the valid text beside every boundary.
+import hex
+import html
+import json
+import path
+import regex
+import url
+
+// ── the oracle: RFC 3629 well-formedness of a String's bytes ──
+fn utf8_in(bs: List[Int], i: Int, lo: Int, hi: Int) -> Bool = match list.get(bs, i) {
+  some(b) => b >= lo and b <= hi,
+  none => false,
+}
+
+fn utf8_cont(bs: List[Int], i: Int, n: Int) -> Bool =
+  if n == 0 then true
+  else utf8_in(bs, i, 128, 191) and utf8_cont(bs, i + 1, n - 1)
+
+fn utf8_width(bs: List[Int], i: Int, b: Int) -> Int =
+  if b < 128 then 1
+  else if b >= 194 and b <= 223 then (if utf8_cont(bs, i + 1, 1) then 2 else 0)
+  else if b == 224 then (if utf8_in(bs, i + 1, 160, 191) and utf8_cont(bs, i + 2, 1) then 3 else 0)
+  else if b == 237 then (if utf8_in(bs, i + 1, 128, 159) and utf8_cont(bs, i + 2, 1) then 3 else 0)
+  else if b >= 225 and b <= 239 then (if utf8_cont(bs, i + 1, 2) then 3 else 0)
+  else if b == 240 then (if utf8_in(bs, i + 1, 144, 191) and utf8_cont(bs, i + 2, 2) then 4 else 0)
+  else if b >= 241 and b <= 243 then (if utf8_cont(bs, i + 1, 3) then 4 else 0)
+  else if b == 244 then (if utf8_in(bs, i + 1, 128, 143) and utf8_cont(bs, i + 2, 2) then 4 else 0)
+  else 0
+
+fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
+    if w == 0 then false else utf8_from(bs, i + w, n)
+  }
+
+fn utf8_ok(s: String) -> Bool = {
+  let bs = bytes.to_list(bytes.from_string(s))
+  utf8_from(bs, 0, list.len(bs))
+}
+
+// ── the invalid input: every class of ill-formed UTF-8 ──
+fn invalid_corpus() -> List[Bytes] = [
+  bytes.from_list([0xFF]),
+  bytes.from_list([0xFE, 0x41]),
+  bytes.from_list([0xC0, 0xAF]),
+  bytes.from_list([0xC1, 0xBF]),
+  bytes.from_list([0xE0, 0x80, 0xAF]),
+  bytes.from_list([0xED, 0xA0, 0x80]),
+  bytes.from_list([0xED, 0xBF, 0xBF]),
+  bytes.from_list([0xF4, 0x90, 0x80, 0x80]),
+  bytes.from_list([0xF5, 0x80, 0x80, 0x80]),
+  bytes.from_list([0xF8, 0x88, 0x80, 0x80, 0x80]),
+  bytes.from_list([0x80]),
+  bytes.from_list([0x61, 0xBF, 0x62]),
+  bytes.from_list([0xE2, 0x82]),
+  bytes.from_list([0xF0, 0x9F, 0x98]),
+  bytes.from_list([0xC3]),
+  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
+  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+]
+
+// ── valid text beside every boundary a cut or a case map can hit ──
+fn edge_strings() -> List[String] = [
+  "",
+  "a",
+  "ab",
+  "é",
+  "€",
+  "😀",
+  "\u{10FFFF}",
+  "\u{FFFD}",
+  "\u{7F}\u{80}\u{7FF}\u{800}\u{FFFF}\u{10000}",
+  "\u{23A}\u{2C65}\u{23E}",
+  "\u{130}\u{131}\u{1E9E}\u{DF}",
+  "\u{FB03}\u{390}\u{3B0}\u{1F80}",
+  "\u{3A3}\u{3C3}\u{3C2}",
+  "e\u{301}",
+  "a😀b€cé",
+  " \t\u{3000}x\u{A0}\u{2028} ",
+  "\u{FEFF}bom",
+  "日本語テキスト",
+  "line\nnext\r\nlast\r",
+  "a,b,,c",
+]
+
+fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
+
+fn err_ok[T](r: Result[T, String]) -> Bool = match r {
+  ok(_) => true,
+  err(e) => utf8_ok(e),
+}
+
+// The percent spelling of each invalid sequence, and of a valid one.
+fn percent(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => "%" + hex.encode(bytes.from_list([x]))) |> list.join("")
+
+fn escapes() -> List[String] = (invalid_corpus() |> list.map((b) => percent(b))) + ["%E2%82%AC", "%", "%G0", "%e9", "a+b%20c", "%F0%9F%98%80"]
+
+fn url_ok(u: Url) -> Bool = utf8_ok(url.to_string(u)) and utf8_ok(u.scheme) and utf8_ok(u.host) and utf8_ok(u.path) and utf8_ok(u.query) and utf8_ok(u.fragment)
+
+test "url decoders refuse escapes of invalid UTF-8" {
+  for e in escapes() + adversary() {
+    match url.decode_component(e) {
+      ok(s) => assert(utf8_ok(s)),
+      err(m) => assert(utf8_ok(m)),
+    }
+    match url.decode_form(e) {
+      ok(s) => assert(utf8_ok(s)),
+      err(m) => assert(utf8_ok(m)),
+    }
+    match url.parse_query("k=" + e + "&" + e + "=v&bare") {
+      ok(kvs) => assert(list.all(kvs, ((k, v)) => utf8_ok(k) and utf8_ok(v))),
+      err(m) => assert(utf8_ok(m)),
+    }
+  }
+  assert(result.is_err(url.decode_component("%FF")))
+  assert(result.is_err(url.decode_component("%ED%A0%80")))
+}
+
+test "url encoders, parse and resolve stay valid" {
+  for s in adversary() + escapes() {
+    assert(utf8_ok(url.encode_component(s)) and utf8_ok(url.encode_form(s)))
+    assert(utf8_ok(url.build_query([(s, s), ("k", s)])))
+    for text in ["https://" + s, "https://h/" + s + "?q=" + s + "#" + s, "http://h" + s, s] {
+      match url.parse(text) {
+        ok(u) => {
+          assert(utf8_ok(url.to_string(u)) and url_ok(u))
+          match url.resolve(u, s) {
+            ok(r) => assert(url_ok(r)),
+            err(m) => assert(utf8_ok(m)),
+          }
+        },
+        err(m) => assert(utf8_ok(m)),
+      }
+    }
+  }
+}
+
+fn value_ok(v: Value) -> Bool = utf8_ok(json.stringify(v)) and utf8_ok(json.stringify_pretty(v))
+
+test "json.parse refuses escapes of unpaired surrogates and passes valid text" {
+  let texts = ["\"\\uD800\"", "\"\\uDC00\"", "\"\\uD83D\\uDE00\"", "\"\\uD83D\"", "\"\\uD83Dx\"", "\"\\u00e9\\u20AC\"", "\"\\uFFFF\"", "{\"\\uDBFF\\uDFFF\": 1}", "\"\\u", "[\"a\", \"\\uZZZZ\"]"]
+  for t in texts + (adversary() |> list.map((s) => "\"" + s + "\"")) + adversary() {
+    match json.parse(t) {
+      ok(v) => assert(utf8_ok(json.stringify(v)) and utf8_ok(json.stringify_pretty(v))),
+      err(e) => assert(utf8_ok(e)),
+    }
+  }
+}
+
+test "value builders and readers stay valid" {
+  let strs = adversary()
+  let obj = value.object(strs |> list.map((s) => (s, value.string(s))))
+  let arr = value.array(strs |> list.map((s) => value.string(s)))
+  let all = [obj, arr, value.int(1), value.float(1.5), value.bool(true), value.null(), value.merge(obj, value.object([("x", arr)]))]
+  for v in all {
+    assert(value_ok(v))
+    assert(value_ok(value.omit(v, strs)) and value_ok(value.pick(v, strs)))
+    assert(err_ok(value.as_string(v)) and err_ok(value.as_int(v)) and err_ok(value.as_float(v)) and err_ok(value.as_bool(v)))
+    assert(err_ok(value.as_array(v)) and err_ok(value.as_object(v)))
+    for s in strs {
+      assert(value_ok(value.get(v, s) ?? value.null()))
+      assert(utf8_ok(value.get_string(v, s) ?? ""))
+      assert(list.all(value.get_array(v, s) ?? [], (x) => value_ok(x)))
+      assert(list.all(value.get_object(v, s) ?? [], ((k, x)) => utf8_ok(k) and value_ok(x)))
+      let p = value.index(value.key(value.root(), s), 0)
+      assert(value_ok(value.get_path(v, p) ?? value.null()))
+      assert(value_ok(value.remove_path(v, p)))
+      match value.set_path(v, value.key(value.root(), s), value.string(s)) {
+        ok(w) => assert(value_ok(w)),
+        err(e) => assert(utf8_ok(e)),
+      }
+    }
+  }
+}
+
+test "html builders stay valid" {
+  for s in adversary() {
+    let h = html.concat(html.escape(s), html.attr(s, s))
+    assert(utf8_ok(html.to_string(h)))
+    assert(utf8_ok(html.to_string(html.url_attr(s, s))))
+    assert(utf8_ok(html.to_string(html.raw(s))))
+    assert(utf8_ok(html.to_string(html.script_json(value.string(s)))))
+  }
+  assert(utf8_ok(html.to_string(html.empty())))
+}
+
+test "path functions cut only at separators and dots" {
+  for s in adversary() {
+    for p in [s, "/" + s, s + "/" + s, s + "." + s, "./" + s + "/../" + s + ".tar.gz"] {
+      assert(utf8_ok(path.basename(p)) and utf8_ok(path.dirname(p)) and utf8_ok(path.stem(p)))
+      assert(utf8_ok(path.extension(p) ?? "") and utf8_ok(path.normalize(p)))
+      assert(list.all(path.components(p), (c) => utf8_ok(c)))
+      assert(utf8_ok(path.join(p, s)) and utf8_ok(path.with_extension(p, s)))
+      assert(err_ok(path.join_within(p, s)))
+      assert(utf8_ok(path.relative_to(p, s) ?? ""))
+    }
+  }
+}
+
+test "regex matches and edits stay on character boundaries" {
+  let patterns = [".", "..", "\\w+", "\\W", "\\s*", "", "(.)(.)?", "^", "$", "\\b", "[^a]", "€|é", "(", "[", "a{2"]
+  for pat in patterns + adversary() {
+    assert(utf8_ok(regex.escape(pat)))
+    match regex.compile(pat) {
+      err(e) => assert(utf8_ok(e)),
+      ok(re) => {
+        for s in adversary() {
+          assert(utf8_ok(regex.find(re, s) ?? ""))
+          assert(list.all(regex.find_all(re, s), (m) => utf8_ok(m)))
+          assert(list.all(regex.captures(re, s) ?? [], (g) => utf8_ok(g ?? "")))
+          assert(list.all(regex.captures_all(re, s), (gs) => list.all(gs, (g) => utf8_ok(g ?? ""))))
+          assert(utf8_ok(regex.replace(re, s, "€$0")) and utf8_ok(regex.replace_first(re, s, "😀")))
+          assert(utf8_ok(regex.replace_with(re, s, (gs) => list.map(gs, (g) => g ?? "") |> list.join("|"))))
+          assert(utf8_ok(regex.replace_first_with(re, s, (gs) => list.map(gs, (g) => g ?? "") |> list.join("|"))))
+          assert(list.all(regex.split(re, s), (p) => utf8_ok(p)))
+        }
+      },
+    }
+  }
+  let re = regex.new("\\w")
+  assert(utf8_ok(regex.find(re, "€a") ?? ""))
+}
