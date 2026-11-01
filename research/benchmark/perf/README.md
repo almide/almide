@@ -1,10 +1,9 @@
 # Perf Suite — Native & WASM Runtime Scoreboard (#917)
 
-Ten benchmark programs — seven Computer-Language-Benchmarks-Game-style
-kernels, a scaled One Billion Row Challenge, the three-shape `listbuild`
-family, and the allocation-heavy `strchurn` string row — run on every leg the
-compiler ships, against handwritten Rust references where a fair reference
-exists. This directory is the source of the numbers in
+The suite in `bench.py` includes compute kernels, a scaled One Billion Row
+Challenge, list-building shapes, string churn, and other workload rows. Each
+row declares which legs it runs and its verification mode; not every workload
+runs on every target. Handwritten Rust references are included where defined. This directory is the source of the numbers in
 [docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) —
 nothing is published that `bench.py` did not produce.
 
@@ -44,13 +43,12 @@ nothing is published that `bench.py` did not produce.
 - `fannkuchredux` and `mandelbrot` are written with `fan`, and since #1330
   they have ORDINARY sequential Rust references (`rust-ref/fannkuchredux.rs`,
   `rust-ref/mandelbrot.rs`: one thread, no `unsafe`, no SIMD). That is not a
-  lie on the native leg, because the native leg gives `fan` no parallelism
-  today — `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk, a `fan { }`
-  block spawns one thread for the whole block, and `AutoParallelPass` never
-  fires (it matches `Call { Named }` and `StdlibLowering` emits
-  `RuntimeCall`). The rows read ~1.0 (0.96–1.06 and 1.01–1.12, M4 Pro, two
-  sizes) and are REPORTED by `check-perf-ratio.sh`, so a data-parallel win,
-  when it lands, is a number and not a claim.
+  universal same-parallelism comparison: native `fan` can run qualifying
+  callbacks on threads (`pass_rust_lowering_fan.rs`). `fannkuchredux` is now
+  a VICTORY row, checked with the `ALMIDE_FAN_SEQUENTIAL` ablation.
+  `mandelbrot` remains REPORTED; its Bytes-returning callback does not meet
+  that native Send-safe routing. Earlier ~1.0 readings describe the earlier
+  implementation, not the absence of native fan parallelism today.
   `binarytrees` (#1991) and `treealloc` (#2028) have same-shape `Box`
   references (`rust-ref/binarytrees.rs`, `rust-ref/treealloc.rs`: one thread,
   a `Box` per node, a free per node — no arena, no `unsafe`). Both sit BELOW

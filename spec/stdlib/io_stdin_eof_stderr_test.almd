@@ -1,0 +1,31 @@
+// io.read_all, io.read_to_end, io.stderr and io.eprint. `almide test` runs a
+// file with stdin closed on every leg (spec/stdlib/io_read_line_opt_test.almd),
+// so both stdin readers are already at the end: read_all is "", read_to_end of
+// the stdin handle is empty, and a second read stays there. The stderr writers
+// return without an err (a `!` err would fail the test); their bytes are judged by the cross-target nets, which compare
+// stderr. Before this file no test called io.read_all, io.stderr or io.eprint
+// on either leg, nor io.read_to_end on wasm (proofs/stdlib-test-coverage.txt).
+import io
+
+test "read_all is the empty string at the end of input" {
+  assert_eq(io.read_all()!, "")
+  assert_eq(io.read_all()!, "")
+}
+
+test "read_to_end of stdin is empty at the end of input" {
+  let h = io.stdin()!
+  assert_eq(bytes.len(io.read_to_end(h)!), 0)
+  assert_eq(bytes.to_list(io.read_to_end(h)!), [])
+}
+
+test "eprint writes to stderr without an err" {
+  io.eprint("io_stdin_eof_stderr_test: eprint\n")!
+  io.eprint("")!
+}
+
+test "the stderr handle takes raw bytes" {
+  let e = io.stderr()!
+  io.write(e, bytes.from_string("io_stdin_eof_stderr_test: stderr handle\n"))!
+  io.write(e, bytes.from_list([]))!
+  io.write(io.stderr()!, bytes.from_list([10]))!
+}

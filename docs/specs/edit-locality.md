@@ -9,8 +9,8 @@ existing language rule to the role it plays in enforcing it, and records —
 with `file:line` evidence — where the current implementation still violates
 it. The research program built on top of this statement (Lean kernel,
 backend refinement, MSR prediction loop) lives in
-`docs/roadmap/active/edit-locality-theory.md`; this file contains only the
-present-tense truth.
+`docs/roadmap/active/edit-locality-theory.md`; this file distinguishes the model claims, current rules, and the retained
+implementation hunt below.
 
 The observable set is fixed once, by the contract ledger
 (`docs/contracts/contracts.toml`): **stdout bytes, stderr bytes, exit
@@ -44,7 +44,7 @@ to the same execution of `P`.
 
 **L2 — Cross-target agreement.** Observables are a function of the source
 alone, not the target: native and wasm agree byte-for-byte. This is the
-contract ledger's standing promise (280 contracts, `spec/wasm_cross/`
+contract ledger's standing promise (the current contract rows, `spec/wasm_cross/`
 fixtures, the differential fuzz); L1 quantifies over "the observables" only
 because L2 makes that phrase well-defined.
 
@@ -68,7 +68,7 @@ job) proves `edit_frame` + determinism (the observables-identical form),
 every other derivation untouched), and `pure_silent` (code typed outside
 an `effect fn` has an empty trace). The implementation-level statement
 over the full language remains gated by §2's evidence, per
-`docs/contracts/proven-vs-trusted.md`.
+`docs/contracts/README.md`.
 
 ## 1a. Above L1: the declared frame and its composition
 
@@ -124,17 +124,17 @@ L4 says only that the replacement itself adds nothing to the trace.
   and wasm is a refinement obligation between λ_almd and the two backends. Like
   every backend claim in this file it is gated by the `spec/wasm_cross`
   fixtures and the contract ledger, and is listed as trusted — not proven —
-  in `docs/contracts/proven-vs-trusted.md`.
+  in `docs/contracts/README.md`.
 
 ## 2. What enforces it today
 
 | Rule | Locality role | Evidence |
 |---|---|---|
 | Return types on `fn`/`effect fn` are syntactically mandatory (hard parse error, no `Option<TypeExpr>` in the AST) | The signature callers see is text, not an inference result — a body edit cannot change it | `crates/almide-syntax/src/parser/fn_decls.rs:69-82`, `crates/almide-syntax/src/ast.rs:401` |
-| `effect` is part of the signature; the checker reads `sig.is_effect`, never the body | Effects are bounded by "signature-preserving"; a pure `fn` cannot produce observables | `crates/almide-frontend/src/check/calls.rs:381-408` — spec: `effect-system.md` |
+| `effect` is part of the signature; the checker reads `sig.is_effect`, never the body | Effects are bounded by "signature-preserving"; ordinary effect calls require the marker; the six console/abort builtins have the ADR-0022 exception | `crates/almide-frontend/src/check/calls.rs:381-408` — spec: `effect-system.md` |
 | Explicit propagation only (ADR-0008): E041/E042 are driven by the callee's **declared** `Result` return type | A callee gaining or losing error paths cannot silently rewire caller control flow; every propagation point is visible in the caller's own text (`!`) | `crates/almide-frontend/src/check/post_solve_validation.rs:399-434` — tests: `tests/expr_stmt_diag_test.rs`, `spec/wasm_cross/expr_stmt_comment.almd` (C-252) |
 | No glob imports; the auto-import set is a compile-time constant | Adding a definition to a module cannot capture an existing unqualified reference elsewhere | `crates/almide-syntax/src/parser/declarations.rs:75-125`, `AUTO_IMPORT_BUNDLED` in `crates/almide-types/src/stdlib_info.rs:39-56` — spec: `module-system.md` |
-| Cross-module access is qualified-only, no transitive access | A reference names its module in place; resolution cannot drift with distant edits | `crates/almide-frontend/src/import_table.rs:23-25` — tests: `spec/integration/modules/` |
+| Cross-module access is qualified or explicitly selectively imported; no transitive access | A reference names its module in place or through a fixed import binding; additions cannot silently replace that binding | `crates/almide-frontend/src/import_table.rs:23-25` — tests: `spec/integration/modules/` |
 | No overloading, no user-defined operators, no implicit conversions, no instance declarations; protocol conformance is declared (`deriving`), lookup is a fixed convention | There is no dispatch whose winner depends on non-local information | `docs/design/DESIGN.md:27`, `crates/almide-frontend/src/canonicalize/registration_validate.rs:237-265`, E012 (`docs/diagnostics/E012.md`) |
 | Fixed UFCS ladder, stdlib-first | A new user `fn len` cannot steal `xs.len()` | `crates/almide-frontend/src/check/calls_ufcs.rs:36-67` — test: `spec/lang/user_fn_namespace_collision_test.almd` |
 | Type inference is module-isolated; call return types come from declared signatures; monomorphization is keyed by call-site argument types only | No constraint crosses a module boundary; callee bodies are never consulted for callers' types | `crates/almide-frontend/src/check/module_inference.rs:16-19`, `check/calls.rs:276-310`, `crates/almide-optimize/src/mono/discovery.rs:28-42` |
@@ -145,8 +145,10 @@ L4 says only that the replacement itself adds nothing to the trace.
 
 ## 3. Where it breaks today (hunt of 2026-08-15)
 
-Every finding below is a fact about the current compiler, with the
-mechanism cited. Triage: **V** = language/compiler bug, L1 must hold —
+The hunt below is retained as implementation history. Its old MIR/incumbent
+paths are not an inventory of current shipping failures; current source must
+be checked before treating a row as an open defect. The borrow-inference
+row has been updated to the current solver. Mechanisms are cited. Triage: **V** = language/compiler bug, L1 must hold —
 **all three V findings of the 2026-08-15 hunt are fixed and promoted to §2
 rows** (#1424 LICM speculation, #1425 selective-import collision, #1426
 constructor owner-scoping; this count may only stay at zero); **R** =
@@ -156,15 +158,15 @@ condition, declared in §4 instead of fixed.
 ### R — Backend refinement obligations
 
 These live below the surface language; "backends as refinements" (roadmap
-Stage 3) must discharge them. All are observable today in the build-failure
-or wrong-code sense:
+Stage 3) must discharge them. The original hunt recorded build-failure or wrong-code mechanisms; rows
+referring to the retired MIR/incumbent pipeline describe that earlier path:
 
 | Finding | Mechanism | Evidence |
 |---|---|---|
 | Self-host splice links whole source files, transitively, to fixpoint — editing stdlib fn `A` pulls new files into programs that only call its file-mate `B` | `link_self_host_runtime_to_fixpoint` | `crates/almide-mir/src/pipeline_link.rs:229-262` |
 | Splice link collisions are a hard compile error — a stdlib body edit can break programs that never call the edited fn (real instance: `__hex_fill`, almide#1068) | `dedup_linked_by_name` | `crates/almide-mir/src/pipeline_link.rs:184-222` |
 | Global impl-name→call-name rewrite captures user identifiers (a user `fn int_abs` gets redirected to `int.abs`) | `rewrite_impl_names_to_call_names` over **all** MIR functions | `crates/almide-mir/src/pipeline_link.rs:272-286` |
-| Borrow inference is a whole-program fixpoint over bodies, capped at 6 rounds with no convergence check; a body edit (e.g. making a fn tail-recursive → `tco_owned_params`) rewrites every call site's `Borrow` wrapping, and past the cap results are iteration-order-dependent | `infer_borrow_signatures` | `crates/almide-codegen/src/pass_borrow_inference.rs:135-146,390-416`, `pass_borrow_inference_call_sites.rs:3-18` |
+| Borrow inference is a whole-program monotone fixpoint over bodies; a body edit can change call-site ownership decoration. The old round cap is removed: slots ascend Ref → RefMut → Own, with monotonicity and lattice-height checks | `infer_borrow_signatures` | `crates/almide-codegen/src/pass_borrow_inference.rs:455-497,568-582`, `pass_borrow_inference_call_sites.rs:3-18` |
 | `inline_pure_call_globals` decides by transitive body purity whether a top-level `let X = f()` initializer is substituted to use sites — moving a potential trap from "always at startup" to "only if read" | `expr_is_pure` recursing into callee bodies | `crates/almide-mir/src/lower/newtype_erase.rs:385-462,517-521,643-656` |
 | Adding/removing a `test` block flips `library_mode`, changing wasm DCE roots program-wide | `reachable_fn_names` | `crates/almide-codegen/src/reachability.rs:168-183` |
 | `Method`/`Computed` call targets contribute no reachability name — a body edit that removes the last `Named` reference to a UFCS-reached fn falsely prunes it (wasm trap, per the pass's own soundness note) | reachability collection | `crates/almide-codegen/src/reachability.rs:15-17,66-72` |
@@ -192,12 +194,14 @@ bug.
   declared form of the dynamic scoping L1 forbids in program code. Test
   blocks also act as DCE roots (§3-R). L1 quantifies over program
   executions, not test executions.
-- **S3 — the ADR-0009 quadrant hole.** A pure `fn` can currently launder
-  effects through a higher-order parameter, which ADR-0009 itself measures
-  as breaking the purity premise
-  (`docs/adr/0009-fn-type-quadrant-transparency.md:29-36`). Until that ADR
-  closes the hole, "pure `fn` cannot produce observables" (§2 row 2) is a
-  per-quadrant statement, not a theorem.
+- **S3 — model purity and the implementation boundary.** ADR-0009's original
+  higher-order effect hole is historical: function-type effect markers and
+  the value-flow checks now reject laundering (see `effect-system.md` and
+  `tests/effect_value_laundering_test.rs`). This does not make the model's
+  `pure_silent` theorem a theorem about every Almide `fn`: ADR-0022 permits
+  six console/abort prelude builtins there. The model theorem keeps its own
+  typing premises; implementation capability accounting follows ADR-0026.
+
 
 ## 5. The gate
 

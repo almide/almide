@@ -1,5 +1,16 @@
-<!-- description: Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field -->
+<!-- description: Historical nested boxed-pattern diagnosis; implemented native lowering and regression pointers -->
 # native: nested ctor/literal pattern at a Box'd (recursive-variant) field
+
+## Implemented mechanism; original diagnosis below
+
+The native nested-box pattern mechanism described here is implemented in
+[statements_box_patterns.rs](../../../crates/almide-codegen/src/walker/statements_box_patterns.rs)
+and [pass_box_deref.rs](../../../crates/almide-codegen/src/pass_box_deref.rs),
+with later nested-pattern/capture refinements (#757/#3174). The
+[nested variant fixture](../../../spec/wasm_cross/nested_variant_tag_box.almd)
+records a regression case. The old “ready to implement” status and compile
+failure below are the original #610 diagnosis, not a fresh reproduction or
+an instruction to reimplement the pass.
 
 Status: active — analyzed, ready to implement (#610)
 Owner: compiler / codegen

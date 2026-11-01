@@ -1,4 +1,8 @@
 # ── WASM REACHABILITY RATCHET (per FUNCTION, not per test file) ──────────────
+# The non-comment rows are the current exclusions. The sweep compares build
+# success, not runtime output: its PARITY label means both builds succeeded.
+# It uses the ordinary stock wasm build, not every embedded/component route.
+# Historical counts/reasons below are provenance, not an all-route API promise.
 #
 # For every @intrinsic-backed stdlib fn, one minimal program is built on BOTH
 # legs. The NATIVE build is the control: a call that does not type or does not
@@ -14,9 +18,9 @@
 # back and that ratchet read a clean 18/18 while the fn did not exist on wasm.
 #
 # Classes:
-#   HOST_CAPABILITY   — the WASI preview1 floor genuinely lacks the primitive
-#                       (sockets, subprocess spawn, a native zlib binding).
-#                       Out of wasm scope BY DESIGN until the WASI story changes.
+#   HOST_CAPABILITY   — a host limitation attributed to the sweep's build route.
+#                       It does not imply that no embedded/component route serves
+#                       the function; see proofs/target-availability.toml.
 #   COMPILER_FRONTIER — WASI CAN do it and the compiler cannot yet. This is the
 #                       DEBT: `fs.write` is self-hosted and reaches parity while
 #                       `fs.write_bytes` right next to it does not.
@@ -30,13 +34,13 @@
 #
 # COMPILER_FRONTIER — the burn-down:
 #
-# HOST_CAPABILITY (43) — out of scope by design (2026-10-03, #2589: the twelve
+# HOST_CAPABILITY — historical note (2026-10-03, #2589: the twelve
 # process.* rows left — the subprocess family builds over almide:process/spawn,
 # ADR-0025, and process.env / process.sleep over host ops 26 / 36):
 #
-# UNPROBEABLE (111) — the sweep's OWN coverage hole, not a compiler
+# UNPROBEABLE — the sweep's OWN coverage hole, not a compiler
 # verdict: the argument synthesizer has no literal for these parameter types
-# (Matrix, Value, Json, RawPtr, closures). Shrinking this list widens what
+# (for example opaque handles, generic carriers, or closures). Shrinking this list widens what
 # the ratchet can see, so it is listed and ratcheted too.
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
 fs.root_exists :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)

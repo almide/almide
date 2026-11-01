@@ -64,11 +64,12 @@ cold wasm 299.1ms。ただし**測定対象が小さい** — これ単体では
 **根拠と勝ち筋**: 2026 年の高速コンパイル事例は全て「開発ループから LLVM を外す」話である
 （Zig: self-build 75s→20s、インクリメンタル 228–288ms / Roc: 3.4s→35ms / tsgo: **インクリメンタルなしで 10 倍**、
 その内訳は半分がネイティブ化・半分が共有メモリ並列）。Almide は既に純 Rust なので前半は済んでおり、
-残りは **Cranelift debug tier（0.6x）+ モジュール並列 + flat index-based レイアウト（#1316）**。
+当初の候補は **Cranelift debug tier + モジュール並列 + flat index-based レイアウト（#1316）**。
+旧 0.6x 割付は 2026-09-27 の後継ラダーで変更されており、現行リリース予定とはしない。
 すべて既知の工学で、発明を必要としない。
 
 **台帳の行**: 0.47–0.49（クエリ/キャッシュ、ただし[粗粒度で足りる](#査読-047048-はクエリエンジンではない)）、
-0.61–0.69（cranelift → DWARF → default 切替 → JIT → 関数単位インクリメンタル）、#1311（行/秒ラチェット）
+当初の 0.61–0.69 案（cranelift → DWARF → default 切替 → JIT → 関数単位インクリメンタル）は履歴。#1311 は行/秒ラチェットの参照
 
 **足りない行**: なし（[#1334](https://github.com/almide/almide/issues/1334) は 2026-08-13 に着地）。
 0.47/0.49（クエリ層 / モジュールキャッシュ）の着工判断はこの数字待ちだった — 傾き 1.13 は
@@ -268,7 +269,11 @@ definition / signatureHelp / codeAction）。playground、VS Code 拡張、tree-
 ## 軸 F: エコシステム — 唯一、工学では勝てない軸
 
 **現在値**: MVS + git 依存 + lockfile（2026 年の形式分析が MVS の多項式性を追認）、
-install-time コード実行を持たない設計（npm Shai-Hulud ワームの伝播経路が構造的に不在）。
+ただし install/build でコードが走らないわけではない。`native/`、`[native-deps]` と
+その build script、`@extern` の信頼境界があり、依存の `[permissions].native` と
+install の `--allow-native` は対象が異なる。
+[CLI install](../specs/cli.md#almide-install) / [package system](../specs/package-system.md)
+を参照し、特定ワームの経路が構造的に存在しないという一般保証にはしない。
 レジストリなし。stdlib は 41 モジュール 959 関数を**自己ホスト**。
 
 **なぜ工学で勝てないか**: ライブラリの量は歴史の関数であり、コンパイラの品質では買えない。
@@ -295,7 +300,7 @@ Almide が 1 万パッケージを持つ日は、正攻法では来ない。
 軸E (agent面)  ──┼→ 0.5x: 指標と道具を先に固める（測れないものは改善できない）
 軸C (ファザー) ──┘
 
-軸A (cranelift) ──→ 0.6x: 編集ループ。flat IR規律(#1316)が前提
+軸A (cranelift) ──→ 編集ループの当初案（旧0.6x割付、現在の出荷予定ではない）。flat IR規律(#1316)が前提
 軸B2 (意味論最適化) ─┘     RcCow(0.55-56)で表現を確定してから
 
 軸C (証明・資格化) ──→ 0.7x-0.8x: codegen が安定してから積む

@@ -42,7 +42,10 @@
 - 23 files changed
 - build.rs updated (generated/ also auto-handled)
 
-## Remaining (Phase 5-6 → active/hkt-foundation.md)
+## Remaining at completion (2026-03-19)
+
+The original `active/hkt-foundation.md` plan is no longer present. The following
+is the remaining-work snapshot recorded at completion, not a current task list.
 
 - Phase 5: Effect information annotation inside compiler (no syntax changes) → 2.x
 - Phase 6: Trait integration → 2.x

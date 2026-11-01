@@ -115,7 +115,7 @@ fn parse(s: String) -> Result[UInt32, String] =
   }
 
 // ── Integer: radix text (R-sized-06) ──
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+/// Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(
   int.__from_uint32(x),
   radix,

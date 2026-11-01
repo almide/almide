@@ -40,8 +40,13 @@ grammar-lab/
 cd research/grammar-lab
 export ALMIDE_BIN=/path/to/almide
 almide build src/mod.almd -o /tmp/grammar-lab-bin
-/tmp/grammar-lab-bin experiments/lambda-syntax/ --trials 5 --model claude-haiku-4-5
+/tmp/grammar-lab-bin experiments/law-spec/ --trials 3 --model claude-haiku-4-5
 ```
+
+現行 runner は task の `source_dir`、visible/hidden tests、任意の laws と
+repair round を読む。`lambda-syntax` は旧実験設定を保持した資料で、現行
+runner schema にそのまま適合する quick start ではない。新規実験は
+`law-spec` の設定を参照する。実験実行はモデル呼び出しを伴う。
 
 ### 主な機能
 
@@ -50,7 +55,7 @@ almide build src/mod.almd -o /tmp/grammar-lab-bin
 - **Fisher's exact test**: Almide で実装。p 値付きで summary を出力
 - **生出力保存**: `outputs/` に LLM の出力を保存。transpile バグと LLM エラーを切り分け可能
 
-### 実験結果
+### 歴史的実験結果（lambda-syntax）
 
 | 実験 | Variant A | Variant B | Sonnet 4.6 | Haiku 4.5 | p-value | 結論 |
 |------|-----------|-----------|------------|-----------|---------|------|
@@ -76,6 +81,6 @@ almide build src/mod.almd -o /tmp/grammar-lab-bin
 
 1. `experiments/<name>/experiment.json` を作成
 2. variant ディレクトリにソースコードを配置
-3. `tasks/` にタスク定義 + テストファイルを配置
+3. `tasks/` の JSON に `source_dir` / `test_file` を指定し、必要に応じ `hidden_file` / `laws_file` / `laws_compiled_file` を配置（`law-spec/tasks/` が現行例）
 4. 未実装構文がある場合は `transpile_regex` を設定
 5. `prompts/layer2_<variant>.md` を作成

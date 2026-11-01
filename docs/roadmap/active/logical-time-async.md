@@ -1,7 +1,12 @@
 <!-- description: The async grammar: fuel as the logical clock, deterministic race, oracle tier -->
 # Logical-Time Async — the async grammar design
 
-> 憲章: [async-inception.md](./async-inception.md)。本文書はその意味論詳細である。
+> 原設計の憲章: [async-inception.md](./async-inception.md)。本文書は論理時間の
+> 設計理由と訂正履歴である。現行表面・clock 契約は
+> [SPEC §13](../../SPEC.md#13-concurrency-fan) と
+> [ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md) が正本。
+> 以下の `race` は原設計の論理コスト選択モデルを指し、Duration の oracle 選択や
+> 現在の実行系全体を証明するものではない。
 >
 > [deterministic-bounds.md](./deterministic-bounds.md) が立てた 4 設問（予算配分・勝者選択・
 > キャンセル・効果隔離）への回答。[concurrency-stance.md](./concurrency-stance.md)（#1000）の
@@ -34,16 +39,18 @@ tiebreak（Verse / Lingua Franca / Esterel）、制限による決定性（Par m
 > — `fan.bounded(compute.ms(100)) { body }` / `fan.race { arm; arm }` — に置き換えられた。
 > 本文書の意味論（fuel、lockstep、trap 窓、入れ子、CM-1）はすべてそのまま適用される。
 >
-> **追補（2026-08-01）**: race の予算は**任意化**された — 選択は予算を要さず、
+> **追補（2026-08-01、後に superseded）**: 当時 race の予算を**任意化**した — 選択は予算を要さず、
 > 予算の役割は発散ガードのみ（n = ∞ の特殊化。停止性の扱いは fan {} の既存仕様と同じ）。
-> 監査は [ticks-interface-audit.md](./ticks-interface-audit.md)。
+> 監査は [ticks-interface-audit.md](./ticks-interface-audit.md)。現行の `fan.min` は
+> ADR-0028 により clock 必須であり、この任意化は現在の API ではない。
 
 ```almide
 fan.bounded(compute.ms(100)) { body }   // Result[T, String] — n fuel 以内に完了すれば Ok
 fan.race(compute.ms(500)) { arm; arm }     // Result[T, String] — 各枝に n fuel、最小消費の成功が勝つ
 ```
 
-将来の oracle 層（Stage 4、Path C 成立後）:
+原設計の oracle 層案（現在は `fan.timeout(duration.ms(n)) { body }`。
+次の thunk 形と tombstone 状態は歴史的スケッチ）:
 
 ```almide
 fan.timeout(ms, thunk)        // 環境相対。R_Ω 契約クラス。それまで tombstone 維持
@@ -103,7 +110,9 @@ race に決定的な意味が存在する。名前を変えない理由は 2 つ
   **動的 charge**（`1 + サイズ比例項`）を追加する。
 - **charge は最適化前の MIR 誕生時に付与し、以後の全パスは注釈を保存する**。renderer 側
   peephole が op を融合しても charge は合算して残る。これにより:
-  - 最適化レベル不変（`-O` が exhaust を変えない）が**検査項目ではなく構成的に**成立する
+  - 注釈保存はこの設計の要求であり、実装全体の最適化不変性の証明ではない。
+    現行の cost 契約は meter version に限定され、inlining/lowering の変更で
+    コストや勝者が変わりうる（ADR-0028）。
   - RC 増減・MakeUnique・move・ANF 管理コードは**無料**（最適化の産物であり、ソース意味論の
     コストではない）。EVM gas が JIT の速さと無関係に定義されるのと同型
 - **コスト表は versioned な意味論的オブジェクト**（`CM-1`）として契約台帳に載る。定数変更は
@@ -129,9 +138,9 @@ site でカウンタを読み、将来の oracle 系構文（`fan.timeout`）は
   `Err`。thunk が Result を返す場合は既存の auto-wrap 契約（race/any/settle と同じ）に従う。
 - **trap は伝播する**。bounded は投機ではない。div-by-zero は通常どおりプログラムを落とす
   （C-200 の哲学と一貫）。
-- exhaustion と thunk 自身の Err の区別が message 文字列に依存するのは、単一 String
-  エラーチャネルという言語全体の性質であり、ここで点解決しない。`fan.any` の
-  defined-Err 前例に従い、メッセージを台帳定数にして検査可能性だけは確保する。
+- この bounded/選択インターフェースの exhaustion は String エラー契約である。
+  これは言語全体の Result エラー型を String に制限する意味ではない。
+  メッセージは対応する契約・fixture の範囲で検査する。
 
 ### `fan.race(compute.ms(500)) { arm; arm }` — lockstep 定義
 
@@ -277,7 +286,7 @@ transactional effect で解こうとしたものの大部分が、ここでは**
 |---|---|---|
 | Verse `race` | 勝者選択の UX、「同時ならソース順」、構造化キャンセル | simulation time は wall-clock 由来で計算量の決定性はない。transactional effect は Rung 1 で限定的に。Epic のドキュメントの記述に依拠（tie 規則は実装時に再確認） |
 | EVM gas / EIP-150 | 決定的 out-of-gas、入れ子の min-cap、コスト表 = 意味論 | EVM に race はない（逐次トランザクションのみ） |
-| Wasmtime fuel | fuel vs epoch の区別そのもの（決定 / 壁時計の二層をベンダーが命名済み） | Wasmtime の fuel は wasm op 単位。CM-1 はソース意味論単位で、最適化不変を構成的に得る |
+| Wasmtime fuel | fuel vs epoch の区別（決定 / 壁時計の二層） | CM-1 の計量点・コストは独自の versioned 契約。実装全体の最適化不変性や他方式への優越は、この比較だけでは証明されない |
 | Lingua Franca / Esterel | 論理時間、同一論理時刻の宣言順解決 | 論理時間の単位がイベントであり計算量ではない |
 | Par monad / LVars | 制限による決定性、quasi-determinism という誠実な退却先の命名 | fuel・選択・キャンセルは扱わない |
 | Kahn process networks | （将来）決定的チャネルの理論的地盤 | 本設計の範囲外、下の「地平」参照 |

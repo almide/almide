@@ -1,0 +1,91 @@
+// regex.captures_all, regex.escape, regex.replace_with,
+// regex.replace_first_with and the deprecated regex.full_match. Before this
+// file no test called any of them on either leg (proofs/stdlib-test-coverage.txt).
+import regex
+
+// ── captures_all ──
+test "regex.captures_all lists [whole, group1, ...] of every match, in order" {
+  let re = regex.new("([a-z]+)=([0-9]+)")
+  assert_eq(
+    regex.captures_all(re, "a=1, bb=22, ccc=333"),
+    [
+      [some("a=1"), some("a"), some("1")],
+      [some("bb=22"), some("bb"), some("22")],
+      [some("ccc=333"), some("ccc"), some("333")]
+    ],
+  )
+}
+
+test "regex.captures_all: an unmatched optional group is none" {
+  assert_eq(
+    regex.captures_all(regex.new("(x)?(y)"), "y xy"),
+    [
+      [some("y"), none, some("y")],
+      [some("xy"), some("x"), some("y")]
+    ],
+  )
+}
+
+test "regex.captures_all: no match is the empty list; a group-free pattern gives the whole match alone" {
+  assert_eq(regex.captures_all(regex.new("([0-9]+)"), "no digits"), [])
+  assert_eq(regex.captures_all(regex.new("[0-9]"), "a1b2"), [
+    [some("1")],
+    [some("2")]
+  ])
+}
+
+// ── escape ──
+test "regex.escape backslashes every metacharacter" {
+  assert_eq(regex.escape("a.b*c"), "a\\.b\\*c")
+  assert_eq(regex.escape("(1+1)?"), "\\(1\\+1\\)\\?")
+  assert_eq(regex.escape("[x]{2}|^$"), "\\[x\\]\\{2\\}\\|\\^\\$")
+  assert_eq(regex.escape("back\\slash"), "back\\\\slash")
+  assert_eq(regex.escape("plain text"), "plain text")
+  assert_eq(regex.escape(""), "")
+}
+
+test "regex.escape: the escaped string matches itself literally" {
+  let lit = "1+1=2? (yes) [really] {ok} a|b ^$ \\ ."
+  assert_eq(regex.is_full_match(regex.new(regex.escape(lit)), lit), true)
+  assert_eq(regex.is_match(regex.new(regex.escape("a.c")), "abc"), false)
+  assert_eq(regex.is_match(regex.new(regex.escape("a.c")), "xa.cx"), true)
+}
+
+// ── replace_with / replace_first_with ──
+test "regex.replace_with rewrites every match from its groups" {
+  let re = regex.new("([a-z]+)=([0-9]+)")
+  let swap = (gs: List[String?]) => "${gs[2] ?? "?"}:${gs[1] ?? "?"}"
+  assert_eq(regex.replace_with(re, "a=1, bb=22", swap), "1:a, 22:bb")
+  assert_eq(regex.replace_with(re, "nothing here", swap), "nothing here")
+}
+
+test "regex.replace_with: element 0 is the whole match" {
+  let up = (gs: List[String?]) => string.to_upper(gs[0] ?? "")
+  assert_eq(regex.replace_with(regex.new("[aeiou]"), "banana", up), "bAnAnA")
+}
+
+test "regex.replace_first_with rewrites only the first match" {
+  let re = regex.new("[0-9]+")
+  let double = (gs: List[String?]) => int.to_string((int.parse(gs[0] ?? "0") ?? 0) * 2)
+  assert_eq(regex.replace_first_with(re, "7 and 8", double), "14 and 8")
+  assert_eq(regex.replace_first_with(re, "none", double), "none")
+}
+
+test "regex.replace_first_with sees an unmatched group as none" {
+  let re = regex.new("(x)?y")
+  let tag = (gs: List[String?]) => match gs[1] {
+    some(_) => "[xy]",
+    none => "[y]",
+  }
+  assert_eq(regex.replace_first_with(re, "ay xy", tag), "a[y] xy")
+  assert_eq(regex.replace_with(re, "ay xy", tag), "a[y] [xy]")
+}
+
+// ── full_match (deprecated alias of is_full_match) ──
+test "regex.full_match agrees with regex.is_full_match" {
+  let re = regex.new("[0-9]+")
+  assert_eq(regex.full_match(re, "123"), true)
+  assert_eq(regex.full_match(re, "123a"), false)
+  assert_eq(regex.full_match(regex.new(""), ""), true)
+  assert_eq(regex.full_match(re, "456"), regex.is_full_match(re, "456"))
+}

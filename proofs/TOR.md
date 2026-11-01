@@ -6,7 +6,7 @@ third of the goal-directed Stage-5 artifact trio (tool-verification ledger =
 `proofs/gate-verification.toml`; known-problems formalization = the
 `known_problems` field every release seal must carry). Companion boundary
 documents: `proofs/TRUSTED_BASE.md` (what is trusted vs proven) and
-`docs/contracts/proven-vs-trusted.md` (what each gate does and does not claim).
+`docs/contracts/README.md` (what each gate does and does not claim).
 The DO-330-shaped package INDEX over all of these is
 `proofs/TOOL-QUALIFICATION.md` (#574).
 
@@ -20,7 +20,7 @@ path resolves — a TOR row pointing at a deleted instrument fails CI.
 - Tool: the Almide compiler + its proof-carrying verification chain
   (`make verify-trust` = `proofs/check.sh` + `proofs/gate.sh` +
   `proofs/structural-wall.sh` + `proofs/corpus-wall.sh` (the native MIR
-  certificate) + the MIR and almide-verify tests; `make receipt` =
+  certificate) + `proofs/native-wall.sh` + the MIR and almide-verify tests; `make receipt` =
   `proofs/receipt.sh`).
 - Artifact identity (#2760): the receipt's C-SAFE row names
   `proofs/structural-artifacts.sha256` and that file's own digest — one row
@@ -60,7 +60,10 @@ capability soundness of the STRUCTURAL build's wasm, for the certified
 fixtures the row counts — it does NOT imply functional correctness (a PID
 controller can be memory-safe and control the wrong thing), and a program
 outside the certified set carries no C-SAFE claim at all. C-SAFE and C-PROVEN
-are receipt claims, not rows of docs/contracts/contracts.toml. Requirements-level
+are receipt claims, not rows of docs/contracts/contracts.toml. They retain
+the receipt's trusted recording/projector assumptions and helper exclusions;
+they are not a proof of all four `MemorySafe` clauses for arbitrary shipped
+programs. Requirements-level
 verification (MC/DC, requirements tracing) is the OPERATOR's domain process,
 outside this tool's scope.
 enforced-by: proofs/receipt.sh
@@ -108,7 +111,7 @@ enforced-by: crates/almide-verify/src/bundle.rs
 
 | limitation | operational consequence |
 |---|---|
-| MC/DC not measured (line coverage only, ratcheted) | structural-coverage credit above statement level cannot be claimed; plan it in the domain process |
+| Domain-level MC/DC qualification not established by these gates | line/condition coverage and safety-set decision vectors are scoped evidence, not blanket domain coverage credit; plan the required assessment in the domain process |
 | C-WCET pending (counted-loop keystone) | no allocation/time bound claims — do not derive timing budgets from the receipt |
 | C-FAITHFUL partial on the wasm leg (the four runtime RC routines are proven bytes-to-semantics; every other emitted body, and the link from a program's instructions to its ownership witness, is not) | treat the structural build's behaviour beyond the RC runtime as differentially tested (native / wasm / interp byte identity), not proven |
 | C-FAITHFUL pending on the native leg (production Rust renderer + Ferrocene) | the native leg's object-code trust runs through rustc, not a qualified toolchain |

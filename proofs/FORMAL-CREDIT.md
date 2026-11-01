@@ -9,12 +9,13 @@ under a given standard is an applicant's and an authority's determination.
 What this table does is make each claim precise enough to evaluate.
 
 Ground truth for the boundary column:
-[docs/contracts/proven-vs-trusted.md](../docs/contracts/README.md) (the
+[contract boundary map](../docs/contracts/README.md) (the
 map) and [proofs/TRUSTED_BASE.md](./TRUSTED_BASE.md) (the territory —
 toolchain pins, irreducible trust roots, tamper drill). The mechanized
 proofs are Rocq (`proofs/*.v` — 153 Theorem/Lemma/Corollary statements
-counted 2026-08-28; the release-audited figure is asserted by
-`proofs/check.sh`, never hand-written). The Lean "belt" crates are DESIGN
+counted 2026-08-28, a historical snapshot). The separate audited-assumptions
+count is derived and checked by `proofs/check.sh`; it is not the total count
+of all theorem, lemma and corollary declarations. The Lean "belt" crates are DESIGN
 MIRRORS, listed separately at the bottom — they are not proofs of the
 implementation and are never claimed as such.
 
@@ -22,20 +23,24 @@ implementation and are never claimed as such.
 
 | # | Objective-shaped claim | Proof artifacts | Assumptions (trusted base) | Coverage boundary |
 |---|---|---|---|---|
-| FC-1 | An ACCEPTED ownership certificate implies the certified function performs no double-free, no leak, and no dangling-name use | `OwnershipChecker.v` (17), `OwnershipFilter.v` (3), `OwnershipLoop.v` (4), `Subset.v` (5), `Termination.v` (2), `StackBalance.v` (1) | The Rocq kernel (coqchk re-check, cross-version 9.1.1/9.2); the extraction glue `driver.ml` (TRUSTED — negative-tested both directions, see gate-verification `proofs/build-checker.sh`); the certificate FAITHFULLY DESCRIBES the MIR (the producer is untrusted; the checker re-verifies every build via `proofs/gate.sh`) | Proves memory-safety of what the certificate describes. Proves NOTHING about semantic correctness of the lowering — the IR→MIR row is trusted, guarded by `mir_wellformed.rs` + differential legs, not by proof |
+| FC-1 | An ACCEPTED ownership certificate implies the certified function performs no double-free, no leak, and no dangling-name use | `OwnershipChecker.v` (17), `OwnershipFilter.v` (3), `OwnershipLoop.v` (4), `Subset.v` (5), `Termination.v` (2), `StackBalance.v` (1) | The Rocq kernel (coqchk re-check, cross-version 9.1.1/9.2); the extraction glue `driver.ml` (TRUSTED — negative-tested both directions, see gate-verification `proofs/build-checker.sh`); the certificate FAITHFULLY DESCRIBES the MIR (the producer is untrusted; the checker re-verifies every build via `proofs/gate.sh`) | Proves the stated ownership/name properties of the certificate model, not all four clauses of `MemorySafe` for shipped bytes. Proves NOTHING about semantic correctness of the lowering — the IR→MIR row is trusted, guarded by `mir_wellformed.rs` + differential legs, not by proof |
 | FC-2 | Copy-on-write aliasing preserves value semantics: a snapshot taken before a write observes the pre-write value | `CowSafety.v` (3), `CoownCompose.v` (3), `CoownLoop.v` (5) | Same kernel/extraction roots; the runtime implements the modeled COW discipline (bridged by C-033's fixture family and the differential fuzz) | The MODEL's COW rule is proven; the implementation's conformance to the model is evidence-class fixture+differential, not proof |
 | FC-3 | The modeled free-list allocator never hands out an aliased or freed block, and RC transitions preserve the heap invariant | `FreeList.v` (29), `FreeListRc.v` (27), `RuntimeModel.v` (5), `StructuralRuntime.v` (19), `StructuralAlloc.v` (6), `StructuralDecode.v` (4), `StructuralRun.v` (42), `LargeList.v` (42), `LargeTree.v` (40) | Kernel/extraction; `StructuralRuntime.v` proves the STRUCTURAL leg's emitted `$inc`/`$dec_flat`/`$free` instruction trees realize `rt_inc`/`rt_dec` and the size-class list push, with the class-math keystones (ceil-class coverage, file/take agreement — the under-serve corruption shape is unrepresentable); the tree↔bytes binding is kernel-checked for all four runtime functions: `StructuralDecode.v`'s symbolic-stack decoders map the emitted bytes (grounded per run by `check-structural-bytes.sh`) directly into the proven trees, `$alloc` included (tee-desugar, second global, `memory.size`, multi-byte SLEB; the grow-arm body is matched verbatim and abstracted to its declared one-step semantics), with the Rust-side hash pin as a fast tripwire | Tree-level realization for inc/dec/free on the structural leg; `StructuralAlloc.v` adds `$alloc`'s take/bump paths (the pop closes the reuse cycle against `dec_unique_files_take_class`; the grow body stays one abstract step under the no-grow hypothesis); the byte-decode half is CLOSED for inc/dec/free/alloc, and `StructuralRun.v` closes the WHOLE-RUN composition: arbitrary sequences of the concrete trees' memory effects, coupled to the ghost allocator, preserve `KINV` on the concrete memory (`structural_runs_preserve_KINV`) — RINV for the 13 size classes, LINV for the exact-size large-block list above 64 KiB (#3348: `LargeList.v` models the address-ordered split/coalesce list, `LargeTree.v` proves the emitted `$lfree`/`$ltake` LOOP trees compute it on the in-memory list), and small/large separation as a proven state invariant rather than an assumed static one — with the F-class stated as violated lemmas of the emitted code (`structural_no_aliased_handout`, `structural_counts_stay_honest`, `structural_large_handout_is_free`) under two named layout premises (heap floor at least 16, class table below the floor); the grow retry stays at slice 2's declared abstraction boundary; the structural `$dec_flat` carries a zero-sentinel since #4023 — the realization theorems keep the upstream Perceus certificate's `1 <= rc` precondition, and `dec_freed_block_traps` proves a dec at rc 0 stops before any store (the trap's abort itself is the engine's) |
-| FC-4 | The emitted `rc_inc`/`rc_dec` wasm byte trees decode and execute to exactly the modeled RC transition | `WasmIsa.v` (13), `WasmExec.v` (9), `WasmDecode.v` (6), `WasmEncode.v` (1), `WasmRcDec.v` (2) | Kernel/extraction; `proofs/check-wasm-bytes.sh` binds the CLAIMED byte trees to the EMITTED bytes per build | Covers the RC instruction sequences, not the whole emitted module; the rest of emission is evidence-class Σ-probe/differential |
+| FC-4 | The retained `rc_inc`/`rc_dec` byte trees of the retired incumbent runtime decode and execute to the modeled RC transition | `WasmIsa.v` (13), `WasmExec.v` (9), `WasmDecode.v` (6), `WasmEncode.v` (1), `WasmRcDec.v` (2) | Kernel; the former `proofs/check-wasm-bytes.sh` grounding gate retired with the incumbent renderer (#2761) | A theorem about that modeled runtime, not the runtime bytes shipped today. Shipping structural-runtime grounding is FC-3 through `proofs/check-structural-bytes.sh`; neither row proves full-module semantics |
 | FC-5 | A function's reachable capability set is bounded by its declared effects: no undeclared capability is reachable through the checked call graph | `CapabilityBound.v` (2), `CapabilityReach.v` (3), `CallModes.v` (6) | Kernel/extraction; the checker's E006/E007 seams enforce the modeled rule at the source boundary (those seams are in the MC/DC safety set, #566) | Proven over the modeled call graph; dynamic dispatch beyond the model (computed calls) is walled, not proven |
 | FC-6 | Name resolution is total over the accepted subset, and type concretization never leaves an abstract type in emitted positions | `NameTotality.v` (2), `TypeConcretization.v` (1) | Kernel/extraction; `assert_names_resolvable` + the `ConcretizeTypes` gate run the corresponding implementation checks every build | Same model/implementation split: the theorem is about the model; the in-build gates carry the implementation side |
-| FC-7 | The certificate language's translation preserves the ALS-specified observable semantics for the modeled constructs | `Translation.v` (2), `ALS.v` (2) | Kernel/extraction; the ALS ledger's contract rows carry the per-construct fixtures | Narrow by design — the modeled constructs only; the 320-contract ledger is the breadth instrument |
+| FC-7 | The certificate language's translation preserves the ALS-specified observable semantics for the modeled constructs | `Translation.v` (2), `ALS.v` (2) | Kernel/extraction; the ALS ledger's contract rows carry the per-construct fixtures | Narrow by design — the modeled constructs only; the current contract ledger is the breadth instrument |
 
-Per-build binding, common to every row: `proofs/gate.sh` (the extracted,
+The extraction binary is a fast path: `proofs/gate.sh` and the corpus gates
+compare its verdicts with the Rocq kernel and the portable verifier. This
+does not remove the model-to-implementation assumptions in the table.
+
+Per-build checking (not a full semantic binding for every proof family): `proofs/gate.sh` (the extracted,
 kernel-proven checker re-verifies each build's certificates — toolchain
 stamp FATAL on mismatch), `proofs/corpus-wall.sh` (checker-phase ACCEPTs
 are kernel-proven; a live REJECT caught the via_if miscompile — the fail
-direction has fired on a real bug), and `translation_validation.rs` (the
-per-build certificate-to-bytes chain, #570).
+direction has fired on a real bug), and `proofs/structural-wall.sh` (the shipping structural artifacts,
+certificate bundles, byte anchors and explicit trusted recording boundary).
 
 ## The Lean belts (design mirrors, not credit claims)
 
@@ -47,6 +52,7 @@ rests on them, because nothing binds them to the shipped code mechanically.
 
 ## Dossier status
 
-This table is the #575 deliverable in standing form. Its inclusion in a
-per-release dossier is #571's assembly work; until then the release seal
-(`proofs/releases/*.toml`) plus this file constitute the audit trail.
+This table is the #575 deliverable in standing form. The per-release assembler is `scripts/gen-dossier.sh`, invoked by the
+tagged Trust Spine workflow. A particular release's attached dossier and
+attestation must be checked as release artifacts; the seal
+(`proofs/releases/*.toml`) and this file alone do not prove publication.

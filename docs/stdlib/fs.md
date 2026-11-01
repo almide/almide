@@ -10,7 +10,7 @@ return `Result[Option[T], String]`:
 when readable, `err(msg)` for real failures (permission, a directory at the
 path, IO). Race-free — the classification happens inside the one read
 (unlike an `fs.exists` pre-check). Contract C-215; serves on native and both wasm legs
-(the wasm render walls honestly).
+with the target availability documented in the route inventory.
 
 ```almd run
 import fs
@@ -207,7 +207,7 @@ missing
 
 Read a file as a list of lines. Materializes the whole file — for large
 inputs use `fs.fold_lines` / `fs.for_each_line` instead (O(longest line)
-memory, not O(file)).
+reader buffering, not O(file), excluding the accumulator and callback allocations).
 
 ```almd run
 import fs
@@ -329,7 +329,8 @@ erring chunk body handles its own error.
 ### `fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String]`
 
 Fold exactly the lines owned by the byte range `[start, end)` — a line
-belongs to the range containing the byte before its first byte — so folding
+belongs to the range containing the byte before its first byte (the first
+line belongs to the range containing byte 0) — so folding
 a partition of `[0, size)` (the size from `fs.stat`) visits every line exactly once.
 
 ```almd check
@@ -352,8 +353,10 @@ effect fn main() -> Unit = {
 
 ### `fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String]`
 
-Chunk-parallel fold: one range worker per chunk on real threads inside the
-runtime, partials returned in chunk order. Merge the partials yourself — the
+Chunked fold, with partials returned in chunk order. Eligible native calls
+use the runtime thread pool, bounded by available cores; calls with
+non-sendable accumulators or closures use the equivalent sequential path.
+Pool exhaustion can also run work inline. Merge the partials yourself — the
 result is deterministic whatever the thread schedule. The callback must be a
 pure step function (capturing mutable state is a compile error).
 

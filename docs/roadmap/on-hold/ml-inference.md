@@ -4,17 +4,22 @@
 **Priority:** after graphics stack reaches v1.0
 **Prerequisites:** `wasm-simd128` intrinsics in Almide codegen, stable `bytes` API, DCE measurement across package boundaries
 **Principle:** Don't write an interpreter for ML graphs. Compile the graph. One model in, one tiny WASM binary out — containing only the operators that model actually needs.
-**Differentiator:** Every other browser-side inference runtime (ORT Web, transformers.js, WebLLM, llama.cpp-wasm, candle) ships a *general-purpose* graph executor. Almide compiles the model directly into specialized code, giving a binary size nobody else in the space can match.
+**Hypothesis:** model-specific compilation may reduce runtime overhead for a
+fixed workload. This proposal has not demonstrated the claimed size advantage,
+and it does not establish that competing systems lack model specialization.
 
-> "1 model = 1 WASM. 30–80 KB per model, not 7–12 MB for a runtime that runs any model."
+> Proposed target: one model-specific Wasm artifact, with runtime bytes and
+> weight bytes reported separately. The original 30–80 KB estimate is unmeasured.
 
 ---
 
 ## Thesis
 
-ONNX Runtime is the wrong model to clone. It is a general-purpose graph interpreter with ~300 operators, multiple execution providers, and an irreducible 7–12 MB footprint on the browser. Almide cannot out-engineer Microsoft on that axis and shouldn't try.
+The proposed scope is narrower than reproducing a general-purpose inference
+stack. The original ORT operator/size figures are unversioned comparisons, not
+a demonstrated irreducible lower bound or current benchmark.
 
-The interesting move is orthogonal: treat a model file as a *source file* and run it through the Almide compiler instead of through a runtime interpreter. Operators used by the model become inlined Almide functions. Weights become static data or externally-loaded `Bytes`. Unused operators never enter the binary at all. The result is an executable specialized to exactly one model, measured in tens of kilobytes rather than megabytes.
+The interesting move is orthogonal: treat a model file as a *source file* and run it through the Almide compiler instead of through a runtime interpreter. Operators used by the model become inlined Almide functions. Weights become static data or externally-loaded `Bytes`. Unused operators never enter the binary at all. The desired result is a model-specialized executable; its size remains to be measured.
 
 This roadmap item describes the staged path there, starting from a simple embedding runner and graduating to LLM inference and full model-as-code compilation.
 
@@ -65,7 +70,11 @@ MLC / TVM do something similar at the compiler-stack level but depend on TVM's C
 
 ---
 
-## Competitive Landscape
+## Original competitive estimates (unversioned, not a current benchmark)
+
+The figures below preserve the proposal's motivation. Build settings, model
+weights and host glue were not normalized here; Almide Shape D is a target,
+not an implemented measurement.
 
 | Runtime | Size | Shape | Gap to Almide Shape D |
 |---|---|---|---|
@@ -77,7 +86,8 @@ MLC / TVM do something similar at the compiler-stack level but depend on TVM's C
 | TensorFlow.js | ~2 MB | General-purpose, legacy | Graph interpreter |
 | **Almide Shape D** | **30–500 KB** | **Per-model compile, DCE-stripped** | **1 model = 1 WASM** |
 
-The empty quadrant — "one model per binary, under 100 KB, browser-runnable" — is uncontested.
+Whether a sub-100-KB browser-runnable artifact is feasible or differentiated
+requires a reproducible prototype and a scoped comparison; it is not established here.
 
 ---
 
@@ -87,19 +97,29 @@ None of the phases start until these exist.
 
 ### 1. `wasm-simd128` intrinsics
 
-Matrix multiplication dominates the runtime cost of any inference engine. Scalar matmul is 4–10× slower than SIMD matmul and cannot be covered by compiler tricks alone. Almide's codegen currently emits only scalar operations; `crates/almide-codegen/src/emit_wasm/` needs a v128 type and the 16-lane f32 / i32 / i8 intrinsics surfaced to the language.
+Measure the target model before selecting SIMD work. The old
+`crates/almide-codegen/src/emit_wasm/` path is removed; current binary Wasm
+emission is in `crates/almide-wasm/`. Any SIMD proposal must specify supported
+operations and host requirements there. A 128-bit vector holds four f32/i32
+lanes or sixteen i8 lanes, not sixteen f32 lanes. The old 4–10× estimate is
+not a workload-independent speedup guarantee.
 
-**Priority:** highest. Nothing below can start without this.
+**Original priority:** highest. The dependency order remains a proposal and must be checked against the selected workload.
 
 ### 2. Large static data handling
 
-A small transformer has tens to hundreds of megabytes of weights. Embedding them all in WASM data segments is non-viable. The realistic pattern is:
+The original host/data-loading sketch below is not an implemented ML interface.
+Model size and startup measurements must determine whether to embed or load weights:
 
 - Weights live in a separate file, loaded at runtime into a `Bytes` buffer.
-- Almide treats the buffer as a view, indexing directly via `bytes.data_ptr` + `get_f32_le` without copying.
-- The host provides either a `bytes.load_file(path)` extension or mmap-equivalent access.
+- A proposed view would avoid unnecessary copies. `bytes.data_ptr` is removed;
+  current foreign-memory designs must use the ownership/bounds rules of
+  [Handle / Region](../../adr/0031-raw-pointers-carry-provenance.md), not raw pointers.
+- A host loading/mmap interface would need to be specified and implemented;
+  `bytes.load_file` here is a proposed extension, not a current API.
 
-The mechanism already exists for obsid (zero-copy vertex buffers). Extending it to multi-megabyte weight files is a small addition.
+The original analogy to obsid vertex buffers is not evidence that large-model
+loading is implemented, zero-copy on every route, or a small extension.
 
 ### 3. Quantization support
 
@@ -156,11 +176,11 @@ Same five axes as the graphics stack and `porta-embedded`.
 
 | Axis | Standing |
 |---|---|
-| Binary size | 10–100× smaller than competing runtimes at the equivalent workload. |
-| LLM authoring | Writing a new operator or variant model in Almide is far easier than in C++. |
-| Zero-copy | Weights and activations live in linear memory, no FFI serialization. |
-| Cross-host | `@extern(wasm, "ml", ...)` keeps the host contract pluggable across browser, native, headless. |
-| Compile-time specialization | Shape D is structurally unique — MLC / TVM do it but only at the compiler-stack level, not the language level. |
+| Binary size | Target to measure against equivalent workloads; no 10–100× result established. |
+| LLM authoring | Hypothesis for a Dojo-owned task comparison, not a measured universal advantage. |
+| Zero-copy | Proposed host/memory layout; copies and ownership must be measured per route. |
+| Cross-host | Original `@extern(wasm, "ml", ...)` host sketch; adapters and ABI support require implementation and validation for each host. |
+| Compile-time specialization | Proposed language-integrated route; novelty and benefit require scoped evidence. |
 
 ---
 

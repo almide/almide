@@ -1,6 +1,6 @@
 # Mission
 
-**Almide is the language LLMs can write most accurately.** The claim is not that the model gets it right: it is that a wrong modification is caught at author time with a diagnostic that names the fix, and a right one is certified memory-safe by a checker proven in Rocq (`almide verify`). Every design decision serves that. (Modification survival rate, measured directly, saturates at the top of the model range — `demo/make-verify/README.md` records why it was replaced.)
+**Almide is the language LLMs can write most accurately.** The goal is to catch incorrect modifications at author time with actionable diagnostics. `almide verify` records witnesses for independent checking of modeled properties; this is not a guarantee that every incorrect program is rejected or that a complete artifact is memory-safe. See [the proof and trust boundary](docs/contracts/proven-vs-trusted.md). Every design decision serves that. (Modification survival rate, measured directly, saturates at the top of the model range — `demo/make-verify/README.md` records why it was replaced.)
 
 # Critical Safety Rules
 
@@ -99,11 +99,17 @@ Correct flow:
    `proofs/releases/vX.Y.Z.toml` on `develop`. CI re-measures every `[derived]` field
    against the tag forever after — the seal is the release's immutable evidence record.
 
-If you already shipped a broken release:
+If a release fails, first distinguish a build that never published from an
+already published release. A failed build is not, by itself, authorization to
+delete a published release or tag. A committed seal requires the original tag
+to remain fetchable; deleting it breaks the evidence check.
 
-- `gh release delete vX.Y.Z --yes`
-- `git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`
-- Fix on `develop`, bump to `vX.Y.(Z+1)`, repeat
+The former deletion-and-next-patch recipe did not settle that constraint.
+Before any withdrawal or destructive recovery, obtain an explicit owner-approved
+plan for the published tag, assets, attestations, and seal. This checklist does
+not decide an exception to evidence preservation. Prepare fixes on `develop`
+and use the normal versioned release procedure; do not silently reuse a
+published version.
 
 ## Development Setup
 
@@ -155,11 +161,14 @@ make install   # cargo build --release + install to ~/.local/bin/almide
 
 ## Usage
 
+Cross-target output comparisons apply under the supported contracts and matching
+host/input assumptions; see [the equivalence scope](docs/design/EQUIVALENCE.md).
+
 ```bash
 cargo build --release
 
 almide run app.almd              # Compile + execute
-almide run app.almd --target wasm  # Compile + execute on wasmtime (byte-identical to native)
+almide run app.almd --target wasm  # Execute on embedded Wasmtime; parity has contract/host conditions
 almide run app.almd -- arg1 arg2 # Program args go after --
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
@@ -341,11 +350,11 @@ fields
 ```almide
 value.get(v, key) ?? default_val      // Result/Option fallback
 json.get(v, "field")?                  // Result → Option
-parse_int(s)!                          // unwrap, propagate err (effect fn only)
+parse_int(s)!                          // unwrap and propagate into the current fallible fn or lambda
 ```
 
 ### Imports
-- Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, `math`, `datetime`, `error`, `bytes`, sized ints, etc.) are auto-imported — do NOT write `import string`. Authoritative lists: `import_table.rs` seed + `AUTO_IMPORT_BUNDLED` in `stdlib_info.rs`
+- Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, `math`, `datetime`, `bytes`, sized ints, etc.) are auto-imported — do NOT write `import string`. Authoritative lists: `import_table.rs` seed + `AUTO_IMPORT_BUNDLED` in `stdlib_info.rs`
 - `json`, `fs`, `http`, `env`, `io`, `random`, `regex`, `process`, `testing`, `url` require explicit `import`
 - External packages require `import pkg_name`
 - Package self-reference: `import self as pkg_name`
@@ -354,8 +363,8 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 - **Multi-target**: Same IR emits to Rust or WASM via `--target rust|wasm` (TS codegen は削除済み)
 - **Codegen v3**: Nanopass pipeline (semantic rewrites) + TOML template renderer (syntax)
-- **Effect fn (Rust)**: `effect fn` → `Result<T, String>`。伝搬は **明示のみ**（ADR-0008）— `expr!` が `?` に落ちる。暗黙伝搬は E041、statement 位置の握り潰しは E042
-- **`==`/`!=`**: `almide_eq!` macro in Rust
+- **Effect fn (Rust)**: `effect fn f() -> T` の呼び出しは既定で `Result<T, String>`。明示的な `Result[T, E]` 戻り型はそのエラー型を保持する。純粋な失敗可能関数は `-> T!` / `-> T!E`。伝搬は **明示のみ**（ADR-0008）— `!` の Rust 側の実現は文脈による（Result/Option の伝搬、test の unwrap など）。lambda の境界を含む詳細は [結果・Option・エフェクト仕様](docs/specs/result-option-effect.md) の文脈表を参照。暗黙伝搬は E041、statement 位置の握り潰しは E042
+- **`==`/`!=`**: 通常の二項等価比較は Rust の `almide_eq!` に出力する。convention `eq` および `Secret` の比較は、その前に lowerer が関数呼び出しへ解決する（`crates/almide-frontend/src/lower/expressions_access.rs`）。
 - **`+`**: Concatenation for strings and lists (overloaded with addition)
 - **Diagnostics**: Every error includes file:line, context, and actionable hint
 
@@ -363,7 +372,7 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 - **This repo** = compiler correctness. `spec/` tests, `cargo test`, grammar-lab experiments, lang-bench.
 - **[almide/almide-dojo](https://github.com/almide/almide-dojo)** = LLM writability. Daily MSR measurement, task bank, malicious-hint detection, diagnostics feedback loop.
-- All MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` were removed from this repo (2026-08-08) — the local harness had an empty `results/` since the April 2026 hand-off, so running it would have overwritten Dojo's README number with a locally-measured one. Recover with `git log --diff-filter=D -- research/benchmark/msr/`.
+- All MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` were removed from this repo (2026-08-08) — the local harness had an empty `results/` since the April 2026 hand-off, so running it would have overwritten Dojo's published number with a locally-measured one. Recover with `git log --diff-filter=D -- research/benchmark/msr/`.
 - Still here and live: `research/benchmark/perf/` (gated by `scripts/check-perf-ratio.sh`), `research/benchmark/lang-bench/`, `research/benchmark/exercises/` (corpus for `tools/v1_gap_measure.py`), `research/grammar-lab/`, `research/spike/`.
 - The bridge: Dojo's PR gate will run a task subset as part of this repo's CI (future).
 

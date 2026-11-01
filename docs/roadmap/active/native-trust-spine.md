@@ -197,10 +197,15 @@
       wall → fail; stale entry → fail; the set only shrinks, target empty) —
       remainder tracked in #791.
 
-## Invariants (every rung)
+## Intended invariants and their evidence boundary
 
-- A v1-rendered program is NEVER wrong: anything outside the subset returns
-  `Err` and the CLI falls back to v0 (`src/cli/build.rs`).
+- Out-of-subset refusal is an intended admission boundary, not proof that every
+  admitted program renders correctly. Ownership checks and differential tests
+  cover their stated properties/fixtures, not arbitrary output correctness.
+- The v0 fallback and `--no-verified` descriptions above are historical rung
+  records. Current `--no-verified` is rejected (`src/main.rs`), and the Wasm
+  route is structural-only (`src/wasm_route.rs`); those old options are not
+  instructions to bypass verification.
 - `verify_ownership` runs on every lowered fn before render.
 - The differential gate corpus only grows; a rung ships WITH its corpus rows.
 - The shim floor is a CLOSED map (`render_native.rs::shim`) — additions are

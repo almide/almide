@@ -4,11 +4,13 @@ HTML escaping and the `SafeHtml` capability type. `import html`.
 
 The point of this module is that `SafeHtml` and `String` are different types.
 A template that concatenates `SafeHtml` values cannot accidentally splice in an
-unescaped string, because the type system will not let it — the only ways to
-obtain a `SafeHtml` are `escape` (which escapes) and `raw` (which is explicit
-about trusting its input).
+unescaped string, because the type system will not let it. Construct fragments
+with the context-specific builders (`escape`, `attr`, `url_attr`,
+`script_json`), combine them with `concat` / `empty`, or explicitly trust
+markup with `raw`. A fragment must still be used in its intended context.
 
-Every function is pure, so it behaves identically on both targets.
+The module exposes pure functions on both targets. Cross-target behavior is
+covered by the HTML spec fixtures; purity alone is not a proof of backend equivalence.
 
 ### `html.escape(s: String) -> SafeHtml`
 

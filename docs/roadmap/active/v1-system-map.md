@@ -1,5 +1,20 @@
-<!-- description: v1 system map — mermaid diagrams of the whole trust architecture: each component's what / why / which area it secures, the PCC trust flow, the trust base, the three pillars, the threat model, and the maturity ladder. -->
+<!-- description: Intended v1 assurance architecture and historical maturity diagrams, not a completed trust-chain certificate -->
 # v1 System Map — 全体像(mermaid)
+
+## Design map, not a completed trust-chain certificate
+
+These diagrams combine the intended assurance architecture with the early
+v1 maturity snapshot. The labels “current”, zero real programs and completed
+trust arrows are not current measurements. In particular, proving a witness
+checker does not by itself remove trust in event recording, lowering, runtime
+bodies, host behavior or source semantics.
+
+Current scoped claims are in [proven versus trusted](../../contracts/proven-vs-trusted.md)
+and the [receipt generator](../../../proofs/receipt.sh). The full K/V/ALS
+refinement chain and qualification ladder below are objectives; the diagrams
+must not be read as evidence that every shipped artifact has attained them.
+The early scoreboard and intended topology are preserved rather than filled
+with unmeasured new values.
 
 > **これは何か**: Almide v1 の信頼アーキテクチャを **一枚ずつの図**で見る地図。
 > 各部品について「**何か / なぜ使うか / Almide のどの領域を担保するか**」を示す。

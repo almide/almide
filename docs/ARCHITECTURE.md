@@ -1,8 +1,10 @@
 # Architecture
 
-Almide is a ~170,000-line pure-Rust compiler organized as a workspace of a CLI
-binary + 13 library crates (plus the cargo-excluded `almide-kernel` SIMD crate
-and the Lean 4 proof project `almide-perceus-belt`). Key dependencies: `serde` +
+Almide is a Rust workspace containing the compiler, runtime and backend crates,
+and independent verification tools. [`Cargo.toml`](../Cargo.toml) is the
+source of truth for workspace membership and exclusions; the default build
+includes both `almide` and the separate `almide-verify` checker. The Lean 4
+proof project `almide-perceus-belt` is not a Cargo crate. Key dependencies: `serde` +
 `serde_json` (AST serialization), `toml` (template loading), `clap` (CLI),
 `lasso` (string interning), `wat` + `wasmparser` + `wasm-encoder` (WASM
 assembly/validation), `lsp-server` + `lsp-types` (language server).
@@ -66,16 +68,19 @@ and serves as the cross-target oracle / executable spec.
   - the **commissioned structural leg** (default): `almide::wasm_leg`
     (parse→check→lower→self-host link→`link_ir`) feeds
     `almide-wasm::emit_program`, which emits wasm bytes structurally
-    (wasm-encoder — no WAT text). Measured 610/610 byte-identical to native
-    on the full wasm_cross corpus. `almide run` executes on the embedded
-    `almide-wasm-run` host (fs/env/stdin included); `almide build` ships the
-    `to_wasi` form (`almide-wasi`, a pure crate re-exported as
-    `almide_wasm_run::wasi`), which runs on STOCK runtimes (`wasmtime run mod.wasm` —
-    the 578-fixture stock-runtime gate is the witness). The same artifact
-    runs on `almide-wasm-vm`, the qualification-scoped interpreter (#865)
-    whose instruction set is pinned to this emitter's;
-    `tests/wasm_vm_parity_test.rs` holds it equal to the stock runtime on
-    every fixture and to native on every Critical-profile one.
+    (wasm-encoder — no WAT text). Differential gates compare observable output against native
+    on the versioned wasm_cross corpus. `almide run` executes on the embedded
+    `almide-wasm-run` host (within its supported operation set). `almide build`
+    packages a core module through `to_wasi`, or a component according to flags
+    and host operations (`src/cli/build_wasm.rs::WasmPackage`); a serve-shaped
+    HTTP program becomes a WASI 0.3 handler component. Stock runtimes must
+    support the artifact's interfaces; process operations require Almide's
+    private host capability. The stock-runtime parity gates cover their
+    declared fixture subsets. The closed core-module subset admitted by `almide-wasm-vm` can run on
+    that qualification-scoped interpreter (#865); it is not a component or
+    arbitrary-host runner. Its load-time validator rejects unsupported shapes.
+    `tests/wasm_vm_parity_test.rs` compares its admitted corpus with the stock
+    runtime and the Critical-profile fixtures with native.
   - the **incumbent WAT trust-spine** (`almide-mir` rendering WAT) is gone:
     #2752 removed its last route and #2761 deleted the renderer. `almide-mir`
     keeps MIR lowering (the native leg), the native renderers, and the
@@ -102,10 +107,13 @@ and serves as the cross-target oracle / executable spec.
 `--verified` is the default (`--no-verified` is deprecated and warns).
 `almide run --target wasm` and `almide build --target wasm` share
 `compile_to_wasm_bytes`, so run and build observe one emission. On the
-structural leg the BUILD artifact additionally passes `to_wasi` (stock-runtime
-form) — same observable behavior, different bytes.
+structural leg the BUILD artifact is packaged for its selected core/component
+route; the embedded-host module and shipped artifact need not have identical bytes.
 
 ## Crate Structure
+
+Selected components are shown below; this is a navigation map, not a complete
+workspace roster. See [`Cargo.toml`](../Cargo.toml) for all members.
 
 ```
 almide/                    Workspace root
@@ -127,14 +135,15 @@ almide/                    Workspace root
 │   ├── almide-syntax/     Lexer, recursive-descent parser, untyped AST
 │   ├── almide-types/      Resolved Ty, unification, protocol defs,
 │   │                      stdlib_info.rs (module registry, auto-import lists,
-│   │                      bundled stdlib sources via include_str!)
+│   │                      bundled stdlib sources via generated/embedded.rs)
 │   ├── almide-lang/       Facade crate: re-exports syntax + types (no logic)
 │   ├── almide-frontend/   Type checker (Infer → Solve → Resolve), AST→IR
 │   │                      lowering, canonicalize, ir_link
+│   ├── almide-driver/     Shared post-typecheck driver: optimize → mono → ir_link
 │   ├── almide-ir/         Typed IR: IrProgram/IrExpr (every node carries ty),
 │   │                      VarId/VarTable, visitors
-│   ├── almide-mir/        v1 Middle IR — single source of truth for ownership
-│   │                      and layout (Perceus). #![forbid(unsafe_code)].
+│   ├── almide-mir/        v1 Middle IR — ownership/layout for its native
+│   │                      renderer (Perceus). #![forbid(unsafe_code)].
 │   │                      MIR lowering + the native trust-spine renderer
 │   │                      + MIR certificate witnesses (proofs/gate.sh).
 │   │                      No wasm/WAT renderer since #2761.
@@ -143,10 +152,15 @@ almide/                    Workspace root
 │   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
 │   │                      TOML template renderer, target-agnostic walker;
 │   │                      templates/rust.toml = Rust syntax templates (~330 rules)
+│   ├── almide-wasm/       Structural wasm emitter and emission witnesses
+│   ├── almide-wasm-run/   Embedded host for emitted wasm modules
+│   ├── almide-wasi/       Transform emitted modules into stock-WASI artifacts
+│   ├── almide-verify/     Independent certificate checker, shipped beside almide
+│   ├── almide-anchor-check/  Check located witness events against shipped wasm bytes
 │   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
 │   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
 │   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
-│   ├── almide-egg-lab/    Equality-saturation (egg) PoC, isolated
+│   ├── almide-egg-lab/    Equality-saturation engine used by EggSaturationPass
 │   ├── almide-kernel/     [cargo-excluded] target-specific SIMD numeric kernels
 │   └── almide-perceus-belt/  [Lean 4, not a cargo crate] Perceus RC/ownership
 │                             proof belt
@@ -154,7 +168,7 @@ almide/                    Workspace root
 ├── grammar/               Git submodule → almide/almide-grammar: descriptive
 │                          keyword/precedence data consumed by the tree-sitter
 │                          and TextMate generators (not by the compiler build)
-├── stdlib/                Self-hosted stdlib: ~280 .almd files (see below)
+├── stdlib/                Self-hosted .almd modules (see below)
 └── runtime/rs/src/        Native Rust runtime for @intrinsic functions
 ```
 
@@ -216,13 +230,23 @@ from `almide-mir` was deleted by #2761.
 - Ownership/RC follows Perceus (Perceus-style RC in linear memory). The Coq
   theorems WasmEncode/WasmExec/WasmRcDec stand about a MODELED runtime (the
   retired incumbent's); the structural runtime's bytes are checked against
-  `StructuralDecode.v` by `proofs/check-structural-bytes.sh`. No per-build
-  ownership certificate is re-verified for a shipped wasm byte — the
-  structural leg is trusted, its certificate pending (#2755–#2760).
-- Stdlib calls are *self-hosted*: pure-Almide implementations from
-  `stdlib/*.almd` are registered in `almide-types/src/self_host_registry.rs`
-  and compiled along with user code. An unlinked stdlib call is a wall (hard
-  error).
+  `StructuralDecode.v` by `proofs/check-structural-bytes.sh`. The structural
+  leg records per-build witnesses; `almide verify` delegates their checking
+  to the independent `almide-verify`. For supported core artifacts (components are refused by `almide verify`),
+  a supplied artifact or one found at the default path is bound to the bundle
+  with SHA-256
+  (#4011). The certified corpus is exercised by
+  `proofs/structural-wall.sh`. This is not a proof of semantic correctness
+  or whole-artifact memory safety: coverage and recording assumptions remain.
+  See [proven vs trusted](./contracts/proven-vs-trusted.md) and the
+  [memory-safety gap table](./design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011).
+- Stdlib calls are *self-hosted*: implementations from `stdlib/*.almd` are
+  compiled along with user code. New self-hosted bodies declare
+  `@implements("module.fn")`; the build generates
+  `crates/almide-types/src/generated/implements.rs` from those declarations.
+  `self_host_registry.rs` combines the declared entries with a legacy table
+  that only shrinks (`tests/name_keyed_sites_test.rs`), not a table to extend
+  for new bodies. An unlinked stdlib call is a wall (hard error).
 - `wasmparser::validate` guards the test harness. `almide test --target wasm`
   renders through the SAME route as `build`/`run --target wasm` (#2179):
   the structural leg (`almide-wasm`, with the shared `__test_runner`
@@ -402,9 +426,10 @@ source with `rustc`, so it gets the full Rust arm of table B plus LLVM.
 The stdlib is self-hosted: every function lives in `stdlib/<module>[_part].almd`
 (the old `stdlib/defs/*.toml` pipeline is gone). Two consumption paths:
 
-- **Native / type signatures** — module sources are embedded via `include_str!`
-  in `almide-types/src/stdlib_info.rs`; the frontend extracts signatures, the
-  codegen extracts `@inline_rust` templates. `@intrinsic("almide_rt_*")`
+- **Native / type signatures** — module sources are embedded in the committed
+  `almide-types/src/generated/embedded.rs` table, regenerated from `.almd` files
+  by `almide-types/build.rs` in a checkout. `stdlib_info.rs` exposes them; the
+  frontend extracts signatures and codegen extracts `@inline_rust` templates. `@intrinsic("almide_rt_*")`
   declarations dispatch to hand-written Rust in `runtime/rs/src/<module>.rs`.
 - **WASM** — pure-Almide implementations registered in
   `almide-types/src/self_host_registry.rs` (shared with the interp oracle)
@@ -417,12 +442,20 @@ Auto-import is the union of the seed list in
 
 ## Build System
 
-The root `build.rs` is empty; codegen lives in crate-specific build scripts:
+The root `build.rs` embeds diagnostic documentation for `almide explain` and
+sets the version/provenance line. Crate-specific build scripts include:
 
-- `almide-codegen/build.rs` — scans `runtime/rs/src/*.rs` → generates
-  `arg_transforms.rs` (per-function argument decoration) and `rust_runtime.rs`
-  (embedded runtime via `include_str!`).
-- `almide-frontend` — generates `stdlib_sigs.rs` (signatures for checking).
+- `almide-codegen/build.rs` — generates the embedded runtime registry and
+  matrix-desugaring fallback from the rewrite declarations. The old
+  `arg_transforms.rs` table is retired.
+- `almide-types/build.rs` — generates committed embedded stdlib sources and
+  declaration-derived tables from `stdlib/*.almd`.
+- `almide-frontend/build.rs` — copies the dialect ledger and regex runtime into
+  committed generated files; signatures are extracted from bundled sources,
+  not a generated `stdlib_sigs.rs` table.
+
+These crate generators regenerate checkout inputs only in a checkout;
+standalone packages use their committed generated copies.
 
 ## Type System
 
@@ -432,9 +465,12 @@ Constraint-based inference with eager unification:
 2. **Solve** — unify constraints, propagate solutions
 3. **Resolve** — replace inference variables with concrete types in `expr_types`
 
-UFCS resolution: `xs.map(f)` → checker finds `builtin_module_for_type(List) =
-"list"` → dispatches to `list.map(xs, f)`. Pipes, UFCS, and string
-interpolation are desugared once, in lowering — codegen never sees them.
+UFCS resolution is receiver- and scope-aware in the checker: for example,
+`xs.map(f)` on a List can resolve to `list.map(xs, f)`; convention methods and
+local/imported functions have their own resolution rules (`calls_ufcs.rs`).
+Pipes and resolved calls are lowered before codegen. String interpolation can
+remain an `IrExprKind::StringInterp`, which the Rust walker renders explicitly
+(`walker/expressions.rs`).
 
 ## Module System
 
@@ -447,9 +483,9 @@ interpolation are desugared once, in lowering — codegen never sees them.
 
 ## Diagnostics
 
-Every diagnostic includes an error code (E001–E030, E420 — see
-[diagnostics/](./diagnostics/)), file:line:col, source context with underline,
-and an actionable hint. Output: human-readable or `--json`.
+The [diagnostic reference](./diagnostics/README.md) lists the current codes.
+Diagnostics report the location and source context, with a repair hint where
+one is known. Output is human-readable or `--json`.
 
 ```
 error[E005]: argument 'xs' expects List[Int] but got String

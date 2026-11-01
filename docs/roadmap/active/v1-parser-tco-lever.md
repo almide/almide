@@ -617,8 +617,8 @@ extend the tail-duplication to a let-bound `if` whose continuation is the recurs
 duplicating the continuation (the recursive call + accumulator update) into each arm so the let-bound
 `if` is ELIMINATED before lowering. Then each arm has a literal `c` and its own self-call; `tco_collect`
 must admit BRANCHED self-calls (one per arm, each a conditional accumulator SetLocal — already supported
-by the loop-body Assign). Risk: TCO composition with branched calls; gate-protected (any double-free →
-cert REJECT). This single lever unblocks base64 ×2 + a large fraction of toml.
+by the loop-body Assign). Risk: TCO composition with branched calls; protected by modeled ownership checks plus runtime/differential probes (a
+certificate does not cover every trusted runtime or renderer operation). This single lever unblocks base64 ×2 + a large fraction of toml.
 
 ### Frontier B — the heap-payload `Result`/variant match (Camp-4)
 `match bs { ok(bytes) => …, err(e) => … }` over a `Result[Bytes, String]` (base64 decode/decode_url).
@@ -663,7 +663,8 @@ Two sub-cases, increasing difficulty:
    This is the documented borrowed-slot move-out ([[v1-selfhost-machinery]] Machinery 2 for match-read).
 
 Camp-4 is double-free territory (the memory's explicit fatigue-warning zone): implement it FRESH with
-the gate (ownership cert REJECTs any double-free) as the safety net. It is the single lever that
+the ownership-event checker plus runtime and differential probes as the safety
+net. Certificate acceptance alone does not exclude every runtime double-free. It is the single lever that
 finishes base64 (decode) AND unblocks the bulk of toml.
 
 ## STATUS (2026-06-22, turn 3) — 7 levers total, +289 corpus coverage; heap-Ok Result is the LAST frontier

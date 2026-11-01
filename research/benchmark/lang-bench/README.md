@@ -30,7 +30,7 @@ ruby research/benchmark/lang-bench/runner.rb --trials 10
 
 Each trial runs two phases:
 
-- **v1** — Claude (Sonnet 4.6) implements `init`, `add`, `commit`, `log`.
+- **v1** — Claude (the runner requests the unversioned `sonnet` alias) implements `init`, `add`, `commit`, `log`.
 - **v2** — Claude extends v1 with `checkout`, `reset`.
 
 Expect ~20–30 min per trial. Trial numbers auto-increment based on existing records in `raw/almide.jsonl`.
@@ -48,12 +48,15 @@ ruby research/benchmark/lang-bench/aggregate.rb   # raw/ → data.json Almide en
 python3 research/benchmark/lang-bench/plot.py     # data.json → docs/figures/lang-bench-*.png
 ```
 
-`plot.py` also cache-busts the README image URLs.
+`plot.py` attempts to cache-bust matching README image URLs. That is a no-op
+when those images are absent, as on the current front README. Published
+measurements live in `docs/benchmarks/README.md`; its dated snapshot is distinct
+from the live charts produced here.
 
 ## Data notes
 
 - The other 15 languages in `data.json` come from the upstream benchmark (Opus 4.6, 20 trials each). Those numbers are not regenerated here.
-- The Almide entry in `data.json` `languages[]` was refreshed on 2026-07-15 from the same-model snapshot below (**Sonnet 5**, 20 trials). Almide never uses Opus because it has no training data; the model difference is documented in the chart label.
+- The Almide entry in `data.json` `languages[]` was refreshed on 2026-07-15 from the same-model snapshot below (**Sonnet 5**, 20 trials). That historical model label is retained; it is not the current runner's version pin. Training-data inclusion cannot be established from this benchmark.
 - `upstream/benchmark.rb` is the vanilla upstream runner — it does **not** include Almide in its language list. `runner.rb` in this directory is our Almide-specific replacement, referencing only `upstream/SPEC-v*.txt` and `upstream/test-v*.sh`.
 
 ## Same-model snapshot (2026-07)
@@ -79,8 +82,8 @@ Chart: `docs/figures/lang-bench-snapshot-2026-07.png`. Aggregated data lives in
 Methodology notes:
 
 - Prompts are the upstream `benchmark.rb` prompts verbatim. Almide additionally
-  receives `CHEATSHEET.md` in its work dir and a build-command hint (it is the
-  only language absent from training data — it learns the language in-context).
+  receives `CHEATSHEET.md` in its work dir and a build-command hint (this documents the supplied context, not a verified claim that the
+  language was absent from model training data).
 - **Infra-retry policy**: trials where the `claude` CLI died before attempting
   the task (≤4 agent turns, 0 LOC written, zero tests executed) were re-run
   once; the original records are quarantined in `raw/retired/` with reasons.

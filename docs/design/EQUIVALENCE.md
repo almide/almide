@@ -1,21 +1,35 @@
 # The Equivalence Claim — Byte-Identical Across Targets
 
-**Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
+**Cross-target equivalence is checked contract by contract:** deterministic
+observations (stdout, stderr, exit code) are compared for supported programs
+under matching inputs and host assumptions. Host observations, randomness,
+resource limits, and oracle-relative time require their stated invariants or
+comparison conditions. Passing a finite corpus is not a proof for every
+program that compiles for both targets.
 
-"Byte-identical" means the *execution output*, not the compiled artifacts — a native binary and a `.wasm` module are different bytes by construction; what must not differ is anything the program lets you observe.
+"Byte-identical" means the *execution output*, not the compiled artifacts — a native binary and a `.wasm` module are different bytes by construction; the comparison concerns the observations covered by the contract.
 
 ## Scope
 
 The guarantee is **continuous, with an explicit scope** — held by gates that re-run on every change, not a one-time snapshot:
 
-- **In scope**: everything the program lets you observe — stdout, stderr, exit code — on every program that compiles for both targets.
-- **Inherently nondeterministic sources** are ledger-managed, not waved away: their contracts certify the *deterministic invariant* (e.g. every `random.int(lo, hi)` draw stays in range — C-112) instead of exact bytes, and the sole wall-clock stdlib surface was removed outright (C-006) rather than documented around.
-- **APIs not yet implemented on wasm** are compile- or run-time *refusals*: the program never runs far enough to emit wrong bytes — an honest wall, not a silent divergence.
-- **Platform-reporting fns are the one exemption, and it is closed**: `env.os()` and `fs.temp_dir()` report the host they run on, so native answers the real OS name and temp directory while the wasm leg answers the WASI sandbox. Making them agree would be the defect. C-189 bounds the carve-out to exactly those two and certifies the invariant that *is* identical (the platform set is closed; the temp path is non-empty and absolute), so a third exempt fn cannot appear without amending the contract and its fixture.
+- **Deterministic observations**: byte comparisons in the declared cross-target
+  fixtures and differential tests, not unrestricted equality under different hosts.
+- **Nondeterministic inputs**: contracts can assert an invariant rather than
+  identical samples (e.g. random values stay in range). The old timeout removal
+  (C-006) is historical; current `fan.timeout` is oracle-relative (C-208).
+- **Unavailable operations**: the selected route may refuse a program or
+  operation; consult `proofs/target-availability.toml`. A refusal is not a
+  successful parity observation for that program.
+- **Declared host/representation differences**: platform reporting and compressed
+  output have scoped invariants, not universal byte equality. For example the
+  zlib contract compares decoding/round trips while documenting different
+  compression strategies. Consult the relevant contract and executable fixture
+  rather than assuming the old two-function exemption list covers every case.
 
 ## The contract ledger
 
-This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts), each traceable to executable evidence of class ≥ `fixture`. The exceptions clause is auto-generated from the ledger into the [README claims block](../../README.md) by `scripts/gen-claims.sh`; the contract counts beside it are stamped from the ledger with their measurement date (`proofs/ledger-counts.toml`, `scripts/gen-ledger-counts.sh`, re-measured nightly by `scripts/check-ledger-counts.sh`); and `scripts/check-contracts.sh` fails CI if the block drifts from either — the public claim literally cannot desynchronize from what the gates verify.
+This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts), each traceable to executable evidence of class ≥ `fixture`. The exceptions clause is auto-generated from the ledger into the [measurements claims block](../benchmarks/README.md) by `scripts/gen-claims.sh`; the contract counts beside it are stamped from the ledger with their measurement date (`proofs/ledger-counts.toml`, `scripts/gen-ledger-counts.sh`, re-measured nightly by `scripts/check-ledger-counts.sh`); and `scripts/check-contracts.sh` fails CI if the block drifts from either — the generated block is kept in sync with its declared inputs; this does not by itself establish that every prose statement or evidence link proves the claimed behavior.
 
 Ledger mechanics:
 
@@ -41,4 +55,7 @@ bash scripts/check-contracts.sh    # ledger integrity + claims-block freshness
 bash scripts/org-byte-verify.sh    # org-wide two-target byte comparison
 ```
 
-The v1 line strengthens this from "gates verify it" to "a proven checker re-verifies it on every build" — see [TRUST-SPINE.md](https://github.com/almide/almide/blob/develop/docs/TRUST-SPINE.md).
+Certificates establish modeled witness properties within their coverage and
+trust assumptions; they do not prove native/Wasm semantic equivalence. See
+[proven vs trusted](../contracts/proven-vs-trusted.md) and
+[TRUST-SPINE.md](../TRUST-SPINE.md).
