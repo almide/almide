@@ -71,10 +71,14 @@ Definition NN := list Slot.
 
 (* A procedure: its slot groups (slot -> representative), its precondition
    over its own slots — known indices, counts (count slot, parameter slot,
-   stride), not-negative slots — and its body. *)
+   stride), not-negative slots — and its body. The table is keyed by the
+   procedure's id (its function's position in the module). *)
 Definition Grp := list (Slot * Slot).
 Definition Pre := (Known * Counts * NN)%type.
-Definition Procs := list (Grp * Pre * PProg).
+Definition Procs := list (nat * (Grp * Pre * PProg)).
+
+Definition plook (P : Procs) (f : nat) : option (Grp * Pre * PProg) :=
+  match find (fun q => Nat.eqb (fst q) f) P with Some (_, d) => Some d | None => None end.
 
 Definition gof (gs : Grp) (x : Slot) : Slot :=
   match find (fun a => Nat.eqb (fst a) x) gs with Some (_, r) => r | None => x end.
@@ -173,14 +177,14 @@ Inductive prun : Bm -> Env -> PProg -> list Ev -> Outcome -> Prop :=
      of the callee to any live block and any value. The caller's slots are
      untouched; the callee's final slots are dropped. *)
   | PRCall : forall bm e f args k gs' pre body bm' e' t1 e1 t2 out,
-      nth_error P f = Some (gs', pre, body) ->
+      plook P f = Some (gs', pre, body) ->
       (forall y, ok (bm' y)) -> resp gs' bm' -> i64 e' ->
       (forall p x, In (p, x) args -> bm' p = bm x /\ e' p = e x) ->
       prun bm' e' body t1 (Done e1) ->
       prun bm e k t2 out ->
       prun bm e (PCall f args k) (t1 ++ t2) out
   | PRCallAbort : forall bm e f args k gs' pre body bm' e' t1,
-      nth_error P f = Some (gs', pre, body) ->
+      plook P f = Some (gs', pre, body) ->
       (forall y, ok (bm' y)) -> resp gs' bm' -> i64 e' ->
       (forall p x, In (p, x) args -> bm' p = bm x /\ e' p = e x) ->
       prun bm' e' body t1 Aborted ->
@@ -274,7 +278,7 @@ Fixpoint pcheck (P : Procs) (gs : Grp) (kn : Known) (cn : Counts) (nn : NN) (p :
       | _, _ => None
       end
   | PCall f args k =>
-      match nth_error P f with
+      match plook P f with
       | Some (gs', pre, _) => if pre_met gs gs' kn cn nn args pre then pcheck P gs kn cn nn k else None
       | None => None
       end
@@ -282,7 +286,7 @@ Fixpoint pcheck (P : Procs) (gs : Grp) (kn : Known) (cn : Counts) (nn : NN) (p :
 
 (* Every procedure's body is accepted under its precondition alone. *)
 Definition procs_ok (P : Procs) : bool :=
-  forallb (fun pb => let '(gs, (kq, cq, nq), body) := pb in
+  forallb (fun pb => let '(_, (gs, (kq, cq, nq), body)) := pb in
                      match pcheck P gs kq cq nq body with Some _ => true | None => false end) P.
 
 Definition paccepts (P : Procs) (gs : Grp) (p : PProg) : bool :=
@@ -464,11 +468,14 @@ Proof.
 Qed.
 
 Lemma procs_ok_body : forall P f gs pre body,
-  procs_ok P = true -> nth_error P f = Some (gs, pre, body) ->
+  procs_ok P = true -> plook P f = Some (gs, pre, body) ->
   exists rb, pcheck P gs (fst (fst pre)) (snd (fst pre)) (snd pre) body = Some rb.
 Proof.
   intros P f gs [[kq cq] nq] body HP Hf. unfold procs_ok in HP. rewrite forallb_forall in HP.
-  specialize (HP _ (nth_error_In P f Hf)). simpl in HP. simpl.
+  unfold plook in Hf.
+  destruct (find (fun q => Nat.eqb (fst q) f) P) as [[g d] |] eqn:Hfd; [| discriminate].
+  injection Hf as <-. apply find_some in Hfd. destruct Hfd as [Hin _].
+  specialize (HP _ Hin). simpl in HP. simpl.
   destruct (pcheck P gs kq cq nq body) as [rb |]; [exists rb; reflexivity | discriminate].
 Qed.
 
@@ -751,57 +758,57 @@ Definition copy_body : PProg :=
 Definition copy_entry : PProg :=
   PLen 1 2 8 (PConst 2 0 (PCall 0 [(1, 1); (2, 2)] PEnd)).
 
-Example accepts_recursive_copy : paccepts [(copy_grp, copy_pre, copy_body)] [] copy_entry = true.
+Example accepts_recursive_copy : paccepts [(0, (copy_grp, copy_pre, copy_body))] [] copy_entry = true.
 Proof. reflexivity. Qed.
 
 (* The signed test of an index NOT known to be non-negative is refused. *)
 Example rejects_signed_unknown_sign :
-  paccepts [(copy_grp, ([], [(1, 2, 8%Z)], []), copy_body)] [] copy_entry = false.
+  paccepts [(0, (copy_grp, ([], [(1, 2, 8%Z)], []), copy_body))] [] copy_entry = false.
 Proof. reflexivity. Qed.
 
 (* A step of twice the stride does not keep the index in the no-wrap range
    the stride gives: the next call's precondition is refused. *)
 Example rejects_step_past_stride :
-  paccepts [(copy_grp, copy_pre,
-             PBranch PEnd (PCheck 2 1 8 true (PAcc 2 8 0 8 (PStep 3 2 16 8 (PCall 0 [(1, 1); (2, 3)] PEnd)))) PEnd)]
+  paccepts [(0, (copy_grp, copy_pre,
+             PBranch PEnd (PCheck 2 1 8 true (PAcc 2 8 0 8 (PStep 3 2 16 8 (PCall 0 [(1, 1); (2, 3)] PEnd)))) PEnd))]
     [] copy_entry = false.
 Proof. reflexivity. Qed.
 
 (* A recursive call passing a count the caller does not have: refused. *)
 Example rejects_call_unproven_count :
-  paccepts [(copy_grp, copy_pre,
-             PBranch PEnd (PCheck 2 1 8 true (PAcc 2 8 0 8 (PStep 3 2 1 8 (PCall 0 [(1, 4); (2, 3)] PEnd)))) PEnd)]
+  paccepts [(0, (copy_grp, copy_pre,
+             PBranch PEnd (PCheck 2 1 8 true (PAcc 2 8 0 8 (PStep 3 2 1 8 (PCall 0 [(1, 4); (2, 3)] PEnd)))) PEnd))]
     [] copy_entry = false.
 Proof. reflexivity. Qed.
 
 (* The step's slot NOT declared in the counter's group: its block is not
    the counted one, so the recursive call's count is refused. *)
 Example rejects_step_outside_group :
-  paccepts [([], copy_pre, copy_body)] [] copy_entry = false.
+  paccepts [(0, ([], copy_pre, copy_body))] [] copy_entry = false.
 Proof. reflexivity. Qed.
 
 (* An entry calling with a negative start: refused. *)
 Example rejects_negative_start :
-  paccepts [(copy_grp, copy_pre, copy_body)] [] (PLen 1 2 8 (PConst 2 (-1)%Z (PCall 0 [(1, 1); (2, 2)] PEnd))) = false.
+  paccepts [(0, (copy_grp, copy_pre, copy_body))] [] (PLen 1 2 8 (PConst 2 (-1)%Z (PCall 0 [(1, 1); (2, 2)] PEnd))) = false.
 Proof. reflexivity. Qed.
 
 (* Two parameters of one callee group handed slots of two caller groups:
    refused (the callee would read one block through the other's count). *)
 Example rejects_groups_disagree :
-  paccepts [([(4, 2)], ([], [(1, 2, 8%Z)], [4]), PCheck 4 1 8 true (PAcc 4 8 0 8 PEnd))] []
+  paccepts [(0, ([(4, 2)], ([], [(1, 2, 8%Z)], [4]), PCheck 4 1 8 true (PAcc 4 8 0 8 PEnd)))] []
     (PLen 1 2 8 (PConst 5 0 (PCall 0 [(1, 1); (2, 2); (4, 5)] PEnd))) = false.
 Proof. reflexivity. Qed.
 
 (* The same call with the counter in the counted slot's group: accepted. *)
 Example accepts_groups_agree :
-  paccepts [([(4, 2)], ([], [(1, 2, 8%Z)], [4]), PCheck 4 1 8 true (PAcc 4 8 0 8 PEnd))] [(5, 2)]
+  paccepts [(0, ([(4, 2)], ([], [(1, 2, 8%Z)], [4]), PCheck 4 1 8 true (PAcc 4 8 0 8 PEnd)))] [(5, 2)]
     (PLen 1 2 8 (PConst 5 0 (PCall 0 [(1, 1); (2, 2); (4, 5)] PEnd))) = true.
 Proof. reflexivity. Qed.
 
 (* A procedure whose body reads without a test, its precondition silent on
    the index: refused even with no caller. *)
 Example rejects_body_unchecked :
-  paccepts [([], ([], [], []), PAcc 0 8 0 8 PEnd)] [] PEnd = false.
+  paccepts [(0, ([], ([], [], []), PAcc 0 8 0 8 PEnd))] [] PEnd = false.
 Proof. reflexivity. Qed.
 
 (* A call of a procedure that does not exist: refused. *)
