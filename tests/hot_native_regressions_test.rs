@@ -32,10 +32,12 @@ fn shebang_precedes_dialect_and_survives_formatting() {
 fn native_mir_declines_serializing_fan() {
     let block = "effect fn f(n: Int) -> Int = n + 1\neffect fn main() -> Unit = { let r = fan { f(1), f(2) }; println(int.to_string(r.0 + r.1)) }";
     let mapper = "effect fn main() -> Unit = { let r = fan.map([1, 2], (x) => ok(x + 1))!; println(int.to_string(list.len(r))) }";
-    for source in [block, mapper] {
-        let error = almide_mir::pipeline::try_render_rust_source(source).unwrap_err();
-        assert!(format!("{error:?}").contains("fan concurrency"), "{error:?}");
-        assert!(matches!(error, almide_mir::lower::LowerError::UnsupportedAt { .. }), "fan wall must retain its source location");
-    }
+    // #4006 family H (owner ruling): a `fan { … }` block's arms are lifted and
+    // certified, and the block renders on scoped threads; `fan.map` still declines.
+    let rendered = almide_mir::pipeline::try_render_rust_source(block).expect("a fan block renders threaded");
+    assert!(rendered.contains("std::thread::scope"), "the arms run on scoped threads:\n{rendered}");
+    let error = almide_mir::pipeline::try_render_rust_source(mapper).unwrap_err();
+    assert!(format!("{error:?}").contains("fan concurrency"), "{error:?}");
+    assert!(matches!(error, almide_mir::lower::LowerError::UnsupportedAt { .. }), "fan wall must retain its source location");
     assert!(almide_mir::pipeline::try_render_rust_source("fn main() -> Unit = println(\"ordinary\")").is_ok());
 }
