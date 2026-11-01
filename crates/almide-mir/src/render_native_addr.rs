@@ -24,6 +24,8 @@ use std::fmt::Write as _;
 
 #[path = "render_native_carrier.rs"]
 mod carrier;
+#[path = "render_native_map.rs"]
+mod map;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 
 /// The index term of a slot address.
@@ -73,6 +75,14 @@ pub(crate) struct AddrState {
     arms: Vec<(Option<ValueId>, bool)>,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
+    /// A map's length read → the map.
+    map_lens: BTreeMap<ValueId, ValueId>,
+    /// `len + i` over a map's length read → (the map, `i`).
+    len_plus: BTreeMap<ValueId, (ValueId, ValueId)>,
+    /// `x * SLOT_SIZE` → `x`.
+    scaled_src: BTreeMap<ValueId, ValueId>,
+    /// Values computed by integer arithmetic (not a plain counter).
+    arith: BTreeSet<ValueId>,
 }
 
 impl AddrState {
@@ -111,14 +121,20 @@ impl AddrState {
         // #4006: heap Option/Result carriers, typed by the declared signatures
         // (this function's and its callees') through joins and copies.
         let carrier_k = |k: &NativeSigKind| match k {
-            NativeSigKind::Rec(i) if carrier::is_carrier(*i) => Some(*i),
+            // (A map alias rides the same declared typing: `map.new()`'s
+            // result takes the map type the program declares for it.)
+            NativeSigKind::Rec(i) if carrier::is_carrier(*i) || crate::render_native_rec::map_kinds(*i).is_some() => Some(*i),
             _ => None,
         };
         let sig_of = |n: &str| -> Option<CarrierSig> {
             sigs.get(n).map(|(ps, r)| (ps.iter().map(carrier_k).collect(), r.as_ref().and_then(carrier_k)))
         };
         let own = sig_of(func.name.as_str()).unwrap_or_default();
-        for (v, i) in carrier::carrier_values(func, &own, &sig_of) {
+        let declared = carrier::carrier_values(func, &own, &sig_of);
+        crate::native_moves::set_declared(
+            declared.iter().filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some()).map(|(v, i)| (*v, *i)).collect(),
+        );
+        for (v, i) in declared {
             alloc_rec.entry(v).or_insert(i);
         }
         // A block stored into a typed parent's slot takes the slot's declared
@@ -207,8 +223,35 @@ impl AddrState {
         let mut str_lists: BTreeSet<ValueId> = BTreeSet::new();
         for r in blocks {
             let mut kinds: Vec<NTy> = Vec::new();
+            // Each whole-slot store at a constant offset: slot → kind (a value
+            // that is no handle is a scalar). A block whose slots hold a heap
+            // kind and a scalar is no list (a list's elements share a kind):
+            // it is a tuple of those slot kinds.
+            let mut slots: BTreeMap<i64, Option<NTy>> = BTreeMap::new();
             for op in &func.ops {
                 let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
+                if let Some(&(root, off)) = base_of.get(&args[0]) {
+                    if root == r {
+                        let (h, w) = (i64::from(BLOCK_HEADER), i64::from(SLOT_SIZE));
+                        let k = match handle_of.get(&args[1]) {
+                            None => Some(NTy::I64),
+                            Some(src) => match alloc_rec.get(src) {
+                                Some(j) => Some(NTy::Rec(*j)),
+                                None if scalar_lists.contains(src) => Some(NTy::Vec),
+                                None if strings.contains(src) => Some(NTy::Str),
+                                None => None,
+                            },
+                        };
+                        match off.filter(|o| *o >= h && (o - h) % w == 0) {
+                            Some(o) if !slots.contains_key(&((o - h) / w)) => {
+                                slots.insert((o - h) / w, k);
+                            }
+                            _ => {
+                                slots.insert(-1, None);
+                            }
+                        }
+                    }
+                }
                 let (Some(&(root, _)), Some(&src)) = (base_of.get(&args[0]), handle_of.get(&args[1])) else { continue };
                 if root != r {
                     continue;
@@ -224,6 +267,14 @@ impl AddrState {
                 };
                 if !kinds.contains(&k) {
                     kinds.push(k);
+                }
+            }
+            let fields: Option<Vec<NTy>> = slots.values().copied().collect();
+            let dense = slots.keys().copied().eq(0..slots.len() as i64);
+            if let (Some(fields), true) = (fields, dense) {
+                if fields.contains(&NTy::I64) && fields.iter().any(|f| *f != NTy::I64) {
+                    alloc_rec.insert(r, crate::render_native_rec::tuple_type_of(fields));
+                    continue;
                 }
             }
             match kinds.as_slice() {
@@ -299,6 +350,10 @@ impl AddrState {
             pending: BTreeMap::new(),
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
+            map_lens: BTreeMap::new(),
+            len_plus: BTreeMap::new(),
+            scaled_src: BTreeMap::new(),
+            arith: BTreeSet::new(),
         }
     }
 }
@@ -410,6 +465,9 @@ pub(crate) fn render_addr_op(
     }
     let ty = |tys: &BTreeMap<ValueId, NTy>, v: &ValueId| tys.get(v).copied();
     if let Some(r) = carrier::render_carrier_op(op, st, tys, out, indent) {
+        return r;
+    }
+    if let Some(r) = map::render_map_op(op, st, tys, out, indent) {
         return r;
     }
     match op {
