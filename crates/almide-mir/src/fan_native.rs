@@ -251,6 +251,7 @@ impl Lift<'_> {
             _ => arm,
         };
         let call_ty = call.ty.clone();
+        let mut body = call.clone();
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut call.kind else {
             return Err("an arm that is not a direct call".into());
         };
@@ -297,7 +298,6 @@ impl Lift<'_> {
             }
         }
         let lifted = arm_name(at.group, at.index);
-        let mut body = call.clone();
         if let IrExprKind::Call { args, .. } = &mut body.kind {
             *args = inner_args;
         }
