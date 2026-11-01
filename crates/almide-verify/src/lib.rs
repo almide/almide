@@ -31,6 +31,8 @@ pub mod bundle;
 mod bounds;
 mod rbounds;
 mod procs;
+mod lin;
+mod zint;
 mod fields;
 mod init;
 mod modes;
