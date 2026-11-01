@@ -12,6 +12,10 @@
 //!   what the declaration says. The only exemption is a callee being BUILT
 //!   (`sym("handle")` in a desugar that synthesizes a `prim.handle` call),
 //!   which names the call it emits rather than deciding what a call does.
+//!
+//! Negative control on the real file (GCE, 2026-11-01, sec-c1-primop-r3): with
+//! `load32`'s `@prim_op` deleted from stdlib/prim.almd, three of these four
+//! tests fail naming `prim.load32: no @prim_op`; restored, all four pass.
 
 use std::path::{Path, PathBuf};
 
