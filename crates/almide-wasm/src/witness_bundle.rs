@@ -89,6 +89,7 @@ fn records_inner(
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
     let hold_anchors = super::bounds::take_holds();
+    let prim_anchors = super::bounds::take_prims();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let (seals, remaps) = super::anchor::take_all();
@@ -139,6 +140,8 @@ fn records_inner(
         locate.text(&pick(judge_anchors))?,
         locate.text(&pick(hold_anchors))?,
     ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids, &rc_helpers)?
+        // #4005 A4: every self-host prim access the pass emitted, located.
+        + &format!("prims {}\n", locate.text(&pick(prim_anchors))?)
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();

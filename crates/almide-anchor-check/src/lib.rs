@@ -831,7 +831,10 @@ pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, V
     };
     let (init, bounds) = (field("init")?, field("bounds")?);
     // The optional `fields` line (#4279) is read by `fields_anchors`.
-    let mut rest: Vec<&str> = lines.filter(|l| !(*l == "fields" || l.starts_with("fields "))).collect();
+    // So is the optional `prims` line (#4005 A4), read by `prims_anchors`.
+    let mut rest: Vec<&str> = lines
+        .filter(|l| !(*l == "fields" || l.starts_with("fields ") || *l == "prims" || l.starts_with("prims ")))
+        .collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
     let rc_lines = match rc_at {
         None => None,
@@ -924,6 +927,15 @@ pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, V
 pub fn fields_anchors(text: &str) -> String {
     text.lines()
         .find_map(|l| if l == "fields" { Some("") } else { l.strip_prefix("fields ") })
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The anchor file's `prims` line (#4005 A4): one token per self-host prim
+/// load or store the pass emitted; empty when the file has none.
+pub fn prims_anchors(text: &str) -> String {
+    text.lines()
+        .find_map(|l| if l == "prims" { Some("") } else { l.strip_prefix("prims ") })
         .unwrap_or("")
         .to_string()
 }

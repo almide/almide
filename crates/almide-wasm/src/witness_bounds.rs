@@ -95,6 +95,10 @@ struct State {
     /// subject before the loop, one anchor each.
     holds: String,
     done_holds: Vec<(usize, String)>,
+    /// The pass's self-host `prim` loads and stores (#4005 A4), one anchor
+    /// each: every one the procedure certificate must cover or count.
+    prims: String,
+    done_prims: Vec<(usize, String)>,
     /// A site outlived its stretch: the witness is made unparseable, so it
     /// is rejected rather than read short.
     broken: bool,
@@ -162,6 +166,10 @@ impl State {
         let holds = std::mem::take(&mut self.holds);
         if !holds.is_empty() {
             self.done_holds.push((self.pass, holds.trim_end().to_string()));
+        }
+        let prims = std::mem::take(&mut self.prims);
+        if !prims.is_empty() {
+            self.done_prims.push((self.pass, prims.trim_end().to_string()));
         }
         let stretches = std::mem::take(&mut self.stretches);
         let anchors = std::mem::take(&mut self.stretch_anchors);
@@ -302,6 +310,15 @@ pub(crate) fn hold(at: &wasm_encoder::Function) {
     });
 }
 
+/// A self-host `prim` load or store was just emitted (prim.rs, #4005 A4).
+pub(crate) fn prim(at: &wasm_encoder::Function) {
+    let a = crate::witness::anchor::at(at);
+    with(|s| {
+        s.prims.push_str(&a);
+        s.prims.push(' ');
+    });
+}
+
 /// Variable `v` changed: every slot of every open stretch that names it.
 pub(crate) fn kill(v: u32) {
     with(|s| s.kill(v));
@@ -315,6 +332,7 @@ pub fn take() -> Vec<(usize, String)> {
     *taken_anchors().lock().expect("bounds anchors") = std::mem::take(&mut s.done_anchors);
     *taken_judges().lock().expect("bounds judges") = std::mem::take(&mut s.done_judges);
     *taken_holds().lock().expect("bounds holds") = std::mem::take(&mut s.done_holds);
+    *taken_prims().lock().expect("bounds prims") = std::mem::take(&mut s.done_prims);
     s.done
 }
 
@@ -338,6 +356,17 @@ fn taken_holds() -> &'static Mutex<Vec<(usize, String)>> {
 /// The loop-hold anchors of the passes the last [`take`] flushed.
 pub fn take_holds() -> Vec<(usize, String)> {
     std::mem::take(&mut *taken_holds().lock().expect("bounds holds"))
+}
+
+fn taken_prims() -> &'static Mutex<Vec<(usize, String)>> {
+    use std::sync::OnceLock;
+    static P: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// The prim-access anchors of the passes the last [`take`] flushed.
+pub fn take_prims() -> Vec<(usize, String)> {
+    std::mem::take(&mut *taken_prims().lock().expect("bounds prims"))
 }
 
 fn taken_anchors() -> &'static Mutex<Vec<(usize, String)>> {
