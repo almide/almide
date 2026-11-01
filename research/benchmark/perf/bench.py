@@ -200,8 +200,8 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "jsonround": "100000",
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
-    "regexcycle-8": "8:200000",
-    "regexcycle-32": "32:200000",
+    "regexcycle-8": "8:400000",
+    "regexcycle-32": "32:400000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",
