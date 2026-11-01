@@ -748,6 +748,7 @@
 131280	spec/wasm_cross/regex_fuzz_batch.almd
 72912	spec/wasm_cross/regex_invalid_pattern.almd
 200432	spec/wasm_cross/regex_linear_time.almd
+77072	spec/wasm_cross/regex_many_patterns.almd
 67840996	spec/wasm_cross/regex_repetition_depth.almd
 71632	spec/wasm_cross/regex_size_cap.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
