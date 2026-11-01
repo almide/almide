@@ -200,7 +200,7 @@ fn corpus() -> Vec<String> {
         out.push(format!("{}:{v4}", segs[..6].iter().map(|s| format!("{s:x}")).collect::<Vec<_>>().join(":")));
         let s = v6.to_string();
         let cut = g.below(s.len() as u64 + 1) as usize;
-        out.push(format!("{}{}", &s[..cut], &s[cut.min(s.len())..].replacen(':', "", 1)));
+        out.push(format!("{}{}", &s[..cut], s[cut.min(s.len())..].replacen(':', "", 1)));
     }
     out
 }
