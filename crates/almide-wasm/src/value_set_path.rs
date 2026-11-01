@@ -37,7 +37,7 @@
 //! shares it with a credit (the same glue's inc). The index is a flat block
 //! `[hdr][pairs][count][mask][slot × (mask+1)]` — open addressing over the
 //! keys' FNV-1a hash (map_index.rs `$mapidx_hash_str`), slot = pair ordinal
-//! + 1. It answers only when it agrees with the box: the pairs address and
+//! plus one. It answers only when it agrees with the box: the pairs address and
 //! count it was built over are the box's own and nobody else holds it;
 //! otherwise it is rebuilt from the pairs (below 16 pairs the scan is
 //! used, the map index's threshold). Only this op writes an Object's pairs,

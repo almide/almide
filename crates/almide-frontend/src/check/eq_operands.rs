@@ -118,7 +118,7 @@ fn position(s: &LitShape, i: usize) -> &LitShape {
     }
 }
 
-fn field<'a>(s: &'a LitShape, name: Sym) -> &'a LitShape {
+fn field(s: &LitShape, name: Sym) -> &LitShape {
     match s {
         LitShape::Fields(v) => v.iter().find(|(n, _)| *n == name).map_or(&OPAQUE, |(_, s)| s),
         _ => &OPAQUE,

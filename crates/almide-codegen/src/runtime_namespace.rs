@@ -94,6 +94,7 @@ struct Acc {
 
 /// The macros invoked at the top level of `src` whose items the scanner
 /// cannot see (not a local `macro_rules!`, not `thread_local!`).
+#[cfg(test)]
 pub(crate) fn unresolved_top_level_macros(src: &str) -> Vec<String> {
     let mut lexer = rust_idents::tokens(src);
     let toks: Vec<Tok> = std::iter::from_fn(|| lexer.next_token()).collect();
@@ -102,6 +103,7 @@ pub(crate) fn unresolved_top_level_macros(src: &str) -> Vec<String> {
 
 /// The `macro_rules!` macros `src` defines at its top level, each with the
 /// number of items its transcriber declares from a `$name` argument.
+#[cfg(test)]
 pub(crate) fn top_level_macros(src: &str) -> Vec<(String, usize)> {
     let mut lexer = rust_idents::tokens(src);
     let toks: Vec<Tok> = std::iter::from_fn(|| lexer.next_token()).collect();
@@ -241,11 +243,11 @@ impl<'s> Scan<'s, '_> {
             ("fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static" | "mod", _) => {
                 let k = if self.tok(j + 1) == "mut" { j + 2 } else { j + 1 };
                 let name = self.tok(k);
-                if self.tok(j) == "mod" {
-                    if let Some(open) = self.body_open(k, end) {
-                        let close = self.group_end(open, end);
-                        acc.mods.push((name.to_string(), self.items(open + 1, close - 1)));
-                    }
+                if self.tok(j) == "mod"
+                    && let Some(open) = self.body_open(k, end)
+                {
+                    let close = self.group_end(open, end);
+                    acc.mods.push((name.to_string(), self.items(open + 1, close - 1)));
                 }
                 if self.is_ident(k) && name != "_" {
                     acc.out.push(TopItem { name: name.to_string(), vis, cfgs: cfgs.to_vec() });
@@ -303,11 +305,12 @@ impl<'s> Scan<'s, '_> {
                 params.push(self.tok(i + 1));
             }
             let declares = matches!(self.tok(i), "fn" | "struct" | "enum" | "const" | "static" | "type");
-            if declares && self.tok(i + 1) == "$" {
-                if let Some(pos) = params.iter().position(|p| *p == self.tok(i + 2)) {
-                    let vis = if i > 0 && self.tok(i - 1) == "pub" { Vis::Pub } else { Vis::Private };
-                    out.push((pos, vis));
-                }
+            if declares
+                && self.tok(i + 1) == "$"
+                && let Some(pos) = params.iter().position(|p| *p == self.tok(i + 2))
+            {
+                let vis = if i > 0 && self.tok(i - 1) == "pub" { Vis::Pub } else { Vis::Private };
+                out.push((pos, vis));
             }
         }
         out

@@ -104,17 +104,17 @@ pub fn input_sink_param_types(module: &str) -> Vec<almide_lang::types::Ty> {
     type SinkMap = HashMap<String, Vec<almide_lang::types::Ty>>;
     static CELL: OnceLock<std::sync::RwLock<SinkMap>> = OnceLock::new();
     let cell = CELL.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
-    if let Ok(guard) = cell.read() {
-        if let Some(tys) = guard.get(module) {
-            return tys.clone();
-        }
+    if let Ok(guard) = cell.read()
+        && let Some(tys) = guard.get(module)
+    {
+        return tys.clone();
     }
     if !almide_lang::stdlib_info::is_bundled_module(module) {
         return Vec::new();
     }
     let Some(source) = super::stdlib::get_bundled_source(module) else { return Vec::new() };
     let Some(program) = almide_lang::parse_cached(source) else { return Vec::new() };
-    let builtin_named = builtin_named_types(&program);
+    let builtin_named = builtin_named_types(program);
     let mut out: Vec<almide_lang::types::Ty> = Vec::new();
     for decl in &program.decls {
         if let ast::Decl::Fn { params, return_type, effect, generics, attrs, .. } = decl {
@@ -252,7 +252,7 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
     // builtin `Path` (= String), so a caller typed through the table (the
     // MIR pipeline, which links no bundled module) saw `value.root()` as a
     // `String` that a `value.Path` slot refuses.
-    let builtin_named = builtin_named_types(&program);
+    let builtin_named = builtin_named_types(program);
     let mut out = HashMap::new();
     for decl in &program.decls {
         if let ast::Decl::Fn { name, params, return_type, effect, generics, attrs, .. } = decl {

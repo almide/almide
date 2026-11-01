@@ -240,10 +240,10 @@ impl From<Vec<Ty>> for TyVec {
         let mut table = interner().lock().unwrap_or_else(|e| e.into_inner());
         let bucket = table.entry(meta.hash).or_default();
         for w in bucket.iter() {
-            if let Some(live) = w.upgrade() {
-                if live.items == items {
-                    return TyVec(live);
-                }
+            if let Some(live) = w.upgrade()
+                && live.items == items
+            {
+                return TyVec(live);
             }
         }
         if bucket.len() >= 8 {

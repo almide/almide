@@ -721,16 +721,23 @@ pub type RcLines = (
     Vec<(usize, usize, usize)>,
 );
 
+/// The anchor file read by [`parse_anchors`]: `(alloc, init anchors, bounds
+/// anchors, judge sites, rc lines)`.
+pub type Anchors = (u32, String, String, Vec<At>, Option<RcLines>);
+
+/// [`Anchors`] with the `holds` sites after the judges (#4280).
+pub type AnchorsHeld = (u32, String, String, Vec<At>, Vec<At>, Option<RcLines>);
+
 /// The anchor file: `(alloc, init anchors, bounds anchors, judge sites, rc
 /// lines)`. The `judges` line is optional (a file without it locates no
 /// judge, and an access a judge sits in front of is then refused); so are
 /// the `rcfns` / `rc` pair (measurement-gated, #4277).
-pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option<RcLines>), String> {
+pub fn parse_anchors(text: &str) -> Result<Anchors, String> {
     parse_anchors_held(text).map(|(a, i, b, j, _, r)| (a, i, b, j, r))
 }
 
 /// [`parse_anchors`] and the optional `holds` line after `judges` (#4280).
-pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, Vec<At>, Option<RcLines>), String> {
+pub fn parse_anchors_held(text: &str) -> Result<AnchorsHeld, String> {
     let mut lines = text.lines();
     if lines.next() != Some("almide-anchors 1") {
         return Err("anchors: not an `almide-anchors 1` file".into());

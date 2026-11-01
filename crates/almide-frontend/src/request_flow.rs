@@ -325,25 +325,25 @@ impl<'c, 'a> Walk<'c, 'a> {
         let (cx, summaries) = (self.cx, self.summaries);
         // The sink first: a derived `User.decode` is also a fn of the
         // program, and its summary must not stand in for the verdict.
-        if let CallTarget::Named { name } = target {
-            if let Some(why) = cx.sink(name.as_str(), self.entry) {
-                if self.any(args) {
-                    self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
-                }
-                return;
+        if let CallTarget::Named { name } = target
+            && let Some(why) = cx.sink(name.as_str(), self.entry)
+        {
+            if self.any(args) {
+                self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
             }
+            return;
         }
         if let Some(ix) = cx.callee(self.entry.module, target) {
             let s = &summaries[ix];
             let callee = qualified(&cx.fns[ix]);
             let mut found = Vec::new();
             for (i, a) in args.iter().enumerate() {
-                if let Some(Some(hit)) = s.sink_from.get(i) {
-                    if self.taint(a) {
-                        let mut via = vec![format!("{}(arg {})", callee, i + 1)];
-                        via.extend(hit.via.iter().cloned());
-                        found.push(Hit { why: hit.why.clone(), decode: hit.decode.clone(), via, site });
-                    }
+                if let Some(Some(hit)) = s.sink_from.get(i)
+                    && self.taint(a)
+                {
+                    let mut via = vec![format!("{}(arg {})", callee, i + 1)];
+                    via.extend(hit.via.iter().cloned());
+                    found.push(Hit { why: hit.why.clone(), decode: hit.decode.clone(), via, site });
                 }
             }
             self.hits.extend(found);
@@ -444,10 +444,10 @@ impl IrVisitor for Walk<'_, '_> {
             }
             IrStmtKind::FieldAssign { target, value, .. }
             | IrStmtKind::IndexAssign { target, value, .. }
-            | IrStmtKind::MapInsert { target, value, .. } => {
-                if self.taint(value) {
-                    self.mark(*target);
-                }
+            | IrStmtKind::MapInsert { target, value, .. }
+                if self.taint(value) =>
+            {
+                self.mark(*target);
             }
             _ => {}
         }
@@ -469,11 +469,11 @@ impl IrVisitor for NamesDecode<'_> {
         if self.found {
             return;
         }
-        if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
-            if name.as_str().rsplit_once('.').is_some_and(|(_, m)| self.methods.iter().any(|d| d == m)) {
-                self.found = true;
-                return;
-            }
+        if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind
+            && name.as_str().rsplit_once('.').is_some_and(|(_, m)| self.methods.iter().any(|d| d == m))
+        {
+            self.found = true;
+            return;
         }
         walk_expr(self, e);
     }

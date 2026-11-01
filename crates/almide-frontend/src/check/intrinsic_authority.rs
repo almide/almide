@@ -99,6 +99,7 @@ impl Checker {
     /// - a `Body` type's media fn is a string literal (Q19), and a
     ///   script-capable one is covered by that fn's own `@media_owns`, so a
     ///   type cannot serve a type it was never granted.
+    ///
     /// Read off the declarations; the stdlib's own sources are exempt.
     pub(super) fn check_media_ownership(&mut self, program: &crate::ast::Program) {
         use crate::media_owners as mo;

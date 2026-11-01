@@ -7,6 +7,11 @@ use wasm_encoder::ValType;
 use crate::emitter::Emitter;
 use crate::*;
 
+/// A fixed-slot block's handle slots: `(payload offset, dec fn)` per slot.
+type HandleSlots = Vec<(u32, u32)>;
+/// A tagged block's per-tag slot tables: `(tag word offset, [(tag, slots)])`.
+type TagSlots = (u32, Vec<(u32, HandleSlots)>);
+
 impl Emitter<'_> {
     /// A slot whose value is a heap HANDLE the holder owns one credit of
     /// (#2010 stage 2b/2c): Str / Bytes, a List, an Option / Result /
@@ -57,7 +62,7 @@ impl Emitter<'_> {
     /// The handle slots of a fixed-slot block: `(payload offset, dec fn)`
     /// per slot, and for a tagged block (Result, variant) the per-tag
     /// tables under the tag word. Registers the nested glue on the way.
-    fn shape_slots(&self, t: SliceTy) -> (Vec<(u32, u32)>, Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) {
+    fn shape_slots(&self, t: SliceTy) -> (HandleSlots, Option<TagSlots>) {
         let slot = |ft: SliceTy, off: u32| self.elem_is_handle(ft).then(|| (off, self.dec_fn_of(ft)));
         match t {
             SliceTy::Option(h) => (slot(self.types.el(h), almide_layout::OPTION_FIELD).into_iter().collect(), None),
