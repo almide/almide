@@ -362,6 +362,11 @@ pub const RUNTIME_SYMBOL_PREFIX: &str = "almide_rt_";
 /// escape of a user fn is never itself a name a user can spell.
 pub const RUNTIME_FN_SPACE: &str = "almide_";
 
+/// The upper-case prefix of the native runtime's constants and statics
+/// (#4345): `ALMIDE_STDOUT_BUF`, `ALMIDE_MATRIX_MAX_ELEMS`, … — the space
+/// [`is_runtime_item_name`] admits outside the user statics' two shapes.
+pub const RUNTIME_CONST_SPACE: &str = "ALMIDE_";
+
 /// Does a user fn named `name` need [`USER_FN_ESCAPE`]? The compiler's
 /// spaces are `__` (synthesized fns, #3483) and [`RUNTIME_FN_SPACE`]: the
 /// runtime's symbols (#3487: a user fn `almide_rt_list_len` was collapsed into
@@ -396,7 +401,7 @@ pub fn is_runtime_item_name(name: &str) -> bool {
             .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
     (name.starts_with(RUNTIME_FN_SPACE) && !name.starts_with(USER_FN_ESCAPE))
         || name.starts_with("Almide")
-        || (name.starts_with("ALMIDE_") && !user_static)
+        || (name.starts_with(RUNTIME_CONST_SPACE) && !user_static)
 }
 
 /// Did the compiler synthesize the ENTRY program fn whose IR name is

@@ -432,10 +432,10 @@ mod tests {
             pub(crate) const fn almide_x<const N: usize>() -> usize { N }
             struct S { f: i64 }
             impl S { pub fn method(&self) {} }
-            static mut ALMIDE_Y: i64 = 0;
+            static mut RT_Y: i64 = 0;
             const Z: S = S { f: 1 };
             extern "C" { fn signal(s: i32) -> i32; }
-            thread_local! { pub static ALMIDE_T: i64 = 0; static U: i64 = 1; }
+            thread_local! { pub static RT_T: i64 = 0; static U: i64 = 1; }
             macro_rules! m { () => { fn in_macro() {} } }
             mod inner { pub fn almide_rt_in() {} fn private_in() {} }
             pub use inner::*;
@@ -446,7 +446,7 @@ mod tests {
         let got = names(src);
         let want: Vec<(&str, Vis)> = vec![
             ("b", Vis::Pub), ("d", Vis::Pub), ("mk", Vis::Pub), ("almide_x", Vis::Crate), ("S", Vis::Private),
-            ("ALMIDE_Y", Vis::Private), ("Z", Vis::Private), ("signal", Vis::Private), ("ALMIDE_T", Vis::Pub),
+            ("RT_Y", Vis::Private), ("Z", Vis::Private), ("signal", Vis::Private), ("RT_T", Vis::Pub),
             ("U", Vis::Private), ("inner", Vis::Private), ("almide_unix_only", Vis::Pub), ("almide_c", Vis::Pub),
             ("almide_rt_in", Vis::Pub),
         ];

@@ -21,16 +21,16 @@ fn almide() -> &'static str {
 const PROGRAM: &str = r#"import env
 
 effect fn main() -> Unit = {
-  println(match env.get("ALMIDE_T4388_BAD") {
+  println(match env.get("T4388_BAD") {
     some(v) => "some ${string.len(v)}",
     none => "none",
   })
-  println(match env.get("ALMIDE_T4388_OK") {
+  println(match env.get("T4388_OK") {
     some(v) => "some ${v}",
     none => "none",
   })
   let names = map.keys(env.vars()!)
-  println("listed bad=${list.contains(names, "ALMIDE_T4388_BAD")} ok=${list.contains(names, "ALMIDE_T4388_OK")}")
+  println("listed bad=${list.contains(names, "T4388_BAD")} ok=${list.contains(names, "T4388_OK")}")
 }
 "#;
 
@@ -48,7 +48,7 @@ fn a_non_utf8_variable_reads_as_none_on_run_native_run_wasm_and_the_built_binary
     let bad = OsStr::from_bytes(b"x\x80y");
     let want = "none\nsome fine\nlisted bad=false ok=true\n";
     let bin = t.path().join("app");
-    let built = seen(Command::new(almide()).arg("build").arg(&src).arg("-o").arg(&bin).env("ALMIDE_T4388_BAD", bad));
+    let built = seen(Command::new(almide()).arg("build").arg(&src).arg("-o").arg(&bin).env("T4388_BAD", bad));
     assert_eq!(built.0, Some(0), "almide build: {}", built.2);
     let legs: [(&str, Command); 3] = [
         ("built binary", Command::new(&bin)),
@@ -64,7 +64,7 @@ fn a_non_utf8_variable_reads_as_none_on_run_native_run_wasm_and_the_built_binary
         }),
     ];
     for (leg, mut cmd) in legs {
-        let (code, out, err) = seen(cmd.env("ALMIDE_T4388_BAD", bad).env("ALMIDE_T4388_OK", "fine"));
+        let (code, out, err) = seen(cmd.env("T4388_BAD", bad).env("T4388_OK", "fine"));
         assert!(!err.contains("panicked"), "{leg} panicked:\n{err}");
         assert_eq!((code, out.as_str()), (Some(0), want), "{leg}:\n{err}");
     }
