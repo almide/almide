@@ -31,7 +31,9 @@
 //! BOUNDS, per token: a `c` is `i64.ge_u` (the list compare) or `i32.eqz`
 //! (the Bytes room test), then `if` (empty), then `i32.const` — anchored at
 //! the const — and that `if` has no `else` and ends in `unreachable` (the
-//! abort); an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
+//! abort); or (#4281, a string's byte) the surface's own `i32.ge_u` /
+//! `i32.eqz` test, then an `if` with an `else` — anchored at the `if` —
+//! whose `else` holds the access; an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
 //! `br_if` — straight inside a `loop` whose parent `block` it leaves to (a
 //! loop's exit test, operands.rs `loop_exit`); an `a` is a load (or a load then the `call` that releases what it
 //! loaded); a `w` is a store; a slot's located events lie in one function,
@@ -413,8 +415,39 @@ impl<'a> Ctx<'_, 'a> {
         Ok(stores)
     }
 
-    fn check_guard(&self, at: At) -> Result<(), String> {
+    /// A `c`'s guard; its compare's index. Two shapes, each a compare whose
+    /// TRUE side never reaches the access:
+    /// - the compare, `if` (empty), `i32.const` — anchored at the const —
+    ///   and that `if` has no `else` and ends in `unreachable` (the abort);
+    /// - the surface's own test (#4281): the compare, then an `if` — anchored
+    ///   at the `if` — that has an `else`; the access lies in that `else`
+    ///   (operands.rs `covers` holds it there), so no second test exists.
+    fn check_guard(&self, at: At) -> Result<usize, String> {
         let b = self.body(at)?;
+        // A fresh block's own size (#4281): `i32.const N; call $alloc`,
+        // anchored at the call — the access below reads inside its N bytes.
+        if let Op::Call { function_index } = b.ops[at.op] {
+            if self.alloc == u32::MAX || function_index != self.alloc {
+                return Err(format!("c: anchored at a call of {function_index}, not $alloc"));
+            }
+            if at.op == 0 || !matches!(b.ops[at.op - 1], Op::I32Const { .. }) {
+                return Err("c: the allocation's size is not a constant".into());
+            }
+            return Ok(at.op);
+        }
+        if at.op >= 1 && matches!(b.ops[at.op], Op::If { .. }) {
+            if !matches!(b.ops[at.op - 1], Op::I32GeU | Op::I32Eqz) {
+                return Err(format!("c: the `if`'s test is {:?}, not a compare", b.ops[at.op - 1]));
+            }
+            let d_in = *b.depth.get(at.op + 1).ok_or("c: the test's `if` has no body")?;
+            let has_else = (at.op + 1..b.ops.len())
+                .find(|&j| b.depth[j] == d_in && matches!(b.ops[j], Op::End | Op::Else))
+                .is_some_and(|j| matches!(b.ops[j], Op::Else));
+            if !has_else {
+                return Err("c: the test's `if` has no `else` to hold the access".into());
+            }
+            return Ok(at.op - 1);
+        }
         if at.op < 2 {
             return Err("c: no room for the compare".into());
         }
@@ -449,7 +482,7 @@ impl<'a> Ctx<'_, 'a> {
                 b.ops[end - 1]
             ));
         }
-        Ok(())
+        Ok(at.op - 2)
     }
 
     fn access(&self, at: At, write: bool) -> Result<(), String> {
@@ -582,11 +615,22 @@ pub fn check_bounds_held(
     holds: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
+    check_bounds_alloc(bodies, bounds, anch, judges, holds, u32::MAX, rep)
+}
+
+/// [`check_bounds_held`] knowing `$alloc` (a function index, as a `call`
+/// names it): a `c` may then be a fresh block's own allocation (#4281).
+pub fn check_bounds_alloc(
+    bodies: &[Body<'_>],
+    bounds: &str,
+    anch: &str,
+    judges: &[At],
+    holds: &[At],
+    alloc: u32,
+    rep: &mut Report,
+) -> Result<(), String> {
     let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
-    let ctx = Ctx {
-        bodies,
-        alloc: u32::MAX,
-    };
+    let ctx = Ctx { bodies, alloc };
     if bounds.trim().is_empty() && anch.trim().is_empty() {
         return Ok(());
     }
@@ -631,10 +675,9 @@ pub fn check_bounds_held(
                     last.insert(tok[1..].to_string(), at);
                     match kind {
                         'c' => {
-                            ctx.check_guard(at)
+                            let cmp = ctx.check_guard(at)
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            // The guard's compare: two before the anchor.
-                            guard.insert(tok[1..].to_string(), (at, at.op - 2));
+                            guard.insert(tok[1..].to_string(), (at, cmp));
                             rep.bounds_checks += 1;
                         }
                         'e' => {
@@ -927,7 +970,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
+    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, alloc, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
