@@ -99,6 +99,7 @@ verify-trust:
 	proofs/gate.sh
 	proofs/corpus-wall.sh
 	proofs/structural-wall.sh
+	proofs/structural-wall.sh --stdlib-tests
 	proofs/native-wall.sh
 	cargo test -p almide-mir
 	cargo test -p almide-verify
