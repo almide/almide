@@ -75,6 +75,10 @@ ALMIDE="$TD/almide"
 PRODUCER="$TD/examples/emit_structural_bundle"
 VERIFY="$TD/almide-verify"
 ANCHORCHECK="$TD/almide-anchor-check"
+# The linear prover searches (simplex, loop invariants): release, so its
+# time budget is spent on search rather than on debug arithmetic.
+(cd "$ROOT" && cargo build -q --release -p almide-lin-prove)
+LINPROVE="${CARGO_TARGET_DIR:-$ROOT/target}/release/almide-lin-prove"
 ./build-checker.sh >/dev/null
 HASHES="$ROOT/proofs/structural-artifacts.sha256"
 
@@ -131,6 +135,25 @@ while IFS= read -r f; do
     echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
     sed 's/^/  /' "$OUT/$N.anchor" >&2
     exit 1
+  fi
+  # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
+  # what it certifies must be the translation of the shipped functions
+  # (--lin-verify) and is judged as a bounds witness below. What it leaves
+  # out stays in the counted class.
+  if grep -q '^prims .' "$OUT/$N.anchors"; then
+    if ! "$LINPROVE" "$OUT/$N.wasm" "$OUT/$N.anchors" > "$OUT/$N.lcert" 2> "$OUT/$N.lprove"; then
+      echo "STRUCTURAL WALL FAIL: $f: the linear prover failed:" >&2
+      sed 's/^/  /' "$OUT/$N.lprove" >&2
+      exit 1
+    fi
+    if ! "$ANCHORCHECK" --lin-verify "$OUT/$N.wasm" "$OUT/$N.anchors" "$OUT/$N.lcert" > "$OUT/$N.lin" 2>&1; then
+      echo "STRUCTURAL WALL FAIL: $f: the linear certificate is not the translation of the shipped functions:" >&2
+      sed 's/^/  /' "$OUT/$N.lin" >&2
+      exit 1
+    fi
+    rc=0
+    "$VERIFY" bounds "$OUT/$N.lcert" > "$OUT/$N.lverify" 2>&1 || rc=$?
+    echo "$rc" > "$OUT/$N.lverify.rc"
   fi
 done < "$OUT/selected"
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
@@ -200,6 +223,40 @@ if [ "$rc" -ne 0 ]; then
   exit 1
 fi
 echo "  ok: the flipped byte reads MISMATCH (exit 1); the untouched artifact verifies (exit 0)"
+
+echo "== drill: a linear certificate with one proof emptied, and one held to another artifact, must be refused =="
+# The first fixture whose certificate certifies a body, and the first other
+# fixture whose certificate differs from it.
+LA=""; LB=""
+while IFS="$(printf '\t')" read -r k _; do
+  [ -s "$OUT/$k.lcert" ] && grep -q '^certified' "$OUT/$k.lprove" || continue
+  if [ -z "$LA" ]; then LA="$k"; elif ! cmp -s "$OUT/$LA.lcert" "$OUT/$k.lcert"; then LB="$k"; break; fi
+done < "$OUT/index"
+if [ -n "$LA" ]; then
+  # Proof tamper: the first non-empty Farkas combination becomes the empty
+  # one, which entails no fact that names a variable.
+  python3 -c 'import re, sys; s = open(sys.argv[1]).read(); t = re.sub(r"\((\d+:\d+(?: \d+:\d+)*)\)(\d+)", "()1", s, count=1); assert t != s; open(sys.argv[2], "w").write(t)' \
+    "$OUT/$LA.lcert" "$OUT/tamper/lin.cert"
+  rc1=0; "$VERIFY" bounds "$OUT/tamper/lin.cert" > /dev/null 2>&1 || rc1=$?
+  rc2=0; ./checker bounds "$OUT/tamper/lin.cert" > /dev/null 2>&1 || rc2=$?
+  if [ "$rc1" -eq 0 ] || [ "$rc2" -ne 1 ]; then
+    echo "STRUCTURAL WALL FAIL: a linear certificate with one proof emptied was not refused (almide-verify exit $rc1, extracted checker exit $rc2)" >&2
+    exit 1
+  fi
+  echo "  ok: the emptied proof is refused by almide-verify (exit $rc1) and the extracted checker (exit $rc2)"
+  if [ -n "$LB" ]; then
+    rc=0; "$ANCHORCHECK" --lin-verify "$OUT/$LB.wasm" "$OUT/$LB.anchors" "$OUT/$LA.lcert" > "$OUT/tamper/lin" 2>&1 || rc=$?
+    if [ "$rc" -ne 1 ] || ! grep -q 'LIN REJECT' "$OUT/tamper/lin"; then
+      echo "STRUCTURAL WALL FAIL: a linear certificate held to another artifact was not refused (exit $rc)" >&2
+      sed 's/^/  /' "$OUT/tamper/lin" >&2
+      exit 1
+    fi
+    echo "  ok: the certificate held to another artifact is LIN REJECT ($(head -1 "$OUT/tamper/lin" | cut -c1-100))"
+  fi
+elif ! ci_slice_active; then
+  echo "STRUCTURAL WALL FAIL: no fixture's linear certificate certifies a body — the drill has nothing to tamper" >&2
+  exit 1
+fi
 
 echo "== the extracted checker judges every witness; the kernel file is generated =="
 KGEN="$(mktemp /tmp/KernelStructural_XXXXXX).v"
@@ -291,6 +348,31 @@ for row in open(os.path.join(out, "index")):
     fixtures_ok += all_ok
     if all_ok and vrc != "0":
         fail.append(f"{fx}: every witness accepts, but almide-verify's bundle outcome is exit {vrc}")
+# #4005 A4: each module's linear certificate is one more bounds witness,
+# judged by the same three verdicts. A refusal has no exception row: what the
+# prover could not prove is left out of the certificate, never put in it.
+lin = {"certified": [0, 0], "uncertified": [0, 0]}
+for row in open(os.path.join(out, "index")):
+    k, fx = row.rstrip("\n").split("\t")
+    cpath = os.path.join(out, k + ".lcert")
+    if not os.path.exists(cpath):
+        continue
+    for l in open(os.path.join(out, k + ".lprove")).read().splitlines():
+        parts = l.split("\t")
+        if parts[0] in lin and len(parts) >= 4:
+            lin[parts[0]][0] += 1
+            lin[parts[0]][1] += int(parts[3])
+    w = open(cpath).read().rstrip("\n")
+    rc = subprocess.run([checker, "bounds", cpath], capture_output=True).returncode
+    vok = open(os.path.join(out, k + ".lverify.rc")).read().strip() == "0"
+    stats["bounds"][1] += 1
+    if rc == 0 and vok:
+        stats["bounds"][0] += 1
+        accepts["bounds"].append(w)
+    else:
+        fail.append(f"{fx}: the linear certificate: extracted checker exit {rc}, almide-verify {'ACCEPT' if vok else 'REJECT'}")
+print(f"  [bounds/linear] {lin['certified'][0]} self-host body(ies) certified ({lin['certified'][1]} prim site(s)), "
+      f"{lin['uncertified'][0]} left in the counted class ({lin['uncertified'][1]} prim site(s))")
 ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
 for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
