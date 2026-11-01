@@ -89,10 +89,12 @@ fn probed_run(fixture: &Path, wasm: bool) -> (bool, String, Option<String>) {
 }
 
 /// The fixtures whose native leg renders on the v1 trust spine (comparable),
-/// asserted MATCH in the spike. `list`/`bce` wall natively — layer 3 covers them.
+/// asserted MATCH in the spike. `list` walls natively — layer 3 covers it.
+/// `bce` joined the comparable set once a scalar Option read out of a list
+/// slot (`list.get`) rendered on the spine (#4006).
 const COMPARABLE: &[&str] =
-    &["loop", "recursion", "branch", "strings", "mutual", "switch", "fusion", "nested"];
-const NATIVE_WALLED: &[&str] = &["list", "bce"];
+    &["loop", "recursion", "branch", "strings", "mutual", "switch", "fusion", "nested", "bce"];
+const NATIVE_WALLED: &[&str] = &["list"];
 
 /// ONE combined test: the in-process renders need the probe env var, and
 /// `set_var` is unsafe under concurrent threads (edition 2024) — a single

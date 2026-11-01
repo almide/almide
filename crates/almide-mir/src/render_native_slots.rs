@@ -49,6 +49,8 @@ fn heap_of_sig(k: NativeSigKind) -> Option<NTy> {
         NativeSigKind::ListI64 => NTy::Vec,
         NativeSigKind::ListStr => NTy::VecStr,
         NativeSigKind::Rec(i) => NTy::Rec(i),
+        // A scalar Option moves into a slot as its `Option<i64>` value.
+        NativeSigKind::Opt => NTy::Opt,
         _ => return None,
     })
 }
@@ -80,6 +82,7 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
         FloorRet::ListInt => Some(NTy::Vec),
         FloorRet::ListStr => Some(NTy::VecStr),
         FloorRet::Bytes => Some(NTy::Rec(rec::bytes_index())),
+        FloorRet::Opt(_) => Some(NTy::Opt),
         _ => None,
     }
 }
@@ -146,6 +149,10 @@ pub(super) fn type_blocks(
                 if let Some(t) = call_result(name, sigs) {
                     known.insert(*d, t);
                 }
+            }
+            // A scalar Option the option rewrite minted.
+            Op::Prim { kind: PrimKind::OptMakeSome | PrimKind::OptMakeNone | PrimKind::OptCopy, dst: Some(d), .. } => {
+                known.insert(*d, NTy::Opt);
             }
             Op::Dup { dst, src } => dups.push((*dst, *src)),
             Op::IfThen { dst, .. } => open.push((*dst, None)),

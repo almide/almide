@@ -325,6 +325,7 @@ pub(crate) fn kind_suffix(t: NTy) -> String {
         NTy::Vec => "v".into(),
         NTy::VecStr => "vs".into(),
         NTy::Rec(j) => format!("r{j}"),
+        NTy::Opt => "o".into(),
         _ => "x".into(),
     }
 }
@@ -669,6 +670,8 @@ pub(crate) fn derive_records(
             // A list of lane scalars, an all-scalar tuple: one i64 slot block.
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_lane_scalar(&a[0]) => NTy::Vec,
             Ty::Tuple(es) if es.iter().all(is_lane_scalar) => NTy::Vec,
+            // An Option of a lane scalar: the `Option<i64>` carrier.
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_lane_scalar(&a[0]) => NTy::Opt,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => NTy::VecStr,
             Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),

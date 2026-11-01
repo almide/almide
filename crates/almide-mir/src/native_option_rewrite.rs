@@ -39,6 +39,16 @@ pub fn rewrite_option_ops(
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = OptionTracker::default();
     t.opt_vals.extend(opt_params.iter().copied());
+    // A handle STORED into a parent's slot (a record field, an enum payload,
+    // a list element) is the Option itself moving into that slot: it stays,
+    // and the render's slot algebra stores the `Option<i64>` value.
+    let stored: BTreeSet<ValueId> = ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.len() == 2 => Some(args[1]),
+            _ => None,
+        })
+        .collect();
     for op in ops {
         match &op {
             Op::ConstInt { dst, value } => {
@@ -64,6 +74,9 @@ pub fn rewrite_option_ops(
             Op::Consume { v } if t.opt_vals.contains(v) => {}
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && t.opt_vals.contains(&args[0]) => {
                 t.handles.insert(*d, args[0]);
+                if stored.contains(d) {
+                    out.push(op.clone());
+                }
             }
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if t.handles.contains_key(a) && t.const_vals.contains_key(b) => {
                 t.addrs.insert(*dst, (t.handles[a], t.const_vals[b]));

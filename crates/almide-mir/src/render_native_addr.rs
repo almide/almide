@@ -327,6 +327,8 @@ fn owned_from(code: &str, t: NTy) -> Option<String> {
         NTy::StrRef => format!("AlmideString::from({code})"),
         NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),
         NTy::RecRef(_) => format!("{code}.clone()"),
+        // A scalar Option is `Copy`: the slot takes the value itself.
+        NTy::Opt => code.to_string(),
         _ => return None,
     })
 }
@@ -338,6 +340,7 @@ fn field_accepts(field: NTy, got: NTy) -> bool {
         NTy::Vec => matches!(got, NTy::Vec | NTy::VecRef),
         NTy::VecStr => matches!(got, NTy::VecStr | NTy::VecStrRef),
         NTy::Rec(i) => matches!(got, NTy::Rec(j) | NTy::RecRef(j) if j == i),
+        NTy::Opt => got == NTy::Opt,
         _ => false,
     }
 }
@@ -386,7 +389,7 @@ pub(crate) fn render_addr_op(
             let x = args[0];
             match ty(tys, &x) {
                 Some(t)
-                    if (is_block(t) && (st.addr_operands.contains(d) || st.stored.contains(d)))
+                    if ((is_block(t) || t == NTy::Opt) && (st.addr_operands.contains(d) || st.stored.contains(d)))
                         || (matches!(t, NTy::Str | NTy::StrRef) && st.stored.contains(d)) =>
                 {
                     if st.reassigned.contains(&x) {
@@ -461,6 +464,22 @@ pub(crate) fn render_addr_op(
                 if crate::render_native_rec::rec_field(i, k) == Some(NTy::I64) {
                     tys.insert(*d, NTy::I64);
                     line!("let mut {}: i64 = {}.f{k};", var(*d), var(ad.base));
+                    return Ok(true);
+                }
+            }
+            // A scalar Option read out of a slot (a record field, an enum
+            // payload, a list element): its length word is `is_some`, its
+            // slot 0 the payload — the window the option rewrite maps for a
+            // minted one.
+            if bt == Some(NTy::Opt) && ad.idx.is_none() {
+                if *width == 4 && ad.off == i64::from(BLOCK_LEN_OFFSET) {
+                    tys.insert(*d, NTy::I64);
+                    line!("let mut {}: i64 = {}.is_some() as i64;", var(*d), var(ad.base));
+                    return Ok(true);
+                }
+                if *width == 8 && ad.off == i64::from(BLOCK_HEADER) {
+                    tys.insert(*d, NTy::I64);
+                    line!("let mut {}: i64 = {}.unwrap_or(0);", var(*d), var(ad.base));
                     return Ok(true);
                 }
             }
