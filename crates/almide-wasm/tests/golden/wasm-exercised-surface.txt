@@ -194,9 +194,11 @@ call:env.vars
 call:eprintln
 call:fan.map
 call:ffi.alloc
+call:ffi.is_writable
 call:ffi.len
 call:ffi.read
 call:ffi.region
+call:ffi.slice
 call:ffi.write
 call:float.__almd_mono4_from__Float
 call:float.__almd_mono4_from__Float32
