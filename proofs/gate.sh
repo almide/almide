@@ -818,11 +818,11 @@ tamper_fixture "$W5" stmt_var '1s/^$/d/' "#2755 var statement"
 # A fallible line walker whose COMPOUND callback is called through its env
 # (fs_meta.rs / fs_fallible.rs closure routes): each line is an activation
 # where the walk's line is born, shared into the callee and released after
-# it (`{iamd|id}`, line 38 of the fixture's `main` — the second arm is a
+# it (`{iamd|id}`, line 44 of the fixture's `main` — the second arm is a
 # line skipped after an err). Drill: the line's share never handed over.
 FW=spec/wasm_cross/fs_fallible_walker_call_head.almd
 run_structural "$FW" main 0
-tamper_fixture "$FW" main '38s/^{iamd|id}$/{iad|id}/' "#2755 closure-route line"
+tamper_fixture "$FW" main '44s/^{iamd|id}$/{iad|id}/' "#2755 closure-route line"
 
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="

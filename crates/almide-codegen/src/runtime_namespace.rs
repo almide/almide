@@ -22,7 +22,7 @@
 use crate::rust_idents;
 
 /// The private module the spliced runtime modules' bodies live in.
-pub(crate) const RUNTIME_MODULE: &str = "almide_runtime";
+pub const RUNTIME_MODULE: &str = "almide_runtime";
 
 /// An item's declared visibility, as far as a re-export cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

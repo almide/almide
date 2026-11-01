@@ -42,7 +42,7 @@ impl Item {
 
 /// The twin module for `entries` over the fs runtime `src`, and the entry
 /// names it holds.
-pub(crate) fn scoped_twin(src: &str, entries: &BTreeSet<String>) -> (String, BTreeSet<String>) {
+pub(crate) fn scoped_twin(src: &str, entries: &BTreeSet<String>, rt_use: &str) -> (String, BTreeSet<String>) {
     let items = top_level_fns(src);
     let by_name: BTreeMap<&str, &Item> = items.iter().map(|i| (i.name.as_str(), i)).collect();
     let mut keep: BTreeSet<String> = entries.iter().filter(|e| by_name.contains_key(e.as_str())).cloned().collect();
@@ -62,7 +62,7 @@ pub(crate) fn scoped_twin(src: &str, entries: &BTreeSet<String>) -> (String, BTr
         }
     }
     let mut out = format!(
-        "\n// The scoped twin of the fs runtime (#4084): src/cli/fs_scope_twin.rs.\n#[allow(unused_imports, dead_code, unused_variables, unused_mut, unused_parens)]\nmod {TWIN_MOD} {{\nuse super::*;\nuse std::path::Path;\nuse almide_sfs::FsScopedPathExt as _;\n"
+        "\n// The scoped twin of the fs runtime (#4084): src/cli/fs_scope_twin.rs.\n#[allow(unused_imports, dead_code, unused_variables, unused_mut, unused_parens)]\nmod {TWIN_MOD} {{\nuse super::*;\n{rt_use}use std::path::Path;\nuse almide_sfs::FsScopedPathExt as _;\n"
     );
     for i in &items {
         if keep.contains(&i.name) {
@@ -237,7 +237,7 @@ mod tests {
         let entries: BTreeSet<String> =
             super::super::build::fs_runtime_guards().into_iter().filter(|(_, g)| *g != "__almide_fs_root").map(|(n, _)| n).collect();
         assert!(entries.len() > 30, "{entries:?}");
-        let (twin, twinned) = scoped_twin(fs_src(), &entries);
+        let (twin, twinned) = scoped_twin(fs_src(), &entries, "");
         assert_eq!(twinned, entries, "a guarded fn is missing from the twin");
         assert_eq!(twin_leaks(&twin), Vec::<String>::new(), "{twin}");
         assert!(twin.contains("almide_sfs::read_to_string"));
