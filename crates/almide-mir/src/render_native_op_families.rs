@@ -467,7 +467,14 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // bidi controls today, but one rule for every native renderer
                 // keeps that a property of the code, not of std's Debug tables.
                 let lit = almide_base::rust_lit::escape_rust_str(s);
-                line!("let mut {}: AlmideString = AlmideString::from(\"{lit}\");", var(*dst));
+                // An immortal static block (`rc == 0`, ADR-0013): a literal
+                // costs no allocation and no free, as the standard codegen's
+                // borrowed `&str` literal does; an edit copies it first.
+                line!(
+                    "let mut {}: AlmideString = {{ static S: crate::almide_str_block::AlmideStrStatic<{}> = crate::almide_str_block::AlmideStrStatic::new(\"{lit}\"); AlmideString::from_static(&S) }};",
+                    var(*dst),
+                    s.len()
+                );
             }
             // #4006: a constant int list (a literal the lowering folded, an
             // empty `[]`, a top-level list `let`) — the same Vec a ListLit renders.

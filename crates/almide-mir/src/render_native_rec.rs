@@ -186,6 +186,21 @@ pub(crate) fn list_type_of(e: NTy) -> u16 {
     })
 }
 
+/// The generated struct of an untyped block whose slot kinds its stores give
+/// (`render_native_slots`): field `fK` holds slot `K`. Appended on first use
+/// at the end, like a list type, so no earlier index moves.
+pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        let name = format!("slots {fields:?}");
+        if let Some(i) = r.iter().position(|d| d.name == name) {
+            return i as u16;
+        }
+        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, alias: None, default_tag: None });
+        (r.len() - 1) as u16
+    })
+}
+
 /// `t` is the generated `Bytes` type.
 pub(crate) fn is_bytes(t: NTy) -> bool {
     matches!(t, NTy::Rec(i) | NTy::RecRef(i) if rec_index(BYTES_KEY) == Some(i))
