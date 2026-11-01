@@ -769,8 +769,74 @@ impl<'m, 'a> Tr<'m, 'a> {
         Ok(Av::Other)
     }
 
+
+    fn call_op(&mut self, op: &Op<'a>, out: &mut Vec<It>, stack: &mut Vec<Av>) -> Result<(), String> {
+        let Op::Call { function_index } = op else { return Err("not a call".into()) };
+        let f = *function_index;
+        let (params, results) = self.m.ftype(f).cloned().ok_or("call of an unknown function")?;
+        let mut args = Vec::new();
+        for _ in &params {
+            args.push(self.pop(stack)?);
+        }
+        args.reverse();
+        let rty = results.first().copied();
+        if results.len() > 1 {
+            return Err("multi-value call".into());
+        }
+        let pos = f.checked_sub(self.m.imports).map(|p| p as usize);
+        if f == self.alloc {
+            let sz = match args.pop() {
+                Some(Av::I32(l, _)) => l,
+                Some(other) => match self.bind(out, other, ValType::I32) {
+                    Av::I32(l, _) => l,
+                    _ => return Err("alloc size".into()),
+                },
+                None => return Err("alloc arity".into()),
+            };
+            let h = self.fresh(ValType::I32);
+            let r = self.region();
+            out.push(It::Alloc { h, r, sz });
+            out.push(It::Wf(r));
+            self.base_of.insert(h, r);
+            stack.push(Av::I32(Lin::slot(h), true));
+        } else if let Some(p) = pos.filter(|p| self.table.contains(p)) {
+            let mut lins = Vec::new();
+            for (i, a) in args.into_iter().enumerate() {
+                let l = match a {
+                    Av::I64(l) => Some(l),
+                    Av::I32(l, true) => Some(l),
+                    Av::Other => None,
+                    other => {
+                        let ty = params[i];
+                        match self.bind(out, other, ty) {
+                            Av::I64(l) | Av::I32(l, _) => Some(l),
+                            _ => None,
+                        }
+                    }
+                };
+                if let Some(l) = l {
+                    lins.push((i as Slot, l));
+                }
+            }
+            let res = self.fresh(rty.unwrap_or(ValType::I64));
+            out.push(It::Call { f: p, args: lins, res });
+            if let Some(t) = rty {
+                stack.push(match t {
+                    ValType::I64 => Av::I64(Lin::slot(res)),
+                    ValType::I32 => Av::I32(Lin::slot(res), true),
+                    _ => Av::Other,
+                });
+            }
+        } else if let Some(t) = rty {
+            let v = self.unknown(out, t);
+            stack.push(v);
+        }
+            Ok(())
+    }
+
     fn op(&mut self, k: usize, out: &mut Vec<It>, stack: &mut Vec<Av>) -> Result<bool, String> {
-        let op = &self.ops[k];
+        let ops = self.ops;
+        let op = &ops[k];
         match op {
             Op::Nop => {}
             Op::Unreachable => {
@@ -964,67 +1030,7 @@ impl<'m, 'a> Tr<'m, 'a> {
                     }
                 }
             }
-            Op::Call { function_index } => {
-                let f = *function_index;
-                let (params, results) = self.m.ftype(f).cloned().ok_or("call of an unknown function")?;
-                let mut args = Vec::new();
-                for _ in &params {
-                    args.push(self.pop(stack)?);
-                }
-                args.reverse();
-                let rty = results.first().copied();
-                if results.len() > 1 {
-                    return Err("multi-value call".into());
-                }
-                let pos = f.checked_sub(self.m.imports).map(|p| p as usize);
-                if f == self.alloc {
-                    let sz = match args.pop() {
-                        Some(Av::I32(l, _)) => l,
-                        Some(other) => match self.bind(out, other, ValType::I32) {
-                            Av::I32(l, _) => l,
-                            _ => return Err("alloc size".into()),
-                        },
-                        None => return Err("alloc arity".into()),
-                    };
-                    let h = self.fresh(ValType::I32);
-                    let r = self.region();
-                    out.push(It::Alloc { h, r, sz });
-                    out.push(It::Wf(r));
-                    self.base_of.insert(h, r);
-                    stack.push(Av::I32(Lin::slot(h), true));
-                } else if let Some(p) = pos.filter(|p| self.table.contains(p)) {
-                    let mut lins = Vec::new();
-                    for (i, a) in args.into_iter().enumerate() {
-                        let l = match a {
-                            Av::I64(l) => Some(l),
-                            Av::I32(l, true) => Some(l),
-                            Av::Other => None,
-                            other => {
-                                let ty = params[i];
-                                match self.bind(out, other, ty) {
-                                    Av::I64(l) | Av::I32(l, _) => Some(l),
-                                    _ => None,
-                                }
-                            }
-                        };
-                        if let Some(l) = l {
-                            lins.push((i as Slot, l));
-                        }
-                    }
-                    let res = self.fresh(rty.unwrap_or(ValType::I64));
-                    out.push(It::Call { f: p, args: lins, res });
-                    if let Some(t) = rty {
-                        stack.push(match t {
-                            ValType::I64 => Av::I64(Lin::slot(res)),
-                            ValType::I32 => Av::I32(Lin::slot(res), true),
-                            _ => Av::Other,
-                        });
-                    }
-                } else if let Some(t) = rty {
-                    let v = self.unknown(out, t);
-                    stack.push(v);
-                }
-            }
+            Op::Call { .. } => self.call_op(op, out, stack)?,
             Op::CallIndirect { type_index, .. } => {
                 self.pop(stack)?;
                 let (params, results) = self.m.types.get(*type_index as usize).cloned().ok_or("call_indirect type")?;
@@ -1036,7 +1042,13 @@ impl<'m, 'a> Tr<'m, 'a> {
                     stack.push(v);
                 }
             }
-            Op::ReturnCall { .. } => return Err("return_call".into()),
+            Op::ReturnCall { function_index } => {
+                // A tail call: the call, then its result returned.
+                let call = Op::Call { function_index: *function_index };
+                self.call_op(&call, out, stack)?;
+                self.ret(out, stack)?;
+                return Ok(true);
+            }
             Op::BrTable { .. } => return Err("br_table".into()),
             Op::I32Load8U { memarg } | Op::I64Load8U { memarg } => {
                 let _ = self.access(k, out, stack, false, 1, memarg.offset)?;
