@@ -24,7 +24,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Default budget for the scheduled run; the dispatch input overrides it.
   #
   # PER-SHARD budget. The night runs FUZZ_SHARDS of these in parallel, so the
@@ -213,8 +213,8 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-${{ matrix.arch }}-linux.tar.xz
-          key: wasmtime-v49.0.1-${{ matrix.arch }}-linux
+          path: wasmtime-v50.0.1-${{ matrix.arch }}-linux.tar.xz
+          key: wasmtime-v50.0.1-${{ matrix.arch }}-linux
       - name: Install wasmtime
         # Pinned + cached + retried (matches develop's ci.yml): the exact-release
         # asset download is per-IP rate-limited (a 429 storm burned all retries
@@ -222,7 +222,7 @@ jobs:
         # rate-limit body into a retry instead of a garbage tarball. Bump VERSION
         # and the cache key together.
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-${{ matrix.arch }}-linux.tar.xz"
           bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
@@ -502,10 +502,10 @@ jobs:
       # kind of unpinned input the coverage ratchet should not depend on.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          # Follows the workspace MSRV: the wasmtime-49 embed (#2955)
-          # requires rustc >= 1.96 — the old 1.89.0 hardcode would fail the
+          # Follows the workspace MSRV: the wasmtime-50 embed
+          # requires rustc >= 1.97 — the old 1.89.0 hardcode would fail the
           # instrumented build at dependency resolution.
-          toolchain: "1.96.0"
+          toolchain: "1.97.0"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -572,7 +572,7 @@ jobs:
       - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: "1.96.0"
+          toolchain: "1.97.0"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

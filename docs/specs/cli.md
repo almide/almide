@@ -185,7 +185,7 @@ almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも
 
 ネイティブビルド（`almide run` / `build` / `test` / `bench`、cdylib と install の経路）は、
 rustc や cargo を起動する前に `rustc --version`（PATH の rustc と、設定されていれば `$RUSTC`）を読み、
-**rustc 1.96.0** 未満なら何もビルドせず終了コード 1 で拒否する。エラーには見つかった版、必要な版、
+**rustc 1.97.0** 未満なら何もビルドせず終了コード 1 で拒否する。エラーには見つかった版、必要な版、
 直し方（`rustup update`）が出る。下限は `src/cli/rustc_floor.rs` の `MIN_RUSTC` 一か所に書かれ、
 max(1.77.2, CI が生成コードを検証する `RUST_TOOLCHAIN`) である。1.77.2 は CVE-2024-24576
 （Windows の `Command` が `.bat` / `.cmd` への引数を cmd.exe で無害化しなかった）の修正版で、
