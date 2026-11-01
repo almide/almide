@@ -296,12 +296,34 @@ fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
 /// carrier prims. The Option values are seeded from the declared types: a
 /// call to a fn returning a scalar Option, and a param declared as one.
 fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    let option_fns: std::collections::BTreeSet<String> = ir
+    let mut option_fns: std::collections::BTreeSet<String> = ir
         .functions
         .iter()
         .filter(|f| is_scalar_option(&f.ret_ty))
         .map(|f| f.name.as_str().to_string())
         .collect();
+    // A declared floor call whose declaration returns a scalar Option
+    // (`Int?`, or the element `A?` of its `List[A]` param) binds the same
+    // `Option<i64>` carrier (`native_floor::render_call`), so its `??` /
+    // `match` windows are this carrier's too. An element Option over a
+    // String list walls at the floor render, and every carrier read refuses
+    // a value not typed `Opt`.
+    for f in functions.iter() {
+        for op in &f.ops {
+            if let crate::Op::CallFn { name, .. } = op {
+                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| {
+                    matches!(
+                        d.ret,
+                        crate::native_floor::FloorRet::Opt(_)
+                            | crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt)
+                    )
+                });
+                if opt_ret {
+                    option_fns.insert(name.clone());
+                }
+            }
+        }
+    }
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
         ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
