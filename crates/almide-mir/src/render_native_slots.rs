@@ -324,3 +324,29 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
     }
     Some(fields)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::slot_kinds;
+    use crate::render_native::NTy;
+
+    #[test]
+    fn a_block_of_mixed_constant_slots_is_a_struct_of_its_slot_kinds() {
+        let stores = [(Some(0), NTy::I64), (Some(1), NTy::Str)];
+        assert_eq!(slot_kinds(&stores, Some(2), None), Some(vec![NTy::I64, NTy::Str]));
+        assert_eq!(slot_kinds(&stores, Some(2), Some(&vec![1])), Some(vec![NTy::I64, NTy::Str]));
+    }
+
+    /// A block the stores do not type whole stays untyped (it walls): two
+    /// kinds into one slot, an unstored slot, an indexed store, a store past
+    /// the length, an unknown length, a heap-slot mask that disagrees.
+    #[test]
+    fn a_block_whose_stores_disagree_stays_untyped() {
+        assert_eq!(slot_kinds(&[(Some(0), NTy::I64), (Some(0), NTy::Str), (Some(1), NTy::Str)], Some(2), None), None);
+        assert_eq!(slot_kinds(&[(Some(1), NTy::Str)], Some(2), None), None);
+        assert_eq!(slot_kinds(&[(Some(0), NTy::I64), (None, NTy::Str)], Some(2), None), None);
+        assert_eq!(slot_kinds(&[(Some(0), NTy::I64), (Some(2), NTy::Str)], Some(2), None), None);
+        assert_eq!(slot_kinds(&[(Some(0), NTy::I64), (Some(1), NTy::Str)], None, None), None);
+        assert_eq!(slot_kinds(&[(Some(0), NTy::I64), (Some(1), NTy::Str)], Some(2), Some(&vec![0])), None);
+    }
+}
