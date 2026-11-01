@@ -848,14 +848,17 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usi
     let exported = lin::exported_or_tabled(wasm, m.imports)?;
     let mut refused: BTreeMap<usize, String> = BTreeMap::new();
     let sites0 = lin::prim_sites(anchors)?;
+    let heap = lin::selfhost_params(anchors);
+    let (alloc, ..) = almide_anchor_check::parse_anchors(anchors)?;
     let mut table: BTreeSet<usize> = sites0.keys().copied().collect();
     loop {
-        let sk = lin::skeletons(wasm, anchors, Some(&table))?;
         let mut skels = BTreeMap::new();
         let mut changed = false;
-        for (pos, r) in sk {
-            match r {
-                Ok((s, _)) => {
+        for &pos in &table.clone() {
+            let none = BTreeSet::new();
+            let hp = heap.get(&pos).cloned().unwrap_or_default();
+            match lin::translate(&m, pos, sites0.get(&pos).unwrap_or(&none), &hp, &table, alloc) {
+                Ok(s) => {
                     skels.insert(pos, s);
                 }
                 Err(e) => {
