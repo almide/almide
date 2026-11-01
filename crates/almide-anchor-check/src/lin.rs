@@ -246,6 +246,8 @@ pub fn selfhost_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i1
     for t in line.split_whitespace() {
         let Some((p, rest)) = t.split_once(':') else { continue };
         let Ok(pos) = p.parse::<usize>() else { continue };
+        // `params[:name]`: the name is for reports only.
+        let rest = rest.split_once(':').map_or(rest, |(ps, _)| ps);
         let mut ps = BTreeMap::new();
         if rest != "-" {
             for q in rest.split(',') {
@@ -266,6 +268,19 @@ pub fn selfhost_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i1
         out.insert(pos, ps);
     }
     out
+}
+
+/// The anchor file's `selfhost` names, per position (reports only).
+pub fn selfhost_names(anchors: &str) -> BTreeMap<usize, String> {
+    let line = anchors.lines().find_map(|l| l.strip_prefix("selfhost ")).unwrap_or("");
+    line.split_whitespace()
+        .filter_map(|t| {
+            let mut it = t.splitn(3, ':');
+            let pos = it.next()?.parse().ok()?;
+            let _ = it.next()?;
+            Some((pos, it.next().unwrap_or("?").to_string()))
+        })
+        .collect()
 }
 
 /// The anchor file's located prim sites, per function position.

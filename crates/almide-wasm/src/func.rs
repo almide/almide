@@ -593,7 +593,7 @@ pub(crate) fn lower_fn(
             .enumerate()
             .filter_map(|(i, (_, ty))| ty.heap_param(ctx.types).map(|s| (i as u32 + env_shift, s)))
             .collect();
-        crate::witness::bounds::heap_params(anchor_serial, &heap);
+        crate::witness::bounds::heap_params(anchor_serial, &heap, &fn_name);
     }
     crate::prim_shape::log_fn(&fn_name, cur_module, &params.iter().map(|(v, _)| *v).collect::<Vec<_>>(), body, None);
     Ok((f, calls))

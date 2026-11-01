@@ -649,7 +649,7 @@ fn site_candidates(s: &Site) -> Vec<L> {
                 .collect::<Option<_>>()?;
             Some(L { t, c })
         })
-        .take(60)
+        .take(200)
         .collect()
 }
 
@@ -696,6 +696,11 @@ fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contrac
 /// The certificate for a module: `;`-separated `Q` stretches, and per
 /// function position the reason it is not in the table.
 pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, String>), String> {
+    certify_table(wasm, anchors).map(|(c, r, _)| (c, r))
+}
+
+/// [`certify`], and the positions certified.
+pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, String>, BTreeSet<usize>), String> {
     let m = lin::Module::read(wasm)?;
     let exported = lin::exported_or_tabled(wasm, m.imports)?;
     let mut refused: BTreeMap<usize, String> = BTreeMap::new();
@@ -753,7 +758,17 @@ pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, St
                 let mine: Vec<&Site> = sites.iter().filter(|s| s.callee == pos).collect();
                 let Some(first) = mine.first() else { continue };
                 let cands = site_candidates(first);
-                let pre: Vec<L> = cands.into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
+                let mut pre: Vec<L> = cands.into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
+                // Drop what the rest implies.
+                let mut i = 0;
+                while i < pre.len() {
+                    let rest: Vec<L> = pre.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, l)| l.clone()).collect();
+                    if entailed(&rest, &pre[i]) {
+                        pre.remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
                 next.insert(pos, Contract { pre });
             }
             if std::env::var_os("ALMIDE_LIN_DEBUG").is_some() {
@@ -777,7 +792,7 @@ pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, St
         let failed: Vec<usize> = results.iter().filter(|(_, r)| r.is_err()).map(|(p, _)| *p).collect();
         if failed.is_empty() {
             let cert: Vec<String> = table.iter().map(|p| results[p].clone().unwrap_or_default()).collect();
-            return Ok((cert.join(" ; "), refused));
+            return Ok((cert.join(" ; "), refused, table));
         }
         for p in failed {
             refused.insert(p, results[&p].clone().err().unwrap_or_default());
