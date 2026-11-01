@@ -53,6 +53,7 @@ pub fn records(
 /// init <one token per init event: position:ordinal | ->
 /// bounds <one token per bounds token: position:ordinal | ->
 /// judges <one token per copy-on-write judge call: position:ordinal | ->
+/// holds <one token per list `for` loop's +1 on its subject (#4280)>
 /// ```
 ///
 /// laid out exactly as the witness texts (`;` between sites / stretches,
@@ -82,6 +83,7 @@ fn records_inner(
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
+    let hold_anchors = super::bounds::take_holds();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
@@ -112,7 +114,7 @@ fn records_inner(
         Some(fmap) => {
     let locate = Locator::new(emitted, shipped, seals, fmap)?;
     format!(
-        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\njudges {}\n",
+        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\njudges {}\nholds {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
             let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
@@ -124,6 +126,7 @@ fn records_inner(
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
         locate.text(&pick(judge_anchors))?,
+        locate.text(&pick(hold_anchors))?,
     ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
         }
     };

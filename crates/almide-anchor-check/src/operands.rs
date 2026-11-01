@@ -17,6 +17,14 @@
 //! is at most `S` bytes wide, `o + o' = PAYLOAD + k * S` with `k >= 0`, and
 //! `I' + k` is `I + c` — the same leaf values.
 //!
+//! LOOP EXIT (`i32.ge_u` feeding `br_if 1`, #4280): the compare is the
+//! counter `I` against the count `len(B) / S` (`i32.div_u`, an i32 count, as
+//! a `for` loop captures it at entry); the `br_if` sits straight inside a
+//! `loop` whose parent `block` it targets, and dominates the access. The
+//! access's address is `B' + I' * S'` (no wrap: the counter is an i32) at
+//! offset `PAYLOAD`, with `S' = S`, width at most `S`, and `I'` is `I` — no
+//! constant offset is accepted on this shape.
+//!
 //! BYTES (`i32.eqz`): the operand is `I >= 0 && I <= len(B) - w` (signed),
 //! the access `B' + wrap(I')` at offset `PAYLOAD + k`, `k + width <= w`,
 //! `I'` is `I`.
@@ -27,6 +35,11 @@
 //! judge returns a block of its argument's count), and from the first read
 //! to the access no call other than a judge is handed the block and no store
 //! writes its count word.
+//!
+//! An `if` with no `else` that ends in `return` and holds no branch never
+//! falls through either: what it calls or writes is not "between" a count's
+//! read and the access (the fuel-exhaustion exit a loop head releases its
+//! lists on, #4280).
 //!
 //! Dominance is structural: the path from a read to a later one may leave
 //! a `block` or `loop` by falling out of it (unless a branch before the read
@@ -39,7 +52,16 @@
 //! `else`, ending in `unreachable`) never falls through and is not
 //! "between".
 //!
+//! HELD (#4280): a list `for` loop takes +1 on its subject before reading
+//! its count, a call the producer records as a HOLD. When a recorded hold on
+//! the counted block dominates the count's read, a call handed the list
+//! between the count and the access is accepted: the block is shared, and a
+//! shared block is never written or resized in place. A write of the list's
+//! variable and a store of its count word still reject.
+//!
 //! TRUSTED: that a recorded judge site calls a copy-on-write judge; that a
+//! recorded hold calls rc_inc and the routines honour the copy-on-write
+//! contract (a block with a second holder is never resized in place); that a
 //! call changes a block's count only when it is handed the block (a block
 //! another local aliases is shared, so no routine shrinks it in place); the
 //! block layout (`LEN` at 4, payload at 12, almide-layout).
@@ -177,6 +199,7 @@ fn pure(op: &Op<'_>) -> Option<&'static str> {
         Op::I64Mul => "i64.mul",
         Op::I64DivU => "i64.div_u",
         Op::I64GeS => "i64.ge_s",
+        Op::I32GeU => "i32.ge_u",
         Op::I64LeS => "i64.le_s",
         Op::I64GeU => "i64.ge_u",
         _ => return None,
@@ -215,14 +238,21 @@ pub(crate) struct Flow<'b, 'a> {
     parent: Vec<Option<usize>>,
     /// Inside an aborting `if` (no `else`, ends in `unreachable`).
     abort_arm: Vec<bool>,
+    /// Inside a returning `if` (no `else`, ends in `return`, no branch
+    /// inside it): a path through it leaves the function (#4280).
+    ret_arm: Vec<bool>,
     /// The recorded copy-on-write judge call sites of this function.
     judges: HashSet<usize>,
+    /// The recorded loop holds (#4280): calls that take +1 on a list a
+    /// `for` loop then iterates.
+    holds: HashSet<usize>,
 }
 
 impl<'b, 'a> Flow<'b, 'a> {
     pub(crate) fn new(b: &'b Body<'a>, judges: HashSet<usize>) -> Self {
         let n = b.ops.len();
         let (mut close, mut parent, mut abort_arm) = (vec![usize::MAX; n], vec![None; n], vec![false; n]);
+        let mut ret_arm = vec![false; n];
         let mut stack: Vec<usize> = Vec::new();
         let mut has_else = vec![false; n];
         for (i, op) in b.ops.iter().enumerate() {
@@ -251,8 +281,37 @@ impl<'b, 'a> Flow<'b, 'a> {
             {
                 abort_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
             }
+            if matches!(b.ops[s], Op::If { .. })
+                && !has_else[s]
+                && close[s] != usize::MAX
+                && close[s] > s + 1
+                && matches!(b.ops[close[s] - 1], Op::Return)
+                && !(s + 1..close[s]).any(|k| matches!(b.ops[k], Op::Br { .. } | Op::BrIf { .. } | Op::BrTable { .. }))
+            {
+                ret_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
+            }
         }
-        Flow { b, close, parent, abort_arm, judges }
+        Flow { b, close, parent, abort_arm, ret_arm, judges, holds: HashSet::new() }
+    }
+
+    /// This function's recorded loop holds.
+    pub(crate) fn with_holds(mut self, holds: HashSet<usize>) -> Self {
+        self.holds = holds;
+        self
+    }
+
+    /// A recorded hold took +1 on the block `x` before its count was read
+    /// at `count_at` (it dominates the read): while the loop runs the block
+    /// has a second holder, and under the copy-on-write contract no routine
+    /// writes or resizes a shared block in place.
+    fn held(&self, x: &T, count_at: usize) -> bool {
+        self.holds.iter().any(|&h| {
+            h < self.b.ops.len()
+                && matches!(self.b.ops[h], Op::Call { .. })
+                && self.b.args[h].len() == 1
+                && self.dominates(h, count_at)
+                && self.same(&self.arg(h, 0, FUEL), x)
+        })
     }
 
     /// Inside an aborting `if` (module header).
@@ -585,7 +644,13 @@ impl<'b, 'a> Flow<'b, 'a> {
             return Err("the block's first read does not dominate the access".into());
         }
         let counted: HashSet<usize> = self.window(count_at, acc).into_iter().collect();
+        let held = self.held(x, count_at);
         for k in self.window(from, acc) {
+            // A returning arm leaves the function: nothing it does reaches
+            // the access (a loop's fuel exhaustion releases and returns).
+            if self.ret_arm[k] {
+                continue;
+            }
             let ins = &self.b.ops[k];
             if let Some(src) = src {
                 if self.writes(k, src) {
@@ -603,7 +668,7 @@ impl<'b, 'a> Flow<'b, 'a> {
             }
             if matches!(ins, Op::Call { .. } | Op::CallIndirect { .. }) && !self.judges.contains(&k) {
                 let n = self.b.args[k].len();
-                if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) {
+                if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) && !held {
                     return Err(format!("instruction {k} ({ins:?}) is handed the list between the check and the access"));
                 }
             }
@@ -667,6 +732,33 @@ fn count_of(t: &T) -> Option<((&T, usize), i64)> {
     Some((len(l)?, cst(s)?))
 }
 
+/// `len(B) / S` as an i32 count (a loop's captured count, #4280).
+fn count_of32(t: &T) -> Option<((&T, usize), i64)> {
+    let [l, s] = op(t, "i32.div_u")? else { return None };
+    Some((len(l)?, cst(s)?))
+}
+
+/// The `br_if` at `at` is a loop's exit test (module header): an
+/// `i32.ge_u` right before it, it sits straight inside a `loop`, and it
+/// branches to the `block` that loop's parent is.
+pub(crate) fn loop_exit(fl: &Flow<'_, '_>, at: usize) -> Result<(), String> {
+    if !matches!(fl.b.ops[at], Op::BrIf { relative_depth: 1 }) {
+        return Err(format!("anchored at {:?}, not `br_if 1`", fl.b.ops[at]));
+    }
+    if at == 0 || !matches!(fl.b.ops[at - 1], Op::I32GeU) {
+        return Err(format!("the exit test is {:?}, not `i32.ge_u`", at.checked_sub(1).map(|k| &fl.b.ops[k])));
+    }
+    let lp = fl.parent[at].ok_or("the exit test is in no loop")?;
+    if !matches!(fl.b.ops[lp], Op::Loop { .. }) {
+        return Err(format!("the exit test sits in {:?}, not a loop", fl.b.ops[lp]));
+    }
+    let bk = fl.parent[lp].ok_or("the loop is in no block")?;
+    if !matches!(fl.b.ops[bk], Op::Block { .. }) {
+        return Err(format!("the loop sits in {:?}, not the block the exit leaves to", fl.b.ops[bk]));
+    }
+    Ok(())
+}
+
 /// The access instruction (`acc`; for an `a` anchored at the release call,
 /// the load before it): its address term, memarg offset and width.
 fn access_parts(fl: &Flow<'_, '_>, acc: usize) -> Result<(T, u64, u64), String> {
@@ -721,6 +813,37 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             let ((ci, cc), (ai, ac)) = (affine(&ix), affine(ai));
             if !fl.same(ci, ai) || cc != ac + k / s {
                 return Err(format!("the check tests index {ix:?}, the access reads slot {ai:?} + {}", k / s));
+            }
+            fl.same_count(cb, ab, count_at, acc)
+        }
+        Op::I32GeU => {
+            // The loop exit test (#4280): its `br_if` must dominate too.
+            if !fl.dominates(cmp + 1, acc) {
+                return Err("the exit test's br_if does not dominate the access".into());
+            }
+            let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
+            let ((cb, count_at), s) = count_of32(&cnt).ok_or_else(|| format!("the exit test's right operand is not a list's count: {cnt:?}"))?;
+            let Some([ab, scaled]) = op(&addr, "i32.add") else {
+                return Err(format!("the access's address is not block + scaled counter: {addr:?}"));
+            };
+            let (ai, s2) = match op(scaled, "i32.mul") {
+                Some([i, c]) => match cst(c) {
+                    Some(s2) => (i, s2),
+                    None => return Err(format!("the access's counter is not scaled by a constant: {scaled:?}")),
+                },
+                _ => return Err(format!("the access's counter is not scaled: {scaled:?}")),
+            };
+            if s <= 0 || s2 != s {
+                return Err(format!("the exit test counts slots of {s} bytes, the access scales by {s2}"));
+            }
+            if width as i64 > s {
+                return Err(format!("the access is {width} bytes wide, its slots {s}"));
+            }
+            if off as i64 != PAYLOAD {
+                return Err(format!("the access lies at offset {off}, not the payload's first slot"));
+            }
+            if !fl.same(&ix, ai) {
+                return Err(format!("the exit test tests {ix:?}, the access reads slot {ai:?}"));
             }
             fl.same_count(cb, ab, count_at, acc)
         }

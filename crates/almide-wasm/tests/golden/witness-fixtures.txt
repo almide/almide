@@ -264,6 +264,7 @@ spec/wasm_cross/fold_family_source_before_init.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/fold_init_rebinds_source.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/for_in_list_value_semantics.almd
 spec/wasm_cross/fs_call_head_family.almd
 spec/wasm_cross/fs_composition_family.almd
 spec/wasm_cross/fs_error_path_escape.almd

@@ -3,7 +3,7 @@
 //!
 //! The witness is `;`-separated stretches, each a sequence of
 //! `c N` (check slot N), `a N` / `w N` (read / write slot N), `s N` (slot N
-//! changed), `L{ … }` (a loop body), `B{ … | … }` (two arms); whitespace
+//! changed), `e N` (a loop's exit test of slot N, #4280), `L{ … }` (a loop body), `B{ … | … }` (two arms); whitespace
 //! between tokens is ignored. A string that does not parse is rejected.
 //! Accepted iff every access in every stretch is preceded, on every path, by
 //! a check of its slot with no change of the slot since.
@@ -22,6 +22,7 @@ enum Item {
     Read(Nat),
     Write(Nat),
     Set(Nat),
+    Exit(Nat),
     Loop(Vec<Item>),
     Branch(Vec<Item>, Vec<Item>),
 }
@@ -39,7 +40,7 @@ fn prog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
         match c {
             b'}' | b'|' | b';' => return Some((items, i)),
             _ if is_space(c) => i += 1,
-            b'c' | b'a' | b'w' | b's' => {
+            b'c' | b'a' | b'w' | b's' | b'e' => {
                 let start = i + 1;
                 let end = start + s[start..].iter().take_while(|b| b.is_ascii_digit()).count();
                 if end == start {
@@ -50,6 +51,7 @@ fn prog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
                     b'c' => Item::Check(n),
                     b'a' => Item::Read(n),
                     b'w' => Item::Write(n),
+                    b'e' => Item::Exit(n),
                     _ => Item::Set(n),
                 });
                 i = end;
@@ -122,8 +124,18 @@ fn kills(items: &[Item], out: &mut Known) {
 /// `check`: the known set after `items`, or `None` when an access is not
 /// justified.
 fn check(mut kn: Known, items: &[Item]) -> Option<Known> {
+    // Coq's `PExit x k` is `kn ∩ check (x :: kn) k`: the rest is checked
+    // knowing `x`, and the stretch ends with what both paths know — the
+    // leaving one keeps the set from before the test. Unfolded over the
+    // sequence, the result is the final set met with every set an exit test
+    // left from, so a stretch of many tests costs no recursion depth.
+    let mut left: Vec<Known> = Vec::new();
     for it in items {
         match it {
+            Item::Exit(n) => {
+                left.push(kn.clone());
+                kn.insert(n.clone());
+            }
             Item::Check(n) => {
                 kn.insert(n.clone());
             }
@@ -151,6 +163,9 @@ fn check(mut kn: Known, items: &[Item]) -> Option<Known> {
                 kn = kt.intersection(&ke).cloned().collect();
             }
         }
+    }
+    for l in left {
+        kn = kn.intersection(&l).cloned().collect();
     }
     Some(kn)
 }
@@ -193,6 +208,12 @@ mod tests {
         assert!(!check_bounds_cert(b"w0"));
         assert!(!check_bounds_cert(b"c0 L{ a0 s0 }"));
         assert!(!check_bounds_cert(b"c1 a0"));
+        // #4280: the loop exit test.
+        assert!(check_bounds_cert(b"L{ e0 a0 s0 }"));
+        assert!(!check_bounds_cert(b"L{ a0 e0 s0 }"));
+        assert!(!check_bounds_cert(b"L{ e0 s0 a0 }"));
+        assert!(!check_bounds_cert(b"e1 a0"));
+        assert!(!check_bounds_cert(b"L{ e0 } a0"));
     }
 
     #[test]
@@ -210,6 +231,11 @@ mod tests {
         let mut w = String::from("c0");
         for _ in 0..200_000 {
             w.push_str(" a0");
+        }
+        assert!(check_bounds_cert(w.as_bytes()));
+        let mut w = String::new();
+        for _ in 0..200_000 {
+            w.push_str("e0 a0 ");
         }
         assert!(check_bounds_cert(w.as_bytes()));
     }
