@@ -44,10 +44,6 @@ effect fn entry_of(root: String, rel: String) -> Entry = {
   Entry { date: m.done, link: "[" + m.title + "](" + rel + ")", desc: m.description }
 }
 
-// Done is sorted by date, newest first. The bash original pipes through `sort -t'|' -k1 -r`
-// and DROPS any row with an empty date (`[ -z "$date" ] && continue`), so a done/ file
-// missing its `<!-- done: -->` line silently vanishes from the table. Reproduced exactly —
-// a byte-match is the acceptance check, so a "fix" here would be a divergence.
 effect fn entries_of(root: String, files: List[String]) -> List[Entry] = files |> list.map((f) => entry_of(root, f)!)!
 
 effect fn plain_section(root: String, sub: String, heading: String) -> String = {
@@ -59,22 +55,28 @@ effect fn plain_section(root: String, sub: String, heading: String) -> String = 
   }
 }
 
-// Done is sorted by date, newest first. The bash original pipes through `sort -t'|' -k1 -r`
-// and DROPS any row with an empty date (`[ -z "$date" ] && continue`), so a done/ file
-// missing its `<!-- done: -->` line silently vanishes from the table. Reproduced exactly —
-// a byte-match is the acceptance check, so a "fix" here would be a divergence.
-//
-// `list.sort_by` takes a KEY extractor, not a comparator, and there is no `string.compare`,
-// so descending is ascending-then-reverse.
+// Match the bash generator's `LC_ALL=C sort -t'|' -k1,1 -r`: newest date
+// first, then the full serialized row in reverse byte order for ties. Undated
+// records sort last and remain visible; their missing date is not invented.
+// The presence prefix matters: sorting `date + "|" + ...` alone places an
+// empty date's leading `|` BEFORE dated rows after reversal.
+fn render_done_entries(entries: List[Entry]) -> String = {
+  if list.len(entries) == 0 then ""
+  else {
+    let sorted = entries |> list.sort_by((e) => (if e.date == "" then "0" else "1") + e.date + "|" + e.link + "|" + e.desc) |> list.reverse
+    let count = list.len(entries)
+    let rows = sorted |> list.map((e) => {
+      let date = if e.date == "" then "Not recorded"
+      else e.date
+      "| " + date + " | " + e.link + " | " + e.desc + " |"
+    }) |> list.join("\n")
+    "## Done\n\n" + int.to_string(count) + " items\n\n<details>\n<summary>Show all " + int.to_string(count) + " archived items</summary>\n\n" + "| Done | Item | Description |\n|------|------|-------------|\n" + rows + "\n\n</details>\n\n"
+  }
+}
+
 effect fn done_section(root: String) -> String = {
   let files = md_files(root, "done")!
-  if list.len(files) == 0 then ""
-  else {
-    let entries = entries_of(root, files)! |> list.filter((e) => e.date != "") |> list.sort_by((e) => e.date + "|" + e.link + "|" + e.desc) |> list.reverse
-    let count = list.len(files)
-    let rows = entries |> list.map((e) => "| " + e.date + " | " + e.link + " | " + e.desc + " |") |> list.join("\n")
-    "## Done\n\n" + int.to_string(count) + " items\n\n<details>\n<summary>Show all " + int.to_string(count) + " completed items</summary>\n\n" + "| Done | Item | Description |\n|------|------|-------------|\n" + rows + "\n\n</details>\n\n"
-  }
+  render_done_entries(entries_of(root, files)!)
 }
 
 effect fn gen_roadmap_readme(root: String) -> String = {
@@ -346,4 +348,25 @@ test "first_divergence names the first differing line, and only that" {
   assert_eq(first_divergence("a\nb\nc\n", "a\nb\nc\n"), "")
   assert_eq(first_divergence("a\nb\nc\n", "a\nB\nc\n"), "line 2\n  committed: b\n  rendered:  B")
   assert_eq(first_divergence("a\n", "a\nb\n"), "line 2\n  committed: \n  rendered:  b")
+}
+
+// Missing dates must not hide archived design records or inflate a displayed
+// count relative to its rows. These synthetic records cover cases the current
+// inventory alone cannot guarantee (including equal dates and multiple gaps).
+test "roadmap done retains undated records last and preserves reverse byte ties" {
+  let entries = [
+    Entry { date: "", link: "[A](done/a.md)", desc: "undated a" },
+    Entry { date: "2026-01-02", link: "[B](done/b.md)", desc: "older" },
+    Entry { date: "2026-10-31", link: "[C](done/c.md)", desc: "newer c" },
+    Entry { date: "", link: "[Z](done/z.md)", desc: "undated z" },
+    Entry { date: "2026-10-31", link: "[D](done/d.md)", desc: "newer d" }
+  ]
+  assert_eq(
+    render_done_entries(entries),
+    "## Done\n\n5 items\n\n<details>\n<summary>Show all 5 archived items</summary>\n\n| Done | Item | Description |\n|------|------|-------------|\n| 2026-10-31 | [D](done/d.md) | newer d |\n| 2026-10-31 | [C](done/c.md) | newer c |\n| 2026-01-02 | [B](done/b.md) | older |\n| Not recorded | [Z](done/z.md) | undated z |\n| Not recorded | [A](done/a.md) | undated a |\n\n</details>\n\n",
+  )
+}
+
+test "roadmap empty done section stays absent" {
+  assert_eq(render_done_entries([]), "")
 }

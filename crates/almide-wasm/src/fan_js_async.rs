@@ -69,22 +69,29 @@ fn computed(a: &IrExpr) -> bool {
 
 /// The declared protocol imports of the finished module: one per
 /// registered `FanStart` / `FanWait` / `FanTake` helper, whose stub body
-/// the `imports::declare` post-pass removes.
-pub(crate) fn declared_protocol(table: &FnTable, work: &FnWork) -> Vec<crate::imports::Declared> {
+/// the `imports::declare` post-pass removes. A start or take import is as
+/// effectful as its hook's declaration (`hook_effect`); `wait` settles every
+/// started hook, so it is effectful when any of them is.
+pub(crate) fn declared_protocol(
+    table: &FnTable,
+    work: &FnWork,
+    hook_effect: &dyn Fn(usize) -> bool,
+) -> Vec<crate::imports::Declared> {
     let base = work.helper_base.get();
     let hook_name = |hook: usize| table.infos[hook].import.as_ref().map_or(String::new(), |(_, n)| n.clone());
-    work.helpers
-        .borrow()
+    let helpers = work.helpers.borrow();
+    let any_effect = helpers.iter().any(|h| matches!(h, Helper::FanStart { hook, .. } if hook_effect(*hook as usize)));
+    helpers
         .iter()
         .enumerate()
         .filter_map(|(pos, h)| {
-            let name = match h {
-                Helper::FanStart { hook, .. } => format!("start:{}", hook_name(*hook as usize)),
-                Helper::FanWait => "wait".to_string(),
-                Helper::FanTake { hook, .. } => format!("take:{}", hook_name(*hook as usize)),
+            let (name, effect) = match h {
+                Helper::FanStart { hook, .. } => (format!("start:{}", hook_name(*hook as usize)), hook_effect(*hook as usize)),
+                Helper::FanWait => ("wait".to_string(), any_effect),
+                Helper::FanTake { hook, .. } => (format!("take:{}", hook_name(*hook as usize)), hook_effect(*hook as usize)),
                 _ => return None,
             };
-            Some(crate::imports::Declared { index: base + pos as u32, module: FAN_MODULE.to_string(), name, narrow: Vec::new() })
+            Some(crate::imports::Declared { index: base + pos as u32, module: FAN_MODULE.to_string(), name, narrow: Vec::new(), effect })
         })
         .collect()
 }

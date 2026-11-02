@@ -238,6 +238,7 @@ call:float64.__almd_mono4_from__Float32
 call:float64.__almd_mono4_from__UInt64
 call:fs.__fallible_fold_lines
 call:fs.__fallible_for_each_line
+call:fs.append_bytes
 call:fs.append_text
 call:fs.copy
 call:fs.create_temp_dir
@@ -729,6 +730,10 @@ call:url.parse_query
 call:url.resolve
 call:url.to_string
 call:user-fn
+call:uuid.compare
+call:uuid.to_bytes
+call:uuid.to_string
+call:uuid.v7
 call:value.__field
 call:value.__keys
 call:value.array

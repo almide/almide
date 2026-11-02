@@ -15,7 +15,7 @@ include process startup and, for wasm, runtime compilation. Small inputs are
 smoke tests, not evidence about steady-state performance.
 
 Use `--max-ratio R` to fail when any ratio exceeds a specified budget.
-`scripts/check-spelling-ratio.sh` is the CI form of exactly that (2.5x, the
+`scripts/check-spelling-ratio.sh` is the CI form of exactly that (2.0x by default, the
 perf-ratchet job): the ratio compares spellings on ONE leg in one round-robin
 run, so a slow shared runner moves the numbers and not the verdict — the same
 discipline the native/Rust ratio gate follows. Lower the budget when the native
@@ -86,7 +86,8 @@ profiles were timed round-robin with `compare.py --profile-pair`:
 | x86_64 | 76.0 / 76.2 ms (1.00x) | 85.3 / 93.3 ms (0.91x) | 76.0 / 76.1 ms (1.00x) |
 | aarch64 | 76.9 / 53.8 ms (**1.43x**) | 73.6 / 90.8 ms (0.81x) | 76.9 / 63.0 ms (**1.22x**) |
 
-On aarch64, `--release` is slower for every spelling. The cause is not a spelling tax. LLVM's loop
+In this aarch64 measurement, `--release` is slower for imperative and enumerate,
+but faster for indexed fold (0.81x). The imperative/enumerate slowdown is not a spelling tax. LLVM's loop
 vectorizer, costed for a generic aarch64 core, splits `eval_a`'s i64 multiply
 across NEON lanes. With `-C llvm-args=-vectorize-loops=false` or
 `-C target-cpu=native`, the slowdown goes away (#3604). A ratio between

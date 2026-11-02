@@ -115,6 +115,13 @@ const ROWS: &[Row] = &[
           call: "println(int.to_string(f_rawptr(f_ret_rawptr(0))))", expected: "1" },
     Row { id: "ret_rawptr", almide_params: "n: Int", almide_ret: "Handle", host_params: "_n: i64", host_ret: "*mut u8", host_body: "std::ptr::null_mut()",
           call: "println(int.to_string(f_rawptr(f_ret_rawptr(1))))", expected: "1" },
+    // ADR-0031 / #4353: a Region is two host arguments, its base and the
+    // runtime's length — the `@extern(c)` pair and the wasm host's
+    // `(base, len)` — never the runtime's Region record.
+    Row { id: "region", almide_params: "v: Region", almide_ret: "Int", host_params: "v: *mut u8, v_len: usize", host_ret: "i64",
+          host_body: "unsafe { std::slice::from_raw_parts(v, v_len) }.iter().map(|b| *b as i64).sum::<i64>() * 1000 + v_len as i64",
+          call: "let a_rg = bytes.from_string(\"AB\")\n  println(int.to_string(f_region(ffi.region(a_rg))))\n  println(int.to_string(f_region(ffi.region(bytes.from_string(\"C\")))))",
+          expected: "131002\n67001" },
     // Returns: a raw `Vec<u8>` / `AlmideMatrix` is accepted (`.into()`).
     Row { id: "ret_bytes", almide_params: "n: Int", almide_ret: "Bytes", host_params: "n: i64", host_ret: "Vec<u8>", host_body: "vec![7u8; n as usize]",
           call: "let a_rb = f_ret_bytes(3)\n  println(int.to_string(bytes.len(a_rb)))", expected: "3" },
@@ -170,7 +177,7 @@ fn covering_rows(ty: &Ty) -> Result<&'static [&'static str], &'static str> {
             TypeConstructorId::UserDefined(_) => Ok(&["record", "variant"]),
         },
         Ty::Tuple(_) => Ok(&["tuple"]),
-        Ty::Named(..) => Ok(&["record", "variant"]),
+        Ty::Named(..) => Ok(&["record", "variant", "region"]),
         Ty::Record { .. } => Ok(&["record"]),
         Ty::Variant { .. } => Ok(&["variant"]),
         Ty::Fn { .. } => Ok(&["fn"]),
@@ -224,7 +231,7 @@ fn every_parameter_type_names_rows_that_exist() {
     }
 }
 
-const PRELUDE: &str = "import bytes\n\ntype Pt = { x: Int, y: Int }\ntype Sh = | Circle(Int) | Sq(Int)\n\n";
+const PRELUDE: &str = "import bytes\nimport ffi\n\ntype Pt = { x: Int, y: Int }\ntype Sh = | Circle(Int) | Sq(Int)\n\n";
 
 fn rust_program(rows: &[Row], target: &str) -> (String, String) {
     let mut almd = String::from(PRELUDE);
@@ -492,4 +499,31 @@ fn a_region_return_without_a_region_clause_is_e090() {
     assert!(!ok, "check accepted a Region return with no length:\n{out}");
     assert!(out.contains("fn 'c_buf_new': a Region return needs the length"), "{out}");
     assert!(out.contains("`len = m` names no parameter"), "{out}");
+}
+
+/// #4353: a binding with both `@extern(wasm)` and `@extern(rust)` and a
+/// `Region` parameter. The Rust host takes the same two values the wasm host
+/// does, `(base, len)`, and the wasm leg accepts the parameter (it refused
+/// it with E082 `extern-native` when the native attr was left on the
+/// split-off wrapper). The JS-host run of the same shape is
+/// `spec/wasm_host_js/extern_region_dual_binding.almd`.
+#[test]
+fn a_region_param_of_a_dual_wasm_and_rust_binding_is_base_and_length_on_both() {
+    let almd = concat!(
+        "import ffi\n\n",
+        "@extern(wasm, \"sys\", \"log\")\n@extern(rust, \"crate::host\", \"log\")\nfn log(buf: Region) -> Unit = _\n\n",
+        "fn say(s: String) -> Unit = log(ffi.region(bytes.from_string(s)))\n\n",
+        "effect fn main() -> Unit = {\n  say(\"hi\")\n  say(\"añb\")\n}\n",
+    );
+    let host = concat!(
+        "pub fn log(base: *mut u8, len: usize) {\n",
+        "    let seen = unsafe { std::slice::from_raw_parts(base, len) };\n",
+        "    println!(\"{} {}\", len, String::from_utf8_lossy(seen));\n",
+        "}\n",
+    );
+    let (ok, stdout, stderr) = run_package("dual_region", almd, host, &["run"]);
+    assert!(ok, "the dual Region binding failed on native\n--- stderr ---\n{stderr}\n--- program ---\n{almd}");
+    assert_eq!(stdout, "2 hi\n4 añb\n", "--- program ---\n{almd}");
+    let (ok, stdout, stderr) = run_package("dual_region_wasm", almd, host, &["check", "--target", "wasm"]);
+    assert!(ok, "check --target wasm refused the dual Region binding\n{stdout}{stderr}");
 }

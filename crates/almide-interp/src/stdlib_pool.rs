@@ -155,6 +155,40 @@ pub(crate) fn bundled_body(module: Sym, func: Sym) -> Option<&'static IrFunction
     bundled_module(module)?.get(&func).filter(|d| !matches!(d.body.kind, almide_ir::IrExprKind::Hole))
 }
 
+/// `func` is an `@intrinsic` stub (a `Hole` body) the auto-imported bundled
+/// `module` declares: a bare call to it from that module's own body means
+/// `module.func`.
+pub(crate) fn bundled_stub(module: Sym, func: Sym) -> bool {
+    bundled_module(module).and_then(|m| m.get(&func)).is_some_and(|d| matches!(d.body.kind, almide_ir::IrExprKind::Hole))
+}
+
+/// `func` is an `@intrinsic` stub (a `_` body) the stdlib `module`'s own
+/// source declares, whether or not the module is auto-imported. The wasm
+/// leg's lowering drops stub declarations from the program's modules
+/// (`uuid.__v7_stamp`, `bytes.to_string_lossy`), so the declaration is read
+/// from the parsed source: a stub needs no type check, and a module that
+/// imports others (`uuid` imports `hex`, `random`) does not check alone.
+pub(crate) fn declared_stub(module: Sym, func: Sym) -> bool {
+    static STUBS: OnceLock<std::sync::Mutex<HashMap<Sym, Vec<Sym>>>> = OnceLock::new();
+    let cell = STUBS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let Ok(mut seen) = cell.lock() else { return false };
+    seen.entry(module).or_insert_with(|| source_stubs(module.as_str())).contains(&func)
+}
+
+fn source_stubs(module: &str) -> Vec<Sym> {
+    use almide_lang::ast::{Decl, ExprKind};
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { return Vec::new() };
+    let mut parser = Parser::new(Lexer::tokenize(source));
+    let Ok(prog) = parser.parse() else { return Vec::new() };
+    prog.decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Fn { name, body: Some(b), .. } if matches!(b.kind, ExprKind::Hole) => Some(*name),
+            _ => None,
+        })
+        .collect()
+}
+
 fn bundled_module(module: Sym) -> BundledBodies {
     let name = module.as_str();
     if !almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED.contains(&name) {

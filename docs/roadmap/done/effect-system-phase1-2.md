@@ -22,7 +22,11 @@
 - Integrated into regular `almide check` — auto-detects violations when [permissions] present
 - Added `permissions` field to `Project` struct in `project.rs`
 
-## Remaining (Phase 3-4 → documented in active/effect-system.md)
+## Remaining at completion (2026-03-19)
+
+The original `active/effect-system.md` plan is no longer present. For the
+current capability roadmap, see [Effect System & Capability](../active/effect-system-capability.md).
+The phase numbering below belongs to this completion record.
 
 - Phase 3: Dependency restriction (`[dependencies.X].allow`) → 2.x
 - Phase 4: Type-level integration (merges with HKT Foundation Phase 4) → 2.x

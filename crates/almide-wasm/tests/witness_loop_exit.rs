@@ -35,20 +35,20 @@ fn accepted(cert: &str) -> bool {
 /// The 14 frames that declined `loop-exit` before #2758 admitted the shape,
 /// with their exact certificates.
 const PINNED: [(&str, &str, &str); 14] = [
-    ("guard_value_exit_in_loop", "effect_int_for", "\n\n{|im}\nim\n"),
-    ("guard_value_exit_in_loop", "effect_int_nested", "\n\n{|im}\nim\n"),
+    ("guard_value_exit_in_loop", "effect_int_for", "\nad\n\n{|im}\nim\n"),
+    ("guard_value_exit_in_loop", "effect_int_nested", "\nad\n\n{|im}\nim\n"),
     ("guard_value_exit_in_loop", "effect_int_while", "\n{|im}\nim\n"),
-    ("guard_value_exit_in_loop", "effect_str_for", "\n{ibamd|ibd}\n\n\n{|im}\n\n{|im}\nim\n"),
-    ("guard_value_exit_in_loop", "effect_unit_for", "\n\n{|im}\nim\n"),
+    ("guard_value_exit_in_loop", "effect_str_for", "\n{ibamd|ibd}\nad\n\n\n{|im}\n\n{|im}\nim\n"),
+    ("guard_value_exit_in_loop", "effect_unit_for", "\nad\n\n{|im}\nim\n"),
     ("guard_value_exit_in_loop", "effect_unit_while", "\n{|im}\nim\n"),
-    ("guard_value_exit_in_loop", "pure_unit_for", "\n"),
-    ("effect_unwrap_in_loop", "sum_parse", "\n\nam\n\n{ibadm|ibd}\nim\n"),
-    ("effect_unwrap_in_loop", "sum_positive", "\n\n{|am}\n\nibd\n\n{ibadmx|}{|ibd}\nim\n"),
+    ("guard_value_exit_in_loop", "pure_unit_for", "\nad\n"),
+    ("effect_unwrap_in_loop", "sum_parse", "\nad\n\nam\n\n{ibadm|ibd}\nim\n"),
+    ("effect_unwrap_in_loop", "sum_positive", "\nad\n\n{|am}\n\nibd\n\n{ibadmx|}{|ibd}\nim\n"),
     ("fuel_cut_releases_frame", "build", "i{dx|}{dx|}m{x|}\n{x|}\n\n{|id}\n\n{|id}\n\n{|im}\n\n{ibd|im}\n{|ibd}\n"),
     ("fuel_dyn_charge", "build", "i{dx|}{dx|}m{x|}\n{x|}\n\n{|id}\n\n{|id}\n\n{|im}\n\n{ibd|im}\n{|ibd}\n"),
-    ("guard_jump_in_value_fn", "effect_int_for", "\n\n{|im}\n\nib{admx|}d\nim\n"),
-    ("effect_unit_yields_result", "walk", "\n\n{ibadm|ibd}\nim\n"),
-    ("nested_unwrap_propagation", "sum_all", "\n\nam\n\n{ibadm|ibd}\nim\n"),
+    ("guard_jump_in_value_fn", "effect_int_for", "\nad\n\n{|im}\n\nib{admx|}d\nim\n"),
+    ("effect_unit_yields_result", "walk", "\nad\n\n{ibadm|ibd}\nim\n"),
+    ("nested_unwrap_propagation", "sum_all", "\nad\n\nam\n\n{ibadm|ibd}\nim\n"),
 ];
 
 #[test]

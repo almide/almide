@@ -249,6 +249,10 @@ impl Emitter<'_> {
             i.local_get(ha).call(F_FREE);
             i.local_get(ho).call(F_FREE);
         }
+        // The rooms' release is `$free` (an owned block filed outright): the
+        // RC check holds each room's recorded release to its call (#4278 B1;
+        // the room was read as consumed by `$alloc` before signatures).
+        crate::witness::rc::release_fn(F_FREE);
         self.witness_par_close([request, answer]);
         for _ in 0..6 {
             self.release_i32();

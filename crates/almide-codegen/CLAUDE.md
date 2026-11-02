@@ -1,8 +1,10 @@
 # almide-codegen
 
-IR → source code: Rust (primary) and WGSL (`emit_wgsl/`). The wasm binary path
-does NOT live here — it is the v1 MIR trust-spine in `crates/almide-mir`
-(the v0 direct emitter `emit_wasm/` was retired in #782).
+IR → Rust source through the nanopass pipeline and template walker, plus a
+limited `@gpu` WGSL source emitter. The shipping Wasm binary path does NOT
+live here: `src/wasm_route.rs` routes it to the structural emitter in
+`crates/almide-wasm`. The old `emit_wasm/` emitter and MIR Wasm renderer
+are retired; MIR still serves the native verified-renderer subset.
 
 > **理想形リファクタのロードマップ**: [docs/roadmap/done/codegen-ideal-form.md](../../docs/roadmap/done/codegen-ideal-form.md)
 > 新しい codegen の修正を入れる前に、そこに挙げられた「場当たり修正を避けるべきポイント」を確認すること。特に: 関数解決は独立パスに、stdlib emit は宣言駆動、`emit_stub_call` による実行時 trap は避ける。
@@ -41,7 +43,7 @@ decisions made in passes + templates.
 - **There is no `Target::Wasm` here.** The variant, its 26-pass pipeline, the
   wasm-only passes (a full second Perceus among them) and the
   `Verified`/`Canonical` certificate chain were deleted in #930 — the tombstone
-  era's `unreachable!` arm included. Wasm requests are routed to `almide-mir`
+  era's `unreachable!` arm included. Wasm requests are routed to `almide-wasm`
   before ever reaching this crate; do not add wasm emission logic here.
 
 ## History note: the rt-oracle registry

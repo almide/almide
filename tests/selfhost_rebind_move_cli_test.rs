@@ -60,6 +60,8 @@ effect fn main() -> Unit = {{
     )
 }
 
+// with_headers puts the body's Content-Type first (row 11e), so the response
+// holds 2001 headers.
 fn http_status(steps: u32) -> String {
     format!(
         "import http
@@ -100,7 +102,7 @@ fn a_user_fn_rebind_moves_the_dying_list_at_rolled_and_unrolled_bounds() {
 #[test]
 fn an_http_status_rebind_moves_the_dying_response_at_rolled_and_unrolled_bounds() {
     for steps in [1000, 4096] {
-        let b = per_step(http_status, steps, "201 2000\n", "200 2000\n");
+        let b = per_step(http_status, steps, "201 2001\n", "200 2001\n");
         assert!(b < 256, "{b} bytes per `x = http.set_status(x, a1())` step at bound {steps} — the step copies the headers");
     }
 }
@@ -188,7 +190,7 @@ fn a_user_fn_tail_call_moves_its_dying_param_into_the_inner_call() {
 #[test]
 fn an_http_status_tail_call_moves_its_dying_param_into_the_inner_call() {
     for depth in [100, 4096] {
-        let b = per_step(http_tail, depth, "201 2000\n", "200 2000\n");
+        let b = per_step(http_tail, depth, "201 2001\n", "200 2001\n");
         assert!(b < 256, "{b} bytes per `go(http.set_status(x, a1()), i - 1)` step at depth {depth} — the step copies the headers");
     }
 }

@@ -1,5 +1,19 @@
-<!-- description: The completion plan to bring the v1 MIR trust-spine to full v0 parity -->
+<!-- description: Historical incumbent-v0 parity plan with explicit limits on tested and witnessed guarantees -->
 # V1 → V0 Parity — the completion plan
+
+## Historical completion plan and evidence correction
+
+This July 2026 plan compares the incumbent MIR leg with the now-retired v0
+leg. Its blocker counts and next-session instructions are historical, not
+today's structural-emitter queue. Later closure work is recorded in
+[closure architecture v2](../done/closure-architecture-v2.md).
+
+The ship-gate text below overstates the evidence when it says every accepted
+program is necessarily correct or byte-identical. A finite differential
+corpus and accepted ownership/name/capability witnesses do not prove all
+program semantics. Read [proven versus trusted](../../contracts/proven-vs-trusted.md)
+for that distinction. Preserve the recorded successes and partial coverage;
+do not infer universal correctness or reopen every old blocker from this plan.
 
 > 2026-07-04 起票。v1（MIR trust-spine）を **v0 相当** まで仕上げるための完成計画。
 > /goal で phase 単位に回せるよう、各 phase に **測定可能な exit gate** と **正確な
@@ -111,7 +125,7 @@ v0 はクロージャ変換で全対応。v1 は inline-defunctionalize でき�
 - **exit gate**: closure-passing プログラムが lower（`unresolvable method/computed`
   バケット → 0）。
 - **再開点**: `funcref_value_of` / `CallIndirect` 経路の拡張、closure env の
-  value-model 材料化。docs/roadmap/active/closure-architecture-v2.md と接続。
+  value-model 材料化。docs/roadmap/done/closure-architecture-v2.md と接続。
 - **重み**: 大（クロージャ env の所有権を PCC に載せる設計）。
 
 ## Phase D — stdlib self-host の完成

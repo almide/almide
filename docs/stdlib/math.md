@@ -1,6 +1,6 @@
 # math
 
-Mathematical functions. import math.
+Mathematical functions. Auto-imported; `import math` is optional.
 
 ### `math.pi() -> Float`
 

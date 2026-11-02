@@ -157,6 +157,9 @@ impl<'a> Interpreter<'a> {
             }
         }
 
+        if let Some(module) = self.dropped_stub_module(name) {
+            return self.eval_module_call(module, name, args, scope);
+        }
         Flow::Unsupported(format!("named call `{}`", n))
     }
 
@@ -183,6 +186,13 @@ impl<'a> Interpreter<'a> {
         //     `html.concat` is html's own, however many loaded modules (or
         //     the program) spell a `to_string`. The program root (space 0)
         //     has no owner and keeps the flat-table order below.
+        // 2d. The executing module's own `@intrinsic` sibling (a `Hole`
+        //     body: `to_string_lossy(b)` inside `bytes.__bytes_to_text`): the
+        //     same call spelled `module.f`, resolved through the module
+        //     dispatch a qualified call takes, keyed on the declaration.
+        if let Some(module) = self.own_module_intrinsic(name) {
+            return Some(self.eval_module_call(module, name, args, scope));
+        }
         let func = self.own_module_sibling(name)?;
         Some(self.eval_lowered_fn_call(func, args, scope))
     }
@@ -205,6 +215,31 @@ impl<'a> Interpreter<'a> {
     /// Step 2d of [`Self::eval_named_ctor_or_sibling`]: the executing
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
+    /// The executing auto-imported bundled module, when it declares `name`
+    /// as an `@intrinsic` stub (a `Hole` body) — the declaration, not the
+    /// spelling, decides. Only the bundled pool needs this: its sibling
+    /// lookup (`bundled_body`) skips stubs. A program-loaded module's stub
+    /// sibling (`env.__set` inside `env.set`) already resolves through
+    /// `own_module_sibling` and the interp's own intrinsic evaluation, which
+    /// must stay the interp's vote rather than the module bridge's copy.
+    pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
+        let module = self.cur_bundled.get()?;
+        crate::stdlib_pool::bundled_stub(module, name).then_some(module)
+    }
+
+    /// The LAST step of a bare call no other step resolved: inside a
+    /// program-loaded stdlib module whose lowering dropped its `@intrinsic`
+    /// stubs (the wasm leg's: `__v7_stamp` inside `uuid.v7`,
+    /// `to_string_lossy` inside `bytes`), the module's own source declares
+    /// the stub, so the call means `module.name`. Last, so every name an
+    /// earlier step answers keeps that answer.
+    fn dropped_stub_module(&self, name: Sym) -> Option<Sym> {
+        let space = (self.cur_space.get() as usize).checked_sub(1)?;
+        let owner = self.program.modules.get(space)?.name;
+        let dropped = !self.module_fns.contains_key(&(owner, name));
+        (dropped && crate::stdlib_pool::declared_stub(owner, name)).then_some(owner)
+    }
+
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
         if let Some(module) = self.cur_bundled.get() {
             return self.bundled_fn(module, name);

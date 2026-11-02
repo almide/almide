@@ -2,6 +2,8 @@
 # リデザイン後の標準ライブラリ（設計）
 
 > Last updated: 2026-10-24
+> この一覧は歴史的な設計目標であり、全項目の実装完了を示しません。現行 API・移行・未完了項目との区別は [README の案内](README.md#この記録と現行実装の区別) を参照してください。
+>
 > 元の記録: [README.md](README.md)（案の索引）・各 L2 ページの L3 関数表
 
 採用した案（○）をすべて適用したあとの、標準ライブラリの公開関数の一覧です。各 L2 ページの L3 関数表から機械的に組み立てています。表と食い違うときは、L3 の表と L2 の案が正です。
@@ -548,7 +550,7 @@
 | `cwd` | `effect fn env.cwd() -> String` |  |  |
 | `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
 | `os` | `fn env.os() -> String` |  |  |
-| `remove` | `effect fn env.remove(name: String) -> Result[Unit, String]` | 新規 | R-env-02 |
+| `remove` | `effect fn env.remove(name: String) -> Unit` | 新規 | R-env-02 |
 | `secret` | `effect fn env.secret(name: String) -> Secret[String]?` | 新規。値は `Secret` で生まれる | R-env-05 |
 | `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
 | `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |

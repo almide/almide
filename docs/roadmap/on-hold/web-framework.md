@@ -5,7 +5,9 @@
 
 Almide's first-party web framework. Achieves Hono-equivalent DX with Almide's philosophy.
 
-A thin layer on top of stdlib's `http` primitives. Provided as an external library, but template / Codec integration is uniquely Almide.
+A proposed thin layer on top of stdlib's `http` primitives, to be provided as
+an external library. The `web.*` API and deployment examples below are design
+sketches, not evidence that this package or its target adapters are shipped.
 
 ## Status (2026-10-24 decision)
 
@@ -14,7 +16,7 @@ A thin layer on top of stdlib's `http` primitives. Provided as an external libra
   - `c.set` / `c.get` becomes values passed with the request;
   - the `await next()` onion becomes middleware as `Handler -> Handler` (what `http.wrap` already composes);
   - a mutating `app` becomes a pipe-built value.
-- **Waiting on:** optional arguments (`json(data)` vs `json(data, 201)`) need default parameters, which the language does not have; until then the status variant is a separately named function.
+- **Updated prerequisite:** default parameters are implemented (`spec/lang/default_args_test.almd`). The package still needs to choose and test its JSON helper signatures; the original absence-of-defaults premise no longer blocks it.
 - **When:** after the stdlib redesign waves and the v0.68.0 release.
 
 ## Design Principles
@@ -22,8 +24,8 @@ A thin layer on top of stdlib's `http` primitives. Provided as an external libra
 1. **Immutable** — No mutable context. Pure transformation of `Request -> Response`
 2. **Composed via pipe chains** — Almide's natural composition mechanism
 3. **Template integration** — Return `HtmlDoc` directly
-4. **Codec integration** — Type-safe request/response JSON via `deriving Codec`
-5. **Multi-target** — Works on both Rust / TS
+4. **Codec integration** — Type-safe request/response JSON via the existing `: Codec` declaration
+5. **Targets** — Design for supported native/Wasm hosts; TypeScript output is retired and deployment adapters still need validation
 6. **Thin** — Routing + middleware + response builder. Nothing more
 
 ## API Design
@@ -47,7 +49,7 @@ effect fn main() -> Result[Unit, String] = {
 ```almide
 let app = web.new()
   |> web.get("/users/:id", fn(req) => {
-    let id = req.param("id")              // UFCS (requires ufcs-external)
+    let id = req.param("id")              // proposed request API using existing UFCS
     web.json(json.object([("id", json.s(id))]))
   })
   |> web.post("/users", fn(req) => {
@@ -82,11 +84,11 @@ let app = web.new()
 
 `web.html(HtmlDoc) -> Response` internally calls `render(doc)` and sets `Content-Type: text/html`.
 
-### Codec Integration (after deriving Codec implementation)
+### Codec Integration (using the existing `: Codec` declaration)
 
 ```almide
-type CreateUser = { name: String, email: String } deriving Codec
-type UserResponse = { id: String, name: String, email: String } deriving Codec
+type CreateUser: Codec = { name: String, email: String }
+type UserResponse: Codec = { id: String, name: String, email: String }
 
 let app = web.new()
   |> web.post("/users", fn(req) => {
@@ -206,7 +208,7 @@ web.on_not_found   : (App, fn(Request) -> Response) -> App
 | Middleware | `c.next()` onion model | `Handler -> Handler` function composition |
 | Response | `c.text()`, `c.json()` | `web.text()`, `web.json()` (pure fn) |
 | HTML | `c.html(string)` | `web.html(HtmlDoc)` — typed document |
-| JSON | object literal | Type-safe via `deriving Codec` |
+| JSON | object literal | Type-safe via `: Codec` |
 | Routing | `.get("/path", handler)` | `\|> web.get("/path", handler)` |
 | Method access | `c.req.param()` | `req.param()` (UFCS) |
 
@@ -214,10 +216,10 @@ web.on_not_found   : (App, fn(Request) -> Response) -> App
 
 | Priority | Feature | Roadmap | Effect |
 |----------|---------|---------|--------|
-| **1** | `deriving Codec` | codec-and-json.md Phase 2 | Eliminates JSON verbosity |
-| **2** | UFCS for external libs | ufcs-external.md | Enables `req.param("id")` |
-| **3** | Lambda shorthand syntax | syntax-sugar.md | `fn(req) =>` → shorthand |
-| **4** | Default params | syntax-sugar.md | Omit status in `web.json(data)` |
+| **1** | `: Codec` (implemented) | [CHEATSHEET](../../CHEATSHEET.md) | Use generated encode/decode in the proposed response API |
+| **2** | UFCS (implemented) | [Type system](../../specs/type-system.md) | Design the package API to use current resolution rules |
+| **3** | `(req) => ...` lambdas (implemented) | [CHEATSHEET](../../CHEATSHEET.md) | Use current lambda syntax |
+| **4** | Default params (implemented) | `spec/lang/default_args_test.almd` | Choose and test the proposed helper signature |
 
 With all of the above:
 
@@ -284,26 +286,28 @@ Send shell ahead via chunked transfer encoding, stream the body after data arriv
 
 ### Multi-Target Deployment
 
-Maps to Almide's existing 3 targets:
+Proposed deployment mapping; availability of a compiler target alone does not
+establish host imports or platform deployment compatibility:
 
 | Deploy target | Target | Notes |
 |---------------|--------|-------|
 | VPS / container | `--target rust` | Standalone binary |
-| Cloudflare Workers | `--target wasm` | WASI + edge deploy |
-| Deno Deploy / Bun | `--target ts` | Node-compatible runtime |
+| Wasm host / edge platform | `--target wasm` | Verify the host/import adapter and deployment constraints; not an automatic Workers compatibility claim |
+| Deno Deploy / Bun | No TS output target | A separate supported-host integration would be needed |
 
-Three deployment forms from the same `.almd` source. This is an advantage over merjs (2 targets: native + WASM).
+The original three-target/merjs comparison is not a current supported-deployment
+claim. Native and Wasm integrations need their own executable acceptance tests.
 
 ## Depends On
 
 - `http` stdlib (done)
 - `template` (active — for `web.html`)
-- `deriving Codec` (active — for `web.json` with typed records)
-- UFCS for external libs (active — for `req.param`)
-- Package system (on-hold — for distribution as external lib)
+- `: Codec` (implemented; proposed `web.json` still needs package implementation)
+- UFCS (implemented; design/test the proposed request helpers against current resolution)
+- Package system (implemented Git/local resolution; external distribution need not wait for a registry)
 - Directory traversal (shared with self-hosting roadmap)
-- Writer abstraction / trait (required for streaming SSR)
-- Session / HMAC (crypto stdlib addition)
+- Streaming SSR integration remains proposed; existing `io.Write` is a foundation, not an implemented SSR adapter
+- Session layer remains proposed; existing `hash.hmac_sha256` provides HMAC, not a complete session policy
 
 ## Implementation Order
 

@@ -1,8 +1,8 @@
 # Canonical evidence-class vocabulary — the SINGLE SOURCE OF TRUTH.
 #
-# Sourced by BOTH gates so the enum can never drift between them:
-#   - scripts/check-contracts.sh          (the contract-ledger gate)
-#   - scripts/check-rt-oracle-registry.sh (the wasm-runtime oracle-pairing gate)
+# Read by scripts/check-contracts.sh (the active contract-ledger gate).
+# scripts/check-rt-oracle-registry.sh also uses this vocabulary if its old
+# emit_wasm tree exists; today that gate exits as RETIRED before reading it.
 #
 # One class per line, ranked WEAKEST -> STRONGEST (the line order IS the rank:
 # line 1 = rank 0, line 2 = rank 1, ...). The rank drives two things:
@@ -13,7 +13,7 @@
 #      alone cannot certify observable cross-target behaviour.
 #
 # Lines beginning with '#' and blank lines are comments — the gates strip them.
-# DO NOT reorder without auditing both gates: the rank is positional.
+# DO NOT reorder without auditing consumers, including the retired gate: rank is positional.
 #
 # rank 0  doc-only         prose only, no executable artifact (RED for active contracts;
 #                          legitimate ONLY for status=flagged-for-revision).

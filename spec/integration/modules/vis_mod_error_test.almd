@@ -1,4 +1,5 @@
 // wasm:skip — expected compile error test (no test blocks)
+// @check-error: function 'mod_fn' is not accessible (mod visibility)
 // ============================================================
 // Visibility Error Test: mod fn
 // ============================================================

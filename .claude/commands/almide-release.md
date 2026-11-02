@@ -37,7 +37,7 @@ Create a GitHub release with tag. Pushing the tag triggers `.github/workflows/re
    - Create a GitHub Release with all assets, titled and described from `docs/releases/v{version}.md`
    (the workflow fails before building if that file is missing or malformed)
 
-4. **Verify release** — Check that all 5 binaries + checksums are attached:
+4. **Verify release** — Check that all 5 platform archives + checksums are attached, and each archive contains both `almide` and `almide-verify` plus LICENSE:
    ```bash
    gh release view v{version}
    ```
@@ -54,11 +54,11 @@ Each release automatically includes:
 
 | File | Contents |
 |------|----------|
-| `almide-linux-x86_64.tar.gz` | Linux x86_64 binary + LICENSE |
-| `almide-linux-aarch64.tar.gz` | Linux ARM64 binary + LICENSE |
-| `almide-macos-x86_64.tar.gz` | macOS Intel binary + LICENSE |
-| `almide-macos-aarch64.tar.gz` | macOS Apple Silicon binary + LICENSE |
-| `almide-windows-x86_64.zip` | Windows x86_64 binary + LICENSE |
+| `almide-linux-x86_64.tar.gz` | Linux x86_64 `almide` + `almide-verify` + LICENSE |
+| `almide-linux-aarch64.tar.gz` | Linux ARM64 `almide` + `almide-verify` + LICENSE |
+| `almide-macos-x86_64.tar.gz` | macOS Intel `almide` + `almide-verify` + LICENSE |
+| `almide-macos-aarch64.tar.gz` | macOS Apple Silicon `almide` + `almide-verify` + LICENSE |
+| `almide-windows-x86_64.zip` | Windows x86_64 `almide.exe` + `almide-verify.exe` + LICENSE |
 | `almide-checksums.sha256` | SHA-256 checksums for all archives |
 
 ## Notes
@@ -66,4 +66,12 @@ Each release automatically includes:
 - Version format: `v{major}.{minor}.{patch}`
 - Release notes must be in English
 - The release workflow takes ~10 minutes to complete all builds
-- If a build fails, delete the release and tag, fix, and re-tag
+- A notes-only pull request is not part of CI's documentation lane:
+  `scripts/check-release-notes.sh` and the release workflow read `docs/releases/`,
+  so it rebuilds the compiler and runs every Emit & Format check
+- If a build fails, first establish whether anything was published. Failure
+  before publication and recovery of a published release are different cases.
+  Do not treat a failed build as permission to delete or re-tag a published
+  version: a committed release seal requires its original tag to remain
+  fetchable. Follow the recovery boundary in `CLAUDE.md` and obtain an explicit
+  owner-approved evidence-preservation plan before any destructive action.

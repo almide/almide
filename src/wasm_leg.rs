@@ -124,24 +124,32 @@ pub(crate) fn resolve_modules(
     }
 }
 
-/// The front's lowering half: canonicalize → check → lower → module
-/// lowering → self-host linking → `link_ir` → the shared post-link rewrites.
-pub(crate) fn lower_resolved(
+/// The entry program checked and lowered — no module lowering, no test
+/// synthesis, no linking. Every call the source spells (UFCS and pipes
+/// included) is still the `CallTarget` the checker resolved it to, which is
+/// what the stdlib test-coverage ledger reads (tests/stdlib_test_coverage_test.rs).
+pub fn lower_entry_unlinked(path: &str, source_text: &str) -> Result<crate::ir::IrProgram, String> {
+    let mut program = parse_entry(path, source_text)?;
+    let resolved = resolve_modules(path, &program, ModuleSource::Disk { dep_paths: &[] })?;
+    check_and_lower_entry(path, source_text, &mut program, &resolved).map(|(_, ir)| ir)
+}
+
+/// [`lower_resolved`]'s front: canonicalize → check → lower the entry.
+fn check_and_lower_entry(
     path: &str,
     source_text: &str,
-    mut program: crate::ast::Program,
-    mut resolved: crate::resolve::ResolvedModules,
-    tests: Option<Option<&str>>,
-) -> Result<crate::ir::IrProgram, String> {
+    program: &mut crate::ast::Program,
+    resolved: &crate::resolve::ResolvedModules,
+) -> Result<(crate::check::Checker, crate::ir::IrProgram), String> {
     let canon = crate::canonicalize::canonicalize_program(
-        &program,
+        program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
     );
     let mut checker = crate::check::Checker::from_env(canon.env);
     checker.set_source(path, source_text);
     checker.diagnostics = canon.diagnostics;
     crate::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-    let diagnostics = checker.infer_program(&mut program);
+    let diagnostics = checker.infer_program(program);
     let n_errors = diagnostics.iter().filter(|d| d.level == crate::diagnostic::Level::Error).count();
     if n_errors > 0 {
         return Err(format!("type errors: {n_errors}"));
@@ -153,7 +161,20 @@ pub(crate) fn lower_resolved(
     // name arrived after the entry had already spelled the bare `lib`, and
     // the use-site never met its `almide_rt_lib_v0` declaration (var:unmapped).
     register_versioned_module_names(&mut checker, &resolved.modules);
-    let mut ir = crate::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let ir = crate::lower::lower_program(program, &checker.env, &checker.type_map);
+    Ok((checker, ir))
+}
+
+/// The front's lowering half: canonicalize → check → lower → module
+/// lowering → self-host linking → `link_ir` → the shared post-link rewrites.
+pub(crate) fn lower_resolved(
+    path: &str,
+    source_text: &str,
+    mut program: crate::ast::Program,
+    mut resolved: crate::resolve::ResolvedModules,
+    tests: Option<Option<&str>>,
+) -> Result<crate::ir::IrProgram, String> {
+    let (mut checker, mut ir) = check_and_lower_entry(path, source_text, &mut program, &resolved)?;
     // Lower every resolved module into the program before linking — the
     // incumbent's lower_one_user_module loop (src/compile_driver.rs:172-222,
     // essential steps replicated with attribution; pkg versioning is inert

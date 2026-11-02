@@ -189,9 +189,12 @@ impl Emitter<'_> {
                 // (payload_ptr.rs) — the read path's shape.
                 let list = (is_local && !in_cell).then_some(*target);
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
-                    let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
-                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
-                    crate::witness::bounds::access(site, false, self.f);
+                    self.slot_release(|em| {
+                        let off = em.emit_elem_addr(list, hb, hi, index, stride)?;
+                        em.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
+                        crate::witness::bounds::access(site, false, em.f);
+                        Ok(())
+                    })?;
                 }
                 let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                 self.f.instructions().local_get(hv);

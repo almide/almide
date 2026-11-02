@@ -1,6 +1,21 @@
 <!-- description: Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong -->
 # Map / Set data-structure roadmap
 
+## Current representation versus the earlier design
+
+The native Map and Set implementations now retain insertion-ordered entries
+**and can add an index**; native is no longer permanently Vec-only. See
+[map.rs](../../../runtime/rs/src/map.rs) and
+[set.rs](../../../runtime/rs/src/set.rs). Small collections and unhashable
+key/element types (including Float) retain the linear path. Indexed lookup
+is not an unconditional worst-case O(1) guarantee: the hash-flood handling
+also has an ordered fallback, and persistent updates still copy data.
+
+The remainder records the earlier compact-ordered-dict choice, rejected
+seq-in-entry experiment and HAMT research. Its v0 emitter paths, dense-Set
+premise and proposed native index are historical, not the current source map;
+the HAMT proposal is not declared implemented by this update.
+
 How `Map[K,V]` (and `Set[T]`) are represented, and where they should go.
 
 ## Decision

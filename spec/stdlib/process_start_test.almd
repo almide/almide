@@ -48,6 +48,21 @@ test "read_new_stdout answers only what is new since the last read" {
   let _ = process.stop(c, 200)
 }
 
+test "read_new_stderr answers only what is new since the last read, apart from stdout" {
+  let c = process.start(process.ProcessCommand {
+    cmd: "perl",
+    args: [
+      "-e",
+      '$| = 1; select(STDERR); $| = 1; print STDERR "e1"; print STDOUT "o1"; sleep 100'
+    ],
+  })!
+  env.sleep_ms(500)
+  assert_eq(process.read_new_stderr(c)!, "e1")
+  assert_eq(process.read_new_stderr(c)!, "")
+  assert_eq(process.read_new_stdout(c)!, "o1")
+  let _ = process.stop(c, 200)
+}
+
 test "a deadline ends the child with the pinned err" {
   let c = process.start(sleeper(100))!
   match process.wait(c) {

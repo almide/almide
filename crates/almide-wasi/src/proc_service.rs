@@ -27,10 +27,10 @@
 use wasm_encoder::{BlockType, Function, ValType};
 
 /// The process ops: `almide:process/spawn`'s `enum op`, case index = op − 80.
-pub const PROC_OPS: std::ops::RangeInclusive<i32> = 80..=90;
+pub const PROC_OPS: std::ops::RangeInclusive<i32> = almide_wasm::host_ops::PROC;
 /// The `process.start` child's ops (#4308): the cases after `run-with`, case
 /// index = op − [`CHILD_CASE_BIAS`]. 91..=139 serve other families.
-pub const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = 146..=151;
+pub const PROC_CHILD_OPS: std::ops::RangeInclusive<i32> = almide_wasm::host_ops::PROC_CHILD;
 /// `op − CHILD_CASE_BIAS` is a child op's WIT case index (11..=16).
 pub const CHILD_CASE_BIAS: i32 = *PROC_CHILD_OPS.start() - (*PROC_OPS.end() - *PROC_OPS.start() + 1);
 

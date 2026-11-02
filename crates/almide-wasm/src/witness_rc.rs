@@ -12,9 +12,9 @@
 //! place a release routine is chosen). `almide-anchor-check` then matches the
 //! events against the calls of the shipped body (anchor-check `rc.rs`).
 //!
-//! Measurement-gated while #4278 is open: the anchor file carries the `rc`
-//! lines only under `ALMIDE_RC_ANCHORS=1`, since releases before an abort and
-//! RC inside runtime helpers are not recorded events by design.
+//! The anchor file always carries the `rc` lines, so the structural wall's
+//! anchor check (proofs/structural-wall.sh) judges every certified fixture's
+//! RC calls on every build.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
@@ -40,6 +40,10 @@ struct State {
     next_window: u64,
     /// Per pass, each closed window's id and `(serial, from, to)`.
     window_ids: HashMap<usize, HashMap<u64, (u64, usize, usize)>>,
+    /// Per pass, every shipped runtime helper that declares an RC signature
+    /// (#4278 B1, helper_sig.rs): its emitted function index, its `rc-sig`
+    /// record and its body's anchor events.
+    helpers: HashMap<usize, Vec<(u32, String, String)>>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -62,7 +66,7 @@ pub(crate) fn begin_pass(pass: usize) {
     with(|s| s.pass = pass);
 }
 
-/// The recorder logged a live `a` / `d` / `o` on `local` (`None`: a
+/// The recorder logged a live `a` / `d` / `o` / `s` on `local` (`None`: a
 /// temporary), or an `m`: the variable's credit moved into the arm or
 /// routine whose window is open (`#<window id>`; outside every window an
 /// `m` is no RC event and is not logged), or an `h`: a credit moved into the
@@ -83,11 +87,28 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
             None => e.push('-'),
         }
         // A move names its window; so does a temporary's event logged inside
-        // one (the arm or routine may release that temporary in its callee).
-        if moves || (local.is_none() && window.is_some()) {
+        // one (the arm or routine may release that temporary in its callee),
+        // and an arm's share-out (#4278), held to the `rc_inc` in its arm.
+        if moves || kind == 's' || (local.is_none() && window.is_some()) {
             e.push_str(&format!("#{}", window.unwrap_or(0)));
         }
         e.push(' ');
+    });
+}
+
+/// #4278 B1: an event held to the instruction window `window` names (an
+/// [`site_id`] closed by [`site_window`]) — a container slot's replaced
+/// occupant (`r`), released inside that window before the slot is stored.
+pub(crate) fn event_at(kind: char, local: Option<u32>, window: u64) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| {
+        let e = s.open.entry(serial).or_default();
+        e.push(kind);
+        match local {
+            Some(l) => e.push_str(&l.to_string()),
+            None => e.push('-'),
+        }
+        e.push_str(&format!("#{window} "));
     });
 }
 
@@ -192,6 +213,14 @@ pub(crate) fn routine(id: u64, from: usize, to: usize) {
     });
 }
 
+/// The runtime helper at emitted index `f` ships with the declared
+/// signature `sig` (#4278 B1).
+pub(crate) fn helper(f: u32, sig: &crate::helper_sig::HelperSig) {
+    with(|s| {
+        s.helpers.entry(s.pass).or_default().push((f, sig.record(), sig.events()));
+    });
+}
+
 /// `f` was handed out as a release routine.
 pub(crate) fn release_fn(f: u32) {
     with(|s| {
@@ -201,13 +230,15 @@ pub(crate) fn release_fn(f: u32) {
 
 /// One pass's RC record: its frames `(serial, name, events)`, its release
 /// routines, its arm windows and its compound-routine windows, each
-/// `(serial, from, to)`, and the windows by the id an `m` event names.
+/// `(serial, from, to)`, the windows by the id an `m` event names, and its
+/// signed runtime helpers `(emitted index, rc-sig record, events)`.
 pub type Taken = (
     Vec<(u64, String, String)>,
     BTreeSet<u32>,
     Vec<(u64, usize, usize)>,
     Vec<(u64, usize, usize)>,
     HashMap<u64, (u64, usize, usize)>,
+    Vec<(u32, String, String)>,
 );
 
 /// The shipped pass's RC record.
@@ -226,5 +257,6 @@ pub fn take(pass: usize) -> Taken {
         s.arms.remove(&pass).unwrap_or_default(),
         s.routines.remove(&pass).unwrap_or_default(),
         s.window_ids.remove(&pass).unwrap_or_default(),
+        s.helpers.remove(&pass).unwrap_or_default(),
     )
 }

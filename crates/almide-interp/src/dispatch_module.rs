@@ -59,9 +59,33 @@ impl<'a> Interpreter<'a> {
         // `value.__set_path_steps` is the native runtime's in-place walk; its
         // registry body (stdlib/json_path.almd) only forwards to the bundled
         // pure walk `value.__set_path_pure`, which the pool does not lower —
-        // so the oracle runs that walk directly, as the wasm leg does.
+        // so the oracle runs that walk's bundled body directly, as the wasm
+        // leg does. The call arrives from inside the pool tier (the registry
+        // `value.set_path` body), where the module dispatch never reaches the
+        // bundled tier, so the body is taken from that tier here. The walk
+        // reads the public Value surface only, which the BOUNDARY tier
+        // answers over Values (#4401: run inside the pool tier, its helpers
+        // reached heap prims with Value operands and abstained): the args are
+        // read back out of the arena, the body runs at the boundary, and its
+        // Value result passes the pool's own return sync untouched.
         if module.as_str() == "value" && func.as_str() == "__set_path_steps" {
-            return self.dispatch_module_resolved(module, almide_base::intern::sym("__set_path_pure"), evaled);
+            let pure = almide_base::intern::sym("__set_path_pure");
+            let Some(def) = self.bundled_fn(module, pure) else {
+                return self.dispatch_module_resolved(module, pure, evaled);
+            };
+            let mut synced = Vec::with_capacity(evaled.len());
+            for (v, p) in evaled.iter().zip(&def.params) {
+                match self.sync_value(v, &p.ty) {
+                    Ok(r) => synced.push(r.unwrap_or_else(|| v.clone())),
+                    Err(why) => return Flow::Unsupported(why),
+                }
+            }
+            let depth = std::mem::replace(&mut self.pool_depth, 0);
+            let root = self.root_scope();
+            let flow = self.call_function(def, synced, &root);
+            let flow = self.sync_block_return(def, flow);
+            self.pool_depth = depth;
+            return flow;
         }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
@@ -126,6 +150,8 @@ impl<'a> Interpreter<'a> {
         scope: &Scope,
     ) -> Flow {
         let (m, f) = (module.as_str(), func.as_str());
+        // Taken before any argument is evaluated: a nested call re-stashes it.
+        let call_ty = self.call_result_ty.take();
         if !crate::inplace::writes_back(m, f) {
             return Flow::Unsupported(format!(
                 "in-place byte-level buffer write `{m}.{f}` (writes a scalar into a \
@@ -134,7 +160,7 @@ impl<'a> Interpreter<'a> {
             ));
         }
         let Some(recv) = args.first().and_then(crate::inplace::receiver_var) else {
-            return self.eval_inplace_on_temporary(m, f, args, scope);
+            return self.eval_inplace_on_temporary(m, f, args, scope, call_ty.as_ref());
         };
         // A `mut`-PARAMETER receiver is fine now: the write lands on the
         // callee frame's binding, and `eval_named_call`'s mut-param copy-out
@@ -152,7 +178,7 @@ impl<'a> Interpreter<'a> {
         // linear. Every argument is already a value by here, so nothing under
         // this closure re-enters the scope.
         match scope.with_slot(recv, |slot| {
-            crate::inplace::apply(m, f, slot, rest).map(|out| moved_back(m, f, out, slot))
+            crate::inplace::apply(m, f, slot, rest).map(|out| moved_back(m, f, out, slot, call_ty.as_ref()))
         }) {
             Some(Some(out)) => Flow::val(out),
             Some(None) => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
@@ -185,6 +211,7 @@ impl<'a> Interpreter<'a> {
         f: &str,
         args: &[IrExpr],
         scope: &Scope,
+        call_ty: Option<&almide_lang::types::Ty>,
     ) -> Flow {
         let Some(recv) = args.first() else {
             return Flow::Abort(format!("internal: `{m}.{f}` with no receiver"));
@@ -214,7 +241,7 @@ impl<'a> Interpreter<'a> {
                 if oob.is_some() {
                     return Some(Value::Unit);
                 }
-                crate::inplace::apply(m, f, cur, rest).map(|out| moved_back(m, f, out, cur))
+                crate::inplace::apply(m, f, cur, rest).map(|out| moved_back(m, f, out, cur, call_ty))
             });
             if let Some(msg) = oob {
                 return self.put_abort(msg);
@@ -249,7 +276,7 @@ impl<'a> Interpreter<'a> {
             return self.put_abort(msg);
         }
         match crate::inplace::apply(m, f, &mut temp, rest) {
-            Some(out) => Flow::val(moved_back(m, f, out, &temp)),
+            Some(out) => Flow::val(moved_back(m, f, out, &temp, call_ty)),
             None => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
         }
     }
@@ -358,6 +385,9 @@ impl<'a> Interpreter<'a> {
         // oracle harness runs every fixture on all three legs).
         // `args_get_list` answers argv[1..].
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
+            return flow;
+        }
+        if let Some(flow) = self.state_stub_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
         // #2185: the self-hosted body — the SAME source the wasm leg links for
@@ -608,16 +638,27 @@ fn member_path(recv: &IrExpr) -> Option<(almide_ir::VarId, Vec<almide_base::inte
 }
 
 /// What an intercepted writer's call evaluates to. A stdlib writer with an
-/// Almide body over `mut b` (`bytes.put_u16_le`, `bytes.pop`) arrives move-mode
-/// rewritten (almide-ir `mut_param`): its call answers the written buffer — and
-/// `(result, buffer)` when it returned a value of its own — which the rewritten
-/// site stores back. An intrinsic writer's call answers its own result.
-fn moved_back(m: &str, f: &str, out: Value, buf: &Value) -> Value {
+/// Almide body over `mut b` (`bytes.put_u16_le`, `bytes.pop`) MAY arrive
+/// move-mode rewritten (almide-ir `mut_param`): then its call answers the
+/// written buffer — and `(result, buffer)` when it returned a value of its own
+/// — which the rewritten site takes apart and stores back. Whether the rewrite
+/// reached the site is read off the call's own static type (`call_ty`), never
+/// assumed: a pipeline that does not run the rewrite (the fuzz ladder's
+/// reference oracle lowers without it) hands the interp the plain call, whose
+/// type is the mutator's own result, and answering the pair there leaked
+/// `(some(7), [2])` into a `let r: Int?` (#4400). An intrinsic writer's call
+/// answers its own result.
+fn moved_back(m: &str, f: &str, out: Value, buf: &Value, call_ty: Option<&almide_lang::types::Ty>) -> Value {
+    use almide_lang::types::Ty;
     if !almide_ir::mut_args::stdlib_fn_has_almide_body(m, f) {
         return out;
     }
-    match out {
-        Value::Unit => buf.clone(),
-        out => Value::tuple(vec![out, buf.clone()]),
+    match (out, call_ty) {
+        // Rewritten Unit mutator: the call is typed as the buffer.
+        (Value::Unit, Some(t)) if !matches!(t, Ty::Unit) => buf.clone(),
+        (Value::Unit, _) => Value::Unit,
+        // Rewritten value mutator: the call is typed `(result, buffer)`.
+        (out, Some(Ty::Tuple(_))) => Value::tuple(vec![out, buf.clone()]),
+        (out, _) => out,
     }
 }

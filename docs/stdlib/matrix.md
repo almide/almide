@@ -1,6 +1,6 @@
 # matrix
 
-2D matrix operations. `import matrix`.
+2D matrix operations. Auto-imported; `import matrix` is optional.
 
 > **Dialect epoch 14:** the neural-network kernels (attention, RoPE, the row
 > norms, the activations, the Q1_0/Q8_0 loaders and the Qwen3 blocks — 25
@@ -87,7 +87,7 @@ shorter operand instead, identically on both targets.
 
 | Signature | Purpose |
 |---|---|
-| `matrix.broadcast_add_row(m, row: Matrix) -> Matrix` | Add a (1×cols) row to every row of m |
+| `matrix.broadcast_add_row(m, row: List[Float]) -> Matrix` | Add the bias list to every row of m (zip-truncated) |
 
 The dense kernels (`linear_row`, `conv1d`, ...) live in module nn.kernels of package almide-graphics/nn.
 

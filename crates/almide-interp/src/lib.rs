@@ -159,6 +159,14 @@ pub struct Interpreter<'a> {
     /// threaded, like `handle_arg_ty`: every caller of `eval_container_op`
     /// sets it immediately before the call, and the op takes it first.
     pub(crate) container_arg_tys: Option<Vec<Ty>>,
+    /// The STATIC result type of the module call about to dispatch, stashed by
+    /// `eval_expr_call` and taken by the in-place mutator path. It says whether
+    /// the move-mode rewrite reached this call site: a rewritten site types the
+    /// call `(result, buffer)` (or the buffer, for a Unit mutator) and takes the
+    /// pair apart itself; an unrewritten one types it the mutator's own result,
+    /// which is all the call may answer (#4400: `bytes.pop` on a `var` answered
+    /// `(some(7), [2])` where both backends print `some(7)`).
+    pub(crate) call_result_ty: Option<Ty>,
     /// Field-declaration lists (decl order + default exprs) for record types
     /// and record-variant ctors, keyed by type/ctor name — the interp-side
     /// twin of codegen's `default_fields` pass: a record literal that OMITS a
@@ -232,6 +240,8 @@ pub struct Interpreter<'a> {
     /// The module of the EXECUTING `stdlib_pool::bundled_body` (its siblings).
     pub(crate) cur_bundled: Cell<Option<Sym>>,
     pub(crate) bundled_space: std::cell::RefCell<HashMap<usize, Sym>>,
+    /// The last `uuid.__v7_stamp` this run handed out (native starts at i64::MIN).
+    pub(crate) v7_last: Cell<i64>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -590,6 +600,7 @@ impl<'a> Interpreter<'a> {
             module_fns,
             pool_depth: 0,
             handle_arg_ty: None,
+            call_result_ty: None,
             container_arg_tys: None,
             record_decls,
             named_records,
@@ -602,6 +613,7 @@ impl<'a> Interpreter<'a> {
             cur_space: Cell::new(0),
             cur_pool: Cell::new(false),
             cur_bundled: Cell::new(None), bundled_space: Default::default(),
+            v7_last: Cell::new(i64::MIN),
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),

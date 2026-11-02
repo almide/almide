@@ -9,16 +9,17 @@ separate: see [SECURITY.md](./SECURITY.md).
 
 Almide is **pre-1.0**. There is exactly one supported line: the latest
 release. Fixes land on `develop` and ship as the next tag — there is no
-back-porting and no patch stream for older tags. Release cadence is high
-(225 tags in the first six months; latest `v0.59.2`), so "the next tag" is
-typically days away, not months.
+back-porting and no patch stream for older tags. Consult the [release history](https://github.com/almide/almide/releases) for
+the published tags; this policy does not pin an old release as "latest" or
+promise a release date.
 
 Two mechanisms keep that single line honest:
 
 - **Release blockers** — the release workflow refuses to cut a final tag
   while any issue labeled `I-unsound` / `I-miscompile` / `I-divergence` /
-  `regression` is open (the gate of #1482). A known-bad compiler cannot
-  become "the supported release".
+  `regression` is open (the gate of #1482). This prevents a final release
+  over those labeled open issues; it is not a claim that every defect is
+  discovered or correctly labeled.
 - **The RC channel** — releases carrying language-surface or
   compiler-behaviour changes tag `vX.Y.Z-rcN` first, published as a GitHub
   prerelease for a soak window before the final tag (#1484).
@@ -42,8 +43,8 @@ these two ledgers are:
 
 - **Dialect epochs** — [`proofs/dialect-epochs.toml`](./proofs/dialect-epochs.toml)
   is the append-only record of every change that can break already-written
-  code. The epoch advances **only** for such changes: 225 releases have
-  produced 3 epochs. Files carry `@dialect(N)` stamps so the compiler can
+  code. The epoch advances **only** for such changes; consult the ledger
+  for its current value rather than inferring it from the release count. Files carry `@dialect(N)` stamps so the compiler can
   tell a stale-dialect file from a wrong program, and the ledger is
   cross-checked against the compiler's `CURRENT_DIALECT` constant by
   `scripts/check-dialect-epochs.sh` — the record and the enforcement
@@ -82,10 +83,12 @@ correctness lives in the maintainer's head:
   public infrastructure (GitHub, Sigstore's public log); the license
   (MIT OR Apache-2.0) permits any party to fork and continue.
 
-What does not exist yet, so it is not claimed: a legal entity that can
-sign support contracts, paid support of any kind, or a certification
-sponsor. Those are organizational-ladder items (#586), not engineering,
-and they are listed there rather than implied here.
+The organization and security contact are identified in [SECURITY.md](./SECURITY.md).
+Their existence is separate from an offer of a paid support contract. This
+policy does not specify paid-support terms, a contracting arrangement, or
+certification sponsorship. Do not infer those commitments from the engineering
+gates or the security reporting policy; any such offer needs separately stated
+scope and terms. Organizational-ladder work (#586) is not itself that offer.
 
 ## Getting help
 
@@ -99,3 +102,7 @@ and they are listed there rather than implied here.
   writing Almide, [docs/SPEC.md](./docs/SPEC.md) for the language,
   [docs/contracts/](./docs/contracts/README.md) for what is promised
   across targets.
+- **Documentation fixes** — a pull request against `develop` that changes
+  only explanatory prose is checked by CI's documentation lane
+  ([docs/project/RUST-LINT-GATES.md](./docs/project/RUST-LINT-GATES.md)) and
+  does not wait for the compiler test matrix.

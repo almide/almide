@@ -28,6 +28,11 @@
 #   docs/diagnostics/**            — tests/explain_docs_test.rs and
 #                                    tests/diagnostic_coverage_test.rs read them
 #   docs/project/CLAUDE_TEMPLATE.md — include_str! into the binary (src/cli/commands.rs)
+#   docs/GRAMMAR.md                — crates/almide-syntax/tests/grammar_assign_rule.rs
+#                                    parses its `assign` rule
+#   docs/stdlib/**                 — generated signature indexes; native_result_ownership,
+#                                    stdlib_inspection_test and name_keyed_sites_test read them
+#   docs/specs/cli.md              — tests/rustc_floor_test.rs reads the toolchain text
 # The README-reading checks that must still run on a docs-only change live in
 # the always-on `checks` job: `almide docs-gen --check` (the stdlib-count claim
 # in README/SPEC/WASM-OUTPUT and llms.txt, tests/docs_gen_test.rs's subject),
@@ -40,6 +45,8 @@ is_docs() {
   case "$1" in
     docs/diagnostics/*)                 return 1 ;;
     docs/project/CLAUDE_TEMPLATE.md)    return 1 ;;
+    docs/GRAMMAR.md|docs/specs/cli.md)  return 1 ;;
+    docs/stdlib/*)                      return 1 ;;
     *.md)                               return 0 ;;
     docs/assets/*|docs/figures/*)       return 0 ;;
     LICENSE|LICENSE-*|LICENSE.*|CITATION*) return 0 ;;

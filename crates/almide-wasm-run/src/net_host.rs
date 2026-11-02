@@ -33,15 +33,16 @@ use almide_rt_core::net_core::AlmideNetTables;
 use almide_rt_core::net_unix_core::AlmideUnixTables;
 
 /// The first and last net op (tcp, then unix / shm).
-pub(crate) const OP_FIRST: i32 = 91;
+/// Both families are declared in `almide_wasm::host_ops` (#4338).
+pub(crate) const OP_FIRST: i32 = *almide_wasm::host_ops::TCP.start();
 pub(crate) const OP_LAST: i32 = crate::net_unix_host::OP_LAST;
-const TCP_LAST: i32 = 103;
+const TCP_LAST: i32 = *almide_wasm::host_ops::TCP.end();
 const _: () = assert!(TCP_LAST + 1 == crate::net_unix_host::OP_FIRST);
 /// The udp and name-lookup ops (#4306).
-pub(crate) const UDP_FIRST: i32 = 140;
-pub(crate) const UDP_LAST: i32 = 145;
-const OP_UDP_SEND_TO: i32 = 142;
-const OP_UDP_RECV_FROM: i32 = 143;
+pub(crate) const UDP_FIRST: i32 = *almide_wasm::host_ops::UDP.start();
+pub(crate) const UDP_LAST: i32 = *almide_wasm::host_ops::UDP.end();
+const OP_UDP_SEND_TO: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::UDP, 2);
+const OP_UDP_RECV_FROM: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::UDP, 3);
 
 /// One run's net state.
 #[derive(Default)]

@@ -1,7 +1,25 @@
 <!-- description: Use almide-lander to call compiled Almide libraries from Almide via shared library FFI -->
 # Almide-to-Almide FFI via almide-lander
 
-## Thesis
+## Source status (2026-10-31)
+
+The proposed Almide binding target now exists in external source:
+[bindgen's supported-language registry](https://github.com/almide/almide-bindgen/blob/b563e8b9076ff511b9b20b03e2c2e475af2c4c0b/src/mod.almd)
+lists 21 targets including Almide;
+[the Almide generator](https://github.com/almide/almide-bindgen/blob/b563e8b9076ff511b9b20b03e2c2e475af2c4c0b/src/bindings/almide.almd)
+emits C-bridge wrappers, and
+[lander's dispatcher](https://github.com/almide/almide-lander/blob/727d9aeb5337c54908f1adaf1b8710a7d994dcf8/src/mod.almd)
+routes `almide` / `almd` to that generator.
+
+Source existence is not end-to-end compatibility evidence. In particular,
+that pinned generator still emits `RawPtr` / `bytes.as_ptr`-style scaffolding;
+its compatibility with the current provenance-based FFI surface needs a build
+and ABI/ownership tests. No such build or security test is claimed here.
+
+The design and code sketches below are the original proposal, not current
+runnable instructions or a request to add a missing target from scratch.
+
+## Original thesis
 
 almide-lander は Almide モジュールを 20 言語に export できる。その 21 番目のターゲットとして **Almide 自身** を追加する。コンパイル済み Almide ライブラリを、別の Almide プロジェクトから shared library 経由で呼べるようにする。
 
@@ -16,11 +34,11 @@ almide-lander + Almide target:
 ## Why
 
 1. **Pre-compiled パッケージ配布** — ソースを配布せずバイナリだけ共有できる。企業内の proprietary ライブラリに最適。
-2. **Capability isolation** — 呼ばれる側は独立してコンパイルされた binary。capability scope が分離される。
+2. **Capability boundary to validate** — shared library の独立コンパイルだけでは capability isolation は成立しない。同一 process の native code は明示的な信頼境界であり、権限分離には別途 host/process の設計と検証が必要。
 3. **almide-lander の既存インフラ活用** — interface.json 抽出、shared library ビルド、バインディング生成の仕組みが全て再利用できる。新しいのは Almide 向け codegen だけ。
 4. **WASM Component Model への踏み石** — 今は shared library FFI、将来は WASM module 間呼び出しに進化。同じ interface.json が基盤。
 
-## Architecture
+## Original architecture sketch
 
 ```
 producer (mylib)                    consumer (app)
@@ -41,7 +59,7 @@ mylib.almd                          app.almd
         └── mod.almd      (@extern)   │
 ```
 
-## Generated Code Example
+## Original generated-code sketch (not current compiler syntax)
 
 **元の mylib.almd:**
 ```almide
@@ -86,7 +104,7 @@ fn main() -> Unit = {
 }
 ```
 
-## What almide-bindgen Needs
+## Original implementation decomposition (generator now exists)
 
 almide-bindgen に `almide` ターゲットを追加:
 
@@ -94,9 +112,9 @@ almide-bindgen に `almide` ターゲットを追加:
 2. **関数 wrapper 生成** — `@extern(lib: "...", "...")` 宣言を生成
 3. **C ABI 境界の型変換** — `--repr-c` でコンパイルされた shared library と Almide の型の間のマーシャリング（String ↔ C string、Record ↔ C struct）
 
-型マッピングが identity なので、20 言語の中で最も実装が軽い。
+Almide 同士でも C ABI・所有権・エラー・buffer 長の境界は消えない。実装工数の順位は未検証。
 
-## Scope
+## Original scope estimates
 
 - **almide-bindgen 側**: 新しい `bindings/almide.almd` ジェネレーター（~200行見込み）
 - **almide compiler 側**: `@extern(lib: "...")` の shared library 指定（既に `@extern` は存在、`lib:` パラメータ追加）
@@ -104,6 +122,6 @@ almide-bindgen に `almide` ターゲットを追加:
 
 ## Relationship to Other Roadmap Items
 
-- **rainbow-bridge.md** — 外部コード→Almide の方向。本ドキュメントは Almide→Almide。rainbow-bridge の Almide→外部方向は almide-lander が既に解決。
+- **rainbow-bridge.md** — 外部コード→Almide の方向。本ドキュメントは Almide→Almide。almide-lander に実装はあるが、全型・全ターゲットの互換性を本書で検証済みとはしない。
 - **wasm-component-model.md** — 将来的に shared library FFI → WASM module 間呼び出しに進化。interface.json が共通基盤。
 - **effect-system-capability.md** — 呼ばれる側の WASM module が独自の capability scope を持つモデルと整合。

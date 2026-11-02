@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/patterns.rs b/crates/almide-wasm/src/patterns.rs
+--- a/crates/almide-wasm/src/patterns.rs
++++ b/crates/almide-wasm/src/patterns.rs
+@@ -97,7 +97,11 @@
+         // A guard that binds a local is recorded as two sites (witness_guard.rs).
+         let split = self.witness_guard_splits(arm);
+         match &arm.guard {
+-            None => self.emit_pattern_test(&arm.pattern, subj_ty, scr)?,
++            // RE-INJECTED (#4279 drill): the binds run before the arm tag test.
++            None => {
++                self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
++                self.emit_pattern_test(&arm.pattern, subj_ty, scr)?
++            }
+             Some(g) if irrefutable => {
+                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                 self.witness_pattern_views(&arm.pattern);

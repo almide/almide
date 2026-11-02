@@ -117,10 +117,11 @@ unreachable is swept by reachability DCE before assembly.
 ## What's still not the smallest possible module, and why
 
 The verified pipeline **ships the bytes its own rendering process produced**.
-Every module built on the default path is emit-time validated. (The retired
-incumbent leg additionally carried a machine-checked ownership/refcount
-certificate re-verified by the Rocq-checked kernel each build; the structural
-leg's certificate is pending, #2755–#2760.) `wasm-opt` is a
+Every module built on the default path is emit-time validated. The structural
+leg also records a certificate bundle; `almide verify` and the certified-corpus
+gates check supported core artifacts, not components. Witness coverage and recording trust are limited, not a proof
+of complete artifact memory safety (see [Memory Safety](../design/MEMORY-SAFETY.md)).
+`wasm-opt` is a
 different kind of thing: an **external, unverified transform applied to the
 renderer's finished output** — running it replaces bytes the pipeline produced
 with bytes a separate, un-certified tool rewrote. That line is why it stays
@@ -370,10 +371,11 @@ rc @0, len @4, cap @8, payload @12) and the module's own signatures for the
 valtype of each slot (`Bool` is `i32` on the structural leg). A block the host builds goes through the module's exported
 allocator (`__alloc`) and a block the host takes out is released through its
 exported release (`__release`); both exports exist only under `--host js`
-and only when some marshalled signature carries a `String` (#2276), so every
-other build keeps its bytes — a scalar-only surface's module is
-byte-identical to the build without the switch, and the glue then carries no
-string helpers either. The structural leg also records which
+when the host surface needs block marshalling: String, Bytes, List, Option,
+records, or an unwrapped Result's error message (`HostSurface::needs_string_abi`
+in `src/cli/js_host.rs`). A scalar-only surface that needs none of these
+keeps the module byte-identical to the build without the switch and carries
+no block-marshalling helpers. The structural leg also records which
 exported params the callee owns, so the host releases exactly the credits
 it still holds.
 
@@ -383,8 +385,8 @@ with `--host js`, runs it under node, byte-compares stdout to
 hooks and an `after(module)` exercising the wrappers), and for a fixture
 without `@extern` also compares the native binary's stdout. It also asserts
 what ships (#2276): the module is byte-identical to the build without
-`--host js` unless the surface marshals a `String` (then it differs by
-exactly the two exports), the glue's `wasi.<name>` shim set equals the
+`--host js` for the scalar-only cases, and the allocator/release exports
+when the marshalled surface needs blocks, the glue's `wasi.<name>` shim set equals the
 shipped module's `wasi_snapshot_preview1` imports (pre- and post-`wasm-opt`),
 and each glue's byte size is at or under its row in
 `spec/wasm_host_js/glue-ceiling.txt` (shrinking is silent, growing is a

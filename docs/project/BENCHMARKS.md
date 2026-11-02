@@ -2,7 +2,15 @@
 
 ## WASM Binary Size
 
-Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Since the unverified v0 emitter was retired (#782), every wasm build comes from a verified renderer — the certified MIR spine, or since commissioning (#1599) the structural engine, whichever the router picks — and **the shipped binary is the exact module that renderer produced** (on the incumbent leg, the exact module the certificate was checked against): reachability DCE inside the renderer prunes unreached preamble helpers, imports, and data segments before assembly, and the debug-name section keeps only function names (for trap backtraces) — but no post-hoc optimizer touches the shipped bytes.
+Almide's structural emitter produces Wasm bytes directly, with the guest
+runtime support the program reaches. Execution still needs a compatible host
+for the artifact's imports. The former MIR/WAT route is retired. Build packaging
+can transform the emitted core module into a stock-WASI module or a component;
+`--wasm-opt` is a separate opt-in. Certificate scope and core-artifact binding
+are described in [WASM-OUTPUT](../wasm/WASM-OUTPUT.md) and
+[MEMORY-SAFETY](../design/MEMORY-SAFETY.md), not inferred from binary size.
+The following table is the historical 2026-07-23 measurement, not the size of
+artifacts emitted by the current compiler.
 
 | Program | Verified, as shipped | After `wasm-opt -Oz --all-features` |
 |---------|-----:|-----:|
@@ -16,7 +24,7 @@ The "as shipped" column is raw `almide build --target wasm` output (measured 202
 
 ## Native Performance
 
-Almide compiles to Rust, which then compiles to native machine code. No runtime, no GC, no interpreter.
+Almide compiles to Rust, which then compiles to native machine code. Runtime support is linked or embedded as needed; execution does not require a language VM or tracing GC.
 
 | Metric | Value |
 |--------|-------|
@@ -30,8 +38,10 @@ Benchmarks-Game-style programs, Almide `--release` vs handwritten Rust compiled
 with the same flags (opt-level=3, LTO, 1 CGU, and the target CPU and LLVM
 options the native `--release` build adds: `-C target-cpu=x86-64-v3` on x86_64,
 the generic CPU on aarch64, as `almide build --print-release-rustflags` prints
-them), median of 5 interleaved runs, byte-identical stdout verified across
-every variant before timing. Measured 2026-10-20 with the v0.68.0-rc2 release
+them), median of 5 interleaved runs. The harness compares small-workload stdout
+before timing; FFT compares only its first line (the next line is timing).
+This is an output check at the verification workload, not a full correctness
+proof at every timed size. Measured 2026-10-20 with the v0.68.0-rc2 release
 binaries (`almide 0.68.0 (release, fcba2bcd5)`, rustc 1.99.1 for both sides) on
 GCE c4-standard-8 (x86, Intel Xeon Platinum 8581C, 8 vCPU) and c4a-standard-8
 (arm, Neoverse-V2, 8 vCPU). Produced
@@ -143,10 +153,11 @@ output):
   single-thread reference is therefore the honest one, and the row sits at
   parity. The ratchet REPORTS it so that a real parallel win becomes a number
   the day it lands.
-- *Stream fusion of `|>` chains* does not fire on the Rust target
-  (`IterChain` never lowers there; see the perf suite's "Not yet covered"),
-  and ordinary Rust iterator chains are already fused by LLVM, so there is no
-  fusion win to claim; the listbuild rows are in the scoreboard above.
+- *Stream fusion of `|>` chains* does run on the Rust target. The perf suite's
+  "Not yet covered" section records the 2026-10-20 counted-iterator follow-up
+  (1.29x its handwritten Rust reference, down from the historical 6.6x).
+  That shape still lacks a dedicated benchmark gate; do not turn the old
+  absence of fusion into a current implementation claim.
 
 ### Allocation: the region window on the native leg (2026-09-08, #1991)
 
@@ -310,8 +321,9 @@ The wasm leg is measured in the same dated results file: within 1.1–1.2× of
 native on the compute kernels (n-body 1.278s, spectral-norm 0.764s,
 fannkuch-redux 1.892s) and *faster* than native on binary-trees (0.239s vs
 0.835s), but it craters on hot list index writes (FFT: ~3,500× at 2^18) and on
-mandelbrot (~130×) — those two cliffs are the current wasm perf arc, tracked in
-#917's follow-up.
+mandelbrot (~130×) in that historical run. These are retained measurements,
+not a claim that the same cliffs remain at the current compiler revision;
+consult later dated runs and the current ratio ledgers for status.
 
 ### Map: what the native keyed lookup costs (2026-09-14, #2150, #2157)
 
@@ -438,7 +450,7 @@ Five languages, one model (Claude Sonnet 5), 20 trials each, identical prompts a
 
 ![Same-model snapshot](../figures/lang-bench-snapshot-2026-07.png?v=1784109014)
 
-> Almide is the only language absent from training data (the model learns it in-context from CHEATSHEET.md), yet it passes 40/40 phases, produces the most concise code of all five languages (233 LOC), and completes faster than both modern peers. Methodology, retry policy, and raw per-trial records: [research/benchmark/lang-bench](../../research/benchmark/lang-bench/README.md).
+> Almide was supplied CHEATSHEET.md as in-context reference; this benchmark does not establish training-data absence. In this snapshot it passes 40/40 phases, produces the most concise code of all five languages (233 LOC), and completes faster than both modern peers. Methodology, retry policy, and raw per-trial records: [research/benchmark/lang-bench](../../research/benchmark/lang-bench/README.md).
 
 ### Historic comparison vs 15 established languages
 

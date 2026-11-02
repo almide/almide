@@ -1,0 +1,14 @@
+// #4278 drill: an arm's share-out held to the wrong window. `value.merge` of
+// a non-object answers with `b`'s block after an rc_inc on it, and the
+// recorder's share-out `s` on `b` names the window of the arm emitted just
+// before it (`value.int(2)`) instead of its own. The ownership witness is
+// unchanged and accepted; the byte check must refuse the event, whose window
+// holds no rc_inc read through `b`.
+import json
+
+effect fn main() -> Unit = {
+  let a = value.int(1)
+  let b = value.int(2)
+  let m = value.merge(a, b)
+  println(json.stringify(m))
+}

@@ -162,9 +162,9 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 Both take whatever type the context demands, so the rest of the program keeps
 type-checking, and both PANIC if execution reaches them (native: exit 101 —
 `not yet implemented: hole at line N` / `not yet implemented: <your message>`).
-This is a NATIVE-ONLY workflow: the wasm MIR has no arm for either node, so a
+This is a NATIVE-ONLY workflow: the structural wasm emitter does not support these nodes, so a
 program that still contains one walls (`almide run --target wasm` exits 1,
-"this program shape is not yet supported by the verified wasm renderer").
+with a diagnostic naming the unsupported shape).
 Fill the hole before you build for wasm.
 
 `_` in a **call argument** is a different thing and is rejected (E046):
@@ -432,7 +432,7 @@ fn main() -> Unit = {
 
 ## Expressions
 
-### If (MUST have else — no standalone `if`)
+### If (an omitted `else` returns Unit)
 ```
 if cond then expr else expr
 if a then x else if b then y else z
@@ -500,8 +500,12 @@ map.filter(m, (k, v) => v > 0)
 capability — one rule for every higher-order callee (`list.map`, …). Inside
 an `effect fn`, a lambda may call effect fns, but their results stay
 **explicit `Result` values** (auto-`?` never crosses a closure boundary):
-unwrap with `?? fallback` or `match` — `!` cannot propagate out of a lambda.
-In a pure fn the same lambda is an error. Exception: metered regions
+handle them with `?? fallback` or `match`, or use `!` to propagate into the
+**lambda's own** failure channel — never the enclosing function's. A `!` in
+an ordinary lambda infers a fallible lambda and lifts its value tail into
+`ok(...)`; an explicit effect-typed slot is not required. Test-block lambdas
+instead retain test unwrap semantics. In a pure fn, calling an effect fn
+inside a lambda is an error; pure fallible lambdas are allowed. Exception: metered regions
 (`fan.bounded` / `fan.min` bodies) are pure by design, so effect calls are
 rejected there even inside an effect fn.
 
@@ -577,7 +581,7 @@ while i < 10 {
 for i in 0..<n { ... }   // optimized: no list allocation
 let xs = list.map(0..<10, (i) => i * i)  // range as List[Int]
 ```
-Prefer `for i in 0..<n` whenever the iteration count is known up front (thread state with `var`); use recursion only for early exit or an unknown bound — see "✗ counted recursion".
+Prefer `for i in 0..<n` whenever the iteration count is known up front (thread state with `var`); loops support `break` / `continue`. Use recursion for recursive data or state transitions when that expresses the algorithm more clearly — see "✗ counted recursion".
 
 ### Pipe
 ```
@@ -922,7 +926,7 @@ effect fn main() -> Unit = {
 `io.read_line()` reads one stdin line with the trailing newline stripped and returns
 `String?`: `none` at end of input, `some("")` for an empty line. It requires an `effect fn`
 caller. For bytes, read a handle: `io.read(io.stdin()!, n)!`, `io.read_to_end(io.stdin()!)!`. `int.parse` / `float.parse` return `Result` — unwrap with
-`??`, `!` (effect fn), or `?`. There is no `int.from_string`.
+`??`, `!` in a fallible context, or `?`. There is no `int.from_string`.
 
 ## Entry point
 ```
@@ -959,44 +963,51 @@ Command-line arguments are accessed via `env.args()` (not main parameters); argv
 `|>` is asymmetric: its right-hand side is a single call/compose chain, so any operator after it applies to the piped result — `xs |> list.map(f) + ys` is `(xs |> list.map(f)) + ys`, and `xs |> f >> g` pipes into the composition `f >> g`.
 
 ## UFCS
-`f(x, y)` ≡ `x.f(y)` — compiler resolves automatically.
+Method syntax supplies the receiver as argument 1: for example,
+`xs.map(f)` resolves to `list.map(xs, f)`, and an ordinary user function
+`fn twice(n: Int) -> Int` can be called as `n.twice()` without an attribute.
+This is not an unconditional equivalence between every `f(x, y)` and
+`x.f(y)`: function-valued record fields, the receiver's stdlib module,
+conventions/protocols, ordinary user functions and the type's defining module
+are resolved in that order. See [UFCS resolution](../crates/almide-frontend/src/check/calls_ufcs.rs).
 
 ## Standard library modules
 
-Full function signatures: [docs/stdlib/](stdlib/)
+Current function signatures and counts: [generated standard-library reference](stdlib/README.md).
+The table below is a navigation guide, not a second API inventory.
 
-| Module | Description | Import | # |
-|---|---|---|---|
-| [string](stdlib/string.md) | String manipulation | auto-imported | 44 |
-| [list](stdlib/list.md) | List operations | auto-imported | 59 |
-| [map](stdlib/map.md) | Map (dictionary) operations | auto-imported | 24 |
-| [set](stdlib/set.md) | Set operations | auto-imported | 19 |
-| [deque](stdlib/deque.md) | Double-ended queue: push/pop at both ends | auto-imported | 58 |
-| [heap](stdlib/heap.md) | Priority queue, least first | auto-imported | 16 |
-| [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 22 |
-| [float](stdlib/float.md) | Floating-point operations | auto-imported | 17 |
-| [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported | 3 |
-| [value](stdlib/value.md) | Dynamic value manipulation | auto-imported | 19 |
-| [result](stdlib/result.md) | Result type operations | auto-imported | 12 |
-| [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
-| [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
-| [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
-| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` | 16 |
-| [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
-| [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
-| [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
-| [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
-| [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
-| [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
-| [fs](stdlib/fs.md) | File system | `import fs` | 24 |
-| [env](stdlib/env.md) | Environment and system | `import env` | 9 |
-| [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` | 17 |
-| [io](stdlib/io.md) | Standard streams; `read` / `write` / `close` over any handle | `import io` | 12 |
-| [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` | 16 |
-| [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` | 10 |
-| [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` | 7 |
-| [http](stdlib/http.md) | HTTP client and server; `HttpRequest` and `HttpResponse` share `header` / `headers` / `body` / `set_header` / `set_body` | `import http` | 36 |
-| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
+| Module | Description | Import |
+| --- | --- | --- |
+| [string](stdlib/string.md) | String manipulation | auto-imported |
+| [list](stdlib/list.md) | List operations | auto-imported |
+| [map](stdlib/map.md) | Map (dictionary) operations | auto-imported |
+| [set](stdlib/set.md) | Set operations | auto-imported |
+| [deque](stdlib/deque.md) | Double-ended queue: push/pop at both ends | auto-imported |
+| [heap](stdlib/heap.md) | Priority queue, least first | auto-imported |
+| [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported |
+| [float](stdlib/float.md) | Floating-point operations | auto-imported |
+| [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported |
+| [value](stdlib/value.md) | Dynamic value manipulation | auto-imported |
+| [result](stdlib/result.md) | Result type operations | auto-imported |
+| [option](stdlib/option.md) | Option type operations | auto-imported |
+| [json](stdlib/json.md) | JSON parsing and querying | `import json` |
+| [math](stdlib/math.md) | Mathematical functions | auto-imported |
+| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` |
+| [datetime](stdlib/datetime.md) | Date and time | auto-imported |
+| [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) |
+| [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) |
+| [bytes](stdlib/bytes.md) | Binary data | auto-imported |
+| [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported |
+| [testing](stdlib/testing.md) | Test assertions | `import testing` |
+| [fs](stdlib/fs.md) | File system | `import fs` |
+| [env](stdlib/env.md) | Environment and system | `import env` |
+| [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` |
+| [io](stdlib/io.md) | Standard streams; `read` / `write` / `close` over any handle | `import io` |
+| [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` |
+| [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` |
+| [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` |
+| [http](stdlib/http.md) | HTTP client and server; `HttpRequest` and `HttpResponse` share `header` / `headers` / `body` / `set_header` / `set_body` | `import http` |
+| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` |
 
 ### Regex: compile once, pass the `Regex` first
 
@@ -1199,7 +1210,7 @@ effect fn main() -> Unit = {
 ## Verifying a webhook signature (HMAC)
 
 `import hash` and `import secret`. The key and the tag are `Secret[Bytes]`;
-read the key with `env.secret(name)`, which answers `Secret[String]`. Verify
+read the key with `env.secret(name)!`, which answers `Option[Secret[String]]`. Handle absence before converting the revealed string to key bytes. Verify
 with the `is_valid_` cell, key first: it computes HMAC-SHA256 and compares in
 constant time. A tag's own `==` is the constant-time one too (it is a
 `Secret[Bytes]`), so never `secret.reveal` two tags to compare them, and never
@@ -1246,14 +1257,14 @@ epoch 15; use `hash.sha256`.
 - No exceptions — use `Result[T, E]` everywhere
 - No null — use `Option[T]`
 - No inheritance — use composition
-- No macros, no operator overloading, no implicit conversions
+- No macros or user-defined operator declarations; built-in operator dispatch is type/protocol-directed. No implicit numeric conversions
 - Empty list = `[]`, empty map = `[:]` (with type annotation)
-- `_` is ONLY for match wildcard patterns, never as a variable name
-- The stdlib functions listed above are exhaustive — no other functions exist
+- `_` is a wildcard/discard in patterns and ignored bindings/parameters, or a typed hole in expression position; it is not an ordinary variable name
+- The module table above is navigation only; use the [generated standard-library reference](stdlib/README.md) for the complete public API
 - Use `for x in xs { ... }` for iteration
 - **No nested functions.** All `fn` must be at the top level. Use lambdas for local helpers
 - **No `let mut`.** Use `var` for mutable bindings. `mut` itself is a real keyword, but only as a parameter modifier (`fn f(mut x: Int)`) — see Functions
-- Almide is NOT Rust. No `&`, `trait` (use `protocol`), `impl` (use convention methods: `fn Type.method(...)`), `pub`, `mod` (as declaration)
+- Almide is NOT Rust. No `&`, `trait` (use `protocol`) or `impl` (use convention methods: `fn Type.method(...)`). Visibility uses `local` / `mod`; `pub` is an optional explicit synonym for default-public functions and bindings, not types
 
 ## Naming conventions across stdlib
 
@@ -1391,15 +1402,21 @@ ML-style let-in is not supported. Use a block.
 ### ✗ `Char` type → ✓ `String`
 Almide has no `Char` type. Single characters are `String`: `"a"`, `"("`.
 
-### ✗ `break` / `continue` → ✓ recursion
-Use a recursive helper function instead of loop control keywords.
+### Loop control: `break` / `continue`
+Both are supported inside loops. `break` exits immediately; `continue` skips
+the rest of the current iteration (a range loop still advances its index).
 ```
-✗ while cond { if done then break }
-✓ fn loop(state) = if done then state else loop(next_state)
+while cond {
+  if done then break
+  if skip then continue
+  work()
+}
 ```
+Use a recursive helper when it expresses the algorithm more clearly, not
+because loop control is unavailable.
 
 ### ✗ counted recursion `f(n - 1)` → ✓ `for _ in 0..<n`
-When the iteration count is known up front, write a range `for` and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance.
+When the iteration count is known up front, write a range `for` and thread state with `var`. Use `break` / `continue` for loop control; recursion remains useful for recursive data or state transitions when it expresses the algorithm more clearly.
 ```almide
 // ✗ correct (tail calls are optimized), but the shape says nothing a `for` would not,
 //   reads as a stack risk, and drags `!` onto every iteration in an effect fn
@@ -1430,7 +1447,7 @@ The last expression in a block is the return value. No `return` keyword.
 ```
 
 ### ✗ Reassigning function parameters → ✓ `var` copy
-Function parameters are immutable. Copy to `var` first.
+Ordinary function parameters are immutable. Copy to `var` for local state; declare a `mut` parameter only when the caller's `var` binding should be updated (see Mutable parameters).
 ```
 ✗ fn f(n: Int) -> Int = { n = n - 1; n }
 ✓ fn f(n: Int) -> Int = { var m = n; m = m - 1; m }

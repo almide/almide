@@ -14,7 +14,7 @@ Extract an Int from a Value. Returns err if not an Int.
 
 ### `value.as_float(v: Value) -> Result[Float, String]`
 
-Extract a Float from a Value. Returns err if not a Float.
+Extract a Float from a Value, widening an Int payload to Float. Returns err for other kinds.
 
 ### `value.as_bool(v: Value) -> Result[Bool, String]`
 

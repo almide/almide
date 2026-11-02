@@ -95,15 +95,15 @@ in a second place. Joining also adds `almide-kernel`, `almide_rt` and a second
 `webpki-roots` major version (0.26.11 beside the 1.0.9 `almide-rt-core` pins)
 to the workspace lock, for a crate that ships nothing.
 
-`Cargo.toml` and `build.rs` are kept as the record of what the runtime source
-needs (crates.io deps; the `have_blas` cfg `matrix.rs` reads). They are not a
-build unit — no CI job and no script invokes cargo here.
+`Cargo.toml` is kept as the record of what the runtime source needs (crates.io
+deps; #4007 removed `build.rs` with the `have_blas` BLAS path no build set). It
+is not a build unit — no CI job and no script invokes cargo here.
 
 ## The behavioural oracle is `spec/`
 
 **The behavioural oracle for `runtime/rs` is the executable `spec/` suite.**
 It exercises this code the way programs do — through the stdlib, on native and
-on both wasm legs — and it is what CI runs. A Rust `#[cfg(test)]` block written
+on the structural Wasm leg — and it is what CI runs. A Rust `#[cfg(test)]` block written
 here runs nowhere: no cargo build compiles this directory, and
 `strip_test_blocks` removes the block from every emitted crate.
 

@@ -169,6 +169,21 @@ Region import's base and length parameters `i32` (the stub stamps their position
 `address_params`) and puts a shim in the stub's place that wraps them. On memory64 the
 shim is not made and they stay `i64`.
 
+### A1b. An `@export(wasm)` fn may take Region parameters (#4354)
+
+The host passes each as `(base, len)`, the pair a Region crosses an import as (D3) and
+#4353's Rust host takes, in the memory's address width. An IR rewrite
+(`extern_region::lend_region_params`) gives the fn a wrapper `__region_lend_<name>` that
+takes the export with the two values in the Region's place (stamped `address_params`; the
+emitter's adapter takes them as `i32` on a 32-bit memory and widens them) and calls the fn
+with `ffi.__lend(base, len)`: a read-only Region over that range of the module's memory,
+owning nothing, lent for the call. The length is the host's word, like A2's C caller's,
+and every access is checked against it. E119 refuses the copies a body can keep past the
+call (a top-level `var`, a return, a closure), as for A2; wasm has no run-time backstop
+after the call. A host normally lends back a range a push export handed it, which its
+share keeps alive. Read-only because the range is the host's statement: a writable inbound
+buffer is the push form.
+
 ### A2. An `@export(c)` fn may take Region parameters
 
 A Region parameter crosses as the C caller's `(const uint8_t *ptr, size_t len)` and is
@@ -237,8 +252,9 @@ scoped-borrow alternative below).
 
 ### Read narrowly, named for a decision
 
-- A1 exports no JS-host marshalling (`--host js` notes no shape for the adapter): a JS
-  driver reads `instance.exports.f()` as the two numbers directly.
+- `--host js` wraps an A1 export as `f(…) → [ptr, len]` (numbers in either width) and
+  adds `regionRelease(ptr)` (#4354). A driver may also read `instance.exports.f()` as the
+  two numbers directly.
 - There is no C header generator. A2's prototypes are written by hand:
   `int32_t f(const uint8_t *buf, size_t buf_len)`, and `uint8_t *` for an `out` parameter.
 

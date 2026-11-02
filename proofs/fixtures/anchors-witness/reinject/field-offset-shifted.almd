@@ -1,0 +1,9 @@
+// #4279 drill: a record's member read loads the NEXT field's slot while the
+// fields witness still records field 0 — the fields checker accepts, the
+// bytes read another offset than the layout's.
+type P = { x: Int, y: Int }
+
+effect fn main() -> Unit = {
+  let p = P { x: 3, y: 4 }
+  println("${p.x}")
+}

@@ -1,0 +1,53 @@
+// The ADR-0001 time constructors as one matrix: both clocks (duration,
+// compute) x all six units (ns, us, ms, s, min, h). Each unit is the next
+// smaller one times its factor; a non-literal argument scales the same way a
+// literal folds; a product past i64::MAX saturates; a negative argument is the
+// deterministic abort. Before this file `duration.us` had no test on either
+// leg (proofs/stdlib-test-coverage.txt).
+import testing
+
+fn n(x: Int) -> Int = x
+
+test "duration: each unit is the next smaller one times its factor" {
+  assert_eq(duration.compare(duration.us(1), duration.ns(1000)), 0)
+  assert_eq(duration.compare(duration.ms(1), duration.us(1000)), 0)
+  assert_eq(duration.compare(duration.s(1), duration.ms(1000)), 0)
+  assert_eq(duration.compare(duration.min(1), duration.s(60)), 0)
+  assert_eq(duration.compare(duration.h(1), duration.min(60)), 0)
+  assert_eq(duration.compare(duration.us(1), duration.ns(999)), 1)
+  assert_eq(duration.compare(duration.us(0), duration.ns(0)), 0)
+}
+
+test "compute: each unit is the next smaller one times its factor" {
+  assert_eq(compute.compare(compute.us(1), compute.ns(1000)), 0)
+  assert_eq(compute.compare(compute.ms(1), compute.us(1000)), 0)
+  assert_eq(compute.compare(compute.s(1), compute.ms(1000)), 0)
+  assert_eq(compute.compare(compute.min(1), compute.s(60)), 0)
+  assert_eq(compute.compare(compute.h(1), compute.min(60)), 0)
+  assert_eq(compute.compare(compute.us(2), compute.ns(1999)), 1)
+}
+
+test "a computed argument scales like a literal one" {
+  assert_eq(duration.compare(duration.us(n(7)), duration.us(7)), 0)
+  assert_eq(duration.compare(duration.us(n(3000)), duration.ms(3)), 0)
+  assert_eq(compute.compare(compute.us(n(5)), compute.ns(5000)), 0)
+  assert_eq(duration.compare(duration.h(n(2)), duration.s(7200)), 0)
+}
+
+test "a product past i64::MAX saturates instead of wrapping" {
+  assert_eq(duration.compare(duration.us(9223372036854775807), duration.ns(9223372036854775807)), 0)
+  assert_eq(
+    duration.compare(duration.us(n(9223372036854775807)), duration.ns(9223372036854775807)),
+    0,
+  )
+  assert_eq(
+    duration.compare(duration.h(n(9223372036854775807)), duration.us(n(9223372036854775807))),
+    0,
+  )
+  assert_eq(compute.compare(compute.us(n(9223372036854775807)), compute.ns(9223372036854775807)), 0)
+}
+
+test "a negative argument aborts with the constructor named" {
+  testing.assert_aborts("negative time: duration.us(", () => duration.us(n(0 - 1)))
+  testing.assert_aborts("negative time: compute.us(", () => compute.us(n(0 - 5)))
+}

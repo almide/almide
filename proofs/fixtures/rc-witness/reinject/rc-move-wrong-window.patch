@@ -1,11 +1,11 @@
 diff --git a/crates/almide-wasm/src/witness_rc.rs b/crates/almide-wasm/src/witness_rc.rs
-index 6c53bd10f..483fd8e4a 100644
+index 856b64860..4703edc7c 100644
 --- a/crates/almide-wasm/src/witness_rc.rs
 +++ b/crates/almide-wasm/src/witness_rc.rs
-@@ -85,7 +85,10 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
-         // A move names its window; so does a temporary's event logged inside
-         // one (the arm or routine may release that temporary in its callee).
-         if moves || (local.is_none() && window.is_some()) {
+@@ -86,7 +86,10 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
+         // one (the arm or routine may release that temporary in its callee),
+         // and an arm's share-out (#4278), held to the `rc_inc` in its arm.
+         if moves || kind == 's' || (local.is_none() && window.is_some()) {
 -            e.push_str(&format!("#{}", window.unwrap_or(0)));
 +            // RE-INJECTED (#4277 drill): a variable's move names the window after the one
 +            // it was logged in.

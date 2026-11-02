@@ -310,4 +310,51 @@ impl<'a> Interpreter<'a> {
             _ => None,
         }
     }
+
+    /// The program-module `@intrinsic` stubs whose answer is INTERPRETER
+    /// state, the same tier as the prim floors above: `fs.append_bytes`
+    /// appends inside the overlay (#4382), `uuid.__v7_stamp` advances this
+    /// run's v7 stamp (#4307). Both backends call a runtime fn behind each.
+    fn state_stub_floor(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+        match (module, func) {
+            ("fs", "append_bytes") => Some(self.fs_append_bytes(args)),
+            ("uuid", "__v7_stamp") => Some(self.uuid_v7_stamp(args)),
+            _ => None,
+        }
+    }
+
+    fn fs_append_bytes(&mut self, args: &[Value]) -> Flow {
+        let path = match self.vfs_path_arg("append_bytes", args.first()) {
+            Ok(p) => p,
+            Err(f) => return f,
+        };
+        let data: Option<Vec<u8>> = match args.get(1) {
+            Some(Value::List(xs)) => {
+                xs.iter().map(|x| if let Value::Int(b) = x { u8::try_from(*b).ok() } else { None }).collect()
+            }
+            _ => None,
+        };
+        let Some(data) = data else {
+            return Flow::Unsupported("fs.append_bytes with a content that is not a byte list".into());
+        };
+        let q = almide_base::err_text::almide_rt_errtext_quote;
+        Flow::val(Value::Result(match crate::vfs::append_bytes(&mut self.vfs, &path, &data) {
+            Ok(()) => Ok(Box::new(Value::Unit)),
+            Err(e) => Err(Box::new(Value::str(format!("fs.append_bytes({}): {e}", q(&path))))),
+        }))
+    }
+
+    /// runtime/rs/src/uuid.rs's rule: the millisecond clamped to 48 bits and
+    /// shifted past the 12-bit counter, or the last stamp plus one when that
+    /// is not greater, so every v7 of a run orders after the one before.
+    fn uuid_v7_stamp(&mut self, args: &[Value]) -> Flow {
+        let Some(Value::Int(ms)) = args.first() else {
+            return Flow::Abort("internal: uuid.__v7_stamp expects an Int".into());
+        };
+        let fresh = (*ms).clamp(0, (1 << 48) - 1) * 4096;
+        let last = self.v7_last.get();
+        let next = if fresh > last { fresh } else { last.saturating_add(1) };
+        self.v7_last.set(next);
+        Flow::val(Value::Int(next))
+    }
 }

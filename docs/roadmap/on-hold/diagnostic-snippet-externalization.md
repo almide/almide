@@ -1,90 +1,47 @@
-<!-- description: Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd -->
+<!-- description: Remaining migration of diagnostic repair snippets from Rust literals to checked source templates -->
 # Externalize `try:` Snippets from Rust Literals
 
-Trigger: blocked on `bundled-almide-dispatch`. Once bundled Almide can
-extend stdlib modules, snippet text (currently 15+ string literals
-scattered across the compiler) moves into source files the compiler
-can load and type-check.
+## Current state
 
-## Current state (the drift risk)
+The prerequisite [bundled-Almide dispatch](../done/bundled-almide-dispatch.md)
+shipped on 2026-04-16. It is no longer a blocker. The snippet migration itself
+remains a proposal: there is no `stdlib/diagnostics/` template directory.
 
-`try:` snippet text lives in Rust string literals in:
+Repair text is still constructed in Rust, for example:
 
-- `crates/almide-frontend/src/check/calls.rs` — E002 method, E002 fuzzy,
-  E002 alias, E004 arg count
-- `crates/almide-frontend/src/check/infer.rs` — E003 undef var, E009 reassign
-- `crates/almide-frontend/src/check/solving.rs` — E001 Unit-leak (fn
-  body + if arm + match arm variants)
-- `crates/almide-frontend/src/stdlib.rs` — `try_snippet_for_alias`
-  (int.sqrt conversion, int.gt operator mapping)
-- `crates/almide-syntax/src/parser/statements.rs` — let-in chain hint
-- `crates/almide-syntax/src/parser/primary.rs` — while-do recursion hint
-- `crates/almide-syntax/src/parser/patterns.rs` — rest-pattern hint
-- `crates/almide-syntax/src/parser/helpers.rs` — test-cascade, cons-pattern
+- [`check/calls.rs`](../../../crates/almide-frontend/src/check/calls.rs):
+  `with_try` builds argument-count and rename repairs.
+- [`check/solving.rs`](../../../crates/almide-frontend/src/check/solving.rs):
+  `unit_leak_snippet` supplies result-expression repairs.
+- [`stdlib.rs`](../../../crates/almide-frontend/src/stdlib.rs):
+  `try_snippet_for_alias` supplies richer alias repairs.
 
-That's 10+ files. Every language-surface change risks making a snippet
-stale. **The E010/E011 doc bugs caught in Phase 3 were the same class of
-issue** — different location but same root cause (detached text).
+These are examples, not a frozen file/count inventory. The drift risk remains:
+text detached from the language's parser can teach an obsolete repair.
 
-## Proposed structure
+## Remaining design and work
 
-```
-stdlib/diagnostics/
-  E001_fn_body_unit_leak.almd
-  E001_if_arm_unit_leak.almd
-  E002_method_call.almd
-  E002_int_gt_operator.almd
-  E002_int_sqrt_conversion.almd
-  E003_missing_import.almd
-  E009_let_to_var.almd
-  let_in_chain.almd
-  while_do_recursion.almd
-  rest_pattern_list_first.almd
-  cons_pattern_list_first.almd
-  test_cascade.almd
-```
+1. Inventory current repair producers and decide which complete snippets can
+   become checked source templates rather than dynamic Rust formatting.
+2. Introduce a template directory (proposed: `stdlib/diagnostics/*.almd`),
+   explicit placeholder substitution and a compiler loading path. Bundled
+   dispatch being available does not implement this loading path by itself.
+3. Migrate the selected repairs without changing their diagnostic meaning or
+   making snippets user-extensible or localized.
+4. Add a test harness that substitutes concrete values, parses every template
+   and type-checks each one advertised as a complete repair. Mark intentional
+   fragments explicitly; do not count them as type-checked programs.
 
-Each file is a valid Almide snippet (compile-time checked) with a
-top-of-file comment marking placeholder slots:
+For example, a template could explain a missing trailing value:
 
 ```almide
 // placeholders: {fn_name}, {binding_name}, {ret_ty}
-// fn body ends with `let {binding_name} = ...` (a statement, returns Unit).
-// Add `{binding_name}` as the trailing expression so the fn returns {ret_ty}:
+// Add {binding_name} as the trailing expression so the fn returns {ret_ty}:
 //
 //   let {binding_name} = <computation>
-//   {binding_name}                         // <-- add this line
+//   {binding_name}
 ```
 
-Compiler loads the file at diagnostic emission, substitutes the
-placeholders, emits. Result: snippets are authored as real Almide
-(syntax-highlighted, checkable, diff-friendly).
-
-## Test invariant
-
-Every `stdlib/diagnostics/*.almd` snippet (with placeholders
-substituted to concrete examples) must:
-
-1. Parse successfully.
-2. Optionally type-check (some snippets contain `<placeholder>`-style
-   sentinels that are deliberately invalid — those get an `// invalid`
-   marker and skip type-check).
-
-A `cargo test` fixture verifies this, so a snippet can never silently
-break the thing it's supposed to teach.
-
-## Non-goals
-
-- Not making snippets pluggable / user-extensible. Still hardcoded to
-  the compiler's diagnostic codes.
-- Not localizing snippets. English only.
-
-## Dependency
-
-`bundled-almide-dispatch.md` must land first — the snippets are
-easier to load via the bundled-Almide path than via raw `include_str!`.
-
-## Estimated scope
-
-~3 hours for the migration + test harness, assuming bundled-dispatch
-is done.
+This is proposed template notation, not an existing loader or passing test.
+The migration is complete only when its templates and validation harness land
+together; the completed dispatch prerequisite alone is not completion evidence.

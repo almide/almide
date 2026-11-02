@@ -25,4 +25,4 @@ Typed Intermediate Representation consumed by all codegen targets.
 2. Update `visit.rs` (`walk_expr`/`walk_stmt`) — the visitor MUST traverse all children.
 3. Update `fold.rs` if the node has transformable sub-expressions.
 4. Update `substitute.rs` if the node binds or references variables.
-5. Codegen: handle in walker (`walker/expressions.rs`) and WASM emitter (`emit_wasm/expressions.rs`).
+5. Codegen: handle in the Rust walker (`almide-codegen/src/walker/expressions.rs`) and structural Wasm emitter (`almide-wasm/src/`); update MIR lowering where the node participates in the native verified-renderer path.

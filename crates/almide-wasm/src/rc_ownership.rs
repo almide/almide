@@ -65,6 +65,21 @@ impl crate::emitter::Emitter<'_> {
         }
     }
 
+    /// #4278 B1: `emit` releases a container slot's old occupant, loaded out
+    /// of the slot a later store overwrites. Its instructions are one
+    /// window the witness's `r` event is held to (witness.rs
+    /// `slot_replaced`).
+    pub(crate) fn slot_release(&mut self, emit: impl FnOnce(&mut Self) -> Result<(), crate::EmitError>) -> Result<(), crate::EmitError> {
+        let id = crate::witness::rc::site_id();
+        let from = self.f.byte_len();
+        emit(self)?;
+        crate::witness::rc::site_window(id, from, self.f.byte_len());
+        if let Some(w) = self.witness.as_mut() {
+            w.slot_replaced(id);
+        }
+        Ok(())
+    }
+
     /// +1 the i32 block handle on top of the stack, leaving it there.
     pub(crate) fn rc_inc_top(&mut self) {
         let scr = self.scr_i32_local;

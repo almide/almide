@@ -195,9 +195,14 @@ impl Emitter<'_> {
                     .local_get(self.cursor_local)
                     .global_set(G_LINE_CURSOR);
                 let got = self.lower(expr, None)?;
+                // A frame variable read bare: an owning repr shares it.
+                let src = if self.rc_owned_result(expr) { None } else { self.witness_src_local(expr) };
+                self.display_src = src;
                 // The IR type rides along: a Float32 (at any depth) shares
                 // Float's slot but not its digits (C-372).
-                self.append_display_part(got, budget, &expr.ty)?;
+                let r = self.append_display_part(got, budget, &expr.ty);
+                self.display_src = None;
+                r?;
             }
         }
         Ok(())

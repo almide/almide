@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/list_mut.rs b/crates/almide-wasm/src/list_mut.rs
+index 1fd42729f..aa90fffd8 100644
+--- a/crates/almide-wasm/src/list_mut.rs
++++ b/crates/almide-wasm/src/list_mut.rs
+@@ -117,7 +117,9 @@ impl Emitter<'_> {
+             })?;
+         }
+         emit(self, fty)?;
+-        self.store_ty_slot(fty, off);
++        // RE-INJECTED (#4278 B1 drill): the new value lands in another slot,
++        // so the released occupant's slot is never overwritten.
++        self.store_ty_slot(fty, off + 8);
+         // Link each fresh inner copy into its parent copy, innermost first.
+         for (k, &(_, _, off)) in steps[..steps.len() - 1].iter().enumerate().rev() {
+             self.f.instructions().local_get(holds[k]).local_get(holds[k + 1]).i32_store(slot_memarg(off));

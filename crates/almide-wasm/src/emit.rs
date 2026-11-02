@@ -9,6 +9,9 @@ use crate::decline_site::DeclineSite;
 use crate::types_table::TypeTable;
 use crate::*;
 
+#[path = "emit_decls.rs"]
+mod decls_rec;
+
 /// #2865: package modules keyed like a compiler namespace (a pre-pass of the
 /// leg's front; its display half is read by [`fn_site`] below).
 #[path = "package_keys.rs"]
@@ -62,6 +65,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // ADR-0031 D3: a Region argument of an `@extern(wasm)` import is split
     // into (base, len) before anything reads the program; a Region return of
     // an `@export(wasm)` fn gets its adapter's wrapper (amendment A1).
+    // #4354: a Region parameter of an `@export(wasm)` fn is lent from the
+    // host's (base, len) first, so a fn that also returns one is wrapped next.
+    let lent = crate::extern_region::lend_region_params(ir);
+    let ir = lent.as_ref().unwrap_or(ir);
     let wrapped = crate::extern_region::wrap_region_exports(ir);
     let ir = wrapped.as_ref().unwrap_or(ir);
     let split = crate::extern_region::split_region_params(ir);
@@ -307,6 +314,11 @@ fn emit_program_pass(
                 // A declared import's slot: the loud stub the post-pass removes.
                 let mut stub = Function::new([]);
                 stub.instructions().unreachable().end();
+                // Call modes (#2758): the host releases no argument, so each droppable param is borrowed.
+                if crate::witness::collecting() {
+                    let modes = table.infos[i].params.iter().filter(|&&t| crate::rc_ownership::rc_droppable_ty(&types, t));
+                    crate::witness::modes::signature(table.infos[i].wasm_index, modes.map(|_| 0).collect());
+                }
                 lowered.push(Ok((stub, HashSet::new())));
                 break 'one_fn;
             }
@@ -624,7 +636,22 @@ fn emit_program_pass(
                 ));
             }
             visited.extend(sub);
-            if region_exports.claim(f, &table.infos[i], &types, &export_name)? {
+            let claimed = region_exports.claim(f, &table.infos[i], &types, &export_name)?;
+            if claimed != crate::region_export::Claimed::Plain {
+                // The adapter passes the wrapper's parameters through, an
+                // address or length among them as a number in the memory's
+                // width, so the host marshals each as an `Int` (#4354).
+                let mut params = crate::host_exports::export_params(&table.infos[i].params, &types);
+                for k in crate::extern_region::address_params(f) {
+                    if let Some(s) = params.get_mut(k as usize) {
+                        *s = crate::host_exports::AbiShape::Int;
+                    }
+                }
+                let ret = match claimed {
+                    crate::region_export::Claimed::Region => crate::host_exports::ExportRet::Region,
+                    _ => crate::host_exports::export_ret(table.infos[i].ret, &types),
+                };
+                crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone(), params, ret);
                 export_owners.push(owner);
                 continue;
             }
@@ -675,9 +702,10 @@ fn emit_program_pass(
         .filter_map(|(i, info)| {
             let (module, name) = info.import.clone()?;
             let narrow = crate::extern_region::address_params(program_fns[i].0);
-            Some(imports::Declared { index: info.wasm_index, module, name, narrow })
+            let effect = program_fns[i].0.declares_effect();
+            Some(imports::Declared { index: info.wasm_index, module, name, narrow, effect })
         })
-        .chain(crate::fan::js_async::declared_protocol(&table, &work))
+        .chain(crate::fan::js_async::declared_protocol(&table, &work, &|hook| program_fns[hook].0.declares_effect()))
         .collect();
     let pre_declare = bytes;
     let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
@@ -691,60 +719,10 @@ fn emit_program_pass(
         pre_declare: &pre_declare,
         stubs: declared.iter().map(|d| d.index).collect(),
     });
-    record_decls(&program_fns, (main, main_index), &work, &entry_fn_indices, &declared, &bytes);
+    let creators = decls_rec::Creators { fns: &fn_lambdas, main: main_lambdas.clone(), lambdas: &lambda_children, entry_fn_indices: &entry_fn_indices };
+    decls_rec::record_decls(&program_fns, (main, main_index), &work, &declared, &creators, &bytes);
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get(), lines })
-}
-
-/// #2759: the declaration table the name and capability witnesses read
-/// (witness_decls.rs) — each program fn's, `main`'s and lifted lambda's
-/// index with what its source declares.
-fn record_decls(
-    program_fns: &[(&IrFunction, Option<String>, u32)],
-    (main, main_index): (Option<&IrFunction>, u32),
-    work: &FnWork,
-    entry_fn_indices: &[u32],
-    stubs: &[imports::Declared],
-    bytes: &[u8],
-) {
-    use crate::witness::decls::{DeclFn, Declared, PassDecls};
-    if !crate::witness::decls::collecting() {
-        return;
-    }
-    let stubs = stubs.iter().map(|d| d.index).collect();
-    // #3041: a fn synthesized from an effect fn's body keeps its origin's
-    // declaration (`IrFunction::declares_effect`).
-    let class = |f: &IrFunction| Some(if f.declares_effect() { Declared::Effect } else { Declared::Pure });
-    let meter = work.meter_reads.borrow();
-    let reads = |name: &str| meter.get(name).copied().unwrap_or(0);
-    let mut fns: Vec<DeclFn> = program_fns
-        .iter()
-        .enumerate()
-        .map(|(i, (f, qual, _))| DeclFn {
-            index: F_FN_BASE + i as u32,
-            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
-            // A self-host registry body implements a SURFACE whose
-            // declaration its callers were checked against; its own `fn`
-            // keyword declares nothing about the host (random.int is an
-            // `effect fn` implemented by a plain `fn random_int`).
-            declared: if qual.as_deref().is_some_and(|q| q.starts_with("__selfhost_")) { None } else { class(f) },
-            meter_clock_reads: reads(&qual.clone().unwrap_or_else(|| f.name.as_str().to_string())),
-        })
-        .collect();
-    fns.push(DeclFn {
-        index: main_index,
-        name: "main".into(),
-        declared: main.map_or(Some(Declared::Pure), class),
-        meter_clock_reads: reads("main"),
-    });
-    for (pos, e) in work.entries.borrow().iter().enumerate() {
-        if let (TableEntry::Lambda(j), Some(&index)) = (e, entry_fn_indices.get(pos)) {
-            let name = format!("<lambda#{j}>");
-            let meter_clock_reads = reads(&name);
-            fns.push(DeclFn { index, name, declared: None, meter_clock_reads });
-        }
-    }
-    crate::witness::decls::record(PassDecls { fns, stubs, bytes: bytes.to_vec() });
 }
 
 /// The module a program fn belongs to: its qualified key minus `.<fn name>`

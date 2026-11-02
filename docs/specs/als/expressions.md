@@ -67,7 +67,7 @@ lowering は **call-free なオペランド対に限り**この比較を定数 B
 テスト: `spec/wasm_cross/literal_unit.almd`(契約 C-233)、
 `spec/lang/unit_literal_test.almd`(assert 形、wasm 脚で実行)。
 
-> **ALS-E3(浮動小数点リテラル)は未執筆**: fixture が `almide fmt` の
+> **ALS-E3(浮動小数点リテラル)の旧未執筆メモ（後段に部分節あり）**: fixture が `almide fmt` の
 > spec ゲートを通過できない(fmt が指数・下線綴りを f64 値経由で正規化する
 > — #1261)。裁定が下り fmt が綴りを保存するまで、
 > proofs/als-element-coverage.toml の `ExprKind::Float` 行は UNWRITTEN の
@@ -123,9 +123,12 @@ ADR-0008)。式文位置と補間 `${...}` 内は字句経路が異なるが同�
 構造的等値。分解束縛・`.k`・パラメータ渡し・返り値のいずれの経路でも
 観測値は両ターゲット同一。
 
-**既知の制限(loud、誤値なし)**: `.k` の範囲・対象型は現状 check 時に
-検査されず、範囲外や非タプル対象は build 段の拒否になる(#1266、正しくは
-check 時型エラーであるべき)。native backend は文字列補間との同居で
+**診断の更新**: `.k` の範囲外および非タプル対象は check 時の E045。
+旧 #1266 の build 段のみの拒否という説明は現状に当てはまらない
+（`tests/tupleindex_diag_test.rs`、
+`crates/almide-frontend/src/check/infer_members.rs` の tuple index 検査）。
+以下の native 1-tuple 制限は旧記録であり、現行の制限としては未再検証:
+native backend は文字列補間との同居で
 1-tuple の `.0` を落とせない(#1267)。
 
 テスト: `spec/wasm_cross/tuple_ops.almd`(契約 C-236)。
@@ -504,7 +507,8 @@ iteration Drop を飛ばすため引き続き wall(loud)。
 
 ## ALS-E25 エラー演算子(`ExprKind::Unwrap` / `ExprKind::ToOption` / `ExprKind::UnwrapOr` / `ExprKind::Try`)
 
-**受理形**: 後置 `e!`(unwrap-伝搬 — effect fn 内のみ、ADR-0008)、後置
+**受理形**: 後置 `e!`（文脈別の unwrap / 伝搬。effect fn に限らず
+可謬 fn・可謬ラムダも含む。ADR-0008、[文脈別の説明](../result-option-effect.md)）、後置
 `e?`(Result → Option 変換)、`e ?? d`(Ok/Some の値、Err/None で `d`)。
 改行を跨ぐ後置 `?` / `?.` は受理しない(行頭の `?` は別の式)。
 
@@ -646,7 +650,11 @@ AST に回復ノードが**ゼロ**であること、(2) 壊れたファイル�
 同一)。連鎖全体の型は `Option[フィールド型]` — つまり `?.` は「あれば
 読む」を Option に包んで返す(値を剥がすのは `??`/match の仕事)。
 
-**scalar/heap の境界**: スカラーフィールドは #1329 で v1 の wall を解除
+**C-264 の範囲と旧経路の記録**: C-264 はスカラーフィールドを対象とする。
+以下の heap ペイロード wall はその契約成立時の診断記録であり、現在の
+すべての String フィールドが拒否されるという意味ではない。
+`spec/lang/unwrap_operators_test.almd` の `name: String` の読み出しも参照。
+スカラーフィールドは #1329 で v1 の wall を解除
 (desugar を共有 optimize カットポイントへ移し、合成ヘルパを Named 呼び
 出しにしたため全位置で lowering 可能)。**heap ペイロード(String
 フィールド)は既存経路のまま** — ユーザー記述の同型ヘルパ自体が

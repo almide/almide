@@ -1,11 +1,13 @@
 # make-verify — the trust demo
 
 **The claim is not "AI writes correct code." The claim is: when AI's code is _wrong_
-— and across the model zoo it often is — Almide makes the failure _clear_ and
-_recoverable_; and when it's _right_, Almide _proves_ it is safe.**
+— this demo exercises several such mistakes — Almide can make the failure
+_clear_ and _recoverable_. Separate certificate checks establish specific
+modeled properties within their documented coverage, not that all code which
+compiles is correct or completely safe.**
 
-Mainstream languages give you neither: a wrong modification compiles, runs, exits 0,
-and ships the bug to production.
+The examples compare concrete compiler diagnostics with Python's `py_compile`
+gate, not all tooling or safety techniques available in other languages.
 
 ## Why this framing (not "modification survival rate")
 
@@ -24,9 +26,9 @@ The real differentiator is **what happens when there _is_ a mistake** — and:
 That response is a property of the **language + compiler + proof spine** — it does not
 evaporate as models get stronger.
 
-## The measured number (unbiased)
+## The reported eight-case experiment
 
-We injected **8 realistic AI modification mistakes** (each authored by a separate
+The original demo experiment injected **8 AI-authored modification mistakes** (each authored by a separate
 agent, both in Almide and in Python) and asked the *language*, at author/CI time:
 caught-and-recoverable, or silent?
 
@@ -34,8 +36,8 @@ caught-and-recoverable, or silent?
   one was a pure-logic off-by-one (a control — no type system catches it), and one
   exposed a real Almide diagnostic gap we're tracking (a stale field name reported as
   an internal error rather than "unknown field").
-- **Python's compile gate (`py_compile`) caught 0/8.** Every mistake passed lint/compile
-  and shipped — surfacing later as a silently wrong value or a runtime crash.
+- **Python's compile gate (`py_compile`) caught 0/8.** Those cases passed that syntax-compilation gate, then produced a wrong value
+  or runtime error. This is not a measurement of all Python linters or tests.
 
 `./run.sh` reproduces three of them live with real compiler output (below is the first).
 
@@ -103,19 +105,23 @@ reaches production and is found — if ever — by a downstream test or an end u
 
 1. **Failure is clear + recoverable** (this demo): a wrong change is caught at compile
    with an actionable diagnostic. Model-agnostic — it pays off for every model that errs.
-2. **Correctness is proven** (the trust spine — separate layer): Almide's `proofs/`
-   pipeline runs a **Coq-proven checker** that, in the build/CI (not in `almide run`),
-   re-verifies ownership / name-resolution / capability bounds over the compiled corpus
-   and emits a certificate per verified function. Almide is the only producer aiming to
-   ship a *proof*, not just an artifact. This layer is real and gated in CI but
-   **in-progress** (byte-level binding is the last mile) — see `proofs/` and `docs/`.
+2. **Modeled properties are checked** (the trust spine — separate layer):
+   `almide verify` produces structural Wasm witnesses and delegates checks to
+   the independent `almide-verify`. Supported core artifacts can be bound to
+   the bundle by SHA-256; components are not supported by that route.
+   Ownership balance, names, and capability bounds have coverage and trust
+   assumptions. Byte binding is implemented (#4011), but it does not establish
+   complete memory safety or functional correctness. See
+   [the gap table](../../docs/design/MEMORY-SAFETY.md) and
+   [proven vs trusted](../../docs/contracts/proven-vs-trusted.md).
 
-That is the trust layer Aid-On sells: machine-written software you can both **fix fast
-when it's wrong** and **prove safe when it's right** — independent of which model wrote it.
+The demonstrated distinction is actionable diagnostics versus silent or later
+failures in these examples. Certificate evidence is a separate, bounded claim;
+it does not establish that every wrong modification is detected.
 
 ## Honest scope
 
 This demo isolates the *failure-clarity* axis (the cleanest, immediately-reproducible
-one). The execution layer (Almide → wasm byte-matches the native oracle) and the formal
-proof bundle are separate, in-progress layers; see `docs/` and `proofs/`. The point here
+one). Cross-target comparisons and the formal witness bundle are separate
+evidence layers with declared scope; see `docs/` and `proofs/`. The point here
 is the trust _experience_, shown with real compiler output, not a mockup.

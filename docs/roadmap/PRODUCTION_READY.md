@@ -1,4 +1,11 @@
-# Production Ready Criteria
+# Historical Production-Readiness Plan
+
+This preserves the earlier pre-1.0 positioning, snapshots and proposed criteria.
+It is not a current release approval or permanent compatibility promise.
+Current APIs/targets are specified in [SPEC](../SPEC.md),
+[stdlib](../stdlib/README.md) and [CLI](../specs/cli.md). LSP and package/native
+integration already exist; the postponed-feature table below is historical.
+The 18/18 tally is not a current checklist result.
 
 > **1.0 = 安定性契約。** 既存コードが壊れないことの約束。機能チェックリストではない。
 >
@@ -18,7 +25,7 @@ Almide が**既に回避した**他言語の失敗:
 |-------------|--------------|
 | Python asyncio: 関数カラーリング問題 | `fan` — async/await なし。コンパイラが自動挿入 |
 | Rust async: Pin/Unpin, runtime 選択 | `fan` — thread backend。ユーザーに runtime を見せない |
-| Go: `if err != nil` 地獄 | `effect fn` + auto-`?` + `guard` |
+| Go: `if err != nil` 地獄 | `effect fn` + explicit `Result` / `!` handling + `guard` |
 | Go: nil panic | `Option[T]` — null は存在しない |
 | Go: sum type 不在 | `type | Variant` + exhaustive `match` |
 | Ruby: 可変デフォルト + monkey patching | immutable values, no metaprogramming |
@@ -76,15 +83,16 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 > Gleam 1.0 は 19 stdlib モジュールで出荷された。Go 1.0 は generics なしで 12 年間繁栄した。
 > 全て「既存コードは壊れない」という約束だけで 1.0 を名乗った。
 
-### Almide 1.0 が約束すること
+### 当初提案した 1.0 安定性方針（現行の無期限保証ではない）
 
 1. **構文凍結**: `effect fn`, `fan`, `guard`, `match`, `for...in`, `while` — 現在の構文は永続
 2. **コア stdlib API 凍結**: 22 モジュール / 390 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
-3. **クロスターゲット一致**: 同じ `.almd` が Rust と TS で同じ出力を生む
+3. **クロスターゲット一致の目標**: 現行対象は native と Wasm。TS 出力は退役済み。
+   実際の一致・例外・環境依存は現行の契約と fixture の scope に従う
 4. **edition フィールド**: `almide.toml` に `edition = "2026"` を追加。将来の破壊的変更は新 edition で吸収 (Rust editions の教訓)
 5. **永続互換性**: 今日コンパイルできる `.almd` は永遠にコンパイルできる (Go 1 compatibility promise)
 
-### Almide 1.0 に入れないもの
+### 当初の延期判断（現在の実装有無を表す一覧ではない）
 
 | 延期する機能 | 理由 | 先例 | 予定 |
 |-------------|------|------|------|
@@ -97,16 +105,20 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | 700+ 関数 | 390 で実用的。Gleam は 19 モジュールで 1.0 | 全言語 | 1.x |
 | Algebraic effects | `effect fn` は I/O マーカーに留める | Gleam: 効果系なしで成功 | 検討しない |
 
-### fan は「完成した並行モデル」
+### 当初の fan 位置づけと現行の参照先
 
 > Rust の async は 1.0 から 4.5 年かかった。Python の asyncio はエコシステムを分断した。
 > Swift は 5.5 まで 7 年待った。Go の goroutine だけが初日から機能した。
 
-Almide の `fan` は Go の goroutine と同じカテゴリ — 1.0 で完成品として出荷する。「async は未実装」ではなく「async/await という概念自体が不要な設計」。6 API (fan, map, race, any, settle, timeout) が揃っている。
+Almide は `async` / `await` を利用者に要求しない表面を選んだが、それだけで
+全ての並行ユースケースが完成したとはしない。旧 six-head リストは現行ではなく、
+`fan.any` は `??` / `list.find_map`、`fan.race` は clock 必須の `fan.min` へ変更された。
+現行の表面・制約は [SPEC §13](../SPEC.md#13-concurrency-fan) と
+[ADR-0028](../adr/0028-fan-selection-names-and-cost-contract.md) を参照。
 
 ---
 
-## 1.0 チェックリスト
+## 当初の 1.0 チェックリスト（履歴）
 
 ```
 Almide 1.0 = ALL of:
@@ -141,7 +153,7 @@ Almide 1.0 = ALL of:
   ■ almide check --json: 構造化出力 実装済み
   ■ almide check < 1 秒: 298 行で 14ms (debug) / 25ms (release)
 
-■ = 達成 (18/18) — 1.0 リリース基準を満たしている
+■ = 当時の達成メモ (18/18)。現行の 1.0 リリース可否は示さない
 
 1.0 後の継続改善 (ブロックしない):
   ○ ICE の継続的削減 (発見次第修正)
@@ -153,7 +165,7 @@ Almide 1.0 = ALL of:
 
 ---
 
-## 1.0 前にやるべき破壊的変更
+## 当初の pre-1.0 変更記録
 
 > Pre-1.0 は破壊的変更ができる唯一の窓。
 > Swift は 1→2→3 で 3 回 breaking change があり、移行コストが大きかった。TypeScript は enum の設計を振り返っている。
@@ -168,7 +180,7 @@ Almide 1.0 = ALL of:
 
 ---
 
-## 1.0 への道
+## 当初の 1.0 への道（元のターゲット/機能計画を保存）
 
 ### Phase I: 正確性 + クロスターゲット CI
 

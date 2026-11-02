@@ -10,7 +10,9 @@ If `data.json` is already up to date:
 python3 research/benchmark/lang-bench/plot.py
 ```
 
-Outputs `docs/figures/lang-bench-{time,loc,pass-rate}.png` and cache-busts README image URLs.
+Outputs `docs/figures/lang-bench-{time,loc,pass-rate}.png`. The script also
+attempts to cache-bust matching README image URLs; the current front README
+has no such chart section, so that step can be a no-op.
 
 ## Run additional Almide trials
 
@@ -35,10 +37,10 @@ Details in `research/benchmark/lang-bench/README.md`.
 - `research/benchmark/lang-bench/data.json` — aggregated stats for all languages (plot.py input)
 - `research/benchmark/lang-bench/raw/almide.jsonl` — append-only raw Almide trial records
 - Other 15 languages sourced from [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (Opus 4.6, 20 trials each)
-- Almide: Sonnet 4.6 (Almide has no Opus training data)
+- The local runner requests the unversioned `sonnet` alias. Record the resolved model and run provenance; that alias alone does not establish a fixed model version or anything about training-data inclusion.
 
 ## Notes
 
-- Charts are referenced from README's "AI Coding Language Benchmark" section
+- Current published measurements live in `docs/benchmarks/README.md`; its dated snapshot chart is distinct from these regenerated live charts. Do not replace a historical comparison with a new run without recording matching provenance.
 - Almide is highlighted in orange; all other languages in blue
 - Commit message: `Update lang-bench charts: {brief summary}`

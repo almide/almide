@@ -8,6 +8,14 @@
 > 設計参照: `../almide-references/RESEARCH-shell-composition.md`
 > （plumbum / sh / xonsh を読んだ記録。clone も同ディレクトリにある）
 
+## 現行 API との境界 (2026-10-31)
+
+既存 API は `ProcessCommand` の設定値を `process.output` / `process.start` /
+`process.run` で実行する形である。stdin はレコードの `stdin` フィールドに渡す。
+[`stdlib/process.almd`](../../../stdlib/process.almd) が現行の定義。
+以下の `process.cmd` / `pipe_to` / `capture` は未実装の合成 API 案であり、
+単一プロセスを設定値で表す機構自体は既にある。
+
 ## 状態: 保留
 
 親項目が保留にした理由をそのまま引く:
@@ -22,7 +30,7 @@
 
 次のどれか一つが観測されたら active に移す。
 
-1. **大きな中間出力を扱う実例が一つ出る。** 現状 `exec_with_stdin` は文字列を丸ごと
+1. **大きな中間出力を扱う実例が一つ出る。** 現状 `ProcessCommand.stdin` は文字列を丸ごと
    受け渡すので、中間出力がメモリに載る。ログや大きなダンプを流すゲートが一本でも
    書かれたら、その時点で条件を満たす
 2. **`head` 相当の打ち切りが要るパイプラインが出る。** 下流が先に終わったとき上流を
@@ -52,7 +60,7 @@ no implicit conversions」）ので、合成は名前付き関数になる。`|>
 
 **1. effect の境界が合成の形と一致する。** `process.cmd` と `process.pipe_to` は `fn`、
 終端の `capture` / `status` / `spawn` だけが `effect fn` になる。いま
-`exec_with_stdin` を手で繋ぐ書き方は、途中の各段が effect なので、合成の途中に
+`process.output` の結果を次の `ProcessCommand.stdin` に手で渡す書き方は、途中の各段が effect なので、合成の途中に
 `!` が散らばる。値にすると **effect が一点に集まる**。
 
 **2. パイプラインが検査できる。** 値なので `let` に入り、比較でき、テストで
@@ -99,7 +107,7 @@ srcproc.stdout.close()   # allow p1 to receive a SIGPIPE if p2 exits
 2. **`Pipeline` 値に E042(must-use) が効くべきか。** 構築を純粋にすると、chain を
    作って**実行し忘れる**ことが起きる。型が effect を持たないぶん、いまの E042 は
    これを捕まえない
-3. **終端をいくつ用意するか。** 既存は `exec` / `exec_status` / `spawn` の三つ。
+3. **終端をいくつ用意するか。** 既存の主な実行形は `output` / `run` / `start` (`exec` は簡便形)。
    端末にも流しつつ捕まえる形（plumbum の `run_tee` 相当）が要るかは、
    [zero-committed-shell.md](../active/zero-committed-shell.md) のゲート移植が実測材料になる
 4. **`fan` との関係。** パイプラインは逐次合成、`fan` は並列。`A | B` が

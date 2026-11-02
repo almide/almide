@@ -102,6 +102,11 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 mod bytes;
 mod bytes_append;
 mod kmp;
+/// #4278 B1: a runtime helper's declared RC signature and its body's log.
+pub(crate) mod helper_sig;
+mod runtime_push;
+/// #4278 B1: an arm's own RC, logged where it is emitted.
+mod arm_rc;
 mod fan_par;
 pub mod decline_site;
 mod imports;
@@ -116,9 +121,13 @@ pub mod checked_alloc;
 mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
+/// The host op number space: every family's range, declared once (#4338).
+pub mod host_ops;
 pub mod witness;
 pub mod cert_project;
 mod witness_hooks;
+mod field_witness;
+mod str_bounds;
 mod witness_unwrap;
 mod calls;
 mod http_call;

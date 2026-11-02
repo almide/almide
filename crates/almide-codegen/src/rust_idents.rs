@@ -90,7 +90,15 @@ fn runtime_type_owners() -> &'static std::collections::HashMap<&'static str, &'s
 /// Every identifier token of `code`, in order, outside literals and comments.
 /// A raw identifier `r#name` yields `name`.
 pub fn identifiers(code: &str) -> Identifiers<'_> {
-    Identifiers { src: code, bytes: code.as_bytes(), pos: 0 }
+    Identifiers { src: code, bytes: code.as_bytes(), pos: 0, punct: false }
+}
+
+/// Every identifier AND every ASCII punctuation byte of `code`, each with its
+/// byte offset, in order, outside literals and comments (#4345: the item
+/// scanner of `runtime_namespace` needs the braces, `;` and `#` around the
+/// identifiers). Use [`Identifiers::next_token`].
+pub(crate) fn tokens(code: &str) -> Identifiers<'_> {
+    Identifiers { src: code, bytes: code.as_bytes(), pos: 0, punct: true }
 }
 
 /// Does `code` contain an identifier token that starts with `prefix`?
@@ -108,6 +116,8 @@ pub struct Identifiers<'a> {
     src: &'a str,
     bytes: &'a [u8],
     pos: usize,
+    /// Also yield punctuation ([`tokens`]).
+    punct: bool,
 }
 
 fn is_ident_start(b: u8) -> bool {
@@ -237,6 +247,15 @@ impl<'a> Iterator for Identifiers<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<&'a str> {
+        self.next_token().map(|(_, t)| t)
+    }
+}
+
+impl<'a> Identifiers<'a> {
+    /// The next token and its byte offset: an identifier, or (built by
+    /// [`tokens`]) one ASCII punctuation byte. Whitespace, numbers,
+    /// literals and comments are never tokens.
+    pub(crate) fn next_token(&mut self) -> Option<(usize, &'a str)> {
         while let Some(b) = self.peek(0) {
             match b {
                 b'"' => self.skip_quoted(),
@@ -266,15 +285,20 @@ impl<'a> Iterator for Identifiers<'a> {
                         while self.peek(0).is_some_and(is_ident_continue) {
                             self.pos += 1;
                         }
-                        return Some(&self.src[s..self.pos]);
+                        return Some((s, &self.src[s..self.pos]));
                     }
-                    return Some(word);
+                    return Some((start, word));
                 }
                 b if b.is_ascii_digit() => {
                     // A number, suffix included (`1u8`, `0x_ff`): not an identifier.
                     while self.peek(0).is_some_and(is_ident_continue) {
                         self.pos += 1;
                     }
+                }
+                b if self.punct && b.is_ascii_punctuation() => {
+                    let at = self.pos;
+                    self.pos += 1;
+                    return Some((at, &self.src[at..at + 1]));
                 }
                 _ => self.pos += 1,
             }

@@ -7,6 +7,11 @@
 // the future before task-return) — PLUS the filesystem surface: the p1 fs
 // service spliced over a wasi:filesystem@0.3 adapter (#3140), resolving
 // paths against the whole preopen table.
+// UDP and name lookup (ops 140..=145, #4306) ride wasi:sockets@0.3.0
+// `udp-socket` and `ip-name-lookup` (wasi_p3_net.rs) in both command worlds;
+// like every other import, a component whose module calls none of them
+// carries none. The serve world imports no sockets: an http.serve program
+// naming a net op is E081 (`check_service`).
 // env.get / the program arguments / env.sleep_ms ride wasi:cli/environment
 // and monotonic-clock.wait-for (ADR-0023 step 3); the rest of env and
 // process keep the defined refusal inside the shims. An import the module
@@ -24,6 +29,8 @@ world p3-command {
   import wasi:random/random@0.3.0;
   import wasi:filesystem/types@0.3.0;
   import wasi:filesystem/preopens@0.3.0;
+  import wasi:sockets/types@0.3.0;
+  import wasi:sockets/ip-name-lookup@0.3.0;
 
   export wasi:cli/run@0.3.0;
 }
@@ -46,6 +53,8 @@ world p3-command-http {
   import wasi:filesystem/preopens@0.3.0;
   import wasi:http/types@0.3.0;
   import wasi:http/client@0.3.0;
+  import wasi:sockets/types@0.3.0;
+  import wasi:sockets/ip-name-lookup@0.3.0;
 
   export wasi:cli/run@0.3.0;
 }

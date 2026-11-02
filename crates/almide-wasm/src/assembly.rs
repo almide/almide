@@ -9,6 +9,7 @@ use wasm_encoder::{
 
 use crate::func::Pool;
 use crate::work::FnWork;
+use crate::helper_sig::HelperSig;
 use crate::*;
 
 pub(crate) struct AssembleIn<'a> {
@@ -66,46 +67,46 @@ impl HelperLits {
     }
 }
 
-/// The 37 fixed-slot helper bodies, in F_* slot order.
-fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function)> {
+/// The 37 fixed-slot helper bodies in F_* slot order, each with its RC signature.
+fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function, Option<HelperSig>)> {
     vec![
-        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT)),
-        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT)),
-        (F_APPEND_COPY, emit_append_copy()),
-        (F_ITOA, emit_itoa()),
-        (F_APPEND_I64, emit_append_i64()),
-        (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base)),
-        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed(), lit.oom_probe)),
-        (F_INT_TO_STRING, emit_int_to_string()),
-        (F_CONCAT, emit_concat()),
-        (F_STR_EQ, emit_str_eq()),
-        (F_LIST_GET_8, emit_list_get(Scalar::Int)),
-        (F_LIST_GET_4, emit_list_get(Scalar::Str)),
-        (F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
-        (F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
-        (F_LIST_JOIN, emit_list_join()),
-        (F_BLOCK_COPY, emit_block_copy()),
-        (F_BUF_TO_BLOCK, emit_buf_to_block()),
-        (F_STR_LEN_CHARS, emit_str_len_chars()),
-        (F_SCAN_W64, emit_scan_w64()),
-        (F_SCAN_W32, emit_scan_w32()),
-        (F_SCAN_STR, emit_scan_str()),
-        (F_F16_TO_F64, emit_f16_to_f64()),
-        (F_CP_OFF, emit_cp_off()),
-        (F_STR_SLICE, emit_str_slice()),
-        (F_STR_REPEAT, emit_str_repeat(lit.repeat_msg)),
-        (F_STR_CMP, emit_str_cmp()),
-        (F_STR_REPLACE, emit_str_replace()),
-        (F_COPY, emit_copy()),
-        (F_FREE, emit_free(counters, crate::canonical_alloc::armed())),
-        (F_INC, emit_inc()),
-        (F_DEC_FLAT, emit_dec_flat()),
-        (F_COW, emit_cow()),
-        (F_STR_APPEND, emit_str_append()),
-        (F_BYTES_PUSH, emit_bytes_push()),
-        (F_LINE_GROW, emit_line_grow()),
-        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT)),
-        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT)),
+        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT), None),
+        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT), None),
+        (F_APPEND_COPY, emit_append_copy(), None),
+        (F_ITOA, emit_itoa(), None),
+        (F_APPEND_I64, emit_append_i64(), None),
+        (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base), None),
+        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed(), lit.oom_probe), None),
+        (F_INT_TO_STRING, emit_int_to_string(), None),
+        (F_CONCAT, emit_concat(), None),
+        (F_STR_EQ, emit_str_eq(), None),
+        (F_LIST_GET_8, emit_list_get(Scalar::Int), None),
+        (F_LIST_GET_4, emit_list_get(Scalar::Str), None),
+        crate::helper_sig::signed(F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
+        crate::helper_sig::signed(F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
+        (F_LIST_JOIN, emit_list_join(), None),
+        (F_BLOCK_COPY, emit_block_copy(), None),
+        (F_BUF_TO_BLOCK, emit_buf_to_block(), None),
+        (F_STR_LEN_CHARS, emit_str_len_chars(), None),
+        (F_SCAN_W64, emit_scan_w64(), None),
+        (F_SCAN_W32, emit_scan_w32(), None),
+        (F_SCAN_STR, emit_scan_str(), None),
+        (F_F16_TO_F64, emit_f16_to_f64(), None),
+        (F_CP_OFF, emit_cp_off(), None),
+        (F_STR_SLICE, emit_str_slice(), None),
+        (F_STR_REPEAT, emit_str_repeat(lit.repeat_msg), None),
+        (F_STR_CMP, emit_str_cmp(), None),
+        (F_STR_REPLACE, emit_str_replace(), None),
+        (F_COPY, emit_copy(), None),
+        (F_FREE, emit_free(counters, crate::canonical_alloc::armed()), None),
+        (F_INC, emit_inc(), None),
+        (F_DEC_FLAT, emit_dec_flat(), None),
+        crate::helper_sig::signed(F_COW, emit_cow()),
+        crate::helper_sig::signed(F_STR_APPEND, emit_str_append()),
+        crate::helper_sig::signed(F_BYTES_PUSH, emit_bytes_push()),
+        (F_LINE_GROW, emit_line_grow(), None),
+        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT), None),
+        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT), None),
     ]
 }
 
@@ -144,7 +145,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // export-table global index is fixed once the globals are laid out, and
     // the call edges do not depend on it.
     let mut adapters: Vec<Function> = region_exports.iter().map(|e| crate::region_export::adapter(e, 0)).collect();
-    let mut release = (!adapters.is_empty()).then(|| crate::region_export::release(0));
+    let shares = region_exports.iter().any(crate::region_export::RegionExport::hands_out_share);
+    let mut release = shares.then(|| crate::region_export::release(0));
     // #2407: the allocation counters, APPENDED after the top-let globals so
     // no existing index moves — four i64 globals `$alloc` / `$free` bump,
     // present only under the `alloc_count` switch (a shipped module has
@@ -219,7 +221,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
     let adapter_ty = T_FN_BASE + table.infos.len() as u32 + work.itypes.borrow().len() as u32;
     for e in region_exports {
-        types.ty().function(e.params.clone(), [ValType::I32, ValType::I32]);
+        types.ty().function(e.export_params(), e.export_results());
     }
 
     let mut imports = ImportSection::new();
@@ -293,7 +295,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     memories.memory(MemoryType {
         minimum: pages,
         maximum,
-        memory64: false,
+        memory64: crate::region_export::MEMORY64,
         shared: false,
         page_size_log2: None,
     });
@@ -465,12 +467,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // unconditionally so the grounding gate keeps its subject.
     let static_helpers = static_helpers(&lits, counters);
     debug_assert!(
-        static_helpers.iter().enumerate().all(|(i, (idx, _))| *idx == F_PRINTLN_BLOCK + i as u32),
+        static_helpers.iter().enumerate().all(|(i, (idx, _, _))| *idx == F_PRINTLN_BLOCK + i as u32),
         "static helper list must mirror the F_* slot order exactly"
     );
-    for (idx, f) in &static_helpers {
+    for (idx, f, sig) in &static_helpers {
         if used.contains(idx) {
             code.function(f);
+            if let Some(sig) = sig {
+                crate::witness::rc::helper(*idx, sig);
+            }
         } else {
             let mut stub = Function::new([]);
             stub.instructions().unreachable().end();
@@ -518,281 +523,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     Ok(module.finish())
 }
 
-/// One emitted-helper BODY (split from resolve_extras for the
-/// complexity budget).
-/// #4203: a module running the contained serve loop (op 75) exports its
-/// table and every global, so the embedded host can call the loop's
-/// closure and put the instance back to its state at the call after a
-/// handler abort. A module without the op keeps its bytes.
-fn export_serve_restore_state(exports: &mut ExportSection, work: &FnWork, global_count: u32) {
-    if !work.host_ops.borrow().contains(&crate::fs_meta::OP_HTTP_SERVE_RUN) {
-        return;
-    }
-    exports.export("__almide_table", ExportKind::Table, 0);
-    for g in 0..global_count {
-        exports.export(&format!("__almide_g{g}"), ExportKind::Global, g);
-    }
-}
-
-fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
-    match h {
-    Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
-        work.helper_base.get(),
-        helper_snapshot,
-        *float_to_string,
-        *frags,
-    ),
-    Helper::JsonQuote { frags, ctrl } => json_helpers::emit_json_quote_helper(*frags, Some(*ctrl)),
-    Helper::ReprQuote { frags } => json_helpers::emit_json_quote_helper(*frags, None),
-    Helper::JsonValuePretty { float_to_string, frags, pfrags } => {
-        json_helpers::emit_json_value_pretty_helper(
-            work.helper_base.get(),
-            helper_snapshot,
-            *float_to_string,
-            *frags,
-            *pfrags,
-        )
-    }
-    Helper::ValueField => value_helpers::emit_value_field_helper(),
-    Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
-    Helper::ErrText => utf8_helpers::emit_err_text_helper(),
-    Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
-        work.helper_base.get() + hpos as u32,
-        *key_off,
-        *val_off,
-    ),
-    Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
-    Helper::StringSplit => value_helpers::emit_string_split_helper(),
-    Helper::ScanF64 => runtime::emit_scan_f64(),
-    Helper::MapReserve => runtime_alloc::emit_map_reserve(),
-    Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
-        utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
-    }
-    _ => match map_index::helper_body(h)
-        .or_else(|| crate::map_ordered::helper_body(h, work.helper_base.get() + hpos as u32))
-        .or_else(|| crate::value_set_path::helper_body(h, work.helper_base.get() + hpos as u32))
-        .or_else(|| crate::fan::js_async::helper_body(h))
-        .or_else(|| runtime_alloc::helper_body(h, work))
-        .or_else(|| runtime_line::helper_body(h, work))
-    {
-        Some(f) => f,
-        None => helper_body_b(h, work),
-    },
-    }
-}
-
-/// Emitted helpers + table-entry extras (shims, adapters, lifted
-/// lambdas) — split from emit_program for the complexity budget.
-pub(crate) fn resolve_extras(
-    table: &FnTable,
-    work: &FnWork,
-    lifted_fns: &[LoweredLifted],
-) -> (Vec<(u32, Function)>, Vec<u32>) {
-    let extra_base = F_FN_BASE + table.infos.len() as u32 + 1;
-    let mut extra_fns: Vec<(u32, Function)> = Vec::new();
-    // Emitted helpers assemble FIRST — their indices were promised during
-    // lowering; the table-entry extras follow.
-    let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
-    for (hpos, h) in helper_snapshot.iter().enumerate() {
-        let params = match map_index::helper_params(h)
-            .or_else(|| crate::map_ordered::helper_params(h))
-            .or_else(|| crate::value_set_path::helper_params(h))
-            .or_else(|| crate::fan::js_async::helper_params(h))
-            .or_else(|| runtime_alloc::helper_params(h))
-            .or_else(|| runtime_line::helper_params(h))
-        {
-            Some(p) => p,
-            None => match h {
-            Helper::ValueKeys
-            | Helper::Utf8Lossy
-            | Helper::ErrText
-            | Helper::BytesToString { .. } => vec![ValType::I32],
-            Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
-            Helper::ScanDeep { .. } => {
-                vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
-            }
-            Helper::JsonValuePretty { .. } => {
-                vec![ValType::I32, ValType::I32, ValType::I32]
-            }
-            _ => vec![ValType::I32, ValType::I32],
-            },
-        };
-        let ret = match h {
-            _ if runtime_line::helper_is_void(h) => None,
-            _ => crate::fan::js_async::helper_result(h).unwrap_or_else(|| runtime_alloc::helper_result(h)),
-        };
-        let ti = work.itype(params, ret);
-        let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);
-        extra_fns.push((ti, f));
-    }
-    let mut entry_fn_indices: Vec<u32> = Vec::new();
-    for e in work.entries.borrow().clone() {
-        match e {
-            TableEntry::Fn(i) => {
-                // Uniform closure convention: env leads — a plain fn's
-                // table slot holds a forwarding shim.
-                let info = &table.infos[i];
-                let mut ps: Vec<ValType> = vec![ValType::I32];
-                ps.extend(info.params.iter().map(|t| t.val_type()));
-                let ti = work.itype(ps, info.ret.map(SliceTy::val_type));
-                let idx = extra_base + extra_fns.len() as u32;
-                extra_fns.push((
-                    ti,
-                    emit_env_shim(F_FN_BASE + i as u32, &info.params, info.ret, false),
-                ));
-                entry_fn_indices.push(idx);
-            }
-            TableEntry::Adapter { target, raw } => {
-                let info = &table.infos[target];
-                let mut ps: Vec<ValType> = vec![ValType::I32];
-                ps.extend(info.params.iter().map(|t| t.val_type()));
-                let ti = work.itype(ps, Some(ValType::I32));
-                let idx = extra_base + extra_fns.len() as u32;
-                let _ = raw;
-                extra_fns.push((
-                    ti,
-                    emit_env_shim(F_FN_BASE + target as u32, &info.params, info.ret, true),
-                ));
-                entry_fn_indices.push(idx);
-            }
-            TableEntry::Lambda(j) => {
-                let (ps, r, f, _) = &lifted_fns[j as usize];
-                let ti = work.itype(ps.clone(), *r);
-                let idx = extra_base + extra_fns.len() as u32;
-                extra_fns.push((ti, f.clone()));
-                entry_fn_indices.push(idx);
-            }
-            TableEntry::Direct(idx) => entry_fn_indices.push(idx),
-        }
-    }
-    (extra_fns, entry_fn_indices)
-}
-/// The named-type / json-path half of the helper table —
-/// split from `helper_body` for the complexity budget.
-fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
-    match h {
-    Helper::DisplayNamed { ti, irk } => {
-        match work.display_bodies.borrow_mut().remove(&(*ti, *irk)) {
-            Some(work::DisplayBuild::Built(f)) => f,
-            // Failed (all callers refused) — keep the promised
-            // index aligned with a loud stub.
-            _ => {
-                let mut f = Function::new([]);
-                f.instructions().unreachable().end();
-                f
-            }
-        }
-    }
-    Helper::DisplayTy { ety, irk } => match work.display_ty_bodies.borrow_mut().remove(&(*ety, *irk)) {
-        Some(work::DisplayBuild::Built(f)) => f,
-        _ => {
-            let mut f = Function::new([]);
-            f.instructions().unreachable().end();
-            f
-        }
-    },
-    Helper::NamedOp { op, ti } => match work.named_bodies.borrow_mut().remove(&(*op, *ti)) {
-        Some(work::DisplayBuild::Built(f)) => f,
-        _ => {
-            let mut f = Function::new([]);
-            f.instructions().unreachable().end();
-            f
-        }
-    },
-    Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
-        Some(work::DisplayBuild::Built(f)) => f,
-        _ => {
-            let mut f = Function::new([]);
-            f.instructions().unreachable().end();
-            f
-        }
-    },
-    _ => unreachable!("helper routed to the wrong half"),
-    }
-}
-
-/// #1699 — which of the 34 fixed-slot helpers this module actually reaches.
-/// Roots are every body that ships after the helper block (the reachable
-/// lowered fns, `main`, the program-driven extras); edges INSIDE the helper
-/// set come from scanning each helper's own encoded body, folded to a
-/// fixpoint.
-///
-/// #1962: the proven runtime core (`$alloc` / `$free` / `$inc` / `$dec_flat`
-/// / `$cow`) is NOT seeded any more — it is reached like every other
-/// helper, through a call from a shipped body. A program that never
-/// allocates (hello, world: one data-segment string through `$println`)
-/// ships the five as 2-byte `unreachable` stubs, index-stable, and drops
-/// ~2 KB from every such artifact. The byte-grounding gate
-/// (`proofs/check-structural-bytes.sh`) dumps the core bodies through
-/// `dump_runtime_bytes` at unit level, independent of any module, so the
-/// `StructuralDecode.v` theorems keep their subject either way. Nothing
-/// outside a body reaches the core: the exports are `memory` / `main` /
-/// `__heap` / the `@export` fns, and the WASI transforms park their
-/// buffers on their own page rather than calling `$alloc`.
-fn used_static_helpers<'a>(
-    helpers: &[(u32, Function)],
-    roots: impl Iterator<Item = &'a Function>,
-    seeds: &[u32],
-) -> std::collections::HashSet<u32> {
-    use std::collections::HashSet;
-    let mut used: HashSet<u32> = HashSet::new();
-    let mut pending: Vec<u32> = Vec::new();
-    fn note(set: &mut HashSet<u32>, pending: &mut Vec<u32>, idx: u32) {
-        if (F_PRINTLN_BLOCK..F_FN_BASE).contains(&idx) && set.insert(idx) {
-            pending.push(idx);
-        }
-    }
-    // Helpers the HOST calls (#2265: the JS host's allocator and release)
-    // are roots no body reaches; they and their callees ship.
-    for &idx in seeds {
-        note(&mut used, &mut pending, idx);
-    }
-    for f in roots {
-        for idx in called_function_indices(f) {
-            note(&mut used, &mut pending, idx);
-        }
-    }
-    let mut scanned: HashSet<u32> = HashSet::new();
-    while let Some(idx) = pending.pop() {
-        if !scanned.insert(idx) {
-            continue;
-        }
-        if let Some((_, f)) = helpers.iter().find(|(i, _)| *i == idx) {
-            for callee in called_function_indices(f) {
-                note(&mut used, &mut pending, callee);
-            }
-        }
-    }
-    used
-}
-
-/// Every `call` / `return_call` target in an encoded function body — parsed
-/// with wasmparser over the same bytes `wasm_encoder` wrote, never
-/// pattern-matched (a raw 0x10 inside an immediate is not a call). A body
-/// that fails to parse claims every helper: over-keeping is bytes,
-/// under-keeping is a trap.
-fn called_function_indices(f: &Function) -> Vec<u32> {
-    use wasm_encoder::Encode;
-    let mut buf = Vec::new();
-    f.encode(&mut buf);
-    let mut out = Vec::new();
-    let mut r = wasmparser::BinaryReader::new(&buf, 0);
-    let Ok(size) = r.read_var_u32() else {
-        return (F_PRINTLN_BLOCK..F_FN_BASE).collect();
-    };
-    let start = r.current_position();
-    let end = (start + size as usize).min(buf.len());
-    let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(&buf[start..end], 0));
-    let Ok(ops) = body.get_operators_reader() else {
-        return (F_PRINTLN_BLOCK..F_FN_BASE).collect();
-    };
-    for op in ops {
-        match op {
-            Ok(wasmparser::Operator::Call { function_index })
-            | Ok(wasmparser::Operator::ReturnCall { function_index }) => out.push(function_index),
-            Ok(_) => {}
-            Err(_) => return (F_PRINTLN_BLOCK..F_FN_BASE).collect(),
-        }
-    }
-    out
-}
+#[path = "assembly_helpers.rs"]
+mod helpers;
+pub(crate) use helpers::resolve_extras;
+use helpers::{export_serve_restore_state, used_static_helpers};

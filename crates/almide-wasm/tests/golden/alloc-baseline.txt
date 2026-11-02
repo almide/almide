@@ -263,6 +263,7 @@
 67056	spec/wasm_cross/fold_init_rebinds_source.almd
 65936	spec/wasm_cross/for_in_forms.almd
 66160	spec/wasm_cross/for_in_list_value_semantics.almd
+~	spec/wasm_cross/fs_append_bytes_true_append.almd
 ~	spec/wasm_cross/fs_call_head_family.almd
 ~	spec/wasm_cross/fs_composition_family.almd
 ~	spec/wasm_cross/fs_error_path_escape.almd
@@ -561,6 +562,7 @@
 67184	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 67328	spec/wasm_cross/matrix_index_domain_family.almd
 66112	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
+69568	spec/wasm_cross/matrix_mul_no_fma.almd
 67248	spec/wasm_cross/matrix_neg_signed_zero.almd
 67616	spec/wasm_cross/matrix_pow_libm.almd
 67520	spec/wasm_cross/matrix_product_family.almd
@@ -749,6 +751,7 @@
 131280	spec/wasm_cross/regex_fuzz_batch.almd
 72912	spec/wasm_cross/regex_invalid_pattern.almd
 200432	spec/wasm_cross/regex_linear_time.almd
+77072	spec/wasm_cross/regex_many_patterns.almd
 67840996	spec/wasm_cross/regex_repetition_depth.almd
 71632	spec/wasm_cross/regex_size_cap.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd

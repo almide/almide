@@ -17,7 +17,6 @@ effect fn main() -> Unit = {
     sa = sa + x + first_or(a, 0) - 1
   }
   println("A ${sa} ${a[2]}")
-
   // B. An append to the iterated list: three iterations, six elements.
   var b = [1, 2, 3]
   var nb = 0
@@ -26,7 +25,6 @@ effect fn main() -> Unit = {
     nb = nb + 1
   }
   println("B ${nb} ${list.len(b)}")
-
   // C. The iterated list replaced by an empty one.
   var c = [1, 2, 3, 4]
   var sc = 0
@@ -35,7 +33,6 @@ effect fn main() -> Unit = {
     sc = sc + x
   }
   println("C ${sc} ${list.len(c)}")
-
   // D. A swap of two elements of the iterated list, every iteration.
   var d = [1, 2, 3]
   var seen = ""

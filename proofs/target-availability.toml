@@ -35,9 +35,12 @@
 #                 adapter: every op P1_SERVED_OPS names, with env.os /
 #                 env.temp_dir / env.cwd (27 / 28 / 33); since #3223 env.set
 #                 (37) too, through the p1 shim's guest-side overlay log,
-#                 so component_availability.rs declares no exclusion. The
-#                 artifact runs on a stock wasmtime 46+ with no feature
-#                 flag (step 1).
+#                 so component_availability.rs declares no exclusion; since
+#                 #4306 UDP and name lookup (140..=145) over wasi:sockets@0.3.
+#                 The artifact runs on a stock wasmtime 46+ with no feature
+#                 flag (step 1); a udp program needs the network grant
+#                 (`-S inherit-network`, `-S allow-ip-name-lookup` for a
+#                 name).
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure
@@ -336,7 +339,23 @@ pending_self_host_ceiling = 0
 # with the stock-p1 leg only. Evidence:
 # spec/embedded_cross/process_start_family.almd and
 # spec/stdlib/process_start_test.almd on the wasm test lane.
-pending_port_ceiling = 23
+# 2026-11-01 (#4306): 23 -> 23. The same five rows are now served by the
+# WASI 0.3 component too: its shim answers ops 140..=145 over
+# wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
+# (crates/almide-wasm-run/src/wasi_p3_net.rs; C-448, evidence: the C-442 / C-443
+# fixtures under tests/net_udp_p3_cross_test.rs). Only the stock-p1 leg
+# remains, and its reason now says why: preview 1 has no sockets at all.
+# 2026-11-01 (#3620, #4306): 23 -> 9. The default `build --target wasm` of
+# a program whose op set names a sockets op (the tcp family 91..=103, udp
+# and name lookup 140..=145 — `almide_wasm::host_ops::SOCKET_FAMILIES`) is
+# the WASI 0.3 component over wasi:sockets@0.3 (the net/tcp design step 4,
+# C-377), as an http.serve program is the serve export; `almide build`
+# prints the grant it needs (`-S inherit-network`, `-S allow-ip-name-lookup`
+# for a name). The thirteen net.tcp_* / net.udp_* / net.lookup_host rows and
+# io.close (the tcp close) lose their stock-p1 leg, their last; evidence:
+# tests/net_tcp_p3_cross_test.rs and tests/net_udp_p3_cross_test.rs (C-377,
+# C-378, C-379, C-448).
+pending_port_ceiling = 9
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -367,62 +386,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
-
-[[unavailable]]
-fn = "net.tcp_accept"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_available"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_connect"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_is_open"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_listen"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_local_port"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_read_timeout"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_set_timeout"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
 
 [[unavailable]]
 fn = "unix.shm_create"
@@ -592,48 +555,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
-
-[[unavailable]]
-fn = "io.close"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.lookup_host"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_bind"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_local_port"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_send_to"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_recv_from"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#4306, ops 140..=145): `almide run --target wasm` answers with native's net core (udp and name lookup on the run's own table, the same err texts), and the structural leg lowers the stdlib/net_wasm.almd bodies; the stock p1 standard has no sockets, so the stock artifact keeps E081 until it routes to the p3 component over wasi:sockets (udp, ip-name-lookup), as the tcp family does (TCP design step 4)."
-issue = "#4306"
 
 [[unavailable]]
 fn = "process.start"
