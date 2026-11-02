@@ -251,8 +251,9 @@ else if c >= 97 and c <= 122 then c - 32 else c
 // capture writes), 7 pat0, 8 end_at (-1 = a match may end anywhere;
 // full_match passes te), 9 the end of the last match found, 10 the capture
 // buffer's slot count, 11-14 a suspended step (p, pend, t, k), 15 the Pike
-// VM's work block once the walk has handed over (0 = none), 16 steps taken,
-// 17 the step budget (-1 = none), 18 1 once the walk gave up, 19 1 under a
+// VM's work block once the walk has handed over (0 = none), 16 the steps
+// left in the budget (__rx_tick), 17 where the pattern's first top-level
+// alternative ends (__rx_exec), 18 1 once the walk gave up, 19 1 under a
 // leading (?i). The first arena follows at slot 20.
 // Flags: a leading `(?m)` makes `^`/`$` line anchors, `(?i)` letters match in
 // either case (`(?im)` both); `(?:…)` groups do not
@@ -310,21 +311,26 @@ fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at:
   prim.store64(m + 64, end_at)
   prim.store64(m + 80, nslots)
   prim.store64(m + 120, 0)
-  prim.store64(m + 128, 0)
-  prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))
+  prim.store64(m + 128, 4 * (pe - pat0 + 1) * (te - ts + 1))
+  prim.store64(m + 136, __rx_alt_end(pat0, pe))
   prim.store64(m + 144, 0)
   prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   vm
 }
 
 // One match attempt of the alternatives [p, pend) at `t`: the end of the
-// first match the walk reaches, or -1.
+// first match the walk reaches, or -1. [p, pend) is always the machine
+// block's own pattern, so where its first alternative ends was found once,
+// by __rx_vm (slot 17), rather than rescanned on every attempt (#4399).
 fn __rx_exec(p: Int, pend: Int, t: Int, m: Int) -> Int = {
   prim.store64(m + 16, 0)
   prim.store64(m + 24, 0 - 1)
   let caps = prim.load64(m + 48)
   let _0 = if caps == 0 then 0 else __rx_fill_neg(caps, prim.load64(m + 80))
-  __rx_drive(__rx_alts(p, pend, t, 0 - 1, m), m)
+  let aend = prim.load64(m + 136)
+  let _1 = if aend < pend then __rx_choice4(m, 11, aend + 1, pend, t, 0 - 1)
+  else 0
+  __rx_drive(__rx_seq(p, aend, t, 0 - 1, m), m)
 }
 
 // -2 = the walk stopped to grow its arena; anything else is its answer.
@@ -1938,12 +1944,13 @@ fn __rx_find_start_walk(p: Int, pe: Int, t: Int, m: Int) -> Int = {
 // write, and it answers what the Pike VM answers. A step past the budget makes
 // it give up (-3 through every caller of __rx_seq); the operation is then done
 // again on the VM, so no call takes more than linear time. Count one step and
-// say whether the budget is spent.
+// say whether the budget is spent. Slot 16 counts DOWN from the budget, so a
+// step is one load, one store and one compare (#4399); the step that takes it
+// below 0 is the one past the budget, as before.
 fn __rx_tick(m: Int) -> Bool = {
-  let steps = prim.load64(m + 128) + 1
-  prim.store64(m + 128, steps)
-  let budget = prim.load64(m + 136)
-  if budget >= 0 and steps > budget then {
+  let left = prim.load64(m + 128) - 1
+  prim.store64(m + 128, left)
+  if left < 0 then {
     prim.store64(m + 144, 1)
     true
   } else false
@@ -1958,9 +1965,12 @@ fn __rx_gave_up(m: Int) -> Bool = prim.load64(m + 144) == 1
 fn __rx_hand_over(m: Int, w: Int) -> Int = {
   prim.store64(m + 120, w)
   prim.store64(m + 144, 0)
-  prim.store64(m + 136, 0 - 1)
+  prim.store64(m + 128, __rx_no_budget())
   0
 }
+
+// A step count no walk reaches: the budget once the walk has handed over.
+fn __rx_no_budget() -> Int = 4611686018427387903
 
 fn regex_is_match(pat: String, s: String) -> Bool = {
   let ph = prim.handle(pat)
