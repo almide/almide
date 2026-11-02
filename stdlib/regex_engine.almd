@@ -259,7 +259,8 @@ else if c >= 97 and c <= 122 then c - 32 else c
 // VM's work block once the walk has handed over (0 = none), 16 the steps
 // left in the budget (__rx_tick), 17 where the pattern's first top-level
 // alternative ends (__rx_exec), 18 1 once the walk gave up, 19 1 under a
-// leading (?i). The first arena follows at slot 20.
+// leading (?i), 20 the byte every match starts with (-1 = none known,
+// __rx_first_byte). The first arena follows at slot 21.
 // Flags: a leading `(?m)` makes `^`/`$` line anchors, `(?i)` letters match in
 // either case (`(?im)` both); `(?:…)` groups do not
 // capture; `\b`/`\B` are word-boundary assertions; a quantifier followed by
@@ -305,7 +306,7 @@ fn __rx_eol(t: Int, te: Int, pat0: Int) -> Bool = t == te or (__rx_multiline(pat
 // The machine block for one public call (layout above), with the first arena
 // inside it. Owned by the caller and dropped with it.
 fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
-  let vm = prim.alloc_list(276)
+  let vm = prim.alloc_list(277)
   let _0 = __rx_vm_init(prim.handle(vm) + 12, pat0, pe, ts, te, caps, nslots, end_at)
   vm
 }
@@ -314,7 +315,7 @@ fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at:
 // check runs first, in slots 11-14 (the suspended step, which nothing reads
 // until the walk suspends), so it allocates nothing of its own (#4399).
 fn __rx_vm_checked(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
-  let vm = prim.alloc_list(276)
+  let vm = prim.alloc_list(277)
   let m = prim.handle(vm) + 12
   let _ok = __rx_require_in(pat0, pe, m + 88)
   let _0 = __rx_vm_init(m, pat0, pe, ts, te, caps, nslots, end_at)
@@ -322,7 +323,7 @@ fn __rx_vm_checked(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int,
 }
 
 fn __rx_vm_init(m: Int, pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> Int = {
-  prim.store64(m, m + 160)
+  prim.store64(m, m + 168)
   prim.store64(m + 8, 2048)
   prim.store64(m + 32, ts)
   prim.store64(m + 40, te)
@@ -332,11 +333,27 @@ fn __rx_vm_init(m: Int, pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots:
   prim.store64(m + 80, nslots)
   prim.store64(m + 120, 0)
   prim.store64(m + 128, 4 * (pe - pat0 + 1) * (te - ts + 1))
-  prim.store64(m + 136, __rx_alt_end(pat0, pe))
+  let aend = __rx_alt_end(pat0, pe)
+  prim.store64(m + 136, aend)
   prim.store64(m + 144, 0)
   prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
+  prim.store64(m + 160, __rx_first_byte(pat0, pe, aend))
   0
 }
+
+// The ASCII byte every match of [pat0, pe) starts with, or -1: known when the
+// pattern is one alternative (`aend`, its end, is pe) whose first piece is a
+// plain ASCII character with no quantifier. A leading flag group starts with
+// `(`, so a case-folding pattern never has one.
+fn __rx_first_byte(pat0: Int, pe: Int, aend: Int) -> Int =
+  if aend < pe or pat0 >= pe then 0 - 1
+  else {
+    let b = prim.load8(pat0)
+    let q = if pat0 + 1 < pe then prim.load8(pat0 + 1) else 0 - 1
+    let special = b == 46 or b == 40 or b == 41 or b == 91 or b == 92 or b == 94 or b == 36 or b == 124 or b == 42 or b == 43 or b == 63 or b == 123
+    if b >= 128 or special or q == 42 or q == 43 or q == 63 or q == 123 then 0 - 1
+    else b
+  }
 
 // One match attempt of the alternatives [p, pend) at `t`: the end of the
 // first match the walk reaches, or -1. [p, pend) is always the machine
@@ -1984,14 +2001,30 @@ fn __rx_find_start(p: Int, pe: Int, t: Int, m: Int) -> Int = {
 
 // The walk's leftmost search: one attempt per start position. -1 also when
 // the walk ran out of steps (slot 18 then says so).
-fn __rx_find_start_walk(p: Int, pe: Int, t: Int, m: Int) -> Int = {
-  let r = __rx_exec(p, pe, t, m)
-  if r >= 0 then {
-    prim.store64(m + 72, r)
-    t
-  } else if r == 0 - 3 or t >= prim.load64(m + 40) then 0 - 1
-  else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
+//
+// When every match starts with one known byte (slot 20), a start position
+// holding another byte is passed over without an attempt (#4399): there the
+// attempt fails at its first step, so the answer is the same and the walk
+// only spends fewer of its steps. An ASCII byte never sits inside a multi-byte
+// character, so the scan steps a byte at a time.
+fn __rx_find_start_walk(p: Int, pe: Int, t0: Int, m: Int) -> Int = {
+  let fb = prim.load64(m + 160)
+  let te = prim.load64(m + 40)
+  let t = if fb < 0 then t0 else __rx_skip_to(t0, te, fb)
+  if fb >= 0 and t >= te then 0 - 1
+  else {
+    let r = __rx_exec(p, pe, t, m)
+    if r >= 0 then {
+      prim.store64(m + 72, r)
+      t
+    } else if r == 0 - 3 or t >= te then 0 - 1
+    else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
+  }
 }
+
+// The first address in [t, te) holding byte `fb`, or te.
+fn __rx_skip_to(t: Int, te: Int, fb: Int) -> Int = if t < te and prim.load8(t) != fb then __rx_skip_to(t + 1, te, fb)
+else t
 
 // The walk runs first, under a step budget linear in the text's length (4 per
 // pattern byte per text byte): it is the faster engine on the patterns people
