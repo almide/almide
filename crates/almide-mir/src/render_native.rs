@@ -452,10 +452,21 @@ fn render_fn(
     // the render breaks there (crate::render_native_addr::flag_exits).
     let flag_exits = crate::render_native_addr::flag_exits(func);
     crate::render_native_move::set_static_strs(func);
+    // Interpolation chains built in one buffer (crate::render_native_interp).
+    let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
+        if chains.skip.contains(&i) {
+            continue;
+        }
+        if let Some((dst, pieces)) = chains.finals.get(&i) {
+            let code = crate::render_native_interp::render_final(*dst, pieces, &tys)?;
+            tys.insert(*dst, NTy::Str);
+            line!("{code}");
+            continue;
+        }
         if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)? {
             continue;
         }
