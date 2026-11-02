@@ -679,12 +679,13 @@ pub(crate) fn flag_exits(func: &MirFunction) -> BTreeSet<usize> {
         let mut reads = Vec::new();
         let mut clean = true;
         for (j, o) in ops.iter().enumerate() {
-            if j == l + 2 {
+            // The header's own three ops.
+            if (l + 1..=l + 3).contains(&j) {
                 continue;
             }
             reads.clear();
             crate::mir_ops::op_reads(o, &mut reads);
-            if (j > l + 3 && j < end && reads.contains(&flag)) || reads.contains(t) || (j != l + 2 && reads.contains(c)) {
+            if (j > l + 3 && j < end && reads.contains(&flag)) || reads.contains(t) || reads.contains(c) {
                 clean = false;
                 break;
             }
