@@ -329,23 +329,45 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
 /// of copying it: outside every loop, and after the read the block is only
 /// dropped, addressed, or read at its other slots. Nothing reads the slot
 /// again, so taking it leaves every later observation as the copy would.
-pub(super) fn movable_loads(func: &MirFunction, base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>) -> BTreeSet<ValueId> {
+/// The second set holds the loads after which nothing reads the block at all
+/// (no other slot either): a carrier whose payload moves out reads as empty
+/// after it, so only those may move a carrier's payload.
+pub(super) fn movable_loads(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+) -> (BTreeSet<ValueId>, BTreeSet<ValueId>) {
     let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
     let mut out = BTreeSet::new();
-    let mut depth = 0usize;
+    let mut last = BTreeSet::new();
+    // The open loops' starts, and where each value is defined.
+    let mut loops: Vec<usize> = Vec::new();
+    let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
     for (i, op) in func.ops.iter().enumerate() {
         match op {
-            Op::LoopStart => depth += 1,
-            Op::LoopEnd => depth = depth.saturating_sub(1),
+            Op::LoopStart => loops.push(i),
+            Op::LoopEnd => {
+                loops.pop();
+            }
             _ => {}
+        }
+        if let Some(v) = crate::mir_ops::defined_value(op) {
+            def_at.entry(v).or_insert(i);
         }
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let Some(&(b, Some(off))) = args.first().and_then(|a| base_of.get(a)) else { continue };
         let Some(k) = slot_of(Some(off)) else { continue };
-        if depth != 0 {
-            continue;
+        // Inside a loop the block must be born in the same iteration (defined
+        // after the innermost loop's start, never rebound): a block from
+        // before the loop would be read again by the next iteration.
+        if let Some(&ls) = loops.last() {
+            let fresh = def_at.get(&b).is_some_and(|d| *d > ls)
+                && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == b));
+            if !fresh {
+                continue;
+            }
         }
         let mut movable = true;
+        let mut other_slot = false;
         for later in &func.ops[i + 1..] {
             let fine = match later {
                 Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } => *v == b,
@@ -357,6 +379,7 @@ pub(super) fn movable_loads(func: &MirFunction, base_of: &BTreeMap<ValueId, (Val
                 _ => false,
             };
             if fine {
+                other_slot |= matches!(later, Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, .. });
                 continue;
             }
             let mut reads = Vec::new();
@@ -368,9 +391,12 @@ pub(super) fn movable_loads(func: &MirFunction, base_of: &BTreeMap<ValueId, (Val
         }
         if movable {
             out.insert(*d);
+            if !other_slot {
+                last.insert(*d);
+            }
         }
     }
-    out
+    (out, last)
 }
 
 /// The field count of a generated plain struct (not a list, an enum or a carrier).

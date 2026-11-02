@@ -90,6 +90,8 @@ pub(crate) struct AddrState {
     /// Heap slot reads of an owned record that move the value out
     /// (`render_native_slots::movable_loads`): nothing reads the slot again.
     moves: BTreeSet<ValueId>,
+    /// The movable reads after which nothing reads the block at all.
+    moves_last: BTreeSet<ValueId>,
     /// Struct blocks built whole (`render_native_slots::built_whole`), and
     /// the fields stored so far of the one being built.
     whole: BTreeSet<ValueId>,
@@ -215,7 +217,7 @@ impl AddrState {
         }
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
-        let moves = slots::movable_loads(func, &base_of);
+        let (moves, moves_last) = slots::movable_loads(func, &base_of);
         let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
         let alloc_rec = func
             .ops
@@ -288,6 +290,7 @@ impl AddrState {
             arith: BTreeSet::new(),
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
             moves,
+            moves_last,
             whole,
             building: BTreeMap::new(),
             whole_enum,

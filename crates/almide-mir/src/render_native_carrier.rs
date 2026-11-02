@@ -342,7 +342,13 @@ pub(super) fn render_carrier_op(
                 if !has_default(p) {
                     return Some(Err(wall("native: an Option payload read with no Default for its absent case")));
                 }
-                (p, format!("match &{b} {{ Some(v) => v.clone(), None => Default::default() }}"))
+                // The last read of an owned carrier's payload moves it out
+                // (render_native_slots::movable_loads): nothing reads it again.
+                if st.moves_last.contains(d) && matches!(tys.get(&ad.base), Some(NTy::Rec(_))) {
+                    (p, format!("match {b}.take() {{ Some(v) => v, None => Default::default() }}"))
+                } else {
+                    (p, format!("match &{b} {{ Some(v) => v.clone(), None => Default::default() }}"))
+                }
             } else {
                 let (o, e) = result_payloads(i)?;
                 // The arm of the innermost tag test of this Result, if any.
