@@ -119,7 +119,7 @@
 # #4372: two new CI-prose gate rows explicitly map four still-uncompensated
 # limits (future consumers, live integration, unmodeled inputs, coordinated edits).
 # This is the bidirectional inventory count described above, not a relaxed ratchet.
-# uncompensated_blind_ceiling = "42"
+# uncompensated_blind_ceiling = "40"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
