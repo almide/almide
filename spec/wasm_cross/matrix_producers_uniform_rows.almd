@@ -13,8 +13,9 @@
 // maps, the product, the row movers (`slice_rows` past the end,
 // `gather_rows` with out-of-range and negative indices), the column movers
 // (`split_cols_even` with an uneven and an oversized split, `concat_cols`
-// with empty members), `concat_rows` with an empty member, `zip_with`, and
-// the three byte decoders.
+// with empty members), `concat_rows` with an empty member, and the three
+// byte decoders. (`zip_with`, a closure-taking composition over `from_lists`,
+// is pinned by matrix_composition_family.)
 fn show(name: String, m: Matrix) -> Unit = println("${name}: r=${matrix.rows(m)} c=${matrix.cols(m)} ${matrix.to_lists(m)} t=${matrix.to_lists(matrix.transpose(m))}")
 
 fn main() -> Unit = {
@@ -65,7 +66,6 @@ fn main() -> Unit = {
   )
   show("concat_cols_empty_first", matrix.concat_cols([e, a]))
   show("concat_rows", matrix.concat_rows([a, e, a]))
-  show("zip_with", matrix.zip_with(a, a, (x, y) => x - y))
   show("from_f64", matrix.from_bytes_f64_le(matrix.to_bytes_f64_le(a), 0, 3, 2) ?? e)
   show("from_f32", matrix.from_bytes_f32_le(matrix.to_bytes_f32_le(a), 0, 3, 2) ?? e)
   show("from_f16", matrix.from_bytes_f16_le(matrix.to_bytes_f16_le(a), 0, 3, 2) ?? e)
