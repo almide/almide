@@ -452,6 +452,7 @@ fn render_fn(
     // the render breaks there (crate::render_native_addr::flag_exits).
     let flag_exits = crate::render_native_addr::flag_exits(func);
     crate::render_native_move::set_static_strs(func);
+    crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
