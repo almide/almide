@@ -616,3 +616,73 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
 - Machine-checked evidence — controlled translation: 1
 - Machine-read evidence ledger — separate companion: 1
 - Experiment input — separate explanatory translation: 8
+
+## Follow-up pass — next coherent batch (2026-11-02 01:58 UTC)
+
+This pass read the complete short reader guides below and inspected nearby manifest/runner consumers, not merely exact-path matches. Existing canonical source remains English. The following **five originals / ten sibling translations** are the next practical group, without generator or CI edits. Existing docs-only classifier may still schedule normal CI; do not weaken it.
+
+| Priority | Original | Placement | Evidence / guardrail |
+|---|---|---|---|
+| 1 | `tools/claude-plugin/README.md` | `README.ja.md`, `README.zh-CN.md` siblings | 93 whitespace tokens. Full guide and `.claude-plugin/plugin.json` reviewed; plugin config names binary commands and server configuration, not README prose. Keep `/plugin` commands byte-exact. Use translated `docs/mcp` only after those files exist. |
+| 2 | `crates/README.md` | sibling `.ja.md` / `.zh-CN.md` | 547 tokens. Full navigation map reviewed; Cargo manifests, not this README, are authoritative workspace/dependency inventories. Mermaids unchanged; retain warnings about native/Wasm route differences and non-exhaustive generator list. No read-by-code references found. |
+| 3 | `examples/almd-outline/README.md` | sibling `.ja.md` / `.zh-CN.md` | 446 tokens. Full guide and source consumer search reviewed; program reads interface JSON, not README. Preserve “step 3 only”, historical-gap section, approximate source size and exact commands. This translation does not newly validate old bit-identical-output statements. |
+| 4 | `research/grammar-lab/README.md` | sibling `.ja.md` / `.zh-CN.md` | 463 tokens. Full reader guide reviewed. Runner `src/mod.almd:92–96` and `run-experiment.sh:31,103–104` load explicit `prompts/layer*.md`, not README. Translate guide only, never prompt stimuli. Keep model-call warning, historic/current schema distinction and example-not-measurement qualifier. Do not execute paid-model commands for verification. |
+| 5 | `research/fan-audit/probes/README.md` | sibling `.ja.md` / `.zh-CN.md` | 109 tokens. Full guide reviewed. Preserve pinned commit `0746eb689`, evidence-not-tests distinction, and deliberate compile failures. These are explanatory guide translations, not new experiment records. No exact machine reader found. |
+
+### Prioritized design documents: not silently cleared
+
+- `docs/design/DESIGN.md`: English, 1,810 tokens. Prose read across both output portions. No exact direct reader found, but this is design-policy/positioning material rather than a neutral current-reference page. It states that every language change is evaluated on particular MSR models and that release notes since v0.14.5 include MSR tables; root CLAUDE now says MSR saturated and was replaced. It also uses broad comparative statements (“Haskell ... sacrifice LLM writability”) without source evidence in the page. **Blocker for fresh current-facing translation:** parent should choose source-pinned design-history framing or source-owner reconciliation; do not quietly make these claims stronger or rewrite them during translation. Technical sibling placement itself appears possible.
+- `docs/design/REJECTED_PATTERNS.md`: Japanese source, 588 whitespace tokens / Japanese prose. Full body read. No exact consumer found. `.en.md` and `.zh-CN.md` preserve Japanese `.md` identity; do not label original English. Contains withdrawn decisions, future plans and external-language historical/numerical claims. Could be a later history-preserving companion with explicit original-authority notice; not included in the immediate five because it needs a consistent historical framing decision. Do not erase strike-through/reversed-decision sections.
+- `docs/design/fan-usability-eval.md`: English, 911 tokens, full body read. This is **evaluation design**, not results: 2026-10-17 plan, 36 task proposal, old `fan.any`/`fan.race` control conditions and ADR-0028 C0/C1/C2 alternatives. Translate as historical/design-only if requested; current fan usage should come from current spec, not this task-bank table. No exact machine consumer found. No model calls authorized by this audit.
+- `docs/design/fan-cross-language.md`: English, 1,927 tokens. Comparison tables and source links reviewed; opening/heading portion had been inspected in prior pass. `#3788` is still described as “once ... lands” and uses dated peer versions. **Needs source-pinned 2026-10-18 comparison framing** before being presented as current cross-language advice. Preserve distinction between selection, waiting, stopping, external effects and cancellation. No exact machine consumer found. Broad “only Almide” claims are not independently reverified by this audit.
+- `docs/design/fan-semantics-audit.md`: English, 3,499 tokens. Opening and explicit historical status read; full detailed body remains pending. Pinned `0746eb689` audit, not current semantics. Source/test references are comments, but it is evidence history and should receive non-normative/source-pinned translation treatment, not an unqualified current reader guide. Do not mark fully audited.
+
+None of these conclusions authorize CI/helper changes, benchmark execution, current-semantic rewrites or deletion. The initial per-file rows above retain the initial state; this follow-up supersedes only the five cleared-as-candidates rows and adds specific design blockers.
+
+---
+
+# Diagnostic translation placement audit
+
+Baseline: almide/almide `9a95b28519b90ae535dc9918bfed04805dc4675c`, inspected 2026-11-02.
+Scope: all 105 baseline Markdown files in docs/diagnostics (104 E-code pages and README), plus codes.toml as a consumer dependency. No repository files changed by this audit.
+
+## Verdict
+
+**Do not add E001.ja.md / E001.zh-CN.md siblings in docs/diagnostics.** Existing coverage gates treat these as new codes. Numeric filtering in the binary embedder alone is not sufficient.
+
+Recommend `docs/translations/ja/diagnostics/E001.md` and `docs/translations/zh-CN/diagnostics/E001.md`, with translated README indexes in the same directories. Preserve the original E-code Markdown and codes.toml exactly. Translation headers must say they are reading aids from a pinned original, not localized CLI output; language navigation can be in the mutable original diagnostic README and in translation indexes. Do not add navigation to every embedded original page merely for cosmetic consistency: it changes `almide explain` output.
+
+## Consumers and exact boundaries
+
+| Consumer | Lines | Result for adjacent E001.ja.md |
+|---|---:|---|
+| build.rs | 76–89 | Immediate directory read; `.md`, E prefix, then all-numeric stem suffix. Excludes language suffixes; embeds original E001 only. Entire dir triggers cargo rebuild (78). |
+| tests/explain_docs_test.rs | 24–35, 51–66 | Independent numeric-stem filter likewise excludes suffixes; verifies CLI output is verbatim original Markdown. |
+| src/cli/docs_gen.rs | 220–241 | Immediate directory read; E + exactly three digits. Excludes suffixes. Diagnostic registry bijection uses this list (126–146). |
+| scripts/check-diagnostic-code-coverage.sh | **42–52** | **Unsafe:** glob `docs/diagnostics/E*.md`; basename minus `.md` becomes E001.ja; seeks tests/diagnostics/e001.ja-* and reports missing fixture. Even E054.ja fails to match exempt E054 (38–44). |
+| tests/diagnostic_coverage_test.rs | **133–141** | **Unsafe population:** any `.md` stem starting E with length ≥4 becomes a doc code, including E001.ja. This report checks real codes' presence, so extra entries may not alone fail, but the population is polluted. |
+| tests/diagnostic_coverage_test.rs | **232–250** | **Unsafe parser:** scans every E*.md, requires literal `## Fix-it verdict`; translated headings fail. Retaining it plus `**mechanical**` instead creates mechanical code E001.ja. |
+| tests/diagnostic_coverage_test.rs | **270–290** | Mechanical names from the preceding scanner become round-trip fixture prefixes, so preserving English machine markers does not make adjacent translations safe. |
+| tests/diagnostic_harness_test.rs | 567–576 | Exact docs/diagnostics/{emitted-code}.md lookup and literal verdict parse. Separate-tree translations unaffected. |
+| src/cli/explain.rs | 13, 25–39, 42–60 | Embeds codes.toml; mnemonic from first line and verdict from literal heading/first bold word of embedded original. Do not translate original machine markers or prepend before original H1. |
+| tests/explain_list_test.rs | 86, 152 | Compares listing with emitted codes and registry severity; relies on embedded originals/registry, not translation tree. |
+| scripts/check-docs-only.sh | 46 | Every docs/diagnostics/* path is code-classified. No changes proposed. |
+| scripts/ci_prose.py | 29–40, 48–66 | Narrow allowlist excludes diagnostics AND proposed translations directory. Separate tree is safe from code consumers but does **not** promise lightweight CI. No allowlist change proposed. |
+| .github/workflows/ci.yml | 2078–2079, 2109 | Invokes docs-gen --check and diagnostic-code-coverage gate. Must retain these gates unchanged. |
+
+## Generation / broad scanners
+
+- `almide docs-gen` is currently check-only; src/cli/docs_gen.rs:32–36 rejects generation without --check. No diagnosis-page translation regeneration exists.
+- Search covered build.rs, src/, crates/, tests/, scripts/, tools/, .github/, .claude/ for literal diagnostic paths, related dir variables and Markdown/glob scans. All discovered direct diagnostic readers are listed above.
+- scripts/check-llm-surface.sh:34 scopes fences to llms.txt and docs/CHEATSHEET.md, and scripts/check-doc-fences.sh:39 scopes fences to docs/stdlib/*.md. Translated diagnostic fences outside those paths are not automatically checked by these gates; separately compare code-fence bytes to their originals and test any new link mapping.
+- No repository-wide Markdown link checker targeting this new tree was identified in the inspected scripts/tools/workflows; this is a search result, not a promise that no indirect future consumer exists. Validate relative file links and fragments explicitly.
+
+## Translation implementation checklist
+
+1. Start with a coherent small code group and its translated index; do not clone 105 files as English placeholders.
+2. Record original commit/path and translation status; retain all error codes, fix-it classification identifiers, code fences and technical limitations verbatim where machine meaning matters.
+3. Resolve original relative links against the original location, then rebase to the new tree; same-language diagnostic links are valid only where the target translation exists, otherwise link the original.
+4. Keep tests/fixtures, embedded originals, registry, generators and CI unchanged.
+5. Mechanical checks: exact fenced-code equality, inline identifiers/URL set, E-code preservation, all relative target existence plus heading anchors, original machine-doc hashes unchanged.
+6. Existing diagnostic-code coverage, docs-gen check, and relevant CI remain required; separate-tree placement is not proof of all gates passing.
+7. This does not localize `almide explain` or `--list`. Implementing localized CLI output would be a separate code request.

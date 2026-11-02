@@ -1,5 +1,7 @@
 # Hidden Operations
 
+[English](./HIDDEN_OPERATIONS.en.md) | [日本語](./HIDDEN_OPERATIONS.md) | [简体中文](./HIDDEN_OPERATIONS.zh-CN.md)
+
 > Zig の原則: "no hidden control flow, no hidden memory allocations"
 > Almide は意図的にいくつかの操作を隠す。ここにその全てを文書化する。
 

@@ -1,5 +1,7 @@
 # Grammar Lab
 
+[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+
 A/B test framework for measuring how syntax choices affect LLM modification survival rate.
 
 ## Quick Start

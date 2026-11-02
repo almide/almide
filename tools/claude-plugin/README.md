@@ -1,5 +1,7 @@
 # Almide — Claude Code plugin
 
+[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+
 Wires two servers that ship inside the `almide` binary into a Claude Code
 session:
 

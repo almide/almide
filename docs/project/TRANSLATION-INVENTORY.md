@@ -9,7 +9,7 @@ This inventory covers **556 tracked Markdown files** at that snapshot, not 556 i
 - Preserve code, commands, identifiers, dates, measurements, source links, and qualification of guarantees. Link to translated siblings only when they exist; untranslated destinations keep their original links.
 - A translation is a reader aid, not a new normative source. The original specification and its upstream ALS authority remain controlling; translation disagreements must be fixed, not used to change language semantics.
 - Existing originals can be Japanese or mixed-language. Do not label every existing `.md` file English or silently replace it to enforce a suffix convention. Inspect each before deciding whether `.en.md` is required to preserve its identity.
-- Current batches: eleven reader guides, twenty-two new language files. Existing README translations are preserved with only links to these guides updated. No compiler, generator, workflow, helper, or CI policy changes are included.
+- Current batches: eighteen reader guides with thirty-six translated files, plus 104 diagnostic-code pages and their index in Japanese and Simplified Chinese (210 files), for 246 new language files. Japanese originals of BREAKING_CHANGE_POLICY and HIDDEN_OPERATIONS retain their existing `.md` paths, with `.en.md` and `.zh-CN.md` siblings. Existing README translations are preserved with only links to these guides updated. All diagnostic originals, including their README, remain byte-identical; the general docs index links to the separate reader tree. The CLI remains English. No compiler, generator, workflow, helper, or CI policy changes are included.
 
 ## Source caveats retained, not silently resolved
 
@@ -34,6 +34,12 @@ The [consumer audit](./TRANSLATION-CONSUMERS.md) inspects the 80 files originall
 
 The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. A documentation-only classification by the former does not guarantee that all workflows skip their compiler jobs. No classifier is changed here.
 
+## Current coverage
+
+Of the frozen 556 Markdown rows, 126 have existing translations or newly supplied reading variants; **430 remain pending**. This is a file inventory, not 556 unique English documents: the three existing root README language files are counted separately. No universal translation-completeness claim is made.
+
+The diagnostic placement audit is included in [the consumer audit](./TRANSLATION-CONSUMERS.md). `docs/translations/{ja,zh-CN}/diagnostics/` avoids code scanners and preserves the original CLI output. [Japanese source caveats](../translations/ja/diagnostics/README.md#source-caveats) and [Chinese source caveats](../translations/zh-CN/diagnostics/README.md#source-caveats) identify original wording conflicts instead of guessing implementation behavior. All 104 numeric E-code pages have source-pinned reading variants; the remaining inventory still requires staged work.
+
 ## Counts by class
 
 | Class | Files |
@@ -43,10 +49,10 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | Diagnostic docs — embedded / scanned | 105 |
 | Evidence / generated blocks / gate inputs | 12 |
 | Existing translations | 3 |
-| Handwritten documentation — consumer audit pending | 73 |
+| Handwritten documentation — consumer audit pending | 66 |
 | Normative specification / grammar | 27 |
 | Proof records — machine evidence | 9 |
-| Reader guides — translated batches | 11 |
+| Reader guides — translated batches | 18 |
 | Release history | 7 |
 | Roadmap — scanned tree / generated index | 202 |
 | Standard library — generated sections / gates | 52 |
@@ -72,7 +78,7 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | [`SECURITY.md`](../../SECURITY.md) | Reader guides — translated batches | Drafted in this PR |
 | [`SUPPORT.md`](../../SUPPORT.md) | Reader guides — translated batches | Drafted in this PR |
 | [`crates/CLAUDE.md`](../../crates/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/README.md`](../../crates/README.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`crates/README.md`](../../crates/README.md) | Reader guides — translated batches | Drafted in this PR |
 | [`crates/almide-base/CLAUDE.md`](../../crates/almide-base/CLAUDE.md) | Agent instructions / embedded template | Pending |
 | [`crates/almide-codegen/CLAUDE.md`](../../crates/almide-codegen/CLAUDE.md) | Agent instructions / embedded template | Pending |
 | [`crates/almide-egg-lab/README.md`](../../crates/almide-egg-lab/README.md) | Handwritten documentation — consumer audit pending | Pending |
@@ -144,117 +150,117 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | [`docs/cross-target-decisions.md`](../../docs/cross-target-decisions.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/DESIGN.md`](../../docs/design/DESIGN.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/EQUIVALENCE.md`](../../docs/design/EQUIVALENCE.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/design/HIDDEN_OPERATIONS.md`](../../docs/design/HIDDEN_OPERATIONS.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/design/HIDDEN_OPERATIONS.md`](../../docs/design/HIDDEN_OPERATIONS.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/design/MEMORY-SAFETY.md`](../../docs/design/MEMORY-SAFETY.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/REJECTED_PATTERNS.md`](../../docs/design/REJECTED_PATTERNS.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/fan-cross-language.md`](../../docs/design/fan-cross-language.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/fan-semantics-audit.md`](../../docs/design/fan-semantics-audit.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/fan-usability-eval.md`](../../docs/design/fan-usability-eval.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/diagnostics/E001.md`](../../docs/diagnostics/E001.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E002.md`](../../docs/diagnostics/E002.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E003.md`](../../docs/diagnostics/E003.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E004.md`](../../docs/diagnostics/E004.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E005.md`](../../docs/diagnostics/E005.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E006.md`](../../docs/diagnostics/E006.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E007.md`](../../docs/diagnostics/E007.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E008.md`](../../docs/diagnostics/E008.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E009.md`](../../docs/diagnostics/E009.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E010.md`](../../docs/diagnostics/E010.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E011.md`](../../docs/diagnostics/E011.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E012.md`](../../docs/diagnostics/E012.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E013.md`](../../docs/diagnostics/E013.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E014.md`](../../docs/diagnostics/E014.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E015.md`](../../docs/diagnostics/E015.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E016.md`](../../docs/diagnostics/E016.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E017.md`](../../docs/diagnostics/E017.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E018.md`](../../docs/diagnostics/E018.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E019.md`](../../docs/diagnostics/E019.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E020.md`](../../docs/diagnostics/E020.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E021.md`](../../docs/diagnostics/E021.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E022.md`](../../docs/diagnostics/E022.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E023.md`](../../docs/diagnostics/E023.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E024.md`](../../docs/diagnostics/E024.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E025.md`](../../docs/diagnostics/E025.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E026.md`](../../docs/diagnostics/E026.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E027.md`](../../docs/diagnostics/E027.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E028.md`](../../docs/diagnostics/E028.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E029.md`](../../docs/diagnostics/E029.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E030.md`](../../docs/diagnostics/E030.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E031.md`](../../docs/diagnostics/E031.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E032.md`](../../docs/diagnostics/E032.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E033.md`](../../docs/diagnostics/E033.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E034.md`](../../docs/diagnostics/E034.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E035.md`](../../docs/diagnostics/E035.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E036.md`](../../docs/diagnostics/E036.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E037.md`](../../docs/diagnostics/E037.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E038.md`](../../docs/diagnostics/E038.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E041.md`](../../docs/diagnostics/E041.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E042.md`](../../docs/diagnostics/E042.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E043.md`](../../docs/diagnostics/E043.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E044.md`](../../docs/diagnostics/E044.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E045.md`](../../docs/diagnostics/E045.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E046.md`](../../docs/diagnostics/E046.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E047.md`](../../docs/diagnostics/E047.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E048.md`](../../docs/diagnostics/E048.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E049.md`](../../docs/diagnostics/E049.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E050.md`](../../docs/diagnostics/E050.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E051.md`](../../docs/diagnostics/E051.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E052.md`](../../docs/diagnostics/E052.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E053.md`](../../docs/diagnostics/E053.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E054.md`](../../docs/diagnostics/E054.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E055.md`](../../docs/diagnostics/E055.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E056.md`](../../docs/diagnostics/E056.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E057.md`](../../docs/diagnostics/E057.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E058.md`](../../docs/diagnostics/E058.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E059.md`](../../docs/diagnostics/E059.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E060.md`](../../docs/diagnostics/E060.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E061.md`](../../docs/diagnostics/E061.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E062.md`](../../docs/diagnostics/E062.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E070.md`](../../docs/diagnostics/E070.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E071.md`](../../docs/diagnostics/E071.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E072.md`](../../docs/diagnostics/E072.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E073.md`](../../docs/diagnostics/E073.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E074.md`](../../docs/diagnostics/E074.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E075.md`](../../docs/diagnostics/E075.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E076.md`](../../docs/diagnostics/E076.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E077.md`](../../docs/diagnostics/E077.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E078.md`](../../docs/diagnostics/E078.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E080.md`](../../docs/diagnostics/E080.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E081.md`](../../docs/diagnostics/E081.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E082.md`](../../docs/diagnostics/E082.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E083.md`](../../docs/diagnostics/E083.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E084.md`](../../docs/diagnostics/E084.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E085.md`](../../docs/diagnostics/E085.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E086.md`](../../docs/diagnostics/E086.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E087.md`](../../docs/diagnostics/E087.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E088.md`](../../docs/diagnostics/E088.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E089.md`](../../docs/diagnostics/E089.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E090.md`](../../docs/diagnostics/E090.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E092.md`](../../docs/diagnostics/E092.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E093.md`](../../docs/diagnostics/E093.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E094.md`](../../docs/diagnostics/E094.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E095.md`](../../docs/diagnostics/E095.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E096.md`](../../docs/diagnostics/E096.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E097.md`](../../docs/diagnostics/E097.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E098.md`](../../docs/diagnostics/E098.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E099.md`](../../docs/diagnostics/E099.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E100.md`](../../docs/diagnostics/E100.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E101.md`](../../docs/diagnostics/E101.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E102.md`](../../docs/diagnostics/E102.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E103.md`](../../docs/diagnostics/E103.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E104.md`](../../docs/diagnostics/E104.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E109.md`](../../docs/diagnostics/E109.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E110.md`](../../docs/diagnostics/E110.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E111.md`](../../docs/diagnostics/E111.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E112.md`](../../docs/diagnostics/E112.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E113.md`](../../docs/diagnostics/E113.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E114.md`](../../docs/diagnostics/E114.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E116.md`](../../docs/diagnostics/E116.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E117.md`](../../docs/diagnostics/E117.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E118.md`](../../docs/diagnostics/E118.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E119.md`](../../docs/diagnostics/E119.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/E420.md`](../../docs/diagnostics/E420.md) | Diagnostic docs — embedded / scanned | Pending |
-| [`docs/diagnostics/README.md`](../../docs/diagnostics/README.md) | Diagnostic docs — embedded / scanned | Pending |
+| [`docs/diagnostics/E001.md`](../../docs/diagnostics/E001.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E002.md`](../../docs/diagnostics/E002.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E003.md`](../../docs/diagnostics/E003.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E004.md`](../../docs/diagnostics/E004.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E005.md`](../../docs/diagnostics/E005.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E006.md`](../../docs/diagnostics/E006.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E007.md`](../../docs/diagnostics/E007.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E008.md`](../../docs/diagnostics/E008.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E009.md`](../../docs/diagnostics/E009.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E010.md`](../../docs/diagnostics/E010.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E011.md`](../../docs/diagnostics/E011.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E012.md`](../../docs/diagnostics/E012.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E013.md`](../../docs/diagnostics/E013.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E014.md`](../../docs/diagnostics/E014.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E015.md`](../../docs/diagnostics/E015.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E016.md`](../../docs/diagnostics/E016.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E017.md`](../../docs/diagnostics/E017.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E018.md`](../../docs/diagnostics/E018.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E019.md`](../../docs/diagnostics/E019.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E020.md`](../../docs/diagnostics/E020.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E021.md`](../../docs/diagnostics/E021.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E022.md`](../../docs/diagnostics/E022.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E023.md`](../../docs/diagnostics/E023.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E024.md`](../../docs/diagnostics/E024.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E025.md`](../../docs/diagnostics/E025.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E026.md`](../../docs/diagnostics/E026.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E027.md`](../../docs/diagnostics/E027.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E028.md`](../../docs/diagnostics/E028.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E029.md`](../../docs/diagnostics/E029.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E030.md`](../../docs/diagnostics/E030.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E031.md`](../../docs/diagnostics/E031.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E032.md`](../../docs/diagnostics/E032.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E033.md`](../../docs/diagnostics/E033.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E034.md`](../../docs/diagnostics/E034.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E035.md`](../../docs/diagnostics/E035.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E036.md`](../../docs/diagnostics/E036.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E037.md`](../../docs/diagnostics/E037.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E038.md`](../../docs/diagnostics/E038.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E041.md`](../../docs/diagnostics/E041.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E042.md`](../../docs/diagnostics/E042.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E043.md`](../../docs/diagnostics/E043.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E044.md`](../../docs/diagnostics/E044.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E045.md`](../../docs/diagnostics/E045.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E046.md`](../../docs/diagnostics/E046.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E047.md`](../../docs/diagnostics/E047.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E048.md`](../../docs/diagnostics/E048.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E049.md`](../../docs/diagnostics/E049.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E050.md`](../../docs/diagnostics/E050.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E051.md`](../../docs/diagnostics/E051.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E052.md`](../../docs/diagnostics/E052.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E053.md`](../../docs/diagnostics/E053.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E054.md`](../../docs/diagnostics/E054.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E055.md`](../../docs/diagnostics/E055.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E056.md`](../../docs/diagnostics/E056.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E057.md`](../../docs/diagnostics/E057.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E058.md`](../../docs/diagnostics/E058.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E059.md`](../../docs/diagnostics/E059.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E060.md`](../../docs/diagnostics/E060.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E061.md`](../../docs/diagnostics/E061.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E062.md`](../../docs/diagnostics/E062.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E070.md`](../../docs/diagnostics/E070.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E071.md`](../../docs/diagnostics/E071.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E072.md`](../../docs/diagnostics/E072.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E073.md`](../../docs/diagnostics/E073.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E074.md`](../../docs/diagnostics/E074.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E075.md`](../../docs/diagnostics/E075.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E076.md`](../../docs/diagnostics/E076.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E077.md`](../../docs/diagnostics/E077.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E078.md`](../../docs/diagnostics/E078.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E080.md`](../../docs/diagnostics/E080.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E081.md`](../../docs/diagnostics/E081.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E082.md`](../../docs/diagnostics/E082.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E083.md`](../../docs/diagnostics/E083.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E084.md`](../../docs/diagnostics/E084.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E085.md`](../../docs/diagnostics/E085.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E086.md`](../../docs/diagnostics/E086.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E087.md`](../../docs/diagnostics/E087.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E088.md`](../../docs/diagnostics/E088.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E089.md`](../../docs/diagnostics/E089.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E090.md`](../../docs/diagnostics/E090.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E092.md`](../../docs/diagnostics/E092.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E093.md`](../../docs/diagnostics/E093.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E094.md`](../../docs/diagnostics/E094.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E095.md`](../../docs/diagnostics/E095.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E096.md`](../../docs/diagnostics/E096.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E097.md`](../../docs/diagnostics/E097.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E098.md`](../../docs/diagnostics/E098.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E099.md`](../../docs/diagnostics/E099.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E100.md`](../../docs/diagnostics/E100.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E101.md`](../../docs/diagnostics/E101.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E102.md`](../../docs/diagnostics/E102.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E103.md`](../../docs/diagnostics/E103.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E104.md`](../../docs/diagnostics/E104.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E109.md`](../../docs/diagnostics/E109.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E110.md`](../../docs/diagnostics/E110.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E111.md`](../../docs/diagnostics/E111.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E112.md`](../../docs/diagnostics/E112.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E113.md`](../../docs/diagnostics/E113.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E114.md`](../../docs/diagnostics/E114.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E116.md`](../../docs/diagnostics/E116.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E117.md`](../../docs/diagnostics/E117.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E118.md`](../../docs/diagnostics/E118.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E119.md`](../../docs/diagnostics/E119.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/E420.md`](../../docs/diagnostics/E420.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
+| [`docs/diagnostics/README.md`](../../docs/diagnostics/README.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
 | [`docs/fan-capture-ownership-review.md`](../../docs/fan-capture-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/fan-parallel-safety-review.md`](../../docs/fan-parallel-safety-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/grammar/README.md`](../../docs/grammar/README.md) | Handwritten documentation — consumer audit pending | Pending |
@@ -263,7 +269,7 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | [`docs/native-projection-ownership-review.md`](../../docs/native-projection-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/native-read-borrow-review.md`](../../docs/native-read-borrow-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/project/BENCHMARKS.md`](../../docs/project/BENCHMARKS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/BREAKING_CHANGE_POLICY.md`](../../docs/project/BREAKING_CHANGE_POLICY.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/project/BREAKING_CHANGE_POLICY.md`](../../docs/project/BREAKING_CHANGE_POLICY.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/project/CLAUDE_TEMPLATE.md`](../../docs/project/CLAUDE_TEMPLATE.md) | Agent instructions / embedded template | Pending |
 | [`docs/project/GENERATED-RUST-REVIEW.md`](../../docs/project/GENERATED-RUST-REVIEW.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/project/ISSUE-TAXONOMY.md`](../../docs/project/ISSUE-TAXONOMY.md) | Handwritten documentation — consumer audit pending | Pending |
@@ -566,7 +572,7 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | [`docs/wasm/WASM-OUTPUT.md`](../../docs/wasm/WASM-OUTPUT.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/wasm/capability-system.md`](../../docs/wasm/capability-system.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/written-in-almide.md`](../../docs/written-in-almide.md) | Reader guides — translated batches | Drafted in this PR |
-| [`examples/almd-outline/README.md`](../../examples/almd-outline/README.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`examples/almd-outline/README.md`](../../examples/almd-outline/README.md) | Reader guides — translated batches | Drafted in this PR |
 | [`proofs/COVERAGE.md`](../../proofs/COVERAGE.md) | Proof records — machine evidence | Pending |
 | [`proofs/DO330-GAP.md`](../../proofs/DO330-GAP.md) | Proof records — machine evidence | Pending |
 | [`proofs/FORMAL-CREDIT.md`](../../proofs/FORMAL-CREDIT.md) | Proof records — machine evidence | Pending |
@@ -591,9 +597,9 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | [`research/benchmark/stdlib/HANDOFF.md`](../../research/benchmark/stdlib/HANDOFF.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`research/benchmark/three-way/README.md`](../../research/benchmark/three-way/README.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`research/beyond-rust/README.md`](../../research/beyond-rust/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/fan-audit/probes/README.md`](../../research/fan-audit/probes/README.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`research/fan-audit/probes/README.md`](../../research/fan-audit/probes/README.md) | Reader guides — translated batches | Drafted in this PR |
 | [`research/grammar-lab/LESSONS.md`](../../research/grammar-lab/LESSONS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/README.md`](../../research/grammar-lab/README.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`research/grammar-lab/README.md`](../../research/grammar-lab/README.md) | Reader guides — translated batches | Drafted in this PR |
 | [`research/grammar-lab/REPORT.md`](../../research/grammar-lab/REPORT.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`research/grammar-lab/experiments/optional-handling/REPORT.md`](../../research/grammar-lab/experiments/optional-handling/REPORT.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`research/grammar-lab/prompts/layer1_rules.md`](../../research/grammar-lab/prompts/layer1_rules.md) | Handwritten documentation — consumer audit pending | Pending |
@@ -611,5 +617,5 @@ The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. 
 | [`spec/churn/README.md`](../../spec/churn/README.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`spec/gauntlet/README.md`](../../spec/gauntlet/README.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`stdlib/README.md`](../../stdlib/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`tools/claude-plugin/README.md`](../../tools/claude-plugin/README.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`tools/claude-plugin/README.md`](../../tools/claude-plugin/README.md) | Reader guides — translated batches | Drafted in this PR |
 | [`tools/xtarget-fuzz/README.md`](../../tools/xtarget-fuzz/README.md) | Handwritten documentation — consumer audit pending | Pending |

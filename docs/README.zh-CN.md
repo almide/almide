@@ -35,3 +35,5 @@
 MSR（modification survival rate）位于 [almide-dojo](https://github.com/almide/almide-dojo)，而非这里；本仓库关注编译器的正确性。
 
 [翻译进度与逐文件范围](./project/TRANSLATION-INVENTORY.md).
+
+诊断代码阅读译文: [日本語](./translations/ja/diagnostics/README.md) · [简体中文](./translations/zh-CN/diagnostics/README.md).

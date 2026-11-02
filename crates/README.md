@@ -1,5 +1,7 @@
 # Almide Workspace Crates
 
+[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+
 > Updated 2026-10-31. This is a navigation map, not an exhaustive dependency
 > graph or a size/performance measurement. [Cargo.toml](../Cargo.toml) and each
 > crate's manifest are the authoritative workspace and dependency inventories.

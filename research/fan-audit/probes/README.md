@@ -1,5 +1,7 @@
 # Fan semantics audit probes
 
+[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+
 The programs behind every "probe" citation in
 [docs/design/fan-semantics-audit.md](../../../docs/design/fan-semantics-audit.md),
 pinned at 0746eb689. Run them from the repository root on both targets:

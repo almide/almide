@@ -35,3 +35,5 @@
 MSR（modification survival rate）の管理先は、ここではなく [almide-dojo](https://github.com/almide/almide-dojo) です。このリポジトリはコンパイラの正しさを扱います。
 
 [翻訳の進捗とファイル別の対象範囲](./project/TRANSLATION-INVENTORY.md).
+
+診断コードの読者向け翻訳: [日本語](./translations/ja/diagnostics/README.md) · [简体中文](./translations/zh-CN/diagnostics/README.md).

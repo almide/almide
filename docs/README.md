@@ -41,3 +41,5 @@ MSR (modification survival rate) lives in
 compiler correctness.
 
 [Translation progress and file-by-file scope](./project/TRANSLATION-INVENTORY.md).
+
+Diagnostic reading translations: [日本語](./translations/ja/diagnostics/README.md) · [简体中文](./translations/zh-CN/diagnostics/README.md).
