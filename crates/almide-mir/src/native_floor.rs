@@ -1237,6 +1237,82 @@ fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
 }
 
 /// The names the native header defines for a floor body.
+/// Is `text` a runtime item (the floor header or an item of the embedded
+/// runtime the floor takes along)? The render places these in the program's
+/// runtime part (`render_native::RT_MOD`), which the build compiles as its
+/// own crate with the runtime's profile (owner ruling 2026-11-02).
+pub(crate) fn is_runtime_text(text: &str) -> bool {
+    static TEXTS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+    text == FLOOR_HEADER || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
+}
+
+/// `text` with every top-level item it opens made `pub` (a fn, const,
+/// static, type, trait or module that is not already): the runtime part is a
+/// module, or a crate of its own, that the program reaches through a glob.
+pub(crate) fn pub_items(text: &str) -> String {
+    let toks = lex(text);
+    // (offset, length replaced, replacement)
+    let mut edits: Vec<(usize, usize, &str)> = Vec::new();
+    let mut i = 0;
+    let mut expect_item = true;
+    let mut nested = false;
+    while i < toks.len() {
+        let t = &toks[i];
+        if t.depth != 0 {
+            nested = true;
+            i += 1;
+            continue;
+        }
+        if nested {
+            // Back at depth 0 after an item's braces: the next item.
+            nested = false;
+            expect_item = true;
+        }
+        if t.text == "#" {
+            // An attribute: skip to its closing bracket.
+            let mut j = i + 1;
+            let mut brackets = 0i32;
+            while j < toks.len() {
+                match toks[j].text {
+                    "[" => brackets += 1,
+                    "]" => {
+                        brackets -= 1;
+                        if brackets == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            i = j + 1;
+            continue;
+        }
+        if expect_item {
+            expect_item = false;
+            if t.text == "pub" && toks.get(i + 1).is_some_and(|n| n.text == "(") {
+                // `pub(crate)` / `pub(super)`: visible from the program too.
+                if let Some(close) = toks[i + 1..].iter().find(|n| n.text == ")") {
+                    edits.push((t.off, close.off + 1 - t.off, "pub"));
+                }
+            } else if matches!(t.text, "fn" | "const" | "static" | "struct" | "enum" | "type" | "trait" | "mod" | "union" | "unsafe" | "use")
+                && !(t.text == "unsafe" && toks.get(i + 1).is_some_and(|n| n.text == "impl"))
+            {
+                edits.push((t.off, 0, "pub "));
+            }
+        }
+        if t.text == ";" {
+            expect_item = true;
+        }
+        i += 1;
+    }
+    let mut out = text.to_string();
+    for (off, len, rep) in edits.into_iter().rev() {
+        out.replace_range(off..off + len, rep);
+    }
+    out
+}
+
 fn header_items() -> &'static BTreeSet<&'static str> {
     static H: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
     H.get_or_init(|| {
