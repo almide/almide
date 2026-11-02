@@ -387,6 +387,9 @@ impl<'a> Interpreter<'a> {
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
+        if let Some(flow) = self.state_stub_floor(module.as_str(), func.as_str(), &args) {
+            return flow;
+        }
         // #2185: the self-hosted body — the SAME source the wasm leg links for
         // this call name, and the definition the native leg compiles — is
         // consulted FIRST, so the third vote is the linked body's, not a

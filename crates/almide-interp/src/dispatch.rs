@@ -219,9 +219,17 @@ impl<'a> Interpreter<'a> {
     /// sibling (`env.__set` inside `env.set`) already resolves through
     /// `own_module_sibling` and the interp's own intrinsic evaluation, which
     /// must stay the interp's vote rather than the module bridge's copy.
+    /// A program-loaded stdlib module whose lowering dropped its stubs (the
+    /// wasm leg's) has no entry for the name at all; its own source's
+    /// declaration decides there, the same way.
     pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
-        let module = self.cur_bundled.get()?;
-        crate::stdlib_pool::bundled_stub(module, name).then_some(module)
+        if let Some(module) = self.cur_bundled.get() {
+            return crate::stdlib_pool::bundled_stub(module, name).then_some(module);
+        }
+        let space = (self.cur_space.get() as usize).checked_sub(1)?;
+        let owner = self.program.modules.get(space)?.name;
+        let dropped = !self.module_fns.contains_key(&(owner, name));
+        (dropped && crate::stdlib_pool::declared_stub(owner, name)).then_some(owner)
     }
 
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
