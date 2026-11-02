@@ -114,6 +114,7 @@ Proof.
       apply Z.leb_gt in E.
       assert (Eg : (r + k <=? 0) = false) by (apply Z.leb_gt; lia).
       rewrite Eg. apply IH; auto.
+    + (* ShareOut — +0, no guard: shift-invariant. *) apply IH; auto.
 Qed.
 
 (* An abstract caller line: plain ops, plus call sites carrying their mode. *)
@@ -163,6 +164,7 @@ Proof.
       apply IHHF; [lia | exact Hex].
     + destruct (r <=? 0) eqn:E; [discriminate|]. apply Z.leb_gt in E.
       apply IHHF; [lia | exact Hex].
+    + apply IHHF; [lia | exact Hex].
   - (* call site: split the mode *)
     unfold param_stream_ok in H. apply andb_prop in H. destruct H as [Hnr Hend].
     destruct (exec body (minit m)) as [z |] eqn:Eb; [| discriminate].

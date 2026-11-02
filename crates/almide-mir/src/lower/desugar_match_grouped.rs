@@ -333,7 +333,7 @@ fn group_option_result_arms(
                         })
                         .collect(),
                 },
-                ty: Ty::Tuple(field_tys.clone()),
+                ty: Ty::Tuple(field_tys.clone().into()),
                 span: subject.span.clone(),
                 def_id: None,
             }

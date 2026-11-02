@@ -36,7 +36,7 @@ impl Emitter<'_> {
         self.load_ty_slot(elem, 0);
         // The element handle inside the Option block takes +1
         // (leak-not-dangle until the Option's typed drop, stage 2c).
-        self.share_handle_top(elem);
+        self.arm_share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         self.release_i32();
@@ -336,7 +336,7 @@ impl Emitter<'_> {
         };
         // The pushed element is a COPY of the source's handle: the result
         // takes its share (#2010).
-        self.share_handle_top(elem);
+        self.arm_share_handle_top(elem);
         self.f.instructions().call(push).local_set(hacc);
         self.f.instructions().end();
         self.hof_step(ih);

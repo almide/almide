@@ -1,0 +1,9 @@
+// #4277 drill: `ys[0] = "y"` releases a value loaded out of the new value's
+// block instead of the list slot it replaces. The witness is unchanged; the
+// release is element-shaped but no store replaces the slot it read, so the
+// RC byte check must refuse it.
+effect fn main() -> Unit = {
+  var ys = ["a", "b"]
+  ys[0] = "y"
+  println(ys[0])
+}

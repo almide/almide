@@ -143,15 +143,15 @@ fn main() -> Unit = {
 10.0
 ```
 
-### `float.sign(n: Float) -> Float`
+### `float.signum(n: Float) -> Float`
 
 Return the sign of a float as 1.0 or -1.0, decided by the sign BIT (f64
-`signum`): `sign(0.0)` is 1.0 and `sign(-0.0)` is -1.0. A NaN input returns
-NaN. It never returns 0.0.
+`signum`): `signum(0.0)` is 1.0 and `signum(-0.0)` is -1.0. A NaN input returns
+NaN. It never returns 0.0. `float.sign` is a deprecated alias.
 
 ```almd run
 fn main() -> Unit = {
-  println(float.to_string(float.sign(-3.5)))
+  println(float.to_string(float.signum(-3.5)))
 }
 ```
 ```output
@@ -186,7 +186,7 @@ true
 
 ### `float.to_bits(f: Float) -> Int`
 
-Reinterpret a float as its IEEE 754 bit representation (i64).
+Return the IEEE 754 binary64 bit representation as Int; every NaN is canonicalized.
 
 ```almd run
 fn main() -> Unit = {

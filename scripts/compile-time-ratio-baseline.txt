@@ -35,5 +35,19 @@
 # modules, transitively. The check row keeps its anchor: the front end still
 # loads a reached module whole (the native leg emits a loaded module whole,
 # so its closure must be too), and this tree reads inside its band.
+#
+# Re-anchored the wasm row on CI's own readings (2026-10-30). The gate runs on
+# the GitHub runner, which reads ~15% above the pinned GCE core (check: 4.745
+# on CI vs 4.13 on GCE for the same tree), so the GCE 7.2 left ~3% headroom and
+# a ledger-only commit read over the ceiling. The four Perf ratchet readings
+# since #4317 landed (min of 3 each):
+#
+#   develop 3007c3fa5 (#4327's merge)        8.381
+#   main 3184b4570 (#4286)                   8.497
+#   post-rc1-fixes eb8ddc30e                 8.179
+#   post-rc1-fixes ab5ea7369 (ledger row only)  8.892
+#
+# Anchor at their median, 8.44; the ceiling (+20%) is 10.13, and the #4317
+# slowdown (22.4 on GCE, ~26 on CI) stays far over it.
 check 4.63
-wasm 7.2
+wasm 8.44

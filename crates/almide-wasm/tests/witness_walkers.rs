@@ -78,7 +78,9 @@ fn io_walkers_witness_each_line_and_carrier() {
         assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
     }
     // A compound fallible body is a closure called per line.
-    assert_eq!(w["compound"], "ibd\nid\n\n\n{iamd|id}\n\n{x|}{idx|}im\n{id|im}\n{|im}\n");
+    // B1 (#4278) logs the fallible fold's own scratch releases after the
+    // walk as two `id` events (6f905ed9d and one later B1 commit).
+    assert_eq!(w["compound"], "ibd\nid\n\n\n{iamd|id}\n\n{x|}{idx|}im\nid\nid\n{id|im}\n{|im}\n");
     assert!(accepted(&w["compound"]));
     // Drill: the line's share kept instead of handed to the callee.
     let leak = w["compound"].replacen("{iamd|id}", "{iad|id}", 1);

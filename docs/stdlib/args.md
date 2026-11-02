@@ -37,7 +37,7 @@ effect fn main() -> Unit = {
 
 ### `args.positional(options: List[String]) -> List[String]`
 
-Arguments that are not flags, with argv[0] dropped, followed by every argument
+Arguments from `env.args()` (which already excludes argv[0]) that are not flags, followed by every argument
 after `--`. `options` names every option the program reads with `args.option`:
 the argument after `--name` is that option's value, not a positional, so
 `--out report.txt input.txt` with `["out"]` gives `["input.txt"]`. Pass `[]`

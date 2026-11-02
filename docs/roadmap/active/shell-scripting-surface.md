@@ -45,25 +45,30 @@
 **20ms は python3 と同クラスで、スクリプト言語として完全に実用域にある。**
 これが本項の前提で、以降の判断はすべてこの数字に乗っている。
 
-### 既にある材料
+### 既にある材料（API 名は現行リファレンスに追従、上の時間計測は 2026-09-12 の記録）
 
-- `|>` と `list` の 66 関数 — `map` / `filter` / `fold` / `sort_by` / `group_by` /
+- `|>` と [`list`](../../stdlib/list.md) の操作群 — `map` / `filter` / `fold` / `sort_by` / `group_by` /
   `partition` / `window` / `unique_by` / `take_while`。Nushell の
   `each` / `where` / `reduce` / `sort-by` / `group-by` は概ね対応物がある
 - コールバックが `!` を含めば**そのまま fallible 形に切り替わる**（ADR-0006、#1041 で解決済）。
   effect を含むパイプラインが `var` + `for` に落ちない
-- `process.*`: `exec` / `exec_in` / `exec_with_stdin` / `exec_status` /
-  `exec_status_timeout`(#1040 で着地) / `spawn` / `kill` / `is_alive` / `stdin_lines`
+- [`process.*`](../../stdlib/process.md): `exec` / `output` / `run`、
+  `ProcessCommand` の `dir` / `stdin` / `timeout_ms`、および native の
+  `start` / `poll` / `wait` / `stop` / `read_new_stdout` / `read_new_stderr`。
+  旧 `exec_in` / `exec_with_stdin` / `exec_status` / `spawn` の名前は使わない
 - `fs.*`: `glob`（マッチャの穴は #1805 で解消）/ `walk` / `stat` / `list_dir` / `fold_lines` / `read_lines`
-- `io.*`: `read_all` / `read_line` / `read_n_bytes` / `write`
+- `io.*`: `read_all` / `read_line` / `read(io.stdin()!, n)!` / `read_exact` / `write`
 - shebang: `#!/usr/bin/env -S almide run`（`spec/cli/shebang.almd`）
 - REPL: サブコマンド無しの `almide`（`src/cli/repl.rs`）
 - 行そのものが既に名前付きレコードで返る —
   `FileStat { size, is_dir, is_file, modified }`、`ProcessStatus { code, stdout, stderr }`
 
-**bash の三大事故はすでに構造的に潰れている**: `process.exec(cmd, args)` は引数がリストなので
-word splitting が起きず、クォート事故の余地がない。`Result` 返しと E042 により終了ステータスの
-握り潰しがコンパイルエラーになる。ここは追加実装なしに勝っている。
+`process.exec(cmd, args)` は argv リストを渡すため、シェル文字列としての word splitting や
+展開は行わない（利用者が明示的に `sh -c` 等を起動する場合は別）。`Result` と E042 は
+エラー結果の処理を要求するが、子プロセスの終了コードを必ず検査させる保証ではない。
+`exec` は非ゼロ終了を `err` にする一方、`output` は非ゼロでも
+`ok(ProcessStatus { code, stdout, stderr })` を返し、`run` も終了コードを返すため、
+それらのコード値は呼び出し側が検査する。
 
 ### 無いもの
 
@@ -82,7 +87,7 @@ word splitting が起きず、クォート事故の余地がない。`Result` �
 **検査済みの失敗を実行時の失敗に差し替える**ことに等しい。列名の打ち間違いがコンパイル時に
 落ちなくなる — MSR を上げるどころか、LLM が最も犯しやすい種類の誤りを黙らせる方向である。
 
-そして Almide には既に正解が明文化されている。[CHEATSHEET.md](../CHEATSHEET.md) §JSON & the wire:
+そして Almide には既に正解が明文化されている。[CHEATSHEET.md](../../CHEATSHEET.md) §JSON & the wire:
 
 > Typed Codec is the default path for ALL JSON work. The dynamic `json.*` API
 > is for exploration and schemaless passthrough only — if you know the shape, declare a type.
@@ -132,7 +137,7 @@ table.print_with(rows, cols) // 列を選ぶ
 MSR 上の意味は見た目ではない。これが無いと **LLM は毎回ハンドロールのパディングループを書く** —
 桁計算と全角幅の扱いを含む、修正に対して極めて脆いコードである。族ごと消す。
 
-`stdlib/` 追加の手順は [CLAUDE.md](../../CLAUDE.md) の Testing Rules に従う
+`stdlib/` 追加の手順は [CLAUDE.md](../../../CLAUDE.md) の Testing Rules に従う
 （self_host_registry 登録、`spec/stdlib/` のテスト、3-way oracle のブリッジ）。
 
 ### Phase 2 — REPL を `almide-interp` に載せ替える
@@ -163,7 +168,8 @@ text.columns(s) -> List[List[String]]                   // JSON を話さない�
 
 ### Phase 4 — 遅延パイプライン合成（保留）
 
-`A | B` のストリーミング。`exec_with_stdin` はあるが遅延合成が無く、大きな中間出力が
+`A | B` のストリーミング。`ProcessCommand.stdin` で入力文字列は渡せるが、
+それだけでプロセス間の遅延パイプライン合成にはならず、大きな中間出力が
 メモリに載る。このリポジトリのゲート移植では一度も必要にならなかった（Unit 0.46 の記録）ので、
 本項も需要が出るまで着手しない。大きな中間出力を扱う実例が一つ出たら起こす。
 
@@ -180,7 +186,7 @@ text.columns(s) -> List[List[String]]                   // JSON を話さない�
 - `table` が stdlib にあり、`spec/stdlib/` のテストと 3-way oracle のブリッジを持つ。
 - REPL が rustc/cargo を一切経由せず、行編集（履歴・補完・複数行）を持つ。
 - `exec` した外部コマンドの JSON 出力が**一手で**型付きレコードになる。
-- 上記を使った実寸のスクリプト例が [CHEATSHEET.md](../CHEATSHEET.md) に
+- 上記を使った実寸のスクリプト例が [CHEATSHEET.md](../../CHEATSHEET.md) に
   ```` ```almide check ```` 付きで載っている（#1483 の規則により、載せた時点で約束になる）。
 
 ## Risks

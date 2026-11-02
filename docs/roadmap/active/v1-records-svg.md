@@ -1,5 +1,18 @@
-<!-- description: Goal prompt: take the records feature to full coverage against the svg package -->
+<!-- description: Historical records/svg campaign, final measured outcome and native-fallback exception -->
 # v1 — records feature: svg FULL CONQUEST (goal prompt)
+
+## Historical records campaign; read through Status 6
+
+The opening goal and intermediate “remaining” lists are the campaign's
+chronology. **Status 6** records the completed records-rendering work and its
+measured tests; earlier suspected map leaks were later re-diagnosed as record
+argument ownership bugs. Keep those corrections together.
+
+The recorded outcome is narrower than the original all-files-via-Wasm goal:
+`path.almd` still used the native fallback in that run. This is not a new test
+of the external svg repository, nor a claim that the original all-Wasm goal
+was met without that exception. Old branch/local-path commands below are
+historical instructions, not a current runbook.
 
 ## BIG-PICTURE GOAL
 

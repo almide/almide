@@ -1,6 +1,18 @@
 <!-- description: Self-host linking v2 — retire the shim registry's per-type twins by linking the monomorphized generic bodies the renderer already produces -->
 # Self-host linking v2 — link the mono instances, retire the twin matrix
 
+## Proposal scope and historical measurements
+
+This remains a linking-unification proposal, not a completion report. The
+#1154 observation and the callee/call counts below are its motivating
+snapshot; no new full-corpus census is claimed. Host effects are not all
+native-only: the embedded Wasm host serves supported fs/process/http
+operations, with per-operation walls in
+[target availability](../../../proofs/target-availability.toml).
+That does not remove the proposal's genuine registry/twin and monomorphized
+body-linking questions. The older machinery narrative is
+[v1-selfhost-machinery.md](v1-selfhost-machinery.md).
+
 Successor design to the shim era recorded in [[v1-selfhost-machinery]]. That
 campaign self-hosted the stdlib onto the wasm leg by hand-writing
 splice-context `.almd` shims over the prim floor and linking them by NAME
@@ -140,7 +152,7 @@ Consequences, in order of value:
 
 ## Relations — three adjacent recreates, three altitudes
 
-- **[[closure-architecture-v2]]** (exists) owns the closure REPRESENTATION
+- **[Closure Architecture v2](../done/closure-architecture-v2.md)** (completed) owns the closure REPRESENTATION
   layer: one identity, one capture-set, `lift_lambda`'s decline classes.
   The #1134 family-1 walls (fallible_hof/fallible_lambda baseline entries)
   live THERE — a bundled generic body links fine today when its lambda

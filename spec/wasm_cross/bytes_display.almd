@@ -1,0 +1,25 @@
+// @contract: C-444
+// A Bytes value nested in a rendered value prints as the list of its byte
+// values: inside an Option, a Result, a list, a tuple, a record and a variant payload, empty, with
+// bytes above 127, and inside the operands of a failing assert_eq. (At the top
+// of an interpolation a Bytes has no string form: E089.) Both legs print the
+// same bytes.
+type Frame = { tag: String, payload: Bytes }
+
+type Msg =
+  | Data(Bytes)
+  | Empty
+
+fn main() -> Unit = {
+  let b = bytes.from_string("ab")
+  let hi = bytes.from_list([0, 127, 128, 255])
+  let none_b: Bytes? = none
+  println("${[b]} ${[bytes.from_string("")]} ${[hi]}")
+  println("${some(b)} ${none_b}")
+  let r: Result[Bytes, String] = ok(b)
+  println("${r}")
+  println("${[b, hi]} ${(b, 1)}")
+  println("${Frame { tag: "x", payload: hi }} ${Data(b)}")
+  let r2: Result[Bytes, String] = ok(hi)
+  assert_eq(r, r2)
+}

@@ -1,4 +1,4 @@
-> Last updated: 2026-09-24
+> Last updated: 2026-10-31
 
 # Type System Specification
 
@@ -8,7 +8,11 @@ Almide uses a constraint-based type system with bidirectional inference, structu
 
 ## 1. Primitive Types
 
-Seven built-in primitive types. Each has kind `*` (concrete, zero type parameters).
+The core built-in types below have kind `*` (concrete, zero type parameters).
+Sized numeric types (`Int8` / `Int16` / `Int32` / `Int64`, `UInt8` / `UInt16` /
+`UInt32` / `UInt64`, `Float32` / `Float64`) are also built in; see
+`spec/lang/sized_numeric_types_test.almd` and the corresponding
+[stdlib references](../stdlib/README.md).
 
 | Type     | Description                | Eq  | Hash | Ord |
 |----------|----------------------------|-----|------|-----|
@@ -255,7 +259,7 @@ test "record-payload construction and matching" {
 Variant types can reference themselves. The type checker uses cycle detection to prevent infinite loops in Eq/Hash checks.
 
 ```almide
-type Tree[T] = | Leaf(T) | Node(T, List[T])
+type Tree[T] = | Leaf(T) | Node(T, List[Tree[T]])
 ```
 
 ### Inline Variants (No Leading Pipe)
@@ -285,7 +289,7 @@ test "function values" {
 }
 ```
 
-Internally represented as `Ty::Fn { params: Vec<Ty>, ret: Box<Ty> }`.
+Internally represented as `Ty::Fn { params: Vec<Ty>, ret: Box<Ty>, is_effect: bool }`.
 
 Function types are never Eq and never hashable.
 
@@ -494,7 +498,8 @@ protocol Showable {
 
 ### Declaring Conformance
 
-Two ways to declare that a type implements a protocol:
+Declare conformance on the type and supply the required convention methods
+(or use derivation for a derivable built-in protocol):
 
 **Convention methods** (the only mechanism — `impl` blocks were removed):
 
@@ -519,7 +524,7 @@ Convention methods register as `Type.method` in the function environment.
 |----------|---------|-------|
 | `Eq`     | `fn eq(a: Self, b: Self) -> Bool` | All value types are Eq except `Fn`. Auto-derived. |
 | `Repr`   | `fn repr(v: Self) -> String` | String representation. |
-| `Ord`    | `fn cmp(a: Self, b: Self) -> Int` | Ordering (-1, 0, 1). Not auto-derived — write `fn T.cmp(a: T, b: T) -> Int`. The `<` / `>` operators stay Int/Float/String/Bool only; call `a.cmp(b)`. |
+| `Ord`    | `fn cmp(a: Self, b: Self) -> Int` | Ordering (-1, 0, 1). Derivable with `type T: Ord = ...` when the fields satisfy the ordering requirements; see `spec/wasm_cross/ord_recursive.almd`. Convention methods may also implement the protocol. See [ALS-C9](als/collections.md#als-c9-順序系コンビネータの全域性) for ordering combinators. |
 | `Hash`   | `fn hash(v: Self) -> Int` | Hash code. No `Float`, `Fn`, or `Map`. |
 | `Codec`  | `fn encode(v: Self) -> Value`, `fn decode(v: Value) -> Result[Self, String]` | Serialization. A record type also derives `fn decode_strict(v: Value) -> Result[Self, String]`, which refuses a key outside its decoded fields (C-429); a field may carry `@skip` / `@skip_decode` (C-428). |
 
@@ -659,15 +664,26 @@ Tests: `spec/lang/type_alias_test.almd`
 
 ---
 
-## 12. Union Types
+## 12. Tagged Variants and Internal Union Types
 
-Inline union types represent a value that can be one of several types:
+For a public type carrying either an integer or a string, declare explicit
+payload-bearing variant cases:
 
 ```almide
-type StringOrInt = Int | String
+type StringOrInt = IntValue(Int) | StringValue(String)
+
+fn render(value: StringOrInt) -> String = match value {
+  IntValue(n) => int.to_string(n),
+  StringValue(s) => s,
+}
 ```
 
-Internally, `Ty::Union(Vec<Ty>)` stores members sorted and deduplicated. The `Ty::union()` constructor flattens nested unions and deduplicates:
+`type StringOrInt = Int | String` does **not** declare an untagged integer-or-string
+payload type: the parser interprets a declaration whose alternatives are all
+uppercase simple names as a variant with two **unit cases** named `Int` and
+`String`. Use the explicit constructors above for payloads.
+
+Separately, the compiler's internal `Ty::Union(Vec<Ty>)` stores members sorted and deduplicated. The `Ty::union()` constructor flattens nested unions and deduplicates:
 
 - `Ty::union([Int, String, Int])` produces `Ty::Union([Int, String])`
 - `Ty::union([Int])` produces `Ty::Int` (single member unwrapped)
@@ -705,7 +721,7 @@ Source (.almd)
 
 ### Key Data Structures
 
-- **`Ty` enum** (`crates/almide-types/src/types/mod.rs`): Internal type representation. 17 variants covering all types.
+- **`Ty` enum** (`crates/almide-types/src/types/mod.rs`): Internal type representation; the enum is the authoritative inventory, including sized numeric types, function effect flags, and compile-time constant parameters.
 - **`TypeEnv`** (`crates/almide-frontend/src/type_env.rs`): The type environment. Holds type declarations, function signatures, scopes, protocol definitions, and conformance tracking.
 - **`FnSig`** (`crates/almide-types/src/types/mod.rs`): Function signature with params, return type, generics, structural bounds, and protocol bounds.
 - **`TypeConstructorId`** (`crates/almide-types/src/types/constructor.rs`): Identifies type constructors (List, Option, Result, Map, Set, user-defined). Used by the `Applied` variant of `Ty`.

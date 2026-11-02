@@ -176,6 +176,11 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
 fn resolve_inference_typevars(program: &mut IrProgram) {
     use crate::types::Ty;
     fn resolve_ty(ty: &mut Ty) {
+        // Nothing to erase in a subtree with no variable: skipped from its
+        // cache, so a shared subtree is not copied (ADR-0030 D5).
+        if !ty.has_infer_var() {
+            return;
+        }
         match ty {
             Ty::TypeVar(name) if name.starts_with('?') => *ty = Ty::Unknown,
             Ty::Applied(_, args) => { for a in args { resolve_ty(a); } }

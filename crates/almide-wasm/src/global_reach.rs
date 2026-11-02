@@ -206,6 +206,9 @@ impl Emitter<'_> {
             i.global_get(gidx).call(dec);
             i.local_get(h).global_set(gidx);
             self.release_i32();
+            // The global's old block released, the copy its new credit: a
+            // rebind of the global holder (`o`, witness_mut.rs).
+            self.witness_mut_rebind(id, true);
             return Ok(());
         }
         let mut leaf = gty;

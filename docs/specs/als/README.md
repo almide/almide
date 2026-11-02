@@ -45,7 +45,7 @@
 | [ALS-D4](./data-formats.md#als-d4-正規表現エンジン) | 正規表現エンジン | C-032, C-160, C-285, C-347, C-395 |
 | [ALS-D5](./data-formats.md#als-d5-半精度浮動小数のデコード) | 半精度浮動小数のデコード | C-037 |
 | [ALS-D6](./data-formats.md#als-d6-codec-と-json-デコード) | Codec と JSON デコード | C-084, C-085, C-095, C-098, C-103, C-209, C-211, C-216, C-217, C-357, C-427, C-428, C-429, C-435 |
-| [ALS-D7](./data-formats.md#als-d7-バイト列ブリッジ) | バイト列ブリッジ | C-062, C-090, C-376 |
+| [ALS-D7](./data-formats.md#als-d7-バイト列ブリッジ) | バイト列ブリッジ | C-062, C-090, C-376, C-446 |
 
 ## deterministic-time.md — 5 section(s)
 
@@ -75,7 +75,7 @@
 | [ALS-E13](./expressions.md#als-e13-条件式exprkindif) | 条件式(`ExprKind::If`) | C-242 |
 | [ALS-E14](./expressions.md#als-e14-ブロック式exprkindblock) | ブロック式(`ExprKind::Block`) | C-243 |
 | [ALS-E15](./expressions.md#als-e15-while-文exprkindwhile) | while 文(`ExprKind::While`) | C-244 |
-| [ALS-E16](./expressions.md#als-e16-文字列補間exprkindinterpolatedstring) | 文字列補間(`ExprKind::InterpolatedString`) | C-245, C-425 |
+| [ALS-E16](./expressions.md#als-e16-文字列補間exprkindinterpolatedstring) | 文字列補間(`ExprKind::InterpolatedString`) | C-245, C-425, C-444 |
 | [ALS-E17](./expressions.md#als-e17-識別子exprkindident) | 識別子(`ExprKind::Ident`) | C-246, C-387 |
 | [ALS-E18](./expressions.md#als-e18-match-式exprkindmatch) | match 式(`ExprKind::Match`) | C-247, C-281, C-323, C-332, C-333, C-352 |
 | [ALS-E19](./expressions.md#als-e19-for-in-文exprkindforin) | for-in 文(`ExprKind::ForIn`) | C-248, C-279 |
@@ -101,13 +101,14 @@
 | [ALS-E30](./expressions.md#als-e30-ホールと未実装マーカーexprkindhole--todo--placeholder) | ホールと未実装マーカー(`ExprKind::Hole` / `Todo` / `Placeholder`) | C-268 |
 | [ALS-E31](./expressions.md#als-e31-スコープ付き領域exprkindscoped--scoped-fn) | スコープ付き領域(`ExprKind::Scoped` / `scoped fn`) | C-362, C-363, C-364 |
 
-## implementation.md — 3 section(s)
+## implementation.md — 4 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
 | [ALS-I1](./implementation.md#als-i1-参照カウント規律（perceus）) | 参照カウント規律（Perceus） | C-041, C-066, C-071, C-086, C-121, C-122, C-130, C-149, C-146, C-159, C-319, C-334 |
 | [ALS-I2](./implementation.md#als-i2-コンパイラの決定性と資源) | コンパイラの決定性と資源 | C-040, C-059 |
 | [ALS-I3](./implementation.md#als-i3-v1-lowering-エッジの等価証拠) | v1 lowering エッジの等価証拠 | C-075, C-107, C-109, C-116, C-120, C-138, C-152, C-143, C-144, C-139, C-156, C-157, C-158, C-212, C-336 |
+| [ALS-I4](./implementation.md#als-i4-コンパイルコストの予算) | コンパイルコストの予算 | C-440 |
 
 ## runtime.md — 9 section(s)
 
@@ -117,7 +118,7 @@
 | [ALS-R2](./runtime.md#als-r2-補間の表示形) | 補間の表示形 | C-008, C-009, C-010, C-011, C-222 |
 | [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349, C-386 |
 | [ALS-R4](./runtime.md#als-r4-非有限浮動小数の定数表示) | 非有限浮動小数の定数表示 | C-012 |
-| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385, C-389, C-390, C-394, C-404, C-405, C-407, C-408, C-409, C-415, C-416, C-417, C-418, C-420, C-421, C-431, C-434, C-437, C-438, C-439 |
+| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385, C-389, C-390, C-394, C-404, C-405, C-407, C-408, C-409, C-415, C-416, C-417, C-418, C-420, C-421, C-431, C-434, C-437, C-438, C-439, C-441, C-442, C-443, C-445, C-447, C-448 |
 | [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284, C-392, C-393, C-396, C-397, C-398 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
 | [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368, C-406, C-432, C-436 |
@@ -190,4 +191,4 @@
 | [ALS-T30](./text-and-numbers.md#als-t30-testingassert_aborts-—-子で走る-abort-表明) | testing.assert_aborts — 子で走る abort 表明 | C-384 |
 | [ALS-T31](./text-and-numbers.md#als-t31-hmac-と定数時間比較) | HMAC と定数時間比較 | C-422, C-423 |
 
-137 sections across 11 chapters.
+138 sections across 11 chapters.

@@ -1,7 +1,7 @@
 //! Decoding the shipped module: every defined function's instructions, with
 //! the control depth and store-address provenance the checks read.
 
-use wasmparser::{Operator as Op, Parser, ValidPayload, Validator, WasmFeatures};
+use wasmparser::{FuncToValidate, FunctionBody, Operator as Op, Parser, ValidPayload, Validator, ValidatorResources, WasmFeatures};
 
 /// One defined function's instructions, as the checker needs them.
 pub struct Body<'a> {
@@ -11,6 +11,10 @@ pub struct Body<'a> {
     /// For a store: the instruction that pushed its address operand, when
     /// the provenance walk knows it.
     pub addr: Vec<Option<usize>>,
+    /// For every instruction, the instruction that pushed each operand it
+    /// pops, bottom first, when the provenance walk knows it (operands.rs
+    /// rebuilds a value's expression from these).
+    pub args: Vec<Vec<Option<usize>>>,
 }
 
 /// Every defined function of `bytes`, validated, in position order.
@@ -20,59 +24,98 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| e.to_string())?;
         if let ValidPayload::Func(func, body) = v.payload(&payload).map_err(|e| e.to_string())? {
-            let mut fv = func.into_validator(Default::default());
-            let mut br = body.get_binary_reader();
-            fv.read_locals(&mut br).map_err(|e| e.to_string())?;
-            let mut r = wasmparser::OperatorsReader::new(br);
-            let (mut ops, mut depth, mut addr) = (Vec::new(), Vec::new(), Vec::new());
-            let mut shadow: Vec<Option<usize>> = Vec::new();
-            let mut d = 0u32;
-            while !r.eof() {
-                let off = r.original_position();
-                let op = r.read().map_err(|e| e.to_string())?;
-                let i = ops.len();
-                let pre = fv.operand_stack_height() as usize;
-                let arity = op.operator_arity(&fv);
-                addr.push(if store_width(&op).is_some() && pre >= 2 {
-                    shadow.get(pre - 2).copied().flatten()
-                } else {
-                    None
-                });
-                depth.push(d);
-                fv.op(off, &op).map_err(|e| e.to_string())?;
-                let post = fv.operand_stack_height() as usize;
-                match arity {
-                    Some((k, m)) if pre >= k as usize => {
-                        let keep = (pre - k as usize).min(post);
-                        shadow.truncate(keep);
-                        // Pushed by this instruction (or, past a polymorphic
-                        // stack, re-derived by it): its own.
-                        while shadow.len() < post {
-                            shadow.push(Some(i));
-                        }
-                        let _ = m;
-                    }
-                    _ => {
-                        shadow.iter_mut().for_each(|s| *s = None);
-                        shadow.truncate(post);
-                        while shadow.len() < post {
-                            shadow.push(None);
-                        }
-                    }
-                }
-                match op {
-                    Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => {
-                        d += 1
-                    }
-                    Op::End => d = d.saturating_sub(1),
-                    _ => {}
-                }
-                ops.push(op);
-            }
-            out.push(Body { ops, depth, addr });
+            out.push(decode_body(func, body)?);
         }
     }
     Ok(out)
+}
+
+/// One defined function's body, validated, with its depths and provenance.
+fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<'a>) -> Result<Body<'a>, String> {
+    let mut fv = func.into_validator(Default::default());
+    let mut br = body.get_binary_reader();
+    fv.read_locals(&mut br).map_err(|e| e.to_string())?;
+    let mut r = wasmparser::OperatorsReader::new(br);
+    let (mut ops, mut depth, mut addr, mut args) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut shadow: Vec<Option<usize>> = Vec::new();
+    let mut d = 0u32;
+    while !r.eof() {
+        let off = r.original_position();
+        let op = r.read().map_err(|e| e.to_string())?;
+        let i = ops.len();
+        let pre = fv.operand_stack_height() as usize;
+        let arity = op.operator_arity(&fv);
+        args.push(popped(&shadow, arity, pre));
+        addr.push(if store_width(&op).is_some() && pre >= 2 {
+            shadow.get(pre - 2).copied().flatten()
+        } else {
+            None
+        });
+        depth.push(d);
+        fv.op(off, &op).map_err(|e| e.to_string())?;
+        let post = fv.operand_stack_height() as usize;
+        reshadow(&mut shadow, arity, pre, post, i);
+        match op {
+            Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => {
+                d += 1
+            }
+            Op::End => d = d.saturating_sub(1),
+            _ => {}
+        }
+        ops.push(op);
+    }
+    Ok(Body { ops, depth, addr, args })
+}
+
+/// The producers of the operands an instruction of `arity` pops from a
+/// stack of height `pre`, bottom first.
+fn popped(shadow: &[Option<usize>], arity: Option<(u32, u32)>, pre: usize) -> Vec<Option<usize>> {
+    match arity {
+        Some((k, _)) if pre >= k as usize && shadow.len() == pre => {
+            shadow[pre - k as usize..pre].to_vec()
+        }
+        Some((k, _)) => vec![None; k as usize],
+        None => Vec::new(),
+    }
+}
+
+/// The shadow stack after instruction `i` took it from height `pre` to `post`.
+fn reshadow(shadow: &mut Vec<Option<usize>>, arity: Option<(u32, u32)>, pre: usize, post: usize, i: usize) {
+    match arity {
+        Some((k, m)) if pre >= k as usize => {
+            let keep = (pre - k as usize).min(post);
+            shadow.truncate(keep);
+            // Pushed by this instruction (or, past a polymorphic
+            // stack, re-derived by it): its own.
+            while shadow.len() < post {
+                shadow.push(Some(i));
+            }
+            let _ = m;
+        }
+        _ => {
+            shadow.iter_mut().for_each(|s| *s = None);
+            shadow.truncate(post);
+            while shadow.len() < post {
+                shadow.push(None);
+            }
+        }
+    }
+}
+
+/// How many functions the module imports (they precede the defined ones in
+/// the function index space).
+pub fn function_imports(bytes: &[u8]) -> u32 {
+    let mut n = 0;
+    for payload in Parser::new(0).parse_all(bytes).flatten() {
+        if let wasmparser::Payload::ImportSection(r) = payload {
+            n += r
+                .into_imports()
+                .flatten()
+                .filter(|i| matches!(i.ty, wasmparser::TypeRef::Func(_)))
+                .count() as u32;
+        }
+    }
+    n
 }
 
 /// A store's width in bytes and its static offset.
@@ -89,7 +132,7 @@ pub fn store_width(op: &Op<'_>) -> Option<(u32, u64)> {
     })
 }
 
-pub(crate) fn is_load(op: &Op<'_>) -> bool {
+pub fn is_load(op: &Op<'_>) -> bool {
     matches!(
         op,
         Op::I32Load { .. }

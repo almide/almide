@@ -69,7 +69,9 @@ pub enum GenType {
 }
 
 /// The fixed-width number types the value grammar builds.
-pub const SIZED: &[&str] = &["Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Float32", "Float64"];
+pub const SIZED: &[&str] = &[
+    "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Float32", "Float64",
+];
 
 impl GenType {
     /// Render as an Almide type annotation.
@@ -159,7 +161,10 @@ impl GenType {
 
     /// The fixed-width type named `name`, if it is one the grammar builds.
     pub fn sized(name: &str) -> Option<GenType> {
-        SIZED.iter().find(|s| **s == name).map(|s| GenType::Sized(s))
+        SIZED
+            .iter()
+            .find(|s| **s == name)
+            .map(|s| GenType::Sized(s))
     }
 
     /// A value of the fixed-width type `name` from the Int expression `n`.
@@ -198,8 +203,12 @@ impl GenType {
                     String::new(),
                     match self {
                         GenType::List(_) => format!("list.map({v}, ({x}) => {expr})!"),
-                        GenType::Option(_) => format!("match {v} {{ some({x}) => some({expr}), none => none }}"),
-                        _ => format!("match {v} {{ ok({x}) => ok({expr}), err(e{depth}) => err(e{depth}) }}"),
+                        GenType::Option(_) => {
+                            format!("match {v} {{ some({x}) => some({expr}), none => none }}")
+                        }
+                        _ => format!(
+                            "match {v} {{ ok({x}) => ok({expr}), err(e{depth}) => err(e{depth}) }}"
+                        ),
                     },
                 ));
             }
@@ -231,7 +240,10 @@ impl GenType {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
             GenType::Value => Some((String::new(), format!("json.stringify({v})"))),
-            GenType::Nominal(k) => Some((String::new(), super::nominal::fill(super::nominal::get(k)?.observe, v, 0))),
+            GenType::Nominal(k) => Some((
+                String::new(),
+                super::nominal::fill(super::nominal::get(k)?.observe, v, 0),
+            )),
             GenType::List(e) => Some((String::new(), format!("list.map({v}, {})", inner(e)?))),
             GenType::Option(e) => Some((String::new(), format!("option.map({v}, {})", inner(e)?))),
             GenType::Result(e) => Some((String::new(), format!("result.map({v}, {})", inner(e)?))),
@@ -239,14 +251,20 @@ impl GenType {
                 let (l, r) = (format!("{x}a"), format!("{x}b"));
                 let (pa, ea) = a.observe(&l, depth + 1)?;
                 let (pb, eb) = b.observe(&r, depth + 1)?;
-                Some((format!("let ({l}, {r}) = {v}\n  {pa}{pb}"), format!("({ea}, {eb})")))
+                Some((
+                    format!("let ({l}, {r}) = {v}\n  {pa}{pb}"),
+                    format!("({ea}, {eb})"),
+                ))
             }
             GenType::Tuple3(a, b, c) => {
                 let (l, m, r) = (format!("{x}a"), format!("{x}b"), format!("{x}c"));
                 let (pa, ea) = a.observe(&l, depth + 1)?;
                 let (pb, eb) = b.observe(&m, depth + 1)?;
                 let (pc, ec) = c.observe(&r, depth + 1)?;
-                Some((format!("let ({l}, {m}, {r}) = {v}\n  {pa}{pb}{pc}"), format!("({ea}, {eb}, {ec})")))
+                Some((
+                    format!("let ({l}, {m}, {r}) = {v}\n  {pa}{pb}{pc}"),
+                    format!("({ea}, {eb}, {ec})"),
+                ))
             }
             _ => None,
         }
@@ -256,10 +274,19 @@ impl GenType {
     pub fn observe_calls_effect(&self) -> bool {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.observe_calls_effect),
-            GenType::ResultNom(e, k) => e.observe_calls_effect() || GenType::Nominal(k).observe_calls_effect(),
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) | GenType::Secret(e) => e.observe_calls_effect(),
+            GenType::ResultNom(e, k) => {
+                e.observe_calls_effect() || GenType::Nominal(k).observe_calls_effect()
+            }
+            GenType::List(e)
+            | GenType::Option(e)
+            | GenType::Result(e)
+            | GenType::Map(e)
+            | GenType::Set(e)
+            | GenType::Secret(e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
-            GenType::Tuple3(a, b, c) => a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect(),
+            GenType::Tuple3(a, b, c) => {
+                a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect()
+            }
             _ => false,
         }
     }
@@ -269,7 +296,12 @@ impl GenType {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.refuses_var),
             GenType::ResultNom(e, k) => e.refuses_var() || GenType::Nominal(k).refuses_var(),
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) | GenType::Secret(e) => e.refuses_var(),
+            GenType::List(e)
+            | GenType::Option(e)
+            | GenType::Result(e)
+            | GenType::Map(e)
+            | GenType::Set(e)
+            | GenType::Secret(e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
             GenType::Tuple3(a, b, c) => a.refuses_var() || b.refuses_var() || c.refuses_var(),
             _ => false,
@@ -332,16 +364,14 @@ impl GenType {
             | GenType::Bytes
             | GenType::Matrix
             | GenType::Value => 1,
-            | GenType::Nominal(_) => 1,
+            GenType::Nominal(_) => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)
             | GenType::ResultNom(e, _)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => {
-                1 + e.depth()
-            }
+            | GenType::Secret(e) => 1 + e.depth(),
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
             GenType::Tuple3(a, b, c) => 1 + a.depth().max(b.depth()).max(c.depth()),
         }
@@ -363,7 +393,10 @@ pub fn render_print(name: &str, ty: &GenType) -> String {
     // in `${…}` whose type is a Result is E041 (ADR-0008), #3636.
     if !ty.is_observable() {
         if let (Some((pre, expr)), Some(seen)) = (ty.observe(name, 0), ty.observed()) {
-            return format!("{pre}let {name}_o: {} = {expr}\n  println(\"{name} = ${{{name}_o}}\")", seen.render());
+            return format!(
+                "{pre}let {name}_o: {} = {expr}\n  println(\"{name} = ${{{name}_o}}\")",
+                seen.render()
+            );
         }
     }
     // Every other printable shape interpolates via `${...}`, so the type is
@@ -392,9 +425,15 @@ mod tests {
             "let d_o: Result[List[Int], String] = result.map(d, ((o0) => bytes.to_list(o0)))\n  println(\"d = ${d_o}\")"
         );
         let p = render_print("v", &GenType::Option(Box::new(GenType::Matrix)));
-        assert!(p.starts_with("let v_o: Option[List[List[Float]]] = option.map(v, "), "{p}");
+        assert!(
+            p.starts_with("let v_o: Option[List[List[Float]]] = option.map(v, "),
+            "{p}"
+        );
         let p = render_print("w", &GenType::Value);
-        assert_eq!(p, "let w_o: String = json.stringify(w)\n  println(\"w = ${w_o}\")");
+        assert_eq!(
+            p,
+            "let w_o: String = json.stringify(w)\n  println(\"w = ${w_o}\")"
+        );
         // A printable value is interpolated as it is.
         assert_eq!(render_print("x", &GenType::Int), "println(\"x = ${x}\")");
     }

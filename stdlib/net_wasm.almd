@@ -1,15 +1,16 @@
 // net_wasm — the WASM lowering of net (#3620): the tcp family (the net/tcp
-// design step 2); the unix-socket and shm family is stdlib/unix_wasm.almd. Native
-// keeps its direct intrinsics (runtime/rs/src/net.rs); this file only ever
-// links on the wasm legs through the self-host registry.
+// design step 2), then UDP and name lookup (#4306); the unix-socket and shm
+// family is stdlib/unix_wasm.almd. Native keeps its direct intrinsics
+// (runtime/rs/src/net.rs); this file only ever links on the wasm legs through
+// the self-host registry.
 //
-// Every operation is one host op (91..=103): two text operands, the handle,
-// lengths, port and milliseconds as decimal text, and an ok / err answer. The
-// embedded host serves them with the SAME core native runs
-// (crates/almide-rt-core/src/net_core.rs), so handle numbers, bytes and every
-// err text agree with native by construction (the judge's tcp contracts,
-// almide/als#134). A stock artifact keeps the defined refusal until the p3
-// route (design step 3).
+// Every operation is one host op (tcp 91..=103, udp and lookup 140..=145):
+// two text operands, the handle, lengths, port and milliseconds as decimal
+// text, and an ok / err answer. The embedded host serves them with the SAME
+// core native runs (crates/almide-rt-core/src/net_core.rs), so handle
+// numbers, bytes and every err text agree with native by construction (the
+// judge's tcp contracts, almide/als#134). A stock artifact keeps the defined
+// refusal until the p3 route (design step 3).
 effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
 
 effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
@@ -107,4 +108,62 @@ effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] =
 fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
   ok("1") => true,
   _ => false,
+}
+
+// ── UDP and name lookup (#4306): ops 140..=145 over the same core ──
+// `sock_port_host` is `<sock>\n<port>\n<host>` (the host last, so any byte
+// of it rides intact); the datagram rides b, byte-exact. A received datagram
+// answers `<port> <ip>\n` then its bytes; a lookup answers one address per line.
+effect fn __net_udp_bind(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_udp_local_port(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_udp_send_to(sock_port_host: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __net_udp_recv_from(sock: String, max: String) -> Result[Bytes, String] = _
+
+effect fn __net_udp_close(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_lookup_host(host: String, unused: String) -> Result[String, String] = _
+
+@implements("net.__os_udp_bind")
+effect fn __net_udp_bind_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_udp_bind(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.__os_udp_local_port")
+effect fn __net_udp_local_port_impl(sock: Int) -> Result[Int, String] = {
+  let t = __net_udp_local_port(int.to_string(sock), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.__os_udp_send_to")
+effect fn __net_udp_send_to_impl(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = {
+  let _ = __net_udp_send_to("${sock}\n${port}\n${host}", data)!
+  ok(())
+}
+
+@implements("net.__os_udp_recv_from")
+effect fn __net_udp_recv_from_impl(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = {
+  let framed = __net_udp_recv_from(int.to_string(sock), int.to_string(max))!
+  let cut = bytes.index_of(framed, bytes.from_string("\n")) ?? 0
+  let head = bytes.to_string_lossy(bytes.take(framed, cut))
+  let (port, ip) = match string.split(head, " ") {
+    [p, h] => (int.parse(p) ?? -1, h),
+    _ => (-1, ""),
+  }
+  ok((bytes.drop(framed, cut + 1), ip, port))
+}
+
+@implements("net.__os_udp_close")
+effect fn __net_udp_close_impl(sock: Int) -> Result[Unit, String] = {
+  let _ = __net_udp_close(int.to_string(sock), "")!
+  ok(())
+}
+
+@implements("net.__os_lookup_host")
+effect fn __net_lookup_host_impl(host: String) -> Result[List[String], String] = {
+  let t = __net_lookup_host(host, "")!
+  ok(string.split(t, "\n") |> list.filter((l) => l != ""))
 }

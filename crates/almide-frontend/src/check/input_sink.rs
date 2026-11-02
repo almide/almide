@@ -130,7 +130,7 @@ impl Checker {
                 let mut seen = std::collections::HashSet::new();
                 self.nested_sent_out(*name, &mut seen)
             }
-            Ty::Variant { name, .. } => self.not_an_input_type(&Ty::Named(*name, vec![]), caller),
+            Ty::Variant { name, .. } => self.not_an_input_type(&Ty::Named(*name, Default::default()), caller),
             _ => None,
         }
     }

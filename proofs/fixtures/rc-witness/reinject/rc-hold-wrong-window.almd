@@ -1,0 +1,12 @@
+// #4277 drill: a routine's hold move (`h<local>@window`: a fresh key's credit
+// moved into the judged set through a pooled hold local) is recorded against
+// the window after the one it was moved into. A hold carries only a
+// temporary's credit — a frame variable's credit moves as that variable's own
+// `m` — so the set's release of the key (the key is present) is left without
+// its event. Once counted as the routine's own (routine-internal), it is
+// refused since #4278 B1 retired that class: the RC byte check must reject.
+effect fn main() -> Unit = {
+  var m: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
+  m = map.set(m, string.repeat("a", 1), 3)
+  println(int.to_string(map.len(m)))
+}

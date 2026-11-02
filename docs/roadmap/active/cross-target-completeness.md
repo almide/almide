@@ -1,5 +1,20 @@
-<!-- description: Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue -->
+<!-- description: Historical cross-target drain strategy, dated catalogue and limits of differential evidence -->
 # Cross-Target Completeness (the Lid)
+
+## Historical drain queue and present evidence boundary
+
+The June 2026 catalogue below is not the live defect queue. The v0 runtime
+registry it counted has retired; native base64, self-hosted algorithms and
+the interpreter/fuzzer now exist. Current operation availability and exception
+scope are recorded in [target availability](../../../proofs/target-availability.toml)
+and [the contract ledger](../../contracts/contracts.toml).
+
+The “four seals” describe an assurance strategy, not a proof that every
+possible divergence is impossible. Finite corpus/fuzz agreement cannot
+establish that universal statement, and documented host observations and
+resource limits remain scoped. The language-comparison survey and its
+uniqueness claim are preserved as the author's dated survey, not revalidated
+competitive claims. The historical measurements and proposed drains follow.
 
 > Native(Rust) and WASM must produce **byte-identical (stdout, stderr, exit)** for every program.
 > The gate exists and has **zero grandfathered exceptions**; this roadmap is how we go from

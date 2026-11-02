@@ -100,6 +100,10 @@ impl Checker {
         let outer_expect = std::mem::replace(&mut self.expr_expect, expect);
         let frame = self.enter_isolation_frame(expr);
         let ity = self.infer_expr_inner(expr);
+        // ADR-0030: an expression's type is held to the `type_size` budget
+        // as it is built (E111), so a doubling chain stops at the budget.
+        let ity = self.within_type_budget(ity, expr.span);
+        self.report_type_budget_hit(expr.span);
         self.leave_isolation_frame(expr, &ity, frame);
         self.expr_expect = outer_expect;
         self.type_map.insert(expr.id, ity.clone());
@@ -185,7 +189,7 @@ impl Checker {
                         // never pinned and mono left the call unspecialised.
                         _ => {
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
-                            Ty::Named(type_name, generic_args)
+                            Ty::Named(type_name, generic_args.into())
                         }
                     }
                 }
@@ -195,7 +199,7 @@ impl Checker {
                 // occurrence (static-dispatch receiver `Type.method`, enum
                 // case access `Color.Red` — the Member path infers the object
                 // before its own resolution).
-                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), vec![]) }
+                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), Default::default()) }
                 else {
                     // A capitalized name that is no ctor, no const param, no
                     // top-let and no declared type resolves to NOTHING.
@@ -224,7 +228,7 @@ impl Checker {
                     // own `type Secret` is `m.Secret`, never the bundled one,
                     // and an alias of the bundled type is the bundled type.
                     let built = self.record_type_canon(&n);
-                    self.reject_foreign_opaque_record(&Ty::Named(built, vec![]), "build a literal of");
+                    self.reject_foreign_opaque_record(&Ty::Named(built, Default::default()), "build a literal of");
                     self.infer_expr_record_named(&n, fields)
                 } else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
@@ -373,7 +377,7 @@ impl Checker {
         };
         let result_named = self.record_case_type_name(n, type_name);
         let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
-        Ok((Ty::Named(result_named, generic_args), decl, true, case_defaults))
+        Ok((Ty::Named(result_named, generic_args.into()), decl, true, case_defaults))
     }
 
     /// #433: a qualified record-variant `mod.Ctor { … }` takes the namespaced
@@ -444,7 +448,7 @@ impl Checker {
         // bundled `Secret[A]`'s parameter and was E025 (`self.Secret[?0]`).
         let generics_key = if self.env.types.contains_key(&canon) { canon } else { *n };
         let generic_args = self.instantiate_type_generics(generics_key.as_str());
-        let named = Ty::Named(canon, generic_args);
+        let named = Ty::Named(canon, generic_args.into());
         let (decl, closed) = match self.env.resolve_named(&named) {
             Ty::Record { fields } => (fields, true),
             Ty::OpenRecord { fields } => (fields, false),

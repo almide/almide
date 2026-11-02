@@ -1,0 +1,1 @@
+ANCHORS REJECT: bounds stretch 0: `a0` against its check at 6:45: the check tests index Local(1, 40), the access reads slot Local(1, 66) + 0

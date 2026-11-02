@@ -119,7 +119,16 @@ impl Emitter<'_> {
                 .i32_const(lay.1 as i32)
                 .i32_add();
         }
-        self.emit_release_slot_at(v);
+        // #4278 B1: the replaced value is the slot's consume (`r`); a flat
+        // value has no release.
+        if self.elem_is_handle(v) {
+            self.slot_release(|em| {
+                em.emit_release_slot_at(v);
+                Ok(())
+            })?;
+        } else {
+            self.emit_release_slot_at(v);
+        }
         self.f.instructions().local_get(vh);
         self.store_ty_slot_raw(v);
         self.emit_release_hold(kh, k);
@@ -196,6 +205,12 @@ impl Emitter<'_> {
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        // #4277: a fresh key's credit moves into this routine through `kh`
+        // (`h<kh>`; a Var key's share is that variable's move, `m`); the set
+        // releases it there when the key is already present.
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         let vh = self.hold_for(v)?;
         self.lower_arg(value, Some(v), ArgMode::Retain)?;
         self.f.instructions().local_set(vh);
@@ -276,7 +291,16 @@ impl Emitter<'_> {
             // place; the key was not stored, its credit goes back
             i.local_get(eh).i32_const(voff).i32_add();
         }
-        self.emit_release_slot_at(v);
+        // #4278 B1: the replaced value is the slot's consume (`r`); a flat
+        // value has no release.
+        if self.elem_is_handle(v) {
+            self.slot_release(|em| {
+                em.emit_release_slot_at(v);
+                Ok(())
+            })?;
+        } else {
+            self.emit_release_slot_at(v);
+        }
         self.f.instructions().local_get(eh).i32_const(voff).i32_add().local_get(vh);
         self.store_ty_slot_raw(v);
         self.emit_release_hold(kh, k);

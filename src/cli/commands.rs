@@ -64,22 +64,42 @@ pub fn cmd_init() {
 /// a filter that selects nothing ran nothing, and a green run of zero tests is
 /// how a mistyped CI filter hid. Its message names the pattern, not an absence.
 ///
-/// One zero is NOT that verdict:
+/// A run whose every file was SKIPPED is that verdict too (#4325). A skip
+/// (`// wasm:skip`, a wall, a host that cannot start) means "these tests exist
+/// and this leg did not run them" — and a run that executed none of them
+/// proves nothing about the target it was asked for. `almide test <file>
+/// --target wasm` on a file the leg could not lower printed `0 passed, 0
+/// failed, 1 skipped` and exited 0, so a negative control that should have
+/// failed on wasm passed. The rule (docs/specs/cli.md): a skip stays green
+/// only when at least one test ran in the same invocation.
 ///
-/// - a file this leg DECLINED (`// wasm:skip`, or a wall routing it to native).
-///   A skip means "these tests exist and this leg cannot run them", the opposite
-///   of "there were none", and `wasm_skip_marker_stays_a_green_skip` pins that a
-///   genuine skip stays green.
-pub(super) fn finish_test_run(counts: TestCounts, files: usize, declined: usize, allow_no_tests: bool) {
-    err(&counts.summary(files));
-    if counts.ran == 0 && declined == 0 && !allow_no_tests {
-        if counts.found_nothing() {
+/// `skipped` is how many files this leg skipped; the summary says so beside
+/// the count of tests that ran.
+pub(super) fn finish_test_run(counts: TestCounts, files: usize, skipped: usize, allow_no_tests: bool) {
+    let mut summary = counts.summary(files);
+    if skipped > 0 {
+        summary.push_str(&format!(", {} file{} skipped", skipped, if skipped == 1 { "" } else { "s" }));
+    }
+    err(&summary);
+    if counts.ran == 0 && !allow_no_tests {
+        if skipped > 0 {
+            err(&no_test_ran_all_skipped(skipped));
+        } else if counts.found_nothing() {
             err("no tests to run — pass --allow-no-tests if a run with no tests is expected");
         } else {
             err(&no_test_matched(counts));
         }
         std::process::exit(NO_TESTS_EXIT);
     }
+}
+
+/// The all-skipped verdict (#4325).
+fn no_test_ran_all_skipped(skipped: usize) -> String {
+    format!(
+        "no test ran: {} file(s) were skipped and nothing else ran — a skip passes only beside a test that ran; \
+         pass --allow-no-tests if a run that executes nothing is expected",
+        skipped
+    )
 }
 
 /// The zero-selection verdict (#4264): a `--run` pattern that matched no test
@@ -244,6 +264,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     // Phase 1: WASM (fast, rustc-free), parallel.
     let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus, run_filter);
     note_wasm_leg_unavailable(&wasm_outcomes);
+    super::test_wasm::note_wasm_leg_no_host(&wasm_outcomes);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();

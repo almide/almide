@@ -71,6 +71,9 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     // 14/25's bodies under their own op (#2890).
     (63, "op_read_bytes", 63),
     (64, "op_read_bytes_if_exists", 64),
+    // 66: fs.append_bytes, op 16's append (fdflags APPEND) under its own
+    // name (#4382).
+    (66, "op_append", 66),
     // 120..=125: the rooted family by descriptor (#4084) — a walk from the
     // root that follows no symlink, then the plain call's body.
     (120, "op_root_read", 120),
@@ -129,6 +132,10 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
 
 /// The call name of an fs op (`"fs"` for one without its own row).
 pub fn fs_op_name(op: i32) -> &'static str {
+    // fs.append_bytes (#4382) declares its name beside its op family.
+    if almide_wasm::host_ops::FS_APPEND_BYTES.contains(&op) {
+        return almide_wasm::host_ops::FS_APPEND_BYTES_CALL;
+    }
     FS_OP_NAMES.iter().find(|(o, _)| *o == op).map_or("fs", |(_, n)| n)
 }
 

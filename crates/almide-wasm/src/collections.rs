@@ -186,7 +186,7 @@ impl Emitter<'_> {
                 self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
                 // the some-block co-owns the value it copied out (its
                 // typed drop releases it; the map keeps its own credit)
-                self.share_handle_top(v);
+                self.arm_share_handle_top(v);
                 self.store_ty_slot(v, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(vh);
                 self.release_i32(); // vh
@@ -205,6 +205,11 @@ impl Emitter<'_> {
                     return Ok(Some(owned));
                 }
                 let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, (ArgMode::Retain, false))?;
+                // #4278 B1: a fresh key's credit moves in through its hold; an
+                // overwrite gives it back there (the judged set's rule).
+                if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+                    self.witness_rc_hold_move(kh_local);
+                }
                 let vh = self.hold_for(v)?;
                 self.lower_arg(value, Some(v), ArgMode::Retain)?;
                 self.f.instructions().local_set(vh);
@@ -384,7 +389,7 @@ impl Emitter<'_> {
                     self.load_ty_slot(t, src_off);
                     // A handle copied into the pair block takes +1: the
                     // pair's typed drop releases it, the map keeps its own.
-                    self.share_handle_top(t);
+                    self.arm_share_handle_top(t);
                     self.store_ty_slot(t, dst_off);
                 }
                 self.f
@@ -520,6 +525,9 @@ impl Emitter<'_> {
                     .i32_const(0)
                     .call(F_ALLOC)
                     .local_set(rh);
+                // #4278 B1: the result's credit stays in `rh` through the
+                // upserts: a shared-path judge releases it there.
+                self.witness_rc_hold_move(rh);
                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                 self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
                 // pair base (i32 element of the list)
@@ -542,15 +550,20 @@ impl Emitter<'_> {
                     .i32_const((almide_layout::PAYLOAD + koff_p) as i32)
                     .i32_add();
                 self.load_ty_slot_at(k);
-                self.share_handle_top(k);
+                self.arm_share_handle_top(k);
                 self.f.instructions().local_set(kh);
+                // #4278 B1: the key's share moves in through `kh`; a present
+                // key gives it back there.
+                if self.elem_is_handle(k) {
+                    self.witness_rc_hold_move(kh);
+                }
                 self.f
                     .instructions()
                     .local_get(ph)
                     .i32_const((almide_layout::PAYLOAD + voff_p) as i32)
                     .i32_add();
                 self.load_ty_slot_at(v);
-                self.share_handle_top(v);
+                self.arm_share_handle_top(v);
                 self.f.instructions().local_set(vh);
                 self.emit_map_set_judged(rh, kh, vh, (k, v), fns)?;
                 self.f

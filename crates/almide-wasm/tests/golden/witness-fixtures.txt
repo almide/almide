@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 998 of 999
+# certified: 1005 of 1006
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -51,6 +51,7 @@ spec/wasm_cross/bytes_clear_mut_param.almd
 spec/wasm_cross/bytes_copy_from_negative_len.almd
 spec/wasm_cross/bytes_copy_within_offset_domain.almd
 spec/wasm_cross/bytes_cursor_read_domain.almd
+spec/wasm_cross/bytes_display.almd
 spec/wasm_cross/bytes_equality_call_operands.almd
 spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -263,6 +264,8 @@ spec/wasm_cross/fold_family_source_before_init.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/fold_init_rebinds_source.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/for_in_list_value_semantics.almd
+spec/wasm_cross/fs_append_bytes_true_append.almd
 spec/wasm_cross/fs_call_head_family.almd
 spec/wasm_cross/fs_composition_family.almd
 spec/wasm_cross/fs_error_path_escape.almd
@@ -561,6 +564,7 @@ spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd
 spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
+spec/wasm_cross/matrix_mul_no_fma.almd
 spec/wasm_cross/matrix_neg_signed_zero.almd
 spec/wasm_cross/matrix_pow_libm.almd
 spec/wasm_cross/matrix_product_family.almd
@@ -709,6 +713,7 @@ spec/wasm_cross/range_first_class.almd
 spec/wasm_cross/range_head_fold_edges.almd
 spec/wasm_cross/range_head_fold_huge.almd
 spec/wasm_cross/range_inclusive_end_at_max.almd
+spec/wasm_cross/range_inclusive_runtime_max.almd
 spec/wasm_cross/range_materialize_oom.almd
 spec/wasm_cross/rc_alloc_stress.almd
 spec/wasm_cross/rc_reclaim_churn.almd
@@ -748,6 +753,7 @@ spec/wasm_cross/regex_engine.almd
 spec/wasm_cross/regex_fuzz_batch.almd
 spec/wasm_cross/regex_invalid_pattern.almd
 spec/wasm_cross/regex_linear_time.almd
+spec/wasm_cross/regex_many_patterns.almd
 spec/wasm_cross/regex_repetition_depth.almd
 spec/wasm_cross/regex_size_cap.almd
 spec/wasm_cross/repeat_size_ceiling.almd
@@ -969,6 +975,7 @@ spec/wasm_cross/uoe_heap_ok_share.almd
 spec/wasm_cross/url_authority_edges.almd
 spec/wasm_cross/url_whatwg_probes.almd
 spec/wasm_cross/user_box_recursive_enum.almd
+spec/wasm_cross/uuid_v7_monotonic.almd
 spec/wasm_cross/value_array_leak_loop.almd
 spec/wasm_cross/value_array_tuple_tco.almd
 spec/wasm_cross/value_as_array_leak_loop.almd

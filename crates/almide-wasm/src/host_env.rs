@@ -65,26 +65,27 @@ impl Emitter<'_> {
                 Some(Lowered::owned(self.fs_result_unit()?))
             }
             // The http string family (#1710 increment 1): every fn is
-            // Result[String, String] — exactly the fs.read_text decode.
+            // Result[String, String], its ok body decoded lossily as native's
+            // client does (#4387).
             ("http", "get", [u]) => {
                 self.fs_call_1(u, crate::fs_meta::OP_HTTP_GET)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             ("http", "delete", [u]) => {
                 self.fs_call_1(u, crate::fs_meta::OP_HTTP_DELETE)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             ("http", "post", [u, b]) => {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_POST)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             ("http", "put", [u, b]) => {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PUT)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             ("http", "patch", [u, b]) => {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PATCH)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             // The framed request family (#1710 increment 3): the spliced
             // http_framed leaves — url in a, the (method, body, headers)
@@ -92,11 +93,11 @@ impl Emitter<'_> {
             // the guest splits.
             ("http", "__http_framed_text", [u, f]) => {
                 self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             ("http", "__http_framed_status", [u, f]) => {
                 self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
-                Some(Lowered::owned(self.fs_result_string()?))
+                Some(Lowered::owned(self.fs_result_text_lossy()?))
             }
             // `env.vars`' leaf (#3908): the `name=value` frames, every one
             // kept (no argv0 to skip).
@@ -365,6 +366,8 @@ impl Emitter<'_> {
             em.f.instructions().local_get(hfirst).if_(BlockType::Empty);
             em.f.instructions().i32_const(0).local_set(hfirst);
             em.f.instructions().local_get(hline).call(F_DEC_FLAT);
+            // #4278 B1: the dropped first frame is the arm's own temporary.
+            em.arm_temp_released();
             em.f.instructions().else_();
             em.f.instructions().local_get(hlist).local_get(hline).call(F_LIST_PUSH_4).local_set(hlist);
             em.f.instructions().end();

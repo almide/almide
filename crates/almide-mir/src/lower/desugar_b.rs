@@ -367,7 +367,7 @@ pub fn desugar_map_literal(body: &IrExpr) -> Option<IrExpr> {
                 Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
                 _ => return,
             };
-            let tuple_ty = Ty::Tuple(vec![k_ty, v_ty]);
+            let tuple_ty = Ty::Tuple(vec![k_ty, v_ty].into());
             let elements: Vec<IrExpr> = entries
                 .iter()
                 .map(|(k, v)| IrExpr {
@@ -381,7 +381,7 @@ pub fn desugar_map_literal(body: &IrExpr) -> Option<IrExpr> {
                 .collect();
             let list_expr = IrExpr {
                 kind: IrExprKind::List { elements },
-                ty: Ty::Applied(TypeConstructorId::List, vec![tuple_ty]),
+                ty: Ty::Applied(TypeConstructorId::List, vec![tuple_ty].into()),
                 span: e.span.clone(),
                 def_id: None,
             };

@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 5d5f6dd0a..0a0d9087e 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -592,7 +592,8 @@ impl Emitter<'_> {
+                     .instructions()
+                     .local_get(base)
+                     .i32_load(len_memarg())
+-                    .i32_const(stride as i32)
++                    // RE-INJECTED (#4280 operands drill): the count in bytes, not slots.
++                    .i32_const(1)
+                     .i32_div_u()
+                     .local_set(count)
+                     .i32_const(0)

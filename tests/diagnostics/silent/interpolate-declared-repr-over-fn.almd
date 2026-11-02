@@ -1,0 +1,16 @@
+// silent (E089 near-miss, #4314): a type that declares `T.repr` prints
+// through it whatever it holds — a function field, a Handle — at the top,
+// inside a container, and as the argument of a generic Secret.
+import ffi
+import secret
+
+type Hook = { run: (Int) -> Int }
+
+fn Hook.repr(h: Hook) -> String = "Hook(${h.run(0)})"
+
+fn main() -> Unit = {
+  let h = Hook { run: (x: Int) => x + 1 }
+  let r = ffi.region(bytes.from_string("ab"))
+  let s = secret.new(h)
+  println("${h} ${[h]} ${r} ${some(r)} ${s} ${secret.new(r)}")
+}

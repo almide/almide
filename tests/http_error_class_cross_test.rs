@@ -306,3 +306,101 @@ effect fn main() -> Unit = {{
     );
     assert_eq!(out, want);
 }
+
+/// #4387 (C-328): a body that is not UTF-8 reads as native's lossy decode on
+/// every lane. The p3 component used to hand the server's bytes back as the
+/// String itself — `[97, 128, 98, 206]` where native reads
+/// `a\u{FFFD}b\u{FFFD}` — and `string.reverse` then walked the trailing lead
+/// byte's claimed continuation off the end of the block. The text, request
+/// and status forms all ride the decode; the reversed and lower-cased copies
+/// prove the String a program receives keeps the encoding invariant.
+#[test]
+fn a_non_utf8_body_reads_as_the_lossy_decode_on_native_embedded_and_p3() {
+    if !wasmtime_runs_p3() {
+        return;
+    }
+    let body: &[u8] = b"a\x80b\xce";
+    let mut reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+    reply.extend_from_slice(body);
+    let port = answering(reply);
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("non_utf8_body.almd");
+    std::fs::write(
+        &src,
+        format!(
+            r#"import http
+
+fn hx(s: String) -> String = "${{bytes.to_list(bytes.from_string(s))}}"
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {{
+  match r {{
+    ok(b) => println("${{tag}}: ${{hx(b)}} rev=${{hx(string.reverse(b))}} lower=${{hx(string.to_lower(b))}}"),
+    err(e) => println("${{tag}}: ${{e}}"),
+  }}
+}}
+
+effect fn main() -> Unit = {{
+  show("get", http.get("http://127.0.0.1:{port}/"))
+  show("request", http.request("GET", "http://127.0.0.1:{port}/", "", [("X-Ok", "1")]))
+}}
+"#
+        ),
+    )
+    .expect("write program");
+    let out = assert_same("non-UTF-8 body", &three_legs(&src, &[], scratch.path()));
+    let lossy = "[97, 239, 191, 189, 98, 239, 191, 189]";
+    let rev = "[239, 191, 189, 98, 239, 191, 189, 97]";
+    assert_eq!(out, format!("get: {lossy} rev={rev} lower={lossy}\nrequest: {lossy} rev={rev} lower={lossy}\n"));
+}
+
+/// #4390 (C-328): a response header value that is not UTF-8 reads as
+/// native's lossy decode on every lane, and the cells after it stay where
+/// they belong. The p3 shim copied each `list<u8>` field value into the
+/// String raw (`[113, 128, 114]` where native reads `q\u{FFFD}r`) and counted
+/// its chars over the raw bytes. The truncated lead at the end of `X-Cut`
+/// and the header after it pin the char counts; the body cell keeps the
+/// server's bytes for `body_bytes` and decodes for `body`.
+#[test]
+fn a_non_utf8_header_value_reads_as_the_lossy_decode_on_native_embedded_and_p3() {
+    if !wasmtime_runs_p3() {
+        return;
+    }
+    let body: &[u8] = b"b\x80";
+    let mut reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n", body.len()).into_bytes();
+    reply.extend_from_slice(b"X-Bad: q\x80r\xed\xa0\x80s\r\nX-Cut: \xce\r\nX-Ok: fine\xc3\xa9\r\nConnection: close\r\n\r\n");
+    reply.extend_from_slice(body);
+    let port = answering(reply);
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("non_utf8_header.almd");
+    std::fs::write(
+        &src,
+        format!(
+            r#"import http
+
+fn hx(s: String) -> String = "${{bytes.to_list(bytes.from_string(s))}}"
+
+effect fn main() -> Unit = {{
+  match http.get_response("http://127.0.0.1:{port}/") {{
+    ok(r) => {{
+      for name in ["x-bad", "x-cut", "x-ok"] {{
+        let v = http.header(r, name) ?? "-"
+        println("${{name}}: ${{hx(v)}} len=${{string.len(v)}} rev=${{hx(string.reverse(v))}}")
+      }}
+      println("body: ${{hx(http.body(r))}} raw=${{bytes.to_list(http.body_bytes(r))}}")
+    }},
+    err(e) => println("err: ${{e}}"),
+  }}
+}}
+"#
+        ),
+    )
+    .expect("write program");
+    let out = assert_same("non-UTF-8 header", &three_legs(&src, &[], scratch.path()));
+    assert_eq!(
+        out,
+        "x-bad: [113, 239, 191, 189, 114, 239, 191, 189, 239, 191, 189, 239, 191, 189, 115] len=7 rev=[115, 239, 191, 189, 239, 191, 189, 239, 191, 189, 114, 239, 191, 189, 113]\n\
+         x-cut: [239, 191, 189] len=1 rev=[239, 191, 189]\n\
+         x-ok: [102, 105, 110, 101, 195, 169] len=5 rev=[195, 169, 101, 110, 105, 102]\n\
+         body: [98, 239, 191, 189] raw=[98, 128]\n"
+    );
+}

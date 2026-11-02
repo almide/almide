@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # A structural witness must catch an emitter that loses what it certifies:
 #   bounds (#4005) — a bounds check;   init (#4013) — a slot store;
+#   fields (#4279) — a record / tuple / variant field store;
 #   native (#4006) — a release in the verified native render, with the
 #   renderer's own Rust-mirror check bypassed (the witness is main's
 #   ownership witness in the native bundle, judged by check_xc);
-#   anchors (#4011 (d)) — an instruction the bounds or init witness names,
+#   rc (#4277) — an RC instruction of a certified frame changed (a release
+#   dropped, doubled, made on the wrong local, inside an arm window, on the
+#   wrong slot holder, or a consuming routine that no longer consumes) while
+#   its recorded event stays: almide-verify still accepts the bundle, and
+#   almide-anchor-check's RC check must reject;
+#   anchors (#4011 (d)) — an instruction the bounds, init or fields witness names,
 #   changed while its recording call stays: the proven checkers still
 #   accept both witnesses (step 2 requires it), and almide-anchor-check,
 #   which holds each event to the shipped bytes, must reject.
@@ -19,6 +25,16 @@
 #      proofs/poisoned-certs/<property>/<issue>-<name>.cert, the copy
 #      proofs/structural-wall.sh has all three verdicts reject on every
 #      trust-spine run (REINJECT_UPDATE=1 rewrites the copy).
+# An rc drill with a <name>.sig file is a SIGNATURE drill (#4278 B1): the
+# patch makes a runtime helper declare an RC signature its body does not
+# keep, and the rejection is almide-verify's verdict on that helper's
+# `rc-sig` record (pinned as its REJECT line).
+# An rc drill with a <name>.count file is a COUNT drill instead: re-injected,
+# the frame must still be ACCEPTED with exactly the named class moved by the
+# named delta (e.g. `before an abort +1`) and every other count unchanged —
+# a lost event that degrades to a counted class, never to an accepted frame
+# credit. (#4278 B1 retired every window class, so no rc drill is a count
+# drill today.)
 # A patch that no longer applies fails this script too: regenerate it
 # against the current emitter rather than letting the drill go stale.
 #
@@ -30,7 +46,7 @@
 # anchors drill's subject: the event stays, the instruction changes, and the
 # byte-level check (#4011 (d)) is what rejects.
 #
-#   scripts/witness-reinject.sh <bounds|init|native|anchors> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|fields|native|anchors|rc> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -39,9 +55,11 @@ PROP="${1:-}"
 case "$PROP" in
   bounds) ISSUE=4005 ;;
   init) ISSUE=4013 ;;
+  fields) ISSUE=4279 ;;
   native) ISSUE=4006 ;;
   anchors) ISSUE=4011 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init|native|anchors> [name ...]" >&2; exit 2 ;;
+  rc) ISSUE=4277 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|anchors|rc> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -58,7 +76,7 @@ git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 
 if [ "$PROP" = native ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-mir --example emit_native_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
-elif [ "$PROP" = anchors ]; then
+elif [ "$PROP" = anchors ] || [ "$PROP" = rc ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify -p almide-anchor-check); }
 else
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
@@ -91,13 +109,37 @@ verdict() {
     echo "$?"
     return
   fi
+  if [ "$PROP" = rc ]; then
+    if ! "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --anchors "$wt/a.anchors" > "$wt/a.bundle" 2> "$wt/producer.err"; then
+      echo "producer-failed"; return
+    fi
+    # The ownership witness must still be ACCEPTED (certified or incomplete):
+    # the bug is one only the bytes show.
+    "$TARGET/debug/almide-verify" bundle "$wt/a.bundle" > "$wt/verify.out" 2>&1
+    case $? in
+      0|3) ;;
+      *)
+        # A SIGNATURE drill (<name>.sig, #4278 B1): a runtime helper's
+        # declared RC signature lies about its body. The lie is the helper's
+        # own certificate's to catch: almide-verify REJECTS its `rc-sig`
+        # record (the proven checker and the Rocq kernel judge the same
+        # record on every structural-wall run). Its REJECT line is pinned.
+        if [ -f "$DIR/$1.sig" ] && grep -E '^REJECT +rc-sig ' "$wt/verify.out" > "$wt/witness.w"; then
+          echo 1; return
+        fi
+        echo "bundle-rejected"; return ;;
+    esac
+    "$TARGET/debug/almide-anchor-check" "$wt/a.anchors.wasm" "$wt/a.bundle" "$wt/a.anchors" > "$wt/witness.w" 2>&1
+    echo "$?"
+    return
+  fi
   if [ "$PROP" = anchors ]; then
     if ! "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --anchors "$wt/a.anchors" > "$wt/a.bundle" 2> "$wt/producer.err"; then
       echo "producer-failed"; return
     fi
-    # The proven checkers must still ACCEPT both witnesses: the bug is one
+    # The proven checkers must still ACCEPT the witnesses: the bug is one
     # only the bytes show.
-    for p in bounds init; do
+    for p in bounds init fields; do
       "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --only "$p" '(program)' > "$wt/$p.w" 2>/dev/null || { echo "producer-failed"; return; }
       "$TARGET/debug/almide-verify" "$p" "$wt/$p.w" > /dev/null 2>&1 || { echo "$p-witness-rejected"; return; }
     done
@@ -116,6 +158,7 @@ build || { echo "FAIL: the unpatched tree does not build"; exit 2; }
 fail=0
 for name in "${names[@]}"; do
   v=$(verdict "$name")
+  cp "$wt/witness.w" "$wt/control.w" 2>/dev/null
   if [ "$v" != 0 ]; then
     echo "FAIL $name: CONTROL — unpatched, the $PROP witness is not accepted (verdict $v): $(head -c 200 "$wt/witness.w" 2>/dev/null) $(head -3 "$wt/producer.err")"
     fail=1; continue
@@ -128,10 +171,38 @@ for name in "${names[@]}"; do
     echo "FAIL $name: the re-injected emitter does not build"; fail=1; git -C "$wt" checkout -q -- .; continue
   fi
   v=$(verdict "$name")
+  if [ "$PROP" = rc ] && [ -f "$DIR/$name.count" ]; then
+    # The count drill: accepted, the one class moved by its delta, the rest equal.
+    read -r cls delta < "$DIR/$name.count"
+    got=$(python3 -c '
+import re, sys
+keys = ["rebind", "judge", "signed"]
+def counts(p):
+    t = open(p).read()
+    m = re.search(r"(\d+) rebind\(s\) with no instruction, (\d+) judge\(s\) with no rebind, (\d+) signed", t)
+    return dict(zip(keys, map(int, m.groups()))) if m else None
+a, b = counts(sys.argv[1]), counts(sys.argv[2])
+if a is None or b is None:
+    print("no-rc-ok"); sys.exit()
+d = {k: b[k] - a[k] for k in keys}
+want = dict.fromkeys(keys, 0); want[sys.argv[3]] = int(sys.argv[4])
+print("ok" if d == want else "moved " + " ".join(f"{k}{v:+d}" for k, v in d.items() if v))
+' "$wt/control.w" "$wt/witness.w" "$cls" "$delta")
+    if [ "$v" = 0 ] && [ "$got" = ok ]; then
+      echo "ok   $name: control accepted; re-injected, still accepted with $cls $delta and every other count unchanged"
+    else
+      echo "FAIL $name: a count drill wants acceptance with $cls $delta only (verdict $v, $got): $(head -c 200 "$wt/witness.w")"
+      fail=1
+    fi
+    git -C "$wt" checkout -q -- .
+    build >/dev/null 2>&1
+    continue
+  fi
   pinned="$ROOT/proofs/poisoned-certs/$PROP/$ISSUE-$name.cert"
   # The anchors drill pins the checker's REJECT line (no certificate format
   # of its own: the witnesses it judges are the accepted ones).
   [ "$PROP" = anchors ] && pinned="$ROOT/proofs/fixtures/anchors-witness/reinject/$name.reject"
+  [ "$PROP" = rc ] && pinned="$ROOT/proofs/fixtures/rc-witness/reinject/$name.reject"
   if [ "$v" = 1 ] && [ "${REINJECT_UPDATE:-0}" = 1 ]; then cp "$wt/witness.w" "$pinned"; fi
   if [ "$v" = 1 ] && ! cmp -s "$wt/witness.w" "$pinned"; then
     echo "FAIL $name: rejected, but the witness is not the pinned poisoned certificate ${pinned#"$ROOT"/} (REINJECT_UPDATE=1 rewrites it): $(head -c 200 "$wt/witness.w")"

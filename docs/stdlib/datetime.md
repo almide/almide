@@ -1,13 +1,14 @@
 # datetime
 
-Date and time. import datetime, effect.
+Date and time. Auto-imported; clock reads are effectful, conversions are pure.
 
 ### `datetime.now() -> Int` (effect)
 
 Get the current time as a Unix timestamp (seconds, UTC). An **effect fn**
 (#1515): a wall-clock read is nondeterministic, so a pure `fn` cannot call it
-(E006) — the caller must be an `effect fn`, where the spelling is unchanged
-(the raw Int comes back, no `!`). `monotonic_ns` follows the same rule.
+(E006) — the caller must be an `effect fn`. Like other effect calls, it
+may be written `datetime.now()!`; for this never-error intrinsic the marker
+is a no-op and the bare call also yields `Int`. `monotonic_ns` follows the same rule.
 
 ```almd check
 effect fn stamp() -> Int = datetime.now()

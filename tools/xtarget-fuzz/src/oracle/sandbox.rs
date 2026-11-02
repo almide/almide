@@ -44,7 +44,14 @@ pub fn tmp_of(dir: &Path) -> PathBuf {
 /// file. The stdin file lives beside the sandbox, so it is not in the tree.
 pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = scratch.join(format!("sbx-{}-{n}", std::process::id()));
+    create_named(scratch, &format!("sbx-{}-{n}", std::process::id()))
+}
+
+/// [`create`] at `scratch/<name>`, replacing what a previous run left there:
+/// the legs of one program, run one after another under one name, see the
+/// same paths (`TMPDIR` is in the environment `env.vars()` lists).
+pub fn create_named(scratch: &Path, name: &str) -> std::io::Result<(PathBuf, PathBuf)> {
+    let dir = scratch.join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("empty_dir"))?;
     let _ = std::fs::remove_dir_all(tmp_of(&dir));
@@ -60,7 +67,7 @@ pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     // allows none leaves it out).
     #[cfg(unix)]
     let _ = std::os::unix::fs::symlink("data.txt", dir.join("link.txt"));
-    let stdin = scratch.join(format!("sbx-{}-{n}.stdin", std::process::id()));
+    let stdin = scratch.join(format!("{name}.stdin"));
     std::fs::write(&stdin, STDIN)?;
     Ok((dir, stdin))
 }
@@ -80,16 +87,24 @@ pub fn snapshot(dir: &Path) -> String {
 }
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
-        let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+        let rel = p
+            .strip_prefix(root)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
         let Ok(ft) = e.file_type() else { continue };
         if ft.is_dir() {
             out.push(format!("d {rel}"));
             walk(root, &p, out);
         } else if ft.is_symlink() {
-            let target = std::fs::read_link(&p).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default();
+            let target = std::fs::read_link(&p)
+                .map(|t| t.to_string_lossy().into_owned())
+                .unwrap_or_default();
             out.push(format!("l {rel} -> {target}"));
         } else {
             let bytes = std::fs::read(&p).unwrap_or_default();
@@ -99,7 +114,9 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3))
+    bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
+        (h ^ *b as u64).wrapping_mul(0x100000001b3)
+    })
 }
 
 /// Remove a sandbox and its stdin file.
@@ -126,11 +143,18 @@ impl World {
     /// asks for: N lines of L `a`s each (the inspection's stdin readers).
     pub fn for_program(scratch: &Path, src: &str) -> Result<World, String> {
         let w = World::new(scratch)?;
-        let spec = src.lines().next().and_then(|l| l.strip_prefix("// inspect-stdin: "));
+        let spec = src
+            .lines()
+            .next()
+            .and_then(|l| l.strip_prefix("// inspect-stdin: "));
         if let Some((len, lines)) = spec.and_then(|s| s.split_once(' ')) {
-            let (len, lines): (usize, usize) = (len.parse().map_err(|_| "bad stdin header")?, lines.trim().parse().map_err(|_| "bad stdin header")?);
+            let (len, lines): (usize, usize) = (
+                len.parse().map_err(|_| "bad stdin header")?,
+                lines.trim().parse().map_err(|_| "bad stdin header")?,
+            );
             let line = format!("{}\n", "a".repeat(len));
-            std::fs::write(&w.stdin, line.repeat(lines)).map_err(|e| format!("sandbox stdin: {e}"))?;
+            std::fs::write(&w.stdin, line.repeat(lines))
+                .map_err(|e| format!("sandbox stdin: {e}"))?;
         }
         Ok(w)
     }
@@ -138,7 +162,9 @@ impl World {
     /// The run's cwd, env and stdin; its argv is [`ARGS`], after the program
     /// (and after `--` for `almide run`).
     pub fn enter(&self, cmd: &mut std::process::Command) {
-        cmd.current_dir(&self.dir).envs(ENV.iter().copied()).env("TMPDIR", tmp_of(&self.dir));
+        cmd.current_dir(&self.dir)
+            .envs(ENV.iter().copied())
+            .env("TMPDIR", tmp_of(&self.dir));
         cmd.envs(super::fixture::env().iter().map(|(k, v)| (k, v)));
         // The tree's absolute path, for a run whose cwd is elsewhere (a
         // diamond's project); a stock runtime sees the tree as `.` instead.
@@ -151,9 +177,16 @@ impl World {
     /// What a stock `wasmtime run` needs before the module to see the same
     /// world: the sandbox preopened as the guest's `.`, and the env.
     pub fn wasmtime_args(&self) -> Vec<String> {
-        let mut a = vec![format!("--dir={}::.", self.dir.display()), format!("--dir={}::/tmp", tmp_of(&self.dir).display())];
+        let mut a = vec![
+            format!("--dir={}::.", self.dir.display()),
+            format!("--dir={}::/tmp", tmp_of(&self.dir).display()),
+        ];
         a.extend(ENV.iter().map(|(k, v)| format!("--env={k}={v}")));
-        a.extend(super::fixture::env().iter().map(|(k, v)| format!("--env={k}={v}")));
+        a.extend(
+            super::fixture::env()
+                .iter()
+                .map(|(k, v)| format!("--env={k}={v}")),
+        );
         a
     }
 }
@@ -177,7 +210,10 @@ mod tests {
         assert!(before.contains("f data.txt 27 "), "{before}");
         assert!(before.contains("d empty_dir\n"), "{before}");
         assert!(before.contains("f sub/deeper/x.txt 1 "), "{before}");
-        assert!(!before.contains(".stdin"), "stdin lives outside the tree: {before}");
+        assert!(
+            !before.contains(".stdin"),
+            "stdin lives outside the tree: {before}"
+        );
         std::fs::write(dir.join("out.txt"), "w").unwrap();
         let after = snapshot(&dir);
         assert_ne!(before, after);

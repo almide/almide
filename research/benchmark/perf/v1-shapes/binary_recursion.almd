@@ -1,0 +1,7 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4385): a binary
+// non-tail Int recursion on non-adjacent offsets. The shared accumulator
+// rewrite (almide_ir::accum_tre) turns one of its two calls into a loop on
+// every leg; without it the certified native render ran 1.24x slower.
+fn tri(n: Int) -> Int = if n <= 1 then n * n - 3 else tri(n - 1) + tri(n - 3)
+
+fn main() -> Unit = println(int.to_string(tri(40)))

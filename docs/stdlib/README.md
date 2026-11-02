@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 51 stdlib modules, 1322 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1324 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -18,7 +18,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [deque](#deque) | 60 | 0 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
-| [ffi](#ffi) | 7 | 0 |
+| [ffi](#ffi) | 8 | 0 |
 | [float](#float) | 27 | 0 |
 | [float32](#float32) | 24 | 0 |
 | [float64](#float64) | 24 | 0 |
@@ -27,7 +27,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [heap](#heap) | 16 | 0 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 8 | 0 |
-| [http](#http) | 35 | 4 |
+| [http](#http) | 36 | 4 |
 | [int](#int) | 47 | 0 |
 | [int16](#int16) | 37 | 0 |
 | [int32](#int32) | 37 | 0 |
@@ -420,7 +420,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect env.remove(name: String) -> Unit` — Removes name for this process and later spawns; ok if unset; err if name is empty or holds `=` or NUL.
 - `effect env.vars() -> Map[String, String]` — Every environment variable of this process, keyed and ordered by name.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
-- `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.
+- `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; zero or negative ms returns without waiting.
 - `env.os() -> String` — Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 
 ## ffi
@@ -434,6 +434,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect ffi.read(r: Region, off: Int, n: Int) -> Bytes` — Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
 - `effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit` — Writes b at off; err if the region is read-only or b does not fit.
 - `effect ffi.to_bytes(r: Region) -> Bytes` — A copy of the whole region as Bytes.
+- `ffi.slice(r: Region, off: Int, n: Int) -> Result[Region, String]` — A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 
 ## float
 
@@ -630,11 +631,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [http.md](http.md)
 
 - `effect http.serve(port: Int, handler: HttpHandler) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
-- `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
-- `http.html(status: Int, body: SafeHtml) -> HttpResponse` — Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-- `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
-- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-- `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.
+- `http.response(status: Int, body: B) -> HttpResponse` — Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+- `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json; body is JSON text.
+- `http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` — Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+- `http.with_body(resp: HttpResponse, body: B) -> HttpResponse` — resp with its body replaced by body and its Content-Type by body's type.
+- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+- `http.redirect(url: String) -> HttpResponse` — 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 - `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
 - `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
 - `http.header(m: M, name: String) -> Option[String]` — First value of header name, any case; none if absent.
@@ -642,9 +644,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
 - `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
 - `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
-- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
-- `http.set_body(m: M, body: String) -> M` — m with its body replaced.
-- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
+- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
+- `http.set_body(m: M, body: String) -> M` — m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
+- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 - `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
 - `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
 - `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
@@ -906,7 +908,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [json.md](json.md)
 
-- `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored; nesting over 1000 is err.
+- `json.parse(text: String) -> Result[Value, String]` — Strict JSON Value or err; trailing non-whitespace text and nesting over 1000 are errors.
 - `json.stringify(v: Value) -> String` — Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
 - `json.stringify_pretty(v: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
 
@@ -1419,7 +1421,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
 - `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
-- `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 - `uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` — UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
 - `uint16.from(x: S) -> UInt16` — x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
 - `uint16.from_checked(x: S) -> Option[UInt16]` — some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
@@ -1459,7 +1461,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
 - `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
-- `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 - `uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` — UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
 - `uint32.from(x: S) -> UInt32` — x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
 - `uint32.from_checked(x: S) -> Option[UInt32]` — some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
@@ -1539,7 +1541,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
 - `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
-- `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 - `uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` — UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
 - `uint8.from(x: S) -> UInt8` — x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
 - `uint8.from_checked(x: S) -> Option[UInt8]` — some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).

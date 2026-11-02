@@ -1,0 +1,20 @@
+// The helper decodes into an input type; `User` is built in code.
+import http
+import json
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+type UserInput: Decode = { name: String, email: String }
+
+effect fn parse_user(text: String) -> User = {
+  let i = UserInput.decode_strict(json.parse(text)!)!
+  User { name: i.name, email: i.email, is_admin: false }
+}
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let body = http.body(req)
+  let u = parse_user(body)!
+  http.response(201, "${u.name} is_admin=${u.is_admin}")
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", []))!))

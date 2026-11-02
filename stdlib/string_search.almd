@@ -369,7 +369,11 @@ fn __empty_replace(s: String, to: String) -> String = {
   let send = sbase + slen
   let th = prim.handle(to)
   let tlen = prim.load32(th + 4)
-  let nchars = __rep_nchars(sbase, send, 0)
+  // Count the segments __rep_empty_fill writes: one opens at byte 0 whatever it is, then
+  // one at each char start after it. Counting char starts from byte 0 under-sized the
+  // buffer by one `to` for a String opening on a continuation byte (A4, #4005).
+  let nchars = if slen <= 0 then 0
+  else 1 + __rep_nchars(sbase + 1, send, 0)
   let rlen = (nchars + 1) * tlen + slen
   let buf = prim.alloc_str(rlen)
   let dbase = prim.handle(buf) + 12

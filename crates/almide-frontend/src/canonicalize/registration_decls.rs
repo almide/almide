@@ -103,7 +103,7 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, identity: Sym, defining_mo
     env.opaque_alias_targets.insert(identity, resolved.clone());
     // Register as nominal type (not transparent alias)
     let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
-    let resolved = Ty::Named(identity, generic_args);
+    let resolved = Ty::Named(identity, generic_args.into());
     // Register constructor with visibility restriction. The OWNER is a
     // definition-time identity captured once: the prefixed registration
     // names it outright, and the per-module re-registration (which runs
@@ -251,9 +251,17 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
         // Bare-name dual-registration of a prefixed type, for unqualified access. Record it so a local same-name type may shadow it (#433).
         env.types.insert(sym(name), resolved);
         env.prefixed_bare_aliases.insert(sym(name));
+        env.types.remove(&crate::canonicalize::resolve::entry_own_type_key(name));
     } else if prefix.is_none() {
         // A local type owns the bare name now — it is no longer a dependency alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
+        // The entry program's own declaration is recorded up front
+        // (`register_entry_own_type_keys`, #4352); recorded again here, at its
+        // own registration, so a dependency's bare dual-registration that ran
+        // in between (and dropped the key above) does not leave it out (#4322).
+        if env.alias_owner_module.is_none() {
+            env.types.insert(crate::canonicalize::resolve::entry_own_type_key(name), Ty::Unit);
+        }
     }
 }
 /// Record the declaration's parameter letters, in declared order, under the
@@ -363,6 +371,11 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     // registers, so the E020 duplicate check never sees it.
     let reserved = reserve_own_nominal_types(env, decls, prefix);
     super::resolve::register_builtin_named_type_keys(env, decls, type_cur_mod(env, prefix));
+    // The entry program's own type names (#4352), read by the bare-name
+    // resolver; a module's own types answer through their `mod.Name` keys.
+    if prefix.is_none() && env.alias_owner_module.is_none() {
+        super::resolve::register_entry_own_type_keys(env, decls);
+    }
     // An alias registers after every alias of this module it spells, and an
     // alias in a cycle registers as `Unknown` (#3407, registration_order.rs).
     for step in type_registration_steps(decls) {

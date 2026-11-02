@@ -1,0 +1,11 @@
+// E118 (ADR-0032 D7): a body type serving a script-capable media type owns
+// it, so the application's grant of that type is what lets it build.
+import http
+
+type Chart: Body = { markup: String }
+
+fn Chart.media_type(self) -> String = "image/svg+xml"
+
+fn Chart.to_text(self) -> String = self.markup
+
+fn main() -> Unit = println(http.body(http.response(200, Chart { markup: "<svg/>" })))

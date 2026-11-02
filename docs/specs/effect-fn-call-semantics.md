@@ -86,11 +86,16 @@ effect fn run(cmd: String) -> Unit =
 
 ## 4. `!` 演算子
 
-`!` は `Result[T, E] → T`(err は囲む関数の失敗チャネルへ伝搬)と
-`Option[T] → T`(none は `err("none")` へ)。effect fn call が
-`Result[T, String]` を返すので、`foo()!` は自然に `T` を返す — checker が
-特別扱いする必要はない。合法な文脈は effect fn 本体・test ブロック・戻り値型が
-Result / Option / `T!` に解決される pure fn(C-211)。
+`!` は成功値を取り出し、失敗時の扱いは**現在のチャネル**に従う。
+fallible fn / lambda では自身の失敗チャネルへ伝搬し、クロージャ境界を越えて
+外側の関数へは伝搬しない。test ブロックでは unwrap し、失敗はテスト失敗になる。
+
+`Option[T]` の `none` は、囲む Option 戻りチャネルでは `none` として伝搬する。
+Result チャネルへの変換が許される場合は `err("none")` となる。エラー型の適合や
+pure/infallible 文脈の扱いを省略して「常に Err を返す」と解釈しないこと。
+完全な文脈別表と検証例は [Result / Option / Effect](result-option-effect.md#2-演算子)
+を参照。回帰テスト: `spec/lang/unwrap_operators_test.almd`、
+`spec/lang/fallible_lambda_test.almd`。
 
 ## 5. test ブロック
 

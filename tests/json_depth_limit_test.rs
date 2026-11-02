@@ -141,16 +141,16 @@ fn the_interp_oracle_agrees() {
     assert_eq!(out.stdout, INTERP_EXPECTED, "interp: set_path's depth bound moved");
 }
 
-/// The self-hosted bodies carry the bound as a literal (each self-hosted
-/// source links on its own, so json_parse.almd and json_path.almd each read
-/// it through one fn); both must be the one declaration's value, and the
-/// err text the one declared text.
+/// The self-hosted parser carries the bound as a literal (a self-hosted
+/// source links on its own, so json_parse.almd reads it through one fn); it
+/// must be the one declaration's value, and the err text the one declared
+/// text. (json_path.almd's copy went with its set walk, #4315: set_path is
+/// `__set_path_steps`, whose wasm lowering reads json_limits.rs itself.)
 #[test]
 fn the_self_hosted_bound_is_the_declared_one() {
     assert_eq!(json_depth_error(), format!("json: nesting deeper than {JSON_MAX_DEPTH}"));
     for (file, decl, text) in [
         ("json_parse.almd", "fn __json_max_depth() -> Int = ", "fn __json_depth_error() -> String = "),
-        ("json_path.almd", "fn __jpath_max_depth() -> Int = ", "fn __jpath_depth_error() -> String = "),
     ] {
         let src = std::fs::read_to_string(format!("{}/stdlib/{file}", env!("CARGO_MANIFEST_DIR"))).expect("stdlib source");
         let line = src.lines().find(|l| l.starts_with(decl)).unwrap_or_else(|| panic!("{file}: no `{decl}…` declaration"));

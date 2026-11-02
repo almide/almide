@@ -1,0 +1,3 @@
+expects_code = "E110"
+expects_error = "`User.decode` decodes request data into `User`, and `User` is also sent out (it is `Codec`)"
+hint_substring = "type UserInput: Decode"

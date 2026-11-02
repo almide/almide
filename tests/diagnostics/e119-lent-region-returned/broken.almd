@@ -1,0 +1,6 @@
+import ffi
+
+@export(wasm, "pass")
+fn pass(buf: Region) -> Region = buf
+
+effect fn main() -> Unit = println("ok")

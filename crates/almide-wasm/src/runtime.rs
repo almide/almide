@@ -4,6 +4,7 @@
 use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
 use crate::*;
+pub(crate) use crate::runtime_push::{emit_bytes_push, emit_list_push};
 
 pub(crate) use crate::runtime_alloc::{emit_alloc, emit_cow, emit_dec_flat, emit_free, emit_inc};
 pub(crate) use crate::runtime_line::{
@@ -545,111 +546,6 @@ pub(crate) fn emit_list_get(s: Scalar) -> Function {
         Scalar::Int => i.i64_store(slot_memarg(almide_layout::OPTION_FIELD)),
         _ => i.i32_store(slot_memarg(almide_layout::OPTION_FIELD)),
     };
-    i.local_get(base);
-    i.end();
-    f
-}
-
-/// `$list_push_{8,4}(list: i32, v) -> i32`: append with AMORTIZED growth.
-/// In-place when `cap - len >= stride` (sound because every List bind/
-/// assign deep-copies — a local's block is uniquely its own, and the
-/// checker only lets `push` target mut vars); otherwise a fresh block
-/// with doubled capacity. Returns the (possibly new) base for write-back.
-pub(crate) fn emit_list_push(s: Scalar) -> Function {
-    // params: 0=list i32, 1=v; locals: 2=la i32, 3=cap i32, 4=base i32
-    let (list, v, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let stride = s.slot_size();
-    let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let mut f = Function::new([(3, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(list).i32_load(len_memarg()).local_set(la);
-    i.local_get(list).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
-    // fast path: room in cap → store at len, bump len, return same block
-    i.local_get(cap).local_get(la).i32_sub().i32_const(stride as i32).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(list).local_get(la).i32_add();
-    i.local_get(v);
-    match s {
-        Scalar::Int => i.i64_store(slot_memarg(0)),
-        _ => i.i32_store(slot_memarg(0)),
-    };
-    i.local_get(list).local_get(la).i32_const(stride as i32).i32_add().i32_store(word(almide_layout::LEN.offset));
-    i.local_get(list).return_();
-    i.end();
-    // grow: newcap = max(cap * 2, 4 * stride)
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
-    i.local_get(cap).i32_const((4 * stride) as i32).i32_lt_u().if_(BlockType::Empty);
-    i.i32_const((4 * stride) as i32).local_set(cap);
-    i.end();
-    i.local_get(cap).call(F_ALLOC).local_set(base); // len = cap = newcap for now
-    i.local_get(base).i32_const(payload).i32_add();
-    i.local_get(list).i32_const(payload).i32_add();
-    i.local_get(la);
-    i.call(F_COPY);
-    i.local_get(base).local_get(la).i32_add();
-    i.local_get(v);
-    match s {
-        Scalar::Int => i.i64_store(slot_memarg(0)),
-        _ => i.i32_store(slot_memarg(0)),
-    };
-    // live len = old len + stride (cap field keeps newcap from $alloc)
-    i.local_get(base).local_get(la).i32_const(stride as i32).i32_add().i32_store(word(almide_layout::LEN.offset));
-    // RC-3: the outgrown block is garbage IFF this list is uniquely
-    // owned (push targets are bind-copied mut vars — but builders and
-    // shared handles exist, so the rc==1 check is the judge, not the
-    // caller). The growth CHAIN was the churn gate's whole leak.
-    i.local_get(list).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
-    i.local_get(list).call(F_FREE);
-    i.end();
-    i.local_get(base);
-    i.end();
-    f
-}
-
-/// `$bytes_push(b: i32, v: i64) -> i32`: the byte-stride twin of
-/// `$list_push` (#1689) — in-place when `cap - len >= 1`, else a fresh
-/// block at `max(cap*2, 16)` with the outgrown block freed at rc==1.
-/// The old inline `emit_copy_grow(b, 1)` protocol reallocated len+1 on
-/// EVERY push and never freed the outgrown block, so n pushes retained
-/// n²/2 bytes and 69k pushes OOM'd where native completes.
-pub(crate) fn emit_bytes_push() -> Function {
-    // params: 0=b i32, 1=v i64; locals: 2=la i32, 3=cap i32, 4=base i32
-    let (b, v, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
-    let mut f = Function::new([(3, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(b).i32_load(len_memarg()).local_set(la);
-    i.local_get(b).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
-    // fast path: room in cap → store at len, bump len, return same block
-    i.local_get(cap).local_get(la).i32_sub().i32_const(1).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(b).local_get(la).i32_add();
-    i.local_get(v);
-    i.i64_store8(byte);
-    i.local_get(b).local_get(la).i32_const(1).i32_add().i32_store(word(almide_layout::LEN.offset));
-    i.local_get(b).return_();
-    i.end();
-    // grow: newcap = max(cap * 2, 16)
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
-    i.local_get(cap).i32_const(16).i32_lt_u().if_(BlockType::Empty);
-    i.i32_const(16).local_set(cap);
-    i.end();
-    i.local_get(cap).call(F_ALLOC).local_set(base);
-    i.local_get(base).i32_const(payload).i32_add();
-    i.local_get(b).i32_const(payload).i32_add();
-    i.local_get(la);
-    i.call(F_COPY);
-    i.local_get(base).local_get(la).i32_add();
-    i.local_get(v);
-    i.i64_store8(byte);
-    // live len = old len + 1 (cap field keeps newcap from $alloc)
-    i.local_get(base).local_get(la).i32_const(1).i32_add().i32_store(word(almide_layout::LEN.offset));
-    // RC-3: the outgrown block is garbage IFF uniquely owned — same
-    // judge as $list_push.
-    i.local_get(b).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
-    i.local_get(b).call(F_FREE);
-    i.end();
     i.local_get(base);
     i.end();
     f

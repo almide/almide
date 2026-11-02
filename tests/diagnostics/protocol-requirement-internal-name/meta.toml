@@ -1,0 +1,2 @@
+expects_error = "type 'Csv' declares protocol 'Body' but missing method 'media_type'"
+hint_substring = "Add: fn Csv.media_type("

@@ -1,4 +1,3 @@
-// wasm:skip — uuid.v7's process-wide stamp is a native runtime cell; the wasm legs refuse it at check time (E081, proofs/target-availability.toml)
 import uuid
 
 test "v7 carries version 7 and the variant, its time is now, and each is greater than the last" {

@@ -116,7 +116,11 @@ mod tests {
     #[test]
     fn variants_generated() {
         let vs = binding_variants(PROG);
-        assert_eq!(vs.len(), 2, "both variants must fire on bind-bearing programs");
+        assert_eq!(
+            vs.len(),
+            2,
+            "both variants must fire on bind-bearing programs"
+        );
         let (label_a, a) = &vs[0];
         assert_eq!(*label_a, "let→var");
         assert!(a.contains("var x5: Int = int.abs(-3);"));

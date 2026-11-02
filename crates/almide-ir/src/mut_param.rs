@@ -302,7 +302,7 @@ impl WritebackHoister<'_> {
             // value form: arms yield (orig, buffer); destructure + one
             // Assign outside, the branch's own value restored as the tail.
             Some(orig) => {
-                let tuple_ty = Ty::Tuple(vec![orig.clone(), mut_ty.clone()]);
+                let tuple_ty = Ty::Tuple(vec![orig.clone(), mut_ty.clone()].into());
                 let rewrite = |arm: &mut IrExpr, tuple_ty: &Ty, orig: &Ty, mut_ty: &Ty| {
                     if as_writeback_block(arm).is_some() {
                         let IrExprKind::Block { stmts, .. } = &mut arm.kind else { unreachable!() };
@@ -847,7 +847,7 @@ fn rewrite_multi_body(func: &mut IrFunction, vt: &mut VarTable, bufs: &[(VarId, 
     let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
     let mut elems: Vec<Ty> = if was_unit { vec![] } else { vec![orig_ty.clone()] };
     elems.extend(bufs.iter().map(|(_, t)| t.clone()));
-    let tuple_ty = Ty::Tuple(elems);
+    let tuple_ty = Ty::Tuple(elems.into());
     func.ret_ty = tuple_ty.clone();
     let reads = || bufs.iter().map(|(v, t)| var_read(*v, t.clone())).collect::<Vec<_>>();
     let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
@@ -928,7 +928,7 @@ fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, 
     let channel = err_channel(func);
     let single_layer = single_layer_ok_ty(func).map(|(ok_ty, _)| ok_ty);
     let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
-    let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()]);
+    let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()].into());
     func.ret_ty = tuple_ty.clone();
     let ret_var = vt.alloc(sym("__mp_ret"), orig_ty.clone(), Mutability::Let, None);
     let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
@@ -1262,7 +1262,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             // `let (a, b) = f(..)` ownership path (a hand-built TupleIndex
             // read left the extracted buffer aliased to a slot the tuple
             // temp's drop then freed).
-            let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()]);
+            let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()].into());
             call.ty = tuple_ty;
             let res = self.vt.alloc(sym("__mp_res"), orig_ty.clone(), Mutability::Let, None);
             let bind = IrStmt {
@@ -1346,7 +1346,7 @@ impl<'a> CallSiteRewriter<'a> {
             let read = var_read(buf, ty.clone());
             writebacks.extend(writeback_stmts(&place, read, self.vt, span));
         }
-        call.ty = Ty::Tuple(elem_tys);
+        call.ty = Ty::Tuple(elem_tys.into());
         let mut stmts = vec![IrStmt {
             kind: IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value: call },
             span,

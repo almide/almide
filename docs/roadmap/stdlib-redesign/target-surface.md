@@ -2,6 +2,8 @@
 # リデザイン後の標準ライブラリ（設計）
 
 > Last updated: 2026-10-24
+> この一覧は歴史的な設計目標であり、全項目の実装完了を示しません。現行 API・移行・未完了項目との区別は [README の案内](README.md#この記録と現行実装の区別) を参照してください。
+>
 > 元の記録: [README.md](README.md)（案の索引）・各 L2 ページの L3 関数表
 
 採用した案（○）をすべて適用したあとの、標準ライブラリの公開関数の一覧です。各 L2 ページの L3 関数表から機械的に組み立てています。表と食い違うときは、L3 の表と L2 の案が正です。
@@ -548,7 +550,7 @@
 | `cwd` | `effect fn env.cwd() -> String` |  |  |
 | `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
 | `os` | `fn env.os() -> String` |  |  |
-| `remove` | `effect fn env.remove(name: String) -> Result[Unit, String]` | 新規 | R-env-02 |
+| `remove` | `effect fn env.remove(name: String) -> Unit` | 新規 | R-env-02 |
 | `secret` | `effect fn env.secret(name: String) -> Secret[String]?` | 新規。値は `Secret` で生まれる | R-env-05 |
 | `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
 | `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |
@@ -886,7 +888,7 @@
 | `read_new` | `effect fn http.read_new(c: HttpCall) -> String` |  | R-http-01 |
 | `redirect` | `fn http.redirect(url: String) -> HttpResponse` |  |  |
 | `request` | `effect fn http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
-| `response` | `fn http.response(status: Int, body: String) -> HttpResponse` |  |  |
+| `response` | `fn http.response[B: Body](status: Int, body: B) -> HttpResponse` | 意味変更: `body` は `Body`（ADR-0032） | ADR-0032 |
 | `route` | `fn http.route(pattern: String, handler: HttpHandler) -> HttpRoute` |  |  |
 | `router` | `fn http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]` |  |  |
 | `send` | `effect fn http.send(req: HttpRequest) -> HttpResponse` | 新規 | R-http-13 |
@@ -898,7 +900,7 @@
 | `start` | `effect fn http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall` | 意味変更: `start(req: HttpRequest, limits: HttpLimits)` にする | R-http-09、R-http-14 |
 | `status` | `fn http.status(resp: HttpResponse) -> Int` | 改名（旧 `status_code`）。epoch 17。`0` の番兵もなくす | R-http-04、R-http-08 |
 | `wait` | `effect fn http.wait(c: HttpCall) -> HttpResponse` |  | R-http-01 |
-| `with_headers` | `fn http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
+| `with_headers` | `fn http.with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `wrap` | `fn http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` |  |  |
 
 撤去（18）:

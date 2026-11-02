@@ -10,7 +10,9 @@
 use crate::rng::SplitMix64;
 
 use super::sig_type::SigType;
-use super::term::{gen_expr, gen_final_call, gen_focus_call, Builder, ScopeVar, MAX_GOAL_DEPTH, START_FUEL};
+use super::term::{
+    gen_expr, gen_final_call, gen_focus_call, Builder, ScopeVar, MAX_GOAL_DEPTH, START_FUEL,
+};
 use super::types::{render_print, GenType};
 use super::{Generated, Origin, Signature};
 
@@ -99,7 +101,11 @@ pub fn synthesize(rng: &mut SplitMix64, catalogue: &[Signature]) -> Generated {
 
 /// [`synthesize`], and with `focus` (a catalogue index) the first binding is a
 /// direct call of that function; the bindings after it may consume it.
-pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: Option<usize>) -> Generated {
+pub fn synthesize_focused(
+    rng: &mut SplitMix64,
+    catalogue: &[Signature],
+    focus: Option<usize>,
+) -> Generated {
     let n_bindings = rng.in_range(MIN_BINDINGS, MAX_BINDINGS) as usize;
 
     let mut builder = Builder {
@@ -135,8 +141,13 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
             Some((call, ty)) => {
                 let name = format!("r{}", builder.fresh);
                 builder.fresh += 1;
-                builder.stmts.push(format!("let {name}: {} = {call}", ty.render()));
-                builder.scope.push(ScopeVar { name: name.clone(), ty: ty.clone() });
+                builder
+                    .stmts
+                    .push(format!("let {name}: {} = {call}", ty.render()));
+                builder.scope.push(ScopeVar {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                });
                 observables.push((name, ty));
             }
             None => {}
@@ -174,14 +185,21 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
     }
     body.extend(last);
 
-    let source = render_main(&body, builder.effect);
+    // An observation through an effect fn (`ffi.to_bytes(r)!`) needs an
+    // effect body as much as an effect call does.
+    let effect = builder.effect || observables.iter().any(|(_, t)| t.observe_calls_effect());
+    let source = render_main(&body, effect);
 
     Generated::plain(source, Origin::Synthesis)
 }
 
 /// Wrap a list of statement lines into a complete `fn main` program.
 fn render_main(body: &[String], effect: bool) -> String {
-    let mut main = String::from(if effect { "effect fn main() -> Unit = {\n" } else { "fn main() -> Unit = {\n" });
+    let mut main = String::from(if effect {
+        "effect fn main() -> Unit = {\n"
+    } else {
+        "fn main() -> Unit = {\n"
+    });
     for line in body {
         main.push_str("  ");
         main.push_str(line);

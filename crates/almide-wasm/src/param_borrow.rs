@@ -121,20 +121,34 @@ pub(crate) fn infer(
                     changed = true;
                 }
             }
-            for (j, k2) in cross {
-                if let Some(t) = table.infos[j].params.get(k2)
-                    && crate::rc_ownership::rc_droppable_ty(types, *t)
-                    && !owned[j][k2]
-                {
-                    owned[j][k2] = true;
-                    changed = true;
-                }
-            }
+            changed |= mark_callee_params(table, types, &mut owned, cross);
         }
         if !changed {
             return owned;
         }
     }
+}
+
+/// Mark the callee params a caller hands a consumable value (`cross`) as
+/// owned; whether any was newly marked. A declared host import
+/// (`@extern(wasm, ..)`) releases no argument: its params stay borrowed
+/// whatever its callers hand it, so a site lends rather than moving a credit
+/// the host would leak (the call-mode witness signs it so too).
+fn mark_callee_params(table: &FnTable, types: &TypeTable, owned: &mut [Vec<bool>], cross: Vec<(usize, usize)>) -> bool {
+    let mut changed = false;
+    for (j, k2) in cross {
+        if table.infos[j].import.is_some() {
+            continue;
+        }
+        if let Some(t) = table.infos[j].params.get(k2)
+            && crate::rc_ownership::rc_droppable_ty(types, *t)
+            && !owned[j][k2]
+        {
+            owned[j][k2] = true;
+            changed = true;
+        }
+    }
+    changed
 }
 
 struct Scan<'a> {

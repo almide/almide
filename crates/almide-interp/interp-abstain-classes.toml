@@ -102,6 +102,8 @@ patterns = [
   # a bytes read, the fallible fold callback. Sandboxed-fs glue at the
   # argv/env tier, bounded work each.
   "capability: fs.__fallible_fold_lines",
+  # fs.append_bytes (#4382): a true append, sandboxed-fs glue at the same tier.
+  "capability: fs.append_bytes",
   # One prim deeper again once the overlay served read_dir / path_filestat /
   # read_bytes_file: the rename floor is the next bounded piece of vfs glue.
   "capability: prim.rename",
@@ -148,6 +150,8 @@ patterns = [
   #                       evaluation model) before it can vote.
   #   prim.read_n_bytes — a raw fd read, the same tier as fd_write above.
   "capability: prim.random_get",
+  # uuid.v7 (#4382): clock + entropy, the same seeded-source glue as random_get.
+  "capability: uuid.v7",
   "capability: prim.read_n_bytes",
   # (stdlib wave 4) The handle-first io.read / io.write that replaced the
   # raw-fd surface above: generic over the `Read` / `Write` handle, so the

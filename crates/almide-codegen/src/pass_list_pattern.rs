@@ -618,7 +618,7 @@ fn build_list_if_chain_tuple_pattern(
 ) -> IrExpr {
     let (covered_next, rest_from_next) = coverage;
             let tuple_tys = match &subject.ty {
-                Ty::Tuple(tys) => tys.clone(),
+                Ty::Tuple(tys) => tys.to_vec(),
                 _ => vec![Ty::Unknown; elements.len()],
             };
             let mut conds: Vec<IrExpr> = Vec::new();
@@ -876,7 +876,7 @@ fn bind_irrefutable_elem(pat: &IrPattern, value: IrExpr, ty: &Ty, stmts: &mut Ve
         }
         IrPattern::Tuple { elements } => {
             let elem_tys: Vec<Ty> = match ty {
-                Ty::Tuple(ts) => ts.clone(),
+                Ty::Tuple(ts) => ts.to_vec(),
                 _ => vec![Ty::Unknown; elements.len()],
             };
             for (j, sub) in elements.iter().enumerate() {

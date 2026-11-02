@@ -19,7 +19,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.96.0"
+  RUST_TOOLCHAIN: "1.97.0"
 
 permissions:
   contents: read
@@ -43,12 +43,9 @@ jobs:
 
       - name: Install wasmtime (the pin setup-test-leg uses)
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version

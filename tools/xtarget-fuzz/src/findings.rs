@@ -274,14 +274,21 @@ mod cap_tests {
 
     #[test]
     fn a_short_side_is_quoted_whole() {
-        assert_eq!(quoted_excerpt("r1 = ok(2)", SUMMARY_SIDE_CAP), "\"r1 = ok(2)\"");
+        assert_eq!(
+            quoted_excerpt("r1 = ok(2)", SUMMARY_SIDE_CAP),
+            "\"r1 = ok(2)\""
+        );
     }
 
     #[test]
     fn a_long_side_is_cut_at_the_cap_and_names_its_size() {
         let line = " ".repeat(5_000_000);
         let q = quoted_excerpt(&line, SUMMARY_SIDE_CAP);
-        assert!(q.ends_with("... (5000000 bytes total)"), "{}", &q[q.len() - 40..]);
+        assert!(
+            q.ends_with("... (5000000 bytes total)"),
+            "{}",
+            &q[q.len() - 40..]
+        );
         assert!(q.len() <= SUMMARY_SIDE_CAP + 64, "len {}", q.len());
     }
 
@@ -334,7 +341,11 @@ mod cap_tests {
             wasm: None,
         };
         let meta = render_meta(1, 2, "all", &Origin::Synthesis, &f);
-        assert!(meta.len() < 3 * SUMMARY_SIDE_CAP, "meta is {} bytes", meta.len());
+        assert!(
+            meta.len() < 3 * SUMMARY_SIDE_CAP,
+            "meta is {} bytes",
+            meta.len()
+        );
         assert!(meta.contains("(4000000 bytes total)"));
     }
 }

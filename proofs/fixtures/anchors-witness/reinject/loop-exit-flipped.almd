@@ -1,0 +1,12 @@
+// #4280 operands drill: a `for` loop's exit test is flipped (`eqz` after the
+// compare), so the loop leaves while the counter is in bounds and reads the
+// element once it is not. The witness still records `e0 a0` in order (the
+// proven checker accepts); only the bytes show the test is no `i32.ge_u`.
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  var s = 0
+  for x in xs {
+    s = s + x
+  }
+  println("${s}")
+}

@@ -100,7 +100,9 @@ fn main() -> Unit = {
 
 A `: Codec` record type `T` derives `T.decode` and `T.decode_strict` (and
 `T.encode`). `T.decode` ignores keys it does not know; `T.decode_strict`
-refuses the first one with `unknown key '<k>'` before reading any field. A
+refuses unknown keys recursively, including nested records and containers.
+At each record it checks keys before decoding fields; nested errors include
+the path to the failing value. A
 field marked `@skip_decode` is never read from input (it keeps its default)
 and is still encoded; `@skip` is neither read nor written. Untrusted input is
 best decoded into a type holding only what the client may set (CHEATSHEET,
@@ -156,7 +158,7 @@ fn main() -> Unit = {
 ## Signature index (3 functions)
 
 ```
-// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
+// Strict JSON Value or err; trailing non-whitespace text and nesting over 1000 are errors.
 // @since 0.5.0 or earlier
 json.parse(text: String) -> Result[Value, String]
 

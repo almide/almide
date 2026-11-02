@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 759  implementations = 1715
+# holes = 767  implementations = 1719
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -1217,6 +1217,13 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "fs"
+name     = "append_bytes"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "fs"
 name     = "mkdir_p"
 native   = 1
 emitter  = 0
@@ -1490,28 +1497,7 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "http"
-name     = "response"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "http"
 name     = "json"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "http"
-name     = "__with_headers"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "http"
-name     = "redirect"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1561,20 +1547,6 @@ total    = 3
 [[hole]]
 module   = "http"
 name     = "__http_response_body_bytes"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "http"
-name     = "__http_response_set_header"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "http"
-name     = "__http_response_set_body"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -3292,43 +3264,43 @@ module   = "net"
 name     = "__os_udp_bind"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_local_port"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_send_to"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_recv_from"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_udp_close"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__os_lookup_host"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__net_listen"
@@ -3409,6 +3381,48 @@ total    = 0
 [[hole]]
 module   = "net"
 name     = "__net_is_open"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_bind"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_local_port"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_send_to"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_recv_from"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_udp_close"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_lookup_host"
 native   = 0
 emitter  = 0
 selfhost = 0
@@ -4139,43 +4153,43 @@ module   = "process"
 name     = "__os_start"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_poll"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_wait"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_stop"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_read_new"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__os_child_pid"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "__proc_exec"
@@ -4207,6 +4221,48 @@ total    = 0
 [[hole]]
 module   = "process"
 name     = "__proc_pid"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_start"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_poll"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_wait"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_stop"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_read_new"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_child_pid"
 native   = 0
 emitter  = 0
 selfhost = 0
@@ -5098,8 +5154,8 @@ module   = "uuid"
 name     = "__v7_stamp"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "value"
 name     = "array"

@@ -9,6 +9,9 @@ use crate::decline_site::DeclineSite;
 use crate::types_table::TypeTable;
 use crate::*;
 
+#[path = "emit_decls.rs"]
+mod decls_rec;
+
 /// #2865: package modules keyed like a compiler namespace (a pre-pass of the
 /// leg's front; its display half is read by [`fn_site`] below).
 #[path = "package_keys.rs"]
@@ -60,7 +63,14 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // Transparent newtypes erase FIRST, so both passes read one tree
     // (#1423 stage 4: the html SafeHtml row).
     // ADR-0031 D3: a Region argument of an `@extern(wasm)` import is split
-    // into (base, len) before anything reads the program.
+    // into (base, len) before anything reads the program; a Region return of
+    // an `@export(wasm)` fn gets its adapter's wrapper (amendment A1).
+    // #4354: a Region parameter of an `@export(wasm)` fn is lent from the
+    // host's (base, len) first, so a fn that also returns one is wrapped next.
+    let lent = crate::extern_region::lend_region_params(ir);
+    let ir = lent.as_ref().unwrap_or(ir);
+    let wrapped = crate::extern_region::wrap_region_exports(ir);
+    let ir = wrapped.as_ref().unwrap_or(ir);
     let split = crate::extern_region::split_region_params(ir);
     let ir = split.as_ref().unwrap_or(ir);
     let erased = crate::newtype::erase_transparent_aliases(ir);
@@ -202,7 +212,7 @@ fn emit_program_pass(
         };
         // #2275: a body-less `@extern` is a declared import on the wasm
         // target, or a wall — never a hollow body.
-        let (import, refuse) = match extern_import(f, &params, ret, &types) {
+        let (import, refuse) = match imports::extern_import(f, &params, ret, &types) {
             Ok(import) => (import, refuse),
             Err(reason) => (None, refuse.or(Some(reason))),
         };
@@ -304,6 +314,11 @@ fn emit_program_pass(
                 // A declared import's slot: the loud stub the post-pass removes.
                 let mut stub = Function::new([]);
                 stub.instructions().unreachable().end();
+                // Call modes (#2758): the host releases no argument, so each droppable param is borrowed.
+                if crate::witness::collecting() {
+                    let modes = table.infos[i].params.iter().filter(|&&t| crate::rc_ownership::rc_droppable_ty(&types, t));
+                    crate::witness::modes::signature(table.infos[i].wasm_index, modes.map(|_| 0).collect());
+                }
                 lowered.push(Ok((stub, HashSet::new())));
                 break 'one_fn;
             }
@@ -571,6 +586,7 @@ fn emit_program_pass(
     // one-namespace duplicate wall as an entry fn.
     let mut export_fns: Vec<(String, u32)> = Vec::new();
     let mut export_owners: Vec<String> = Vec::new();
+    let mut region_exports = crate::region_export::Claims::default();
     for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
         // The source spelling: an entry fn's IR name may be escaped (#3483).
         let name = almide_ir::user_fn_source_name(f.name.as_str());
@@ -609,7 +625,7 @@ fn emit_program_pass(
             // never a silent dedup (the name is the host's contract). The
             // names the toolchain writes itself are the module's own.
             let reserved = crate::host_exports::is_reserved_export(&export_name);
-            let prior = export_fns.iter().position(|(e, _)| *e == export_name);
+            let prior = region_exports.prior(&export_name);
             if reserved || prior.is_some() {
                 let claimants = match prior {
                     Some(p) => format!("fns `{}` and `{owner}`", export_owners[p]),
@@ -620,6 +636,25 @@ fn emit_program_pass(
                 ));
             }
             visited.extend(sub);
+            let claimed = region_exports.claim(f, &table.infos[i], &types, &export_name)?;
+            if claimed != crate::region_export::Claimed::Plain {
+                // The adapter passes the wrapper's parameters through, an
+                // address or length among them as a number in the memory's
+                // width, so the host marshals each as an `Int` (#4354).
+                let mut params = crate::host_exports::export_params(&table.infos[i].params, &types);
+                for k in crate::extern_region::address_params(f) {
+                    if let Some(s) = params.get_mut(k as usize) {
+                        *s = crate::host_exports::AbiShape::Int;
+                    }
+                }
+                let ret = match claimed {
+                    crate::region_export::Claimed::Region => crate::host_exports::ExportRet::Region,
+                    _ => crate::host_exports::export_ret(table.infos[i].ret, &types),
+                };
+                crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone(), params, ret);
+                export_owners.push(owner);
+                continue;
+            }
             crate::host_exports::note_export(
                 &export_name,
                 table.infos[i].param_owned.clone(),
@@ -656,17 +691,21 @@ fn emit_program_pass(
         extra_fns: &extra_fns,
         global_decls: &global_decls,
         export_fns: &export_fns,
+        region_exports: &region_exports.adapters,
         main_index,
     })?;
     // #2275: the extern stubs become declared imports of the finished bytes.
     let declared: Vec<imports::Declared> = table
         .infos
         .iter()
-        .filter_map(|info| {
+        .enumerate()
+        .filter_map(|(i, info)| {
             let (module, name) = info.import.clone()?;
-            Some(imports::Declared { index: info.wasm_index, module, name })
+            let narrow = crate::extern_region::address_params(program_fns[i].0);
+            let effect = program_fns[i].0.declares_effect();
+            Some(imports::Declared { index: info.wasm_index, module, name, narrow, effect })
         })
-        .chain(crate::fan::js_async::declared_protocol(&table, &work))
+        .chain(crate::fan::js_async::declared_protocol(&table, &work, &|hook| program_fns[hook].0.declares_effect()))
         .collect();
     let pre_declare = bytes;
     let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
@@ -680,60 +719,10 @@ fn emit_program_pass(
         pre_declare: &pre_declare,
         stubs: declared.iter().map(|d| d.index).collect(),
     });
-    record_decls(&program_fns, (main, main_index), &work, &entry_fn_indices, &declared, &bytes);
+    let creators = decls_rec::Creators { fns: &fn_lambdas, main: main_lambdas.clone(), lambdas: &lambda_children, entry_fn_indices: &entry_fn_indices };
+    decls_rec::record_decls(&program_fns, (main, main_index), &work, &declared, &creators, &bytes);
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get(), lines })
-}
-
-/// #2759: the declaration table the name and capability witnesses read
-/// (witness_decls.rs) — each program fn's, `main`'s and lifted lambda's
-/// index with what its source declares.
-fn record_decls(
-    program_fns: &[(&IrFunction, Option<String>, u32)],
-    (main, main_index): (Option<&IrFunction>, u32),
-    work: &FnWork,
-    entry_fn_indices: &[u32],
-    stubs: &[imports::Declared],
-    bytes: &[u8],
-) {
-    use crate::witness::decls::{DeclFn, Declared, PassDecls};
-    if !crate::witness::decls::collecting() {
-        return;
-    }
-    let stubs = stubs.iter().map(|d| d.index).collect();
-    // #3041: a fn synthesized from an effect fn's body keeps its origin's
-    // declaration (`IrFunction::declares_effect`).
-    let class = |f: &IrFunction| Some(if f.declares_effect() { Declared::Effect } else { Declared::Pure });
-    let meter = work.meter_reads.borrow();
-    let reads = |name: &str| meter.get(name).copied().unwrap_or(0);
-    let mut fns: Vec<DeclFn> = program_fns
-        .iter()
-        .enumerate()
-        .map(|(i, (f, qual, _))| DeclFn {
-            index: F_FN_BASE + i as u32,
-            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
-            // A self-host registry body implements a SURFACE whose
-            // declaration its callers were checked against; its own `fn`
-            // keyword declares nothing about the host (random.int is an
-            // `effect fn` implemented by a plain `fn random_int`).
-            declared: if qual.as_deref().is_some_and(|q| q.starts_with("__selfhost_")) { None } else { class(f) },
-            meter_clock_reads: reads(&qual.clone().unwrap_or_else(|| f.name.as_str().to_string())),
-        })
-        .collect();
-    fns.push(DeclFn {
-        index: main_index,
-        name: "main".into(),
-        declared: main.map_or(Some(Declared::Pure), class),
-        meter_clock_reads: reads("main"),
-    });
-    for (pos, e) in work.entries.borrow().iter().enumerate() {
-        if let (TableEntry::Lambda(j), Some(&index)) = (e, entry_fn_indices.get(pos)) {
-            let name = format!("<lambda#{j}>");
-            let meter_clock_reads = reads(&name);
-            fns.push(DeclFn { index, name, declared: None, meter_clock_reads });
-        }
-    }
-    crate::witness::decls::record(PassDecls { fns, stubs, bytes: bytes.to_vec() });
 }
 
 /// The module a program fn belongs to: its qualified key minus `.<fn name>`
@@ -759,42 +748,4 @@ fn fn_site(entry: &(&IrFunction, Option<String>, u32), refused_at: Option<usize>
         None => qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
     };
     DeclineSite { function, module, line: refused_at.or(f.body.span.map(|s| s.line)), top_let: false }
-}
-
-/// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
-/// `Ok(Some((module, name)))` when its signature has the scalar host ABI
-/// (`Int`/sized ints → i64, `Float` → f64, `Bool` → i32, `String` → i32
-/// block, `Unit` → no result), or — a fallible import (#3356: an `effect fn`
-/// extern, or one declaring `Result[T, String]`) — an i32 `Result` block the
-/// host builds, ok a scalar or Unit, err a String; `Ok(None)` for a fn with
-/// a body; `Err` for a native (`rs`/`rust`) extern — there is no wasm host
-/// for it, so an import would be a hollow lie — and for a param or return
-/// outside the ABI.
-fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>, types: &TypeTable) -> Result<Option<(String, String)>, String> {
-    if f.extern_attrs.is_empty() {
-        return Ok(None);
-    }
-    let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else {
-        return Err(format!("extern-native:{}", f.name));
-    };
-    if !matches!(f.body.kind, IrExprKind::Hole) {
-        return Ok(None);
-    }
-    for (p, t) in f.params.iter().zip(params) {
-        if !matches!(t, SliceTy::Scalar(_)) {
-            return Err(format!("extern-ty:{}:{}", f.name, p.name));
-        }
-    }
-    let fallible = |ok: crate::ETy, err: crate::ETy| {
-        matches!(types.el(ok), SliceTy::Scalar(_) | SliceTy::Unit) && types.el(err) == crate::STR
-    };
-    let host_ret = match ret {
-        None | Some(SliceTy::Scalar(_)) => true,
-        Some(SliceTy::Result(ok, err)) => fallible(ok, err),
-        _ => false,
-    };
-    if !host_ret {
-        return Err(format!("extern-ret:{}", f.name));
-    }
-    Ok(Some((a.module.as_str().to_string(), a.function.as_str().to_string())))
 }

@@ -346,7 +346,7 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
             continue;
         }
         let is_generic = env.types.get(type_name).is_some_and(|t| t.contains_typevar());
-        let type_ty = Ty::Named(*type_name, vec![]);
+        let type_ty = Ty::Named(*type_name, Default::default());
 
         for proto_name in protocol_names {
             // A part of a declared composition (`Encode` of `Codec`) is
@@ -412,6 +412,9 @@ fn validate_protocol_method_impl(
     method_sig: &crate::types::ProtocolMethodSig,
 ) {
     let ImplTarget { name: type_name, is_generic, ty: type_ty } = *target;
+    // The name a declared type writes (`media_type`, never the internal
+    // `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method_sig.name.as_str());
     // A derived method is keyed bare while an explicit one is keyed prefixed,
     // so the key has to be resolved rather than assumed (#1087).
     // A built-in conformer (`Int: Numeric`) satisfies its requirements with
@@ -421,7 +424,7 @@ fn validate_protocol_method_impl(
         return;
     }
     let fn_key = super::protocols::requirement_fn_key(env, type_name.as_str(), method_sig.name.as_str())
-        .unwrap_or_else(|| format!("{}.{}", type_name, method_sig.name));
+        .unwrap_or_else(|| format!("{}.{}", type_name, public));
     let Some(sig) = env.functions.get(&sym(&fn_key)) else {
         // A derivable built-in (Eq, Repr, Ord, Hash, Codec) may leave its
         // requirements to auto-derive; any other protocol's must be written.
@@ -429,9 +432,9 @@ fn validate_protocol_method_impl(
         if !is_builtin {
             diagnostics.push(err(
                 format!("type '{}' declares protocol '{}' but missing method '{}'",
-                    type_name, proto_name, method_sig.name),
+                    type_name, proto_name, public),
                 format!("Add: fn {}.{}({}) -> {}",
-                    type_name, method_sig.name,
+                    type_name, public,
                     method_sig.params.iter()
                         .map(|(n, t)| {
                             let display_ty = if *t == Ty::TypeVar(sym("Self")) {
@@ -470,12 +473,12 @@ fn validate_protocol_method_impl(
     if actual_params.len() != expected_params.len() {
         diagnostics.push(err(
             format!("method '{}' on type '{}' has {} parameter(s), expected {} to satisfy protocol '{}'",
-                method_sig.name, type_name, actual_params.len(), expected_params.len(), proto_name),
-            format!("Protocol '{}' defines: fn {}({})", proto_name, method_sig.name,
+                public, type_name, actual_params.len(), expected_params.len(), proto_name),
+            format!("Protocol '{}' defines: fn {}({})", proto_name, public,
                 method_sig.params.iter().map(|(n, t)| {
                     format!("{}: {}", n, substitute_self(t, type_ty).display())
                 }).collect::<Vec<_>>().join(", ")),
-            format!("fn {}.{}", type_name, method_sig.name),
+            format!("fn {}.{}", type_name, public),
         ));
         return;
     }
@@ -485,9 +488,9 @@ fn validate_protocol_method_impl(
             let param_name = &sig.params[i].0;
             diagnostics.push(err(
                 format!("method '{}.{}' parameter '{}' has type '{}', expected '{}' to satisfy protocol '{}'",
-                    type_name, method_sig.name, param_name, actual_ty.display(), expected_ty.display(), proto_name),
+                    type_name, public, param_name, actual_ty.display(), expected_ty.display(), proto_name),
                 format!("Change type to '{}'", expected_ty.display()),
-                format!("fn {}.{}", type_name, method_sig.name),
+                format!("fn {}.{}", type_name, public),
             ));
         }
     }
@@ -495,9 +498,9 @@ fn validate_protocol_method_impl(
     if !ret_matches && expected_ret != Ty::Unknown && actual_ret != Ty::Unknown {
         diagnostics.push(err(
             format!("method '{}.{}' returns '{}', expected '{}' to satisfy protocol '{}'",
-                type_name, method_sig.name, actual_ret.display(), expected_ret.display(), proto_name),
+                type_name, public, actual_ret.display(), expected_ret.display(), proto_name),
             format!("Change return type to '{}'", expected_ret.display()),
-            format!("fn {}.{}", type_name, method_sig.name),
+            format!("fn {}.{}", type_name, public),
         ));
     }
 }
@@ -537,6 +540,9 @@ fn validate_protocol_method_modes(
     method_sig: &crate::types::ProtocolMethodSig,
 ) {
     let type_name = target.name;
+    // The name a declared type writes (`media_type`, never the internal
+    // `__self_media_type`, ADR-0032 Q24).
+    let public = almide_lang::stdlib_info::requirement_public_name(method_sig.name.as_str());
     // A built-in conformer (`Int: Numeric`) satisfies its requirements with
     // its stdlib module's functions and the operators; the conformance matrix
     // gate checks those, not this per-declaration pass.
@@ -544,15 +550,15 @@ fn validate_protocol_method_modes(
         return;
     }
     let fn_key = super::protocols::requirement_fn_key(env, type_name.as_str(), method_sig.name.as_str())
-        .unwrap_or_else(|| format!("{}.{}", type_name, method_sig.name));
+        .unwrap_or_else(|| format!("{}.{}", type_name, public));
     let Some(sig) = env.functions.get(&sym(&fn_key)) else { return };
     if sig.is_effect != method_sig.is_effect {
         let (want, have) = if method_sig.is_effect { ("an `effect fn`", "a pure fn") } else { ("a pure fn", "an `effect fn`") };
         diagnostics.push(err(
-            format!("method '{}.{}' is {}, but protocol '{}' declares '{}' as {}", type_name, method_sig.name, have, proto_name, method_sig.name, want),
+            format!("method '{}.{}' is {}, but protocol '{}' declares '{}' as {}", type_name, public, have, proto_name, public, want),
             format!("Match the protocol's declaration: {} `fn {}.{}` — effect-ness is part of the method signature a conformance must implement",
-                if method_sig.is_effect { "write" } else { "drop `effect` from" }, type_name, method_sig.name),
-            format!("fn {}.{}", type_name, method_sig.name),
+                if method_sig.is_effect { "write" } else { "drop `effect` from" }, type_name, public),
+            format!("fn {}.{}", type_name, public),
         ));
     }
     if sig.mut_params != method_sig.mut_params {
@@ -561,9 +567,9 @@ fn validate_protocol_method_modes(
             if v.is_empty() { "no `mut` parameter".to_string() } else { v.join(", ") }
         };
         diagnostics.push(err(
-            format!("method '{}.{}' takes {}, but protocol '{}' declares {}", type_name, method_sig.name, names(&sig.mut_params), proto_name, names(&method_sig.mut_params)),
-            format!("Match the protocol's parameter modes on `fn {}.{}` — `mut` (in-place mutation of the caller's value) is part of the method signature a conformance must implement", type_name, method_sig.name),
-            format!("fn {}.{}", type_name, method_sig.name),
+            format!("method '{}.{}' takes {}, but protocol '{}' declares {}", type_name, public, names(&sig.mut_params), proto_name, names(&method_sig.mut_params)),
+            format!("Match the protocol's parameter modes on `fn {}.{}` — `mut` (in-place mutation of the caller's value) is part of the method signature a conformance must implement", type_name, public),
+            format!("fn {}.{}", type_name, public),
         ));
     }
 }

@@ -1,6 +1,6 @@
 # Almide v1 trust kernel (Coq/Rocq proof spine)
 
-The flight-grade certification spine (docs/roadmap/active/v1-mir-architecture.md
+The proof and certification-evidence spine (docs/roadmap/active/v1-mir-architecture.md
 §5, and the tier-1 stack). **We do not prove the compiler — we prove the
 CHECKER.** The (large, untrusted) compiler emits an artifact + a certificate;
 a tiny checker `K` verifies each build, and `K`'s soundness is proven here:
@@ -23,7 +23,7 @@ compiler with qualified use in safety-critical settings).
 ## Status
 
 - **brick 1 (here): `OwnershipChecker.v` — KERNEL-VERIFIED.** The RC-balance /
-  memory-safety checker `K` over the MIR ownership op sequence, and its soundness
+  ownership checker `K` over the MIR ownership op sequence, and its soundness
   theorem `check_sound : check ops = true → no_double_free ops ∧ no_leak ops`.
   The irreducible single-object core. Verified three ways (Rocq 9.1.1):
   - kernel-checked (`coqc`), `Qed`, `0` admits;
@@ -126,11 +126,13 @@ compiler with qualified use in safety-critical settings).
   control: an in-layout read of a freed block is not safe.
   `certified_memory_safe` reaches all four clauses with one more
   hypothesis, `init_disc`: every allocation is immediately followed by the
-  store that initializes its whole extent (the constructor discipline; no
-  witness carries it yet). `read_before_init_not_initialized` is its
+  store that initializes its whole extent (the constructor discipline).
+  `InitCert.v` subsequently replaces initialization/layout assumptions with
+  accepted construction sites; the structural emitter records `init`
+  witnesses for list literals and range lists, not all allocation sites. `read_before_init_not_initialized` is its
   control. Not reached: the link from the certificates' events to the bytes.
 
-## Verify (the third-party `make verify`)
+## Verify (the third-party `make verify-trust`)
 
 ```
 cd proofs
@@ -141,16 +143,19 @@ cd proofs
 ## Known limitations (the honest base — config-management §7)
 
 The trusted base is recorded so the rest may be called "proven":
-- The **kernel** (Coq/Rocq) and **OCaml extraction** are trusted (CertiCoq +
-  CompCert will close the extraction hole, brick 6).
+- The **kernel** (Coq/Rocq) remains a trust root. Extraction is a fast path,
+  not the sole root of gate verdicts: the gates independently re-evaluate
+  the witnesses in the kernel and compare with `almide-verify`.
 - ~~The tokenizer in `driver.ml`~~ — **INTERNALIZED into Coq** (`parse` +
   `check_cert`, proven by `check_cert_sound`): the whole *bytes ⟶ accept/reject*
   pipeline is now kernel-checked. The trusted glue is reduced to file I/O only.
-- The model is single-object RC; multi-object ✅ (`check_all`); the other
-  properties (stack balance, name totality, …) are later bricks.
+- Ownership, names, capabilities, call modes, bounds and initialization have
+  checker components; see `Extract.v` and `structural-wall.sh`. Their
+  accepted witnesses do not prove the full `MemorySafe` predicate of every
+  shipped program: recording, coverage and trace-to-bytes assumptions remain.
 
-Rocq/Coq provides `coqc`/`coqchk`. Toolchain pin + axiom ledger is a later
-brick (config management, §7 of the tier-1 stack).
+Rocq/Coq provides `coqc`/`coqchk`. Current toolchain pins, the axiom ledger
+and exact model/implementation boundaries are in [TRUSTED_BASE.md](TRUSTED_BASE.md).
 
 ## Byte grounding: two runtimes, one retired (#2753, #2761)
 
@@ -180,7 +185,7 @@ about those bytes. At the deletion:
   MODELED runtime (the retired incumbent's), and `check-structural-bytes.sh`
   is named as the shipping-bytes grounding.
 
-## Roadmap (the tier-1 stack, in critical-path order)
+## Original brick plan (historical ordering, not current pending status)
 
 1. ✅ first property (RC balance) checker + soundness — this file.
 2. Certificate format v0 (a Metamath-simple witness language) — the seam.

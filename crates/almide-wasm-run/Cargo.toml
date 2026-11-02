@@ -5,7 +5,7 @@ edition.workspace = true
 # The embedded engine's floor (wasmtime/cranelift), NOT the compiler's:
 # every other workspace crate holds the workspace 1.89 promise, and the
 # MSRV-honesty gate checks both claims separately.
-rust-version = "1.96"
+rust-version = "1.97"
 license.workspace = true
 description = "The greenfield wasm HOST: the almide.* import surface (print/exit/fs_call/host_read) over wasmtime, as a library and a CLI runner"
 
@@ -31,15 +31,15 @@ wasmparser = "0.262"
 wasm-encoder = "0.262"
 # wasmtime's defaults minus `cache`: the on-disk compilation cache is never
 # configured here, and the feature pulls zstd (RUSTSEC-2026-0391/0395/0398/0403/0410).
-wasmtime = { version = "49.0.4", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
+wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
 # ADR-0023 step 7: the embedded lane runs an HTTP program's WASI 0.3
 # component. The p3 worlds come from wasmtime-wasi; wasi:http comes from
 # wasmtime-wasi-http WITHOUT `default-send-request` (no hyper client, no
 # rustls): the transport is the `send_request` hook, which is almide-rt-core,
 # the client native runs (§2.2). Pinned in lockstep with wasmtime's major
 # (proofs/wasi-pin-policy.toml [runtime].crate_major).
-wasmtime-wasi = { version = "49.0.4", default-features = false, features = ["p3"] }
-wasmtime-wasi-http = { version = "49.0.4", default-features = false, features = ["p3"] }
+wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p3"] }
+wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p3"] }
 tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread"] }
 http = "1"
 http-body-util = "0.1"

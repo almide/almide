@@ -1,6 +1,6 @@
 # bytes
 
-Binary data manipulation. `import bytes`.
+Binary data manipulation. Auto-imported; `import bytes` is optional.
 
 `Bytes` is a contiguous, mutable-in-place byte buffer with a length prefix.
 Most operations are O(1) or O(n).
@@ -51,7 +51,7 @@ fn main() -> Unit = {
 | `bytes.to_list(b) -> List[Int]` | Materialise as a list |
 | `bytes.len(b) -> Int` | Length |
 | `bytes.is_empty(b) -> Bool` | Length == 0 |
-| `bytes.is_eof(b, i) -> Bool` | `i` is at or past the end |
+| `bytes.is_eof(b, i) -> Bool` | `i` is negative or at or past the end |
 | `bytes.get(b, i) -> Int?` | Single byte |
 | `bytes.compare(a, b) -> Int` | Lexicographic order |
 

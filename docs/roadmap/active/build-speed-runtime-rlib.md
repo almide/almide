@@ -1,5 +1,23 @@
-<!-- description: Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] -->
+<!-- description: Runtime rlib build path: current fat-LTO release linking and the historical inlining experiment -->
 # Build Speed: Runtime rlib + Hot-Fn Inlining
+
+## Current implementation (2026-10-31)
+
+The release fast path now links with **fat LTO and one codegen unit**;
+the runtime rlib itself is built with LTO off and four codegen units.
+`src/cli/cargo_build.rs` records the October 9 experiment: adding `#[inline]`
+to wrappers alone would not recover the observed non-LTO gap. The cache key
+includes source, toolchain identity, opt level, CPU and codegen flags, under
+`build_dir::cache_base()` rather than a fixed public temporary path.
+
+Cross builds, matrix use, runtime-crate dependencies, native dependencies and
+a source root bypass the run/build fast path. See
+[cargo_build.rs](../../../src/cli/cargo_build.rs) for the actual predicates.
+The timings and no-LTO/inline plan below describe the earlier implementation;
+they are retained as measurement and design history, not a current prescription.
+Native-dependency support in the rlib fast path and prebuilt distribution remain separate proposals.
+
+## Earlier implementation and inlining proposal
 
 > Goal: Go-like build speed. The dev/test/run loop and shipping builds should not pay to recompile the runtime every time.
 

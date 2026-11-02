@@ -25,11 +25,13 @@
 
 ### `s[i]` (文字列インデックス)
 
-**却下理由**: 演算子オーバーロード禁止 (SPEC §19)。`string.char_at(s, i)` を使う。
+**現行 API**: 文字列の文字取得には `string.get(s, i)` を使う。これは、既存演算子の protocol dispatch まで禁止するという意味ではない。
 
-### match arm の `{}` 省略
+### match arm の `{}` 省略 — 現行構文では許可
 
-**却下理由**: Rust と同じルール。LLM の既存知識と一致。Canonicity (ブロックは常に `{}` で囲む)。
+旧却下記述は現行 parser と一致しない。arm body は式なので `some(x) => x` の
+ように書ける。複数文の block には `{ ... }` を使う
+（`crates/almide-syntax/src/parser/compounds.rs::parse_match_arm`）。
 
 ### ternary `? :` 演算子
 
@@ -47,13 +49,20 @@
 
 **却下理由**: `int.to_string(n)`, `int.from_saturating(x)` で明示変換。暗黙の変換は Python 2→3 の `/` 演算子 (int→float) のような silent な挙動変更を引き起こす。
 
-### operator overloading
+### custom operator syntax — protocol dispatch とは区別
 
-**却下理由**: 演算子は固定セマンティクス。`+` は加算と連結（型によるオーバーロード）。ユーザー定義演算子は解析の曖昧さと LLM の混乱を生む。
+利用者が新しい演算子記号や構文を定義する機能はない。一方、既存演算子は
+宣言された protocol に従い requirement method へ dispatch できる。たとえば
+`Eq` の `==` は `Type.eq`、`Numeric` の `+` は `add` に対応する。
+旧「演算子オーバーロードを全面禁止」という説明は現行実装と一致しない
+（`canonicalize/protocols.rs`、`spec/lang/operator_protocol_test.almd`、
+`spec/stdlib/bigint_operators_test.almd`）。
 
 ### algebraic effects (拡張 effect system)
 
-**却下理由**: `effect fn` は I/O/副作用マーカーに留める。Gleam が effect system なしで成功したように、シンプルな 2 値分類 (pure / effect) で十分。typed effects (`effect[fs]`, `effect[http]`) は Security Layer 2-3 で将来検討。
+**却下理由**: `effect fn` は I/O/副作用マーカーに留める。Gleam が effect system なしで成功したように、シンプルな 2 値分類 (pure / effect) で十分。表面構文 `effect[fs]` / `effect[http]` は採用していない。一方、関数値を通した
+capability category set の推論と `[permissions].allow` は実装済み
+（[capability system](../wasm/capability-system.md)）。
 
 ### Higher-Kinded Types (HKT)
 
@@ -123,7 +132,8 @@ Almide の `fan` は「並行の意図」だけを書く。コンパイラがタ
 
 ### macros
 
-**却下理由**: Zig の comptime、Rust の proc macros — 強力だが LLM が正しく生成できない。Almide は TOML 定義 + `build.rs` でコード生成。
+**却下理由**: Zig の comptime、Rust の proc macros — 強力だが LLM が正しく生成できない。compiler 内部の生成処理と、利用者が書く macro 構文は別物。stdlib の定義元は
+現在 `stdlib/*.almd` であり、旧 TOML stdlib 定義ではない。
 
 ### monkey patching / open classes
 

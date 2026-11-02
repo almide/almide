@@ -48,18 +48,18 @@ bash なら `grep` 三発で済むものを、型の付いたパーサとして�
 
 規則だけでは守られない。それがこの六週間の実測結果そのものである（下記）。
 
-`proofs/gate-verification.toml` を使う。**全ゲート 79 行の台帳**で、1 行ごとに `path` /
+`proofs/gate-verification.toml` を使う。行数は台帳を正本とし、各行に `path` /
 `class`（KERNEL_PROVEN / MUTATION_TESTED / NEGATIVE_TESTED / EXERCISED / UNVERIFIED）/
 `evidence` を持ち、`scripts/check-gate-verification.sh` が列挙・欠落・陳腐化を落とす。
 UNVERIFIED は **縮小のみ許す上限**で burn-down される。
 
-ここに分類フィールドを 1 つ足す。**構造化と宣言されたゲートが bash で書かれていたら落ちる。**
+分類フィールド `reads` は実装済みで、`structured` / `scalar` / `UNCLASSIFIED` を取る。
+**`reads = "structured"` と宣言された `.sh` は検査で拒否する。**
 
-- 初期値は `UNCLASSIFIED`、上限 79、**縮小のみ**。台帳が UNVERIFIED で既にやっている作法を
-  そのまま借りる。79 行の分類が仕組みの導入をブロックしない。
-- 新規ゲートは宣言必須。
-- 列挙は `scripts/check-*.sh` だけでなく `tools/almide-gates/` のサブコマンドにも広げる
-  （現在は bash 側しか列挙していないので、Almide のゲートは台帳に存在しない）。
+- `UNCLASSIFIED` は台帳の上限で縮小管理される。固定の 79 行という旧値を複写しない。
+- 新規ゲートは宣言必須で、欠落・未知の分類・根拠不足を検査する。
+- `tools/almide-gates/src/main.almd` のサブコマンドも
+  `tools/almide-gates:<cmd>` として列挙済み。導入そのものは残件ではない。
 
 **`.sh` の本数を数える ratchet は作らない。** 旧目標の done-criteria に書かれていたが、
 grep-and-exit のゲートは bash のままで正しいと決めた以上、本数は正当に増える。本数は
@@ -140,10 +140,16 @@ unquote 式、2 箇所に書かれた evidence クラスの enum。
 安い選択肢**である。移植が見つけられたのは賢かったからではなく、byte-diff が
 「もっともらしい言い換え」を拒否したからである。
 
-## タイムアウトの可容範囲（この項目が確定させた契約）
+## タイムアウト — 当初の経緯と現在の境界
+
+現在の子プロセス期限は `ProcessCommand.timeout_ms`（[process reference](../../stdlib/process.md)）。
+`fan.timeout(duration.ms(n)) { body }` も oracle 層として存在し、撤去されたままではない。
+決定的な計算量上限は `fan.bounded(compute.ms(n))`、clock による選択は
+[ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md) の `fan.min` を使う。
+以下は #1040 時点の設計経緯であり、現行構文の可否を決める表ではない。
 
 `output-parity` はサブプロセスに制限時間をかける必要があり、当時 `perl -e 'alarm …; exec …'`
-に外注していた。`fan.timeout` は 0.29.0 で撤去されている — **純粋な計算**に制限時間をかけると
+に外注していた。当時 `fan.timeout` は 0.29.0 で撤去されていた — **純粋な計算**に制限時間をかけると
 結果が機械の関数になり、native ⇄ wasm のバイト一致が壊れるからである。
 
 引ける線はこうだった。**制限時間が許されるのは、それが囲む操作が既にバイト一致契約の外に
@@ -163,7 +169,8 @@ unquote 式、2 箇所に書かれた evidence クラスの enum。
 > **保証しない**: 発火するかどうか。それはホストの関数である。
 
 [#1040](https://github.com/almide/almide/issues/1040) で **着地済み** —
-`process.exec_status_timeout` として効果表面にのみ入った。`fan.timeout` は撤去されたまま。
+当時は `process.exec_status_timeout` として効果表面に入った。現在の名前と
+`fan.timeout` の oracle 層への再導入は、この節の冒頭の現行参照に従う。
 
 ## 解けた障害
 
@@ -211,9 +218,9 @@ unquote 式、2 箇所に書かれた evidence クラスの enum。
 - **R2 — twin が `.sh` オラクルから乖離する。** 吸収: **diff を実装する**（旧版はこれを
   宣言だけして実装しなかった。それが R2 が現実になった経路である）。diff が緑になるまで
   `.sh` は消さない。
-- **R3 — タイムアウトの設計が 0.29.0 の決定を再び開く。** 吸収: 上の可容範囲の規則は
-  **契約であって慣習ではない**。`fan.timeout` は撤去されたまま、tombstone 診断が効果表面の
-  形を指し続ける。
+- **R3 — 決定的な計算量上限と環境期限を混同する。** 吸収: `Compute` と
+  `Duration` の契約を区別し、壁時計の発火有無をターゲット不変とは主張しない。
+  現行の SPEC / ADR-0028 を正本にし、0.29.0 の撤去を現在の禁止と読み替えない。
 - **R4 — 線が判定不能になる。** 「構造化か grep か」が毎回議論になると、台帳のフィールドが
   形骸化する。吸収: 迷ったら構造化に倒す、という既定を上に書いた。パーサを書いているなら
   構造化である。

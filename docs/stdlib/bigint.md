@@ -20,9 +20,10 @@ Radix 2, 4, 8, 16 and 32 convert in linear time and have no limit — print a
 huge value in hex. `pow` aborts with `pow result too large` before computing a
 result sure to pass 30 * 2^28 bits (2^28 limbs, the list ceiling `bshl` meets).
 
-Not yet: the arithmetic operators `+ - * / %` on BigInt and `bigint.from` (a
-conversion from any number type) wait on the language; build values with
-`parse` and `pow` until then.
+BigInt supports the arithmetic operators `+ - * / %`. Build values with
+`parse`, `pow`, or `bigint.from(x)`: the conversion accepts numeric sources,
+truncates toward zero, and aborts for NaN or an infinity.
+`bigint.from_checked(x)` returns `none` when the source is not a finite integer.
 
 ```almd run
 import bigint

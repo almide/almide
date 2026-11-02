@@ -57,6 +57,8 @@ Definition step_mem (o : Op) (m : Mem) (base : Z) : option Mem :=
   | Dec | MoveOut => rt_dec m base
   | Reuse => rt_reuse m base
   | Borrow => rt_borrow m base
+  (* a share-out: the +1 is the arm result's cell (its `i`), not this one. *)
+  | ShareOut => Some m
   end.
 
 Fixpoint mrun (ops : list Op) (m : Mem) (base : Z) : option Mem :=
@@ -114,6 +116,7 @@ Proof.
         reflexivity.
       * (* live: memory untouched, count unchanged *)
         apply IH.
+    + (* ShareOut: this cell untouched, count unchanged *) apply IH.
 Qed.
 
 (* COROLLARY: an accepted certificate (the abstract run ends balanced from rc 0)

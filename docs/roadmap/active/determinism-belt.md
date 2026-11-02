@@ -1,5 +1,16 @@
-<!-- description: Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction -->
+<!-- description: Historical determinism belt design, retired type-state boundary and current evidence limits -->
 # The Determinism / Purity Belt
+
+## Reading this historical belt design
+
+The `Verified → Canonical → emit_wasm` type-state chain below belonged to
+the retired v0 emitter. It is **not a live emission boundary**:
+[codegen/lib.rs](../../../crates/almide-codegen/src/lib.rs) records its retirement
+in #782/#930; the current Wasm route is
+[wasm_route.rs](../../../src/wasm_route.rs). The impurity lint and differential
+determinism gates are evidence within their coverage, not a theorem that a
+browser compiler can never crash or that every host emits identical bytes.
+The original implementation notes and their limitations follow.
 
 > A Perceus-analog for compiler **output determinism + target portability**. AlmidePerceusBelt makes "if it emits, RC is balanced" a theorem; this makes "if it emits, the output is a pure function of (IR, target)" enforced by construction — so a wasm32 (browser playground) compile can't crash or diverge from x86-64.
 

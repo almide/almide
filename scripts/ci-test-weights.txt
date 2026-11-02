@@ -203,6 +203,7 @@ exercise_corpus_check_test       9
 http_non_2xx_status_only_test    9
 io_read_all_test                 9
 net_tcp_embedded_cross_test      8
+net_udp_embedded_cross_test      16
 component_p3_test                8
 mut_field_arg_sibling_read_test  8
 map_from_list_linear_test        8

@@ -78,7 +78,7 @@ pub(super) fn entry_path(
     for (pkg, dir) in dep_paths {
         field("dep", format!("{pkg:?}={}", dir.display()).as_bytes());
     }
-    let mut vars: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k.starts_with("ALMIDE_")).collect();
+    let mut vars = super::crate_inputs::env_pairs(|k| k.starts_with("ALMIDE_"));
     vars.sort();
     for (k, v) in vars {
         field("env", format!("{k}={v}").as_bytes());

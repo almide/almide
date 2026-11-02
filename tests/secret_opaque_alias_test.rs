@@ -280,3 +280,48 @@ fn a_user_module_copy_of_a_bundled_type_leaves_the_bundled_one_its_own() {
     let _ = std::fs::remove_dir_all(&d);
     assert!(ok && !out.contains("E109"), "a user copy of the bundled heap beside `import http` must check clean:\n{out}");
 }
+
+/// `(success, stdout, stderr)` of `almide <args…>` run from `dir`.
+fn run_args(dir: &Path, args: &[&str]) -> (bool, String, String) {
+    let o = Command::new(almide()).current_dir(dir).args(args).output().expect("almide runs");
+    (o.status.success(), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+
+/// #4322: a file's own `type Item` is the `Item` its bare spelling names,
+/// even when a dependency it imports holds a structurally identical `mod type
+/// Item` (in a sub-module or at its root). It was resolved to the
+/// dependency's record, and reading its own field was E033. The program
+/// checks, and runs to the same output natively and on wasm.
+#[test]
+fn an_own_type_shadows_a_dependency_mod_type_of_the_same_name() {
+    let root = scratch("own_shadows_dep_mod_type");
+    let lib = root.join("d");
+    std::fs::create_dir_all(lib.join("src")).unwrap();
+    std::fs::write(lib.join("almide.toml"), "[package]\nname = \"d\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(lib.join("src/mod.almd"), "import self.inner\n\nmod type Vault = { key: String }\n\npub fn hi() -> String = inner.tag()\n").unwrap();
+    std::fs::write(lib.join("src/inner.almd"), "mod type Item = { id: String }\n\nmod fn tag() -> String = \"d\"\n").unwrap();
+    let app = root.join("app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(app.join("almide.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nd = { path = \"../d\" }\n").unwrap();
+    // The issue's shape: an entry file with only a test.
+    std::fs::write(
+        app.join("src/m.almd"),
+        "import d\n\ntype Item = { id: String }\n\nfn id_of(i: Item) -> String = i.id\n\ntest \"t\" { assert_eq(id_of(Item { id: \"a\" }), \"a\") }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src/main.almd"),
+        "import d\n\ntype Item = { id: String }\ntype Vault = { key: String }\n\nfn id_of(i: Item) -> String = i.id\n\neffect fn main() -> Unit = {\n  let v = Vault { key: \"k\" }\n  let w = { ...v, key: \"w\" }\n  let { key } = w\n  println(\"${id_of(Item { id: \"a\" })} ${v.key} ${key} ${d.hi()}\")\n}\n",
+    )
+    .unwrap();
+    let (ok, out, err) = run_args(&app, &["check", "src/m.almd"]);
+    assert!(ok && !err.contains("E033") && !out.contains("E033"), "the entry's own Item must check:\n{out}{err}");
+    let (ok, out, err) = run_args(&app, &["test", "src/m.almd"]);
+    assert!(ok, "the entry's own Item test must pass:\n{out}{err}");
+    let (ok, native, err) = run_args(&app, &["run", "src/main.almd"]);
+    assert!(ok, "native run:\n{native}{err}");
+    assert_eq!(native, "a k w d\n");
+    let (ok, wasm, err) = run_args(&app, &["run", "src/main.almd", "--target", "wasm"]);
+    assert!(ok, "wasm run:\n{wasm}{err}");
+    assert_eq!(wasm, native, "native and wasm must agree");
+}

@@ -1,0 +1,3 @@
+expects_code = "E116"
+expects_error = "`http.set_header` writes `content-type` by name"
+hint_substring = "`html.*` builds text/html"

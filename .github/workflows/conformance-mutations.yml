@@ -15,7 +15,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
 
 # #4094: the same read-only token the repository default gives, stated here so a
 # settings change cannot widen it. A job that needs more declares it itself.
@@ -49,8 +49,8 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
 
       - name: Install wasmtime
         # Pinned + cached + retried, same pattern as fuzz-nightly.yml. The
@@ -58,14 +58,9 @@ jobs:
         # seeded into the structural emitter, would survive for the wrong
         # reason).
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version

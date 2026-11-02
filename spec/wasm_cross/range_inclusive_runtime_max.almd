@@ -1,0 +1,29 @@
+// @contract: C-238
+// An inclusive range whose end is Int max only at RUN time materializes every
+// element through the last one. The list was built as `list.range(a, e + 1)`,
+// and `e + 1` wrapped to Int min, so the list came out empty (#4355). Covered:
+// a let-bound range, a range passed straight to a call, the single-element
+// range, the empty inclusive range, and an end one below max.
+fn span(a: Int, e: Int) -> Int = {
+  let r = a...e
+  list.len(r)
+}
+
+fn edges(a: Int, e: Int) -> String = {
+  let r = a...e
+  let n = list.len(r)
+  if n == 0 then "empty"
+  else "${int.to_string(r[0] - a)}..${int.to_string(r[n - 1] - a)}"
+}
+
+fn direct(a: Int, e: Int) -> Int = list.len(a...e)
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println(int.to_string(span(top - 3, top)))
+  println(edges(top - 3, top))
+  println(int.to_string(direct(top - 5, top)))
+  println(int.to_string(span(top, top)))
+  println(int.to_string(span(top, top - 1)))
+  println(int.to_string(span(top - 4, top - 1)))
+}

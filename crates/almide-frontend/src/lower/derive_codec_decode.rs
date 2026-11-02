@@ -4,7 +4,7 @@
 /// Auto-derive Codec decode: `fn T.decode(v: Value) -> Result[T, String]`
 pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let type_name = wk.type_name.to_string();
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
     let var_v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
 

@@ -11,9 +11,9 @@ plain `fn`s.
 `v4()` and `v7()` return a plain `Uuid`, but as `effect fn`s their calls yield
 a `Result`: write `uuid.v4()!`.
 
-**Targets.** Native serves every function. `v4` and the pure functions
-(`parse`, `to_string`, `from_bytes`, `to_bytes`, `compare`) also run on wasm.
-`v7` is native only for now.
+**Targets.** Every function runs on native and on wasm. On wasm, `v7` keeps
+its last stamp in the module instance, so each `Uuid` it makes is greater than
+the one before it in the same run, as on native.
 
 ## Making one
 

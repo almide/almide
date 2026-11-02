@@ -11,6 +11,8 @@ almide-ir = { path = "../almide-ir" }
 almide-base = { path = "../almide-base" }
 almide-types = { path = "../almide-types" }
 almide-layout = { path = "../almide-layout" }
+# The stamp the Region-export rewrite writes on its wrapper (extern_region.rs).
+almide-lang = { path = "../almide-lang" }
 wasm-encoder = { version = "0.262", features = ["wasmparser"] }
 wasmparser = "0.262"
 # #1315: the DWARF line table of a debug build (`debug_lines.rs`). The writer
@@ -32,7 +34,7 @@ almide = { path = "../.." }
 wasmparser = "0.262"
 # wasmtime's defaults minus `cache`: the on-disk compilation cache is never
 # configured here, and the feature pulls zstd (RUSTSEC-2026-0391/0395/0398/0403/0410).
-wasmtime = { version = "49.0.4", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
+wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
 sha2 = "0.11"
 gimli = { version = "0.34", default-features = false, features = ["read", "std"] }
 

@@ -70,8 +70,7 @@ handle).
 4. **`fan` bodies.** A pure fn called from a `fan` arm prints as part of that
    arm. The exemption adds no ordering promise beyond §5's determinism
    contract: C-004 fixes list/arm order for `fan.map` (and a `??` chain is sequential by definition), while the
-   interleaving of `fan.settle` thunks' side effects on native is outside the
-   contract. `fan` itself still requires an effect context (E007).
+   `fan.settle` forms expand sequentially on both targets as stated in §5. `fan` itself still requires an effect context (E007).
 5. **Reference evaluators.** The in-process interpreter and the judge's
    reference evaluator treat these six names as prelude builtins with no effect
    context. They evaluate them the same way wherever they are called, so the
@@ -235,8 +234,9 @@ fn sneaky(p: String) -> Result[String, String] = apply(fs.read_text, p)
 
 From an `effect fn` both programs are accepted: `effect fn reads(r: Reader)`
 may run the field, and `apply(fs.read_text, p)` in an effect fn is an effect
-call like any other. `process.exit` (`-> Never`) does not carry the bit: it is
-§2.1's abort.
+call like any other. `process.exit` returns `Never` but is still an effect
+function: a pure caller is rejected with E006. It is not one of ADR-0022's
+six exempt prelude builtins; the capability ledger accounts for its abort.
 
 The analysis is whole-program, after type checking, on every route (`check`,
 `build`, `run`, `test`, both targets) and conservative: a value that leaves the
@@ -251,7 +251,10 @@ Tests: `tests/diagnostics/e109-*`, `tests/diagnostics/e006-effect-fn-path-to-use
 
 ## 3. Return Type Wrapping
 
-In the Rust target, `effect fn` return types are lifted to `Result[T, String]` during codegen if they are not already `Result`. The `ResultPropagationPass` performs this transformation:
+The checked source interface already treats effect calls as fallible (apart
+from never-error intrinsic declarations). Source `!` is explicit and shared
+frontend lowering records the explicit operation in typed IR. In the native representation,
+`effect fn` return types are lifted to `Result[T, String]` during codegen if they are not already `Result`. The `ResultPropagationPass` performs this transformation:
 
 1. If an effect fn declares `-> T` where T is not Result, the codegen rewrites it to `-> Result[T, String]`
 2. The body's tail expression is wrapped in `ok(...)`
@@ -289,7 +292,13 @@ effect fn add_strings(a: String, b: String) -> Result[Int, String] = {
 
 **Type checker (`infer.rs`):** The `Unwrap` expression extracts the inner type -- `Result[T, E]` becomes `T`, `Option[T]` becomes `T`. Implicit narrowing of un-annotated `let` bindings was REMOVED with ADR-0008 (v0.55.0): a fallible call yields a Result VALUE in every position, the formerly-implicit sites are the hard errors E041/E042, and `let _ = f()` is the sanctioned discard (C-217). See docs/specs/result-option-effect.md §3.
 
-**Codegen (`pass_result_propagation.rs`):** The `ResultPropagationPass` translates `!` into `?` (Rust's try operator). For match subjects, Try is **not** inserted -- you match on `ok`/`err` variants directly.
+**Lowering/codegen:** the frontend records explicit `!` as an IR `Unwrap`
+node (erasing a permitted no-op on bare values). Target lowering/emission
+realizes its channel-dependent control flow.
+Native `pass_result_propagation.rs` adapts Result signatures and call shapes
+to Rust; the structural Wasm route uses the shared typed IR through its own
+emitter. Neither restores source-level auto-propagation. Matching a Result
+value inspects `ok`/`err` without implicitly unwrapping it.
 
 ```almide
 fn require_positive(n: Int) -> Result[Int, String] =
@@ -345,7 +354,7 @@ effect fn bad() -> Result[Unit, String] = {
 
 ### Type behavior
 
-A `fan` ALL-block / `fan.settle` yields its tuple (no Result wrapper — nothing to unwrap). The Result-yielding forms (the mappers, `fan.min`) follow ADR-0008: the Result is a VALUE, and a binding spells its propagation explicitly (`let v = fan.first_ok { ... }!`). Test: `spec/wasm_cross/fan_any_early_winner.almd` and the fan fixtures migrated at the 0.55 switch.
+A `fan` ALL-block / `fan.settle` yields its tuple (no Result wrapper — nothing to unwrap). The Result-yielding forms (the mappers, `fan.min`) follow ADR-0008: the Result is a VALUE, and a binding spells its propagation explicitly (`let v = fan.map(xs, f)!`). Test: `spec/wasm_cross/fan_any_early_winner.almd` and the fan fixtures migrated at the 0.55 switch.
 
 ```almide
 effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
@@ -395,9 +404,9 @@ test "the tuple carries the unwrapped values" {
 テスト: `tests/fan_acceptance_test.rs`(4 レッグで stdout 一致を固定)。
 全形の現状と既知の食い違いは `docs/design/fan-semantics-audit.md`。
 
-### Thunk typing
+### Historical thunk adapters (not a list of current public forms)
 
-`race` / `any` / `settle` の thunk は純粋(`fn() -> T`)でも effect
+旧 thunk API の実装では `race` / `any` / `settle` の thunk は純粋(`fn() -> T`)でも effect
 (`fn() -> Result[T, String]`)でもよい — 非 Result thunk は FanLowering が
 両ターゲット共通で `Ok` アダプタに包む(v0.27.3+、#514)。
 **`fan.map` だけは mapper が明示的に Result を返す必要がある**
@@ -624,13 +633,17 @@ the operation then runs beneath a descriptor of the granted directory it
 lands under, opened once on first use (`crates/almide-rt-core/src/fs_scoped_core.rs`,
 #4084): the decided segments are walked from that descriptor without
 following a symlink (openat2 `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` on Linux,
-an `O_NOFOLLOW` openat walk on macOS) and the last one is opened, created,
-listed, removed or renamed from its parent's descriptor. A tree rewritten
-between the check and the call (a directory swapped for a symlink) is refused
-by the call with the same `err`, never followed. What remains path-based: an
-operation on a granted directory itself, the metadata of an entry the process
-may not open, and every call on a platform other than 64-bit Linux and macOS,
-where the check still runs before a plain call and a rewrite can race it. The
+64- and 32-bit, an `O_NOFOLLOW` openat walk on macOS, `NtCreateFile` relative
+to the held directory handle with `FILE_OPEN_REPARSE_POINT` on Windows, where
+any reparse point — a symlink, a junction — is refused as a symlink is, #4293)
+and the last one is opened, created, listed, removed or renamed from its
+parent's descriptor. A tree rewritten between the check and the call (a
+directory swapped for a symlink) is refused by the call with the same `err`,
+never followed. An operation on a granted directory itself runs on its held
+descriptor, or from its parent's after the entry there is checked to be the
+held directory, and the metadata of an entry the process may not open is taken
+by descriptor. On a platform other than Linux, macOS and Windows every scoped
+call is refused and the toolchain refuses the key before building. The
 p3 component's bound is its preopens, which the runtime (wasmtime-wasi over
 cap-std) resolves beneath the preopened descriptor at the call itself. Within a program, `fs.open_root`
 (`docs/stdlib/fs.md`) bounds the paths built from untrusted input to one
@@ -670,8 +683,9 @@ written:
   each fn-typed argument and keeps none; a value it receives in a type-variable
   parameter is pooled, and its result is read from the pools at the call's
   type. Before #4152 such a body was read as "does nothing", so
-  `list.map(paths, fs.read_text)` charged `IO` to nobody and a manifest
-  without `IO` built it. A stdlib fn taken as a value carries its category.
+  `list.map(paths, fs.read_text)` failed to charge the filesystem-read
+  capability. In the current leaf vocabulary it must charge `FS.read`;
+  taking a stdlib fn as a value preserves that category.
 
 ```
   call_box  → {FS.read}

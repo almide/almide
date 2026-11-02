@@ -5,6 +5,8 @@ expression: "run_outline(&[\"@stdlib/string\"])"
 fn string.__err_text(s: String) -> String
 fn string.__from_codepoint(n: Int) -> String
 fn string.__join(xs: List[String], sep: String) -> String
+fn string.__string_media_type(s: String) -> String
+fn string.__string_to_text(s: String) -> String
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 fn string.capitalize(s: String) -> String

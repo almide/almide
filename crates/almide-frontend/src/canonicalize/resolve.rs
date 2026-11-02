@@ -66,7 +66,34 @@ pub fn register_builtin_named_type_keys(env: &mut crate::types::TypeEnv, decls: 
         if let ast::Decl::Type { name, .. } = decl
             && builtin_type_head(name.as_str(), TypeSpelling::Bare).is_some()
         {
-            env.types.insert(builtin_named_type_key(scope, name.as_str()), Ty::Named(*name, vec![]));
+            env.types.insert(builtin_named_type_key(scope, name.as_str()), Ty::Named(*name, Default::default()));
+        }
+    }
+}
+
+/// The key recording that the ENTRY program declares a type of this bare
+/// name (#4352, #4322): `<entry-own-type>|ToolCall`. The entry's own declaration
+/// owns its bare spelling there, whatever its shape — a dependency's
+/// same-named type, even a structurally identical one, is never what the
+/// entry's `ToolCall` means. Without the record the bare-name resolver could
+/// only compare structures, and read an entry `type ToolCall = { id: String }`
+/// as the bare alias of a dependency's `mod type ToolCall = { id: String }`,
+/// so the entry's own literal and field reads were E033 against the
+/// dependency's module. No source can spell the key, and it has no `.Name`
+/// suffix, so no scan for a module's `m.Name` key ever matches it.
+pub fn entry_own_type_key(name: &str) -> Sym {
+    sym(&format!("<entry-own-type>|{}", name))
+}
+
+/// Record [`entry_own_type_key`] for each type the entry program's `decls`
+/// declare, before any declaration body or signature resolves (declaration
+/// order is not meaningful, #2645).
+pub fn register_entry_own_type_keys(env: &mut crate::types::TypeEnv, decls: &[ast::Decl]) {
+    for decl in decls {
+        if let ast::Decl::Type { name, .. } = decl {
+            // Only the key's presence is read; `Unit` names no type, so no
+            // scan of the table reads the record as an alias or a record.
+            env.types.insert(entry_own_type_key(name.as_str()), Ty::Unit);
         }
     }
 }
@@ -107,7 +134,7 @@ pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Op
     }
     for (name, ks) in owners {
         if let [only] = ks.as_slice() {
-            env.types.insert(scoped_bare_type_key(scope, &name), Ty::Named(*only, vec![]));
+            env.types.insert(scoped_bare_type_key(scope, &name), Ty::Named(*only, Default::default()));
         }
     }
     // The file's ALIAS spellings too (#2877): `import self.boxes as bx` makes
@@ -132,7 +159,7 @@ pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Op
                 continue;
             }
             let spelled = format!("{}.{}", alias.as_str(), rest);
-            alias_adds.push((scoped_bare_type_key(scope, &spelled), Ty::Named(*k, vec![])));
+            alias_adds.push((scoped_bare_type_key(scope, &spelled), Ty::Named(*k, Default::default())));
         }
     }
     for (k, v) in alias_adds {
@@ -163,7 +190,7 @@ pub fn register_alias_type_keys(env: &mut crate::types::TypeEnv) {
             if rest.contains('.') {
                 continue;
             }
-            adds.push((sym(&format!("{}.{}", alias.as_str(), rest)), Ty::Named(*k, vec![])));
+            adds.push((sym(&format!("{}.{}", alias.as_str(), rest)), Ty::Named(*k, Default::default())));
         }
     }
     for (k, v) in adds {
@@ -395,9 +422,13 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
         if let Some(bare) = types.get(&sym(name)) {
             // The value test first: it rejects almost every entry without
             // resolving the key's text (#3509).
+            // The entry's own declaration answers first (#4352): the
+            // structural test below cannot tell it from a dependency's bare
+            // alias when the two declare the same fields.
+            let declared_here = types.contains_key(&entry_own_type_key(name));
             let is_alias_of_a_qualified = || types.iter().any(|(k, v)| v == bare && user_module_owner(k));
             match bare {
-                Ty::Record { .. } | Ty::Variant { .. } if !is_alias_of_a_qualified() => return Some(sym(name)),
+                Ty::Record { .. } | Ty::Variant { .. } if declared_here || !is_alias_of_a_qualified() => return Some(sym(name)),
                 // The entry program's own ALIAS of the name (#3401): not
                 // nominal, so it has no key to answer with, but it shadows an
                 // imported module's same-named record just as a local record
@@ -606,7 +637,7 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
     // `Matrix[Float32]` / `Matrix[Float64]`.
     BuiltinTypeHead {
         name: "Matrix", arity: BuiltinArity::Params(&["T"]),
-        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec()),
+        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec().into()),
     },
 ];
 
@@ -761,7 +792,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     // #433: a user module's (qualified) reference to a namespaced
     // type resolves to its canonical `mod.Type` name; falls through
     // to the existing bare resolution for stdlib / local types.
-    if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, vec![])) {
+    if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, Default::default())) {
         return qualified;
     }
     if let Some((_, alias)) = known_types.and_then(|types| scoped_alias_entry(other, types, cur_mod)) {
@@ -788,7 +819,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
                 Ty::Record { .. } | Ty::Variant { .. } => {
                     // nominal — keep as Named, but use the canonical name
                     if let Some((_, bare)) = other.rsplit_once('.') {
-                        return Ty::Named(sym(bare), vec![]);
+                        return Ty::Named(sym(bare), Default::default());
                     }
                 }
                 other_ty => return other_ty.clone(),
@@ -797,9 +828,9 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     }
     // For module-qualified names, use the bare name for Ty::Named
     if let Some((_, bare)) = other.rsplit_once('.') {
-        Ty::Named(sym(bare), vec![])
+        Ty::Named(sym(bare), Default::default())
     } else {
-        Ty::Named(sym(other), vec![])
+        Ty::Named(sym(other), Default::default())
     }
 }
 
@@ -845,7 +876,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     // name; stdlib / local generics stay bare.
     let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
     if let Some(qn) = qualified {
-        return Ty::Named(qn, ra);
+        return Ty::Named(qn, ra.into());
     }
     // A generic TRANSPARENT alias applied to its arguments (#3403) is its
     // body with each declared letter replaced by its argument, as a
@@ -856,7 +887,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     if let Some((key, body)) = known_types.and_then(|types| transparent_alias_entry(name.as_str(), types, cur_mod)) {
         let params = known_types.and_then(|types| declared_type_params(key.as_str(), types)).unwrap_or(&[]);
         if params.len() != ra.len() {
-            return Ty::Named(key, ra);
+            return Ty::Named(key, ra.into());
         }
         let bindings: HashMap<Sym, Ty> = params.iter().zip(ra)
             .filter_map(|(p, a)| match p { Ty::TypeVar(v) => Some((*v, a)), _ => None })
@@ -864,7 +895,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
         return almide_lang::types::substitute(body, &bindings);
     }
     let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-    Ty::Named(resolved_name, ra)
+    Ty::Named(resolved_name, ra.into())
 }
 
 // `TypeExpr::Variant { cases, .. }` resolution: lower each AST variant case form

@@ -1,39 +1,43 @@
-<!-- description: Concrete implementation design for flight keystone (い) — G-F3: a production v1 MIR→Rust renderer + a rust_pattern faithfulness layer, making Rust→Ferrocene the flight target. The proof is cheap (~75% of the spine is target-agnostic; the faithfulness theorem is `exact eager_copy_refines_safety`); the real cost is the production renderer (~5x render_wasm). Ferrocene owns Rust→machine, so the flight path bypasses the hardest wasm byte-binding proof (Gap 1). -->
+<!-- description: Native renderer and proposed Ferrocene qualification path; abstract RC lemmas do not prove Almide-to-Rust translation -->
 # Flight Keystone (い) — v1 MIR → Rust → Ferrocene(忠実性束縛)
 
 > **Goal**: [flight-profile](flight-profile.md) のラダー gate **G-F3** の具体実装設計 ──
-> **Rust → Ferrocene を飛行ターゲットに**する。Almide は Rust 実行を証明せず、
-> **Almide→Rust 翻訳忠実性**(証明書の所有権/安全事実を保存)を証明し、Rust→機械語は
-> 資格化済み Ferrocene に信頼する。証明は安い(スパインの ~75% がターゲット非依存、
-> 忠実性定理は `exact eager_copy_refines_safety`)、**実コストは本番レンダラ**(約 5x
-> render_wasm)。**飛行経路は最難関の wasm byte 束縛(Gap 1)を丸ごと迂回する。**
+> **Rust → Ferrocene を検討する設計案**。現行の native renderer は
+> `crates/almide-mir/src/render_native.rs` に存在するが、その存在と
+> Almide→Rust の全翻訳忠実性の証明は別である。
+> `.github/workflows/ferrocene-lane.yml` は、Ferrocene 契約前の
+> stock rustc を使用すると明記しており、資格化済みコンパイラでの実行実績ではない。
+> 後段の資格化は前段の意味保存を自動的に証明せず、証明工数を 75% 再利用等の
+> 割合から断定しない。
 > **関連**: [flight-profile](flight-profile.md) §4 / [v1-mir-architecture](v1-mir-architecture.md) §1・§9 / [certificate-format-v1](certificate-format-v1.md)。
 
 ---
 
 ## 1. 設計核(一行)
 
-> **本番 v1 MIR→Rust レンダラ(walker グレードの可読 Rust を出しつつ、demo の per-op
-> 対応を保つ「第3の物」)を建て、`rust_pattern` 表 + per-build V で忠実性を束縛する。
-> 健全性の核はターゲット非依存なので忠実性定理は既証明の eager instance を `exact` で
-> 再利用。MIR は唯一の真のまま、Rust は証明束縛されたレンダラ(§9 と矛盾しない)。
-> Ferrocene が Rust→機械語の信頼を肩代わりし、飛行経路は wasm byte 束縛を迂回する。**
+> **設計目標**: native renderer の出力と明示した意味論を結ぶ根拠を整える。
+> RC 事象列の既存定理は再利用候補だが、文字列パターン表と
+> `exact eager_copy_refines_safety` だけでは実際の Rust 実行の忠実性は証明できない。
+> 対象構文・ランタイム・ABI と未証明境界を明記し、後段ツールチェーンの証拠と分ける。
 
 ---
 
-## 2. なぜ安いか(ターゲット結合の分割、接地済み)
+## 2. 既存証拠の分割（再利用可能性と未証明の接続）
 
 | 区分 | ファイル | 飛行への含意 |
 |---|---|---|
-| **ターゲット非依存(そのまま再利用)** | `OwnershipChecker.v`(`check_sound` は**fold の `Z` 結果**を論証、`:34-36`)/ 証明書 i/a/d/m/r/b(= MIR 所有権事実)/ `certificate.rs`(target 認識ゼロ)/ `RuntimeModel.v` / `ALS.v` / `NameTotality` / `CapabilityBound` / `TypeConcretization` / `Subset` / `Termination` / `FreeList` / `CowSafety` | **健全性の核は Rust にタダで移る** |
-| **wasm 固有(唯一の target レイヤ)** | `Translation.v:28-35`(`wasm_pattern: Op→string`)+ `WasmEncode`/`WasmExec`/`WasmRcDec` + V validator | Rust では `rust_pattern` に置換。**最も薄い層** |
+| **ターゲット非依存(そのまま再利用)** | `OwnershipChecker.v`(`check_sound` は**fold の `Z` 結果**を論証、`:34-36`)/ 証明書 i/a/d/m/r/b(= MIR 所有権事実)/ `certificate.rs`(target 認識ゼロ)/ `RuntimeModel.v` / `ALS.v` / `NameTotality` / `CapabilityBound` / `TypeConcretization` / `Subset` / `Termination` / `FreeList` / `CowSafety` | 抽象事象モデルの定理は再利用候補。Rust 実行との接続は別義務 |
+| **wasm 固有(唯一の target レイヤ)** | `Translation.v:28-35`(`wasm_pattern: Op→string`)+ `WasmEncode`/`WasmExec`/`WasmRcDec` + V validator | `rust_pattern` は構文照合の候補。意味保存の証明の厚さは未評価 |
 
 `Translation.v` の eager instance は**既に証明済み**(`eager_translation_refines_safety
 := exact eager_copy_refines_safety`、`Translation.v:52-54` ← `ALS.v:62`)。
 
 ---
 
-## 3. 本番 MIR→Rust レンダラ(§A)
+## 3. 当初の renderer 実装案(§A)
+
+以下の demo/行番号は原設計の記録。現在の renderer が未着手という意味ではない。
+実装の入口は `crates/almide-mir/src/render_native.rs` と `src/cli/emit.rs`。
 
 **構造(`render_wasm.rs` を鏡映)**: `render_rust_program(prog) -> String` が
 `render_rust_fn` を駆動 + `rust_preamble()`(`render_wasm.rs:648` `preamble()` のアナログ)+
@@ -129,7 +133,7 @@ prim 床自体は target ごと分岐**(設計上の信頼境界、ここだけ�
 
 ## 6. 忠実性証明(§D)
 
-### 6.1 `Translation.v` アナログ定理(既証明 eager instance を clone)
+### 6.1 抽象 eager 事象モデルの再利用例（Rust 翻訳証明ではない）
 
 `rust_pattern : Op -> string` を追加(`wasm_pattern` `:28-35` と構造同型):
 
@@ -148,14 +152,14 @@ Proof. exact eager_copy_refines_safety. Qed.
 `Dec/MoveOut/Reuse` が空文字なのは **wasm と同じ理由**(RAII scope-end は明示命令を出さない、
 eager wasm も出さない)。release-empty 補題(`is_release o → rust_pattern o = ""`)もそのまま移る。
 
-- **100% 再利用(新証明ゼロ)**: 健全性の核全部 ── `eager_copy_refines_safety`・
-  `exec_inc_only_no_fault`・`check_sound`・アルファベット・`RuntimeModel`。定理本体は文字通り
-  `exact eager_copy_refines_safety`(安全性は**target 独立の fold delta** を論証するから)。
-- **新規(自明)**: `rust_pattern` 表 + `Print Assumptions` discharge(数個の `reflexivity` 例)。
-  **これが「証明は安い」の正体** ── 表が唯一の新 Coq object、eager instance は既証明。
-- **延期(wasm と同じ重い trac だが Rust は不要)**: Rust 断片が抽象 op を**実現**する意味論
-  証明(Rust メモリモデル)= `RustExec.v` ── **Ferrocene が Rust→機械語を所有するので不要**
-  (`flight-profile.md:120`)。**Rust 経路は wasm が依然負う最難関の延期証明をスキップする。**
+- **既存定理の範囲**: `eager_copy_refines_safety` は抽象事象列の性質を
+  示す。上の結論には `rust_pattern` も Rust 実行の意味論も現れないため、
+  Rust 出力の正しさは導かれない。
+- **別途必要な根拠**: 実際の生成コード・ランタイム・ABI がそのモデルを実現する
+  対応関係。文字列一致や `Print Assumptions` だけでこの接続を閉じたとはしない。
+- **残る接続義務**: Rust 断片が抽象 op を実現することの根拠は必要。後段の
+  Ferrocene 採用だけでは、前段の生成 Rust とモデルの対応を省略できない。
+  特定の形式化ファイルを必須と決めるのではなく、主張範囲に応じた証拠を定める。
 
 ### 6.2 per-build V validator(`translation_validation.rs` の `rust_pattern` 兄弟)
 
@@ -185,16 +189,15 @@ leak-count 検査(`:122-126` `rc_decs >= drop_count`)はそのまま移る。非
   **資格化されている**(我々が証明するのでない)= SCADE KCG アナロジー(`certification-grade.md:135`)。
 - **Rust prim 床**(`PrimKind`→ Rust stdlib `io::Write`/ptr)= 小さい閉じた信頼面、wasm prim 床の Rust アナログ。
 
-**証明されたまま(未信頼コンパイラ・毎ビルド再検証)**:
-- **Almide→Rust 翻訳忠実性** = `rust_pattern` 表 + per-build V(§6)、不変のターゲット非依存
-  健全性核(`OwnershipChecker`/`ALS`/`RuntimeModel`…)に乗る。cert の所有権/安全事実
-  (メモリ安全・RC 均衡・capability 有界)が出力 Rust へ保存される。
+**未証明境界**: Almide→Rust の全翻訳忠実性は、抽象 RC 定理や
+`rust_pattern` の構文照合からは確立しない。Native 経路では Wasm の byte
+束縛とは異なる検証対象になるが、Rust の生成コードとの対応義務が残る。
+Ferrocene の資格化を採用しても、その前段の義務が消えるわけではない。
 
-**wasm 信頼基底を丸ごと離れる(戦略的勝ち)**: 飛行経路は **Gap 1(wasm byte 束縛、最難関の
-未証明フロンティア)を勝つ必要がない**。`WasmEncode`/`WasmExec`/`WasmRcDec` が迂回され、
-Ferrocene がそのオブジェクトコード忠実性証明を代替する。「証明コストは wasm 経路より飛行経路が安い」。
+**§9 当初の設計目標**（以下の「証明束縛されたレンダラ」は達成済みの事実ではない）:
+MIR のモデルを基準に生成 Rust との対応を確立する、という意図を保存する。
 
-**§9 和解**(MIR 主権を尊重):`v1-mir-architecture.md §9` が却下したのは「**Rust を唯一の真**
+**原設計の和解案**(MIR 主権を尊重):`v1-mir-architecture.md §9` が却下したのは「**Rust を唯一の真**
 にする」(Rust の無い形式意味論の上に建てる)。本設計は**それをしない** ── Rust 意味論の上に
 建てず、認証済み **MIR 事実**に束縛、Rust は依然ただのレンダラ、**MIR は唯一の真のまま**。
 唯一の変更は Rust レンダラを「ほぼ自明に下る踏み台」(§1)から「**証明束縛された2人目の本番
@@ -249,7 +252,7 @@ Ferrocene `rustc` に差し替え byte 一致確認**。新レンダラコード
    Behavior Contracts)なので許容、`almide_div!`/`almide_mod!` が唯一の trap 差を処理。FFI/ABI
    保証を後で主張するなら `--repr-c`(`rust.toml:56`)が効く。
 
-**正味**: 証明層(§6)は本当に安い(ターゲット非依存 by construction の表1つ、定理は既証明、
-V は直接 port)。エンジニアリング(§3/§4 本番レンダラ + lowering 名 side-table + 制御フロー
-再構成 + dogfood runtime)が真の ~5x スケール作業 ── ロードマップ通り**作り直しでなく拡張**、
-MIR 主権そのまま、Ferrocene が wasm の依然負う最難関延期証明を代替する。
+**正味**: 既存 native renderer と抽象モデルの証拠を土台にできるが、
+全翻訳忠実性・実際の資格化ツールチェーン使用・当局受理は別々の未確立事項である。
+元の ~5x/~75% 見積りや「表一つで自明」という説明を、現在の工数・証明完了の
+根拠として使わない。

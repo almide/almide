@@ -172,6 +172,9 @@ impl Emitter<'_> {
                     let mut i = self.f.instructions();
                     i.local_get(ho).call(inc);
                     i.local_get(ho).local_get(hoff).i32_add().i32_load(slot_memarg(0)).call(dec);
+                    let _ = i;
+                    // #4278 B1: the walk's extra credit on the inserted slot.
+                    self.arm_temp_released();
                 }
                 self.f.instructions().local_get(ho);
                 self.release_i32();

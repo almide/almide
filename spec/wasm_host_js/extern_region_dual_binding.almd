@@ -1,0 +1,20 @@
+// @leg: structural
+// #4353: a host binding with both `@extern(wasm, …)` and `@extern(rust, …)`
+// takes a `Region`. The wasm leg splits the Region into the import's
+// `(base, len)` and drops the native attr from the wrapper it leaves behind;
+// with the attr left on, the wrapper read as a native-only extern and the
+// program was refused (E082 `call-fn:log:extern-native:log`). The Rust host
+// takes the same two values, `(*mut u8, usize)` — the native run of this
+// shape is `tests/extern_rust_abi_test.rs`.
+import ffi
+
+@extern(wasm, "js", "js_log")
+@extern(rust, "crate::sys", "log")
+fn log(buf: Region) -> Int = _
+
+fn say(s: String) -> Int = log(ffi.region(bytes.from_string(s)))
+
+fn main() -> Unit = {
+  let total = say("hi") + say("añb")
+  println("bytes seen: ${total}")
+}

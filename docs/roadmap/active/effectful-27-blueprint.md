@@ -1,5 +1,20 @@
-<!-- description: Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause -->
+<!-- description: Historical effect/raw-pointer blueprint; byte-tested tiers are not universal semantic proofs -->
 # Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1
+
+## Evidence terminology in this historical blueprint
+
+The June 17 design used **PROVEN** as a label for tier-1 finite byte-golden
+regression tests. That label must be read as **byte-tested on the cited cases**,
+not a mathematical proof of every execution. The modeled capability theorem
+is a different kind of evidence and retains its stated premises; a pointer
+round-trip test also does not prove arbitrary memory safety.
+
+The old host availability, raw-pointer API and projected 543/621 counts below
+are historical design inputs, not current support or safety guidance.
+Current authority and raw-memory boundaries are in
+[the capability overview](../../wasm/capability-system.md) and
+[ADR-0031](../../adr/0031-raw-pointers-carry-provenance.md). No historical
+SAFE-NOW label authorizes restoring a removed raw-address API.
 
 Design-only (the PLAN, not a build). Produced by a 6-agent design fan-out + adversarial
 review, grounded in the tree (2026-06-17). **Verdict: SOUND-with-fixes — safe to build

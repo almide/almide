@@ -270,6 +270,10 @@ fn __rx_back(t: Int, ts: Int) -> Int = {
 fn __rx_flags(pat0: Int) -> Int =
   if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 then __rx_flag_scan(pat0 + 2, 0) else 0
 
+// __rx_flags for a caller that holds the pattern's end: an empty pattern has no byte at
+// pat0 to read (A4, #4005), and a one-byte one none at pat0 + 1.
+fn __rx_flags_in(pat0: Int, pe: Int) -> Int = if pat0 + 1 < pe then __rx_flags(pat0) else 0
+
 fn __rx_flag_scan(p: Int, acc: Int) -> Int = {
   let b = prim.load8(p)
   if b == 109 then __rx_flag_scan(p + 1, prim.bor(acc, 1))
@@ -309,7 +313,7 @@ fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at:
   prim.store64(m + 128, 0)
   prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))
   prim.store64(m + 144, 0)
-  prim.store64(m + 152, if prim.band(__rx_flags(pat0), 2) == 2 then 1 else 0)
+  prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   vm
 }
 
@@ -1103,7 +1107,7 @@ fn __rx_work_size(n: Int, width: Int, ns: Int) -> Int = {
 }
 
 // Lay out the work block at `w` (all its stamps zero).
-fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Int = {
+fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, pe: Int, track: Int) -> Int = {
   let k = n * width
   let l0 = w + 32 * 8
   let l1 = l0 + (16 + 2 * k + k * ns + k) * 8
@@ -1125,7 +1129,7 @@ fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: I
   let _13 = __rx_wset(w, 17, 0)
   let _s = __rx_wset(w, 20, 3 * k + 8)
   let _h = __rx_wset(w, 22, 0)
-  let _i = __rx_wset(w, 24, if prim.band(__rx_flags(pat0), 2) == 2 then 1 else 0)
+  let _i = __rx_wset(w, 24, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   let _14 = __rx_list_init(l0, k, ns)
   __rx_list_init(l1, k, ns)
 }
@@ -1575,7 +1579,7 @@ fn __rx_program(p0: Int, pe: Int) -> List[Int] = {
 // [ts, te): an empty list when there is no program. Handles, never the Lists,
 // cross these calls: a List passed to a fn is the callee's to drop, and the
 // caller keeps both alive for as long as the VM runs.
-fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> List[Int] = {
+fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, pe: Int, track: Int) -> List[Int] = {
   let pa = ph + 12
   if prim.load32(ph + 4) == 0 then prim.alloc_list(0)
   else {
@@ -1586,7 +1590,7 @@ fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Lis
     let ns = r0 + regs
     let work = prim.alloc_list(__rx_work_size(n, width, ns))
     let w = prim.handle(work) + 12
-    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, track)
+    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, pe, track)
     let _1 = __rx_wset(w, 18, r0)
     let _2 = __rx_wset(w, 19, regs)
     work
@@ -1971,7 +1975,7 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let st = __rx_find_start(p0, pe, t0, m)
   if __rx_gave_up(m) then {
     let prog = __rx_program(p0, pe)
-    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
     let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
     __rx_find_start(p0, pe, t0, m) >= 0
   } else st >= 0
@@ -1991,7 +1995,7 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let r = __rx_exec(p0, pe, t0, m)
   if __rx_gave_up(m) then {
     let prog = __rx_program(p0, pe)
-    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
     let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
     let w = __rx_work_at(prim.handle(work))
     if w != 0 then __rx_pike(w, t0, 1, te, 0) >= 0
@@ -2017,14 +2021,14 @@ fn __rx_sub(a: Int, b: Int) -> String = {
 // the program and work block for as long as the VM runs.
 fn __rx_vm_find(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> Int = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   __rx_find_start(p0, pe, t0, m)
 }
 
 fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc: List[String] = []
   __rx_find_all_go(p0, pe, t0, m, acc)
@@ -2032,7 +2036,7 @@ fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] 
 
 fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> String = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc = ""
   __rx_replace_go(p0, pe, t0, m, rep, acc)
@@ -2040,7 +2044,7 @@ fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> S
 
 fn __rx_vm_split(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc: List[String] = []
   __rx_split_go(p0, pe, t0, t0, m, acc)
@@ -2293,7 +2297,7 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
 // #4083).
 fn __rx_vm_captures(p0: Int, pe: Int, t0: Int, te: Int, ncap: Int, bd: Int, m: Int) -> List[String]? = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let w = __rx_work_at(prim.handle(work))
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let ms = if w != 0 then __rx_pike(w, t0, 0, 0 - 1, 0)
@@ -2396,7 +2400,7 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
 
 fn __rx_vm_scan(p0: Int, pe: Int, t0: Int, te: Int, m: Int, ncap: Int, bd: Int, first: Bool) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let head: List[String] = [int.to_string(ncap + 1)]
   __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)

@@ -1,0 +1,17 @@
+// E110 (row 22, #4232): the body text goes through a helper that knows
+// nothing of requests, and the helper decodes it into `User`, which is also
+// sent out. The flow follows the text into the helper.
+import http
+import json
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+effect fn parse_user(text: String) -> User = User.decode(json.parse(text)!)!
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let body = http.body(req)
+  let u = parse_user(body)!
+  http.response(201, "${u.name} is_admin=${u.is_admin}")
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", []))!))

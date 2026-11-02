@@ -30,8 +30,7 @@ effect fn handle(req: HttpRequest) -> HttpResponse = {
       201,
       "${method} ${http.body(req)}",
       [
-        ("X-Echo", http.header(req, "x-token") ?? "none"),
-        ("Content-Type", "text/plain; charset=utf-8")
+        ("X-Echo", http.header(req, "x-token") ?? "none")
       ],
     ),
     "/query" => http.json(200, "\"${render_query(req)}\""),

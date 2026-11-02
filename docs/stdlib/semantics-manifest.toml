@@ -3342,11 +3342,11 @@ setup = [
   'let r = http.response(200, "hi")',
 ]
 probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")'
-expect = "hi text/plain"
+expect = "hi text/plain; charset=utf-8"
 note = """
 Pins the ARGUMENT ORDER, which is the whole trap: status first, body second.
-A swapped implementation could not produce the body "hi", and the seeded
-"text/plain" separates response from json below.
+A swapped implementation could not produce the body "hi", and the String
+body's Content-Type (ADR-0032) separates response from json below.
 """
 
 [[http.fn]]
@@ -3361,20 +3361,6 @@ note = """
 The same (status, body) order as response — the ONLY difference is the seeded
 Content-Type, so a caller who picks json for the header gets no other change.
 201 also shows the status is a free 3-digit code, not a success/failure flag.
-"""
-
-[[http.fn]]
-name = "html"
-index_unit = "status-code"
-setup = [
-  'let r = http.html(201, html.escape("<b>"))',
-]
-probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")'
-expect = "&lt;b&gt; text/html; charset=utf-8"
-note = """
-The (status, body) order of response and json, with a SafeHtml body (#4120):
-the body is written as the SafeHtml holds it, and the seeded Content-Type is
-text/html with its charset.
 """
 
 [[http.fn]]
@@ -3399,7 +3385,7 @@ setup = [
   'let r = http.set_status(http.response(200, "sb"), 404)',
 ]
 probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none") + " " + int.to_string(http.status(r))'
-expect = "sb text/plain 404"
+expect = "sb text/plain; charset=utf-8 404"
 note = """
 The order INVERTS here — set_status(resp, code), response first — and the Int
 is still a status code; overwriting it leaves body and headers untouched. The

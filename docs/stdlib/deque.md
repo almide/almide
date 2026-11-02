@@ -5,7 +5,7 @@ Auto-imported. Pure — identical on both targets.
 
 `push` / `pop` work at the back, like `list.push` / `list.pop`, and
 `push_front` / `pop_front` at the front. All four change the deque in place
-(`mut`); everything else returns a new value. Taking from an empty deque gives
+(`mut`), as does `clear`; the other operations do not mutate the deque. Taking from an empty deque gives
 `none`. Positional and range functions (`get`, `take`, `slice`, `set`, …) take
 the same arguments and give the same answers as the `list` function of the same
 name, and the sequence algorithms (`map`, `fold`, `sort_by`, `min_by`, …) walk

@@ -1,0 +1,16 @@
+// #4278 B1 drill: `$str_append` declares the string it appends CONSUMED
+// while its body only reads it. A frame's release of that string would
+// then be absorbed by the append (a double free once the frame's own
+// release runs too); the helper's own certificate refuses the lie: the
+// appended string's line, seeded with the caller's reference, never
+// releases it.
+effect fn main() -> Unit = {
+  var acc = ""
+  var i = 0
+  while i < 12 {
+    let s = int.to_string(i)
+    acc = acc + s
+    i = i + 1
+  }
+  println(acc)
+}
