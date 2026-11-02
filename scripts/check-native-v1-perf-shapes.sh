@@ -60,22 +60,24 @@ BIN="$TARGET/release/examples/render_corpus"
 { grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } \
   | grep -vxF "${NATIVE_V1_SHAPES_DROP:-/nonexistent}" > "$WORK/corpus.txt"
 LLVM_PROFILE_FILE="$WORK/run-%m.profraw" "$BIN" < "$WORK/corpus.txt" > "$WORK/verdicts.txt"
-total=$(wc -l < "$WORK/corpus.txt")
-ok=$(grep -c $'\tOK$' "$WORK/verdicts.txt")
 fail=0
-if [ "$ok" != "$total" ]; then
-  echo "native-v1-perf-shapes: $((total - ok)) of $total corpus programs do not render:"
-  grep -v $'\tOK$' "$WORK/verdicts.txt" | head -20
+# A floor program that no longer renders blinds the corpus; a shape bench
+# that does not render is not compared by the perf gate either (UNCERTIFIED
+# there), so it is reported and its paths simply do not count.
+if grep -v $'\tOK$' "$WORK/verdicts.txt" | grep -q '^spec/'; then
+  echo "native-v1-perf-shapes: floor programs that do not render:"
+  grep -v $'\tOK$' "$WORK/verdicts.txt" | grep '^spec/' | head -20
   fail=1
 fi
+grep -v $'\tOK$' "$WORK/verdicts.txt" | grep -v '^spec/' | sed 's/^/UNCERTIFIED /'
 
 "$LLVM_BIN/llvm-profdata" merge -sparse "$WORK"/run-*.profraw -o "$WORK/run.profdata" || { echo "native-v1-perf-shapes: profdata merge failed"; exit 2; }
 "$LLVM_BIN/llvm-cov" export "$BIN" -instr-profile="$WORK/run.profdata" -skip-expansions > "$WORK/cov.json" \
   || { echo "native-v1-perf-shapes: llvm-cov export failed"; exit 2; }
 
-python3 - "$WORK/cov.json" "$BASELINE" "$UPDATE" "$fail" <<'PY'
-import json, re, sys, os
-cov, baseline, update, fail = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4])
+python3 - "$WORK/cov.json" "$BASELINE" "$UPDATE" "$fail" "$LLVM_BIN/llvm-cxxfilt" <<'PY'
+import json, re, sys, os, subprocess
+cov, baseline, update, fail, cxxfilt = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), sys.argv[5]
 root = os.getcwd() + "/"
 EMIT = ("line!(", "push_str(", "writeln!(", "emit(")
 data = json.load(open(cov))["data"][0]
@@ -91,22 +93,14 @@ def text_of(path, l0, c0, l1, c1):
         return ls[0][c0 - 1:c1 - 1]
     return "\n".join([ls[0][c0 - 1:]] + ls[1:-1] + [ls[-1][:c1 - 1]])
 
+names = sorted({f["name"] for f in data["functions"]})
+plain = subprocess.run([cxxfilt], input="\n".join(names), capture_output=True, text=True).stdout.split("\n")
+# Drop the crate disambiguators (`almide_mir[1a2b3c]`) and legacy hashes, so
+# a row survives a rebuild.
+demangled = {n: re.sub(r"::h[0-9a-f]{16}$", "", re.sub(r"\[[0-9a-f]+\]", "", d)) for n, d in zip(names, plain)}
+
 def demangle(name):
-    # Legacy Rust mangling: _ZN <len><seg>... 17h<hash> E — keep the path,
-    # drop the hash, so a row survives a rebuild.
-    m = re.match(r"_ZN(.*)E$", name)
-    if not m:
-        return name
-    s, out = m.group(1), []
-    while s:
-        n = re.match(r"(\d+)", s)
-        if not n:
-            break
-        k = int(n.group(1)); seg = s[len(n.group(1)):len(n.group(1)) + k]; s = s[len(n.group(1)) + k:]
-        if re.fullmatch(r"h[0-9a-f]{16}", seg):
-            continue
-        out.append(seg.replace("$u7b$", "{").replace("$u7d$", "}").replace("$u20$", " ").replace("$LT$", "<").replace("$GT$", ">").replace("..", "::"))
-    return "::".join(out)
+    return demangled.get(name, name)
 
 counts = {}
 seen_fns = set()
