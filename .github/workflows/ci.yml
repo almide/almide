@@ -445,7 +445,10 @@ jobs:
     needs: [changes, build, test-rust-solo]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30, not 20 (#4408): on a full main run the judging steps alone took
+    # ~17 min on 2026-11-02 and the trailing informational balance report was
+    # cut at 20 (attempts 3 and 4 of run 41398410434). A time budget only.
+    timeout-minutes: 30
     steps:
       - name: Every solo leg passed (they carry five corpus gates the shards no longer run)
         if: needs.test-rust-solo.result != 'success'
