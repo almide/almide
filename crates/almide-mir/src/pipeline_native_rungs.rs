@@ -392,7 +392,6 @@ fn rewrite_native_result_windows_over<'a>(
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
 // sees these ops. Runs BEFORE verification/render (both are downstream).
 {
-    use almide_lang::types::Ty;
     let decl_list: Vec<&almide_ir::IrFunction> = decls.collect();
     let result_fns: std::collections::BTreeSet<String> = decl_list
         .iter()
