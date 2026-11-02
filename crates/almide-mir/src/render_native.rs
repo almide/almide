@@ -774,7 +774,11 @@ fn render_native_fn_sig(
         if func.ret.is_some() {
             return Err(wall("native: main with a return value"));
         }
-        return Ok(String::from("fn main()"));
+        // Out of line, as the standard codegen's program body is: the
+        // small-program perf check counts a program's work by toggling
+        // collection on `main` (scripts/check-native-v1-perf-small.sh), which
+        // an inlined `main` would never enter. One call; no cost.
+        return Ok(String::from("#[inline(never)]\nfn main()"));
     }
     // A param that any `Op::SetLocal` retargets (the MIR tail-recursion loop
     // reassigns its params each iteration) must render `mut` — without it the
