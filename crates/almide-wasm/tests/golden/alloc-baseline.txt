@@ -752,7 +752,7 @@
 200432	spec/wasm_cross/regex_linear_time.almd
 77072	spec/wasm_cross/regex_many_patterns.almd
 67840996	spec/wasm_cross/regex_repetition_depth.almd
-71568	spec/wasm_cross/regex_size_cap.almd
+71632	spec/wasm_cross/regex_size_cap.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 65920	spec/wasm_cross/replace_empty_pat.almd
 66992	spec/wasm_cross/repr_parity_pin.almd

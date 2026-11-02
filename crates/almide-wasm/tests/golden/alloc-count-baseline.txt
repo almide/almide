@@ -744,15 +744,15 @@
 23	14	368	23	spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
 11	5	168	11	spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 18	13	174	18	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
-1981	1944	137256	1981	spec/wasm_cross/regex_captures_accumulator_release.almd
-160	132	9819184	160	spec/wasm_cross/regex_counted_repetition.almd
-1035	969	318783	1035	spec/wasm_cross/regex_engine.almd
-2224	1980	578251	2224	spec/wasm_cross/regex_fuzz_batch.almd
-155	139	6105	141	spec/wasm_cross/regex_invalid_pattern.almd
-152	118	310158	152	spec/wasm_cross/regex_linear_time.almd
-3446	3280	2217945	3446	spec/wasm_cross/regex_many_patterns.almd
-123	95	119851422	123	spec/wasm_cross/regex_repetition_depth.almd
-30	18	5402	19	spec/wasm_cross/regex_size_cap.almd
+1926	1889	135496	1926	spec/wasm_cross/regex_captures_accumulator_release.almd
+158	130	9819120	158	spec/wasm_cross/regex_counted_repetition.almd
+1023	957	318399	1023	spec/wasm_cross/regex_engine.almd
+2194	1950	577291	2194	spec/wasm_cross/regex_fuzz_batch.almd
+156	140	6137	142	spec/wasm_cross/regex_invalid_pattern.almd
+150	116	310094	150	spec/wasm_cross/regex_linear_time.almd
+3416	3250	2216985	3416	spec/wasm_cross/regex_many_patterns.almd
+122	94	119851390	122	spec/wasm_cross/regex_repetition_depth.almd
+31	18	5434	20	spec/wasm_cross/regex_size_cap.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 7	3	32	7	spec/wasm_cross/replace_empty_pat.almd
 14	6	178	14	spec/wasm_cross/repr_parity_pin.almd
