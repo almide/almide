@@ -303,6 +303,22 @@ fn heap_carrier_values_in<'a>(
     crate::render_native_addr::carrier_values(f, &own, &sig).into_keys().collect()
 }
 
+/// A LIFTED effect fn: declared `-> Int | Bool | Unit` (not a Result), whose
+/// body can err, so its compiled ABI is the wrapped `Result[T, String]`
+/// carrier on this leg. A never-err one returns its raw value (#3058), and
+/// the entry `main` keeps its own exit convention (the same exclusion
+/// `effect_abi_facts` makes for the auto-wrap ABI).
+fn returns_lifted_carrier(f: &almide_ir::IrFunction) -> bool {
+    use almide_lang::types::Ty;
+    f.is_effect
+        && match f.ret_ty {
+            Ty::Int | Ty::Bool => true,
+            Ty::Unit => f.name.as_str() != "main",
+            _ => false,
+        }
+        && !crate::lower::is_never_err_lifted(f.name.as_str())
+}
+
 /// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
 /// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
 fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
@@ -316,12 +332,34 @@ fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
 /// carrier prims. The Option values are seeded from the declared types: a
 /// call to a fn returning a scalar Option, and a param declared as one.
 fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    let option_fns: std::collections::BTreeSet<String> = ir
+    let mut option_fns: std::collections::BTreeSet<String> = ir
         .functions
         .iter()
         .filter(|f| is_scalar_option(&f.ret_ty))
         .map(|f| f.name.as_str().to_string())
         .collect();
+    // A declared floor call whose declaration returns a scalar Option
+    // (`Int?`, or the element `A?` of its `List[A]` param) binds the same
+    // `Option<i64>` carrier (`native_floor::render_call`), so its `??` /
+    // `match` windows are this carrier's too. An element Option over a
+    // String list walls at the floor render, and every carrier read refuses
+    // a value not typed `Opt`.
+    for f in functions.iter() {
+        for op in &f.ops {
+            if let crate::Op::CallFn { name, .. } = op {
+                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| {
+                    matches!(
+                        d.ret,
+                        crate::native_floor::FloorRet::Opt(_)
+                            | crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt)
+                    )
+                });
+                if opt_ret {
+                    option_fns.insert(name.clone());
+                }
+            }
+        }
+    }
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
         ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
@@ -369,9 +407,7 @@ fn rewrite_native_result_windows_over<'a>(
                 // the verifier flagging the raw LoadHandle as UseAfterFree.
                 // A NEVER-ERR one returns its raw scalar instead: the shared
                 // chain settled every call site against that (#3058).
-                || (f.is_effect
-                    && matches!(f.ret_ty, Ty::Int | Ty::Bool)
-                    && !crate::lower::is_never_err_lifted(f.name.as_str()))
+                || returns_lifted_carrier(f)
         })
         .map(|f| f.name.as_str().to_string())
         .collect();
@@ -512,16 +548,13 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
             continue;
         }
         let params: Option<Vec<_>> = func.params.iter().map(|p| native_sig_kind(&p.ty, record_layouts, variant_layouts)).collect();
-        let ret = if matches!(func.ret_ty, Ty::Unit) {
-            Some(None)
-        } else if func.is_effect
-            && matches!(func.ret_ty, Ty::Int | Ty::Bool)
-            && !crate::lower::is_never_err_lifted(func.name.as_str())
-        {
+        let ret = if returns_lifted_carrier(func) {
             // A LIFTED effect fn returns the wrapped carrier on this leg
             // (the same widening `result_fns` applies above): its declared
             // scalar would type the call dst I64 while the value is Res.
             Some(Some(NativeSigKind::Res))
+        } else if matches!(func.ret_ty, Ty::Unit) {
+            Some(None)
         } else {
             native_sig_kind(&func.ret_ty, record_layouts, variant_layouts).map(Some)
         };
@@ -612,6 +645,25 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
 /// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
 /// the functions the Rust source was rendered from, not a sibling lowering.
 pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
+    render_native_parts(source).map(|(rust, certs, _)| (rust, certs))
+}
+
+/// The capabilities `main` reaches in the native render of `source`, as
+/// capability ids: `certificate::reachable_caps` over the exact MIR the
+/// native renderer rendered from (host ops counted at their call sites, as
+/// `cap_witness` counts them). The native leg's capability report, held to
+/// the wasm leg's (`cert_project::caps`) for the same program.
+pub fn native_capability_reach(source: &str) -> Result<std::collections::BTreeSet<u32>, LowerError> {
+    let (_, _, functions) = render_native_parts(source)?;
+    let program: std::collections::BTreeMap<String, crate::MirFunction> =
+        functions.into_iter().map(|f| (f.name.to_string(), f)).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    Ok(crate::certificate::reachable_caps("main", &program, &mut seen).into_iter().map(|c| c.id()).collect())
+}
+
+/// The body of [`try_render_rust_source_certified`]: the native render, the
+/// certificates of the MIR it rendered from, and that MIR.
+fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>, Vec<crate::MirFunction>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
     if almide_base::env::flag("ALMIDE_DUMP_MIR") {
@@ -769,16 +821,14 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
-    let rust = crate::render_native::try_render_native_program(
-        &MirProgram {
-            functions,
-            exports: Vec::new(),
-            // Rung 1 walls every top-let above, so there are no mutable-global slots.
-            mutable_global_count: 0,
-        },
-        &sigs,
-    )?;
-    Ok((rust, certs))
+    let program = MirProgram {
+        functions,
+        exports: Vec::new(),
+        // Rung 1 walls every top-let above, so there are no mutable-global slots.
+        mutable_global_count: 0,
+    };
+    let rust = crate::render_native::try_render_native_program(&program, &sigs)?;
+    Ok((rust, certs, program.functions))
 }
 
 

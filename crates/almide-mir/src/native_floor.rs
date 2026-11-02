@@ -423,7 +423,17 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         .ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
     // An effect fn's error reaches its caller through its declared Result,
     // the carrier the call site's `!` reads; any other effect return walls.
-    if is_effect && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResBytes | FloorRet::ResOptStr) {
+    // A HOST OP is the other admitted effect: its effect is a capability, not
+    // an error channel, and the certificate counts that capability at the
+    // call site (`certificate::cap_witness`, the ids the wasm leg's op_caps
+    // uses). It joins the floor when its row agrees with this declaration:
+    // the same intrinsic fn, the same runtime symbol, at least one capability.
+    let counted_host_op = crate::host_ops::host_op(module, func)
+        .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
+    if is_effect
+        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResBytes | FloorRet::ResOptStr)
+        && !counted_host_op
+    {
         return Err("an effect fn whose return is not a Result carrier".into());
     }
     let rt = runtime_index();

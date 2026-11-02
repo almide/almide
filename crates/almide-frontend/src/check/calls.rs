@@ -1055,6 +1055,18 @@ impl Checker {
                         return Ty::result(ret, Ty::String);
                     }
                 }
+                // The same bundled call typed from its bundled signature alone,
+                // with its module not loaded into `env.functions`: the
+                // single-file render front end (`almide_mir::pipeline`), which
+                // checks with no modules. Lifting is a property of the
+                // declaration (an Almide body), so it must not depend on
+                // whether the module was loaded; it did, and `args.option(..)!`
+                // typed `String` there but `String?` on the CLI.
+                if is_bundled_stdlib_call {
+                    if bundled_call_is_lifted(name) {
+                        return Ty::result(ret, Ty::String);
+                    }
+                }
             }
         }
         ret
