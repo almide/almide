@@ -1,5 +1,7 @@
 # Almide documentation
 
+[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+
 Start here. Four doorways, by what you are trying to do.
 
 | I want to… | Read |
@@ -37,3 +39,5 @@ pages are named from Rust source comments. Grep before you move.
 MSR (modification survival rate) lives in
 [almide-dojo](https://github.com/almide/almide-dojo), not here — this repo is
 compiler correctness.
+
+[Translation progress and file-by-file scope](./project/TRANSLATION-INVENTORY.md).

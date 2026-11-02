@@ -19,8 +19,8 @@
   <a href="./docs/SPEC.md">仕様</a> ·
   <a href="#クイックスタート">クイックスタート</a> ·
   <a href="./docs/benchmarks/README.md">証拠</a> ·
-  <a href="./docs/how-it-works.md">仕組み</a> ·
-  <a href="./docs/status.md">状態</a>
+  <a href="./docs/how-it-works.ja.md">仕組み</a> ·
+  <a href="./docs/status.ja.md">状態</a>
 </p>
 
 <p align="center">
@@ -95,7 +95,7 @@ almide run hello.almd --target wasm   # 同じバイト列を wasmtime で
 - **注釈のいらないメモリ管理** —— Perceus 式の所有権推論。GC もライフタイムもない（[メモリ安全性](./docs/design/MEMORY-SAFETY.md)）
 - **Fan** —— 構造化並行性。ネイティブではスレッドで、wasm でも同じ出力順で動く（[ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md)）
 - **標準ライブラリ** —— 自己ホストの `.almd` モジュール。公開関数はどれも両ターゲットで検品済み（[リファレンス](./docs/stdlib/)）
-- **組み込みのツール** —— `almide test`、`almide fmt`、`almide check`、ダイヤモンド依存を解決するモジュール（[仕組み](./docs/how-it-works.md)）
+- **組み込みのツール** —— `almide test`、`almide fmt`、`almide check`、ダイヤモンド依存を解決するモジュール（[仕組み](./docs/how-it-works.ja.md)）
 
 ## さらに読む
 
@@ -105,9 +105,9 @@ almide run hello.almd --target wasm   # 同じバイト列を wasmtime で
 - [仕様](./docs/SPEC.md) · [文法](./docs/GRAMMAR.md) · [標準ライブラリ](./docs/stdlib/) · [設計哲学](./docs/design/DESIGN.md) · [安定性の方針](./docs/STABILITY.md)
 - [何を測っているか](./docs/benchmarks/README.md) —— LLM 可読性、バイト同一性、メモリ安全性、サイズと速度。どれも日付とゲートつき · [ベンチマークの方法](./docs/project/BENCHMARKS.md)
 - [振る舞い契約](./docs/contracts/) —— ネイティブ ⇄ wasm のすべての約束とその証拠 · [証明と信頼の境界](./docs/contracts/proven-vs-trusted.md)
-- [仕組み](./docs/how-it-works.md) —— パイプラインとトラストスパイン · [アーキテクチャ](./docs/ARCHITECTURE.md)
-- [プロジェクトの状態](./docs/status.md) —— 1.0 前。LLM 向けの表面は、移行用の診断つきの dialect epoch でのみ変わる（[安定性方針](./docs/STABILITY.md)） · [ロードマップ](./docs/roadmap/README.md)
-- [Almide で書かれたもの](./docs/written-in-almide.md) —— このリポジトリの外のエージェント、パーサ、グラフィックス、ライブラリ · エディタ：[vscode-almide](https://github.com/almide/vscode-almide)、[tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
+- [仕組み](./docs/how-it-works.ja.md) —— パイプラインとトラストスパイン · [アーキテクチャ](./docs/ARCHITECTURE.md)
+- [プロジェクトの状態](./docs/status.ja.md) —— 1.0 前。LLM 向けの表面は、移行用の診断つきの dialect epoch でのみ変わる（[安定性方針](./docs/STABILITY.md)） · [ロードマップ](./docs/roadmap/README.md)
+- [Almide で書かれたもの](./docs/written-in-almide.ja.md) —— このリポジトリの外のエージェント、パーサ、グラフィックス、ライブラリ · エディタ：[vscode-almide](https://github.com/almide/vscode-almide)、[tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
 
 ## コントリビュート
 

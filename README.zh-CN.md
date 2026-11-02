@@ -19,8 +19,8 @@
   <a href="./docs/SPEC.md">规范</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="./docs/benchmarks/README.md">证据</a> ·
-  <a href="./docs/how-it-works.md">工作原理</a> ·
-  <a href="./docs/status.md">状态</a>
+  <a href="./docs/how-it-works.zh-CN.md">工作原理</a> ·
+  <a href="./docs/status.zh-CN.md">状态</a>
 </p>
 
 <p align="center">
@@ -95,7 +95,7 @@ almide run hello.almd --target wasm   # 相同的字节，在 wasmtime 上
 - **无需注解的内存管理** —— Perceus 式所有权推导，没有 GC，没有生命周期（[内存安全](./docs/design/MEMORY-SAFETY.md)）
 - **Fan** —— 结构化并发：原生上用线程，在 wasm 上输出顺序相同（[ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md)）
 - **标准库** —— 自举的 `.almd` 模块，每个公开函数都在两个目标上检验过（[参考](./docs/stdlib/)）
-- **内建工具** —— `almide test`、`almide fmt`、`almide check`，以及解析菱形依赖的模块系统（[工作原理](./docs/how-it-works.md)）
+- **内建工具** —— `almide test`、`almide fmt`、`almide check`，以及解析菱形依赖的模块系统（[工作原理](./docs/how-it-works.zh-CN.md)）
 
 ## 延伸阅读
 
@@ -105,9 +105,9 @@ almide run hello.almd --target wasm   # 相同的字节，在 wasmtime 上
 - [规范](./docs/SPEC.md) · [文法](./docs/GRAMMAR.md) · [标准库](./docs/stdlib/) · [设计哲学](./docs/design/DESIGN.md) · [稳定性策略](./docs/STABILITY.md)
 - [测量了什么](./docs/benchmarks/README.md) —— LLM 可写性、逐字节相同、内存安全、体积与速度，均带日期并有门禁 · [基准方法](./docs/project/BENCHMARKS.md)
 - [行为契约](./docs/contracts/) —— 原生 ⇄ wasm 的每一项承诺及其证据 · [证明与信任的边界](./docs/contracts/proven-vs-trusted.md)
-- [工作原理](./docs/how-it-works.md) —— 流水线与信任主干 · [架构](./docs/ARCHITECTURE.md)
-- [项目状态](./docs/status.md) —— 1.0 之前；面向 LLM 的表面只通过附带迁移诊断的 dialect epoch 变更（[稳定性策略](./docs/STABILITY.md)） · [路线图](./docs/roadmap/README.md)
-- [用 Almide 写成的](./docs/written-in-almide.md) —— 本仓库之外的智能体、解析器、图形与库 · 编辑器：[vscode-almide](https://github.com/almide/vscode-almide)、[tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
+- [工作原理](./docs/how-it-works.zh-CN.md) —— 流水线与信任主干 · [架构](./docs/ARCHITECTURE.md)
+- [项目状态](./docs/status.zh-CN.md) —— 1.0 之前；面向 LLM 的表面只通过附带迁移诊断的 dialect epoch 变更（[稳定性策略](./docs/STABILITY.md)） · [路线图](./docs/roadmap/README.md)
+- [用 Almide 写成的](./docs/written-in-almide.zh-CN.md) —— 本仓库之外的智能体、解析器、图形与库 · 编辑器：[vscode-almide](https://github.com/almide/vscode-almide)、[tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
 
 ## 参与贡献
 

@@ -1,5 +1,7 @@
 # Written in Almide
 
+[English](./written-in-almide.md) | [日本語](./written-in-almide.ja.md) | [简体中文](./written-in-almide.zh-CN.md)
+
 The standard library is the largest Almide program in this repository. The
 projects below show uses elsewhere. This is a directory, not a claim that every
 listed platform, host, or package was built and tested with the current compiler.

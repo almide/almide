@@ -1,0 +1,26 @@
+# Almide で書かれたもの
+
+[English](./written-in-almide.md) | [日本語](./written-in-almide.ja.md) | [简体中文](./written-in-almide.zh-CN.md)
+
+標準ライブラリは、このリポジトリ内で最大の Almide プログラムである。以下のプロジェクトは、他の場所での利用例を示す。これはディレクトリであり、掲載したすべてのプラットフォーム、ホスト、パッケージを現在のコンパイラでビルド・テスト済みだと主張するものではない。以下のリポジトリ数・コード行数の集計は、2026-09-30 時点の観測である。
+
+2026-10-31 に対象を絞って行ったソース確認：
+- [Bindgen のターゲット登録一覧](https://github.com/almide/almide-bindgen/blob/b563e8b9076ff511b9b20b03e2c2e475af2c4c0b/src/mod.almd)には、Almide を含む 21 言語が列挙されている。これはソース上の一覧であり、21 種類のバインディングを個別にテストしたという意味ではない。
+- [Porta のアーキテクチャ](https://github.com/almide/porta/blob/123bef319c99610dd94fb73c28f6443c5a03fc73/README.md)は、ネイティブプロセスのサンドボックス化と独立した Wasm モードを区別している。このディレクトリはデプロイ環境の安全性を立証せず、両モードを一つの万能な保証としてまとめるものでもない。
+その他の説明は引き続き各プロジェクトへの案内であり、この限定的な確認では、すべてのプラットフォームでのビルドや 144 リポジトリの集計を再実施していない。
+
+- **コーディングエージェント** — [comide](https://github.com/O6lvl4/comide)、ディレクトリ内での会話 · [golemide](https://github.com/O6lvl4/golemide)、単一の静的バイナリ、観察してから編集し、すべての書き込みを構文ゲートに通す · [homullus](https://github.com/almide-ai/homullus)、モジュール式エージェントランタイム · [manus](https://github.com/almide-ai/manus)、macOS 上のコンピューター操作
+- **エージェント基盤** — [porta](https://github.com/almide/porta)、ネイティブプロセスのサンドボックス化（macOS Seatbelt / Linux Landlock、seccomp、namespaces）と、それとは別の Wasm 実行モード · [ctxgate](https://github.com/O6lvl4/ctxgate)、ツールフック内に置くコンテキストファイアウォール · [hew](https://github.com/O6lvl4/hew)、エージェント用の構造を理解する `cat`/`grep`/`sed` · [almai](https://github.com/almide-ai/almai)、各プロバイダーに共通の LLM インターフェース
+- **構文解析** — [gramide](https://github.com/O6lvl4/gramide)、コーディングエージェント用の構文木。[TypeScript](https://github.com/O6lvl4/gramide-typescript)、[Python](https://github.com/O6lvl4/gramide-python)、[Rust](https://github.com/O6lvl4/gramide-rust)、[Go](https://github.com/O6lvl4/gramide-go)、[JavaScript](https://github.com/O6lvl4/gramide-javascript)、[Almide](https://github.com/O6lvl4/gramide-almide) の文法パッケージがあり、それぞれ当該言語自身のパーサーと照合している · [parsegen](https://github.com/almide/parsegen)、C も動的ロードも使わない tree-sitter 互換パーサージェネレーター
+- **グラフィックス** — [ceangal2](https://github.com/almide-graphics/ceangal2)、コンピュートシェーダーを中心とする snaidhm の 2D/3D レンダラーと、その上に構築した ceangal のレイアウト・ウィジェット。一つの Almide プログラムが Web、iOS、macOS、Android、Windows、Linux で動作する（[ceangal-hello](https://github.com/almide-graphics/ceangal-hello) から始められる） · [obsid](https://github.com/almide-graphics/obsid)、WASM を介した Canvas 2D / WebGL / 3D · [nn](https://github.com/almide-graphics/nn) と [slabhra](https://github.com/almide-graphics/slabhra)、ニューラルネットワークの基本要素（標準ライブラリの `matrix` から移ったカーネルは `nn.kernels` にある）と逆モード自動微分 · [cruth](https://github.com/almide-graphics/cruth)、VRM/glTF キャラクター · [lumen](https://github.com/almide-graphics/lumen)、`@extern` を必要としないグラフィックス数学
+- **デスクトップ** — [almide-shell](https://github.com/almide-graphics/almide-shell)、Hyprland 用シェル：バー、ランチャー、通知、画面表示 · [sprid](https://github.com/O6lvl4/sprid)、厳格なメモリ上限の下でスクロールバックを備えるターミナルエミュレーター
+- **バインディングとパッケージ化** — [almide-bindgen](https://github.com/almide/almide-bindgen)、Almide を含む登録済み 21 言語ターゲット向けの FFI 生成 · [almide-wasm-bindgen](https://github.com/almide/almide-wasm-bindgen) · [almide-lander](https://github.com/almide/almide-lander)、ネイティブ共有ライブラリとしての Almide · [almide-web](https://github.com/almide/almide-web)、ブラウザー API
+- **ライブラリ** — [toml](https://github.com/almide/toml) · [yaml](https://github.com/almide/yaml) · [csv](https://github.com/almide/csv) · [svg](https://github.com/almide/svg) · [dfa](https://github.com/almide/dfa) · [bigint](https://github.com/almide/bigint) · [aes](https://github.com/almide/aes) · [rsa](https://github.com/almide/rsa) · [sha1](https://github.com/almide/sha1) · [base64](https://github.com/almide/base64) · [almide-sqlite](https://github.com/almide/almide-sqlite) · [llm](https://github.com/almide/llm)、LLM プロバイダー用ストリーミングクライアント
+- **適合性と計測** — [als](https://github.com/almide/als)、独自の判定器を持つ規範的仕様。任意の `almide` バイナリに対して実行する · [almide-dojo](https://github.com/almide/almide-dojo)、LLM による記述しやすさを測る場。ハーネスは Almide で書かれている · [bonsai-almide](https://github.com/almide/bonsai-almide)、ブラウザー内の 1-bit LLM
+
+2026-09-30 の計測：このリポジトリ以外に、Almide ソースを含む公開リポジトリは 144 件。生成物を除く手書き部分は、[nn](https://github.com/almide-graphics/nn) が 21,815 行、[gramide](https://github.com/O6lvl4/gramide) ファミリーが八つのリポジトリで計 19,780 行、[almide-shell](https://github.com/almide-graphics/almide-shell) が 8,502 行、[snaidhm](https://github.com/almide-graphics/snaidhm) が 6,800 行、[almide-bindgen](https://github.com/almide/almide-bindgen) が 5,871 行、[ceangal](https://github.com/almide-graphics/ceangal) が 5,099 行、[sprid](https://github.com/O6lvl4/sprid) が 4,565 行、[porta](https://github.com/almide/porta) が 4,419 行。snaidhm と ceangal は当時それぞれ独立したリポジトリとして数えており、その後アーカイブされ、ceangal2 に移された。
+
+## ツール
+
+- [almide-grammar](https://github.com/almide/almide-grammar) — エディターや tree-sitter のツールを生成する元となる構文定義（キーワード、演算子、優先順位、TextMate スコープ）。Almide で記述されている。コンパイラの字句解析器への入力ではなく、それを反映するものであり、週次の `downstream-sync` workflow（`scripts/check-downstream-grammar.sh`）は両者のトークン集合が異なると失敗する
+- [vscode-almide](https://github.com/almide/vscode-almide) · [tree-sitter-almide](https://github.com/almide/tree-sitter-almide)（Neovim、Helix、Zed） · [playground](https://github.com/almide/playground)

@@ -1,5 +1,7 @@
 # Project Status
 
+[English](./status.md) | [日本語](./status.ja.md) | [简体中文](./status.zh-CN.md)
+
 Where Almide stands today. The stamped totals (stdlib size, test files, contracts, mutation score) are rendered on the [measurements page](./benchmarks/README.md#derived-counts), where CI checks them against their ledgers.
 
 | Category | Status |

@@ -1,5 +1,7 @@
 # Support policy
 
+[English](./SUPPORT.md) | [日本語](./SUPPORT.ja.md) | [简体中文](./SUPPORT.zh-CN.md)
+
 What an adopter can count on, stated plainly. This document is the policy
 half; every guarantee below names the machinery that enforces it, so the
 policy and the enforcement cannot drift apart. Vulnerability reporting is

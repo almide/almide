@@ -1,5 +1,7 @@
 # How It Works
 
+[English](./how-it-works.md) | [日本語](./how-it-works.ja.md) | [简体中文](./how-it-works.zh-CN.md)
+
 The compiler pipeline in one page. The module map and every pass in detail: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 A shared frontend and linked IR feed the two main output routes (simplified):
