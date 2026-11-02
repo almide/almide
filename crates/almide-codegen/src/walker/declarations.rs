@@ -11,6 +11,12 @@ use super::helpers::{template_or, render_type_field_fn};
 /// `render_type_decl`'s generics-string computation, extracted verbatim
 /// (cog>25 decomposition). Builds e.g. `"<T>"` or `"<T, U>"`, or `""` when
 /// there are none (or #621 phantom-param dropping applies).
+///
+/// The DEFINITION's parameters are bare (#4312), as an anonymous record's
+/// are (#1798): a bound on the definition must hold at every mention of the
+/// type, so `Secret<A: Clone + PartialEq>` refused `Secret[Region]` (a
+/// closure-bearing record, `Clone` only) after the checker accepted it. The
+/// derives add their own per-impl bounds and the repr impl declares its own.
 fn render_type_decl_generics(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     if ctx.ann.phantom_param_structs.contains(td.name.as_str()) {
         // All params phantom (#621): drop them so Rust doesn't reject E0392.
@@ -20,10 +26,7 @@ fn render_type_decl_generics(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     if generics.is_empty() {
         return String::new();
     }
-    let params = generics.iter().map(|g| {
-        ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
-            .unwrap_or_else(|| g.name.to_string())
-    }).collect::<Vec<_>>().join(", ");
+    let params = generics.iter().map(|g| g.name.to_string()).collect::<Vec<_>>().join(", ");
     format!("<{}>", params)
 }
 
@@ -150,11 +153,11 @@ fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &
     else if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
     let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
     let fallback = if has_fn_fields {
-        format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
+        format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, fields_str)
     } else if has_non_eq_fields {
-        format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+        format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, fields_str)
     } else {
-        format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+        format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, fields_str)
     };
     ctx.templates.render_with("struct_decl", None, &attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
         .unwrap_or(fallback)
@@ -191,7 +194,7 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
                     .collect::<Vec<_>>().join(", ");
                 let param_names = (0..types.len()).map(|i| format!("v{}", i))
                     .collect::<Vec<_>>().join(", ");
-                let fallback = format!("{}({})", v.name, &fields_str);
+                let fallback = format!("{}({})", v.name, fields_str);
                 ctx.templates.render_with("enum_variant", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("params", params_str.as_str()), ("param_names", param_names.as_str())])
                     .unwrap_or(fallback)
             }
@@ -235,9 +238,9 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
     else if has_hash { enum_attrs.push("has_hash"); }
     let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
     let fallback = if has_fn_fields {
-        format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, &variants_str)
+        format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, variants_str)
     } else {
-        format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
+        format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, variants_str)
     };
     let decl = ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
         .unwrap_or(fallback);
@@ -293,27 +296,24 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
 
     // Generic header + target. The impl GENERICS carry every param's bounds; the
     // impl TARGET uses BARE params. For a generic type these MUST differ:
-    //   impl<T: AlmideRepr + Clone + PartialEq> AlmideRepr for Tree<T> { … }
-    //                       ^^^^^^^^^^^^^^^^^^^ bounds belong here          ^^^ bare
-    // Reusing the decl's bounded `<T: Clone + PartialEq>` as the target emits the
-    // invalid `for Tree<T: Clone + PartialEq>` (E0229: associated-item-constraint
-    // not allowed). The param's own bound set is whatever the struct/enum decl
-    // declared (via the `generic_bound` template), plus `AlmideRepr` so the field
-    // reprs compose; rendering them through the same template keeps the impl
-    // bounds in lock-step with the type decl (Rust requires the impl to satisfy
-    // every bound the type definition declares).
+    //   impl<T: AlmideRepr + Clone> AlmideRepr for Tree<T> { … }
+    //                       ^^^^^^^ bounds belong here          ^^^ bare
+    // The definition's parameters are bare (#4312), so the impl declares what
+    // the repr needs and no more: `generic_bound_minimal` (`T: Clone`) plus
+    // `AlmideRepr` so the field reprs compose. The anonymous records' repr
+    // impls (program_render.rs) use the same set, so a named record's repr
+    // calling one on its anonymous field is satisfiable (#1798). No
+    // `PartialEq`: a closure-bearing argument (`Secret[Region]`) still prints.
     // A fully-phantom record (#621) has its generics stripped from the struct,
     // so its impl must be ungenerified too (`impl AlmideRepr for Tagged`).
     let phantom = ctx.ann.phantom_param_structs.contains(td.name.as_str());
     let (impl_generics, target_args) = match td.generics.as_ref().filter(|g| !g.is_empty() && !phantom) {
         Some(generics) => {
             let impl_bounds = generics.iter().map(|g| {
-                // The type DEFINITION declares each param via `generic_bound`
-                // (`T: Clone + PartialEq`); the impl must satisfy those same
-                // bounds, so reuse the rendered form and splice `AlmideRepr` in
-                // right after the `name:` colon → `T: AlmideRepr + Clone + …`.
-                let own = ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
-                    .unwrap_or_else(|| format!("{}: Clone + PartialEq", g.name));
+                // `generic_bound_minimal` (`T: Clone`) with `AlmideRepr`
+                // spliced in after the `name:` colon → `T: AlmideRepr + Clone`.
+                let own = ctx.templates.render_with("generic_bound_minimal", None, &[], &[("name", g.name.as_str())])
+                    .unwrap_or_else(|| format!("{}: Clone", g.name));
                 match own.split_once(':') {
                     Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
                     None => format!("{}: AlmideRepr", g.name),
@@ -396,7 +396,7 @@ fn render_repr_parts_body(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             let arms = cases.iter().map(|v| {
-                let boxed = |field: &str| super::case_field_is_boxed(ctx, Some(&Ty::Named(td.name.clone(), vec![])), v.name.as_str(), field)
+                let boxed = |field: &str| super::case_field_is_boxed(ctx, Some(&Ty::Named(td.name, Default::default())), v.name.as_str(), field)
                     || ctx.ann.boxed_case_fields.contains(&(td.name.to_string(), v.name.to_string(), field.to_string()));
                 match &v.kind {
                     IrVariantKind::Unit => format!("{}::{} => {{ {} }}", td.name, v.name, lit(v.name.as_str())),

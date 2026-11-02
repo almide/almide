@@ -114,13 +114,16 @@ else {
   else true
 }
 
-// Step BACK over UTF-8 continuation bytes to the previous codepoint start.
+// Step BACK over UTF-8 continuation bytes to the previous codepoint start, never before
+// `start`: a run of continuation bytes reaching the String's first byte stops there instead
+// of answering `start - 1`, a header byte (A4, #4005).
 fn __to_lower_prev(start: Int, i: Int) -> Int =
   if i > start and prim.load8(i - 1) >= 128 and prim.load8(i - 1) < 192 then __to_lower_prev(
     start,
     i - 1,
   )
-  else i - 1
+  else if i > start then i - 1
+  else start
 
 // Scanning BACKWARD from just before Σ: skip Case_Ignorable; true iff the
 // first non-ignorable codepoint is Cased.

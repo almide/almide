@@ -1,0 +1,50 @@
+// E111 (ADR-0030, #4114): the doubling through a generic record. Each
+// `Pair[T, T]` holds the last type twice, so the 40th would have 2^40 leaves.
+type Pair[A, B] = { fst: A, snd: B }
+
+fn pair[T](x: T) -> Pair[T, T] = { fst: x, snd: x }
+
+effect fn main() -> Unit = {
+  let t0 = 1
+  let t1 = pair(t0)
+  let t2 = pair(t1)
+  let t3 = pair(t2)
+  let t4 = pair(t3)
+  let t5 = pair(t4)
+  let t6 = pair(t5)
+  let t7 = pair(t6)
+  let t8 = pair(t7)
+  let t9 = pair(t8)
+  let t10 = pair(t9)
+  let t11 = pair(t10)
+  let t12 = pair(t11)
+  let t13 = pair(t12)
+  let t14 = pair(t13)
+  let t15 = pair(t14)
+  let t16 = pair(t15)
+  let t17 = pair(t16)
+  let t18 = pair(t17)
+  let t19 = pair(t18)
+  let t20 = pair(t19)
+  let t21 = pair(t20)
+  let t22 = pair(t21)
+  let t23 = pair(t22)
+  let t24 = pair(t23)
+  let t25 = pair(t24)
+  let t26 = pair(t25)
+  let t27 = pair(t26)
+  let t28 = pair(t27)
+  let t29 = pair(t28)
+  let t30 = pair(t29)
+  let t31 = pair(t30)
+  let t32 = pair(t31)
+  let t33 = pair(t32)
+  let t34 = pair(t33)
+  let t35 = pair(t34)
+  let t36 = pair(t35)
+  let t37 = pair(t36)
+  let t38 = pair(t37)
+  let t39 = pair(t38)
+  let t40 = pair(t39)
+  println("ok")
+}

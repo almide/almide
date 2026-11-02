@@ -16,6 +16,23 @@
 use super::WitnessRecorder;
 
 impl WitnessRecorder {
+    /// #4278 B1: a container SLOT's old occupant released before the slot is
+    /// overwritten (`xs[i] = v`, `r.f = v`). The occupant's credit is the
+    /// container's, handed to this release — the slot pseudo-parameter's
+    /// consume (`c`): a line seeded with that credit (`i`) and released
+    /// (`d`). The release is logged to the RC byte check as `r`, held to a
+    /// release call inside `window` on a value loaded out of a slot that a
+    /// later store writes — never a frame variable's event.
+    pub fn slot_replaced(&mut self, window: u64) {
+        if self.branches.dead() {
+            return;
+        }
+        let o = self.new_obj();
+        self.ops(o, "i");
+        self.log.push(super::paths::Ev::Op(o, 'd'));
+        crate::witness::rc::event_at('r', None, window);
+    }
+
     /// The rest block was built into `local`: a new object it holds (`i`).
     pub fn rest_born(&mut self, local: u32) {
         let o = self.fresh_obj(local, false);
@@ -31,15 +48,23 @@ impl WitnessRecorder {
         }
     }
 
-    /// `for (k, v) in m` (stmts.rs `lower_forin`): the cursor takes its credit
-    /// on the subject before the loop — an OWNED subject is the cursor's own
-    /// block (`i`), a borrowed one is shared (`a`, the route's `rc_inc_top`,
-    /// a holder line of its own beside the block's owner). The cursor local
+    /// A `for` loop over a map or a list (stmts.rs `lower_forin`): the
+    /// cursor takes its credit on the subject before the loop — an OWNED
+    /// subject is the cursor's own block (`i`), a borrowed one is shared
+    /// (`a`, the `rc_inc` the route takes through the cursor local, a holder
+    /// line of its own beside the block's owner). The cursor local
     /// `local` holds it (not an owner: no dec-old, no iteration-end release),
     /// so the release that settles it is resolved per path through `local`.
     pub fn cursor_take(&mut self, owned: bool, local: u32) {
         let o = self.fresh_obj(local, false);
-        self.ops(o, if owned { "i" } else { "a" });
+        if owned {
+            self.ops(o, "i");
+        } else {
+            // The +1 is taken through the cursor local (`local.get local;
+            // call $rc_inc`), so its event names that local and the RC byte
+            // check holds it to that call (#4278 B1).
+            self.held_ops(local, "a");
+        }
     }
 
     /// After the loop the cursor releases its credit (`d`). An exit from the
@@ -51,5 +76,55 @@ impl WitnessRecorder {
         if !self.held_ops(local, "d") {
             self.poison();
         }
+    }
+}
+
+/// A FUSED chain (list_fuse.rs, #2977): a map stage's owned result makes the
+/// next stage's param its owner for one element. The chain releases it where
+/// the element is done with: where a filter skips it, and after the fold step.
+/// That release is the iteration-end `d` the paths renderer writes for each
+/// owner local bound in the iteration (witness_paths.rs `end_iteration`), so
+/// it is not logged on the certificate; it is logged for the byte check
+/// (#4277) on the owner it names, at each edge the iteration ends on.
+impl WitnessRecorder {
+    pub fn fused_open(&mut self) {
+        self.iter_owned.push(Vec::new());
+    }
+
+    /// A stage param takes an owned element: a new object it owns (`i`). No
+    /// dec-old: the chain released the previous element's block where that
+    /// element was done with, so the rebind releases nothing.
+    pub fn iteration_owner(&mut self, local: u32) {
+        let o = self.fresh_obj(local, true);
+        self.ops(o, "i");
+        if let Some(v) = self.iter_owned.last_mut() {
+            v.push(local);
+        }
+    }
+
+    /// The iteration ends here (a filter's skip, or the step's end): each
+    /// owner bound so far is released on this edge.
+    pub fn iteration_releases(&mut self) {
+        if self.branches.dead() {
+            return;
+        }
+        let owned = self.iter_owned.last().cloned().unwrap_or_default();
+        for l in owned {
+            self.iteration_release(l);
+        }
+    }
+
+    /// One owner's iteration-end release, emitted here as a `$dec` on
+    /// `local` (a fused element's owner, a fold's accumulator before its
+    /// rebind): logged for the byte check only — the certificate writes it at
+    /// the iteration's end.
+    pub fn iteration_release(&mut self, local: u32) {
+        if !self.branches.dead() && self.bound.contains_key(&local) {
+            crate::witness::rc::event('d', Some(local));
+        }
+    }
+
+    pub fn fused_close(&mut self) {
+        self.iter_owned.pop();
     }
 }

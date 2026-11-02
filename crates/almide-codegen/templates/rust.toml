@@ -604,9 +604,6 @@ template = "#[allow(non_camel_case_types)]\nstruct __AlmideTl_{name};\nimpl std:
 [top_var]
 template = "thread_local! { #[allow(non_upper_case_globals)] static {name}: std::cell::RefCell<{type}> = std::cell::RefCell::new({value}); }"
 
-[generic_bound]
-template = "{name}: Clone + PartialEq"
-
 [generic_bound_full]
 template = "{name}: Clone + std::fmt::Debug + PartialEq"
 

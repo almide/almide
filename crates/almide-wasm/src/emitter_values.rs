@@ -178,10 +178,10 @@ impl Emitter<'_> {
                     }
                     other => return unsup(&format!("map-literal-ty:{}", ty_name(other))),
                 };
-                let pair_ty = Ty::Tuple(vec![k_ty, v_ty]);
+                let pair_ty = Ty::Tuple(vec![k_ty, v_ty].into());
                 let list_ty = Ty::Applied(
                     TypeConstructorId::List,
-                    vec![pair_ty.clone()],
+                    vec![pair_ty.clone()].into(),
                 );
                 // Pinned: the marks its nodes' lowering writes are keyed
                 // by address, and a pairs list dropped here handed its
@@ -204,7 +204,14 @@ impl Emitter<'_> {
                     span: e.span,
                     def_id: None,
                 });
-                match self.arm_scope(|em| em.lower_map_call("from_list", std::slice::from_ref(&*pairs), Some(ty)))? {
+                // The literal is `map.from_list`'s arm lowered inline: a
+                // compound routine whose window holds the upserts' own RC (a
+                // grown block's release, a duplicate key's) — #4277.
+                let lowered = self.routine(
+                    |_: &Option<_>| true,
+                    |em| em.arm_scope(|em| em.lower_map_call("from_list", std::slice::from_ref(&*pairs), Some(ty))),
+                )?;
+                match lowered {
                     Some(t) => Ok(t.ty),
                     None => unsup("map-literal-unit"),
                 }

@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/map_remove.rs b/crates/almide-wasm/src/map_remove.rs
+index 26a721dda..721ca6b54 100644
+--- a/crates/almide-wasm/src/map_remove.rs
++++ b/crates/almide-wasm/src/map_remove.rs
+@@ -269,7 +269,9 @@ impl Emitter<'_> {
+             em.emit_release_slot_at(ty);
+             Ok(())
+         })?;
+-        let at = MemArg { offset: u64::from(off), align: 2, memory_index: 0 };
++        // RE-INJECTED (#4278 B1 drill): the NULL lands one slot past the
++        // released one; the slot's `r` event stays.
++        let at = MemArg { offset: u64::from(off) + 4, align: 2, memory_index: 0 };
+         self.f.instructions().local_get(eh).i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
+         Ok(())
+     }

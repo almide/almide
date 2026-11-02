@@ -436,7 +436,7 @@ fn ir_expr_tuple() {
             IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None, def_id: None },
             IrExpr { kind: IrExprKind::LitStr { value: "a".into() }, ty: Ty::String, span: None, def_id: None },
         ]},
-        ty: Ty::Tuple(vec![Ty::Int, Ty::String]),
+        ty: Ty::Tuple(vec![Ty::Int, Ty::String].into()),
         span: None, def_id: None,
     };
     if let IrExprKind::Tuple { elements } = &expr.kind {

@@ -3,6 +3,8 @@ pub mod intern;
 pub mod span;
 pub mod diagnostic;
 pub mod env;
+/// Compile-cost budgets (ADR-0030): every counted limit on the compiler's input.
+pub mod budget;
 pub mod names;
 pub mod profile;
 pub mod fs_errno;

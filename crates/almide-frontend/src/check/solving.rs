@@ -20,6 +20,11 @@ impl Checker {
                 self.note_errored_slots(c);
                 self.report_constraint_mismatch(c);
             }
+            // ADR-0030: a resolution this unification ran stopped at the
+            // type-size budget — E111 at the constraint's site.
+            if super::types::take_type_budget_hit() {
+                self.report_type_budget_at(c.span, None);
+            }
         }
         // ADR-0021: a lambda channel nothing constrained takes the join of its
         // `!` operands — before the slot defaults, which only fill what is
@@ -255,6 +260,13 @@ impl Checker {
             (None, None) => {
                 let a_resolved = resolve_ty_keeping_literals(a, &self.uf);
                 let b_resolved = resolve_ty_keeping_literals(b, &self.uf);
+                // Equal types unify. With shared, hash-consed types this is a
+                // pointer comparison, and it keeps a type that references one
+                // subtree many times from being unified once per reference
+                // (ADR-0030 D5).
+                if a_resolved == b_resolved {
+                    return true;
+                }
                 self.unify_structural(&a_resolved, &b_resolved)
             }
         }
@@ -518,6 +530,10 @@ impl Checker {
 
 /// Push every open inference var (`?N`) in `t` onto `out`.
 pub(crate) fn collect_inference_vars(t: &Ty, out: &mut Vec<Ty>) {
+    // A subtree with no variable is skipped from its cache (ADR-0030 D5).
+    if !t.has_infer_var() {
+        return;
+    }
     if is_inference_var(t).is_some() {
         out.push(t.clone());
     }

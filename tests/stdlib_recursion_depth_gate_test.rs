@@ -76,14 +76,6 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
         "one frame per 64 MiB chunk of the requested length"),
     ("json_parse.almd", "__jp_array", "__jp_value", JSON_NESTING),
     ("json_parse.almd", "__jp_object", "__jp_value", JSON_NESTING),
-    // #4209: set_path's nesting probe stops at its budget (at most
-    // JSON_MAX_DEPTH = 1000 levels), whatever the Value holds.
-    ("json_path.almd", "__jnp_items", "__json_nests_past", VALUE_NESTING),
-    ("json_path.almd", "__jps_items", "json_path_set_go", PATH_SEGMENTS),
-    ("json_path.almd", "__jps_pairs", "json_path_set_go", PATH_SEGMENTS),
-    ("json_path.almd", "json_path_set_field", "__jps_pairs", PATH_SEGMENTS),
-    ("json_path.almd", "json_path_set_field", "json_path_set_go", PATH_SEGMENTS),
-    ("json_path.almd", "json_path_set_index", "__jps_items", PATH_SEGMENTS),
     ("json_path.almd", "__jpr_items", "json_path_rm_go", PATH_SEGMENTS),
     ("json_path.almd", "__jpr_pairs", "json_path_rm_go", PATH_SEGMENTS),
     ("json_path.almd", "json_path_rm_field", "__jpr_pairs", PATH_SEGMENTS),

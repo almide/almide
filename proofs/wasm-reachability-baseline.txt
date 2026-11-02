@@ -67,9 +67,7 @@ json.stringify :: UNPROBEABLE :: no candidate shape builds natively
 json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
-net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
 net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
-net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared capability not in this brick
 net.tcp_local_port :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_local_port needs a declared capability not in this brick
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
@@ -116,8 +114,6 @@ io.read_to_end :: UNPROBEABLE :: parameter type outside the synthesizer (a proto
 io.write :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 net.ip_to_string :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 net.is_loopback :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
-net.lookup_host :: HOST_CAPABILITY :: native-only: no wasm leg serves UDP or name resolution (proofs/target-availability.toml)
-net.udp_bind :: HOST_CAPABILITY :: native-only: no wasm leg serves UDP or name resolution (proofs/target-availability.toml)
 net.udp_local_port :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 net.udp_recv_from :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 net.udp_send_to :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)

@@ -419,7 +419,7 @@ impl Emitter<'_> {
         } else {
             self.f.instructions().local_get(hacc).local_get(hv);
             if !owned {
-                self.share_handle_top(b_ty);
+                self.arm_share_handle_top(b_ty);
             }
             if b_ty.val_type() == wasm_encoder::ValType::F64 {
                 self.f.instructions().i64_reinterpret_f64();
@@ -558,9 +558,10 @@ impl Emitter<'_> {
                 // already present: the functional result IS the input
                 // block, which the owned result co-owns (+1); the unstored
                 // member's Retain credit goes back.
-                self.emit_release_hold(xh, e);
+                self.arm_release_hold(xh, e, x);
                 self.f.instructions().local_get(sh);
                 self.rc_inc_top();
+                self.witness_arm_share_out(s);
                 self.f.instructions().else_();
                 let (len_h, rh) = self.emit_copy_grow(sh, e.slot_size())?;
                 let st = SliceTy::Set(self.types.intern(e));
@@ -728,7 +729,7 @@ impl Emitter<'_> {
                     .local_get(xh);
                 // The member handle copied into the set takes +1: the set
                 // releases it through its typed drop (#2010 Map stage b).
-                self.share_handle_top(e);
+                self.arm_share_handle_top(e);
                 self.store_ty_slot_raw(e);
                 {
                     let mut i = self.f.instructions();

@@ -83,16 +83,33 @@ fn split_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
             let field = |name: &str, ty: Ty| {
                 expr(IrExprKind::Member { object: Box::new(var.clone()), field: almide_base::intern::sym(name) }, ty)
             };
-            args.push(field("base", Ty::RawPtr));
+            // A slice's view starts `off` bytes past its block's base. The
+            // sum is still an address into the Region's block, so it stays
+            // typed `Handle`: the exit plan keys its raw-address rule (the
+            // frame holds the Region across the host call) on that type.
+            let start = IrExprKind::BinOp {
+                op: almide_ir::BinOp::AddInt,
+                left: Box::new(field("base", Ty::RawPtr)),
+                right: Box::new(field("off", Ty::Int)),
+            };
+            args.push(expr(start, Ty::RawPtr));
             args.push(field("len", Ty::Int));
         }
         let mut stub = f.clone();
         stub.name = almide_base::intern::sym(&stub_name);
+        stub.attrs.push(address_params_attr(&stub_params, f));
         stub.params = stub_params;
         stub.def_id = None;
+        // The stub is the wasm import alone: a native binding beside it
+        // (`@extern(rust)` / `@extern(c)`, #4353) names a host this target
+        // does not have, and the import reads only the wasm attr.
+        stub.extern_attrs.retain(|a| a.target.as_str() == "wasm");
         stubs.push(stub);
         // The wrapper: same name and signature, a body that calls the stub.
-        f.extern_attrs.retain(|a| a.target.as_str() != "wasm");
+        // It is an ordinary fn now, bound to no host, so it keeps no extern
+        // attr — a native one left on it read as a native-only extern
+        // (`extern-native`, E082) on a dual binding (#4353).
+        f.extern_attrs.clear();
         f.body = expr(
             IrExprKind::Call {
                 target: CallTarget::Named { name: almide_base::intern::sym(&stub_name) },
@@ -103,4 +120,230 @@ fn split_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
         );
     }
     functions.extend(stubs);
+}
+
+/// #4354: an `@export(wasm, "sym")` fn taking a Region parameter is handed
+/// it by the host as `(base, len)`, the pair a Region crosses an import as
+/// (D3) and #4353's Rust host takes. The fn keeps its name and body but loses
+/// the export; a wrapper `__region_lend_<name>` takes the export with each
+/// Region parameter split into `<p>_base: Handle, <p>_len: Int` (stamped
+/// `address_params`, so they cross in the memory's address width) and calls
+/// the fn with `ffi.__lend(base, len)`: a read-only Region over the host's
+/// range of the module's memory, owning nothing, lent for the call. Its
+/// length is the host's word, every access is still checked against it, and
+/// E119 refuses the copies a body could keep past the call. A Region return
+/// of the same fn is wrapped afterwards (`wrap_region_exports`).
+/// None when no export takes a Region (no clone).
+pub(crate) fn lend_region_params(ir: &IrProgram) -> Option<IrProgram> {
+    let wants = |fs: &[IrFunction]| fs.iter().any(takes_lent_region);
+    if !wants(&ir.functions) && !ir.modules.iter().any(|m| wants(&m.functions)) {
+        return None;
+    }
+    let mut out = ir.clone();
+    lend_in(&mut out.functions, &mut out.var_table);
+    for m in &mut out.modules {
+        lend_in(&mut m.functions, &mut m.var_table);
+    }
+    Some(out)
+}
+
+fn takes_lent_region(f: &IrFunction) -> bool {
+    f.export_attrs.iter().any(|a| a.target.as_str() == "wasm") && f.params.iter().any(|p| is_region(&p.ty))
+}
+
+fn lend_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
+    let mut wrappers = Vec::new();
+    for f in functions.iter_mut().filter(|f| takes_lent_region(f)) {
+        let mut w = f.clone();
+        w.name = almide_base::intern::sym(&format!("__region_lend_{}", f.name.as_str()));
+        let mut params = Vec::new();
+        let mut args = Vec::new();
+        for p in &f.params {
+            if !is_region(&p.ty) {
+                let q = param(vars, p.name.as_str().to_string(), p.ty.clone());
+                args.push(expr(IrExprKind::Var { id: q.var }, q.ty.clone()));
+                params.push(q);
+                continue;
+            }
+            let base = param(vars, format!("{}_base", p.name.as_str()), Ty::RawPtr);
+            let len = param(vars, format!("{}_len", p.name.as_str()), Ty::Int);
+            args.push(expr(
+                IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: almide_base::intern::sym("ffi"),
+                        func: almide_base::intern::sym("__lend"),
+                        def_id: None,
+                    },
+                    args: vec![
+                        expr(IrExprKind::Var { id: base.var }, Ty::RawPtr),
+                        expr(IrExprKind::Var { id: len.var }, Ty::Int),
+                    ],
+                    type_args: Vec::new(),
+                },
+                p.ty.clone(),
+            ));
+            params.push(base);
+            params.push(len);
+        }
+        w.attrs = vec![address_params_attr(&params, f)];
+        w.params = params;
+        let call_ty = if f.is_effect {
+            Ty::Applied(almide_types::types::TypeConstructorId::Result, vec![f.ret_ty.clone(), Ty::String].into())
+        } else {
+            f.ret_ty.clone()
+        };
+        let call = expr(IrExprKind::Call { target: CallTarget::Named { name: f.name }, args, type_args: Vec::new() }, call_ty);
+        // An effect fn's err propagates: the wrapper is an effect fn too, so
+        // the export's err channel is the fn's own.
+        w.body = if f.is_effect { expr(IrExprKind::Unwrap { expr: Box::new(call) }, f.ret_ty.clone()) } else { call };
+        w.export_attrs.retain(|a| a.target.as_str() == "wasm");
+        w.extern_attrs.clear();
+        w.def_id = None;
+        w.doc = None;
+        w.mutated_params.clear();
+        w.visibility = almide_ir::IrVisibility::Public;
+        f.export_attrs.retain(|a| a.target.as_str() != "wasm");
+        f.visibility = almide_ir::IrVisibility::Mod;
+        wrappers.push(w);
+    }
+    functions.extend(wrappers);
+}
+
+/// The stamp on the compiler-made wrapper of an `@export(wasm)` fn returning
+/// a Region (ADR-0031 amendment A1): the emitter exports an adapter that
+/// splits the wrapper's block into `(ptr: i32, len: i32)`. A declaration the
+/// rewrite below writes, read by the emitter — never a name.
+pub(crate) const REGION_EXPORT_ATTR: &str = "region_export";
+
+/// Does the emitter export this fn through the `(ptr, len)` adapter?
+pub(crate) fn is_region_export(f: &IrFunction) -> bool {
+    f.attrs.iter().any(|a| a.name.as_str() == REGION_EXPORT_ATTR)
+}
+
+/// ADR-0031 amendment A1: an `@export(wasm, "sym")` fn returning a Region
+/// keeps its name and body but loses the export; a wrapper
+/// `__region_export_<name>` of the same parameters takes the export and
+/// returns `ffi.__export_view(f(…))` (`f(…)!` for an `effect fn`): the
+/// Region's block, one share of it, and the view's offset and length, so the
+/// Region's own record is released by the ordinary ownership rules. The
+/// emitter's adapter hands the host the view's data address and length, and
+/// files the address against the block's share (region_export.rs).
+/// None when no export returns a Region (no clone).
+pub(crate) fn wrap_region_exports(ir: &IrProgram) -> Option<IrProgram> {
+    let wants = |fs: &[IrFunction]| fs.iter().any(returns_region_export);
+    if !wants(&ir.functions) && !ir.modules.iter().any(|m| wants(&m.functions)) {
+        return None;
+    }
+    let mut out = ir.clone();
+    wrap_in(&mut out.functions, &mut out.var_table);
+    for m in &mut out.modules {
+        wrap_in(&mut m.functions, &mut m.var_table);
+    }
+    Some(out)
+}
+
+fn returns_region_export(f: &IrFunction) -> bool {
+    is_region(&f.ret_ty) && f.export_attrs.iter().any(|a| a.target.as_str() == "wasm")
+}
+
+fn wrap_in(functions: &mut Vec<IrFunction>, vars: &mut VarTable) {
+    let mut wrappers = Vec::new();
+    for f in functions.iter_mut().filter(|f| returns_region_export(f)) {
+        let mut w = f.clone();
+        w.name = almide_base::intern::sym(&format!("__region_export_{}", f.name.as_str()));
+        w.params = f.params.iter().map(|p| param(vars, p.name.as_str().to_string(), p.ty.clone())).collect();
+        let args = w.params.iter().map(|p| expr(IrExprKind::Var { id: p.var }, p.ty.clone())).collect();
+        let call_ty = if f.is_effect {
+            Ty::Applied(almide_types::types::TypeConstructorId::Result, vec![f.ret_ty.clone(), Ty::String].into())
+        } else {
+            f.ret_ty.clone()
+        };
+        let call = expr(
+            IrExprKind::Call { target: CallTarget::Named { name: f.name }, args, type_args: Vec::new() },
+            call_ty,
+        );
+        let region = if f.is_effect { expr(IrExprKind::Unwrap { expr: Box::new(call) }, f.ret_ty.clone()) } else { call };
+        w.body = expr(
+            IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: almide_base::intern::sym("ffi"),
+                    func: almide_base::intern::sym("__export_view"),
+                    def_id: None,
+                },
+                args: vec![region],
+                type_args: Vec::new(),
+            },
+            export_view_ty(),
+        );
+        w.ret_ty = export_view_ty();
+        w.export_attrs.retain(|a| a.target.as_str() == "wasm");
+        w.extern_attrs.clear();
+        // A lent wrapper's address parameters (#4354) keep their width.
+        w.attrs = f.attrs.iter().filter(|a| a.name.as_str() == ADDRESS_PARAMS_ATTR).cloned().collect();
+        w.attrs.push(almide_lang_attr(REGION_EXPORT_ATTR));
+        w.def_id = None;
+        w.doc = None;
+        w.mutated_params.clear();
+        w.visibility = almide_ir::IrVisibility::Public;
+        f.export_attrs.retain(|a| a.target.as_str() != "wasm");
+        // The export is the wrapper's now: the fn itself must not also
+        // export under its own name as an entry `pub fn` would (a record
+        // block the host has no reading of). Visibility is past checking here;
+        // the emitter reads it only to pick the implicit exports.
+        f.visibility = almide_ir::IrVisibility::Mod;
+        wrappers.push(w);
+    }
+    functions.extend(wrappers);
+}
+
+fn almide_lang_attr(name: &str) -> almide_lang::ast::Attribute {
+    almide_lang::ast::Attribute { name: almide_base::intern::sym(name), args: Vec::new(), span: None }
+}
+
+/// `ffi.RegionExportView`, the record `__export_view` answers.
+fn export_view_ty() -> Ty {
+    Ty::Named(almide_base::intern::sym("RegionExportView"), Vec::new().into())
+}
+
+/// The stamp on a Region import stub naming its address and length
+/// parameters: they cross in the target memory's address width
+/// (imports::declare). A declaration this rewrite writes, never a name.
+const ADDRESS_PARAMS_ATTR: &str = "address_params";
+
+fn address_params_attr(stub_params: &[IrParam], f: &IrFunction) -> almide_lang::ast::Attribute {
+    // Each Region parameter of `f` became two stub parameters, in order.
+    let mut positions = Vec::new();
+    let mut k = 0i64;
+    for p in &f.params {
+        if is_region(&p.ty) {
+            positions.push(k);
+            positions.push(k + 1);
+            k += 2;
+        } else {
+            k += 1;
+        }
+    }
+    debug_assert_eq!(k as usize, stub_params.len());
+    almide_lang::ast::Attribute {
+        name: almide_base::intern::sym(ADDRESS_PARAMS_ATTR),
+        args: positions
+            .into_iter()
+            .map(|v| almide_lang::ast::AttrArg { name: None, value: almide_lang::ast::AttrValue::Int { value: v } })
+            .collect(),
+        span: None,
+    }
+}
+
+/// The parameter positions of an import stub that carry an address or a
+/// length, from the stamp above (none for any other fn).
+pub(crate) fn address_params(f: &IrFunction) -> Vec<u32> {
+    f.attrs
+        .iter()
+        .filter(|a| a.name.as_str() == ADDRESS_PARAMS_ATTR)
+        .flat_map(|a| a.args.iter())
+        .filter_map(|a| match a.value {
+            almide_lang::ast::AttrValue::Int { value } => u32::try_from(value).ok(),
+            _ => None,
+        })
+        .collect()
 }

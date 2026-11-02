@@ -1,0 +1,12 @@
+// ADR-0032 Q24: a type outside the stdlib meets a requirement under its plain
+// name. `__self_` is the stdlib's internal per-type marker, so a method
+// spelled with it is an ordinary method that meets nothing.
+import http
+
+type Csv: Body = { rows: String }
+
+fn Csv.__self_media_type(self) -> String = "text/csv"
+
+fn Csv.to_text(self) -> String = self.rows
+
+fn main() -> Unit = println(http.body(http.response(200, Csv { rows: "a,b" })))

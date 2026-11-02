@@ -45,7 +45,7 @@ classify() {
                 ratchet="$ratchet $f" ;;
             crates/almide-spine/tests/golden/*|crates/almide-syntax/tests/golden/*|crates/almide-wasm/tests/golden/*)
                 ratchet="$ratchet $f" ;;
-            proofs/gate-verification.toml|scripts/lib/*.txt)
+            proofs/gate-verification.toml|scripts/lib/*.txt|proofs/runtime-unsafe-allowlist.toml)
                 ratchet="$ratchet $f" ;;
             # this gate and its disposition ledger are verification artifacts
             # themselves: they define which moves count as moving the bar, so

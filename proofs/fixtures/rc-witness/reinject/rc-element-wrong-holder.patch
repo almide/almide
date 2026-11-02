@@ -1,0 +1,19 @@
+diff --git a/crates/almide-wasm/src/stmts_index.rs b/crates/almide-wasm/src/stmts_index.rs
+index 11c62b3c7..1b647909a 100644
+--- a/crates/almide-wasm/src/stmts_index.rs
++++ b/crates/almide-wasm/src/stmts_index.rs
+@@ -190,9 +190,11 @@ impl Emitter<'_> {
+                 let list = (is_local && !in_cell).then_some(*target);
+                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
+                     self.slot_release(|em| {
+-                        let off = em.emit_elem_addr(list, hb, hi, index, stride)?;
+-                        em.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
+-                        crate::witness::bounds::access(site, false, em.f);
++                        // RE-INJECTED (#4277 drill): the replaced element is read
++                        // out of the new value's block, not the list's slot (an
++                        // unchecked read, so no bounds access is recorded for it).
++                        let off = u64::from(almide_layout::PAYLOAD);
++                        em.f.instructions().local_get(hv).i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
+                         Ok(())
+                     })?;
+                 }

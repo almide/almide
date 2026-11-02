@@ -21,10 +21,10 @@
 /// The minimum rustc (major, minor, patch). Raise it when a std security fix
 /// Almide relies on lands, and note the advisory below.
 ///   1.77.2  CVE-2024-24576 (Command + .bat/.cmd argument injection, Windows)
-///   1.96.0  the toolchain CI verifies the generated code with
-pub(crate) const MIN_RUSTC: (u32, u32, u32) = (1, 96, 0);
+///   1.97.0  the toolchain CI verifies the generated code with (wasmtime 50 needs 1.97)
+pub(crate) const MIN_RUSTC: (u32, u32, u32) = (1, 97, 0);
 
-/// `MIN_RUSTC` as `1.96.0`.
+/// `MIN_RUSTC` as `1.97.0`.
 pub(crate) fn min_rustc_string() -> String {
     let (a, b, c) = MIN_RUSTC;
     format!("{a}.{b}.{c}")

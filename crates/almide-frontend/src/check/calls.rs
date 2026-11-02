@@ -1055,6 +1055,18 @@ impl Checker {
                         return Ty::result(ret, Ty::String);
                     }
                 }
+                // The same bundled call typed from its bundled signature alone,
+                // with its module not loaded into `env.functions`: the
+                // single-file render front end (`almide_mir::pipeline`), which
+                // checks with no modules. Lifting is a property of the
+                // declaration (an Almide body), so it must not depend on
+                // whether the module was loaded; it did, and `args.option(..)!`
+                // typed `String` there but `String?` on the CLI.
+                if is_bundled_stdlib_call {
+                    if bundled_call_is_lifted(name) {
+                        return Ty::result(ret, Ty::String);
+                    }
+                }
             }
         }
         ret
@@ -1220,7 +1232,7 @@ impl Checker {
             self.report_ambiguous_ctor(name);
             self.check_constructor_args(name, &case, arg_tys);
             let generic_args = self.instantiate_type_generics(type_name.as_str());
-            return Some(Ty::Named(type_name, generic_args));
+            return Some(Ty::Named(type_name, generic_args.into()));
         }
         // #2588: a top-level `let` holding a closure is callable like a local
         // one — `app(http.new_request(...))` against `let app = http.router(...)`.
@@ -1503,7 +1515,7 @@ impl Checker {
         for (aty, ety) in arg_tys.iter().zip(Self::ctor_tuple_payload(case, &subst).iter()) {
             self.unify_infer(aty, ety);
         }
-        Ty::Named(result_name, generic_args)
+        Ty::Named(result_name, generic_args.into())
     }
 
     /// A tuple-payload constructor used as a value (`Node`, `m.Node`): the
@@ -1513,7 +1525,7 @@ impl Checker {
         let (generic_args, subst) = self.instantiate_ctor_case(type_key);
         Ty::Fn {
             params: Self::ctor_tuple_payload(case, &subst),
-            ret: Box::new(Ty::Named(result_name, generic_args)),
+            ret: Box::new(Ty::Named(result_name, generic_args.into())),
             is_effect: false,
         }
     }

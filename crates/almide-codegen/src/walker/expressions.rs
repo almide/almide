@@ -166,7 +166,7 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
         arms_raw.push_str("\n_ => unreachable!(\"checker-verified exhaustive match: box-pattern refinement fell through\"),");
     }
     let arms_str = indent_lines(&arms_raw, 4);
-    let fallback = format!("match {} {{\n{}\n}}", &subj, &arms_str);
+    let fallback = format!("match {} {{\n{}\n}}", subj, arms_str);
     ctx.templates.render_with("match_expr", None, &[], &[("subject", subj.as_str()), ("arms", arms_str.as_str())])
         .unwrap_or(fallback)
 }

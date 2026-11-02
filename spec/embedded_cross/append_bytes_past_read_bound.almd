@@ -1,0 +1,50 @@
+// @contract: C-447
+// #4382: the cost of fs.append_bytes does not depend on the file's size,
+// because the file is never read. A sparse file one byte past the 1 GiB read
+// limit (C-431) — what only a lane with `process` can set up — takes three
+// appended bytes, and its size grows by exactly three, on native and on the
+// embedded wasm host, byte for byte. The control line reads the same file
+// whole and errs `File too large`, so an append that read the file first
+// would fail here instead of answering ok. fs.append_text answers the same
+// way, as its op always did. `truncate` is on every CI image this lane runs on.
+import fs
+import process
+
+fn line(name: String, r: Result[Int, String], d: String) -> String = match r {
+  ok(n) => "${name}=ok(${n})",
+  err(m) => "${name}=err(${string.replace(m, d, "<TMP>")})",
+}
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("appendbound")!
+  let big = d + "/big.bin"
+  process.exec("truncate", ["-s", "1073741825", big])!
+  // Control: the file is past the whole-file read limit.
+  println(line(
+    "read_bytes",
+    match fs.read_bytes(big) {
+      ok(b) => ok(bytes.len(b)),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println(line(
+    "append_bytes",
+    match fs.append_bytes(big, bytes.from_list([7, 8, 9])) {
+      ok(_) => ok(0),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println("size=${fs.stat(big)!.size}")
+  println(line(
+    "append_text",
+    match fs.append_text(big, "z") {
+      ok(_) => ok(0),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println("size=${fs.stat(big)!.size}")
+  fs.remove_all(d)!
+}

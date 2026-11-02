@@ -11,11 +11,11 @@ fn export(name: &str, params: Vec<Ty>, ret: Ty, is_effect: bool) -> HostFn {
 }
 
 fn list(t: Ty) -> Ty {
-    Ty::Applied(TypeConstructorId::List, vec![t])
+    Ty::Applied(TypeConstructorId::List, vec![t].into())
 }
 
 fn option(t: Ty) -> Ty {
-    Ty::Applied(TypeConstructorId::Option, vec![t])
+    Ty::Applied(TypeConstructorId::Option, vec![t].into())
 }
 
 /// The #3352 cells: an effect fn's Result block is unwrapped for every
@@ -61,7 +61,7 @@ fn block_shapes_plan_from_the_record_and_refuse_a_disagreement() {
         (list(Ty::Int), ints.clone()),
         (list(Ty::String), AbiShape::List { el: Box::new(AbiShape::Str), stride: 4 }),
         (option(Ty::Int), AbiShape::Option(Box::new(AbiShape::Int))),
-        (Ty::Named(almide_base::intern::sym("Point"), vec![]), point.clone()),
+        (Ty::Named(almide_base::intern::sym("Point"), Default::default()), point.clone()),
     ];
     for (ty, shape) in cells {
         let f = export("f", vec![ty.clone()], ty.clone(), false);
@@ -80,7 +80,7 @@ fn block_shapes_plan_from_the_record_and_refuse_a_disagreement() {
     assert!(e.contains("cannot wrap parameter `a0` of `f`"), "{e}");
     // A record of another name, and a variant: refused.
     let other = AbiShape::Record { name: "Other".into(), size: 0, fields: vec![] };
-    let named = Ty::Named(almide_base::intern::sym("Point"), vec![]);
+    let named = Ty::Named(almide_base::intern::sym("Point"), Default::default());
     let f = export("f", vec![named.clone()], Ty::Unit, false);
     assert!(plan_export(&f, Some(&[other]), Some(&ExportRet::Void)).is_err());
     let variant = AbiShape::Other("variant `Shape`".into());

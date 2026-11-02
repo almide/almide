@@ -627,7 +627,7 @@ mod tests {
     use super::*;
     use almide_base::intern::sym;
 
-    fn named(n: &str) -> Ty { Ty::Named(sym(n), vec![]) }
+    fn named(n: &str) -> Ty { Ty::Named(sym(n), Default::default()) }
 
     fn module_with_decl(decl: &str) -> IrModule {
         IrModule {
@@ -728,7 +728,7 @@ mod tests {
         program.modules.push(module_with_decl("m.Cfg"));
         program.var_table.alloc(
             sym("v"),
-            Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![named("Cfg")]),
+            Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![named("Cfg")].into()),
             Mutability::Let, None,
         );
         assert_eq!(collect_unresolvable_names(&program).len(), 1,

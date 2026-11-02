@@ -35,9 +35,12 @@
 #                 adapter: every op P1_SERVED_OPS names, with env.os /
 #                 env.temp_dir / env.cwd (27 / 28 / 33); since #3223 env.set
 #                 (37) too, through the p1 shim's guest-side overlay log,
-#                 so component_availability.rs declares no exclusion. The
-#                 artifact runs on a stock wasmtime 46+ with no feature
-#                 flag (step 1).
+#                 so component_availability.rs declares no exclusion; since
+#                 #4306 UDP and name lookup (140..=145) over wasi:sockets@0.3.
+#                 The artifact runs on a stock wasmtime 46+ with no feature
+#                 flag (step 1); a udp program needs the network grant
+#                 (`-S inherit-network`, `-S allow-ip-name-lookup` for a
+#                 name).
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure
@@ -83,7 +86,7 @@
 #                        import that a stock runtime refuses at load (the
 #                        probe reads the import off the artifact). The
 #                        subprocess family over `almide:process/spawn`
-#                        (#2589, ADR-0025) is the only member. The row
+#                        (#2589, #4308, ADR-0025) is the only member. The row
 #                        carries a `justification` sentence; no ceiling, and
 #                        a leg that starts serving is STALE as for every
 #                        class.
@@ -317,7 +320,42 @@ pending_self_host_ceiling = 0
 # entropy every leg serves; a started child becomes a resource on the
 # almide:process capability (ADR-0025). `forever` was the wrong closure
 # class for all three. No row's legs changed and no served function moved.
-pending_port_ceiling = 31
+# 2026-10-30 (#4306): 31 -> 31. net.lookup_host and the four net.udp_* rows
+# lose their embedded and structural legs: the embedded host serves them
+# through ops 140..=145 over native's net core, and the structural leg lowers
+# their stdlib/net_wasm.almd bodies (evidence: spec/embedded_cross/
+# net_udp_loopback.almd and net_udp_errors.almd under
+# tests/net_udp_embedded_cross_test.rs). Each row keeps its stock-p1 leg —
+# the stock p1 standard has no sockets — so no row is removed and the count
+# stays.
+# 31 -> 30 (2026-10-30, #4307): uuid.v7 serves on every wasm leg; its stamp cell is a guest global (stdlib/uuid_wasm.almd), pinned by spec/wasm_cross/uuid_v7_monotonic.almd.
+# 2026-10-30 (#4308): 30 -> 23. The process.start child family (start, poll,
+# wait, stop, read_new_stdout, read_new_stderr, child_pid) leaves
+# pending-port: the embedded host keeps a started child as a host resource
+# over almide:process/spawn cases start..child-pid (ops 146..=151) and runs
+# native's child core on it, the structural leg lowers the family through
+# stdlib/process_wasm.almd, and the stock artifact carries the private
+# import, so the seven rows join the subprocess family in host-capability
+# with the stock-p1 leg only. Evidence:
+# spec/embedded_cross/process_start_family.almd and
+# spec/stdlib/process_start_test.almd on the wasm test lane.
+# 2026-11-01 (#4306): 23 -> 23. The same five rows are now served by the
+# WASI 0.3 component too: its shim answers ops 140..=145 over
+# wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
+# (crates/almide-wasm-run/src/wasi_p3_net.rs; C-448, evidence: the C-442 / C-443
+# fixtures under tests/net_udp_p3_cross_test.rs). Only the stock-p1 leg
+# remains, and its reason now says why: preview 1 has no sockets at all.
+# 2026-11-01 (#3620, #4306): 23 -> 9. The default `build --target wasm` of
+# a program whose op set names a sockets op (the tcp family 91..=103, udp
+# and name lookup 140..=145 — `almide_wasm::host_ops::SOCKET_FAMILIES`) is
+# the WASI 0.3 component over wasi:sockets@0.3 (the net/tcp design step 4,
+# C-377), as an http.serve program is the serve export; `almide build`
+# prints the grant it needs (`-S inherit-network`, `-S allow-ip-name-lookup`
+# for a name). The thirteen net.tcp_* / net.udp_* / net.lookup_host rows and
+# io.close (the tcp close) lose their stock-p1 leg, their last; evidence:
+# tests/net_tcp_p3_cross_test.rs and tests/net_udp_p3_cross_test.rs (C-377,
+# C-378, C-379, C-448).
+pending_port_ceiling = 9
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -348,62 +386,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
-
-[[unavailable]]
-fn = "net.tcp_accept"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_available"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_connect"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_is_open"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_listen"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_local_port"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_read_timeout"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.tcp_set_timeout"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
 
 [[unavailable]]
 fn = "unix.shm_create"
@@ -575,125 +557,57 @@ reason = "the stock p1 artifact has no http import; the WASI 0.3 component serve
 issue = "#1710"
 
 [[unavailable]]
-fn = "io.close"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#3620, the net/tcp design step 2, ops 91..=103): `almide run --target wasm` answers with native's net core (the judge's tcp contracts, almide/als#134); the stock artifact routes to the p3 component at TCP design step 4 and still refuses at build via the op audit"
-issue = "#3620"
-
-[[unavailable]]
-fn = "net.lookup_host"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_bind"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_local_port"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_send_to"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-issue = "#4306"
-
-[[unavailable]]
-fn = "net.udp_recv_from"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-stock-p1 = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-reason-embedded = "pending-port: UDP sockets and name resolution are not served on this leg yet; the route is wasi:sockets (udp, ip-name-lookup) and embedded-host datagram and resolver ops (#4306). The native target serves it today."
-issue = "#4306"
-
-[[unavailable]]
-fn = "uuid.v7"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-reason-stock-p1 = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-reason-embedded = "pending-port: uuid.v7's strictly increasing stamp needs a monotonic cell this leg does not hold yet; the route is a guest or embedded-host cell over the clock and entropy every leg already serves (#4307). The native target serves it today."
-issue = "#4307"
-
-[[unavailable]]
 fn = "process.start"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"
 
 [[unavailable]]
 fn = "process.poll"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"
 
 [[unavailable]]
 fn = "process.wait"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"
 
 [[unavailable]]
 fn = "process.stop"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"
 
 [[unavailable]]
 fn = "process.read_new_stdout"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"
 
 [[unavailable]]
 fn = "process.read_new_stderr"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"
 
 [[unavailable]]
 fn = "process.child_pid"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-structural = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-stock-p1 = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
-reason-embedded = "pending-port: a started child needs a handle that owns its pipes and deadline, which no wasm host keeps yet; the route is a child resource on the almide:process capability (#4308). The native target serves it today."
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host, which keeps the started child as a host resource), and its stock artifact carries that import, which a stock runtime refuses at load (#4308, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#4308"

@@ -157,9 +157,9 @@ pub fn classify_storage(mutable: bool, kind: TopLetKind, ty: &Ty, init_aborts: b
 }
 
 /// Prefix of an entry-program global's static.
-const ENTRY_STATIC_PREFIX: &str = "ALMIDE_G_";
+pub(crate) const ENTRY_STATIC_PREFIX: &str = "ALMIDE_G_";
 /// Prefix of a module global's static.
-const MODULE_STATIC_PREFIX: &str = "ALMIDE_RT_";
+pub(crate) const MODULE_STATIC_PREFIX: &str = "ALMIDE_RT_";
 
 /// The emitted static name of a top-level `let`/`var` — THE one site that
 /// owns the spelling (the definition, every read and write, the thread-local
@@ -864,5 +864,41 @@ mod tests {
         assert!(init_can_abort(&call_mod("m", "noisy")));
         assert!(!init_can_abort(&lit()));
         assert!(!init_can_abort(&var(0)));
+    }
+
+    /// #4345: no Rust name a user item reaches is a name the runtime may put
+    /// at the crate root (`crate::is_runtime_item_name`) — user fns through
+    /// the escape, user globals through their statics — while the runtime's
+    /// own spellings are admitted.
+    #[test]
+    fn user_spellings_never_land_in_the_runtime_item_space() {
+        // A user fn name is a lower-case identifier.
+        for n in ["mk", "sha256", "request", "almide_abort", "almide_rt_list_len", "almide_fn_x", "__lambda_1", "x", "main"] {
+            let rust_fn = crate::escape_user_fn_name(sym(n));
+            assert!(!crate::is_runtime_item_name(rust_fn.as_str()), "user fn `{n}` reaches Rust as `{rust_fn}`, a runtime name");
+        }
+        // A global may be spelled in any case, a runtime static's spelling too.
+        let stdout_buf = format!("{}STDOUT_BUF", crate::RUNTIME_CONST_SPACE);
+        let names = ["mk", "almide_abort", "almide_fn_x", stdout_buf.as_str(), "AlmideMatrix", "x", "N"];
+        for n in names {
+            for origin in [None, Some("cfg".to_string()), Some("a_b".to_string())] {
+                let vi = crate::VarInfo { name: sym(n), ty: Ty::Int, mutability: crate::Mutability::Let, span: None,
+                    use_count: 0, module_origin: origin.clone(), synthetic: false };
+                let st = static_name(&vi);
+                assert!(!crate::is_runtime_item_name(&st), "global `{n}` ({origin:?}) is the static `{st}`, a runtime name");
+            }
+        }
+        // The runtime's constants are spelled in its upper-case space (`runtime/rs`'s
+        // matrix bound, almide-base's escaped-text table).
+        let consts = ["MATRIX_MAX_ELEMS", "RT_ERRTEXT_ESCAPED"].map(|c| format!("{}{c}", crate::RUNTIME_CONST_SPACE));
+        for rt in ["almide_rt_matrix_mul", "almide_abort", "AlmideMatrix", "almide_runtime", "almide_kernel"]
+            .into_iter()
+            .chain(consts.iter().map(String::as_str))
+        {
+            assert!(crate::is_runtime_item_name(rt), "`{rt}` is the runtime's own spelling");
+        }
+        for not_rt in ["mk", "sha256", "request", "almide_fn_mk", "ALMIDE_G_x", "ALMIDE_RT_3_cfg_x", "Value"] {
+            assert!(!crate::is_runtime_item_name(not_rt), "`{not_rt}` must stay outside the runtime's space");
+        }
     }
 }

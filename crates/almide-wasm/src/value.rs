@@ -24,6 +24,16 @@ pub(crate) const VT_FLOAT: i32 = 3;
 pub(crate) const VT_STR: i32 = 4;
 pub(crate) const VT_ARRAY: i32 = 5;
 pub(crate) const VT_OBJECT: i32 = 6;
+/// An Object box's key-index word (value_set_path.rs): the pad word beside
+/// the tag — 0, or an index block. An Object's tag and this word are written
+/// together, one i64 store of the tag (`store_object_tag`), so a box is born
+/// with no index for no more bytes than the tag alone took.
+pub(crate) const OBJECT_INDEX: u32 = almide_layout::SUM_TAG + 4;
+
+/// Write the Object tag and a zero key-index word at the box on the stack.
+pub(crate) fn store_object_tag(i: &mut wasm_encoder::InstructionSink<'_>) {
+    i.i64_const(i64::from(VT_OBJECT)).i64_store(slot_memarg(almide_layout::SUM_TAG));
+}
 
 /// The self-host helpers this emitter calls DIRECTLY when it lowers a
 /// `value.*` surface natively: (surface, helper). No IR names a helper — the
@@ -159,6 +169,9 @@ impl Emitter<'_> {
         i.i32_or().if_(BlockType::Result(wasm_encoder::ValType::I32));
         i.local_get(hb).call(F_INC);
         i.local_get(hb);
+        let _ = i;
+        self.witness_arm_share_out(vb);
+        let mut i = self.f.instructions();
         i.else_();
         // Both operands are Objects on this arm (the tag test above), so the
         // payload slot is each one's pair list: pushed as the helper's
@@ -167,6 +180,9 @@ impl Emitter<'_> {
             i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD));
             if owned[k] {
                 i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+                let _ = i;
+                self.arm_share_stored();
+                i = self.f.instructions();
             }
         }
         i.call(merge).local_set(ho);
@@ -214,16 +230,25 @@ impl Emitter<'_> {
         } else {
             i.local_get(hv).call(F_INC);
             i.local_get(hv);
+            let _ = i;
+            self.witness_arm_share_out(v);
+            i = self.f.instructions();
         }
         i.else_();
         // An Object on this arm (the tag test above): its pair list.
         i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD));
         if owned[0] {
             i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+            let _ = i;
+            self.arm_share_stored();
+            i = self.f.instructions();
         }
         i.local_get(hk);
         if owned[1] {
             i.local_get(hk).call(F_INC);
+            let _ = i;
+            self.arm_share_stored();
+            i = self.f.instructions();
         }
         i.call(sel).local_set(ho);
         box_object(&mut i, ho, hp);
@@ -406,9 +431,13 @@ impl Emitter<'_> {
             .instructions()
             .i32_const(16)
             .call(F_ALLOC)
-            .local_tee(hb)
-            .i32_const(tag)
-            .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            .local_tee(hb);
+        // An Object is born with no key index (value_set_path.rs).
+        if tag == VT_OBJECT {
+            store_object_tag(&mut self.f.instructions());
+        } else {
+            self.f.instructions().i32_const(tag).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        }
         if let (Some(h), Some(k)) = (hv, payload_kind) {
             self.f.instructions().local_get(hb).local_get(h);
             self.store_ty_slot(k, almide_layout::SUM_FIELD);
@@ -471,7 +500,7 @@ impl Emitter<'_> {
         // The Value keeps its interior: the Result's payload is a SHARE of
         // it (+1), released by the Result's typed drop (#2010 stage 2c —
         // `value.as_array` twice on one Value freed its array).
-        self.share_handle_top(payload);
+        self.arm_share_handle_top(payload);
         self.store_ty_slot(payload, almide_layout::SUM_FIELD);
         let mut i = self.f.instructions();
         i.else_();
@@ -617,12 +646,19 @@ impl Emitter<'_> {
                 i.i32_store(m_pay);
                 i.local_get(hk).call(F_DEC_FLAT);
                 i.local_get(he).call(F_DEC_FLAT);
+                let _ = i;
+                self.arm_temp_released();
+                self.arm_temp_released();
+                let mut i = self.f.instructions();
                 i.else_();
                 i.local_get(hr).i32_const(0).i32_store(m_tag);
                 // The object keeps the field's Value: the ok payload is a
                 // share of it (#2010 item 5 — the Result's typed drop
                 // releases it).
                 i.local_get(hv).call(F_INC);
+                let _ = i;
+                self.arm_share_stored();
+                let mut i = self.f.instructions();
                 i.local_get(hr).local_get(hv).i32_store(m_pay);
                 i.end();
                 i.end();
@@ -652,6 +688,11 @@ impl Emitter<'_> {
                 self.release_i32();
                 Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
+            // #4315: the set_path walk, in place where the document is the
+            // op's alone (value_set_path.rs).
+            ("__set_path_steps", [v, steps, x]) => {
+                Some(Lowered::owned(self.lower_value_set_path_steps(v, steps, x)?))
+            }
             ("__stringify", [v]) => {
                 self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
@@ -667,7 +708,8 @@ impl Emitter<'_> {
 /// the stack (`scratch` holds the box).
 fn box_object(i: &mut wasm_encoder::InstructionSink, pairs: u32, scratch: u32) {
     i.i32_const(16).call(F_ALLOC).local_set(scratch);
-    i.local_get(scratch).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+    i.local_get(scratch);
+    store_object_tag(i);
     i.local_get(scratch).local_get(pairs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
     i.local_get(scratch);
 }

@@ -33,7 +33,7 @@ env:
   ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
   ALMIDE_CI_SEED: ${{ github.sha }}
   ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
-  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -98,22 +98,17 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -132,11 +127,13 @@ jobs:
           # commit-rotated 1-in-8 slice of the test files plus the ones the
           # change touches; every other run, all of them.
           . scripts/lib/ci-slice.sh
+          . scripts/lib/wasm-skip.sh
           find spec/ -name '*_test.almd' -type f | sed 's#^spec//#spec/#' | sort | ci_slice_filter cross-target-spec > /tmp/xt-selected.txt
           selected=0
           for f in $(cat /tmp/xt-selected.txt); do
-            # Skip files marked with wasm:skip
-            if head -3 "$f" | grep -q 'wasm:skip'; then continue; fi
+            # Skip files that declare `// wasm:skip` (scripts/lib/wasm-skip.sh:
+            # the harness's own reading of the marker), naming the reason.
+            if reason=$(wasm_skip_reason "$f"); then echo "SKIP $f (declared // wasm:skip: $reason)"; continue; fi
             selected=$((selected + 1))
 
             # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a
@@ -247,18 +244,13 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version

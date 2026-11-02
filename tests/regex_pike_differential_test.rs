@@ -158,6 +158,23 @@ mod rt {
         almide_regex_find_all(pat, s)
     }
 
+    /// The compiled pattern the cache hands out for `pat`. Held by the caller,
+    /// so a recompile can never reuse its address: the same pointer twice
+    /// means it was not recompiled in between.
+    pub fn compiled(pat: &str) -> std::rc::Rc<dyn std::any::Any> {
+        rx_cached(pat)
+    }
+
+    /// (entries, pattern bytes) the thread's cache holds, and its limits.
+    pub fn cache_size() -> (usize, usize) {
+        ALMIDE_RX_COMPILED.with(|c| {
+            let c = c.borrow();
+            (c.entries.len(), c.bytes)
+        })
+    }
+
+    pub const CACHE_LIMITS: (usize, usize) = (ALMIDE_RX_CACHE, ALMIDE_RX_CACHE_BYTES);
+
     /// find_all's spans with the walk, the VM, or the hybrid the public API
     /// runs (walk first, VM once the walk's budget is spent).
     pub fn spans(pat: &str, s: &str, engine: &str) -> (Vec<(usize, usize)>, bool) {
@@ -438,6 +455,49 @@ fn the_walk_hands_over_to_the_vm_without_a_seam() {
     for pat in ["(a+)+b", "(a|aa)+b", "(a*)*b"] {
         assert_eq!(rt::spans(pat, short, "walk").0, rt::spans(pat, short, "pike").0);
     }
+}
+
+/// #4392: a rule table applied in turn stays compiled. 0.69.0-rc1 kept 16
+/// patterns in an LRU list, so a cycle of 17 or more found every entry evicted
+/// and recompiled on every match. A cycle of 300 patterns is now compiled once;
+/// a cycle longer than the cache still answers what a fresh compile answers,
+/// keeps most of its patterns compiled, and never grows the cache past its
+/// limits.
+#[test]
+fn a_cycle_of_patterns_stays_compiled() {
+    let rule = |i: usize| format!("k{i}-[A-Za-z0-9_-]{{4,}}");
+    let same = |a: &std::rc::Rc<dyn std::any::Any>, b: &std::rc::Rc<dyn std::any::Any>| std::rc::Rc::ptr_eq(a, b);
+    let first: Vec<_> = (0..300).map(|i| rt::compiled(&rule(i))).collect();
+    for _ in 0..3 {
+        for (i, held) in first.iter().enumerate() {
+            assert!(same(&rt::compiled(&rule(i)), held), "rule {i} was recompiled inside a 300-rule cycle");
+        }
+    }
+    drop(first);
+    // Past the cache's capacity: two passes over a cycle 1.5x the capacity.
+    let (cap, bytes_cap) = rt::CACHE_LIMITS;
+    let n = cap + cap / 2;
+    let line = "x k5-abcd k1500-ABCDEFG k77-zz k1000-___-";
+    for _ in 0..2 {
+        for i in 0..n {
+            let got = rt::find_all(&rule(i), line);
+            let want: Vec<String> = line
+                .split(' ')
+                .filter(|w| w.starts_with(&format!("k{i}-")) && w.len() >= format!("k{i}-").len() + 4)
+                .map(str::to_string)
+                .collect();
+            assert_eq!(got, want, "rule {i} on {line:?}");
+        }
+    }
+    let (len, bytes) = rt::cache_size();
+    assert!(len <= cap && bytes <= bytes_cap, "the cache holds {len} patterns / {bytes} bytes, over {cap} / {bytes_cap}");
+    // Random eviction keeps a share of an over-long cycle compiled, where an
+    // LRU list keeps none of it: count the rules a whole pass leaves in place.
+    let before: Vec<_> = (0..n).map(|i| rt::compiled(&rule(i))).collect();
+    let survived = (0..n).filter(|&i| same(&rt::compiled(&rule(i)), &before[i])).count();
+    assert!(survived > n / 4, "only {survived} of {n} rules stayed compiled across one pass");
+    let (len, bytes) = rt::cache_size();
+    assert!(len <= cap && bytes <= bytes_cap, "the cache holds {len} patterns / {bytes} bytes, over {cap} / {bytes_cap}");
 }
 
 /// A huge count does not allocate a huge program: past the state budget the

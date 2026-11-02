@@ -128,7 +128,7 @@ impl NanoPass for BoxDerefPass {
                 for ((type_name, field_name), expr) in entries {
                     // Register module-qualified name first (needs clone)
                     if let Some(prefix) = mod_prefix {
-                        defaults.insert((format!("{}.{}", prefix, &type_name), field_name.clone()), expr.clone());
+                        defaults.insert((format!("{}.{}", prefix, type_name), field_name.clone()), expr.clone());
                     }
                     // Bare name (move, no clone)
                     defaults.insert((type_name, field_name), expr);

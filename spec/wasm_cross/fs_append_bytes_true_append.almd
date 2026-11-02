@@ -1,0 +1,45 @@
+// @contract: C-447
+// #4382: fs.append_bytes is a true append on every leg — native O_APPEND, the
+// embedded host's append, the p1 service's fdflags APPEND, the p3 adapter's
+// append-via-stream — never a read of the file followed by a rewrite. What a
+// single program can see of that: the bytes land after whatever the file
+// holds (a text write, an append_text, earlier appends), every byte value
+// rides verbatim, an empty append changes nothing, a missing file is created,
+// and the errors name `fs.append_bytes` with the path the writer wrote — a
+// directory (EISDIR from the open, no read first) and a missing parent (the
+// parent is not created). Temp dir redacted.
+import fs
+
+fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>")
+
+fn unit(name: String, r: Result[Unit, String], d: String) -> Unit = println(match r {
+  ok(_) => "${name}=OK",
+  err(m) => "${name}=ERR[${redact(m, d)}]",
+})
+
+effect fn show(name: String, p: String) -> Unit = println("${name}=${bytes.to_list(fs.read_bytes(p)!)}")
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("append-bytes")!
+  let p = d + "/out.bin"
+  unit("create", fs.append_bytes(p, bytes.from_list([1, 2, 3])), d)
+  show("after_create", p)!
+  unit("high_bytes", fs.append_bytes(p, bytes.from_list([255, 0, 128, 192])), d)
+  unit("empty", fs.append_bytes(p, bytes.from_list([])), d)
+  show("after_high", p)!
+  // The append lands at the end of what another call wrote, not at offset 0.
+  let t = d + "/mixed.txt"
+  fs.write_text(t, "abcdef")!
+  unit("after_text", fs.append_bytes(t, bytes.from_string("XY")), d)
+  fs.append_text(t, "-")!
+  unit("after_append_text", fs.append_bytes(t, bytes.from_list([10])), d)
+  println("mixed=${fs.read_text(t)!}")
+  println("size=${fs.stat(t)!.size}")
+  // Negative controls: the errors name the call and the path.
+  let sub = d + "/sub"
+  fs.mkdir_p(sub)!
+  unit("onto_dir", fs.append_bytes(sub, bytes.from_list([1])), d)
+  unit("missing_parent", fs.append_bytes(d + "/no/such/f.bin", bytes.from_list([1])), d)
+  println("parent_created=${fs.exists(d + "/no")}")
+  fs.remove_all(d)!
+}

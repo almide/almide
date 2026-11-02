@@ -354,6 +354,40 @@ depth. Field attributes are only `@skip` /
 `@skip_decode` (and WGSL's `@builtin` / `@location`), for two-way types;
 `@serde(skip)`, `@json_ignore`, `@redact` are E053.
 
+### A response's Content-Type is its body's type
+
+`http.response(status, body)` takes a `Body`: a String is
+`text/plain; charset=utf-8`, Bytes `application/octet-stream`, a `Value`
+`application/json`, `html.*` builds `text/html`
+(`html.escape` / `html.attr` / `html.url_attr` / `html.script_json`, or
+`html.raw(s)` for trusted markup). Any other media type is
+`http.typed("text/csv", bytes)` with a literal type (E117 for a computed one,
+or for HTML / XML / SVG). SVG comes from a package such as almide/svg, which
+the application grants in `almide.toml`: `[trust]` `media = { "almide/svg" =
+["image/svg+xml"] }` (E118 without it). Content-Type is never written by name: `set_header` /
+`with_headers` refuse it (E116); `set_body` / `http.with_body(resp, body)`
+replace the body and its type together. `http.html` is gone (`almide fix`
+rewrites it to `http.response`).
+
+Your own type meets a built-in protocol with plain method names, never a `__`
+prefix: `Read` / `Write` / `Close` (`effect fn T.read(self, max: Int)`,
+`T.write(self, data: Bytes)`, `T.close(self)`), `HttpMessage` (`T.header`,
+`header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`,
+`set_body_bytes`) and `Body` (`fn T.media_type(self) -> String` as a literal,
+`fn T.to_text(self) -> String`).
+
+```almide check
+import html
+import http
+
+fn greet(req: HttpRequest) -> HttpResponse = {
+  let name = http.param(req, "name") ?? "guest"
+  http.response(200, html.escape("Hello, ${name}"))
+}
+
+fn report(rows: String) -> HttpResponse = http.with_headers(200, http.typed("text/csv", bytes.from_string(rows)), [("X-Rows", "1")])
+```
+
 ```almide check
 import http
 import secret
@@ -486,7 +520,14 @@ context-specific rules in [E022](docs/diagnostics/E022.md) and
 | [E104](docs/diagnostics/E104.md) | a skipped record field has no default |
 | [E109](docs/diagnostics/E109.md) | pure fn runs an effect fn through a function value |
 | [E110](docs/diagnostics/E110.md) | untrusted input decodes only into an input type |
+| [E111](docs/diagnostics/E111.md) | type too large |
+| [E112](docs/diagnostics/E112.md) | too many generic instances |
+| [E113](docs/diagnostics/E113.md) | match too complex to check for exhaustiveness |
 | [E114](docs/diagnostics/E114.md) | a generic fn reaches itself at a growing type |
+| [E116](docs/diagnostics/E116.md) | a response's Content-Type is written from its body's type |
+| [E117](docs/diagnostics/E117.md) | `http.typed` takes a literal media type no safe module owns |
+| [E118](docs/diagnostics/E118.md) | a media type's owner is not granted, not unique, or not a literal |
+| [E119](docs/diagnostics/E119.md) | a Region lent to an `@export(c)` fn escapes its call |
 | [E420](docs/diagnostics/E420.md) | Function visibility violation |
 
 Retired codes: **E039** (`result.collect` / `collect_map`) and **E040**

@@ -1,0 +1,15 @@
+// #4005 operands drill: an assignment of the index neither drops the bounds
+// fact it names nor records the `s` kill, so the second read's check is
+// elided after `i` moved and the witness still reads as covered. The bytes
+// show the index written between the check and the access.
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  var i = 0
+  var s = 0
+  while i < 2 {
+    s = s + xs[i]
+    i = i + 1
+    s = s + xs[i]
+  }
+  println("${s}")
+}

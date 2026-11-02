@@ -1,0 +1,14 @@
+// #4277 drill: `$bytes_push` stops releasing the outgrown block on its grow
+// path while its logged release stays. The frame's event still reads as the
+// push consuming the buffer through its signature (#4278 B1); the helper's
+// own body, held to its logged events like any frame, has a release event
+// with no release call.
+effect fn main() -> Unit = {
+  var b = bytes.zeros(0)
+  var i = 0
+  while i < 40 {
+    bytes.push(b, i)
+    i = i + 1
+  }
+  println("${bytes.len(b)}")
+}

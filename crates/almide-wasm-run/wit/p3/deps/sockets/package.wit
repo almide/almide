@@ -1,0 +1,100 @@
+package wasi:sockets@0.3.0;
+
+// wasi:sockets@0.3.0, trimmed to what the p3 command shim calls: UDP and
+// name lookup (#4306, ops 140..=145, wasi_p3_net.rs). Every type is the
+// upstream declaration, case for case and field for field (the shim derives
+// its discriminants, payload offsets and flat shapes from these); a resource
+// lists only the methods the shim imports. Source: wasmtime-wasi 50.0.1's
+// `src/p3/wit/deps/sockets.wit`, WASI 0.3.0 (byte-identical to 49.0.4's).
+interface types {
+  use wasi:clocks/types@0.3.0.{duration};
+
+  // The case order is net_error_core.rs's NetErrorClass order; the shim
+  // maps each case to its class by NAME.
+  variant error-code {
+    access-denied,
+    not-supported,
+    invalid-argument,
+    out-of-memory,
+    timeout,
+    invalid-state,
+    address-not-bindable,
+    address-in-use,
+    remote-unreachable,
+    connection-refused,
+    connection-broken,
+    connection-reset,
+    connection-aborted,
+    datagram-too-large,
+    other(option<string>),
+  }
+
+  enum ip-address-family {
+    ipv4,
+    ipv6,
+  }
+
+  type ipv4-address = tuple<u8, u8, u8, u8>;
+
+  type ipv6-address = tuple<u16, u16, u16, u16, u16, u16, u16, u16>;
+
+  variant ip-address {
+    ipv4(ipv4-address),
+    ipv6(ipv6-address),
+  }
+
+  record ipv4-socket-address {
+    port: u16,
+    address: ipv4-address,
+  }
+
+  record ipv6-socket-address {
+    port: u16,
+    flow-info: u32,
+    address: ipv6-address,
+    scope-id: u32,
+  }
+
+  variant ip-socket-address {
+    ipv4(ipv4-socket-address),
+    ipv6(ipv6-socket-address),
+  }
+
+  // TCP (#3620, the net/tcp design step 4): `connect` is an async func the
+  // shim lowers synchronously, as native's connect blocks; the byte streams
+  // `send` and `receive` hand over are driven by the async stream builtins.
+  resource tcp-socket {
+    create: static func(address-family: ip-address-family) -> result<tcp-socket, error-code>;
+    bind: func(local-address: ip-socket-address) -> result<_, error-code>;
+    connect: async func(remote-address: ip-socket-address) -> result<_, error-code>;
+    listen: func() -> result<stream<tcp-socket>, error-code>;
+    send: func(data: stream<u8>) -> future<result<_, error-code>>;
+    receive: func() -> tuple<stream<u8>, future<result<_, error-code>>>;
+    get-local-address: func() -> result<ip-socket-address, error-code>;
+  }
+
+  // UDP (#4306): `send` and `receive` are async funcs the shim lowers
+  // synchronously — the task blocks for the datagram, as native's call does.
+  resource udp-socket {
+    create: static func(address-family: ip-address-family) -> result<udp-socket, error-code>;
+    bind: func(local-address: ip-socket-address) -> result<_, error-code>;
+    send: async func(data: list<u8>, remote-address: option<ip-socket-address>) -> result<_, error-code>;
+    receive: async func() -> result<tuple<list<u8>, ip-socket-address>, error-code>;
+    get-local-address: func() -> result<ip-socket-address, error-code>;
+  }
+}
+
+interface ip-name-lookup {
+  use types.{ip-address};
+
+  variant error-code {
+    access-denied,
+    invalid-argument,
+    name-unresolvable,
+    temporary-resolver-failure,
+    permanent-resolver-failure,
+    other(option<string>),
+  }
+
+  resolve-addresses: async func(name: string) -> result<list<ip-address>, error-code>;
+}

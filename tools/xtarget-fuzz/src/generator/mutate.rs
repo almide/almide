@@ -134,7 +134,11 @@ fn collect_almd(
         if path.extension().and_then(|e| e.to_str()) != Some("almd") {
             continue;
         }
-        if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX) > MAX_CORPUS_FILE_BYTES {
+        if std::fs::metadata(&path)
+            .map(|m| m.len())
+            .unwrap_or(u64::MAX)
+            > MAX_CORPUS_FILE_BYTES
+        {
             continue;
         }
         let Ok(src) = std::fs::read_to_string(&path) else {
@@ -233,9 +237,10 @@ fn unresolvable_import(
 
 /// Does the program declare a top-level `fn main`?
 fn has_main(program: &Program) -> bool {
-    program.decls.iter().any(|d| {
-        matches!(d, Decl::Fn { name, .. } if name.as_str() == "main")
-    })
+    program
+        .decls
+        .iter()
+        .any(|d| matches!(d, Decl::Fn { name, .. } if name.as_str() == "main"))
 }
 
 /// Remove `test` and `test where` declarations so both targets execute
@@ -320,13 +325,7 @@ fn perturb_literal(rng: &mut SplitMix64, program: &mut Program) -> bool {
             return;
         }
         if seen == target {
-            apply_literal(
-                &mut e.kind,
-                new_int,
-                new_float,
-                &new_string,
-                new_bool,
-            );
+            apply_literal(&mut e.kind, new_int, new_float, &new_string, new_bool);
             done = true;
         }
         seen += 1;
@@ -354,8 +353,14 @@ fn apply_literal(kind: &mut ExprKind, i: i64, f: f64, s: &str, b: bool) {
         }
         // `raw` is the pre-mutation SOURCE spelling; clearing it makes fmt
         // print the new value (#1261/#1263).
-        ExprKind::Float { value, raw } => { *value = f; *raw = None; }
-        ExprKind::String { value, raw } => { *value = s.to_string(); *raw = None; }
+        ExprKind::Float { value, raw } => {
+            *value = f;
+            *raw = None;
+        }
+        ExprKind::String { value, raw } => {
+            *value = s.to_string();
+            *raw = None;
+        }
         ExprKind::Bool { value } => *value = b,
         _ => {}
     }
@@ -447,7 +452,10 @@ fn leaf_discriminant(kind: &ExprKind) -> Option<u8> {
 fn duplicate_stmt(rng: &mut SplitMix64, program: &mut Program) -> bool {
     let mut block_count = 0u32;
     for decl in program.decls.iter() {
-        if let Decl::Fn { body: Some(expr), .. } = decl {
+        if let Decl::Fn {
+            body: Some(expr), ..
+        } = decl
+        {
             count_blocks(expr, &mut block_count);
         }
     }
@@ -463,7 +471,10 @@ fn duplicate_stmt(rng: &mut SplitMix64, program: &mut Program) -> bool {
         if done {
             break;
         }
-        if let Decl::Fn { body: Some(expr), .. } = decl {
+        if let Decl::Fn {
+            body: Some(expr), ..
+        } = decl
+        {
             mutate_block(expr, target_block, dup_choice, &mut ordinal, &mut done);
         }
     }

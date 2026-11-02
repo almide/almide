@@ -1,0 +1,18 @@
+// The helper goes through the typed sink and declares itself one, so each
+// caller's type is judged as an input type.
+import http
+
+type UserInput: Decode = { name: String, email: String }
+
+@input_sink
+fn body_as[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = http.decode_json[T](req)
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let r: Result[UserInput, HttpResponse] = body_as(req)
+  match r {
+    ok(u) => http.response(201, u.name),
+    err(bad) => bad,
+  }
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", []))!))

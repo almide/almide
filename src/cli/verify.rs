@@ -169,6 +169,62 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
     })
 }
 
+/// Is an independent verifier installed (next to this executable, or on
+/// PATH)? `almide build --target wasm` judges its own certificate when one is.
+pub(super) fn verifier_present() -> bool {
+    locate_verifier().is_some()
+}
+
+/// The build gate (#4011, row 3 of the security table): the certificate of
+/// the build that just ran — the witness sinks were armed before it — pinned
+/// to the exact bytes about to be written, judged by the installed
+/// `almide-verify`. `Ok(())` when it CERTIFIES the bundle, or reports it
+/// INCOMPLETE (exit 3: every witness accepted, some function declared
+/// uncertified — nothing is contradicted); `Err` with the verifier's report
+/// when it REJECTS a witness or the bundle (exit 1 / 2), or cannot be run:
+/// the build then refuses to write the artifact. The compiler still never
+/// judges its own certificate — the verdict is the separate binary's.
+pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8]) -> Result<(), String> {
+    let Some(verifier) = locate_verifier() else { return Ok(()) };
+    let allow = manifest_allow();
+    let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
+        .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
+    let dir = std::env::temp_dir();
+    let id = std::process::id();
+    let (art, bun) = (dir.join(format!("almide-build-{id}.wasm")), dir.join(format!("almide-build-{id}.bundle")));
+    let cleanup = || {
+        let _ = std::fs::remove_file(&art);
+        let _ = std::fs::remove_file(&bun);
+    };
+    use sha2::Digest;
+    let hex: String = sha2::Sha256::digest(shipped).iter().map(|b| format!("{b:02x}")).collect();
+    let art_path = art.display().to_string();
+    let text = almide_wasm::witness::bundle::render(
+        &format!("almide {}", env!("ALMIDE_VERSION_LINE")),
+        file,
+        Some((hex.as_str(), art_path.as_str())),
+        &records,
+        &uncertified,
+    );
+    if let Err(e) = std::fs::write(&art, shipped).and_then(|()| std::fs::write(&bun, text)) {
+        cleanup();
+        return Err(format!("cannot write the certificate for {}: {e}", verifier.display()));
+    }
+    let run = Command::new(&verifier).arg("bundle").arg(&bun).output();
+    cleanup();
+    let out = run.map_err(|e| format!("could not start {}: {e}", verifier.display()))?;
+    match out.status.code() {
+        Some(0 | 3) => Ok(()),
+        code => Err(format!(
+            "{} judged this build's certificate and did not accept it (exit {}):\n{}{}",
+            verifier.display(),
+            code.map_or_else(|| "signal".to_string(), |c| c.to_string()),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )),
+    }
+}
+
 /// One framing-safe line: a name or reason may not break the bundle's lines.
 fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")

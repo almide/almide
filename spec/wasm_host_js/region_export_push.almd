@@ -1,0 +1,48 @@
+// @leg: structural
+// @contract: C-446
+// #4354 (ADR-0031 amendment A1, A4 push): an `@export(wasm)` fn returning a
+// Region crosses as `(ptr, len)` through wasm's multi-value return, in the
+// memory's address width (two i32 on wasm32). The pair is the view's data
+// address and the length the Region holds, never the address of the Region's
+// record. The host writes straight into the `ffi.alloc` Region `inbox_open`
+// returned, with no copy, and `inbox_show` reads the bytes back through the
+// program's own copy (the top-level `var`).
+//
+// The host holds one share of the block per address it was handed, until it
+// gives the address back to `__region_release`. `inbox_tail` hands out a
+// sub-Region (`ffi.slice`) as its own address inside the parent's block, and
+// that share alone keeps the parent alive after the program dropped it and
+// the host released the parent's address. A second release of an address
+// traps. `digest` takes a Region the host lends as `(base, len)`. The driver
+// is region_export_push.host.mjs; `main` prints the line
+// the native run shares.
+import ffi
+
+var inbox: Region = ffi.region(bytes.new())
+
+@export(wasm, "inbox_open")
+effect fn inbox_open(n: Int) -> Region = {
+  inbox = ffi.alloc(n)!
+  inbox
+}
+
+@export(wasm, "inbox_tail")
+effect fn inbox_tail(off: Int) -> Region = ffi.slice(inbox, off, ffi.len(inbox) - off)!
+
+@export(wasm, "inbox_show")
+effect fn inbox_show() -> Unit = {
+  let b = ffi.read(inbox, 0, ffi.len(inbox))!
+  println("inbox holds ${bytes.len(b)} bytes: ${bytes.to_string_lossy(b)}")
+}
+
+// The other direction: the host hands a range of the module's memory to an
+// export taking a Region, as `(base, len)` (the pair #4353's hosts take). The
+// Region is read-only and lent for the call.
+@export(wasm, "digest")
+effect fn digest(buf: Region) -> Int = {
+  let b = ffi.read(buf, 0, ffi.len(buf))!
+  println("lent ${bytes.len(b)} bytes: ${bytes.to_string_lossy(b)}")
+  bytes.len(b)
+}
+
+effect fn main() -> Unit = println("ready")

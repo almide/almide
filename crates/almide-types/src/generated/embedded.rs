@@ -2134,6 +2134,12 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
 else list.len(bytes.split(b, needle)) - 1
+
+
+
+fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
+
+fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -5638,14 +5644,18 @@ pub const SRC_FFI: &str = r#"
 
 
 
-/// A view of memory: base, length, permission and owner (ADR-0031 D1).
-mod type Region = { owner: Bytes, base: Handle, len: Int, writable: Bool, keep: () -> Unit }
+
+
+/// A view of memory: base, length, permission and owner (ADR-0031 D1). The
+/// view starts `off` bytes past `base`: 0 for every mint, the slice's offset
+/// for `slice`, so narrowing a region needs no address arithmetic.
+mod type Region = { owner: Bytes, base: Handle, off: Int, len: Int, writable: Bool, keep: () -> Unit }
 
 /// A read-only view of b; b lives as long as the view.
 @memory_unsafe
 fn region(b: Bytes) -> Region = {
   let base = __address(b)
-  { owner: b, base: base, len: bytes.len(b), writable: false, keep: () => () }
+  { owner: b, base: base, off: 0, len: bytes.len(b), writable: false, keep: () => () }
 }
 
 /// A fresh writable region of n zero bytes; err if n is negative.
@@ -5655,7 +5665,7 @@ effect fn alloc(n: Int) -> Result[Region, String] =
   else {
     let buf = bytes.zeros(n)
     let base = __address(buf)
-    ok({ owner: buf, base: base, len: n, writable: true, keep: () => () })
+    ok({ owner: buf, base: base, off: 0, len: n, writable: true, keep: () => () })
   }
 
 /// The region's length in bytes.
@@ -5671,7 +5681,7 @@ fn is_writable(r: Region) -> Bool = r.writable
 effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
   if n < 0 then err("ffi.read: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
-  else ok(__load(r.base, off, n))
+  else ok(__load(r.base, r.off + off, n))
 
 /// Writes b at off; err if the region is read-only or b does not fit.
 @memory_unsafe
@@ -5679,13 +5689,20 @@ effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
   if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
   else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
   else {
-    __store(r.base, off, b)
+    __store(r.base, r.off + off, b)
     ok(())
   }
 
 /// A copy of the whole region as Bytes.
 @memory_unsafe
-effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, 0, r.len))
+effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, r.off, r.len))
+
+/// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.slice: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok({ ...r, off: r.off + off, len: n, writable: false })
 
 /// `Region(<len> bytes)`: the base address differs per target and is never shown.
 mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
@@ -5695,6 +5712,34 @@ mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
 local fn __address(b: Bytes) -> Handle = _
+
+
+
+
+
+
+
+
+mod type RegionExportView = { owner: Bytes, off: Int, len: Int }
+
+@memory_unsafe
+local fn __export_view(r: Region) -> RegionExportView = { owner: r.owner, off: r.off, len: r.len }
+
+
+
+
+
+
+
+@memory_unsafe
+local fn __lend(base: Handle, len: Int) -> Region = {
+  owner: bytes.new(),
+  base: base,
+  off: 0,
+  len: if len < 0 then 0 else len,
+  writable: false,
+  keep: () => (),
+}
 
 
 
@@ -7474,19 +7519,14 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 
 
 
+
+
+
 /// Appends data verbatim; creates the file if missing.
 @ordered
+@intrinsic("almide_rt_fs_append_bytes")
 @category("FS.write")
-effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
-  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
-  else bytes.new()
-  __as_append(fs.write_bytes(path, bytes.__concat(old, data)))
-}
-
-local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
-  ok(x) => ok(x),
-  err(e) => err(["fs.read_bytes", "fs.write_bytes"] |> list.find((call) => string.starts_with(e, call)) |> option.map((call) => "fs.append_bytes" + string.drop(e, string.len(call))) ?? e),
-}
+effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
@@ -9825,7 +9865,7 @@ pub const SRC_HTML: &str = r##"
 
 import json
 
-mod type SafeHtml = String
+mod type SafeHtml: Body = String
 
 
 
@@ -9971,6 +10011,21 @@ fn script_json(v: Value) -> SafeHtml = {
   ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
   SafeHtml(s)
 }
+
+
+
+
+
+
+
+
+
+
+@media_owns("text/html", "application/xhtml+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
+fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
+
+fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)
 "##;
 pub const SRC_HTTP: &str = r#"
 
@@ -9997,7 +10052,6 @@ pub const SRC_HTTP: &str = r#"
 
 
 
-import html
 import json
 import url
 
@@ -10008,34 +10062,77 @@ import url
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
-/// Reply with Content-Type text/plain.
-@intrinsic("almide_rt_http_response")
-fn response(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
-fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
-  response(status, html.to_string(body)),
-  "Content-Type",
-  "text/html; charset=utf-8",
+
+
+
+
+
+
+
+
+/// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
+  status,
+  body.__self_to_text(),
+  ["Content-Type", body.__self_media_type()],
 )
 
-/// Reply with Content-Type application/json.
+/// Reply with Content-Type application/json; body is JSON text.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
-  let flat = __flat(headers)
-  http.__with_headers(status, body, flat)
+/// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
+@header_write(headers, owned="__http_response_body_headers")
+fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse = {
+  for h in headers {
+    __http_response_owned_refusal("http.with_headers", h.0)
+  }
+  http.__with_headers(
+    status,
+    body.__self_to_text(),
+    ["Content-Type", body.__self_media_type()] + __flat(headers),
+  )
 }
+
+/// resp with its body replaced by body and its Content-Type by body's type.
+fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http_response_put_header(
+  http.__http_response_put_body(resp, body.__self_to_text()),
+  "Content-Type",
+  body.__self_media_type(),
+)
+
+/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+@literal_media(media_type)
+fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
+  media_type: media_type,
+  bytes: body,
+}
+
+/// A body of a declared media type, built only by `http.typed`.
+mod type TypedBody: Body = { media_type: String, bytes: Bytes }
+
+fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
+
+fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
-fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
-/// 302 with Location url and empty body.
-@intrinsic("almide_rt_http_redirect")
-fn redirect(url: String) -> HttpResponse = _
+
+
+
+@intrinsic("almide_rt_http___http_response_flat")
+@borrow_ref(flat)
+local fn __http_response_flat(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+
+/// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
+fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
+  302,
+  "",
+  ["Location", url, "Content-Type", string.__string_media_type("")],
+)
 
 
 /// resp with code set; not range-checked.
@@ -10064,16 +10161,16 @@ fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 /// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
-/// m with header name set, any case: the first match replaced in place, else appended.
+/// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
 fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
   name,
   value,
 )
 
-/// m with its body replaced.
+/// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8.
+/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -10099,18 +10196,40 @@ fn __http_response_body(m: HttpResponse) -> String = _
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
 
+@header_write(name, value, owned="__http_response_body_headers")
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = {
+  __http_response_owned_refusal("http.set_header", name)
+  http.__http_response_put_header(m, name, value)
+}
+
+
+
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = with_body(m, body)
+
+
 @intrinsic("almide_http_set_header")
 @consume(m)
-fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+local fn __http_response_put_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
 
 @intrinsic("almide_http_set_body")
 @consume(m)
-fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
-fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
-  m,
-  bytes.to_string_lossy(body),
-)
+
+local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
+
+
+
+
+@intrinsic("almide_rt_http___http_response_ascii_lower")
+local fn __http_response_ascii_lower(s: String) -> String = _
+
+
+local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
+  if __http_response_body_headers() |> list.any((h) => string.len(h) == string.len(name) and http.__http_response_ascii_lower(h) == http.__http_response_ascii_lower(name)) then panic("${op}: `${name}` is written from the body's type, never by name: answer with http.response(status, body), http.with_body(resp, body) or http.typed(media_type, bytes)")
+  else ()
+
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
 
 @intrinsic("almide_http_req_header")
@@ -10586,7 +10705,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
       )
       else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__http_response_set_body(res, "") else res
+        if via_get then http.__http_response_put_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -10969,17 +11088,15 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
-fn http_response(status: Int, body: String) -> List[String] = {
-  let st = int.to_string(status)
-  [st, body, "Content-Type", "text/plain"]
-}
+
+
+@implements("http.__http_response_flat")
+fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
 
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
   [st, body, "Content-Type", "application/json"]
 }
-
-fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 
 
 
@@ -11082,6 +11199,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 
 
+@implements("http.__http_response_ascii_lower")
 fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
@@ -14115,12 +14233,22 @@ fn value_path_index(p: List[String], i: Int) -> List[String] =
 @implements("value.get_path")
 fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
 
+
+
+
+
 @implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
-  let steps = list.len(p)
-  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(v, p, 0, x))
-}
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = value.__set_path_steps(
+  v,
+  __jpath_steps(p),
+  x,
+)
+
+
+fn __jpath_steps(p: List[String]) -> List[(Bool, String, Int)] = p |> list.map((seg) => match string.take(seg, 1) {
+  "f" => (true, string.drop(seg, 1), 0),
+  _ => (false, "", int.parse(string.drop(seg, 1)) ?? 0),
+})
 
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
@@ -14130,118 +14258,6 @@ fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p,
 
 
 
-
-
-
-
-
-
-
-
-
-
-fn __jp_empty_obj() -> Value = {
-  let v = prim.alloc_value(0)
-  let h = prim.handle(v)
-  prim.store32(h + 4, 6)
-  prim.store32(h + 8, 0)
-  v
-}
-
-
-
-fn __jp_has(j: Value, key: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let ek: String = prim.load_handle(prim.handle(j) + 12 + (2 * i) * 8)
-  if ek == key then true
-  else __jp_has(j, key, i + 1, n)
-}
-
-
-
-
-
-
-
-
-
-fn __jpath_max_depth() -> Int = 1000
-
-
-fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
-
-
-
-fn __json_nests_past(v: Value, budget: Int) -> Bool = {
-  let tag = prim.load32(prim.handle(v) + 4)
-  if tag != 5 and tag != 6 then false
-  else if budget == 0 then true
-  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
-  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
-}
-
-
-
-fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
-else {
-  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
-  if __json_nests_past(ev, budget) then true
-  else __jnp_items(v, budget, i + 1, n, stride)
-}
-
-fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
-  if k >= list.len(path) then nv
-  else {
-    let seg = list.get(path, k) ?? ""
-    let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
-    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
-  }
-
-fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 6 then {
-    let n = prim.load32(prim.handle(j) + 8) / 2
-    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
-    if __jp_has(j, key, 0, n) then value.object(pairs)
-    else {
-      let seed = __jp_empty_obj()
-      let sv = json_path_set_go(seed, path, k + 1, nv)
-      value.object(pairs + [(key, sv)])
-    }
-  } else {
-    let seed = __jp_empty_obj()
-    let sv = json_path_set_go(seed, path, k + 1, nv)
-    value.object([(key, sv)])
-  }
-
-fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(j)
-    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    if ek == key then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
-    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
-  }
-
-fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
-  if prim.load32(prim.handle(j) + 4) == 5 then {
-    let n = prim.load32(prim.handle(j) + 8)
-    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
-    else j
-  } else j
-
-fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
-  if i >= n then acc
-  else {
-    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-    if i == tgt then {
-      let sv = json_path_set_go(ev, path, k + 1, nv)
-      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
-    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
-  }
 
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
@@ -18153,8 +18169,11 @@ pub const SRC_LIST_PARTITION: &str = r#"
 
 
 
+
+
+
 fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
-  if i >= n then yi * 1048576 + ni
+  if i >= n then yi
   else {
     let v = prim.load64(sh + 12 + i * 8)
     if f(v) then {
@@ -18170,14 +18189,14 @@ fn list_partition(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
   let no = prim.alloc_list(n)
-  let packed = __lpart_fill(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
-  prim.store32(prim.handle(yes) + 4, packed / 1048576)
-  prim.store32(prim.handle(no) + 4, prim.band(packed, 1048575))
+  let yi = __lpart_fill(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
+  prim.store32(prim.handle(yes) + 4, yi)
+  prim.store32(prim.handle(no) + 4, n - yi)
   (yes, no)
 }
 
 fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
-  if i >= n then yi * 1048576 + ni
+  if i >= n then yi
   else {
     let v = prim.load64(sh + 12 + i * 8)
     if f(v) then {
@@ -18195,9 +18214,9 @@ fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) 
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
   let no = prim.alloc_list(n)
-  let packed = __lpart_fill_rc(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
-  prim.store32(prim.handle(yes) + 4, packed / 1048576)
-  prim.store32(prim.handle(no) + 4, prim.band(packed, 1048575))
+  let yi = __lpart_fill_rc(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
+  prim.store32(prim.handle(yes) + 4, yi)
+  prim.store32(prim.handle(no) + 4, n - yi)
   (yes, no)
 }
 "#;
@@ -28064,6 +28083,7 @@ pub const SRC_NET_WASM: &str = r#"
 
 
 
+
 effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
 
 effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
@@ -28161,6 +28181,64 @@ effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] =
 fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
   ok("1") => true,
   _ => false,
+}
+
+
+
+
+
+effect fn __net_udp_bind(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_udp_local_port(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_udp_send_to(sock_port_host: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __net_udp_recv_from(sock: String, max: String) -> Result[Bytes, String] = _
+
+effect fn __net_udp_close(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_lookup_host(host: String, unused: String) -> Result[String, String] = _
+
+@implements("net.__os_udp_bind")
+effect fn __net_udp_bind_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_udp_bind(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.__os_udp_local_port")
+effect fn __net_udp_local_port_impl(sock: Int) -> Result[Int, String] = {
+  let t = __net_udp_local_port(int.to_string(sock), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.__os_udp_send_to")
+effect fn __net_udp_send_to_impl(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = {
+  let _ = __net_udp_send_to("${sock}\n${port}\n${host}", data)!
+  ok(())
+}
+
+@implements("net.__os_udp_recv_from")
+effect fn __net_udp_recv_from_impl(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = {
+  let framed = __net_udp_recv_from(int.to_string(sock), int.to_string(max))!
+  let cut = bytes.index_of(framed, bytes.from_string("\n")) ?? 0
+  let head = bytes.to_string_lossy(bytes.take(framed, cut))
+  let (port, ip) = match string.split(head, " ") {
+    [p, h] => (int.parse(p) ?? -1, h),
+    _ => (-1, ""),
+  }
+  ok((bytes.drop(framed, cut + 1), ip, port))
+}
+
+@implements("net.__os_udp_close")
+effect fn __net_udp_close_impl(sock: Int) -> Result[Unit, String] = {
+  let _ = __net_udp_close(int.to_string(sock), "")!
+  ok(())
+}
+
+@implements("net.__os_lookup_host")
+effect fn __net_lookup_host_impl(host: String) -> Result[List[String], String] = {
+  let t = __net_lookup_host(host, "")!
+  ok(string.split(t, "\n") |> list.filter((l) => l != ""))
 }
 "#;
 pub const SRC_OPTION: &str = r#"
@@ -30554,6 +30632,68 @@ fn __process_pid_impl() -> Int = match __proc_pid("", "") {
   ok(p) => int.parse(p) ?? -1,
   _ => -1,
 }
+
+
+
+
+
+
+
+
+
+effect fn __proc_start(cmd: String, argv: String) -> Result[String, String] = _
+
+
+effect fn __proc_poll(h: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __proc_wait(h: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __proc_stop(h: String, grace_ms: String) -> Result[String, String] = _
+
+
+
+
+fn __proc_read_new(h: String, which: String) -> Result[String, String] = _
+
+fn __proc_child_pid(h: String, unused: String) -> Result[String, String] = _
+
+@implements("process.__os_start")
+effect fn __process_start_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let h = __proc_start(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
+  ok(int.parse(h) ?? -1)
+}
+
+@implements("process.__os_poll")
+effect fn __process_poll_impl(h: Int) -> Result[Bool, String] = {
+  let t = __proc_poll(int.to_string(h), "")!
+  ok(t == "1")
+}
+
+@implements("process.__os_wait")
+effect fn __process_wait_impl(h: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_wait(int.to_string(h), "")!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_stop")
+effect fn __process_stop_impl(h: Int, grace_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_stop(int.to_string(h), int.to_string(grace_ms))!
+  ok(__proc_status(f))
+}
+
+@implements("process.__os_read_new")
+fn __process_read_new_impl(h: Int, which: Int) -> String = __proc_read_new(
+  int.to_string(h),
+  int.to_string(which),
+) ?? ""
+
+@implements("process.__os_child_pid")
+fn __process_child_pid_impl(h: Int) -> Int = match __proc_child_pid(int.to_string(h), "") {
+  ok(p) => int.parse(p) ?? -1,
+  _ => -1,
+}
 "#;
 pub const SRC_RANDOM: &str = r#"
 
@@ -31279,6 +31419,10 @@ fn __rx_back(t: Int, ts: Int) -> Int = {
 fn __rx_flags(pat0: Int) -> Int =
   if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 then __rx_flag_scan(pat0 + 2, 0) else 0
 
+
+
+fn __rx_flags_in(pat0: Int, pe: Int) -> Int = if pat0 + 1 < pe then __rx_flags(pat0) else 0
+
 fn __rx_flag_scan(p: Int, acc: Int) -> Int = {
   let b = prim.load8(p)
   if b == 109 then __rx_flag_scan(p + 1, prim.bor(acc, 1))
@@ -31318,7 +31462,7 @@ fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at:
   prim.store64(m + 128, 0)
   prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))
   prim.store64(m + 144, 0)
-  prim.store64(m + 152, if prim.band(__rx_flags(pat0), 2) == 2 then 1 else 0)
+  prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   vm
 }
 
@@ -32112,7 +32256,7 @@ fn __rx_work_size(n: Int, width: Int, ns: Int) -> Int = {
 }
 
 
-fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Int = {
+fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, pe: Int, track: Int) -> Int = {
   let k = n * width
   let l0 = w + 32 * 8
   let l1 = l0 + (16 + 2 * k + k * ns + k) * 8
@@ -32134,7 +32278,7 @@ fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: I
   let _13 = __rx_wset(w, 17, 0)
   let _s = __rx_wset(w, 20, 3 * k + 8)
   let _h = __rx_wset(w, 22, 0)
-  let _i = __rx_wset(w, 24, if prim.band(__rx_flags(pat0), 2) == 2 then 1 else 0)
+  let _i = __rx_wset(w, 24, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
   let _14 = __rx_list_init(l0, k, ns)
   __rx_list_init(l1, k, ns)
 }
@@ -32584,7 +32728,7 @@ fn __rx_program(p0: Int, pe: Int) -> List[Int] = {
 
 
 
-fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> List[Int] = {
+fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, pe: Int, track: Int) -> List[Int] = {
   let pa = ph + 12
   if prim.load32(ph + 4) == 0 then prim.alloc_list(0)
   else {
@@ -32595,7 +32739,7 @@ fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Lis
     let ns = r0 + regs
     let work = prim.alloc_list(__rx_work_size(n, width, ns))
     let w = prim.handle(work) + 12
-    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, track)
+    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, pe, track)
     let _1 = __rx_wset(w, 18, r0)
     let _2 = __rx_wset(w, 19, regs)
     work
@@ -32980,7 +33124,7 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let st = __rx_find_start(p0, pe, t0, m)
   if __rx_gave_up(m) then {
     let prog = __rx_program(p0, pe)
-    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
     let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
     __rx_find_start(p0, pe, t0, m) >= 0
   } else st >= 0
@@ -33000,7 +33144,7 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let r = __rx_exec(p0, pe, t0, m)
   if __rx_gave_up(m) then {
     let prog = __rx_program(p0, pe)
-    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
     let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
     let w = __rx_work_at(prim.handle(work))
     if w != 0 then __rx_pike(w, t0, 1, te, 0) >= 0
@@ -33026,14 +33170,14 @@ fn __rx_sub(a: Int, b: Int) -> String = {
 
 fn __rx_vm_find(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> Int = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   __rx_find_start(p0, pe, t0, m)
 }
 
 fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc: List[String] = []
   __rx_find_all_go(p0, pe, t0, m, acc)
@@ -33041,7 +33185,7 @@ fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] 
 
 fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> String = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc = ""
   __rx_replace_go(p0, pe, t0, m, rep, acc)
@@ -33049,7 +33193,7 @@ fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> S
 
 fn __rx_vm_split(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let acc: List[String] = []
   __rx_split_go(p0, pe, t0, t0, m, acc)
@@ -33302,7 +33446,7 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
 
 fn __rx_vm_captures(p0: Int, pe: Int, t0: Int, te: Int, ncap: Int, bd: Int, m: Int) -> List[String]? = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let w = __rx_work_at(prim.handle(work))
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let ms = if w != 0 then __rx_pike(w, t0, 0, 0 - 1, 0)
@@ -33405,7 +33549,7 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
 
 fn __rx_vm_scan(p0: Int, pe: Int, t0: Int, te: Int, m: Int, ncap: Int, bd: Int, first: Bool) -> List[String] = {
   let prog = __rx_program(p0, pe)
-  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let head: List[String] = [int.to_string(ncap + 1)]
   __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)
@@ -36688,6 +36832,12 @@ fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 @intrinsic("almide_rt_string___err_text")
 fn __err_text(s: String) -> String = _
+
+
+
+fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
+
+fn __string_to_text(s: String) -> String = s
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -37733,10 +37883,13 @@ else {
 
 
 
+
+
 fn __rev_walk(src: Int, send: Int, dst_base: Int, out_end: Int) -> Int = if src >= send then 0
 else {
   let b = prim.load8(src)
-  let cl = __cp_len(b)
+  let w = __cp_len(b)
+  let cl = if w > send - src then send - src else w
   let off = out_end - cl
   let dst = dst_base + off
   let _x = __rev_copy_n(src, dst, cl)
@@ -38123,7 +38276,11 @@ fn __empty_replace(s: String, to: String) -> String = {
   let send = sbase + slen
   let th = prim.handle(to)
   let tlen = prim.load32(th + 4)
-  let nchars = __rep_nchars(sbase, send, 0)
+
+
+
+  let nchars = if slen <= 0 then 0
+  else 1 + __rep_nchars(sbase + 1, send, 0)
   let rlen = (nchars + 1) * tlen + slen
   let buf = prim.alloc_str(rlen)
   let dbase = prim.handle(buf) + 12
@@ -38573,12 +38730,15 @@ else {
 }
 
 
+
+
 fn __to_lower_prev(start: Int, i: Int) -> Int =
   if i > start and prim.load8(i - 1) >= 128 and prim.load8(i - 1) < 192 then __to_lower_prev(
     start,
     i - 1,
   )
-  else i - 1
+  else if i > start then i - 1
+  else start
 
 
 
@@ -40773,9 +40933,42 @@ local fn __unwrapped(s: String) -> String =
 
 
 
+
 @intrinsic("almide_rt_uuid___v7_stamp")
 @category("Time")
 effect fn __v7_stamp(ms: Int) -> Int = _
+"#;
+pub const SRC_UUID_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+var v7_last: Int = -1
+
+@implements("uuid.__v7_stamp")
+fn uuid_v7_stamp(ms: Int) -> Int = {
+  let fresh = int.clamp(ms, 0, 281474976710655) * 4096
+  let next = if fresh > v7_last then fresh else v7_last + 1
+  v7_last = next
+  next
+}
 "#;
 pub const SRC_VALUE: &str = r#"/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
@@ -40947,7 +41140,11 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 
 
 
+
+
+
 @intrinsic("almide_rt_value_set_path_steps")
+@reuse(v)
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 
@@ -41046,6 +41243,12 @@ local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> V
     err(_) => v,
   },
 }
+
+
+
+fn __value_media_type(v: Value) -> String = "application/json"
+
+fn __value_to_text(v: Value) -> String = __stringify(v)
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 
@@ -44067,6 +44270,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "unix_wasm" => Some(SRC_UNIX_WASM),
         "url" => Some(SRC_URL),
         "uuid" => Some(SRC_UUID),
+        "uuid_wasm" => Some(SRC_UUID_WASM),
         "value" => Some(SRC_VALUE),
         "value_core" => Some(SRC_VALUE_CORE),
         "value_utils" => Some(SRC_VALUE_UTILS),

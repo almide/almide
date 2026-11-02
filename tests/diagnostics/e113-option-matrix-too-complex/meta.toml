@@ -1,0 +1,3 @@
+expects_code = "E113"
+expects_error = "match too complex to check for exhaustiveness"
+hint_substring = "Split the match"

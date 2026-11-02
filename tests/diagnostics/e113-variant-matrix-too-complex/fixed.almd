@@ -1,0 +1,20 @@
+type Light = | On | Off
+
+// One arm per column, then one arm for every value the columns leave.
+fn first_on(x0: Light, x1: Light, x2: Light, x3: Light, x4: Light, x5: Light, x6: Light, x7: Light, x8: Light, x9: Light, x10: Light, x11: Light) -> Int = match (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11) {
+  (On, _, _, _, _, _, _, _, _, _, _, _) => 0,
+  (_, On, _, _, _, _, _, _, _, _, _, _) => 1,
+  (_, _, On, _, _, _, _, _, _, _, _, _) => 2,
+  (_, _, _, On, _, _, _, _, _, _, _, _) => 3,
+  (_, _, _, _, On, _, _, _, _, _, _, _) => 4,
+  (_, _, _, _, _, On, _, _, _, _, _, _) => 5,
+  (_, _, _, _, _, _, On, _, _, _, _, _) => 6,
+  (_, _, _, _, _, _, _, On, _, _, _, _) => 7,
+  (_, _, _, _, _, _, _, _, On, _, _, _) => 8,
+  (_, _, _, _, _, _, _, _, _, On, _, _) => 9,
+  (_, _, _, _, _, _, _, _, _, _, On, _) => 10,
+  (_, _, _, _, _, _, _, _, _, _, _, On) => 11,
+  _ => -1,
+}
+
+effect fn main() -> Unit = println("${first_on(On, On, On, On, On, On, On, On, On, On, On, On)}")

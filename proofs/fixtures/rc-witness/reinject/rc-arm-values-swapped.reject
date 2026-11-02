@@ -1,0 +1,1 @@
+ANCHORS REJECT: rc: function 7: recorded events with no call [a2 (no callee in its window declares that it consumes it) a3 (no callee in its window declares that it consumes it)]; calls with no recorded event [a@47 on [6]]

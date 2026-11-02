@@ -1,0 +1,3 @@
+expects_code = "E119"
+expects_error = "escapes its call: it is returned (the return type holds a Region)"
+hint_substring = "copy what you need out with `ffi.read` / `ffi.to_bytes`"

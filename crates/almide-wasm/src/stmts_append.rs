@@ -83,7 +83,7 @@ impl Emitter<'_> {
     /// The list twin of [`Self::try_str_append_assign`] (#1729):
     /// `data = data + [e]` — the canonical accumulator loop — routes
     /// through `$cow` + `$list_push_{8,4}` (amortized in-place growth,
-    /// the outgrown block freed at rc==1) instead of `$concat`'s full
+    /// the outgrown block released) instead of `$concat`'s full
     /// copy per append. The COW judge keeps value semantics for a
     /// shared accumulator; the element is lowered AFTER the judge but
     /// read against the pre-assign block either way, so a

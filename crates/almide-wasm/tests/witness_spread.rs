@@ -51,12 +51,16 @@ fn spread_records_witness_their_field_stores_and_release_a_produced_base() {
         // param_borrow.rs), and the dying base hands its credit to the
         // rebuilt record (`im`: received, moved — dying_move.rs); the
         // borrowed `s` shares into the overwritten slot; the result moves out.
-        ("renamed", "im\nam\nim\n"),
+        // B1 (9b35d41ca) logs the overwritten `name` slot's release as the
+        // slot's consume (`id`).
+        ("renamed", "im\nam\nid\nim\n"),
         // A scalar field carries no site: `p.n` reads the base (`b`) before
         // its hand-over, and the result moves out.
         ("bumped", "ibm\nim\n"),
         // A fresh list literal (and its element) moves into the slot.
-        ("tagged", "im\nim\nim\nim\n"),
+        // B1 (9b35d41ca) logs the overwritten `tags` slot's release as the
+        // slot's consume (`id`).
+        ("tagged", "im\nim\nim\nid\nim\n"),
         // A LOCAL base: born by the call, read by the spread (`b`) and by
         // `p.n`, released at the exit; the copy is a fresh bind of its own.
         ("local_base", "\nibbd\nibd\n"),

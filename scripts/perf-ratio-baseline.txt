@@ -110,6 +110,13 @@ wordfreq-wasm-idiom 0.78
 jsonround-native-wasm 0.69
 wordfreq-native-wasm 0.46
 wordfreq-group-native-wasm 0.39
+# REGEX CYCLE (#4392): regexcycle-32 min / regexcycle-8 min, the same number of
+# matches, per leg. The gate fails on REGEX_CYCLE_CEILING in check-perf-ratio.sh,
+# never on these values. GCE n2-standard-4, 2026-11-01, --quick --runs 9:
+# native 1.026 (with the fix reverted 3.274: 0.519 s against 0.159 s),
+# wasm 1.065 (the wasm leg keeps no cache and reads the same with or without it).
+regexcycle-native 1.03
+regexcycle-wasm 1.07
 treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written

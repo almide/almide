@@ -1,0 +1,11 @@
+// E118 (ADR-0032 Q19): a body type's media type is a literal the checker
+// reads, so what it serves is what it was granted.
+import http
+
+type Report: Body = { rows: String, kind: String }
+
+fn Report.media_type(self) -> String = "text/${self.kind}"
+
+fn Report.to_text(self) -> String = self.rows
+
+fn main() -> Unit = println(http.body(http.response(200, Report { rows: "a,b", kind: "csv" })))

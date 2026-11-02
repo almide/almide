@@ -19,13 +19,18 @@ pub fn transpose_8x8_f64(input: &[f64; 64]) -> [f64; 64] {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx") {
-            // SAFETY: guarded by the runtime feature check.
+            // SAFETY: guarded by the runtime feature check (AVX, the
+            // kernel's one precondition; its input is a fixed [f64; 64]).
             return unsafe { transpose_8x8_f64_avx(input) };
         }
     }
     transpose_8x8_f64_naive(input)
 }
 
+/// # Safety
+/// The CPU has AVX; it is inlined into, and only called from,
+/// `transpose_8x8_f64_avx`, whose own contract is that. Register-only: no
+/// memory is touched.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn transpose_4x4_f64(
@@ -47,6 +52,9 @@ unsafe fn transpose_4x4_f64(
     ]
 }
 
+/// # Safety
+/// The CPU has AVX (the caller checks it). The loads and stores index the
+/// fixed 64-element arrays at `row * 8 + {0, 4}`, rows 0..8, all in bounds.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx")]
 unsafe fn transpose_8x8_f64_avx(input: &[f64; 64]) -> [f64; 64] {

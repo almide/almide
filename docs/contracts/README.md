@@ -67,8 +67,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | value get/set/remove_path edge cases match the native oracle, which never fails on a path edge case | 0.24.0 | active | fixture | 3 |
-| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 5 |
-| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 21 |
+| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 6 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 22 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 10 |
@@ -273,7 +273,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-235 | Unary operators: `not` negation and prefix minus evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-236 | Tuple construction, destructuring, indexing, and structural equality are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-237 | Option/Result constructor literals build and eliminate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 9 |
+| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 10 |
 | C-239 | Collection literals, indexing, and the empty spellings behave identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-241 | Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets | 0.57.1 | active | fixture | 1 |
@@ -338,7 +338,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 2 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
 | C-302 | Numeric determinism family head: a Float result is a function of the program alone | 0.58.0 | active | fixture | 6 |
-| C-303 | Float operations round to nearest-even once each — no contraction, no FMA | 0.58.0 | active | fixture | 1 |
+| C-303 | Float operations round to nearest-even once each — no contraction, no FMA | 0.58.0 | active | fixture | 2 |
 | C-304 | Subnormal floats are preserved — no flush-to-zero on any target | 0.58.0 | active | fixture | 1 |
 | C-305 | Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/pow within 1 ulp | 0.58.0 | active | fixture | 1 |
 | C-306 | Signed zero: IEEE propagation, equality ignores the sign, min/max order -0 below +0 (IEEE 754-2019) | 0.60.0 | active | fixture | 2 |
@@ -475,4 +475,13 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-437 | A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error | 0.69.0 | active | fixture | 0 |
 | C-438 | env.secret(name) reads an environment variable as Option[Secret[String]]: env.get's value, rendered Secret(***), compared in constant time | 0.69.0 | active | fixture | 1 |
 | C-439 | env.vars lists the environment keyed and ordered by name with the program's own set and remove applied, and env.remove unsets a name or refuses it as env.set does, with the same bytes on every leg | 0.69.0 | active | fixture | 1 |
+| C-440 | every compile-cost budget in the table holds: a counted limit the source cannot raise, ending in its defined diagnostic | 0.69.0 | active | fixture | 0 |
+| C-441 | uuid.v7 carries version 7 and the RFC 9562 variant, spells as 8-4-4-4-12 lowercase hex, and each one is strictly greater than the last on every leg, in one millisecond too | 0.69.0 | active | fixture | 1 |
+| C-442 | net udp and lookup_host: binding, datagram boundaries, the max-bytes rule, the sender's address and loopback name lookup agree on native and the embedded wasm lane | 0.69.0 | active | fixture | 0 |
+| C-443 | net udp and lookup_host: every failure reads as errno-free classified text from net's one table, identical on native and the embedded wasm lane | 0.69.0 | active | fixture | 0 |
+| C-444 | A Bytes value nested in a rendered value prints as the list of its byte values, identically on every target | 0.69.0 | active | fixture | 1 |
+| C-445 | The embedded wasm host stops a process.start child neither waited on nor stopped when the run ends by main's return, process.exit or an effect error, as native does | 0.69.0 | active | fixture | 0 |
+| C-446 | A Region crosses the wasm host boundary as (base, len) in the memory's address width: an exported Region stays the host's to write until it releases the address, and a Region lent across the boundary is read and written in place | 0.69.0 | active | fixture | 0 |
+| C-447 | fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length | 0.69.0 | active | fixture | 1 |
+| C-448 | net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native | 0.69.0 | active | fixture | 0 |
 

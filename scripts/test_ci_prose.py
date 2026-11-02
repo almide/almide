@@ -188,7 +188,7 @@ class ProseTests(unittest.TestCase):
         skipped = {step.splitlines()[0] for step in steps if "        if: env.PROSE_LANE != 'true'" in step}
         self.assertEqual(skipped, {
             "name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)",
-            "uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0",
+            "uses: ./.github/actions/setup-node-pinned",
             "name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)",
             "name: JS host (#2265/#2276 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal "
             "to expected and native; the module and glue ship only the program's surface)",

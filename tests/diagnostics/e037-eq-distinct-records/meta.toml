@@ -1,0 +1,3 @@
+expects_code = "E037"
+expects_error = "operator '==' compares Point with Size"
+hint_substring = "same type"

@@ -261,8 +261,8 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
         //   encode: Item.encode : (Item) -> Value
         //   decode: Item.decode : (Value) -> Result[Item, String]
         // (`Value` is the codec intermediate, `Ty::Named("Value")`.)
-        let elem_ty = Ty::Named(type_name.into(), vec![]);
-        let value_ty = Ty::Named("Value".into(), vec![]);
+        let elem_ty = Ty::Named(type_name.into(), Default::default());
+        let value_ty = Ty::Named("Value".into(), Default::default());
         use almide_lang::types::constructor::TypeConstructorId;
         let fn_ref_ty = if is_encode {
             Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(value_ty) }
@@ -271,7 +271,7 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
                 params: vec![value_ty],
                 ret: Box::new(Ty::Applied(
                     TypeConstructorId::Result,
-                    vec![elem_ty, Ty::String],
+                    vec![elem_ty, Ty::String].into(),
                 )),
             }
         };
@@ -315,15 +315,15 @@ fn rewrite_call_option_codec(name: Sym, type_name: String, args: Vec<IrExpr>, ty
     let func_ref = MODULE_METHOD_FNS
         .with(|c| c.borrow().get(&codec_method).cloned())
         .unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
-    let elem_ty = Ty::Named(type_name.into(), vec![]);
-    let value_ty = Ty::Named("Value".into(), vec![]);
+    let elem_ty = Ty::Named(type_name.into(), Default::default());
+    let value_ty = Ty::Named("Value".into(), Default::default());
     use almide_lang::types::constructor::TypeConstructorId;
     let fn_ref_ty = if is_encode {
         Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(value_ty) }
     } else {
         Ty::Fn { is_effect: false, 
             params: vec![value_ty],
-            ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String])),
+            ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String].into())),
         }
     };
     let by_ref = !is_encode && DECODE_BY_REF.with(|c| c.borrow().contains(&codec_method));

@@ -41,7 +41,7 @@ fn parsed(tag: &str, text: &str) -> String {
     let _ = std::fs::remove_dir_all(&dir);
     // `root` and each `declared_at` name the scratch directory, which differs
     // per tag; only what the keys say is compared.
-    format!("{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}", p.package, p.dependencies, p.permissions, p.proc_allow, p.fs_allow, p.native_grants, p.trust_owners, p.native_deps)
+    format!("{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}", p.package, p.dependencies, p.permissions, p.proc_allow, p.fs_allow, p.native_grants, p.trust_owners, p.media_grants, p.native_deps)
         .replace(&dir.display().to_string(), "<dir>")
 }
 
@@ -176,7 +176,13 @@ fn every_accepted_key_changes_the_parse() {
         );
     }
     for key in TRUST_KEYS {
-        let text = format!("{pkg}[trust]\n{key} = [\"github.com/alice\"]\n");
+        // `media` is a table from a package source to its media types
+        // (ADR-0032 D7); `owners` a list of owners.
+        let value = match *key {
+            "media" => "{ \"almide/svg\" = [\"image/svg+xml\"] }",
+            _ => "[\"github.com/alice\"]",
+        };
+        let text = format!("{pkg}[trust]\n{key} = {value}\n");
         assert_ne!(parsed(&format!("trust-{key}"), &text), base, "[trust].{key} is listed but changes nothing");
     }
     for key in TARGET_PLATFORM_KEYS {

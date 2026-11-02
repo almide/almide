@@ -1,0 +1,19 @@
+// One arm per column, then one arm for every value the columns leave: the
+// check walks each column once.
+fn first_some(x0: Option[Int], x1: Option[Int], x2: Option[Int], x3: Option[Int], x4: Option[Int], x5: Option[Int], x6: Option[Int], x7: Option[Int], x8: Option[Int], x9: Option[Int], x10: Option[Int], x11: Option[Int]) -> Int = match (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11) {
+  (some(_), _, _, _, _, _, _, _, _, _, _, _) => 0,
+  (_, some(_), _, _, _, _, _, _, _, _, _, _) => 1,
+  (_, _, some(_), _, _, _, _, _, _, _, _, _) => 2,
+  (_, _, _, some(_), _, _, _, _, _, _, _, _) => 3,
+  (_, _, _, _, some(_), _, _, _, _, _, _, _) => 4,
+  (_, _, _, _, _, some(_), _, _, _, _, _, _) => 5,
+  (_, _, _, _, _, _, some(_), _, _, _, _, _) => 6,
+  (_, _, _, _, _, _, _, some(_), _, _, _, _) => 7,
+  (_, _, _, _, _, _, _, _, some(_), _, _, _) => 8,
+  (_, _, _, _, _, _, _, _, _, some(_), _, _) => 9,
+  (_, _, _, _, _, _, _, _, _, _, some(_), _) => 10,
+  (_, _, _, _, _, _, _, _, _, _, _, some(_)) => 11,
+  _ => -1,
+}
+
+effect fn main() -> Unit = println("${first_some(some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1), some(1))}")

@@ -343,7 +343,7 @@ fn resolve_list_elem_ty_zip(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
     let a = resolve_list_elem_ty(&args[0], vt);
     let b = resolve_list_elem_ty(&args[1], vt);
     if let (Some(a), Some(b)) = (a, b) {
-        Some(Ty::Tuple(vec![a, b]))
+        Some(Ty::Tuple(vec![a, b].into()))
     } else {
         None
     }
@@ -463,16 +463,16 @@ fn compute_stdlib_call_ret_inner(module: &str, func: &str, args: &[IrExpr], vt: 
         let arg = args.get(idx)?;
         resolve_list_elem_ty(arg, vt)
     };
-    let list_of = |t: Ty| Ty::Applied(TCI::List, vec![t]);
+    let list_of = |t: Ty| Ty::Applied(TCI::List, vec![t].into());
     match func {
         "zip" => {
             let a = list_elem(0)?;
             let b = list_elem(1)?;
-            Some(list_of(Ty::Tuple(vec![a, b])))
+            Some(list_of(Ty::Tuple(vec![a, b].into())))
         }
         "enumerate" => {
             let elem = list_elem(0)?;
-            Some(list_of(Ty::Tuple(vec![Ty::Int, elem])))
+            Some(list_of(Ty::Tuple(vec![Ty::Int, elem].into())))
         }
         "map" | "filter_map" | "flat_map" => None,  // needs lambda ret
         "filter" | "take_while" | "drop_while"
@@ -486,7 +486,7 @@ fn compute_stdlib_call_ret_inner(module: &str, func: &str, args: &[IrExpr], vt: 
         "count" | "len" => Some(Ty::Int),
         "first" | "last" | "find" => {
             let elem = list_elem(0)?;
-            Some(Ty::Applied(TCI::Option, vec![elem]))
+            Some(Ty::Applied(TCI::Option, vec![elem].into()))
         }
         _ => None,
     }

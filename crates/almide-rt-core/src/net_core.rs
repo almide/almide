@@ -332,6 +332,18 @@ impl AlmideNetTables {
         }
     }
 
+    /// A table holding only a clone of UDP socket `h`, at `h`: a send or a
+    /// datagram wait runs on it with the shared table's lock released, so
+    /// one `fan` arm waiting never stalls another (the embedded host's ops
+    /// 142 / 143, #4306; native's own `almide_net_udp_io` is the same shape).
+    pub fn udp_scratch(&mut self, h: i64) -> Result<AlmideNetTables, String> {
+        let clone = self.udp(h)?.try_clone().map_err(|e| net_io_error_text("UdpSocket", &e))?;
+        let mut scratch = AlmideNetTables::default();
+        scratch.udps.resize_with(h as usize, || None);
+        scratch.udps.push(Some(clone));
+        Ok(scratch)
+    }
+
     /// Closing a closed socket is ok; a handle never issued is not.
     pub fn udp_close(&mut self, h: i64) -> Result<(), String> {
         let i = usize::try_from(h).ok().filter(|i| *i < self.udps.len())

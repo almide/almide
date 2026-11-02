@@ -1,0 +1,58 @@
+// @contract: C-275
+// Security row 11e, ADR-0032: a fetched response's body keeps its own type.
+// Re-served unchanged (a proxy) it stays text/html, as the upstream sent it,
+// and a header added to it stays allowed. A String written into it replaces
+// the body AND its type (text/plain; charset=utf-8), so it can never go out
+// labelled as the upstream's HTML, and writing Content-Type by name aborts.
+// The full-response client family is native-only (E081 on every wasm leg),
+// so no cross-target runner executes this file;
+// tests/http_proxy_html_passthrough_test.rs in almide/almide runs it and
+// pins its stdout, stderr and exit code.
+//
+// The server arm answers one canned text/html response over `net` on
+// loopback; the client arm fetches it, and main re-serves it.
+import env
+import io
+import http
+import net
+
+effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
+  let server = net.tcp_listen("127.0.0.1", port)!
+  let peer = net.tcp_accept(server)!
+  let _ = io.read(peer, 4096)!
+  io.write(peer, bytes.from_string(reply))!
+  io.close(peer)!
+  io.close(server)!
+  ok(())
+}
+
+effect fn get_retry(url: String, left: Int) -> Result[HttpResponse, String] = match http.get_response(url) {
+  ok(resp) => ok(resp),
+  err(e) => if left == 0 then err(e)
+  else {
+    env.sleep_ms(20)
+    get_retry(url, left - 1)
+  },
+}
+
+// A header name the checker cannot read as a literal (a literal is E116).
+fn ct(s: String) -> String = s
+
+effect fn main() -> Unit = {
+  let reply = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 15\r\n\r\n<p>upstream</p>"
+  let (_, upstream) = fan {
+    answer_once(39193, reply)
+    get_retry("http://127.0.0.1:39193/page", 100)
+  }
+  // The proxy answers with the upstream response, unchanged but for one header.
+  let served = http.set_header(upstream, "Via", "1.1 almide-proxy")
+  println("status ${http.status(served)}")
+  println("content-type ${http.header(served, "Content-Type") ?? "none"}")
+  println("via ${http.header(served, "Via") ?? "none"}")
+  println("body ${http.body(served)}")
+  let text = http.set_body(served, "<script>alert(1)</script>")
+  println("rewritten ${http.header(text, "Content-Type") ?? "none"}")
+  println("relabelling")
+  let relabelled = http.set_header(served, ct("Content-Type"), "text/html")
+  println("not reached ${http.body(relabelled)}")
+}

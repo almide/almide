@@ -1726,30 +1726,118 @@ fn rx_valid(pat: &str) -> std::rc::Rc<AlmideRxCompiled> {
     rx
 }
 
-/// How many compiled patterns a thread keeps.
-const ALMIDE_RX_CACHE: usize = 16;
+/// How many compiled patterns a thread keeps, and how many pattern bytes they
+/// may hold in all. A secret scanner applies a few hundred Regex values to
+/// every line; each must stay compiled for as long as the scan runs (#4392).
+const ALMIDE_RX_CACHE: usize = 1024;
+const ALMIDE_RX_CACHE_BYTES: usize = 1 << 20;
+
+/// The patterns this thread compiled, keyed by their text. A Regex holds its
+/// pattern, so a match looks its program up here in one hash: it is built
+/// once per pattern, never once per call.
+///
+/// When the cache is full, a pseudo-randomly chosen entry makes room. An LRU
+/// list evicts every entry of a cycle one longer than the list before it is
+/// used again: 17 patterns applied in turn to a 16-entry list recompiled on
+/// every call (#4392). Random eviction keeps most of such a cycle compiled.
+struct AlmideRxCache {
+    entries: Vec<(std::rc::Rc<str>, std::rc::Rc<AlmideRxCompiled>)>,
+    index: std::collections::HashMap<std::rc::Rc<str>, usize, std::hash::BuildHasherDefault<AlmideRxHasher>>,
+    bytes: usize,
+    seed: u64,
+}
+
+/// The cache's hash: a multiply-rotate fold over 8-byte words (FxHash's).
+/// Every match hashes its pattern once, and SipHash cost a match of a short
+/// pattern a tenth of its time. Collisions only lengthen a probe; the key is
+/// compared in full.
+#[derive(Default)]
+struct AlmideRxHasher(u64);
+
+impl AlmideRxHasher {
+    fn add(&mut self, w: u64) {
+        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for AlmideRxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u8(&mut self, i: u8) {
+        self.add(u64::from(i));
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+impl AlmideRxCache {
+    /// Drops the entry at `i`, moving the last one into its place.
+    fn evict(&mut self, i: usize) {
+        let (key, _) = self.entries.swap_remove(i);
+        self.index.remove(&key);
+        self.bytes -= key.len();
+        if let Some((moved, _)) = self.entries.get(i) {
+            self.index.insert(moved.clone(), i);
+        }
+    }
+
+    /// The next pseudo-random index below `n` (xorshift64; only which entry
+    /// is recompiled later depends on it, never an answer).
+    fn pick(&mut self, n: usize) -> usize {
+        let mut x = self.seed;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.seed = x;
+        (x % n as u64) as usize
+    }
+}
 
 thread_local! {
-    /// The patterns this thread compiled most recently, newest first: a loop
-    /// that calls `regex.is_match(pat, line)` per line builds the program once.
-    static ALMIDE_RX_COMPILED: std::cell::RefCell<Vec<(String, std::rc::Rc<AlmideRxCompiled>)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+    static ALMIDE_RX_COMPILED: std::cell::RefCell<AlmideRxCache> = std::cell::RefCell::new(AlmideRxCache {
+        entries: Vec::new(),
+        index: std::collections::HashMap::default(),
+        bytes: 0,
+        seed: 0x9E37_79B9_7F4A_7C15,
+    });
 }
 
 fn rx_cached(pat: &str) -> std::rc::Rc<AlmideRxCompiled> {
-    ALMIDE_RX_COMPILED.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(i) = cache.iter().position(|(p, _)| p == pat) {
-            let hit = cache.remove(i);
-            let rc = hit.1.clone();
-            cache.insert(0, hit);
-            return rc;
-        }
-        let rc = std::rc::Rc::new(rx_compiled(pat));
-        cache.insert(0, (pat.to_string(), rc.clone()));
-        cache.truncate(ALMIDE_RX_CACHE);
-        rc
-    })
+    let hit = ALMIDE_RX_COMPILED.with(|cache| {
+        let cache = cache.borrow();
+        cache.index.get(pat).map(|&i| cache.entries[i].1.clone())
+    });
+    if let Some(rc) = hit {
+        return rc;
+    }
+    let rc = std::rc::Rc::new(rx_compiled(pat));
+    // A pattern larger than the whole budget is compiled for this call only.
+    if pat.len() <= ALMIDE_RX_CACHE_BYTES {
+        ALMIDE_RX_COMPILED.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            while !cache.entries.is_empty()
+                && (cache.entries.len() >= ALMIDE_RX_CACHE || cache.bytes + pat.len() > ALMIDE_RX_CACHE_BYTES)
+            {
+                let n = cache.entries.len();
+                let i = cache.pick(n);
+                cache.evict(i);
+            }
+            let key: std::rc::Rc<str> = std::rc::Rc::from(pat);
+            let at = cache.entries.len();
+            cache.index.insert(key.clone(), at);
+            cache.bytes += key.len();
+            cache.entries.push((key, rc.clone()));
+        });
+    }
+    rc
 }
 
 /// How many walk steps per (pattern char × text char) a call may spend before

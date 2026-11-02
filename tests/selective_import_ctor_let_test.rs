@@ -134,3 +134,50 @@ fn the_cheatsheet_selective_import_form_runs() {
     assert!(ok, "wasm run failed:\n{out}");
     assert!(out.contains("[\"small\", \"big\", \"big\"] 2"), "unexpected wasm output:\n{out}");
 }
+
+/// #4329: a selectively imported fn named as a VALUE resolves as its call
+/// does. The spec file holds the shapes; this runs it on both legs.
+#[cfg_attr(debug_assertions, ignore = "compiles the program on every leg (CI: release-shape job)")]
+#[test]
+fn selectively_imported_fn_as_a_value_runs_on_every_leg() {
+    let integration = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/integration");
+    let file = "modules/selective_fn_value_test.almd";
+    let (ok, out) = run(&integration, &["test", file, "--target", "rust"]);
+    assert!(ok, "native leg failed:\n{out}");
+    assert!(out.contains("3 tests"), "all three tests must run:\n{out}");
+    if !wasmtime_available() {
+        eprintln!("wasmtime not on PATH — the wasm leg is skipped here (CI installs it)");
+        return;
+    }
+    let (ok, out) = run(&integration, &["test", file, "--target", "wasm"]);
+    assert!(ok, "wasm leg failed:\n{out}");
+}
+
+/// The issue's own shape (#4329): a package submodule's zero-argument fn,
+/// brought in by `import self.common.{items}`, passed to a fn parameter.
+#[cfg_attr(debug_assertions, ignore = "compiles the program (CI: release-shape job)")]
+#[test]
+fn a_package_selective_fn_import_passes_as_a_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("almide.toml"), "[package]\nname = \"p\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(root.join("src/common.almd"), "fn items() -> List[Int] = [1, 2, 3]\n").unwrap();
+    std::fs::write(
+        root.join("src/main.almd"),
+        "import self.common.{items}\n\n\
+         fn call(f: () -> List[Int]) -> Int = list.len(f())\n\n\
+         effect fn main() -> Unit = {\n  println(\"n=${call(items)} direct=${list.len(items())}\")\n}\n",
+    )
+    .unwrap();
+    let (ok, out) = run(root, &["check", "src/main.almd"]);
+    assert!(ok && !out.contains("E003"), "a selectively imported fn must be a value:\n{out}");
+    assert!(!out.contains("unused import"), "naming the fn as a value uses its import:\n{out}");
+    let (ok, out) = run(root, &["run", "src/main.almd"]);
+    assert!(ok && out.contains("n=3 direct=3"), "native run:\n{out}");
+    if !wasmtime_available() {
+        return;
+    }
+    let (ok, out) = run(root, &["run", "src/main.almd", "--target", "wasm"]);
+    assert!(ok && out.contains("n=3 direct=3"), "wasm run:\n{out}");
+}

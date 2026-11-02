@@ -1,0 +1,6 @@
+// #4281 drill: starts_with's length test lets a prefix one byte longer than
+// s through while the bounds witness still records s's read under the loop
+// exit `e a` — the proven checker accepts, the bytes read past s.
+effect fn main() -> Unit = {
+  println("${string.starts_with("hey", "he")}")
+}

@@ -59,7 +59,11 @@ pub const TESTED: &[&str] = &["testing.assert_aborts"];
 const ABORTS_MAX_K: u64 = 256;
 
 fn default_n(counted: bool) -> u64 {
-    if counted { 16_384 } else { 262_144 }
+    if counted {
+        16_384
+    } else {
+        262_144
+    }
 }
 
 pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String]) {
@@ -67,16 +71,28 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
     // Every run compiles the test file first (both legs), as the embedded
     // lane does for `almide run` (see `Ctx::calibrate_scale`).
     ctx.calibrate_scale = 10.0;
-    let n: u64 = super::super::flag_value(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(default_n(ctx.icount));
+    let n: u64 = super::super::flag_value(args, "--n")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default_n(ctx.icount));
     if let Some(out) = super::super::flag_value(args, "--emit") {
         let root = Path::new(out);
         let mut files = Vec::new();
         for fill in Fill::MEASURED {
             let dir = vars_dir(fill);
-            files.push((format!("{dir}/call_test.almd"), aborts_gen::complexity_test(n, 3, fill)));
-            files.push((format!("{dir}/alloc_test.almd"), aborts_gen::alloc_test(8, fill)));
+            files.push((
+                format!("{dir}/call_test.almd"),
+                aborts_gen::complexity_test(n, 3, fill),
+            ));
+            files.push((
+                format!("{dir}/alloc_test.almd"),
+                aborts_gen::alloc_test(8, fill),
+            ));
             for (i, p) in aborts_gen::diamond_projects(fill).into_iter().enumerate() {
-                files.extend(p.files.into_iter().map(|(f, s)| (format!("{dir}/diamond-{}/{f}", ["d", "l", "r"][i]), s)));
+                files.extend(
+                    p.files
+                        .into_iter()
+                        .map(|(f, s)| (format!("{dir}/diamond-{}/{f}", ["d", "l", "r"][i]), s)),
+                );
             }
         }
         for i in 0..3 {
@@ -84,7 +100,11 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
         }
         for (path, src) in files {
             let file = root.join(path);
-            if let Err(e) = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&file, src)) {
+            if let Err(e) = file
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|_| std::fs::write(&file, src))
+            {
                 eprintln!("{}: {e}", file.display());
                 std::process::exit(2);
             }
@@ -97,15 +117,26 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
     // per measured T and are labelled as every generic's are
     // (`super::both_instantiations`). Parity is one campaign whose closures
     // draw T from Unit, Int and String (`aborts_gen::synthesize_test`).
-    let per_fill = |f: &dyn Fn(Fill) -> String| super::both_instantiations(&f(Fill::Int), &f(Fill::String));
+    let per_fill =
+        |f: &dyn Fn(Fill) -> String| super::both_instantiations(&f(Fill::Int), &f(Fill::String));
     let verdicts = vec![
         ("parity", parity(ctx, engine, args)),
-        ("complexity", per_fill(&|fill| complexity(ctx, n, order, fill))),
+        (
+            "complexity",
+            per_fill(&|fill| complexity(ctx, n, order, fill)),
+        ),
         ("alloc", per_fill(&|fill| alloc(ctx, fill))),
         ("diamond", per_fill(&|fill| diamond(ctx, fill))),
     ];
     let all_pass = verdicts.iter().all(|(_, v)| v.starts_with("PASS"));
-    println!("# {name} — {}", if all_pass { "all criteria PASS (stampable)" } else { "NOT stampable" });
+    println!(
+        "# {name} — {}",
+        if all_pass {
+            "all criteria PASS (stampable)"
+        } else {
+            "NOT stampable"
+        }
+    );
     for (k, v) in &verdicts {
         println!("{k} = {}", toml_str(v));
     }
@@ -124,7 +155,9 @@ pub(super) fn test_cmd(ctx: &Ctx, file: &Path, wasm: bool) -> Result<(Command, W
     let src = std::fs::read_to_string(file).unwrap_or_default();
     let world = World::for_program(&ctx.dir, &src)?;
     let mut c = Command::new(&ctx.almide);
-    c.arg("test").arg(file).args(["--target", if wasm { "wasm" } else { "native" }]);
+    c.arg("test")
+        .arg(file)
+        .args(["--target", if wasm { "wasm" } else { "native" }]);
     world.enter(&mut c);
     Ok((c, world))
 }
@@ -141,20 +174,39 @@ pub fn transcript(code: Option<i32>, stdout: &str, stderr: &str) -> String {
     }
     let all = format!("{stdout}\n{stderr}");
     let lines: Vec<&str> = all.lines().collect();
-    let Some(start) = lines.iter().position(|l| l.trim_start().starts_with("expected: ")) else {
-        let first = lines.iter().find(|l| l.contains("error")).or_else(|| lines.iter().find(|l| !l.trim().is_empty())).unwrap_or(&"");
+    let Some(start) = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("expected: "))
+    else {
+        let first = lines
+            .iter()
+            .find(|l| l.contains("error"))
+            .or_else(|| lines.iter().find(|l| !l.trim().is_empty()))
+            .unwrap_or(&"");
         return format!("fail\n{}\n", first.trim());
     };
     let at = lines[..start]
         .iter()
         .rev()
         .find(|l| l.trim_start().starts_with("at:"))
-        .map(|l| l.trim().chars().rev().take_while(char::is_ascii_digit).collect::<String>().chars().rev().collect::<String>())
+        .map(|l| {
+            l.trim()
+                .chars()
+                .rev()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>()
+        })
         .unwrap_or_default();
     let mut out = format!("fail\nat line {at}\n");
     for l in &lines[start..] {
         let t = l.trim();
-        let end = t.is_empty() || t.starts_with("test: ") || t.starts_with("error: ") || t.starts_with("PANIC: testing.assert_aborts failed");
+        let end = t.is_empty()
+            || t.starts_with("test: ")
+            || t.starts_with("error: ")
+            || t.starts_with("PANIC: testing.assert_aborts failed");
         if end {
             break;
         }
@@ -195,7 +247,12 @@ pub(super) fn test_art(ctx: &Ctx, file: &Path, src: &str, wasm: bool) -> Result<
     let _ = std::fs::remove_dir_all(&build);
     let tmp = build.join("tmp");
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-    let src_file = build.join(format!("{}_test.almd", file.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default()));
+    let src_file = build.join(format!(
+        "{}_test.almd",
+        file.file_stem()
+            .map(|s| s.to_string_lossy())
+            .unwrap_or_default()
+    ));
     std::fs::write(&src_file, src).map_err(|e| e.to_string())?;
     let out = Command::new(&ctx.almide)
         .arg("test")
@@ -208,10 +265,14 @@ pub(super) fn test_art(ctx: &Ctx, file: &Path, src: &str, wasm: bool) -> Result<
     if !out.status.success() {
         let t = output_transcript(&out);
         let _ = std::fs::remove_dir_all(&build);
-        return Err(format!("the test did not pass at build: {}", t.replace('\n', " / ")));
+        return Err(format!(
+            "the test did not pass at build: {}",
+            t.replace('\n', " / ")
+        ));
     }
     let bin = built_test_bin(&tmp);
-    let copied = bin.and_then(|b| std::fs::copy(&b, &art).map_err(|e| format!("{}: {e}", b.display())));
+    let copied =
+        bin.and_then(|b| std::fs::copy(&b, &art).map_err(|e| format!("{}: {e}", b.display())));
     let _ = std::fs::remove_dir_all(&build);
     copied.map(|_| art)
 }
@@ -229,7 +290,11 @@ pub fn built_test_bin(tmp: &Path) -> Result<PathBuf, String> {
         .collect();
     match found.as_slice() {
         [one] => Ok(one.clone()),
-        _ => Err(format!("expected one {TEST_BIN} under {}, found {}", root.display(), found.len())),
+        _ => Err(format!(
+            "expected one {TEST_BIN} under {}, found {}",
+            root.display(),
+            found.len()
+        )),
     }
 }
 
@@ -259,20 +324,33 @@ pub(super) fn test_art_cmd(ctx: &Ctx, art: &Path, wasm: bool, cwd: &Path) -> Com
         return c;
     }
     let mut c = Command::new(art);
-    c.args(["--nocapture", "--test-threads=1"]).env("RUST_MIN_STACK", "8388608").env("ALMIDE_CWD", cwd);
+    c.args(["--nocapture", "--test-threads=1"])
+        .env("RUST_MIN_STACK", "8388608")
+        .env("ALMIDE_CWD", cwd);
     c
 }
 
 /// A finished test run's transcript; a test that did not pass is a failed
 /// run for the judge (its probes are the success path).
 pub(super) fn output_transcript(out: &std::process::Output) -> String {
-    transcript(out.status.code(), &String::from_utf8_lossy(&out.stdout), &String::from_utf8_lossy(&out.stderr))
+    transcript(
+        out.status.code(),
+        &String::from_utf8_lossy(&out.stdout),
+        &String::from_utf8_lossy(&out.stderr),
+    )
 }
 
-pub(super) fn run_test_art(ctx: &Ctx, art: &Path, wasm: bool, world: &World) -> Result<String, String> {
+pub(super) fn run_test_art(
+    ctx: &Ctx,
+    art: &Path,
+    wasm: bool,
+    world: &World,
+) -> Result<String, String> {
     let mut c = test_art_cmd(ctx, art, wasm, &world.dir);
     world.enter(&mut c);
-    let out = c.output().map_err(|e| format!("almide test did not run: {e}"))?;
+    let out = c
+        .output()
+        .map_err(|e| format!("almide test did not run: {e}"))?;
     let t = output_transcript(&out);
     if !out.status.success() {
         return Err(format!("the test did not pass: {}", t.replace('\n', " / ")));
@@ -280,13 +358,24 @@ pub(super) fn run_test_art(ctx: &Ctx, art: &Path, wasm: bool, world: &World) -> 
     Ok(t)
 }
 
-fn run_transcript(ctx: &Ctx, file: &Path, wasm: bool, cwd: Option<&Path>) -> Result<String, String> {
+fn run_transcript(
+    ctx: &Ctx,
+    file: &Path,
+    wasm: bool,
+    cwd: Option<&Path>,
+) -> Result<String, String> {
     let (mut c, _world) = test_cmd(ctx, file, wasm)?;
     if let Some(d) = cwd {
         c.current_dir(d);
     }
-    let o = c.output().map_err(|e| format!("almide test did not run: {e}"))?;
-    Ok(transcript(o.status.code(), &String::from_utf8_lossy(&o.stdout), &String::from_utf8_lossy(&o.stderr)))
+    let o = c
+        .output()
+        .map_err(|e| format!("almide test did not run: {e}"))?;
+    Ok(transcript(
+        o.status.code(),
+        &String::from_utf8_lossy(&o.stdout),
+        &String::from_utf8_lossy(&o.stderr),
+    ))
 }
 
 // ── complexity ─────────────────────────────────────────────────────────
@@ -300,8 +389,19 @@ fn run_transcript(ctx: &Ctx, file: &Path, wasm: bool, cwd: Option<&Path>) -> Res
 /// compiled module on the embedded lane): a constant per call, in the
 /// intercept of the fit. The closure is valued `fill` (T).
 fn complexity(ctx: &Ctx, n: u64, order: Option<&str>, fill: Fill) -> String {
-    let programs = |m: u64, k: u64| (aborts_gen::complexity_test(m, k, fill), aborts_gen::complexity_test(m, 0, fill));
-    match judge(ctx, "assert_aborts(n=child stderr bytes before the abort, k=calls)", order, n, &programs) {
+    let programs = |m: u64, k: u64| {
+        (
+            aborts_gen::complexity_test(m, k, fill),
+            aborts_gen::complexity_test(m, 0, fill),
+        )
+    };
+    match judge(
+        ctx,
+        "assert_aborts(n=child stderr bytes before the abort, k=calls)",
+        order,
+        n,
+        &programs,
+    ) {
         Ok(s) => format!("PASS: {s}"),
         Err(s) => format!("FAIL: {s}"),
     }
@@ -314,7 +414,9 @@ fn complexity(ctx: &Ctx, n: u64, order: Option<&str>, fill: Fill) -> String {
 /// every closure valued `fill` (T).
 pub(super) fn alloc(ctx: &Ctx, fill: Fill) -> String {
     let src = aborts_gen::alloc_test(8, fill);
-    let file = ctx.dir.join(format!("a{:016x}_test.almd", super::hash(&src)));
+    let file = ctx
+        .dir
+        .join(format!("a{:016x}_test.almd", super::hash(&src)));
     if std::fs::write(&file, &src).is_err() {
         return "SKIP: scratch write failed".into();
     }
@@ -322,7 +424,9 @@ pub(super) fn alloc(ctx: &Ctx, fill: Fill) -> String {
         Ok(c) => c,
         Err(e) => return format!("SKIP: {e}"),
     };
-    let Ok(out) = c.env("ALMIDE_WASM_ALLOC_COUNT", "1").output() else { return "SKIP: could not run almide".into() };
+    let Ok(out) = c.env("ALMIDE_WASM_ALLOC_COUNT", "1").output() else {
+        return "SKIP: could not run almide".into();
+    };
     alloc_verdict(out.status.code(), &String::from_utf8_lossy(&out.stderr))
 }
 
@@ -330,9 +434,15 @@ pub fn alloc_verdict(code: Option<i32>, stderr: &str) -> String {
     let line = stderr.lines().find(|l| l.starts_with("__ALMD_WASM_ALLOC "));
     let live = line.and_then(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")));
     match (code, live) {
-        (Some(0), Some("0")) => "PASS: [embedded] parent live=0 after 5 sites (each abort) and 8 calls of one site".into(),
+        (Some(0), Some("0")) => {
+            "PASS: [embedded] parent live=0 after 5 sites (each abort) and 8 calls of one site"
+                .into()
+        }
         (Some(0), Some(v)) => format!("FAIL: [embedded] parent live={v} after 5 sites and 8 calls"),
-        (Some(0), None) => format!("FAIL: no counter line ({})", stderr.lines().next().unwrap_or("")),
+        (Some(0), None) => format!(
+            "FAIL: no counter line ({})",
+            stderr.lines().next().unwrap_or("")
+        ),
         (c, _) => format!("FAIL: the alloc test did not pass (exit {c:?})"),
     }
 }
@@ -349,9 +459,16 @@ pub fn alloc_verdict(code: Option<i32>, stderr: &str) -> String {
 /// the closure, is valued `fill` (T).
 fn diamond(ctx: &Ctx, fill: Fill) -> String {
     let mut legs: [Vec<String>; 2] = [Vec::new(), Vec::new()];
-    for (p, project) in ["d", "l", "r"].into_iter().zip(aborts_gen::diamond_projects(fill)) {
-        let root = ctx.dir.join(format!("diamond-aborts-{}-{p}", vars_dir(fill)));
-        let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
+    for (p, project) in ["d", "l", "r"]
+        .into_iter()
+        .zip(aborts_gen::diamond_projects(fill))
+    {
+        let root = ctx
+            .dir
+            .join(format!("diamond-aborts-{}-{p}", vars_dir(fill)));
+        let Ok(entry) = project.write_to(&root) else {
+            return "SKIP: scratch write failed".into();
+        };
         for (i, wasm) in [false, true].into_iter().enumerate() {
             match run_transcript(ctx, &entry, wasm, Some(&root.join("app"))) {
                 Ok(t) => legs[i].push(t),
@@ -364,7 +481,9 @@ fn diamond(ctx: &Ctx, fill: Fill) -> String {
 
 pub fn diamond_verdict(native: &[String], wasm: &[String]) -> String {
     let same_three = |t: &[String]| t.len() == 3 && t[0] == t[1] && t[0] == t[2];
-    let shaped = native.first().is_some_and(|t| t.starts_with("fail\n") && t.contains("found: abort \"PANIC: xf-diamond t\""));
+    let shaped = native.first().is_some_and(|t| {
+        t.starts_with("fail\n") && t.contains("found: abort \"PANIC: xf-diamond t\"")
+    });
     match (same_three(native), same_three(wasm), native == wasm) {
         (true, true, true) if shaped => {
             "PASS: direct = via left = via right on both legs (the passing call passes, the failing one reports found: abort \"PANIC: xf-diamond t\")".into()
@@ -397,22 +516,39 @@ enum Outcome {
 /// A child's abort at a host resource limit, as the fuzzer's ladder reads
 /// it (`oracle::ladder::resource_limit`): the abort text a failing call
 /// reports as `found: abort "…"`.
-const RESOURCE_SIGNATURES: [&str; 4] = ["Error: out of memory", "call stack exhausted", "stack overflow", "bytes failed"];
+const RESOURCE_SIGNATURES: [&str; 4] = [
+    "Error: out of memory",
+    "call stack exhausted",
+    "stack overflow",
+    "bytes failed",
+];
 
 /// Some transcript's failure block reports a child that died at a resource
 /// limit.
 pub fn resource_limited(t: &str) -> bool {
-    t.lines().any(|l| l.starts_with("found: abort ") && RESOURCE_SIGNATURES.iter().any(|s| l.contains(s)))
+    t.lines().any(|l| {
+        l.starts_with("found: abort ") && RESOURCE_SIGNATURES.iter().any(|s| l.contains(s))
+    })
 }
 
 /// Criteria 1 and 4: `--count` generated test files (default 200) from
 /// `--seed`, each run on native and the embedded lane.
 fn parity(ctx: &Ctx, engine: &Engine, args: &[String]) -> String {
-    let count: u64 = super::super::flag_value(args, "--count").and_then(|s| s.parse().ok()).unwrap_or(200);
-    let jobs: u64 = super::super::flag_value(args, "--jobs").and_then(|s| s.parse().ok()).unwrap_or(4).max(1);
-    let seed: u64 = super::super::flag_value(args, "--seed").and_then(|s| s.parse().ok()).unwrap_or_else(|| {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
-    });
+    let count: u64 = super::super::flag_value(args, "--count")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
+    let jobs: u64 = super::super::flag_value(args, "--jobs")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4)
+        .max(1);
+    let seed: u64 = super::super::flag_value(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default()
+        });
     let findings_dir = std::env::temp_dir().join(format!("xtarget-aborts-findings-{seed}"));
     let _ = std::fs::remove_dir_all(&findings_dir);
     let next = AtomicU64::new(0);
@@ -435,10 +571,28 @@ fn parity(ctx: &Ctx, engine: &Engine, args: &[String]) -> String {
 }
 
 fn parity_line(seed: u64, count: u64, results: &[(u64, Outcome)], findings_dir: &Path) -> String {
-    let rejected: Vec<&String> = results.iter().filter_map(|(_, o)| if let Outcome::Rejected(e) = o { Some(e) } else { None }).collect();
-    let passed = results.iter().filter(|(_, o)| *o == Outcome::PassedAlike).count();
-    let failed = results.iter().filter(|(_, o)| *o == Outcome::FailedAlike).count();
-    let limited = results.iter().filter(|(_, o)| *o == Outcome::ResourceLimit).count();
+    let rejected: Vec<&String> = results
+        .iter()
+        .filter_map(|(_, o)| {
+            if let Outcome::Rejected(e) = o {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let passed = results
+        .iter()
+        .filter(|(_, o)| *o == Outcome::PassedAlike)
+        .count();
+    let failed = results
+        .iter()
+        .filter(|(_, o)| *o == Outcome::FailedAlike)
+        .count();
+    let limited = results
+        .iter()
+        .filter(|(_, o)| *o == Outcome::ResourceLimit)
+        .count();
     let mut sigs: Vec<(String, u64)> = Vec::new();
     for (i, o) in results {
         if let Outcome::Finding(sig) = o {
@@ -448,15 +602,25 @@ fn parity_line(seed: u64, count: u64, results: &[(u64, Outcome)], findings_dir: 
         }
     }
     sigs.sort();
-    let reject_note = rejected.first().map(|e| format!(" (first: {e})")).unwrap_or_default();
+    let reject_note = rejected
+        .first()
+        .map(|e| format!(" (first: {e})"))
+        .unwrap_or_default();
     let mut line = format!(
         "seed {seed}, {count} generated test files; legs native, embedded; {passed} passed alike, {failed} failed alike with the same failure block; {limited} skipped at a host resource limit (C-196/C-197); {} generator rejects{reject_note}; unique findings {}",
         rejected.len(),
         sigs.len()
     );
     if !sigs.is_empty() {
-        let shown: Vec<String> = sigs.iter().map(|(s, i)| format!("[{s}] e.g. #{i}")).collect();
-        line.push_str(&format!(": {} — test files and transcripts in {}", shown.join("; "), findings_dir.display()));
+        let shown: Vec<String> = sigs
+            .iter()
+            .map(|(s, i)| format!("[{s}] e.g. #{i}"))
+            .collect();
+        line.push_str(&format!(
+            ": {} — test files and transcripts in {}",
+            shown.join("; "),
+            findings_dir.display()
+        ));
     }
     // Both verdicts must be exercised: a campaign that only passes (or only
     // fails) compared half of what it claims.
@@ -476,14 +640,22 @@ fn one_test(ctx: &Ctx, src: &str, i: u64, findings: &Path) -> Outcome {
         Ok(o) => return Outcome::Rejected(super::first_error(&o.stderr)),
         Err(e) => return Outcome::Finding(format!("almide check did not run: {e}")),
     }
-    let (n, w) = match (run_transcript(ctx, &file, false, None), run_transcript(ctx, &file, true, None)) {
+    let (n, w) = match (
+        run_transcript(ctx, &file, false, None),
+        run_transcript(ctx, &file, true, None),
+    ) {
         (Ok(n), Ok(w)) => (n, w),
         (Err(e), _) | (_, Err(e)) => return Outcome::Finding(e),
     };
     let out = if n != w && (resource_limited(&n) || resource_limited(&w)) {
         Outcome::ResourceLimit
     } else if n != w {
-        let first = n.lines().zip(w.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("{a} | {b}")).unwrap_or_else(|| "length".into());
+        let first = n
+            .lines()
+            .zip(w.lines())
+            .find(|(a, b)| a != b)
+            .map(|(a, b)| format!("{a} | {b}"))
+            .unwrap_or_else(|| "length".into());
         let key = first.split(':').next().unwrap_or("").to_string();
         let dir = findings.join(format!("{i:04}"));
         let _ = std::fs::create_dir_all(&dir);
@@ -519,12 +691,22 @@ mod tests {
     #[test]
     fn a_different_found_is_a_different_transcript() {
         let other = WASM_FAIL.replace("PANIC: other", "PANIC: else");
-        assert_ne!(transcript(Some(1), "", NATIVE_FAIL), transcript(Some(1), &other, ""));
+        assert_ne!(
+            transcript(Some(1), "", NATIVE_FAIL),
+            transcript(Some(1), &other, "")
+        );
     }
 
     #[test]
     fn a_failure_without_a_block_keeps_its_first_error_line() {
-        assert_eq!(transcript(Some(1), "", "warning: x\nerror[E0277]: the `?` operator\nmore\n"), "fail\nerror[E0277]: the `?` operator\n");
+        assert_eq!(
+            transcript(
+                Some(1),
+                "",
+                "warning: x\nerror[E0277]: the `?` operator\nmore\n"
+            ),
+            "fail\nerror[E0277]: the `?` operator\n"
+        );
     }
 
     #[test]
@@ -532,14 +714,22 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("xf-aborts-bin-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let cache = tmp.join("almide-test").join("native");
-        assert!(built_test_bin(&tmp).unwrap_err().starts_with("no native test cache"));
+        assert!(built_test_bin(&tmp)
+            .unwrap_err()
+            .starts_with("no native test cache"));
         std::fs::create_dir_all(cache.join("p0-1a2b")).unwrap();
         assert!(built_test_bin(&tmp).unwrap_err().contains("found 0"));
         std::fs::write(cache.join("p0-1a2b").join(TEST_BIN), "bin").unwrap();
-        assert_eq!(built_test_bin(&tmp).unwrap(), cache.join("p0-1a2b").join(TEST_BIN));
+        assert_eq!(
+            built_test_bin(&tmp).unwrap(),
+            cache.join("p0-1a2b").join(TEST_BIN)
+        );
         std::fs::create_dir_all(cache.join("p1-3c4d")).unwrap();
         std::fs::write(cache.join("p1-3c4d").join(TEST_BIN), "bin").unwrap();
-        assert!(built_test_bin(&tmp).unwrap_err().contains("found 2"), "two builds are ambiguous");
+        assert!(
+            built_test_bin(&tmp).unwrap_err().contains("found 2"),
+            "two builds are ambiguous"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -558,17 +748,51 @@ mod tests {
         };
         let art = Path::new("/tmp/d/p00ab.nativetest.bin");
         assert_eq!(test_art_leg(art), Some(false));
-        assert_eq!(test_art_leg(Path::new("/tmp/d/p00ab.wasmtest.almd")), Some(true));
-        assert_eq!(test_art_leg(Path::new("/tmp/d/p00ab.nativetest.almd")), None, "the source is no longer a native artifact");
-        assert_eq!(super::super::source_of(art), "", "source_of strips every kind suffix");
+        assert_eq!(
+            test_art_leg(Path::new("/tmp/d/p00ab.wasmtest.almd")),
+            Some(true)
+        );
+        assert_eq!(
+            test_art_leg(Path::new("/tmp/d/p00ab.nativetest.almd")),
+            None,
+            "the source is no longer a native artifact"
+        );
+        assert_eq!(
+            super::super::source_of(art),
+            "",
+            "source_of strips every kind suffix"
+        );
         let c = test_art_cmd(&ctx, art, false, Path::new("/w"));
         assert_eq!(c.get_program(), art.as_os_str());
-        assert_eq!(c.get_args().collect::<Vec<_>>(), ["--nocapture", "--test-threads=1"]);
-        let envs: Vec<_> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
-        assert!(envs.contains(&("RUST_MIN_STACK".into(), Some("8388608".into()))) && envs.contains(&("ALMIDE_CWD".into(), Some("/w".into()))), "{envs:?}");
-        let w = test_art_cmd(&ctx, Path::new("/tmp/d/p00ab.wasmtest.almd"), true, Path::new("/w"));
+        assert_eq!(
+            c.get_args().collect::<Vec<_>>(),
+            ["--nocapture", "--test-threads=1"]
+        );
+        let envs: Vec<_> = c
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.contains(&("RUST_MIN_STACK".into(), Some("8388608".into())))
+                && envs.contains(&("ALMIDE_CWD".into(), Some("/w".into()))),
+            "{envs:?}"
+        );
+        let w = test_art_cmd(
+            &ctx,
+            Path::new("/tmp/d/p00ab.wasmtest.almd"),
+            true,
+            Path::new("/w"),
+        );
         assert_eq!(w.get_program(), "/x/almide");
-        assert_eq!(w.get_args().collect::<Vec<_>>(), ["test", "/tmp/d/p00ab.wasmtest.almd", "--target", "wasm"]);
+        assert_eq!(
+            w.get_args().collect::<Vec<_>>(),
+            ["test", "/tmp/d/p00ab.wasmtest.almd", "--target", "wasm"]
+        );
     }
 
     /// The joined criterion is what the stamp gate reads: one string, PASS
@@ -577,7 +801,11 @@ mod tests {
     fn a_heap_criterion_carries_both_instantiations() {
         let pass = alloc_verdict(Some(0), "__ALMD_WASM_ALLOC live=0\n");
         let joined = super::super::both_instantiations(&pass, &pass);
-        assert!(joined.starts_with("PASS: [vars=Int] [embedded] parent live=0") && joined.contains(" || [vars=String] [embedded]"), "{joined}");
+        assert!(
+            joined.starts_with("PASS: [vars=Int] [embedded] parent live=0")
+                && joined.contains(" || [vars=String] [embedded]"),
+            "{joined}"
+        );
         let fail = alloc_verdict(Some(0), "__ALMD_WASM_ALLOC live=3\n");
         assert!(super::super::both_instantiations(&pass, &fail).starts_with("FAIL: [vars=Int]"));
         assert_eq!(vars_dir(Fill::String), "vars-String");
@@ -585,15 +813,25 @@ mod tests {
 
     #[test]
     fn the_alloc_verdict_reads_the_parent_counter_line() {
-        assert!(alloc_verdict(Some(0), "__ALMD_WASM_ALLOC allocs=9 reused=0 bytes=1 frees=9 reclaimed=0 live=0 heap_end=1\n").starts_with("PASS"));
-        assert!(alloc_verdict(Some(0), "__ALMD_WASM_ALLOC allocs=9 live=2 heap_end=1\n").starts_with("FAIL: [embedded] parent live=2"));
+        assert!(alloc_verdict(
+            Some(0),
+            "__ALMD_WASM_ALLOC allocs=9 reused=0 bytes=1 frees=9 reclaimed=0 live=0 heap_end=1\n"
+        )
+        .starts_with("PASS"));
+        assert!(
+            alloc_verdict(Some(0), "__ALMD_WASM_ALLOC allocs=9 live=2 heap_end=1\n")
+                .starts_with("FAIL: [embedded] parent live=2")
+        );
         assert!(alloc_verdict(Some(0), "").starts_with("FAIL: no counter line"));
-        assert!(alloc_verdict(Some(1), "__ALMD_WASM_ALLOC live=0\n").starts_with("FAIL: the alloc test did not pass"));
+        assert!(alloc_verdict(Some(1), "__ALMD_WASM_ALLOC live=0\n")
+            .starts_with("FAIL: the alloc test did not pass"));
     }
 
     #[test]
     fn the_diamond_needs_three_equal_paths_on_equal_legs_with_the_probes_verdict() {
-        let t = "fail\nat line 6\nexpected: xf-never-printed\nfound: abort \"PANIC: xf-diamond t\"\n".to_string();
+        let t =
+            "fail\nat line 6\nexpected: xf-never-printed\nfound: abort \"PANIC: xf-diamond t\"\n"
+                .to_string();
         let three = vec![t.clone(), t.clone(), t.clone()];
         assert!(diamond_verdict(&three, &three).starts_with("PASS"));
         let pass = vec!["pass\n".to_string(); 3];
@@ -613,11 +851,19 @@ mod tests {
     #[test]
     fn parity_passes_only_with_both_verdicts_and_no_finding() {
         let d = Path::new("/tmp/x");
-        let both = vec![(0, Outcome::PassedAlike), (1, Outcome::FailedAlike), (2, Outcome::Rejected("e".into()))];
+        let both = vec![
+            (0, Outcome::PassedAlike),
+            (1, Outcome::FailedAlike),
+            (2, Outcome::Rejected("e".into())),
+        ];
         assert!(parity_line(1, 3, &both, d).starts_with("PASS"));
         let only_pass = vec![(0, Outcome::PassedAlike)];
         assert!(parity_line(1, 1, &only_pass, d).starts_with("FAIL"));
-        let finding = vec![(0, Outcome::PassedAlike), (1, Outcome::FailedAlike), (2, Outcome::Finding("x".into()))];
+        let finding = vec![
+            (0, Outcome::PassedAlike),
+            (1, Outcome::FailedAlike),
+            (2, Outcome::Finding("x".into())),
+        ];
         assert!(parity_line(1, 3, &finding, d).contains("unique findings 1"));
     }
 }

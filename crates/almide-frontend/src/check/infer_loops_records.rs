@@ -27,7 +27,7 @@ impl Checker {
         let iter_resolved = resolve_ty(&iter_ty, &self.uf);
         let elem_ty = match &iter_resolved {
             Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
-            Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
+            Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()].into()),
             // #1521: a CONCRETE non-iterable head (`for x in 5`) used to fall
             // through as Unknown and die at codegen behind the COMPILER BUG
             // banner. Opaque types stay silent — an unresolved var is the
@@ -124,7 +124,7 @@ impl Checker {
                     n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
                 ).unwrap_or(n),
             };
-            matches!(self.env.resolve_named(&Ty::Named(key, vec![])), Ty::Record { .. } | Ty::OpenRecord { .. })
+            matches!(self.env.resolve_named(&Ty::Named(key, Default::default())), Ty::Record { .. } | Ty::OpenRecord { .. })
         };
         if ctor_payload_record == Some(true) || is_record_type {
             if !args.is_empty() {

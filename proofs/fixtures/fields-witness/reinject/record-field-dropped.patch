@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -531,7 +531,9 @@
+                 let hold = self.hold_i32()?;
+                 self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
+                 let site = self.fw_site(ty, None);
+-                for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
++                // RE-INJECTED (#4279 drill): the literal last field is never stored.
++                let last = fields.len().saturating_sub(1);
++                for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots).take(last) {
+                     self.f.instructions().local_get(hold);
+                     self.lower(fexpr, Some(fty))?;
+                     self.rc_share_guard(fexpr, fty);

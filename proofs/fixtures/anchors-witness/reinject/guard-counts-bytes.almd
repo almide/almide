@@ -1,0 +1,9 @@
+// #4005 operands drill: the read's bounds compare counts the list in BYTES
+// rather than slots, so an index past the end passes it. The compare, its
+// abort and the load are all where the witness says (the proven checker and
+// the shape check accept); only the guard's operands show the wrong count.
+fn pick(xs: List[Int], i: Int) -> Int = xs[i]
+
+effect fn main() -> Unit = {
+  println("${pick([1, 2, 3], 1)}")
+}

@@ -174,7 +174,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
     // (Option ret) sits in the SUM tier below.
-    "http_response", "http_json", "http_redirect", "http_with_headers",
+    "http_json", "http_with_headers",
     "http_status", "http_body", "http_body_bytes", "http_set_header",
     // The #1791 read side (audited 2026-09-03): the same list/string
     // surface plus int.parse / map.new / map.contains / map.set.
@@ -197,13 +197,14 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "random_bytes",
     // json_path.almd, READ side only (audited 2026-08-25): the value.Path
     // rep is a plain List[String]; get walks value.__field / value.as_array /
-    // list.get — all native arms here, no raw layout reads. set/remove
-    // are REJECTED: their pair walks read the incumbent's inline-pairs
-    // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
+    // list.get — all native arms here, no raw layout reads. remove is
+    // REJECTED: its pair walk reads the incumbent's inline-pairs Value
+    // layout (tag@h+4, count@h+8) — see PORT-MATRIX. set goes through
+    // value.__set_path_steps, which this emitter lowers itself (#4315).
     "json_path_index",
-    // value.__set_path_steps (the wasm body of value.set_path's walk): pure
-    // Almide over value.as_object / as_array and the constructors, no layout
-    // reads — unlike json_path_set_go below the REJECTED line.
+    // value.__set_path_steps' self-hosted body: pure Almide over
+    // value.as_object / as_array and the constructors, no layout reads. The
+    // emitter's own lowering (value_set_path.rs) answers the call first.
     "value_set_path_steps",
     "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).

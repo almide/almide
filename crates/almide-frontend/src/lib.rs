@@ -10,6 +10,8 @@ pub mod deprecation;
 /// Where a stdlib spelling removed at a dialect epoch went (read from the ledger).
 pub mod removed_spellings;
 pub mod attr_vocab;
+/// Media-type ownership read off declarations (ADR-0032 D4, D7).
+pub mod media_owners;
 pub mod secret_type;
 pub mod stdlib;
 pub mod bundled_sigs;
@@ -18,6 +20,8 @@ pub mod bundled_reach;
 /// E008 generalized (ADR-0020 §3): no `var` reachable from a concurrent body.
 pub mod concurrent_reach;
 pub mod concurrent_reach_types;
+/// E110 phase 2 (#4232): request data decoded by hand into a type also sent out.
+pub mod request_flow;
 
 /// The one implementation of integer-literal decoding.
 mod literals;

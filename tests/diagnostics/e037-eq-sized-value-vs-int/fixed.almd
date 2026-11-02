@@ -1,0 +1,6 @@
+// E037 (#4018, security row 11b): a comparison relates two values of ONE type.
+// A sized width meets a canonical Int VALUE: only a literal adopts the width.
+fn main() -> Unit = {
+  let small: Int8 = 3
+  println("${small == 3}")
+}

@@ -90,6 +90,11 @@ env:
   # The rocq-core release CI proves on. It is in the cache key, so moving it
   # rebuilds the toolchain instead of restoring an older one.
   ROCQ_CORE_VERSION: "9.3.0"
+  # The opam-repository commit every package (OCaml, Rocq and their
+  # dependencies) resolves from. Its opam files carry each source archive's
+  # checksum, so pinning the commit pins every digest opam checks; the
+  # repository's moving head did not (security row 16). In the cache key.
+  OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
 
 jobs:
   trust-spine:
@@ -112,7 +117,7 @@ jobs:
       # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.96.0"  # the workspace lock needs >= 1.96 (wasmtime 49, #2955)
+          toolchain: "1.97.0"  # the workspace lock needs >= 1.97 (wasmtime 50)
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -130,7 +135,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
-          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
 
       - name: Install opam + wabt (wat2wasm for the A2 byte-binding grounding)
         run: |
@@ -147,18 +152,13 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -166,7 +166,7 @@ jobs:
       - name: Build opam switch + Rocq (cache miss only)
         if: steps.opam-cache.outputs.cache-hit != 'true'
         run: |
-          opam init --bare --disable-sandboxing -y
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
           opam switch create "${OCAML_VERSION}" -y
           eval "$(opam env)"
           # opam's published rocq-prover has no 9.1.1 (the local trusted base is a
@@ -249,7 +249,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
-          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
 
       # ── #571: the qualification dossier, on release tags only ──────────
       # The spine just verified THIS tree, so the receipt inside the dossier

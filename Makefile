@@ -11,7 +11,7 @@ BIN := target/release/almide
 VERIFY_BIN := target/release/almide-verify
 VERIFY_VERSION := $(shell awk '/^\[/{f=($$0=="[package]")} f && /^version = "/{sub(/^version = "/,""); sub(/".*$$/,""); print; exit}' crates/almide-verify/Cargo.toml)
 
-.PHONY: build install test test-wasm check clean fmt cross-target verify-trust receipt stdlib-docs
+.PHONY: build install test test-wasm check clean fmt cross-target verify-trust receipt stdlib-docs stdlib-test-coverage
 
 ## Build
 
@@ -72,6 +72,10 @@ test-wasm: build
 	$(BIN) test --target wasm
 
 test-all: test-rust test test-wasm
+
+# Every public stdlib fn has a test on both legs (proofs/stdlib-test-coverage.txt).
+stdlib-test-coverage:
+	bash scripts/check-stdlib-test-coverage.sh
 
 cross-target: build
 	bash tools/cross-target-check.sh spec/lang

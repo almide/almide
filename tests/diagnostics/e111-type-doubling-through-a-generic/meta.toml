@@ -1,0 +1,3 @@
+expects_code = "E111"
+expects_error = "type too large"
+hint_substring = "Name the intermediate type"

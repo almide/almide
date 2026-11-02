@@ -1,0 +1,17 @@
+// A generic whose result type does not grow with each call.
+fn twice[T](xs: List[T]) -> List[T] = xs + xs
+
+effect fn main() -> Unit = {
+  let t0 = [1]
+  let t1 = twice(t0)
+  let t2 = twice(t1)
+  let t3 = twice(t2)
+  let t4 = twice(t3)
+  let t5 = twice(t4)
+  let t6 = twice(t5)
+  let t7 = twice(t6)
+  let t8 = twice(t7)
+  let t9 = twice(t8)
+  let t10 = twice(t9)
+  println("ok ${list.len(t10)}")
+}

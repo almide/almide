@@ -32,7 +32,7 @@ printf 'jobs:\n  sneak:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: d
 red "a new job that installs rustc with no version"
 
 fresh
-printf 'jobs:\n  sneak:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: dtolnay/rust-toolchain@stable\n        with:\n          toolchain: "1.97.0"\n' > "$tmp/t/.github/workflows/sneak.yml"
+printf 'jobs:\n  sneak:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: dtolnay/rust-toolchain@stable\n        with:\n          toolchain: "1.80.0"\n' > "$tmp/t/.github/workflows/sneak.yml"
 red "a rustc version the list does not name"
 
 fresh
@@ -40,11 +40,11 @@ printf 'jobs:\n  sneak:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: d
 green "a new job pinned to RUST_TOOLCHAIN"
 
 fresh
-sed -E 's/^(wasmtime = (\{ *version = )?)"49\.0\.4"/\1"50.0.0"/' "$root/crates/almide-wasm-run/Cargo.toml" > "$tmp/t/crates/almide-wasm-run/Cargo.toml"
+sed -E 's/^(wasmtime = (\{ *version = )?)"[0-9]+\.[0-9]+\.[0-9]+"/\1"99.0.0"/' "$root/crates/almide-wasm-run/Cargo.toml" > "$tmp/t/crates/almide-wasm-run/Cargo.toml"
 red "the embedded wasmtime bumped without the list"
 
 fresh
-printf 'jobs:\n  sneak:\n    steps:\n      - name: Install wasmtime\n        run: VERSION=v51.0.0\n' > "$tmp/t/.github/workflows/sneak.yml"
+printf 'jobs:\n  sneak:\n    steps:\n      - name: Install wasmtime\n        run: VERSION=v99.0.0\n' > "$tmp/t/.github/workflows/sneak.yml"
 red "a stock wasmtime CLI version the list does not name"
 
 fresh
@@ -58,7 +58,8 @@ printf 'floating ci.yml:gone stable — a job that no longer exists\n' >> "$tmp/
 red "a list line for a floating step that no longer exists (stale)"
 
 fresh
-sed 's/49\.0\.1/(removed)/g' "$root/proofs/TRUSTED_BASE.md" > "$tmp/t/proofs/TRUSTED_BASE.md"
+pinned=$(awk '$1 == "wasmtime-crate" { print $2; exit }' "$root/scripts/toolchain-pins.txt")
+sed "s/${pinned//./\\.}/(removed)/g" "$root/proofs/TRUSTED_BASE.md" > "$tmp/t/proofs/TRUSTED_BASE.md"
 red "TRUSTED_BASE.md no longer naming a version the list pins"
 
 echo "toolchain-pins negative controls: all verdicts as expected"

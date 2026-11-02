@@ -322,12 +322,33 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
     }
 }
 
+/// The argument a C export wrapper hands its Almide fn for a lent `Region`
+/// param — a signature spelling (owned param: a clone of the lent view;
+/// borrowed: a reference to it), so it lives beside the param types.
+fn c_export_region_arg(p: &IrParam, lent: &str) -> String {
+    match p.borrow {
+        ParamBorrow::Own => format!("{lent}.clone()"),
+        _ => format!("&{lent}"),
+    }
+}
+
 /// One `@extern(rust)` wrapper argument, spelled from the param's mode like
 /// its type above (ADR-0013): a value holding a String in a structural
 /// position is copied into its host shape, and a `mut` one is copied back
 /// after the call through `after`.
+///
+/// A `Region` (ADR-0031) is two host arguments, its base and the length the
+/// runtime holds for it — `(*mut u8, usize)`, the pair `@extern(c)` hands a C
+/// callee (D3) and `@extern(wasm)` hands its host as `(base, len)` (#4353).
+/// A dual binding has one parameter shape on every host, and the host never
+/// names the runtime's `Region` record nor gets a length the caller typed.
+/// The base is the view's own start, `base + off`: an `ffi.slice` is handed
+/// as its sub-range, the same address the C glue computes.
 fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> String {
     let name = p.name.to_string();
+    if almide_lang::types::extern_abi::is_region(&p.ty) {
+        return format!("{name}.base.wrapping_add({name}.off.max(0) as usize), {name}.len.max(0) as usize");
+    }
     if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
         return name;
     }
@@ -582,6 +603,9 @@ fn render_fn_safe_name(
 /// single-file and module layouts. A no-op off unix, and under Miri, which
 /// cannot call `signal` and runs the generated crate to find UB in the
 /// runtime's `unsafe` (#4009).
+// SAFETY: (of the emitted call) signal(2) is declared with its C prototype
+// (an int and a pointer-sized handler, returning one), and called with
+// SIGPIPE and SIG_DFL (0): no handler address of ours is handed over.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
 /// Call-stack exhaustion as the defined abort (C-196): replace std's

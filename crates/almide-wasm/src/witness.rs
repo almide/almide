@@ -53,7 +53,10 @@
 //!   `a` = a +1 backed by a real `rc_inc` (the borrowed-rhs bind share);
 //!   `d` = a −1 backed by a real `$dec_flat` (epilogue release, dec-old);
 //!   `b` = a +0 read of the block a local holds (#3259), which the checker
-//!         rejects at count 0 (a read after the release).
+//!         rejects at count 0 (a read after the release);
+//!   `s` = an arm's share-out (#4278): a +0 on the argument's line backed by
+//!         the real `rc_inc` the arm makes before it answers with that block
+//!         as its owned result — the +1 is the result line's `i`.
 //! Balance (every prefix nonnegative, every stream ending at zero) is
 //! re-checked here by `balanced` — the Rust mirror of the proven rule —
 //! and the certificate text is byte-compatible with the extracted checker
@@ -113,6 +116,8 @@ pub struct WitnessRecorder {
     /// a different fn set); the floor test compares their certificates only
     /// where this agrees. Never part of the certificate.
     conv: String,
+    /// Per open fused chain, the owner locals its stages bound (witness_rest.rs).
+    iter_owned: Vec<Vec<u32>>,
 }
 
 impl Default for WitnessRecorder {
@@ -134,6 +139,7 @@ impl WitnessRecorder {
             hooked: Vec::new(),
             err_exit_armed: false,
             conv: String::new(),
+            iter_owned: Vec::new(),
         }
     }
 
@@ -175,6 +181,15 @@ impl WitnessRecorder {
     /// path — the instructions are emitted but never run).
     fn log(&mut self, ev: Ev) {
         if !self.branches.dead() {
+            // #4277: a live rc_inc / release, for the byte check.
+            match ev {
+                Ev::Op(_, c @ ('a' | 'd' | 's')) => crate::witness::rc::event(c, None),
+                Ev::LOp(l, c @ ('a' | 'd' | 'm' | 's')) => crate::witness::rc::event(c, Some(l)),
+                // An owner rebind's release of the old block: by a release
+                // call, or inside the copy-on-write judge that rebinds it (#4278).
+                Ev::DecOld(l) => crate::witness::rc::event('o', Some(l)),
+                _ => {}
+            }
             self.log.push(ev);
         }
     }
@@ -350,8 +365,21 @@ impl WitnessRecorder {
     /// (`released_old`), and the local now holds the rhs — a new object
     /// (`src = None`) or a share of `src`'s. A var bound outside the loop
     /// being assigned is loop-carried (#2755, [`Self::rebind_site`]).
+    ///
+    /// The events follow the emitted order (stmts.rs `lower_assign`): the
+    /// rhs is lowered and a borrowed Var rhs takes its `rc_inc_top` BEFORE
+    /// the old occupant's release, so a share of `src` is logged before the
+    /// `d`. For `x = x` the two name one block: share, then release, nets
+    /// to zero (#4339 — logged the other way round, the release reached 0
+    /// first and the owned-line probe rejected a share the bytes never make
+    /// on a dead block).
     pub fn assign(&mut self, local: u32, released_old: bool, src: Option<u32>) -> bool {
         if !self.rebind_site(local) {
+            return false;
+        }
+        if let Some(s) = src
+            && !self.held_ops(s, "a")
+        {
             return false;
         }
         if released_old {
@@ -363,12 +391,7 @@ impl WitnessRecorder {
                 self.ops(o, "i");
                 self.log(Ev::Bind { local, obj: o, owner: true });
             }
-            Some(s) => {
-                if !self.held_ops(s, "a") {
-                    return false;
-                }
-                self.log(Ev::Alias { local, src: s, owner: true });
-            }
+            Some(s) => self.log(Ev::Alias { local, src: s, owner: true }),
         }
         true
     }
@@ -451,6 +474,16 @@ impl WitnessRecorder {
         self.branches.arm(&mut self.log);
     }
 
+    /// `branch_open` / `branch_arm` of an `if` whose arms the RC check
+    /// holds to the shipped `if` / `else` (`rc::site_window`).
+    pub fn branch_open_at(&mut self, anchor: u64) {
+        self.branches.open_at(&mut self.log, Some(anchor));
+    }
+
+    pub fn branch_arm_at(&mut self, anchor: u64) {
+        self.branches.arm_at(&mut self.log, Some(anchor));
+    }
+
     /// The innermost open site joins.
     pub fn branch_close(&mut self) {
         self.branches.close(&mut self.log);
@@ -459,6 +492,19 @@ impl WitnessRecorder {
     /// A local's credit moves without a share (#2757).
     pub fn move_local(&mut self, local: u32) -> bool {
         self.held_ops(local, "m")
+    }
+
+    /// [`Self::move_local`] into a routine's hold (#4278 B1): the ownership
+    /// op only — the credit's byte-check event is the hold move the routine
+    /// logs (`h<hold>`), one event per credit.
+    pub fn move_local_into_hold(&mut self, local: u32) -> bool {
+        if !self.bound.contains_key(&local) {
+            return false;
+        }
+        if !self.branches.dead() {
+            self.log.push(Ev::LOp(local, 'm'));
+        }
+        true
     }
 
     /// A droppable Var argument at a call site: the site's `rc_inc` is
@@ -513,114 +559,6 @@ impl WitnessRecorder {
         let d = self.loop_depth;
         self.bound.insert(local, d);
     }
-
-    /// An owned temporary born here whose later events the site names by
-    /// object (a `!` operand carrier: moved out on the err arm, released
-    /// on the ok path).
-    pub fn temp_born(&mut self) -> u32 {
-        let o = self.new_obj();
-        self.ops(o, "i");
-        o
-    }
-
-    /// Record `ops` on an object a site holds by id ([`Self::temp_born`]).
-    pub fn temp_ops(&mut self, o: u32, ops: &str) {
-        self.ops(o, ops);
-    }
-
-    /// The share a borrowed `!` carrier takes before it propagates.
-    pub fn share_local(&mut self, local: u32) -> bool {
-        self.held_ops(local, "a")
-    }
-
-    /// Is the code being emitted right now unreachable on every path?
-    pub fn dead(&self) -> bool {
-        self.branches.dead()
-    }
-
-    /// Arm the next ReturnError exit as a recorded propagation.
-    pub fn arm_err_exit(&mut self) {
-        self.err_exit_armed = true;
-    }
-
-    /// Was the ReturnError exit being emitted armed? (Disarms it.)
-    pub fn take_err_exit(&mut self) -> bool {
-        std::mem::take(&mut self.err_exit_armed)
-    }
-
-    pub fn poison(&mut self) {
-        self.poisoned = true;
-    }
-
-    /// Withdraw this frame's certificate: the first reason wins (the
-    /// shape that turned the recorder away is the one to count).
-    pub fn decline(&mut self, reason: &str) {
-        if self.declined.is_none() {
-            self.declined = Some(reason.to_string());
-        }
-    }
-
-    /// One line per object, in object order — certificate v0. A poison
-    /// outranks a decline: a hook disagreement is a bug even in a frame
-    /// that withdrew.
-    /// #2758: the recorded `(a, d, i)` events, every path together — one
-    /// per emitted RC instruction (witness_helper.rs audits them).
-    pub(crate) fn event_totals(&self) -> (usize, usize, usize) {
-        let mut n = (0, 0, 0);
-        for ev in &self.log {
-            if let Ev::Op(_, c) | Ev::LOp(_, c) = ev {
-                match c {
-                    'a' => n.0 += 1,
-                    'd' => n.1 += 1,
-                    'i' => n.2 += 1,
-                    _ => {}
-                }
-            }
-        }
-        n
-    }
-
-    pub fn certificate(&self) -> String {
-        if self.poisoned {
-            return "!poison\n".to_string();
-        }
-        if let Some(r) = &self.declined {
-            return format!("{DECLINE_PREFIX}{r}\n");
-        }
-        if !self.branches.settled() {
-            return "!poison\n".to_string();
-        }
-        match paths::render(&self.log, self.next_obj) {
-            Ok(s) => s,
-            Err(r) => format!("{DECLINE_PREFIX}{r}\n"),
-        }
-    }
-}
-
-/// The proven balance rule, mirrored: per stream, `i`/`a` = +1, `d`/`m` =
-/// −1, `b` = +0 at a count above 0 (no read after the release), every
-/// prefix nonnegative (no release at rc 0), final balance zero (no leak).
-/// Arm braces are phase-B vocabulary — their presence here is out of subset
-/// and fails.
-pub fn balanced(cert: &str) -> bool {
-    for line in cert.lines() {
-        let mut bal: i64 = 0;
-        for c in line.chars() {
-            match c {
-                'i' | 'a' => bal += 1,
-                'd' | 'm' => bal -= 1,
-                'b' if bal > 0 => {}
-                _ => return false,
-            }
-            if bal < 0 {
-                return false;
-            }
-        }
-        if bal != 0 {
-            return false;
-        }
-    }
-    true
 }
 
 #[path = "witness_rest.rs"]
@@ -650,7 +588,9 @@ pub fn start_collecting() {
     crate::witness::modes::start();
     crate::witness::bounds::start();
     crate::witness::init::start();
+    crate::witness::fields::start();
     crate::witness::anchor::start();
+    crate::witness::rc::start();
     crate::witness::decls::start();
 }
 
@@ -677,6 +617,18 @@ pub use init::take as take_init;
 /// The init witness sink (split for the file budget).
 #[path = "witness_init.rs"]
 pub(crate) mod init;
+
+/// The fields witness of every emission pass (#4013, #4279,
+/// witness_fields.rs): `(pass, items)`, for `almide-verify fields`.
+pub use fields::take as take_fields;
+
+/// The fields witness sink (split for the file budget).
+#[path = "witness_fields.rs"]
+pub(crate) mod fields;
+
+/// Where the ownership witness's RC events are (#4277, witness_rc.rs).
+#[path = "witness_rc.rs"]
+pub mod rc;
 
 /// Where in the bytes each bounds / init event is (#4011 (d),
 /// witness_anchor.rs).
@@ -758,3 +710,7 @@ pub(crate) fn heapish_ret(t: SliceTy) -> bool {
 #[cfg(test)]
 #[path = "witness_tests.rs"]
 mod tests;
+
+#[path = "witness_recorder_tail.rs"]
+mod recorder_tail;
+pub use recorder_tail::balanced;

@@ -346,10 +346,12 @@ impl Emitter<'_> {
             // var rebound and the rebind witnessed): a C-319 cell, a `mut`
             // parameter, a metered frame's var.
             IrStmtKind::MapInsert { target, key, value } => {
-                if self.try_map_set_in_place(target, key, value)? {
+                if self.routine(|r: &bool| *r, |em| em.try_map_set_in_place(target, key, value))? {
                     return Ok(());
                 }
-                self.lower_map_insert_writeback(target, key, value)
+                // The write-back is a compound routine too: the key's credit
+                // moves into the set, which releases it when the key exists.
+                self.routine(|_: &()| true, |em| em.lower_map_insert_writeback(target, key, value))
             }
             IrStmtKind::Assign { var, value } => self.lower_assign(var, value),
             IrStmtKind::IndexAssign { target, index, value } => {
@@ -486,7 +488,8 @@ impl Emitter<'_> {
                         return Ok(());
                     }
                 }
-                let elem = match self.lower(iterable, None)? {
+                let iter_ty = self.lower(iterable, None)?;
+                let elem = match iter_ty {
                     SliceTy::List(h) => self.types.el(h),
                     // `for (k, v) in map` — walk the insertion-ordered
                     // entry blocks (the same layout map.fold walks).
@@ -508,13 +511,14 @@ impl Emitter<'_> {
                         // takes +1; an owned one is the cursor's own), and
                         // the cursor releases its credit after the loop.
                         let owned = self.rc_owned_result(iterable);
-                        if !owned {
-                            self.rc_inc_top();
-                        }
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
+                        self.f.instructions().local_set(bh);
+                        if !owned {
+                            self.f.instructions().local_get(bh).call(crate::F_INC);
+                        }
                         if let Some(w) = self.witness.as_mut() {
                             w.cursor_take(owned, bh);
                         }
@@ -528,7 +532,6 @@ impl Emitter<'_> {
                         self.owned_ty.insert(bh, SliceTy::Map(kh, vh));
                         {
                             let mut i = self.f.instructions();
-                            i.local_set(bh);
                             i.local_get(bh)
                                 .i32_const(almide_layout::PAYLOAD as i32)
                                 .i32_add()
@@ -582,10 +585,33 @@ impl Emitter<'_> {
                     return unsup("forin-var-ty");
                 }
                 let stride = elem.slot_size();
+                // #4351 / #4280: the loop holds the list across the body, as
+                // the map loop does (#1219). A borrowed subject takes +1, so
+                // a write or resize of it in the body (`xs[i] = v`,
+                // `xs = xs + [x]`) finds the block shared and copies: the
+                // loop reads the value it started on, as the native leg
+                // does, and the block's count cannot change under the exit
+                // test. An owned subject is the cursor's own credit. The +1
+                // is recorded as a HOLD for almide-anchor-check.
+                let owned = self.rc_owned_result(iterable);
+                let drop_list = self.dec_fn_of(iter_ty);
                 let base = self.hold_i32()?;
                 let count = self.hold_i32()?;
                 let cur = self.hold_i32()?;
                 self.f.instructions().local_set(base);
+                // The +1 is taken through the cursor local itself, so the RC
+                // byte check holds the cursor's `a` to this call (#4278 B1).
+                if !owned {
+                    self.f.instructions().local_get(base).call(crate::F_INC);
+                    crate::witness::bounds::hold(self.f);
+                }
+                if let Some(w) = self.witness.as_mut() {
+                    w.cursor_take(owned, base);
+                }
+                // #3374: a frame credit for the body's duration, so every exit
+                // edge out of the body releases it through its exit plan.
+                self.rc_owned.insert(base);
+                self.owned_ty.insert(base, iter_ty);
                 self.f
                     .instructions()
                     .local_get(base)
@@ -597,7 +623,11 @@ impl Emitter<'_> {
                     .local_set(cur);
                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                 self.emit_det_charge_const(1);
+                // #4280: the exit test guards the element read below; the
+                // bounds witness records the pair as a stretch of its own.
+                let site = crate::witness::bounds::loop_header();
                 self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
+                crate::witness::bounds::exit(site, self.f);
                 self.f
                     .instructions()
                     .local_get(base)
@@ -607,6 +637,10 @@ impl Emitter<'_> {
                     .i32_add();
                 self.witness_loop_open();
                 self.load_ty_slot(elem, 0);
+                crate::witness::bounds::access(site, false, self.f);
+                if site.is_some() {
+                    crate::witness::bounds::close();
+                }
                 self.f.instructions().local_set(var_idx);
                 self.witness_view_local(var_idx, elem);
                 // for (a, b) in pairs — the loop var holds the tuple base;
@@ -640,6 +674,12 @@ impl Emitter<'_> {
                     .br(0)
                     .end()
                     .end();
+                self.rc_owned.remove(&base);
+                self.owned_ty.remove(&base);
+                self.f.instructions().local_get(base).call(drop_list);
+                if let Some(w) = self.witness.as_mut() {
+                    w.cursor_release(base);
+                }
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
@@ -648,140 +688,5 @@ impl Emitter<'_> {
 
 }
 
-impl Emitter<'_> {
-    /// `Assign` lowering — the share/dec discipline (RC-3/RC-5) plus the
-    /// growing-accumulator window, split from `lower_stmt` for the
-    /// complexity budget.
-    fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
-                let moved = self.take_moved_temp(value);
-                if self.try_str_append_assign(var, value)? {
-                    return Ok(());
-                }
-                if self.try_list_append_assign(var, value)? {
-                    return Ok(());
-                }
-                if self.try_map_set_assign(var, value)? {
-                    return Ok(());
-                }
-                let (local, declared) = match self.locals.get(var) {
-                    Some(&(idx, d)) => (Some(idx), d),
-                    None => match self.globals.get(&(self.var_space, *var)) {
-                        Some(&(gidx, d)) => (None, {
-                            let _ = gidx;
-                            d
-                        }),
-                        None => return unsup("assign:unmapped"),
-                    },
-                };
-                // #1688 once refused a droppable PARAM reassigned under an
-                // if/match arm ("one path releases the caller's block, the
-                // other keeps it"). Under the credit discipline the local
-                // holds exactly ONE credit on every path — the assign
-                // releases the old occupant and makes the local an owner,
-                // the epilogue releases the local once whichever arm ran —
-                // and the exit validator (E083) checks it; the refusal is
-                // retired (stage 2c-ii: records made the mut_port cell hit it).
-                // #3406: `var` dies at a consuming rhs over it (dying_move.rs).
-                self.note_dying(value, Some(*var), true);
-                // #4208: a tail `map.remove(var, k)` of a tombstone var holes
-                self.with_tomb_tail(*var, value, |em| em.lower(value, Some(declared)))?;
-                self.note_dying(value, Some(*var), false);
-                // RC-5: same share discipline as Bind — except a MOVED
-                // temp (#3104), whose one credit becomes the var's.
-                if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
-                    self.rc_inc_top();
-                }
-                // RC-3: same ownership settlement as Bind — here for locals
-                // (a global's is at the store below), never through a cell, and
-                // NEVER when the rhs SPENDS the assigned var's own credit
-                // (`assign_rhs_spends_var`): then the callee already released
-                // or reallocated the old block, and a dec here double-frees
-                // (mut_heap_param exit-1'd on exactly this). Every other rhs
-                // leaves the old occupant this local's to release. Aliasing
-                // rhs shapes (`xs = if c then xs else ys`) stay safe by order:
-                // the RC-5 inc above runs before this dec, so a same-block
-                // result nets to zero.
-                let rhs_spends_var = self.assign_rhs_spends_var(value, *var);
-                if let Some(idx) = local
-                    && !self.cells.contains(var)
-                    && self.rc_droppable(declared)
-                    && !rhs_spends_var
-                {
-                    let dec = self.dec_fn_of(declared);
-                    self.f.instructions().local_get(idx).call(dec);
-                    self.rc_own(idx, declared);
-                }
-                // The witness (#2757): a droppable local's occupant changes
-                // here — or a global's / a cell's, an outer holder the frame
-                // borrows (#2755, `witness_holder`), settled the same way below.
-                if self.rc_droppable(declared)
-                    && let Some(idx) = self.witness_holder(*var, local.is_none())
-                {
-                    match moved {
-                        Some(src) => self.witness_transfer(idx, !rhs_spends_var, src),
-                        None => self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value),
-                    }
-                }
-                // #2010: a C-319 cell's occupant is released as it is
-                // replaced (the cell holds exactly one credit on it) — the
-                // same settlement, one load deeper.
-                if let Some(idx) = local
-                    && self.cells.contains(var)
-                    && self.rc_droppable(declared)
-                    && !rhs_spends_var
-                {
-                    let dec = self.dec_fn_of(declared);
-                    self.f.instructions().local_get(idx);
-                    self.load_ty_slot(declared, 0);
-                    self.f.instructions().call(dec);
-                }
-                match local {
-                    Some(idx) => self.emit_store_var(*var, idx, declared)?,
-                    None => {
-                        let gidx = self.globals[&(self.var_space, *var)].0;
-                        // #2992: a top-let global holds ONE credit on its
-                        // occupant for the program's life (its initializer
-                        // takes it, func.rs), so replacing the occupant
-                        // releases it — the local settlement above, read
-                        // through the global. Without it every `g = …` in a
-                        // loop kept the previous block alive.
-                        if self.rc_droppable(declared) && !rhs_spends_var {
-                            let dec = self.dec_fn_of(declared);
-                            self.f.instructions().global_get(gidx).call(dec);
-                        }
-                        self.f.instructions().global_set(gidx);
-                    }
-                }
-                self.empty_moved_temp(moved);
-                Ok(())
-    }
-}
-
-impl Emitter<'_> {
-    /// `p.field = v` on a record var: copy-on-write write-back — fresh
-    /// block, one slot replaced, rebound. Split from `lower_stmt` for the
-    /// complexity budget; the core is `field_assign_with` (list_mut.rs),
-    /// which the record-field forms of the mut list/map ops share (#2411).
-    pub(crate) fn lower_field_assign(
-        &mut self,
-        target: &almide_ir::VarId,
-        path: &[almide_base::intern::Sym],
-        value: &IrExpr,
-    ) -> Result<(), EmitError> {
-        let moved = self.take_moved_temp(value);
-        if moved.is_none() && self.try_field_append_assign(target, path, value)? {
-            return Ok(());
-        }
-        let spends_var = self.assign_rhs_spends_var(value, *target);
-        self.field_assign_with(target, path, spends_var, |s, fty| {
-            s.lower(value, Some(fty))?;
-            if moved.is_none() {
-                s.rc_share_guard(value, fty);
-            }
-            s.witness_field_value(value, fty, moved, spends_var);
-            Ok(())
-        })?;
-        self.empty_moved_temp(moved);
-        Ok(())
-    }
-}
+#[path = "stmts_assign.rs"]
+mod assign;

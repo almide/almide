@@ -185,7 +185,7 @@ almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも
 
 ネイティブビルド（`almide run` / `build` / `test` / `bench`、cdylib と install の経路）は、
 rustc や cargo を起動する前に `rustc --version`（PATH の rustc と、設定されていれば `$RUSTC`）を読み、
-**rustc 1.96.0** 未満なら何もビルドせず終了コード 1 で拒否する。エラーには見つかった版、必要な版、
+**rustc 1.97.0** 未満なら何もビルドせず終了コード 1 で拒否する。エラーには見つかった版、必要な版、
 直し方（`rustup update`）が出る。下限は `src/cli/rustc_floor.rs` の `MIN_RUSTC` 一か所に書かれ、
 max(1.77.2, CI が生成コードを検証する `RUST_TOOLCHAIN`) である。1.77.2 は CVE-2024-24576
 （Windows の `Command` が `.bat` / `.cmd` への引数を cmd.exe で無害化しなかった）の修正版で、
@@ -230,6 +230,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 |---|---|---|
 | `--run` が 1 件も一致しなかった | **5** | 何も走っていない。CI のフィルタの打ち間違いが緑に見えないように。メッセージはパターンが一致しなかったと言う。`--allow-no-tests` で opt-out |
 | 実行すべきテストが 1 件も無かった | **5** | 事故。`--allow-no-tests` で opt-out |
+| テストはあったが、全ファイルがスキップされ 1 件も走らなかった | **5** | 何も走っていない（#4325）。メッセージは `no test ran: N file(s) were skipped` と言う。`--allow-no-tests` で opt-out |
 
 「テストが無かった」は**テストファイルが見つからなかった場合と、名指ししたファイルに
 `test` ブロックが無かった場合の両方**に適用される。5 は 1(テスト失敗)と区別するための
@@ -240,7 +241,35 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 レンダラの壁(WALL、そのレグが辞退した)ではなく「走らせるものが無かった」であり、両レグで
 5 になる(#2204)。
 
-テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`
+**スキップは、同じ実行で 1 件以上のテストが走ったときだけ緑**(#4325)。`--target wasm`
+のスキップは 3 種あり、要約行に種類ごとの数が出る（`1 passed, 0 failed, 2 skipped: 1 walled,
+1 declared `// wasm:skip` (of 3 files)`、件数行は `1 test in 3 files, 2 files skipped`）:
+
+| スキップ | 意味 |
+|---|---|
+| declared（先頭 3 行の `// wasm:skip`） | 作者が「wasm ではこのファイルを走らせられない」と理由付きで宣言した |
+| walled（`WALL` 行） | wasm レグがそのプログラムを lower できなかった（E082 と同じ判定） |
+| host unavailable | レーンを起動できない環境（`ALMIDE_TEST_WASM_RUNNER=wasmtime` で CLI が無い等） |
+
+どれも「テストはあるが、このレグでは走らなかった」であって合格ではない。そこで規則は
+1 つ: **実行全体で走ったテストが 0 件なら、スキップの有無にかかわらず 5**。宣言済みの
+`// wasm:skip` ファイルも、そのファイル単独で `--target wasm` にかければ 5 になる（走らせた
+ものが無い）。ディレクトリ実行で他のファイルのテストが 1 件でも走れば、宣言スキップは
+緑のまま。以前はスキップがあると 0 件でも 0 で終わり、wasm で lower できない負の対照が
+`0 passed, 0 failed, 1 skipped` で通っていた。
+
+**組み込みホストに無い `@extern(wasm)` import はミスコンパイルではない**(#4324)。
+`@extern(wasm, "m", "f")` を import するプログラムは、`almide run --target wasm` と同じ
+文言（`this program imports `m.f` … has no host for it` と `--host js` の hint）で断られる:
+
+- 既定の `almide test`（wasm 先行 + native fallback）: そのファイルは native で走り、
+  `note: <file>: the wasm leg cannot run this file; its tests run on the native fallback`
+  と理由が出る。「wasm-only miscompile」の WASM TRAP にはならない
+- `--target wasm`: `almide run --target wasm` と同じく **FAIL**（終了 1）。そのホストを
+  前提とするファイルは `// wasm:skip <理由>` で宣言する
+
+テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`、
+スキップと無ホストの判定は `tests/wasm_test_skip_verdict_test.rs`
 
 **失敗したテストの出力は失敗報告の下に付く**(#2538)。`println` / `eprintln` で途中の値を
 出したテストが落ちたとき、その出力が捨てられないようにするため:
@@ -414,6 +443,7 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 | `--allow <CAP>` | `--profile critical` で capability を 1 つ許可(複数回指定可) |
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
+| `--budget NAME=N` | コンパイルコストの予算を 1 つ設定(下記、複数回指定可。`--profile critical` では拒否) |
 
 `./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
 `check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
@@ -431,6 +461,32 @@ stderr に出る。表ごとの受理キーは [package-system.md §6](package-s
 severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
+
+#### コンパイルコストの予算（ADR-0030, #4136）
+
+コンパイラは信頼できない入力（PR の CI、ファイルを開いた瞬間の LSP、採点器、playground）を処理するので、
+入力に比例して仕事が増えるフェーズにはそれぞれ名前付きの**予算**がある。予算は数える（ノード数・インスタンス数・
+バイト数・段数）もので、秒や空きメモリでは測らない。だから同じ入力は、どの機械でも、native でも wasm 上の
+コンパイラでも、CLI でも LSP でも同じ判定になる。超えたら定義済みの診断で終わり、クラッシュ・OOM・ハングにはならない。
+
+- **ソースは予算を上げられない。** 属性・`almide.toml`・`almide.lock`・環境変数のどれも予算を読まない。
+- **上げられるのはコマンドラインだけ**: `--budget NAME=N`（複数回指定可、全サブコマンド共通）。
+  `--profile critical` は `--budget` を拒否する（既定の予算で判定する）。
+- `almide budgets` が一覧、`almide budgets --md` が下表そのもの（`tests/compile_budget_test.rs` が一致を検査）。
+- 隠しフラグ `--budget-report` は、終了時に各予算の観測最大値と数えた仕事量を stderr に出す
+  （`scripts/measure-compile-budgets.sh` と上記ゲートが読む）。
+
+<!-- almide budgets --md: begin -->
+| Budget | Default | Counts | Exceeding it |
+|---|---|---|---|
+| `nesting` | 500 levels | syntactic nesting of one expression or pattern, counted by the parser as it descends | parse error `expression nesting too deep (max N)` |
+| `type_size` | 256 nodes | nodes of one inferred type, counted as the checker builds an expression's type and as it resolves an inference variable — `let t1 = (t0, t0)` doubled 22 times was 3.7 GB (#4114) | E111 |
+| `generic_instances` | 1000 instances | specialized instances of protocol-bounded generic fns one program monomorphizes, each instance's type arguments also held to `type_size`; polymorphic recursion would add a larger one per round without end | E112 |
+| `manifest_bytes` | 1048576 bytes | size of one `almide.toml` or `almide.lock` read, the project's own or a dependency's, checked before and while it is read (#4194) | error `<file> is larger than N bytes` |
+| `dependency_count` | 1000 packages | distinct packages one dependency resolution visits, the transitive closure included, counted before each is fetched | error `too many dependencies (N, max M)` |
+| `dependency_depth` | 64 levels | length of the chain of dependencies from the root package to the one being resolved, counted before it is fetched | error `dependency chain too deep (N, max M)` |
+| `exhaustiveness_steps` | 400 steps | recursive steps of the exhaustiveness and reachability check of one `match` (pattern-matrix usefulness is exponential in the worst case) | E113 |
+<!-- almide budgets --md: end -->
 
 #### `--profile critical`
 
@@ -1162,6 +1218,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_ABORT_SITE=value` | runtime | the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand |
 | `ALMIDE_ALLOC_COUNT` | instrument | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
+| `ALMIDE_BASELINE_BIN=value` | harness | a compiler from before the sockets route: tests/net_wasm_default_route_test.rs byte-compares a socket-free program's preview 1 module against it |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
 | `ALMIDE_BENCH_MAIN_NS=value` | harness | the file `almide bench` points a benched native binary at: the spliced `main` timer writes its elapsed nanoseconds there (#2980, the main-only boundary) |
 | `ALMIDE_BIN=value` | harness | path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH) |
@@ -1178,10 +1235,12 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_CI_TOUCHED=value` | harness | a file listing the repo-relative paths the change touches, one per line (written by scripts/ci-slice-prepare.sh); read instead of running `git diff` against `ALMIDE_CI_BASE` |
 | `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
 | `ALMIDE_COMPONENT_ADAPTER` | route | route `--component` through the preview1 adapter instead of the direct component emission |
-| `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; runs on a stock wasmtime 46+ with no feature flag (`wasmtime run app.wasm`, `-S http` for an http client — ADR-0023 step 1) |
+| `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component` (a program whose op set names a tcp / udp / name-lookup op builds as this component without the switch, since preview 1 has no sockets); runs on a stock wasmtime 46+ with no feature flag (`wasmtime run app.wasm`, `-S http` for an http client — ADR-0023 step 1) |
 | `ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT` | ablation | make an `@input_sink` parameter (`http.decode_json[T]`) admit a type that is also `Encode` (a `Codec` type) instead of E110: the negative control of the row-22 input-type gate (tests/input_sink_test.rs), whose over-post cell must flip from E110 to `is_admin=true`; never set otherwise |
+| `ALMIDE_CONTROL_ADMIT_HAND_DECODE` | ablation | make the request-decode flow gate (E110's flow half, #4232) admit request data decoded by hand into a type that is also sent out (`User.decode(json.parse(http.body(req))!)` into a `Codec` type): the negative control of tests/input_sink_test.rs, whose hand-decode program must flip from E110 to `is_admin=true`; never set otherwise |
 | `ALMIDE_CONTROL_BIN=value` | harness | an `almide` binary the security route tests (`tests/effect_value_laundering_test.rs`, `proc_category_test.rs`, `permissions_routes_test.rs`) run INSTEAD of the one under test — the negative control: a build without the check fails their assertions (#4151, #4155) |
 | `ALMIDE_CONTROL_IGNORE_SKIP_DECODE` | ablation | make the Codec derive read a `@skip_decode` field from input again: the negative control of the #4108 field-skip matrix gate (tests/codec_field_skip_test.rs), which must flip its `admin=false` cell; never set otherwise |
+| `ALMIDE_CONTROL_NO_TYPE_SHARING` | ablation | make every clone of a type copy its whole tree instead of sharing its element lists (ADR-0030 D5): the negative control of the type-sharing gate (tests/compile_budget_test.rs), whose doubling chain with the type-size budget lifted must then build exponentially many type lists; never set otherwise |
 | `ALMIDE_CORPUS_FILTER=value` | harness | substring filter over the fixture paths the 3-way oracle test evaluates |
 | `ALMIDE_CORPUS_SHARD=value` | harness | `k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate |
 | `ALMIDE_CORPUS_SHARD_DIR=value` | harness | directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing |
@@ -1218,6 +1277,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DUMP_VERIFY` | debug | print the native render's verification transcript |
 | `ALMIDE_DUMP_WMIR=value` | debug | print the lowered wasm-leg op stream of every fn whose name contains the value |
 | `ALMIDE_DWARF_FIXTURES=value` | harness | the DWARF line-table span-resolution measurement (`crates/almide-wasm/tests/dwarf_lines.rs`, ignored test): the `.almd` files to measure, comma-separated (#1315) |
+| `ALMIDE_EXPECT_BASELINE` | harness | make tests/net_wasm_default_route_test.rs fail instead of skipping the byte comparison when ALMIDE_BASELINE_BIN is unset |
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FAKE_RUSTC_VERSION=value` | harness | the version a fake `rustc` reports in tests/rustc_floor_test.rs, which forwards every other invocation to `ALMIDE_REAL_RUSTC` (the rustc-floor refusal's probe) |
@@ -1283,6 +1343,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SIZE_PRESSURE=value` | harness | the allocation pressure (`plain` / `quarantine` / `ballast`) a size-ratchet child builds its one fixture under, for the determinism check (#3143); the ratchet sets it on the processes it spawns |
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
+| `ALMIDE_STDLIB_COVERAGE_PROBE=value` | harness | the one program (its repo-relative path) tests/stdlib_test_coverage_test.rs measures, for probing a single fixture |
+| `ALMIDE_STDLIB_COVERAGE_REPORT=value` | harness | where tests/stdlib_test_coverage_test.rs writes its per-function coverage table (scripts/check-stdlib-test-coverage.sh) |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
 | `ALMIDE_SURVIVE_OVERLAY=value` | harness | RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change |
 | `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | harness | RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read |
@@ -1308,6 +1370,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
+| `ALMIDE_UPDATE_STDLIB_COVERAGE` | harness | rewrite the stdlib test-coverage ledger's rows from the measured run |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |

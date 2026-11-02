@@ -21,6 +21,12 @@
 #             `pip install`; values are resolved through env / inputs first;
 #   closure   (`--closure`, network) every pinned action's own action.yml AT
 #             ITS COMMIT pins each nested `uses:` and docker image, recursively.
+# and scripts/lib/download_pins.py:
+#   downloads (always, offline) every curl / wget / Invoke-WebRequest of a binary
+#             or archive in .github and scripts/*.sh is checked against a pinned
+#             sha256 — scripts/fetch-pinned.sh with a line in
+#             .github/pinned-downloads.txt, or a 64-hex literal — or, for a
+#             first-party `latest`, `gh attestation verify` of the same repo.
 #
 # Usage: scripts/check-action-pins.sh [root]   (default: the repository root)
 #        scripts/check-action-pins.sh --closure [root]
@@ -35,6 +41,7 @@ export LC_ALL=C
 
 here="$(cd "$(dirname "$0")" && pwd)"
 supply() { python3 -I "$here/lib/action_supply.py" "$@"; }
+dlpins() { python3 -I "$here/lib/download_pins.py" "$@"; }
 
 scan() {
   local root="$1" bad=0 n=0
@@ -160,7 +167,148 @@ PY
   ACTION_SUPPLY_FETCH_ROOT="$mirror" supply closure "$tmp" >/dev/null \
     || { echo "self-test: the closure rule refused a fully pinned closure" >&2; ACTION_SUPPLY_FETCH_ROOT="$mirror" supply closure "$tmp" >&2; exit 1; }
 
-  echo "check-action-pins self-test: OK — refused a tag pin, a branch pin, seven moving toolchain / runtime / installer names and a composite's nested tag; passed the fixed trees"
+  # Downloads (row 16): a fetched binary or archive must be checked against a
+  # pinned sha256 (or, for a first-party `latest`, its own attestation).
+  rm -rf "$tmp/.github" "$tmp/mirror"; mkdir -p "$tmp/.github/workflows" "$tmp/.github/actions/leg" "$tmp/scripts"
+  cp "$here/fetch-pinned.sh" "$tmp/scripts/fetch-pinned.sh"
+  good=https://github.com/ex/tool/releases/download/v1.0.0/tool-v1.0.0-x86_64-linux.tar.xz
+  printf '%s  %s\n' "$(printf 'a%.0s' $(seq 64))" "$good" > "$tmp/.github/pinned-downloads.txt"
+  cat > "$tmp/.github/workflows/dl.yml" <<'EOF'
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: raw release asset
+        run: |
+          VERSION=v1.0.0
+          curl -fLO "https://github.com/ex/tool/releases/download/${VERSION}/tool-${VERSION}-x86_64-linux.tar.xz"
+      - name: installer piped into a shell
+        run: curl -fsSL https://ex.example/install | sh
+      - name: helper, unlisted version
+        run: |
+          VERSION=v9.9.9
+          bash scripts/fetch-pinned.sh "https://github.com/ex/tool/releases/download/${VERSION}/tool-${VERSION}-x86_64-linux.tar.xz" t.tar.xz
+      - name: latest, attested by the wrong repository
+        run: |
+          curl -fsSL -o a.tar.gz https://github.com/ex/tool/releases/latest/download/a.tar.gz
+          gh attestation verify a.tar.gz --repo other/repo
+      - uses: ./.github/actions/leg
+        with:
+          v: v2.0.0
+      - name: not downloads
+        run: |
+          # curl -fLO https://github.com/ex/tool/releases/download/v1/x.tar.gz
+          curl --fail-with-body -X POST https://api.example/hook -d '{}'
+          curl -fsS -m 2 -H 'Metadata-Flavor: Google' http://metadata.google.internal/x
+          curl -fsSL -o "$tmp" "https://raw.githubusercontent.com/ex/als/0123/contracts.toml"
+EOF
+  cat > "$tmp/.github/actions/leg/action.yml" <<'EOF'
+inputs:
+  v:
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: bash scripts/fetch-pinned.sh "https://github.com/ex/tool/releases/download/${{ inputs.v }}/tool-${{ inputs.v }}-x86_64-linux.tar.xz" t.tar.xz
+EOF
+  printf '#!/bin/sh\nwget https://ex.example/tool.tar.gz\n' > "$tmp/scripts/get.sh"
+  echo "not a digest line" >> "$tmp/.github/pinned-downloads.txt"
+  set +e; out=$(dlpins "$tmp" 2>&1); rc=$?; set -e
+  expect_refusal "the download rule" "$out" "$rc" \
+    'dl.yml:9  curl -fLO' 'dl.yml:11  curl -fsSL https://ex.example/install | sh' \
+    'tool-v9.9.9-x86_64-linux.tar.xz — no line in' 'not a release asset of that repository' \
+    'leg/action.yml:8' 'tool-v2.0.0-x86_64-linux.tar.xz — no line in' 'get.sh:2  wget' \
+    'pinned-downloads.txt:2  not `<sha256>  <https url>`' '7 finding(s)'
+  python3 -I - "$tmp/.github/workflows/dl.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+for a, b in [('          curl -fLO "https://github.com/ex/tool/releases/download/${VERSION}/tool-${VERSION}-x86_64-linux.tar.xz"\n',
+              '          bash scripts/fetch-pinned.sh "https://github.com/ex/tool/releases/download/${VERSION}/tool-${VERSION}-x86_64-linux.tar.xz" t.tar.xz\n'),
+             ("curl -fsSL https://ex.example/install | sh", "echo no installer"), ("VERSION=v9.9.9", "VERSION=v1.0.0"),
+             ("--repo other/repo", "--repo ex/tool"), ("v: v2.0.0", "v: v1.0.0")]:
+    assert a in s, a
+    s = s.replace(a, b, 1)
+open(p, "w").write(s)
+PY
+  printf '#!/bin/sh\nwget https://ex.example/tool.tar.gz\necho "%s  tool.tar.gz" | sha256sum -c -\n' "$(printf 'b%.0s' $(seq 64))" > "$tmp/scripts/get.sh"
+  sed -i.bak '/not a digest line/d' "$tmp/.github/pinned-downloads.txt"; rm -f "$tmp/.github/pinned-downloads.txt.bak"
+  dlpins "$tmp" >/dev/null || { echo "self-test: the download rule refused the pinned tree" >&2; dlpins "$tmp" >&2; exit 1; }
+
+  # Fetches by other clients (row 16): a clone of a moving branch, another
+  # repository checked out at a branch, elan's and opam's own fetches, and a
+  # third-party action nobody declared.
+  src="$tmp/src"; mkdir -p "$src/.github/workflows" "$src/scripts"
+  printf '# none yet\n' > "$src/.github/pinned-downloads.txt"
+  cat > "$src/.github/workflows/src.yml" <<'EOF'
+on: push
+env:
+  TOOL_SHA: 1111111111111111111111111111111111111111
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ex/undeclared@2222222222222222222222222222222222222222 # v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ex/project
+          ref: main
+      - name: clone at the head
+        run: git clone --depth 1 https://github.com/ex/tool /tmp/tool
+      - name: clone at a pinned commit
+        run: |
+          git clone -q https://github.com/ex/tool /tmp/tool2
+          git -C /tmp/tool2 checkout -q --detach "$TOOL_SHA"
+      - name: toolchains
+        run: |
+          elan toolchain install leanprover/lean4:v4.29.1
+          opam init --bare --disable-sandboxing -y
+EOF
+  printf '#!/bin/sh\n# supply: head-tracked\ngit clone https://github.com/ex/grammar /tmp/g\n' > "$src/scripts/get.sh"
+  set +e; out=$(dlpins "$src" 2>&1); rc=$?; set -e
+  expect_refusal "the source rule" "$out" "$rc" \
+    'src.yml:8  uses: ex/undeclared' 'src.yml:9  uses: actions/checkout — not declared' \
+    'actions/checkout of ex/project at `main`' 'src.yml:14  run: git clone --depth 1' \
+    'src.yml:21  elan toolchain install' 'src.yml:22  opam init' 'get.sh:3  git clone' '7 finding(s)'
+  /usr/bin/grep -qF 'git clone -q https://github.com/ex/tool /tmp/tool2' <<< "$out" \
+    && { echo "self-test: the source rule refused a clone checked out at a 40-hex commit" >&2; echo "$out" >&2; exit 1; }
+  python3 -I - "$src/.github/workflows/src.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+for a, b in [("ref: main", "ref: 3333333333333333333333333333333333333333"),
+             ("run: git clone --depth 1 https://github.com/ex/tool /tmp/tool\n",
+              "run: git clone https://github.com/ex/tool /tmp/tool && git -C /tmp/tool checkout 4444444444444444444444444444444444444444\n"),
+             ("          elan toolchain install leanprover/lean4:v4.29.1\n", ""),
+             ("opam init --bare --disable-sandboxing -y", 'opam init --bare -y default "git+https://github.com/ocaml/opam-repository.git#${TOOL_SHA}"')]:
+    assert a in s, a
+    s = s.replace(a, b, 1)
+open(p, "w").write(s)
+PY
+  printf 'action ex/undeclared  nothing (a forged declaration)\naction actions/checkout  the forged project at a 40-hex ref\n' >> "$src/.github/pinned-downloads.txt"
+  printf '#!/bin/sh\n# supply: head-tracked — the forged head is the subject\ngit clone https://github.com/ex/grammar /tmp/g\n' > "$src/scripts/get.sh"
+  dlpins "$src" >/dev/null || { echo "self-test: the source rule refused the pinned tree" >&2; dlpins "$src" >&2; exit 1; }
+
+  # The helper at run time: a wrong digest aborts the step and leaves no file.
+  asset="$tmp/asset.tar.gz"; printf 'release bytes\n' > "$asset"
+  url="file://$asset"; man="$tmp/manifest.txt"
+  right=$( (command -v sha256sum >/dev/null && sha256sum "$asset" || shasum -a 256 "$asset") | cut -d' ' -f1)
+  printf '%s  %s\n' "$(printf '0%.0s' $(seq 64))" "$url" > "$man"
+  set +e; out=$(PINNED_DOWNLOADS_MANIFEST="$man" bash -c 'set -e; bash "$1" "$2" "$3"; echo REACHED' _ "$tmp/scripts/fetch-pinned.sh" "$url" "$tmp/got" 2>&1); rc=$?; set -e
+  [ "$rc" = 1 ] && ! /usr/bin/grep -q REACHED <<< "$out" && [ ! -e "$tmp/got" ] && /usr/bin/grep -qF 'sha256 mismatch' <<< "$out" \
+    || { echo "self-test: a wrong digest did not abort the download step (exit $rc)" >&2; echo "$out" >&2; exit 1; }
+  printf '%s  %s\n' "$right" "$url" > "$man"
+  PINNED_DOWNLOADS_MANIFEST="$man" bash "$tmp/scripts/fetch-pinned.sh" "$url" "$tmp/got" >/dev/null \
+    || { echo "self-test: the helper refused the pinned digest" >&2; exit 1; }
+  printf 'tampered cache\n' > "$tmp/got"   # a poisoned cache restore is re-fetched, not trusted
+  PINNED_DOWNLOADS_MANIFEST="$man" bash "$tmp/scripts/fetch-pinned.sh" "$url" "$tmp/got" >/dev/null \
+    && cmp -s "$asset" "$tmp/got" || { echo "self-test: the helper kept a cached file whose digest is wrong" >&2; exit 1; }
+  set +e; PINNED_DOWNLOADS_MANIFEST="$man" bash "$tmp/scripts/fetch-pinned.sh" "file://$tmp/other" "$tmp/x" >/dev/null 2>&1; rc=$?; set -e
+  [ "$rc" = 1 ] || { echo "self-test: the helper fetched a URL with no pinned digest (exit $rc)" >&2; exit 1; }
+
+  echo "check-action-pins self-test: OK — refused a tag pin, a branch pin, seven moving toolchain / runtime / installer names and a composite's nested tag, six unpinned downloads and a malformed manifest line, seven fetches by other clients (a moving clone, an unreasoned head-tracked mark, a checkout of another repository at a branch, elan, opam at its head, two undeclared actions), and a wrong digest at run time; passed the fixed trees"
   exit 0
 fi
 
@@ -173,4 +321,5 @@ root="${1:-$(git rev-parse --show-toplevel)}"
 rc=0
 scan "$root" || rc=1
 supply versions "$root" || rc=1
+dlpins "$root" || rc=1
 exit "$rc"

@@ -56,7 +56,7 @@ fn c132_tuple(elements: Vec<IrExpr>) -> IrExpr {
 }
 
 fn c132_result_ty(ok: &Ty, err: &Ty) -> Ty {
-    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![ok.clone(), err.clone()])
+    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![ok.clone(), err.clone()].into())
 }
 
 /// The carrier's err half `(String, Buf..)`: the buffer types, when `ty` is
@@ -482,7 +482,7 @@ fn c132_paired_assign_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTabl
                 },
             ],
         },
-        ty: Ty::Tuple(vec![r_ty.clone(), x_ty.clone()]),
+        ty: Ty::Tuple(vec![r_ty.clone(), x_ty.clone()].into()),
         span: value.span,
         def_id: None,
     };
