@@ -7,7 +7,7 @@
 | 类别 | 状态 |
 |----------|--------|
 | 成熟度 | 尚未达到 1.0，正在 `develop` 上积极开发；面向 LLM 的表层规范只能通过带有迁移诊断的 dialect epoch 变更，遵循 [STABILITY.md](./STABILITY.md)（于 2026-08-20 宣布） |
-| 支持 | 1.0 之前仅支持最新发布系列。政策和版本管理保证：[SUPPORT.md](../SUPPORT.md) · 漏洞：[SECURITY.md](../SECURITY.md) |
+| 支持 | 1.0 之前仅支持最新发布系列。政策和版本管理保证：[SUPPORT.md](../SUPPORT.zh-CN.md) · 漏洞：[SECURITY.md](../SECURITY.zh-CN.md) |
 | 编译器 | 纯 Rust 编译器；发行包还附带独立的 `almide-verify` 证书检查器 |
 | 目标 | Rust（原生）、WASM（直接输出的 structural leg，见[工作原理](./how-it-works.zh-CN.md)） |
 | 带验证的代码生成 | structural wasm 路径会为每次构建输出所有权、边界、名称和能力的验证证据（witness）；`almide verify` 检查通过 SHA-256 绑定到交付 wasm 文件的包（#4011）。这并不证明语义正确性或整个产物的内存安全：覆盖范围限制和剩余的信任假设明确列于[已证明与依赖信任的部分](./contracts/proven-vs-trusted.md)和[内存安全缺口表](./design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011)。旧 MIR→WAT 渲染器已在 #2761 中退役 |

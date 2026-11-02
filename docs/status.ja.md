@@ -7,7 +7,7 @@ Almide の現在地をまとめています。記録時点が付いた集計値�
 | 分類 | 状況 |
 |----------|--------|
 | 成熟度 | 1.0 未満で、`develop` 上で活発に開発中。LLM 向けの表面仕様の変更は、[STABILITY.md](./STABILITY.md) に従い、移行診断を伴う dialect epoch を通してのみ行います（2026-08-20 宣言） |
-| サポート | 1.0 未満では最新リリース系列のみ。方針とバージョニングの保証：[SUPPORT.md](../SUPPORT.md) · 脆弱性：[SECURITY.md](../SECURITY.md) |
+| サポート | 1.0 未満では最新リリース系列のみ。方針とバージョニングの保証：[SUPPORT.md](../SUPPORT.ja.md) · 脆弱性：[SECURITY.md](../SECURITY.ja.md) |
 | コンパイラ | 純 Rust 製コンパイラ。配布物には独立した証明書検査器 `almide-verify` も同梱します |
 | ターゲット | Rust（ネイティブ）、WASM（直接出力する structural leg。[仕組み](./how-it-works.ja.md)を参照） |
 | 検証付きコード生成 | structural wasm 経路は、ビルドごとに所有権、境界、名前、ケイパビリティの検証用証拠（witness）を出力します。`almide verify` は、配布される wasm ファイルに SHA-256 で結び付けられたバンドルを検査します（#4011）。これは意味的な正しさや成果物全体のメモリ安全性の証明ではありません。対象範囲の限界と残る信頼上の前提は、[証明済みの事項と信頼に依存する事項](./contracts/proven-vs-trusted.md)および[メモリ安全性の不足事項一覧](./design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011)に明記しています。旧 MIR→WAT レンダラーは #2761 で廃止されました |

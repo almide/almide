@@ -22,7 +22,7 @@
 | [`contracts/`](./contracts/) | 振る舞い契約台帳。観測可能な native ⇄ wasm の約束をすべて実行可能な証拠に結び付ける。索引と適合性レポートは生成物 | ✅ `check-contracts.sh` |
 | [`adr/`](./adr/) | Architecture Decision Records — 採用・却下された設計の理由を残す、番号付きの不変な記録 |  |
 | [`roadmap/`](./roadmap/) | `active/` = 進行中（約20件は Rust ソースのコメントから名前で参照）、`on-hold/`、`done/`。README はディレクトリ構造から生成 | ✅ `almide-gates` |
-| [`design/`](./design/) | 設計の根拠：[DESIGN.md](./design/DESIGN.md)（曖昧さの除去）、[REJECTED_PATTERNS.md](./design/REJECTED_PATTERNS.md)、[HIDDEN_OPERATIONS.md](./design/HIDDEN_OPERATIONS.md)、[EQUIVALENCE.md](./design/EQUIVALENCE.md) |  |
+| [`design/`](./design/) | 設計の根拠：[DESIGN.md](./design/DESIGN.md)（曖昧さの除去）、[REJECTED_PATTERNS.md](./design/REJECTED_PATTERNS.md)、[HIDDEN_OPERATIONS.md](./design/HIDDEN_OPERATIONS.md)、[EQUIVALENCE.md](./design/EQUIVALENCE.ja.md) |  |
 | [`wasm/`](./wasm/) | [WASM-OUTPUT.md](./wasm/WASM-OUTPUT.md)（wasm バックエンドの出力と約束）、ケイパビリティシステム |  |
 | [`project/`](./project/) | [BENCHMARKS.md](./project/BENCHMARKS.md)、[BREAKING_CHANGE_POLICY.md](./project/BREAKING_CHANGE_POLICY.md)、[CLAUDE_TEMPLATE.md](./project/CLAUDE_TEMPLATE.md)（`almide init` が組み込む） | ✅ `include_str!` |
 | [`benchmarks/`](./benchmarks/) | [README.md](./benchmarks/README.md) — 計測ページ（トップの README から分離）。生成ブロックはここのコミット済み台帳（`build-speed.txt`、`wasm-size.txt`、`wasm-runtime.txt`、`native-victory.txt`）と `proofs/` から描画 | ✅ `almide-gates bench`、`gen-readme-stats.sh`、`gen-claims.sh`、`gen-mutation-score.sh`、`check-readme-numbers.sh` |

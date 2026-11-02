@@ -1,5 +1,7 @@
 # The Equivalence Claim — Byte-Identical Across Targets
 
+[English](./EQUIVALENCE.md) | [日本語](./EQUIVALENCE.ja.md) | [简体中文](./EQUIVALENCE.zh-CN.md)
+
 **Cross-target equivalence is checked contract by contract:** deterministic
 observations (stdout, stderr, exit code) are compared for supported programs
 under matching inputs and host assumptions. Host observations, randomness,

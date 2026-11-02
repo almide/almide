@@ -1,5 +1,7 @@
 # Security Policy
 
+[English](./SECURITY.md) | [日本語](./SECURITY.ja.md) | [简体中文](./SECURITY.zh-CN.md)
+
 ## Security lead
 
 Hiromi Motodera (本寺 広海), Representative Director of Aid-On Inc.

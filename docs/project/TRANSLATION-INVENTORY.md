@@ -9,7 +9,11 @@ This inventory covers **556 tracked Markdown files** at that snapshot, not 556 i
 - Preserve code, commands, identifiers, dates, measurements, source links, and qualification of guarantees. Link to translated siblings only when they exist; untranslated destinations keep their original links.
 - A translation is a reader aid, not a new normative source. The original specification and its upstream ALS authority remain controlling; translation disagreements must be fixed, not used to change language semantics.
 - Existing originals can be Japanese or mixed-language. Do not label every existing `.md` file English or silently replace it to enforce a suffix convention. Inspect each before deciding whether `.en.md` is required to preserve its identity.
-- First batch: five reader guides, ten new language files. Existing README translations are preserved with only links to these guides updated. No compiler, generator, workflow, helper, or CI policy changes are included.
+- Current batches: eight reader guides, sixteen new language files. Existing README translations are preserved with only links to these guides updated. No compiler, generator, workflow, helper, or CI policy changes are included.
+
+## Source caveats retained, not silently resolved
+
+Translation preserves source statements; it is not independent verification of every claim. `SECURITY.md` says “latest minor release line”, whereas `SUPPORT.md` says “latest release”. The intended maintenance scope needs owner reconciliation. `docs/mcp.md` describes this repository as scored on LLM writing accuracy, while `CLAUDE.md` assigns LLM writability to Dojo and compiler correctness here. These original statements have not been rewritten by this localization batch. CI behavior described in support prose is likewise not a newly established guarantee.
 
 ## Remaining work and safe placement
 
@@ -33,10 +37,10 @@ The classifications below are routing decisions, not completion claims or perman
 | Diagnostic docs — embedded / scanned | 105 |
 | Evidence / generated blocks / gate inputs | 12 |
 | Existing translations | 3 |
-| Handwritten documentation — consumer audit pending | 80 |
-| Normative specification / grammar | 26 |
+| Handwritten documentation — consumer audit pending | 76 |
+| Normative specification / grammar | 27 |
 | Proof records — machine evidence | 9 |
-| Reader guides — first batch | 5 |
+| Reader guides — translated batches | 8 |
 | Release history | 7 |
 | Roadmap — scanned tree / generated index | 202 |
 | Standard library — generated sections / gates | 52 |
@@ -59,8 +63,8 @@ The classifications below are routing decisions, not completion claims or perman
 | [`README.ja.md`](../../README.ja.md) | Existing translations | Existing — preserved |
 | [`README.md`](../../README.md) | Existing translations | Existing — preserved |
 | [`README.zh-CN.md`](../../README.zh-CN.md) | Existing translations | Existing — preserved |
-| [`SECURITY.md`](../../SECURITY.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`SUPPORT.md`](../../SUPPORT.md) | Reader guides — first batch | Drafted in this PR |
+| [`SECURITY.md`](../../SECURITY.md) | Reader guides — translated batches | Drafted in this PR |
+| [`SUPPORT.md`](../../SUPPORT.md) | Reader guides — translated batches | Drafted in this PR |
 | [`crates/CLAUDE.md`](../../crates/CLAUDE.md) | Agent instructions / embedded template | Pending |
 | [`crates/README.md`](../../crates/README.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`crates/almide-base/CLAUDE.md`](../../crates/almide-base/CLAUDE.md) | Agent instructions / embedded template | Pending |
@@ -81,9 +85,9 @@ The classifications below are routing decisions, not completion claims or perman
 | [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/CHEATSHEET.md`](../../docs/CHEATSHEET.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/GRAMMAR.md`](../../docs/GRAMMAR.md) | Normative specification / grammar | Pending |
-| [`docs/README.md`](../../docs/README.md) | Reader guides — first batch | Drafted in this PR |
+| [`docs/README.md`](../../docs/README.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/SPEC.md`](../../docs/SPEC.md) | Normative specification / grammar | Pending |
-| [`docs/STABILITY.md`](../../docs/STABILITY.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/STABILITY.md`](../../docs/STABILITY.md) | Normative specification / grammar | Pending |
 | [`docs/TRUST-SPINE.md`](../../docs/TRUST-SPINE.md) | Evidence / generated blocks / gate inputs | Pending |
 | [`docs/adr/0001-deterministic-time-units.md`](../../docs/adr/0001-deterministic-time-units.md) | Decision history — immutable original | Pending |
 | [`docs/adr/0002-fallibility-effect-orthogonal.md`](../../docs/adr/0002-fallibility-effect-orthogonal.md) | Decision history — immutable original | Pending |
@@ -133,7 +137,7 @@ The classifications below are routing decisions, not completion claims or perman
 | [`docs/contracts/proven-vs-trusted.md`](../../docs/contracts/proven-vs-trusted.md) | Evidence / generated blocks / gate inputs | Pending |
 | [`docs/cross-target-decisions.md`](../../docs/cross-target-decisions.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/DESIGN.md`](../../docs/design/DESIGN.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/EQUIVALENCE.md`](../../docs/design/EQUIVALENCE.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/design/EQUIVALENCE.md`](../../docs/design/EQUIVALENCE.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/design/HIDDEN_OPERATIONS.md`](../../docs/design/HIDDEN_OPERATIONS.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/MEMORY-SAFETY.md`](../../docs/design/MEMORY-SAFETY.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/design/REJECTED_PATTERNS.md`](../../docs/design/REJECTED_PATTERNS.md) | Handwritten documentation — consumer audit pending | Pending |
@@ -248,8 +252,8 @@ The classifications below are routing decisions, not completion claims or perman
 | [`docs/fan-capture-ownership-review.md`](../../docs/fan-capture-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/fan-parallel-safety-review.md`](../../docs/fan-parallel-safety-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/grammar/README.md`](../../docs/grammar/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/how-it-works.md`](../../docs/how-it-works.md) | Reader guides — first batch | Drafted in this PR |
-| [`docs/mcp.md`](../../docs/mcp.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/how-it-works.md`](../../docs/how-it-works.md) | Reader guides — translated batches | Drafted in this PR |
+| [`docs/mcp.md`](../../docs/mcp.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/native-projection-ownership-review.md`](../../docs/native-projection-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/native-read-borrow-review.md`](../../docs/native-read-borrow-review.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/project/BENCHMARKS.md`](../../docs/project/BENCHMARKS.md) | Handwritten documentation — consumer audit pending | Pending |
@@ -496,7 +500,7 @@ The classifications below are routing decisions, not completion claims or perman
 | [`docs/specs/result-option-effect.md`](../../docs/specs/result-option-effect.md) | Normative specification / grammar | Pending |
 | [`docs/specs/scoped.md`](../../docs/specs/scoped.md) | Normative specification / grammar | Pending |
 | [`docs/specs/type-system.md`](../../docs/specs/type-system.md) | Normative specification / grammar | Pending |
-| [`docs/status.md`](../../docs/status.md) | Reader guides — first batch | Drafted in this PR |
+| [`docs/status.md`](../../docs/status.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/stdlib/README.md`](../../docs/stdlib/README.md) | Standard library — generated sections / gates | Pending |
 | [`docs/stdlib/args.md`](../../docs/stdlib/args.md) | Standard library — generated sections / gates | Pending |
 | [`docs/stdlib/base64.md`](../../docs/stdlib/base64.md) | Standard library — generated sections / gates | Pending |
@@ -555,7 +559,7 @@ The classifications below are routing decisions, not completion claims or perman
 | [`docs/wasm/README.md`](../../docs/wasm/README.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/wasm/WASM-OUTPUT.md`](../../docs/wasm/WASM-OUTPUT.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/wasm/capability-system.md`](../../docs/wasm/capability-system.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/written-in-almide.md`](../../docs/written-in-almide.md) | Reader guides — first batch | Drafted in this PR |
+| [`docs/written-in-almide.md`](../../docs/written-in-almide.md) | Reader guides — translated batches | Drafted in this PR |
 | [`examples/almd-outline/README.md`](../../examples/almd-outline/README.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`proofs/COVERAGE.md`](../../proofs/COVERAGE.md) | Proof records — machine evidence | Pending |
 | [`proofs/DO330-GAP.md`](../../proofs/DO330-GAP.md) | Proof records — machine evidence | Pending |

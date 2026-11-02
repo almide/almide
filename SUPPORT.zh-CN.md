@@ -2,7 +2,7 @@
 
 [English](./SUPPORT.md) | [日本語](./SUPPORT.ja.md) | [简体中文](./SUPPORT.zh-CN.md)
 
-本文明确说明采用者可以期待什么。这里记录的是政策；下文每项保证都注明落实它的机制，以免政策与执行脱节。漏洞报告单独处理：参见 [SECURITY.md](./SECURITY.md)。
+本文明确说明采用者可以期待什么。这里记录的是政策；下文每项保证都注明落实它的机制，以免政策与执行脱节。漏洞报告单独处理：参见 [SECURITY.md](./SECURITY.zh-CN.md)。
 
 ## 哪些版本会获得修复
 
@@ -34,11 +34,11 @@ Almide **尚未达到 1.0**。目前仅支持一个版本系列：最新发布�
 - **规范独立于实现** — ALS（[almide/als](https://github.com/almide/als)）是单独的规范性规格，拥有自己的参考求值器；编译器接受规范的检验，而不是反过来。
 - **产物的连续性** — 发布版本、seal 和证明保存在公开基础设施（GitHub、Sigstore 的公开日志）中；许可证（MIT OR Apache-2.0）允许任何一方分叉并继续维护。
 
-组织与安全联系人列在 [SECURITY.md](./SECURITY.md) 中。它们的存在不等于提供付费支持合同。本政策没有规定付费支持条款、签约安排或认证赞助。不要从工程关卡或安全报告政策推断出这些承诺；任何此类服务都需要单独列明范围与条款。组织建设阶梯的工作（#586）本身并不代表提供这些服务。
+组织与安全联系人列在 [SECURITY.md](./SECURITY.zh-CN.md) 中。它们的存在不等于提供付费支持合同。本政策没有规定付费支持条款、签约安排或认证赞助。不要从工程关卡或安全报告政策推断出这些承诺；任何此类服务都需要单独列明范围与条款。组织建设阶梯的工作（#586）本身并不代表提供这些服务。
 
 ## 如何获得帮助
 
 - **错误和功能请求** — [GitHub issues](https://github.com/almide/almide/issues)；按照 [docs/project/ISSUE-TAXONOMY.md](./docs/project/ISSUE-TAXONOMY.md) 的分类，静默产生错误答案类的报告（错误输出、跨目标行为不一致）优先分诊。
-- **安全报告** — [SECURITY.md](./SECURITY.md)（私下报告，不要创建公开 Issue）。
+- **安全报告** — [SECURITY.md](./SECURITY.zh-CN.md)（私下报告，不要创建公开 Issue）。
 - **文档** — 编写 Almide 请查阅 [docs/CHEATSHEET.md](./docs/CHEATSHEET.md)，语言本身请查阅 [docs/SPEC.md](./docs/SPEC.md)，跨目标承诺请查阅 [docs/contracts/](./docs/contracts/README.md)。
 - **文档修正** — 面向 `develop`、仅修改说明性文字的 pull request 由 CI 的文档通道检查（[docs/project/RUST-LINT-GATES.md](./docs/project/RUST-LINT-GATES.md)），无需等待编译器测试矩阵。

@@ -1,5 +1,7 @@
 # Almide for agents: MCP server + Claude Code plugin
 
+[English](./mcp.md) | [日本語](./mcp.ja.md) | [简体中文](./mcp.zh-CN.md)
+
 > Last updated: 2026-09-26
 
 An agent reaching the compiler through a shell has to parse human-formatted

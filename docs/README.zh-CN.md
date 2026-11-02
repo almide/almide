@@ -22,7 +22,7 @@
 | [`contracts/`](./contracts/) | 行为契约台账：每项可观察的 native ⇄ wasm 承诺都能追溯到可执行证据。索引和符合性报告由工具生成 | ✅ `check-contracts.sh` |
 | [`adr/`](./adr/) | 架构决策记录 — 记录采纳或拒绝某项设计的原因，带编号且不可变 |  |
 | [`roadmap/`](./roadmap/) | `active/` = 进行中（约20篇由 Rust 源码注释按名称引用）、`on-hold/`、`done/`。README 根据目录树生成 | ✅ `almide-gates` |
-| [`design/`](./design/) | 设计依据：[DESIGN.md](./design/DESIGN.md)（消除歧义）、[REJECTED_PATTERNS.md](./design/REJECTED_PATTERNS.md)、[HIDDEN_OPERATIONS.md](./design/HIDDEN_OPERATIONS.md)、[EQUIVALENCE.md](./design/EQUIVALENCE.md) |  |
+| [`design/`](./design/) | 设计依据：[DESIGN.md](./design/DESIGN.md)（消除歧义）、[REJECTED_PATTERNS.md](./design/REJECTED_PATTERNS.md)、[HIDDEN_OPERATIONS.md](./design/HIDDEN_OPERATIONS.md)、[EQUIVALENCE.md](./design/EQUIVALENCE.zh-CN.md) |  |
 | [`wasm/`](./wasm/) | [WASM-OUTPUT.md](./wasm/WASM-OUTPUT.md)（wasm 后端的输出与承诺）、能力系统 |  |
 | [`project/`](./project/) | [BENCHMARKS.md](./project/BENCHMARKS.md)、[BREAKING_CHANGE_POLICY.md](./project/BREAKING_CHANGE_POLICY.md)、[CLAUDE_TEMPLATE.md](./project/CLAUDE_TEMPLATE.md)（由 `almide init` 嵌入） | ✅ `include_str!` |
 | [`benchmarks/`](./benchmarks/) | [README.md](./benchmarks/README.md) — 测量页面（从首页 README 移出）；其中的生成区块来自此处已提交的台账（`build-speed.txt`、`wasm-size.txt`、`wasm-runtime.txt`、`native-victory.txt`）以及 `proofs/` | ✅ `almide-gates bench`、`gen-readme-stats.sh`、`gen-claims.sh`、`gen-mutation-score.sh`、`check-readme-numbers.sh` |
