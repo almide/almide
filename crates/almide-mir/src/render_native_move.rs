@@ -231,6 +231,71 @@ pub(crate) fn is_static_str(v: ValueId) -> bool {
     STATIC_STRS.with(|m| m.borrow().contains(&v))
 }
 
+thread_local! {
+    static STACK_LITS: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Scalar list literals that live on the stack (#4006, no-perf-loss): a
+/// `ListLit` read only by borrowing calls to the program's own functions,
+/// as a closure call's environment, and by scalar slot reads, dropped and
+/// never returned, copied or stored — a closure block or a small tuple passed
+/// down. The render spells it `[i64; N]` where a `Vec` allocated and freed one
+/// block per evaluation (a closure value built per recursive call read 65x
+/// the standard codegen's instructions). Each of those uses borrows it as
+/// `&[i64]`, which an array coerces to.
+pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BTreeSet<&str>) {
+    let mut lits: std::collections::BTreeSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::ListLit { dst, .. } => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    lits.retain(|l| func.ret != Some(*l));
+    let mut reads = Vec::new();
+    for op in &func.ops {
+        if bookkeeping(op) {
+            continue;
+        }
+        let allowed: Vec<ValueId> = match op {
+            Op::ListLit { dst, .. } => vec![*dst],
+            Op::CallFn { name, args, .. } if user_fns.contains(name.as_str()) => args
+                .iter()
+                .filter_map(|a| match a {
+                    crate::CallArg::Handle(v) => Some(*v),
+                    _ => None,
+                })
+                .collect(),
+            Op::CallIndirect { args, .. } => match args.first() {
+                Some(crate::CallArg::Handle(env)) => vec![*env],
+                _ => vec![],
+            },
+            Op::ListGetScalar { list, .. } => vec![*list],
+            _ => vec![],
+        };
+        reads.clear();
+        crate::mir_ops::op_values(op, &mut reads);
+        for v in &reads {
+            if !allowed.contains(v) {
+                lits.remove(v);
+            }
+        }
+        // A value used twice by one op (a list as its own index) is not a borrow.
+        if let Op::ListGetScalar { list, idx, .. } = op {
+            if list == idx {
+                lits.remove(list);
+            }
+        }
+    }
+    STACK_LITS.with(|m| *m.borrow_mut() = lits);
+}
+
+pub(crate) fn is_stack_lit(v: ValueId) -> bool {
+    STACK_LITS.with(|m| m.borrow().contains(&v))
+}
+
 /// Record which of `ops[at]`'s call args may move (read by the floor render).
 pub(crate) fn set_moving_args(
     func: &MirFunction,

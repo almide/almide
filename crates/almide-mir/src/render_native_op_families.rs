@@ -531,8 +531,14 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 });
             }
             tys.insert(*dst, NTy::Vec);
+            let n = items.len();
             let items = items.join(", ");
-            line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+            if crate::render_native_move::is_stack_lit(*dst) {
+                // Borrowed only (crate::render_native_move::set_stack_lits).
+                line!("let mut {}: [i64; {n}] = [{items}];", var(*dst));
+            } else {
+                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+            }
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
         Op::IntBinOp { dst, op, a, b } => {
