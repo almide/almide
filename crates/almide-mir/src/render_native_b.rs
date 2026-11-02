@@ -449,7 +449,10 @@ fn render_declared_floor_call(
     let NativeCall { dst, name, args, .. } = call;
     let OpSink { tys, out, indent, used_shims } = s;
     let rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
-    let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered)?;
+    let dying: Vec<bool> =
+        args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
+    let dst_map = dst.and_then(crate::render_native_rec::declared_map);
+    let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
     used_shims.push(crate::native_floor::FLOOR_HEADER);
     used_shims.extend(floor.items.iter().copied());
     for _ in 0..indent {

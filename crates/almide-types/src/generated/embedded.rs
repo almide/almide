@@ -22543,12 +22543,16 @@ else {
   else __skv_find(h, entries, k, i + 1)
 }
 
+@specializes("map.new")
 fn map_new_skv() -> Map[String, Int] = prim.alloc_map_skv(0)
 
+@specializes("map.len")
 fn map_len_skv(m: Map[String, Int]) -> Int = prim.load32(prim.handle(m) + 4)
 
+@specializes("map.is_empty")
 fn map_is_empty_skv(m: Map[String, Int]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
 
+@specializes("map.contains")
 fn map_contains_skv(m: Map[String, Int], k: String) -> Bool = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22565,6 +22569,7 @@ fn __skv_some(h: Int, entries: Int, idx: Int) -> Int? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_skv(m: Map[String, Int], k: String) -> Int? = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22604,6 +22609,7 @@ fn __skv_set_append(rh: Int, sentries: Int, rentries: Int, idx: Int, k: String, 
     0
   }
 
+@specializes("map.set")
 fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22641,6 +22647,7 @@ fn __skv_remove_fill(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, 
     }
   }
 
+@specializes("map.remove")
 fn map_remove_skv(m: Map[String, Int], k: String) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22663,6 +22670,7 @@ else {
   __skv_keys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_skv(m: Map[String, Int]) -> List[String] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22679,6 +22687,7 @@ else {
   __skv_values_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.values")
 fn map_values_skv(m: Map[String, Int]) -> List[Int] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22916,6 +22925,7 @@ else {
   }
 }
 
+@specializes("map.from_list")
 fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
   let lh = prim.handle(pairs)
   let n = prim.load32(lh + 4)
@@ -23019,6 +23029,7 @@ fn __skv_merge_bapp(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, j: Int
     } else __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w)
   }
 
+@specializes("map.merge")
 fn map_merge_skv(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)

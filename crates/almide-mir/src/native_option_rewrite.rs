@@ -82,7 +82,7 @@ pub fn rewrite_option_ops(
             }
             Op::CallFn { dst, name, args, result } => {
                 if let Some(d) = dst {
-                    if option_fns.contains(name) {
+                    if option_fns.contains(name) || crate::native_floor::declared_scalar_option(name) {
                         t.opt_vals.insert(*d);
                     }
                 }

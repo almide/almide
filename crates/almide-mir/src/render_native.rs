@@ -414,6 +414,7 @@ fn render_fn(
     }
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
+        crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
         if render_fan_group(func, i, &mut ops, user_fns, sigs, &mut tys, &mut out, indent, used_shims)? {
             continue;
         }
@@ -867,7 +868,14 @@ fn render_native_flow_op(
         | Op::DropResultValue { .. }
         | Op::DropResultListValue { .. }
         | Op::DropResultValueInt { .. }
-        | Op::DropResultListValueInt { .. } => {
+        | Op::DropResultListValueInt { .. }
+        | Op::DropListStrStr { .. }
+        | Op::DropListIntStr { .. }
+        | Op::DropListStrInt { .. }
+        | Op::DropResultStrInt { .. }
+        | Op::DropResultListStrInt { .. }
+        | Op::DropResultListStr { .. }
+        | Op::DropListListStr { .. } => {
             return render_native_drop_op(op, borrows, tys, out, *indent)
         }
         // Pure ownership bookkeeping — no native code.
@@ -948,10 +956,18 @@ fn render_native_drop_op(
         {
             line!("// drop: borrowed join, scope-end");
         }
-        // The Value-holding releases: the wasm leg's routine walks the block's
-        // tags to free it; a native value of a generated type (the runtime
-        // `Value`, a list of it, a carrier of it) frees like any owned Rust value.
-        Op::DropValue { v }
+        // The typed releases: the wasm leg's routine walks the block's slots
+        // (or a Value's tags) to free them; a native value of a generated type
+        // (a list of tuples, the runtime `Value`, a carrier) frees like any
+        // owned Rust value.
+        Op::DropListStrStr { v }
+        | Op::DropListIntStr { v }
+        | Op::DropListStrInt { v }
+        | Op::DropResultStrInt { v }
+        | Op::DropResultListStrInt { v }
+        | Op::DropResultListStr { v }
+        | Op::DropListListStr { v }
+        | Op::DropValue { v }
         | Op::DropListValue { v }
         | Op::DropListStrValue { v }
         | Op::DropResultValue { v }

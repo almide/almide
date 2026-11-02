@@ -28,6 +28,21 @@ pub(crate) fn bookkeeping(op: &Op) -> bool {
         op,
         Op::Drop { .. }
             | Op::DropListStr { .. }
+            // The typed releases erase to scope end too (render_native's drop arms).
+            | Op::DropValue { .. }
+            | Op::DropListValue { .. }
+            | Op::DropListStrValue { .. }
+            | Op::DropResultValue { .. }
+            | Op::DropResultListValue { .. }
+            | Op::DropResultValueInt { .. }
+            | Op::DropResultListValueInt { .. }
+            | Op::DropListStrStr { .. }
+            | Op::DropListIntStr { .. }
+            | Op::DropListStrInt { .. }
+            | Op::DropResultStrInt { .. }
+            | Op::DropResultListStrInt { .. }
+            | Op::DropResultListStr { .. }
+            | Op::DropListListStr { .. }
             | Op::DropVariant { .. }
             | Op::DropWrapperRec { .. }
             | Op::Consume { .. }
@@ -123,4 +138,97 @@ pub(crate) fn last_use(
         }
     };
     defs.iter().any(|&d| d < at && loops[d] == loops[at]) && defs.iter().all(|&d| d < at && within(d))
+}
+
+/// Whether `src`, read at `ops[at]`, is rebound (`SetLocal`) later in the
+/// block `at` sits in (not inside a nested `if` or loop) before any further
+/// read: the rebind dominates everything after, the loop's back edge
+/// included, so the read is the old value's last (`m = map.set(m, k, v)`).
+fn rebound_before_read(func: &MirFunction, at: usize, src: ValueId) -> bool {
+    let mut depth = 0usize;
+    let mut reads = Vec::new();
+    for op in &func.ops[at + 1..] {
+        match op {
+            Op::IfThen { .. } | Op::LoopStart => depth += 1,
+            Op::EndIf { .. } | Op::LoopEnd | Op::Else { .. } if depth == 0 => return false,
+            Op::EndIf { .. } | Op::LoopEnd => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 {
+            if let Op::SetLocal { local, src: s } = op {
+                if *local == src {
+                    return *s != src;
+                }
+            }
+        }
+        if bookkeeping(op) {
+            continue;
+        }
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if reads.contains(&src) {
+            return false;
+        }
+    }
+    false
+}
+
+/// Whether a call's arg `src` at `ops[at]` may be moved into a by-value
+/// runtime param: the last-use rule above, or a read the value's own rebind
+/// follows before any other read. Same eligibility (owned kind with a
+/// `Default`, not a param, not the result, no borrow join).
+pub(crate) fn moves_at_call(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    t: NTy,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
+    if last_use(func, at, src, t, borrow_arms) {
+        return true;
+    }
+    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
+        return false;
+    }
+    // (The function's result is fine here: what it returns is the rebound
+    // value, read after the rebind.)
+    if func.params.iter().any(|p| p.value == src) {
+        return false;
+    }
+    let joined = func
+        .ops
+        .iter()
+        .any(|op| matches!(op, Op::Dup { dst, src: s } if *s == src && borrow_arms.contains(dst)));
+    !joined && rebound_before_read(func, at, src)
+}
+
+thread_local! {
+    static MOVING: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Record which of `ops[at]`'s call args may move (read by the floor render).
+pub(crate) fn set_moving_args(
+    func: &MirFunction,
+    at: usize,
+    tys: &std::collections::BTreeMap<ValueId, NTy>,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) {
+    let moving = match &func.ops[at] {
+        Op::CallFn { args, .. } => args
+            .iter()
+            .filter_map(|a| match a {
+                crate::CallArg::Handle(v) => Some(*v),
+                _ => None,
+            })
+            .filter(|v| tys.get(v).is_some_and(|t| moves_at_call(func, at, *v, *t, borrow_arms)))
+            .collect(),
+        _ => Default::default(),
+    };
+    MOVING.with(|m| *m.borrow_mut() = moving);
+}
+
+/// `v` is an arg of the call being rendered that may be moved.
+pub(crate) fn moving_arg(v: ValueId) -> bool {
+    MOVING.with(|m| m.borrow().contains(&v))
 }

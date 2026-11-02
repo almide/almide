@@ -476,6 +476,14 @@ impl<K, V> AlmideMap<K, V> {
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.entries.iter().flatten().map(|(k, v)| (k, v))
     }
+    /// The `i`-th live entry in insertion order: O(1) while the map has no
+    /// removal hole (#3691), a scan of the live entries otherwise. The native
+    /// leg's `for (k, v) in m` reads its entries by position.
+    pub fn entry_at(&self, i: usize) -> (&K, &V) {
+        let e = if self.dead == 0 { self.entries[i].as_ref() } else { self.entries.iter().flatten().nth(i) };
+        let (k, v) = e.expect("a map entry position within its length");
+        (k, v)
+    }
     pub fn clear(&mut self) {
         self.entries.clear();
         self.dead = 0;

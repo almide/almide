@@ -57,6 +57,15 @@ pub(crate) enum FloorParam {
     /// the runtime takes the element by value (`T`, false) or by reference
     /// (`&T`, true), and the call site's list decides its kind.
     Elem(bool),
+    /// `Map[K, V]` — v0's runtime `AlmideMap`, borrowed (`true`) or by value
+    /// (`false`; the caller's map is moved in when the call is its last read).
+    Map(bool),
+    /// The key `K` / the value `V` of the call's `Map[K, V]` param (by
+    /// reference when `true`); the map's kinds decide the native kind.
+    MapKey(bool),
+    MapVal(bool),
+    /// `List[(K, V)]` — the runtime takes a `Vec<(K, V)>` of Rust pairs.
+    MapPairs,
 }
 
 /// A declared list's element type.
@@ -112,6 +121,12 @@ pub(crate) enum FloorRet {
     /// A return typed by the element `A` of the call's `List[A]` param: `A`,
     /// `A?` or `List[A]` (the call site's list decides the kind).
     Elem(ElemRet),
+    /// `Map[K, V]` — the generated map alias of the call's (key, value) kinds.
+    Map,
+    /// `V?` / `List[K]` / `List[V]` of the call's map.
+    MapOptVal,
+    MapKeys,
+    MapVals,
 }
 
 /// A scalar kind a runtime value converts from.
@@ -168,6 +183,34 @@ pub(crate) fn declared_result_carrier(name: &str) -> Option<bool> {
     }
 }
 
+/// Whether a floor call returns the scalar `Option<i64>` carrier: a declared
+/// `Int? | Bool? | Float?`, or a map's `V?` whose specialized body declares a
+/// scalar `V` (`map_get_skv(…) -> Int?`). The option rewrite seeds its
+/// carrier values from it, as from a declared user fn.
+pub(crate) fn declared_scalar_option(name: &str) -> bool {
+    match declared(name).map(|f| f.ret) {
+        Some(FloorRet::Opt(_)) => true,
+        Some(FloorRet::MapOptVal) => specialized_ret(name).is_some_and(|t| match &t {
+            TypeExpr::Generic { name, args } if is_option_name(name.as_str()) && args.len() == 1 => {
+                simple(&args[0]).and_then(scalar_of).is_some()
+            }
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
+/// The declared return of the self-hosted body registered under `call`.
+fn specialized_ret(call: &str) -> Option<TypeExpr> {
+    crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {
+        let (impl_fn, _) = pairs.iter().find(|(_, c)| *c == call)?;
+        almide_lang::parse_cached(src)?.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, return_type, .. } if name.as_str() == *impl_fn => Some(return_type.clone()),
+            _ => None,
+        })
+    })
+}
+
 /// Every `module.fn` whose declaration gives a floor entry, over the bundled
 /// stdlib: the enumeration the compile gate walks.
 pub fn declared_floor_calls() -> Vec<String> {
@@ -208,6 +251,26 @@ pub fn declared_floor_source() -> String {
     }
     out.push_str("fn main() {}\n");
     out
+}
+
+/// The stdlib fn a self-hosted body registered under `call` declares it
+/// specializes (`@specializes("m.f")` on its declaration).
+fn specialized_target(call: &str) -> Option<String> {
+    crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {
+        let (impl_fn, _) = pairs.iter().find(|(_, c)| *c == call)?;
+        let program = almide_lang::parse_cached(src)?;
+        program.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, attrs, .. } if name.as_str() == *impl_fn => attrs
+                .iter()
+                .find(|a| a.name.as_str() == "specializes")
+                .and_then(|a| a.args.first())
+                .and_then(|a| match &a.value {
+                    AttrValue::String { value } => Some(value.to_string()),
+                    _ => None,
+                }),
+            _ => None,
+        })
+    })
 }
 
 /// `m.f` when `body` is exactly `m.f(p1, …, pn)` over `params`.
@@ -306,7 +369,15 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         }
         _ => None,
     });
-    let (effect, attrs, generics, params, ret, body) = decls.next().ok_or("no declaration")?;
+    let Some((effect, attrs, generics, params, ret, body)) = decls.next() else {
+        // A self-hosted representation-specialized body (`map.set_skv`)
+        // declares the stdlib fn it specializes (`@specializes("map.set")`):
+        // the floor serves it as that fn.
+        return match specialized_target(call) {
+            Some(target) if target != call => derive_explained(&target).map_err(|e| format!("specializes `{target}`: {e}")),
+            _ => Err("no declaration".into()),
+        };
+    };
     if decls.next().is_some() {
         return Err("declared more than once".into());
     }
@@ -332,11 +403,24 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         .flatten()
         .map(|g| g.name.as_str().to_string())
         .collect();
+    // A `Map[K, V]` (or `List[(K, V)]`) param binds K and V: its key, value,
+    // and the returns spelled over them, take the map's native kinds.
+    let map_kv = params.iter().find_map(|p| map_params(&p.ty, &type_params)).or_else(|| map_params(ret, &type_params));
     let fparams: Vec<FloorParam> = params
         .iter()
-        .map(|p| floor_param(&p.ty, &type_params).ok_or_else(|| format!("param type {:?} outside the per-type map", p.ty)))
+        .map(|p| {
+            map_kv
+                .as_ref()
+                .and_then(|kv| map_param(&p.ty, kv))
+                .or_else(|| floor_param(&p.ty, &type_params))
+                .ok_or_else(|| format!("param type {:?} outside the per-type map", p.ty))
+        })
         .collect::<Result<_, _>>()?;
-    let fret = floor_ret(ret, &type_params).ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
+    let fret = map_kv
+        .as_ref()
+        .and_then(|kv| map_ret(ret, kv))
+        .or_else(|| floor_ret(ret, &type_params))
+        .ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
     // An effect fn's error reaches its caller through its declared Result,
     // the carrier the call site's `!` reads; any other effect return walls.
     if is_effect && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResBytes | FloorRet::ResOptStr) {
@@ -370,6 +454,9 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         .map(|(p, r)| match p {
             FloorParam::Elem(_) => FloorParam::Elem(squash(r).starts_with('&')),
             FloorParam::Value(_) => FloorParam::Value(squash(r).starts_with('&')),
+            FloorParam::Map(_) => FloorParam::Map(squash(r).starts_with('&')),
+            FloorParam::MapKey(_) => FloorParam::MapKey(squash(r).starts_with('&')),
+            FloorParam::MapVal(_) => FloorParam::MapVal(squash(r).starts_with('&')),
             other => other,
         })
         .collect();
@@ -410,6 +497,61 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
         }
         _ => None,
     }
+}
+
+/// `(K, V)` when `t` is `Map[K, V]` or `List[(K, V)]` over two type params.
+fn map_params(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<(String, String)> {
+    let kv = |args: &[TypeExpr]| -> Option<(String, String)> {
+        let (k, v) = (simple(args.first()?)?, simple(args.get(1)?)?);
+        (args.len() == 2 && type_params.contains(k) && type_params.contains(v)).then(|| (k.to_string(), v.to_string()))
+    };
+    match t {
+        TypeExpr::Generic { name, args } if name.as_str() == "Map" => kv(args),
+        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => match &args[0] {
+            TypeExpr::Tuple { elements } => kv(elements),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn map_param(t: &TypeExpr, (k, v): &(String, String)) -> Option<FloorParam> {
+    match t {
+        TypeExpr::Simple { name } if name.as_str() == k => Some(FloorParam::MapKey(false)),
+        TypeExpr::Simple { name } if name.as_str() == v => Some(FloorParam::MapVal(false)),
+        TypeExpr::Generic { name, .. } if name.as_str() == "Map" => {
+            map_params(t, &[k.clone(), v.clone()].into_iter().collect()).filter(|kv| kv == &(k.clone(), v.clone())).map(|_| FloorParam::Map(false))
+        }
+        TypeExpr::Generic { name, .. } if name.as_str() == "List" => {
+            map_params(t, &[k.clone(), v.clone()].into_iter().collect()).filter(|kv| kv == &(k.clone(), v.clone())).map(|_| FloorParam::MapPairs)
+        }
+        _ => None,
+    }
+}
+
+fn map_ret(t: &TypeExpr, (k, v): &(String, String)) -> Option<FloorRet> {
+    match t {
+        TypeExpr::Generic { name, args } if name.as_str() == "Map" => {
+            (args.len() == 2 && simple(&args[0]) == Some(k.as_str()) && simple(&args[1]) == Some(v.as_str())).then_some(FloorRet::Map)
+        }
+        TypeExpr::Generic { name, args } if is_option_name(name.as_str()) && args.len() == 1 && simple(&args[0]) == Some(v.as_str()) => {
+            Some(FloorRet::MapOptVal)
+        }
+        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => match simple(&args[0]) {
+            Some(x) if x == k => Some(FloorRet::MapKeys),
+            Some(x) if x == v => Some(FloorRet::MapVals),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `AlmideMap<A, B>` over two type params (squashed).
+fn is_generic_map(t: &str) -> bool {
+    t.strip_prefix("AlmideMap<")
+        .and_then(|x| x.strip_suffix('>'))
+        .and_then(|x| x.split_once(','))
+        .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b))
 }
 
 /// The stdlib's dynamic data model, as its declarations spell it (the one
@@ -501,6 +643,13 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Str => r == "&str",
         FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
         FloorParam::Value(_) => r == "&AlmideValue" || r == "AlmideValue",
+        FloorParam::Map(_) => is_generic_map(r.strip_prefix('&').unwrap_or(&r)),
+        FloorParam::MapKey(_) | FloorParam::MapVal(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),
+        FloorParam::MapPairs => r
+            .strip_prefix("Vec<(")
+            .and_then(|x| x.strip_suffix(")>"))
+            .and_then(|x| x.split_once(','))
+            .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
         FloorParam::Elem(_) => is_type_param(&r) || r.strip_prefix('&').is_some_and(is_type_param),
         FloorParam::List(elem) => {
             let inner = r
@@ -556,6 +705,9 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Elem(ElemRet::List) => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Value => t == "AlmideValue",
+        FloorRet::Map => is_generic_map(&t),
+        FloorRet::MapOptVal => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::MapKeys | FloorRet::MapVals => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::ResValue => result_parts(&t).is_some_and(|(ok, err)| ok == "AlmideValue" && string(err)),
         FloorRet::OptStr => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(string),
         FloorRet::ResListStr => result_parts(&t).is_some_and(|(ok, err)| {
@@ -701,7 +853,7 @@ fn runtime_index() -> &'static RuntimeIndex {
             }
             taken.push((name, &*Box::leak(whole.into_boxed_str()), methods));
         }
-        let RuntimeIndex { mut items, defined, trait_methods, fns } = provisional;
+        let RuntimeIndex { mut items, defined, mut trait_methods, fns } = provisional;
         for (name, whole, methods) in taken {
             items.insert(name, RtItem { text: whole });
             for m in methods {
@@ -726,6 +878,29 @@ fn runtime_index() -> &'static RuntimeIndex {
                 whole.push_str(imp);
             }
             items.insert(name, RtItem { text: Box::leak(whole.into_boxed_str()) });
+        }
+        // A runtime trait defined once travels whole too: its declaration and
+        // every runtime impl of it (`AlmideMapKey` and its blanket impls), taken
+        // by its name or any of its methods.
+        for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
+            for (name, decl, _, methods) in prelude_traits(src) {
+                if seen.get(name) != Some(&1) || items.contains_key(name) {
+                    continue;
+                }
+                let mut whole = String::from(decl);
+                for (_, imp) in &impls {
+                    if impl_parts(&lex(imp)).and_then(|(t, _)| t) == Some(name) {
+                        whole.push('\n');
+                        whole.push_str(imp);
+                    }
+                }
+                let whole: &'static str = Box::leak(whole.into_boxed_str());
+                items.insert(name, RtItem { text: whole });
+                for m in methods {
+                    trait_methods.remove(m);
+                    items.entry(m).or_insert(RtItem { text: whole });
+                }
+            }
         }
         RuntimeIndex { items, defined, trait_methods, fns }
     })
@@ -911,7 +1086,19 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     let toks = lex(text);
     let fn_at = toks.iter().position(|t| t.text == "fn")?;
     let open = toks[fn_at..].iter().position(|t| t.text == "(")? + fn_at;
-    let close = (open + 1..toks.len()).find(|&k| toks[k].text == ")" && toks[k].depth == toks[open].depth)?;
+    // The `)` matching the param list's `(` (a param type may hold parens:
+    // `Vec<(K, V)>`).
+    let close = {
+        let mut n = 0i32;
+        (open..toks.len()).find(|&k| {
+            match toks[k].text {
+                "(" => n += 1,
+                ")" => n -= 1,
+                _ => {}
+            }
+            n == 0
+        })?
+    };
     let inner = &text[toks[open].off + 1..toks[close].off];
     let mut params = Vec::new();
     let mut depth = 0i32;
@@ -1320,6 +1507,28 @@ use crate::render_native::{as_f64_arg, as_str_arg, wall, NTy};
 
 /// A declared list param's argument: a slice borrow of the list the render
 /// carries, when its element kind is the declared one.
+/// The owned value of kind `want` that a call arg of kind `got` gives.
+fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
+    Some(match (want, got) {
+        (NTy::I64, NTy::I64) => code.to_string(),
+        (NTy::I64, NTy::F64) => format!("{code}.to_bits() as i64"),
+        (NTy::Str, NTy::Str) => format!("{code}.clone()"),
+        (NTy::Str, NTy::StrRef) => format!("AlmideString::from({code})"),
+        (NTy::Vec, NTy::Vec | NTy::VecRef) => format!("{code}.to_vec()"),
+        (NTy::VecStr, NTy::VecStr | NTy::VecStrRef) => format!("{code}.to_vec()"),
+        (NTy::Rec(i), NTy::Rec(j) | NTy::RecRef(j)) if i == j => format!("{code}.clone()"),
+        _ => return None,
+    })
+}
+
+/// The (key, value) kinds of a generated list of pairs.
+fn pair_kinds(list: u16) -> Option<(NTy, NTy)> {
+    match crate::render_native_rec::list_elem(list)? {
+        NTy::Rec(t) => Some((crate::render_native_rec::rec_field(t, 0)?, crate::render_native_rec::rec_field(t, 1)?)),
+        _ => None,
+    }
+}
+
 fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
     let int_list = matches!(elem, ListElem::Int | ListElem::Any);
     let str_list = matches!(elem, ListElem::Str | ListElem::Any);
@@ -1340,11 +1549,24 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
 
 /// The Rust expression calling `f`'s runtime body with `args` (each rendered
 /// with the NTy it carries), and the NTy its result binds as (`None`: Unit).
-pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Result<(String, Option<NTy>), LowerError> {
+pub(crate) fn render_call(
+    f: &FloorFn,
+    name: &str,
+    args: &[(String, NTy)],
+    dying: &[bool],
+    dst_map: Option<u16>,
+) -> Result<(String, Option<NTy>), LowerError> {
     if args.len() != f.params.len() {
         return Err(wall(format!("native: floor call `{name}` arity mismatch")));
     }
     let mismatch = || wall(format!("native: floor call `{name}` arg type mismatch"));
+    // The (key, value) kinds of the call's map, from its `Map[K, V]` arg or
+    // its `List[(K, V)]` pairs.
+    let map_kv: Option<(NTy, NTy)> = f.params.iter().zip(args).find_map(|(p, (_, got))| match (p, got) {
+        (FloorParam::Map(_), NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::map_kinds(*i),
+        (FloorParam::MapPairs, NTy::Rec(i) | NTy::RecRef(i)) => pair_kinds(*i),
+        _ => None,
+    });
     // The element kind of the call's `List[A]` arg, for an element-typed
     // param or return: an Int list's `i64`, a String list's `AlmideString`.
     let elem_str = f
@@ -1371,6 +1593,43 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
                     _ => return Err(mismatch()),
                 };
                 if *by_ref { format!("&{v}") } else { v }
+            }
+            FloorParam::Map(by_ref) => {
+                let ok = matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::map_kinds(*i).is_some());
+                if !ok {
+                    return Err(mismatch());
+                }
+                match (got, by_ref, dying.get(rendered.len()).copied().unwrap_or(false)) {
+                    (NTy::Rec(_), true, _) => format!("&{code}"),
+                    (NTy::RecRef(_), true, _) => code.clone(),
+                    // The caller's map, not read again: v0's move.
+                    (NTy::Rec(_), false, true) => format!("std::mem::take(&mut {code})"),
+                    _ => format!("{code}.clone()"),
+                }
+            }
+            FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => {
+                let (k, v) = map_kv.ok_or_else(mismatch)?;
+                let want = if matches!(p, FloorParam::MapKey(_)) { k } else { v };
+                let owned = owned_arg(want, code, *got).ok_or_else(mismatch)?;
+                let own_value = matches!(got, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
+                match (by_ref, own_value, dying.get(rendered.len()).copied().unwrap_or(false)) {
+                    // Borrow the caller's own value; a borrowed one is copied once.
+                    (true, true, _) => format!("&{code}"),
+                    (true, false, _) if *got == NTy::I64 => format!("&{code}"),
+                    (true, false, _) => format!("&{owned}"),
+                    // The caller's value, not read again: moved in.
+                    (false, true, true) => format!("std::mem::take(&mut {code})"),
+                    (false, _, _) => owned,
+                }
+            }
+            FloorParam::MapPairs => {
+                let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return Err(mismatch()) };
+                let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
+                let (a, b) = match pair {
+                    NTy::Vec | NTy::VecRef => ("t[0]".to_string(), "t[1]".to_string()),
+                    _ => ("t.f0.clone()".to_string(), "t.f1.clone()".to_string()),
+                };
+                format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()")
             }
             FloorParam::Value(by_ref) => match (got, by_ref) {
                 (NTy::Rec(_), true) if crate::render_native_rec::is_value(*got) => format!("&{code}"),
@@ -1424,6 +1683,26 @@ pub(crate) fn render_call(f: &FloorFn, name: &str, args: &[(String, NTy)]) -> Re
         FloorRet::ResBytes => {
             let b = NTy::Rec(crate::render_native_rec::bytes_index());
             (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))
+        }
+        FloorRet::Map => match (map_kv, dst_map) {
+            (Some((k, v)), _) => (call, Some(NTy::Rec(crate::render_native_rec::map_type_of(k, v)))),
+            // No map arg (`map.new()`): the result's declared map type.
+            (None, Some(i)) => (call, Some(NTy::Rec(i))),
+            (None, None) => return Err(mismatch()),
+        },
+        FloorRet::MapOptVal => match map_kv.ok_or_else(mismatch)?.1 {
+            NTy::I64 => (call, Some(NTy::Opt)),
+            v => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(v)))),
+        },
+        FloorRet::MapKeys | FloorRet::MapVals => {
+            let (k, v) = map_kv.ok_or_else(mismatch)?;
+            let e = if f.ret == FloorRet::MapKeys { k } else { v };
+            let t = match e {
+                NTy::I64 => NTy::Vec,
+                NTy::Str => NTy::VecStr,
+                other => NTy::Rec(crate::render_native_rec::list_type_of(other)),
+            };
+            (call, Some(t))
         }
         FloorRet::ResOptStr => {
             let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str));

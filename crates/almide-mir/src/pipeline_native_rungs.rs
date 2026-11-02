@@ -109,6 +109,7 @@ fn native_sig_subset_check(
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
             || heap_carrier_of(t).is_some()
             || crate::lower::is_value_ty(t)
+            || native_map_of(t).is_some()
     };
     let sig_ok = |t: &Ty| {
         crate::render_native_rec::is_lane_scalar(t) || matches!(t, Ty::String)
@@ -272,6 +273,16 @@ fn heap_carrier_of(t: &almide_lang::types::Ty) -> Option<u16> {
         .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
         .flatten()
         .filter(|i| crate::render_native_addr::is_carrier(*i))
+}
+
+/// The generated `AlmideMap` alias a declared map type stands for.
+fn native_map_of(t: &almide_lang::types::Ty) -> Option<u16> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, _))
+        .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
+        .flatten()
+        .filter(|i| crate::render_native_rec::map_kinds(*i).is_some())
 }
 
 /// The values of `f` whose declared type is a generated heap carrier.
@@ -468,6 +479,8 @@ fn native_sig_kind(
         // #4006: a heap Option / a Result outside the scalar carriers rides its
         // generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => heap_carrier_of(t).map(NativeSigKind::Rec),
+        // A map rides v0's runtime `AlmideMap` (its generated alias).
+        Ty::Applied(TypeConstructorId::Map, _) => native_map_of(t).map(NativeSigKind::Rec),
         Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) => {
             crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec)
         }

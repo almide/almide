@@ -24,6 +24,8 @@ use std::fmt::Write as _;
 
 #[path = "render_native_carrier.rs"]
 mod carrier;
+#[path = "render_native_map.rs"]
+mod map;
 #[path = "render_native_slots.rs"]
 mod slots;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
@@ -75,6 +77,14 @@ pub(crate) struct AddrState {
     arms: Vec<(Option<ValueId>, bool)>,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
+    /// A map's length read → the map.
+    map_lens: BTreeMap<ValueId, ValueId>,
+    /// `len + i` over a map's length read → (the map, `i`).
+    len_plus: BTreeMap<ValueId, (ValueId, ValueId)>,
+    /// `x * SLOT_SIZE` → `x`.
+    scaled_src: BTreeMap<ValueId, ValueId>,
+    /// Values computed by integer arithmetic (not a plain counter).
+    arith: BTreeSet<ValueId>,
     /// Payload reads that render as a borrow into their block.
     borrow_reads: BTreeSet<ValueId>,
     /// Heap slot reads of an owned record that move the value out
@@ -122,14 +132,20 @@ impl AddrState {
         // #4006: heap Option/Result carriers, typed by the declared signatures
         // (this function's and its callees') through joins and copies.
         let carrier_k = |k: &NativeSigKind| match k {
-            NativeSigKind::Rec(i) if carrier::is_carrier(*i) => Some(*i),
+            // (A map alias rides the same declared typing: `map.new()`'s
+            // result takes the map type the program declares for it.)
+            NativeSigKind::Rec(i) if carrier::is_carrier(*i) || crate::render_native_rec::map_kinds(*i).is_some() => Some(*i),
             _ => None,
         };
         let sig_of = |n: &str| -> Option<CarrierSig> {
             sigs.get(n).map(|(ps, r)| (ps.iter().map(carrier_k).collect(), r.as_ref().and_then(carrier_k)))
         };
         let own = sig_of(func.name.as_str()).unwrap_or_default();
-        for (v, i) in carrier::carrier_values(func, &own, &sig_of) {
+        let declared = carrier::carrier_values(func, &own, &sig_of);
+        crate::render_native_rec::set_declared(
+            declared.iter().filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some()).map(|(v, i)| (*v, *i)).collect(),
+        );
+        for (v, i) in declared {
             alloc_rec.entry(v).or_insert(i);
         }
         // An if-value join holds one declared type on both arms: a typed join
@@ -260,6 +276,10 @@ impl AddrState {
             pending: BTreeMap::new(),
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
+            map_lens: BTreeMap::new(),
+            len_plus: BTreeMap::new(),
+            scaled_src: BTreeMap::new(),
+            arith: BTreeSet::new(),
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
             moves,
             whole,
@@ -375,6 +395,9 @@ pub(crate) fn render_addr_op(
     }
     let ty = |tys: &BTreeMap<ValueId, NTy>, v: &ValueId| tys.get(v).copied();
     if let Some(r) = carrier::render_carrier_op(op, st, tys, out, indent) {
+        return r;
+    }
+    if let Some(r) = map::render_map_op(op, st, tys, out, indent) {
         return r;
     }
     match op {

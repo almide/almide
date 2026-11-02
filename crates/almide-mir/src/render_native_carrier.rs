@@ -114,7 +114,7 @@ pub(crate) fn carrier_values(
                     }
                 }
             }
-            Op::Dup { dst, src } => edges.push((*dst, *src)),
+            Op::Dup { dst, src } | Op::SetLocal { local: dst, src } => edges.push((*dst, *src)),
             Op::IfThen { dst, .. } => ifs.push(*dst),
             Op::Else { val } | Op::EndIf { val } => {
                 if let (Some(v), Some(Some(d))) = (val, ifs.last()) {
