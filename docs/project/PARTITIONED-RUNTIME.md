@@ -1,5 +1,7 @@
 # Partitioned-runtime requirements (#568)
 
+[English](./PARTITIONED-RUNTIME.md) | [日本語](./PARTITIONED-RUNTIME.ja.md) | [简体中文](./PARTITIONED-RUNTIME.zh-CN.md)
+
 What a partition-style host (ARINC 653-shaped time/space partitioning, or
 any environment that budgets memory and CPU per component) must provide to
 run a Critical-profile Almide wasm artifact, and what the artifact itself

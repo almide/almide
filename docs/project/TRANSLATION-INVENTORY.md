@@ -9,7 +9,7 @@ This inventory covers **556 tracked Markdown files** at that snapshot, not 556 i
 - Preserve code, commands, identifiers, dates, measurements, source links, and qualification of guarantees. Link to translated siblings only when they exist; untranslated destinations keep their original links.
 - A translation is a reader aid, not a new normative source. The original specification and its upstream ALS authority remain controlling; translation disagreements must be fixed, not used to change language semantics.
 - Existing originals can be Japanese or mixed-language. Do not label every existing `.md` file English or silently replace it to enforce a suffix convention. Inspect each before deciding whether `.en.md` is required to preserve its identity.
-- Current batches: eight reader guides, sixteen new language files. Existing README translations are preserved with only links to these guides updated. No compiler, generator, workflow, helper, or CI policy changes are included.
+- Current batches: eleven reader guides, twenty-two new language files. Existing README translations are preserved with only links to these guides updated. No compiler, generator, workflow, helper, or CI policy changes are included.
 
 ## Source caveats retained, not silently resolved
 
@@ -28,6 +28,12 @@ The classifications below are routing decisions, not completion claims or perman
 - **Evidence / proof / releases:** preserve recorded facts, dates and source identity. Separate explanatory translations from generated or sealed evidence. Do not duplicate markers that generators or checks interpret as authoritative inputs.
 - **Agent instructions / templates:** do not create competing automatically loaded instructions or replace the embedded template; consider explicitly labeled human-readable translations outside instruction discovery paths.
 
+## Handwritten-file consumer audit
+
+The [consumer audit](./TRANSLATION-CONSUMERS.md) inspects the 80 files originally routed to handwritten-document review: five translation candidates, sixteen requiring special handling, and fifty-nine still awaiting deeper body/indirect-consumer review. It is a frozen audit, not a claim that the original routing class was correct. In particular, `STABILITY.md` is normative, `org-trust-status.md` is legacy generated evidence, `fuzz-green/README.md` is parsed evidence, and experiment prompt files are machine inputs. The first of these is already reclassified below; the per-file audit supplies the finer routing for the rest.
+
+The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. A documentation-only classification by the former does not guarantee that all workflows skip their compiler jobs. No classifier is changed here.
+
 ## Counts by class
 
 | Class | Files |
@@ -37,10 +43,10 @@ The classifications below are routing decisions, not completion claims or perman
 | Diagnostic docs — embedded / scanned | 105 |
 | Evidence / generated blocks / gate inputs | 12 |
 | Existing translations | 3 |
-| Handwritten documentation — consumer audit pending | 76 |
+| Handwritten documentation — consumer audit pending | 73 |
 | Normative specification / grammar | 27 |
 | Proof records — machine evidence | 9 |
-| Reader guides — translated batches | 8 |
+| Reader guides — translated batches | 11 |
 | Release history | 7 |
 | Roadmap — scanned tree / generated index | 202 |
 | Standard library — generated sections / gates | 52 |
@@ -259,11 +265,11 @@ The classifications below are routing decisions, not completion claims or perman
 | [`docs/project/BENCHMARKS.md`](../../docs/project/BENCHMARKS.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/project/BREAKING_CHANGE_POLICY.md`](../../docs/project/BREAKING_CHANGE_POLICY.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/project/CLAUDE_TEMPLATE.md`](../../docs/project/CLAUDE_TEMPLATE.md) | Agent instructions / embedded template | Pending |
-| [`docs/project/GENERATED-RUST-REVIEW.md`](../../docs/project/GENERATED-RUST-REVIEW.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/project/GENERATED-RUST-REVIEW.md`](../../docs/project/GENERATED-RUST-REVIEW.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/project/ISSUE-TAXONOMY.md`](../../docs/project/ISSUE-TAXONOMY.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/PARTITIONED-RUNTIME.md`](../../docs/project/PARTITIONED-RUNTIME.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/project/PARTITIONED-RUNTIME.md`](../../docs/project/PARTITIONED-RUNTIME.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/project/RUST-LINT-GATES.md`](../../docs/project/RUST-LINT-GATES.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/WCET-STORY.md`](../../docs/project/WCET-STORY.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`docs/project/WCET-STORY.md`](../../docs/project/WCET-STORY.md) | Reader guides — translated batches | Drafted in this PR |
 | [`docs/project/linguist-submission.md`](../../docs/project/linguist-submission.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/project/org-trust-status.md`](../../docs/project/org-trust-status.md) | Handwritten documentation — consumer audit pending | Pending |
 | [`docs/record-option-cells-verification.md`](../../docs/record-option-cells-verification.md) | Handwritten documentation — consumer audit pending | Pending |

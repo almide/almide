@@ -1,5 +1,7 @@
 # WCET analyzability of Critical-shape native output (#569)
 
+[English](./WCET-STORY.md) | [日本語](./WCET-STORY.ja.md) | [简体中文](./WCET-STORY.zh-CN.md)
+
 Hard-real-time acceptance needs worst-case execution time analysis. This
 is the documented WCET story for Almide's `--target rust` output in the
 CRITICAL shape, demonstrated end to end on `examples/pid-kernel.almd`

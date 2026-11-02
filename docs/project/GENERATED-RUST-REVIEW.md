@@ -1,5 +1,7 @@
 # Reviewing generated Rust (#572)
 
+[English](./GENERATED-RUST-REVIEW.md) | [日本語](./GENERATED-RUST-REVIEW.ja.md) | [简体中文](./GENERATED-RUST-REVIEW.zh-CN.md)
+
 In the qualified-code-generator model (the SCADE KCG precedent), the
 generated source is a reviewable artifact. That qualification model is not
 a claim that Almide or its current build is qualified. This is the
