@@ -90,24 +90,6 @@ pub(crate) fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static 
         .map(|(_, p, r, src)| (*p, *r, *src))
 }
 
-/// `print_str`'s body outside a fan program (#4006, no-perf-loss rule): the
-/// standard codegen's stdout — one thread-local buffered writer, flushed at
-/// every newline — instead of std's line writer, which searches each line for
-/// its newline and takes the global stdout lock per call. The bytes and the
-/// moment they reach the fd are the same (every line is flushed when it is
-/// printed), and a failed write panics as `println!` does. A fan program keeps
-/// `println!`: the fan glue's own `println!` routes each arm's output.
-const PRINT_STR_BUFFERED: &str = "thread_local! {\n    static ALMIDE_V1_STDOUT: std::cell::RefCell<std::io::BufWriter<std::io::Stdout>> =\n        std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));\n}\nfn rt_print_str(s: &str) {\n    ALMIDE_V1_STDOUT.with(|b| {\n        let mut w = b.borrow_mut();\n        let r = std::io::Write::write_all(&mut *w, s.as_bytes())\n            .and_then(|()| std::io::Write::write_all(&mut *w, b\"\\n\"))\n            .and_then(|()| std::io::Write::flush(&mut *w));\n        if let Err(e) = r {\n            panic!(\"failed printing to stdout: {e}\");\n        }\n    });\n}";
-
-/// The text a shim renders as in a program without fan glue: `print_str`
-/// buffered as the standard codegen's stdout is, every other shim as is.
-pub(crate) fn outside_fan(src: &'static str) -> &'static str {
-    match shim("print_str") {
-        Some((_, _, print)) if std::ptr::eq(print, src) => PRINT_STR_BUFFERED,
-        _ => src,
-    }
-}
-
 pub(crate) fn shim_rust_name(name: &str) -> String {
     format!("rt_{}", name.trim_start_matches("__").replace('.', "_"))
 }
