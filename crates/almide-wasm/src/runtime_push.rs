@@ -48,8 +48,10 @@ pub(crate) fn emit_list_push(s: Scalar) -> (Function, HelperSig) {
     i.end();
     sig.arm();
     sig.join();
-    // grow: newcap = max(cap * 2, 4 * stride)
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    // grow: newcap = max(cap * 2, 4 * stride), the doubling saturated
+    // (#4396: a cap at 2^31 wrapped to 0 and the old len was copied into
+    // the 4-slot block)
+    crate::runtime_alloc::emit_double_cap_sat(&mut i, cap);
     i.local_get(cap).i32_const((4 * stride) as i32).i32_lt_u().if_(BlockType::Empty);
     i.i32_const((4 * stride) as i32).local_set(cap);
     i.end();
@@ -142,8 +144,8 @@ pub(crate) fn emit_bytes_push() -> (Function, HelperSig) {
     i.end();
     sig.arm();
     sig.join();
-    // grow: newcap = max(cap * 2, 16)
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    // grow: newcap = max(cap * 2, 16), the doubling saturated (#4396)
+    crate::runtime_alloc::emit_double_cap_sat(&mut i, cap);
     i.local_get(cap).i32_const(16).i32_lt_u().if_(BlockType::Empty);
     i.i32_const(16).local_set(cap);
     i.end();
