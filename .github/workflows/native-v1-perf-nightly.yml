@@ -114,11 +114,11 @@ jobs:
       - name: Render paths the perf corpus does not exercise
         run: bash scripts/check-native-v1-perf-shapes.sh
 
-      - name: Negative control — without push_swap the shapes gate must fail
+      - name: Negative control — without half the floor the shapes gate must fail
         run: |
-          if NATIVE_V1_SHAPES_DROP=research/benchmark/perf/v1-shapes/push_swap.almd bash scripts/check-native-v1-perf-shapes.sh > drill-shapes.log 2>&1; then
+          if NATIVE_V1_SHAPES_DROP='^spec/wasm_cross/[a-m]' bash scripts/check-native-v1-perf-shapes.sh > drill-shapes.log 2>&1; then
             cat drill-shapes.log
-            echo "the shapes gate read green with a shape bench left out"
+            echo "the shapes gate read green with half the corpus left out"
             exit 1
           fi
           grep -E '^UNEXERCISED ' drill-shapes.log | head -5
