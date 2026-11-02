@@ -199,6 +199,8 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     let name = call.name;
     if let Some(callee) = user_fns.get(name.as_str()) {
         render_user_fn_call(call, callee, sigs, OpSink { tys, out, indent, used_shims })
+    } else if name == "__str_concat" && render_concat_in_place(call, tys, out, indent) {
+        Ok(())
     } else if let Some(shim_entry) = shim(name) {
         render_closed_shim_call(call, shim_entry, OpSink { tys, out, indent, used_shims })
     } else if let Some(floor) = crate::native_floor::declared(name) {
@@ -468,6 +470,33 @@ fn render_declared_floor_call(
         (Some(_), None) => return Err(wall(format!("native: floor call `{name}` has no result"))),
     }
     Ok(())
+}
+
+/// `a + b` over strings where one side is an owned string that dies at the
+/// concatenation: the result reuses its buffer — `b.prepend(a)` /
+/// `a.concat(b)`, AlmideStr's in-place edits when the buffer is unique — the
+/// expression v0's `AlmideConcat` renders, where the shim allocates a third
+/// string. `false` leaves the call to the shim.
+fn render_concat_in_place(call: NativeCall<'_>, tys: &mut BTreeMap<ValueId, NTy>, out: &mut String, indent: usize) -> bool {
+    let (Some(d), [CallArg::Handle(a), CallArg::Handle(b)]) = (call.dst, call.args.as_slice()) else { return false };
+    if a == b {
+        return false;
+    }
+    let (Some(ta), Some(tb)) = (tys.get(a).copied(), tys.get(b).copied()) else { return false };
+    let dying = |v: &ValueId, t: NTy| t == NTy::Str && crate::render_native_move::moving_arg(*v);
+    let expr = if dying(b, tb) && ta.is_stringy() {
+        format!("std::mem::take(&mut {}).prepend({})", var(*b), as_str_arg(&var(*a), ta))
+    } else if dying(a, ta) && tb.is_stringy() {
+        format!("std::mem::take(&mut {}).concat({})", var(*a), as_str_arg(&var(*b), tb))
+    } else {
+        return false;
+    };
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    writeln!(out, "let mut {}: AlmideString = {expr};", var(*d)).unwrap();
+    tys.insert(*d, NTy::Str);
+    true
 }
 
 fn render_closed_shim_call(
