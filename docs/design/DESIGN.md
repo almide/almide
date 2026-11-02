@@ -10,12 +10,12 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 | Error handling | `throw`, `try/catch`, `panic`, error codes | `Result[T, E]` only | Error path always visible in types |
 | Generics | `<T>` (ambiguous with `<` `>`) | `[T]` | No parser ambiguity with comparisons |
 | Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` for collection iteration, `while cond { ... }` for condition-based loops | Each form has one purpose |
-| Early exit | `return`, `break`, `continue`, `throw` | Last expression only; `guard ... else` is the canonical structured escape hatch | No early-return confusion |
+| Early exit | `return`, `break`, `continue`, `throw` | Last-expression function results; `guard ... else` for structured escape, `break`/`continue` inside loops | No early-return confusion |
 | Lambdas | `=>`, `->`, `lambda`, `fn`, `\x ->`, blocks | `(x) => expr` only | One syntax, zero alternatives |
 | Statement termination | `;`, optional `;`, ASI rules | Newline-separated | No insertion ambiguity |
-| Conditionals | `if` with optional `else`, ternary `?:` | `if/then/else` (else mandatory) | No dangling-else |
-| Side effects | Implicit anywhere | `effect fn` annotation required | Restricts callable set at each point |
-| Operator meaning | Overloading, implicit coercion | Operators have fixed built-in meanings only. No user-defined overloading, no implicit coercion | Operators always resolve identically |
+| Conditionals | `if` with optional `else`, ternary `?:` | `if/then/else`; an omitted `else` yields Unit | No dangling-else |
+| Side effects | Implicit anywhere | `effect fn` marks effect calls; output/abort builtins are also admissible in plain `fn` | Restricts callable set at each point |
+| Operator meaning | Custom operator syntax, implicit coercion | Fixed operator vocabulary; declared protocol conformance can dispatch operators to requirement methods. No implicit coercion | Resolution follows the operand type and protocol requirements |
 | Type conversions | Implicit widening, coercion | Explicit only | No hidden type changes |
 
 ## Semantic Ambiguity Removed
@@ -26,8 +26,8 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 | Type inference | Local only — annotations required on function signatures | No inference across distant definitions |
 | Overloading | None — names do not participate in ad-hoc overload resolution | No dispatch ambiguity |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
-| Protocol lookup | Protocols exist but conformance is explicit convention methods (`fn Type.method`) — no implicit instance resolution | No global instance search |
-| Method resolution | Canonical resolution is module-qualified function form; UFCS is parse-time sugar for chaining | Resolution is always local — no method lookup tables |
+| Protocol lookup | Types declare protocol satisfaction; convention methods (`fn Type.method`) provide implementations — no global implicit instance resolution | No global instance search |
+| Method resolution | Canonical calls are module-qualified; receiver-aware UFCS is resolved by the checker | Resolution follows explicit receiver/scope rules |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
 | Import style | `import module` or `import self as alias` — one form per purpose; aliases only for self-imports and submodules; core modules are auto-imported | Two import forms, no `from`, no `*` |
 
@@ -35,7 +35,7 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 
 `effect fn` is not primarily a safety feature — it is a **search space reducer for code generation**.
 
-- A pure function can only call other pure functions → the set of valid completions shrinks dramatically
+- A plain `fn` rejects direct effect calls; output/abort builtins and transparent callback parameters have the documented exceptions
 - An `effect fn` explicitly marks I/O boundaries → the LLM knows exactly where side effects are legal
 - Effect mismatch is caught at compile time → wrong calls are rejected before execution
 - Function signatures alone tell the LLM what is callable at each point, without reading function bodies
@@ -44,30 +44,34 @@ This means the LLM can generate code by looking only at the current function's s
 
 ## Concurrency: `fan` — Boring on Purpose
 
-Almide keeps concurrency boring on purpose: explicit fork, explicit join, automatic cancellation, and fail-fast semantics. There is no `async`/`await` — `effect fn` is the async boundary, and the compiler handles the rest.
+Almide uses explicit fork/join without exposing `async`/`await`. Ordinary
+`fan` joins every sibling and reports the first error in source/list order,
+not the first failure in wall-clock time.
 
-One keyword, three forms:
+Two common forms:
 
-- **`fan { a(); b() }`** — run expressions as one scoped unit (real threads on native, sequential on wasm), wait for all, return results as a tuple in declaration order
-- **`fan.map(xs, fn)`** — map over a collection through the fan surface — deterministic, sequential in list order on both targets (C-004)
+- **`fan { a(), b() }`** — run expressions as one scoped unit, wait for all, return results as a tuple in declaration order; the compiler and host choose the execution substrate
+- **`fan.map(xs, f)`** — run every element and collect results in list order; parallel execution depends on the callback and target
 
 The rules are minimal:
 
 - `fan { }` is only valid inside `effect fn` — pure functions cannot fork
-- Result auto-unwrap: if any expression returns `Err`, the entire `fan` fails and siblings are cancelled
+- If an arm returns `Err`, the block returns the first `Err` in arm order after joining all siblings
 - No `var` capture inside `fan` — only `let` bindings from outer scope are readable (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
 
-`fan` exits on the first failed task. Sequential and concurrent code follow the same fail-fast rule.
+Ordinary `fan` does not cancel siblings. Budget/deadline forms have separate
+cooperative-cut rules; see [SPEC §13](../SPEC.md#13-concurrency-fan).
 
 ## UFCS: Why Two Forms is Acceptable
 
-`f(x, y)` and `x.f(y)` are equivalent, which superficially adds a synonym. We accept this because:
+When UFCS resolution selects `f`, `x.f(y)` passes `x` as its first argument.
+This is not an unconditional parse-time rewrite:
 
 - **Canonical resolution is module-qualified function form**: `module.fn(args)` — the module prefix makes resolution unambiguous
-- **Surface syntax may omit the module** for auto-imported core modules (e.g., `len(s)` instead of `string.len(s)`)
+- **Auto-import makes a module available**, not every function name globally available; use `string.len(s)` or receiver syntax such as `s.len()`
 - **Method form is syntactic sugar for chaining only**: `x.f(y).g(z)` reads left-to-right
-- The compiler does not need method lookup — it rewrites `x.f(y)` to `f(x, y)` at parse time
+- The checker resolves convention methods, local/imported functions, and builtin-module methods using receiver type and scope (`calls_ufcs.rs`)
 - A future formatter will normalize to canonical form, eliminating style drift
 
 ## Iteration: `for...in` + `while`
@@ -81,13 +85,13 @@ Two loop constructs, each with a clear purpose:
 
 Almide's diagnostics are designed so that **each error points to exactly one repair**. This is critical for LLM fix-loops:
 
-- Rejected syntax (`!`, `return`, `class`, `null`) includes a hint naming the exact Almide equivalent
+- Rejected syntax (prefix `!x`, `return`, `class`, `null`) includes a hint naming the exact Almide equivalent
 - Expected tokens at each parse position are kept to a small, enumerable set
 - Parser recovery does not guess — it fails fast with a precise location and expectation
-- `_` holes and `todo()` let LLMs generate incomplete but type-valid code, then fill incrementally
+- `_` holes and `todo()` mark incomplete code; they are not a guarantee that an unfinished program will compile or run successfully
 
 ```
-'!' is not valid in Almide at line 5:12
+Prefix '!x' is not boolean negation in Almide
   Hint: Use 'not x' for boolean negation, not '!x'.
 
 'return' is not valid in Almide at line 12:5
@@ -100,11 +104,11 @@ The standard library follows strict naming rules to minimize LLM guessing:
 
 | Convention | Rule | Example |
 |---|---|---|
-| Module prefix | Canonical form is `module.function()`; core modules may omit the prefix in surface syntax | `string.len(s)`, `list.get(xs, i)`, `map.get(m, k)` (core modules auto-imported) |
+| Module prefix | Canonical form is `module.function()`; receiver syntax may replace a qualified call after UFCS resolution | `string.len(s)`, `list.get(xs, i)`, `map.get(m, k)` (core modules auto-imported) |
 | Predicate prefix | `is_` for boolean-returning functions | `string.is_empty(s)`, `list.is_empty(xs)`, `map.contains(m, key)` |
-| Return type consistency | Fallible lookups return `Option`, fallible I/O returns `Result`, infallible pure conversions return plain values | `list.get() -> Option[T]`, `fs.read_text() -> Result[String, FsError]` (effect fn) |
+| Return type consistency | Fallible lookups return `Option`, fallible I/O returns `Result`, infallible pure conversions return plain values | `list.get() -> Option[T]`, `fs.read_text() -> Result[String, String]` (effect fn) |
 | No synonyms | One name per operation, no aliases | `len` not `length`/`size`/`count` |
-| Symmetric pairs | Matching names for inverse operations | `read_text`/`write`, `split`/`join`, `to_string`/`to_int` |
+| Symmetric pairs | Matching names for inverse operations | `read_text`/`write_text`, `split`/`join`, `to_string`/`to_int` |
 | No semantic name drift | Same operation names are reused only when the semantics match across modules | `string.len` and `list.len` both mean "count elements", not different operations hidden behind the same name |
 
 ## What Almide Sacrifices
@@ -114,12 +118,12 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 | Sacrificed | Why |
 |---|---|
 | Raw expressiveness | Each concept has one idiomatic way to write it. Almide provides the right abstraction (e.g., `map`, `for...in`) but not multiple ways to achieve the same thing. |
-| Operator overloading | Operators have fixed built-in meanings only. No user-defined overloading, no implicit coercion. |
+| Custom operators | No custom operator syntax. Existing operators can dispatch through declared protocols (`Eq`, `Numeric`, ordering requirements); no implicit coercion. |
 | Metaprogramming | No macros, no reflection, no code generation. The language surface is fixed. |
 | Ad-hoc polymorphism | `protocol` defines required convention methods. Types declare satisfaction explicitly (`type Dog: Eq, Serializable`). Implementation via flat convention methods (`fn Dog.serialize(...)`), no `impl` blocks. Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols. Generic bounds: `fn f[T: Protocol](x: T)` — monomorphized, no dynamic dispatch. No implicit instance resolution, no orphan rules. |
 | Named/default arguments | Default arguments supported (`fn f(x: Int, y: Int = 0)`); named arguments for clarity (`f(x: 1, y: 2)`). No variadic arguments. |
 | Multiple return styles | No `return` keyword. The last expression is always the value. No exceptions. |
-| Syntax sugar variety | One way to write each construct. No shorthand forms, no alternative spellings. |
+| Syntax sugar variety | A small canonical surface with documented sugar: for example `T?`, `T!E`, UFCS, and record-field shorthand. Concrete grammar takes precedence over the design slogan. |
 | DSL capabilities | No operator definition, no custom syntax. Almide code always looks like Almide. |
 
 These are not missing features — they are **intentional constraints that keep the generation space focused**. The goal is not minimalism for its own sake, but ensuring each abstraction has one clear path.

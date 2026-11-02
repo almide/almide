@@ -117,7 +117,7 @@ jobs:
       # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.96.0"  # the workspace lock needs >= 1.96 (wasmtime 49, #2955)
+          toolchain: "1.97.0"  # the workspace lock needs >= 1.97 (wasmtime 50)
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -152,11 +152,11 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v49.0.1-x86_64-linux
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          VERSION=v49.0.1
+          VERSION=v50.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"

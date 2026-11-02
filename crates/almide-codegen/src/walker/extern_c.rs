@@ -9,7 +9,8 @@
 /// disagree. The host fn sees plain Rust types: `&str`, `&[T]`, `&[u8]`,
 /// `&AlmideMatrix`, `&T` for records / maps / sets, `&mut T` for `mut`
 /// params, `&dyn Fn(A) -> B` for fn values, and owned scalars / `Option` /
-/// `Result` / tuples / variants. A `Bytes` / `Matrix` RETURN accepts either the raw
+/// `Result` / tuples / variants, and a `Region` as two arguments `(*mut u8,
+/// usize)` — its base and runtime length (#4353). A `Bytes` / `Matrix` RETURN accepts either the raw
 /// `Vec<u8>` / `AlmideMatrix` or the `AlmideRcCow` handle (`.into()`).
 fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
     use types::render_type;
@@ -194,6 +195,12 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     };
     // A Region return binds the pointer first and builds the Region after.
     let (bind, end) = if epilogue.is_empty() { ("", "") } else { ("let __almide_p: *mut u8 = ", ";") };
+    // SAFETY: (of the emitted call) the program's own `@extern(c)` declaration
+    // states the foreign signature, which no compiler can check against the C
+    // side: it is trusted, and --profile critical refuses the declaration
+    // itself (E100, #4008). The glue adds nothing beyond it: every argument is a value of the
+    // declared C type (a CString kept alive in the wrapper for the call; a
+    // Region's base + off and len, bounds-checked by the Region itself).
     let ret_value = format!("    {bind}unsafe {{ {body} }}{end}\n{epilogue}");
     format!(
         "{link}\nextern \"C\" {{ fn {c_func}({}) -> {};{extra_decls} }}\n\
@@ -231,6 +238,9 @@ fn region_clause(func: &IrFunction) -> Option<(String, String)> {
 /// from `ffi.alloc`), and the release guard in `keep` (D6).
 fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
     let n = format!("    let __almide_n: i64 = if __almide_p.is_null() {{ 0 }} else {{ {len}.max(0) }};\n");
+    // SAFETY: (of the emitted release) the guard runs this once, on the last
+    // drop, with the pointer the foreign call returned — the contract the
+    // program's `@region(release = …)` declares (ADR-0031 D6).
     let release_call = format!("|__almide_q: *mut u8| unsafe {{ {release}(__almide_q) }}");
     let keep = format!("almide_rt_ffi_release_guard(__almide_p, {release_call})");
     format!(
@@ -287,10 +297,7 @@ fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
             c_params.push(format!("{name}: {ptr}, {name}_len: usize"));
             let lent = format!("__almide_lent_{name}");
             lends.push_str(&format!("    let {lent} = {};\n", render_lent_region(&render_type(ctx, &p.ty), name, writable)));
-            call_args.push(match p.borrow {
-                ParamBorrow::Own => format!("{lent}.clone()"),
-                _ => format!("&{lent}"),
-            });
+            call_args.push(c_export_region_arg(p, &lent));
             ends.push_str(&format!("    almide_rt_ffi_lent_end(&{lent}.keep, \"{symbol}\", \"{name}\");\n"));
             continue;
         }

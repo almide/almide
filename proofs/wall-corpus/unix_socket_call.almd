@@ -1,0 +1,14 @@
+// @wall: `unix.connect` is not available on --target wasm
+// Unix-domain sockets have no WASI interface at all — neither preview 1 nor
+// the WASI 0.3 component's wasi:sockets carries one (R-net-01, L2-unix) —
+// so a stock artifact refuses the call with the E081 availability
+// diagnostic at check time; only the embedded host's interim ops serve it.
+// Pinned so a routing change that starts building the call into a stock
+// artifact without a host interface for it fails loudly.
+import io
+import unix
+
+effect fn main() -> Unit = {
+  let fd = unix.connect("/tmp/almide-wall.sock")!
+  io.close(fd)!
+}

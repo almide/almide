@@ -94,7 +94,9 @@ impl HostSurface {
         // String, Bytes, List, Option or record (#3354), or an unwrapped
         // Result (#3352), whose err message is a String.
         let exports_block = self.exports.iter().any(|f| {
-            returns_result(f) || !exports::scalar_only(visible_ret(f)) || f.params.iter().any(|(_, t)| !exports::scalar_only(t))
+            // A Region return (#4354) is the adapter's two numbers, no block.
+            let region = almide_lang::types::extern_abi::is_region(&f.ret);
+            (!region && (returns_result(f) || !exports::scalar_only(visible_ret(f)))) || f.params.iter().any(|(_, t)| !exports::scalar_only(t))
         });
         externs_string || exports_block
     }
@@ -189,8 +191,8 @@ impl HostSurface {
 
 /// A fn's parameters as the host sees them. A `Region` crosses an import as
 /// two numbers, its base and its length (ADR-0031 D3; the structural leg's
-/// `extern_region` split), and an export never takes one, so the expansion is
-/// the same for both.
+/// `extern_region` split), and an `@export(wasm)` fn takes one as the same
+/// two numbers (#4354), so the expansion is the same for both.
 fn import_params(f: &almide_ir::IrFunction) -> Vec<(String, Ty)> {
     f.params
         .iter()
@@ -382,6 +384,8 @@ fn refuse(fn_name: &str, what: &str, ty: &Ty, set: &str) -> String {
 fn to_wasm(m: Marshal, v: Val, expr: &str, what: &str) -> String {
     match (m, v) {
         (Marshal::Int, Val::I64) => format!("toI64({expr}, \"{what}\")"),
+        // An address or length in a 32-bit memory's width (#4354).
+        (Marshal::Int, Val::I32) => format!("Number({expr})"),
         (Marshal::Float, Val::F64) => format!("Number({expr})"),
         (Marshal::Bool, Val::I32) => format!("({expr} ? 1 : 0)"),
         (Marshal::Bool, Val::I64) => format!("({expr} ? 1n : 0n)"),
@@ -537,6 +541,13 @@ fn hooks_dts(surface: &HostSurface) -> String {
     format!("  /** The `@extern(wasm, \"js\", ...)` imports the program declares. */\n  js: {{\n{}\n  }};\n}}\n\n", rows.join("\n"))
 }
 
+/// `regionRelease(ptr)`: the module's `__region_release` (#4354). Each
+/// address a Region export handed out holds one share of its block until it
+/// is given back here; a second release of an address, or one the module
+/// never handed out, traps. Releasing 0 (an empty Region) is a no-op.
+const REGION_RELEASE_JS: &str = "\n/** Give back the share a Region export handed out with `ptr`. */\nexport function regionRelease(ptr) {\n  ready();\n  instance.exports.__region_release(ptr);\n}\n";
+const REGION_RELEASE_DTS: &str = "/** Give back the share a Region export handed out with `ptr`; a second release traps. */\nexport function regionRelease(ptr: number): void;\n";
+
 const RUN_JS: &str = "\n/** Run `main` (the module's `_start`); a non-zero exit throws AlmideExit. */\nexport function run() {\n  ready();\n  try {\n    instance.exports._start();\n  } catch (e) {\n    if (e instanceof AlmideExit && e.code === 0) return;\n    throw e;\n  } finally {\n    flush();\n  }\n}\n";
 
 /// What the emitter recorded about each export (#2265, #3352, #3354), keyed
@@ -578,6 +589,7 @@ pub(crate) fn generate(
     let mut wrappers = String::new();
     let mut export_dts = String::new();
     let mut needs_values = false;
+    let mut region_release = false;
     for f in &surface.exports {
         // The structural leg exports a pub fn only when its whole call
         // closure lowers; a fn the module does not export gets no wrapper.
@@ -586,8 +598,15 @@ pub(crate) fn generate(
         let plan = exports::plan_export(f, export_params.get(&f.name).map(Vec::as_slice), export_rets.get(&f.name))?;
         needs_values |= plan.needs_values();
         let entry = suspension.entry(&f.name);
+        region_release |= plan.ret == exports::RetPlan::Region;
         wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan, entry)?);
         export_dts.push_str(&exports::export_dts(f, &plan, entry));
+    }
+    // A Region export (ADR-0031 amendment A1, #4354) hands the host one share
+    // of the block per address; this gives it back.
+    if region_release {
+        wrappers.push_str(REGION_RELEASE_JS);
+        export_dts.push_str(REGION_RELEASE_DTS);
     }
     // A fallible import (#3356) builds its Result block with the value helpers.
     needs_values |= surface.externs.iter().any(|e| returns_result(&e.sig));

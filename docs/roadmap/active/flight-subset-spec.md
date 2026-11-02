@@ -1,5 +1,13 @@
-<!-- description: The normative Almide Flight Profile — the SPARK/Ravenscar-class language subset for flight-grade code, machine-enforced by the per-build certificate (by proof, not review). Feature IN/OUT/RESTRICTED classification, the resolved keystone open questions (Dup-in-loop IN, break/continue OUT, recursion=acyclicity-reject, nested loops IN), the @flight enforcement architecture, the MISRA/Ravenscar mapping, and honest language residuals. -->
-# Almide Flight Profile — 規範仕様(Normative Subset)
+<!-- description: Original flight-subset proposal; normative bounded-profile authority is ALS §B, not the historical @flight sketch -->
+# Almide Flight Profile — original subset proposal
+
+The current normative bounded profile is [ALS §B](../../specs/als/bounded.md),
+using `@bounded` and the critical-profile checks. This roadmap's `@flight`,
+IN/OUT tables and old lowering line numbers are the original design, not a
+second normative language specification or evidence of certified flight use.
+Do not implement its policy differences as a documentation cleanup.
+The per-loop certificate/WCET ideas below remain proposals where not established
+by the current ALS, source and receipt.
 
 > **Goal**: flight-grade Almide コードの**言語サブセット**を規範化する ── SPARK/Ravenscar
 > や MISRA C のアナログ。狙いは、ビルド毎の証明書がサブセット所属を**証明で機械強制**
@@ -20,10 +28,10 @@
 
 ---
 
-## 2. 特徴分類表(IN / OUT / RESTRICTED)
+## 2. 原設計の特徴分類表(IN / OUT / RESTRICTED)
 
 凡例 ── **IN**: 飛行コードで許可。**OUT**: 禁止(拒否)。**RESTRICTED**: 明示形でのみ許可。
-Enforcement は今ある gate(lowering 壁 / 証明性質)か **未**(壁を建てる必要)。
+Enforcement は設計時点の gate/未実装メモであり、現行の可否は ALS §B に従う。
 
 ### 2.1 制御フロー
 
@@ -46,7 +54,7 @@ Enforcement は今ある gate(lowering 壁 / 証明性質)か **未**(壁を建�
 
 | 特徴 | 区分 | 根拠 | Enforcement |
 |---|---|---|---|
-| ループ外動的確保 | **IN** | アロケータ O(1)(単一プローブ free-list + bump、固定 64KiB、`memory.grow` なし)。有界 count の O(1) alloc は静的 high-water-mark | `Op::Alloc`(`lib.rs:162`)。`AllocBound` で有界化 **未** |
+| ループ外動的確保 | **IN** | 元の固定ページ allocator を前提とした案。現行 size-class/free-list と heap cap の条件を別途確認し、確保 count だけから byte 上限や物理 WCET を導かない | `Op::Alloc`(`lib.rs:162`)。`AllocBound` で有界化 **未** |
 | ループ内確保 | **OUT** | trip count を掛けないと high-water-mark が壊れる | `is_allocating` を `CountedLoopStart/End` 間で拒否 **未** |
 | `Init::DynStr`/`DynList`(ランタイム長) | **OUT**(byte 有界飛行) | 長さがランタイム `ValueId`(`lib.rs:137,151`)→ `len` 有界化なしに byte 無界 | `len` 有界証明まで wall **未**(count 基準は許容、byte 基準は不可) |
 | static-`Init` heap(`IntList`/`Str` リテラル、`OptSome`) | **IN** | サイズが `Init` から静的既知 → byte 上限可算 | `Op::Alloc` with static `Init` |

@@ -1,0 +1,45 @@
+// fs.append_bytes: appends exactly its bytes (every value 0..=255, non-UTF-8
+// runs included), creates a missing file, and errs where a file cannot be
+// written. Before this file no test called it on either leg
+// (proofs/stdlib-test-coverage.txt).
+import fs
+import testing
+
+effect fn tmp() -> String = fs.create_temp_dir("append-bytes")!
+
+test "append_bytes creates a missing file, then appends" {
+  let d = tmp()!
+  let p = d + "/out.bin"
+  fs.append_bytes(p, bytes.from_list([1, 2, 3]))!
+  assert_eq(bytes.to_list(fs.read_bytes(p)!), [1, 2, 3])
+  fs.append_bytes(p, bytes.from_list([4, 5]))!
+  assert_eq(bytes.to_list(fs.read_bytes(p)!), [1, 2, 3, 4, 5])
+}
+
+test "append_bytes keeps every byte value, non-UTF-8 included" {
+  let d = tmp()!
+  let p = d + "/all.bin"
+  fs.write_bytes(p, bytes.from_list([255, 254]))!
+  fs.append_bytes(p, bytes.from_list(list.range(0, 256)))!
+  let got = bytes.to_list(fs.read_bytes(p)!)
+  assert_eq(list.len(got), 258)
+  assert_eq(list.take(got, 3), [255, 254, 0])
+  assert_eq(list.drop(got, 2), list.range(0, 256))
+}
+
+test "append_bytes of nothing leaves the file as it was" {
+  let d = tmp()!
+  let p = d + "/same.txt"
+  fs.write_text(p, "abc")!
+  fs.append_bytes(p, bytes.from_list([]))!
+  assert_eq(fs.read_text(p)!, "abc")
+  fs.append_bytes(p, bytes.from_string("def"))!
+  assert_eq(fs.read_text(p)!, "abcdef")
+}
+
+test "append_bytes errs on a directory and on a missing parent" {
+  let d = tmp()!
+  testing.assert_err(fs.append_bytes(d, bytes.from_list([1])))
+  testing.assert_err(fs.append_bytes(d + "/no/such/dir/f.bin", bytes.from_list([1])))
+  assert_eq(fs.exists(d + "/no"), false)
+}

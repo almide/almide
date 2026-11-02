@@ -22,11 +22,11 @@
 use std::sync::Mutex;
 
 /// The first and last process op (`almide:process/spawn`'s `enum op`).
-pub(crate) const OP_FIRST: i32 = 80;
-pub(crate) const OP_LAST: i32 = 90;
+pub(crate) const OP_FIRST: i32 = *almide_wasm::host_ops::PROC.start();
+pub(crate) const OP_LAST: i32 = *almide_wasm::host_ops::PROC.end();
 /// The `process.start` child's ops (#4308): the WIT cases after `run-with`.
-pub(crate) const CHILD_FIRST: i32 = 146;
-pub(crate) const CHILD_LAST: i32 = 151;
+pub(crate) const CHILD_FIRST: i32 = *almide_wasm::host_ops::PROC_CHILD.start();
+pub(crate) const CHILD_LAST: i32 = *almide_wasm::host_ops::PROC_CHILD.end();
 const _: () = assert!(
     *crate::wasi::PROC_OPS.start() == OP_FIRST
         && *crate::wasi::PROC_OPS.end() == OP_LAST
@@ -44,22 +44,55 @@ pub(crate) fn is_op(op: i32) -> bool {
 /// are its own (and stopped at its end, C-437's rule).
 pub(crate) type ProcTable = Mutex<Vec<Option<almide_rt_core::process_core::AlmideProcChild>>>;
 
-/// The table of the canonical import's children ([`link_spawn_import`]): a
-/// stand-alone artifact's host keeps one table for the process.
-fn import_table() -> &'static ProcTable {
-    static T: ProcTable = Mutex::new(Vec::new());
-    &T
+/// One run's `process.start` children, on every leg that serves them: the
+/// embedded lane's `fs_call` ops and the canonical import a stock (p1)
+/// artifact carries ([`link_spawn_import`]). Dropping it is the run's end:
+/// every child neither waited on nor stopped is stopped then, as native's
+/// exit stops them (C-437). The embedded host also stops them explicitly
+/// before it reports (`run_compiled`); a host that runs a p1 artifact stops
+/// them when it drops the run's store (#4347). Before #4347 the import kept
+/// its children in one process-wide table nothing ever stopped.
+#[derive(Default)]
+pub struct RunChildren(ProcTable);
+
+impl std::ops::Deref for RunChildren {
+    type Target = Mutex<Vec<Option<almide_rt_core::process_core::AlmideProcChild>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for RunChildren {
+    fn drop(&mut self) {
+        stop_unwaited(&self.0);
+    }
+}
+
+/// The store data of a host that links [`link_spawn_import`]: where the
+/// run's children live. One store = one run, so its children end with it.
+pub trait SpawnHost {
+    fn spawn_children(&self) -> &RunChildren;
+}
+
+/// The handle operand as the Int native names it by.
+fn handle_number(h: &str) -> Option<i64> {
+    h.trim().parse().ok()
 }
 
 /// Run `f` on the child behind handle `h` (native's `almide_proc_with`).
 fn with_child<R>(procs: &ProcTable, h: &str, f: impl FnOnce(&mut almide_rt_core::process_core::AlmideProcChild) -> R) -> Result<R, String> {
     let mut t = procs.lock().unwrap_or_else(|p| p.into_inner());
-    let c = h
-        .parse::<usize>()
-        .ok()
+    // Native's text names the handle as the Int it is (`almide_proc_with`);
+    // a handle operand that is not one is quoted, never embedded raw (C-418).
+    let n = handle_number(h);
+    let c = n
+        .and_then(|i| usize::try_from(i).ok())
         .and_then(|i| t.get_mut(i))
         .and_then(|c| c.as_mut())
-        .ok_or_else(|| format!("invalid ProcessChild handle: {h}"))?;
+        .ok_or_else(|| match n {
+            Some(i) => format!("invalid ProcessChild handle: {i}"),
+            None => format!("invalid ProcessChild handle: {}", almide_base::err_text::almide_rt_errtext_quote(h)),
+        })?;
     Ok(f(c))
 }
 
@@ -254,7 +287,7 @@ pub(crate) fn dispatch(op: i32, a: &str, b: &[u8], flush: &dyn Fn(), procs: &Pro
 /// result<string, string>` — `(op, a_ptr, a_len, b_ptr, b_len, retptr)`,
 /// the answer's bytes placed with the guest's `cabi_realloc` export, the
 /// discriminant at `retptr` and `(ptr, len)` at `retptr + 4`.
-pub fn link_spawn_import<T: 'static>(linker: &mut wasmtime::Linker<T>) -> anyhow::Result<()> {
+pub fn link_spawn_import<T: SpawnHost + 'static>(linker: &mut wasmtime::Linker<T>) -> anyhow::Result<()> {
     let ty = wasmtime::FuncType::new(linker.engine(), std::iter::repeat_n(wasmtime::ValType::I32, 6), []);
     linker.func_new("almide:process/spawn", "call", ty, |mut caller, params, _results| {
         let mut args = [0i32; 6];
@@ -267,7 +300,7 @@ pub fn link_spawn_import<T: 'static>(linker: &mut wasmtime::Linker<T>) -> anyhow
 }
 
 /// One canonical-ABI `call`: `[op, a_ptr, a_len, b_ptr, b_len, retptr]`.
-fn spawn_call<T>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr, b_len, ret]: [i32; 6]) -> wasmtime::Result<()> {
+fn spawn_call<T: SpawnHost>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr, b_len, ret]: [i32; 6]) -> wasmtime::Result<()> {
     let mem = caller
         .get_export("memory")
         .and_then(|e| e.into_memory())
@@ -280,7 +313,7 @@ fn spawn_call<T>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr,
     };
     let a = read(caller, a_ptr, a_len)?;
     let b = read(caller, b_ptr, b_len)?;
-    let (disc, text) = match call(crate::wasi::proc_op_of_case(op), &a, &b, &|| {}, import_table()) {
+    let (disc, text) = match call(crate::wasi::proc_op_of_case(op), &a, &b, &|| {}, caller.data().spawn_children()) {
         Ok(t) => (0u8, t),
         Err(m) => (1u8, m),
     };

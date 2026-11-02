@@ -10,10 +10,11 @@ ISO 26262/DO-178C qualification) is the prior-example model throughout.
 ## 1. The qualification argument (mapping)
 
 The DO-178C Table-A objective mapping and the DO-330 TQL argument live in
-the G-F5 design: the PCC asymmetry demotes the UNTRUSTED compiler to a
-TQL-5/Criteria-3 tool (its output independently re-verified every build)
-and leaves the small kernel-proven checker as the qualification object —
-qualified by formal proof (DO-330 + DO-333), not by test.
+the G-F5 design. Its proposed argument uses independent output verification
+to reduce the qualification burden on the untrusted compiler and focuses
+on the checker. This is a qualification argument to assess, not an assigned
+TQL or a grant of formal-methods credit; the applicable objectives and
+accepted evidence remain the applicant's and authority's determination.
 source: docs/roadmap/active/flight-qualification.md
 
 Claim strength at a glance (measured, drift-gated):
@@ -23,7 +24,7 @@ source: proofs/STAGE-STATUS.md
 
 | artifact | home | enforcement |
 |---|---|---|
-| Tool Operational Requirements | proofs/TOR.md (TOR-1..9) | check-tor-refs.sh: every requirement keeps its enforcing instrument |
+| Tool Operational Requirements | proofs/TOR.md (the current TOR rows) | check-tor-refs.sh: every requirement keeps its enforcing instrument |
 | Verification-tool verification | proofs/gate-verification.toml | check-gate-verification.sh: every gate classified by how it can FAIL; UNVERIFIED shrink-only |
 | Known-problems formalization | proofs/releases/ (per-release seals) | release-seal.sh: `known_problems` REQUIRED, derived fields re-measured against the tag forever |
 
@@ -35,9 +36,9 @@ source: scripts/release-seal.sh
 
 | gap | state | owner / ref |
 |---|---|---|
-| MC/DC & branch coverage | line coverage only (ratcheted) | flight-evidence-gaps F2 remainder |
+| MC/DC & branch coverage | ratcheted line/condition coverage and safety-set decision vectors exist; domain-level coverage credit remains to be assessed | flight-evidence-gaps F2 remainder |
 | C-WCET (counted-loop keystone あ) | PENDING in the receipt design | flight-reference-app Slice 2 |
-| C-FAITHFUL + Ferrocene leg (keystone い) | PENDING; no qualified native toolchain in the chain | flight-reference-app Slice 3, needs Ferrocene access |
+| C-FAITHFUL + Ferrocene leg (keystone い) | partial structural-runtime refinement; no qualified native binary toolchain in the chain | flight-reference-app Slice 3, needs Ferrocene access |
 | wasmtime qualification pedigree | unqualified COTS, procedural TOR-9 | #865 |
 | ALS syntax-element authoring | shrink-only ratchet; live count in the ledger's `unwritten_ceiling` and proofs/STAGE-STATUS.md | proofs/als-element-coverage.toml (freeze precondition) |
 | Durability evidence | streak re-measured nightly by ledger-counts.yml; live count in proofs/STAGE-STATUS.md | research/benchmark/fuzz-green/ (90-day milestone) |

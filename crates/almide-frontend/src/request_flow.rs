@@ -325,25 +325,25 @@ impl<'c, 'a> Walk<'c, 'a> {
         let (cx, summaries) = (self.cx, self.summaries);
         // The sink first: a derived `User.decode` is also a fn of the
         // program, and its summary must not stand in for the verdict.
-        if let CallTarget::Named { name } = target {
-            if let Some(why) = cx.sink(name.as_str(), self.entry) {
-                if self.any(args) {
-                    self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
-                }
-                return;
+        if let CallTarget::Named { name } = target
+            && let Some(why) = cx.sink(name.as_str(), self.entry)
+        {
+            if self.any(args) {
+                self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
             }
+            return;
         }
         if let Some(ix) = cx.callee(self.entry.module, target) {
             let s = &summaries[ix];
             let callee = qualified(&cx.fns[ix]);
             let mut found = Vec::new();
             for (i, a) in args.iter().enumerate() {
-                if let Some(Some(hit)) = s.sink_from.get(i) {
-                    if self.taint(a) {
-                        let mut via = vec![format!("{}(arg {})", callee, i + 1)];
-                        via.extend(hit.via.iter().cloned());
-                        found.push(Hit { why: hit.why.clone(), decode: hit.decode.clone(), via, site });
-                    }
+                if let Some(Some(hit)) = s.sink_from.get(i)
+                    && self.taint(a)
+                {
+                    let mut via = vec![format!("{}(arg {})", callee, i + 1)];
+                    via.extend(hit.via.iter().cloned());
+                    found.push(Hit { why: hit.why.clone(), decode: hit.decode.clone(), via, site });
                 }
             }
             self.hits.extend(found);
@@ -389,7 +389,6 @@ impl IrVisitor for AnyChild<'_, '_, '_> {
     fn visit_stmt(&mut self, s: &IrStmt) {
         walk_stmt(self, s);
     }
-    fn visit_pattern(&mut self, _: &IrPattern) {}
 }
 
 impl IrVisitor for Walk<'_, '_> {
@@ -444,17 +443,15 @@ impl IrVisitor for Walk<'_, '_> {
             }
             IrStmtKind::FieldAssign { target, value, .. }
             | IrStmtKind::IndexAssign { target, value, .. }
-            | IrStmtKind::MapInsert { target, value, .. } => {
-                if self.taint(value) {
-                    self.mark(*target);
-                }
+            | IrStmtKind::MapInsert { target, value, .. }
+                if self.taint(value) =>
+            {
+                self.mark(*target);
             }
             _ => {}
         }
         walk_stmt(self, s);
     }
-
-    fn visit_pattern(&mut self, _: &IrPattern) {}
 }
 
 /// Does any user fn name a `Decode` requirement at all? Most programs do
@@ -469,18 +466,17 @@ impl IrVisitor for NamesDecode<'_> {
         if self.found {
             return;
         }
-        if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
-            if name.as_str().rsplit_once('.').is_some_and(|(_, m)| self.methods.iter().any(|d| d == m)) {
-                self.found = true;
-                return;
-            }
+        if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind
+            && name.as_str().rsplit_once('.').is_some_and(|(_, m)| self.methods.iter().any(|d| d == m))
+        {
+            self.found = true;
+            return;
         }
         walk_expr(self, e);
     }
     fn visit_stmt(&mut self, s: &IrStmt) {
         walk_stmt(self, s);
     }
-    fn visit_pattern(&mut self, _: &IrPattern) {}
 }
 
 /// The modules a program reaches through a call target.
@@ -496,7 +492,6 @@ impl IrVisitor for ModulesCalled {
     fn visit_stmt(&mut self, s: &IrStmt) {
         walk_stmt(self, s);
     }
-    fn visit_pattern(&mut self, _: &IrPattern) {}
 }
 
 /// Every hand decode of request data into a type that may not take it.
@@ -505,27 +500,8 @@ pub fn hand_decode_violations(program: &IrProgram) -> Vec<HandDecodeViolation> {
     if almide_base::env::flag("ALMIDE_CONTROL_ADMIT_HAND_DECODE") {
         return Vec::new();
     }
-    let mut decode_methods: Vec<String> = builtin_protocol(DECODE_PROTOCOL)
-        .map(|p| p.method_names())
-        .unwrap_or_default();
-    if !decode_methods.iter().any(|m| m == STRICT_DECODE_METHOD) {
-        decode_methods.push(STRICT_DECODE_METHOD.to_string());
-    }
-
-    // The fns that are judged: the entry's and every user module's. A
-    // bundled module's fns are called as opaque transforms.
-    let mut fns: Vec<FnEntry<'_>> = Vec::new();
-    for f in &program.functions {
-        fns.push(FnEntry { module: None, f });
-    }
-    for m in &program.modules {
-        if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
-            continue;
-        }
-        for f in &m.functions {
-            fns.push(FnEntry { module: Some(m.name.as_str()), f });
-        }
-    }
+    let decode_methods = decode_method_names();
+    let fns = judged_fns(program);
     let mut names = NamesDecode { methods: &decode_methods, found: false };
     for e in &fns {
         names.visit_expr(&e.f.body);
@@ -533,32 +509,65 @@ pub fn hand_decode_violations(program: &IrProgram) -> Vec<HandDecodeViolation> {
     if !names.found {
         return Vec::new();
     }
-
-    // Sources: the declared parameter types of every stdlib `@input_sink` fn
-    // in the modules the program reaches. A user's own `@input_sink` fn names
-    // a sink, not a source: its parameter (often a plain `String`) is not
-    // request data by declaration.
-    let mut reached: HashSet<String> = program.used_stdlib_modules.iter().cloned().collect();
-    reached.extend(program.modules.iter().map(|m| m.name.to_string()));
-    let mut called = ModulesCalled(HashSet::new());
-    for e in &fns {
-        called.visit_expr(&e.f.body);
-    }
-    reached.extend(called.0);
-    let mut sources: Vec<Ty> = Vec::new();
-    let mut reached: Vec<String> = reached.into_iter().collect();
-    reached.sort();
-    for m in &reached {
-        for t in crate::bundled_sigs::input_sink_param_types(m) {
-            if !sources.contains(&t) {
-                sources.push(t);
-            }
-        }
-    }
+    let sources = source_types(program, &fns);
     if sources.is_empty() {
         return Vec::new();
     }
+    let types = type_table(program);
+    let by_key = fn_keys(&fns);
+    let cx = Cx { fns, by_key, types, sources, decode_methods };
+    let summaries = solve_summaries(&cx);
+    judge(&cx, &summaries)
+}
 
+/// The Decode protocol's method names, the strict decode among them.
+fn decode_method_names() -> Vec<String> {
+    let mut decode_methods: Vec<String> = builtin_protocol(DECODE_PROTOCOL)
+        .map(|p| p.method_names())
+        .unwrap_or_default();
+    if !decode_methods.iter().any(|m| m == STRICT_DECODE_METHOD) {
+        decode_methods.push(STRICT_DECODE_METHOD.to_string());
+    }
+    decode_methods
+}
+
+/// The fns that are judged: the entry's and every user module's. A bundled
+/// module's fns are called as opaque transforms.
+fn judged_fns(program: &IrProgram) -> Vec<FnEntry<'_>> {
+    let entry = program.functions.iter().map(|f| FnEntry { module: None, f });
+    let modules = program
+        .modules
+        .iter()
+        .filter(|m| !almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
+        .flat_map(|m| m.functions.iter().map(move |f| FnEntry { module: Some(m.name.as_str()), f }));
+    entry.chain(modules).collect()
+}
+
+/// Sources: the declared parameter types of every stdlib `@input_sink` fn in
+/// the modules the program reaches. A user's own `@input_sink` fn names a
+/// sink, not a source: its parameter (often a plain `String`) is not request
+/// data by declaration.
+fn source_types(program: &IrProgram, fns: &[FnEntry<'_>]) -> Vec<Ty> {
+    let mut reached: HashSet<String> = program.used_stdlib_modules.iter().cloned().collect();
+    reached.extend(program.modules.iter().map(|m| m.name.to_string()));
+    let mut called = ModulesCalled(HashSet::new());
+    for e in fns {
+        called.visit_expr(&e.f.body);
+    }
+    reached.extend(called.0);
+    let mut reached: Vec<String> = reached.into_iter().collect();
+    reached.sort();
+    let mut sources: Vec<Ty> = Vec::new();
+    for t in reached.iter().flat_map(|m| crate::bundled_sigs::input_sink_param_types(m)) {
+        if !sources.contains(&t) {
+            sources.push(t);
+        }
+    }
+    sources
+}
+
+/// Every declared type by its name, a module's also by `module.Name`.
+fn type_table(program: &IrProgram) -> HashMap<String, TypeInfo<'_>> {
     let mut types: HashMap<String, TypeInfo<'_>> = HashMap::new();
     for d in &program.type_decls {
         types.entry(d.name.to_string()).or_insert(TypeInfo { decl: d, stdlib: false });
@@ -570,6 +579,12 @@ pub fn hand_decode_violations(program: &IrProgram) -> Vec<HandDecodeViolation> {
             types.entry(format!("{}.{}", m.name, last_segment(d.name.as_str()))).or_insert(TypeInfo { decl: d, stdlib });
         }
     }
+    types
+}
+
+/// Each judged fn's index by `(module, name)`, a module fn also by its last
+/// segment.
+fn fn_keys(fns: &[FnEntry<'_>]) -> HashMap<(Option<String>, String), usize> {
     let mut by_key = HashMap::new();
     for (i, e) in fns.iter().enumerate() {
         by_key.entry((e.module.map(str::to_string), e.f.name.to_string())).or_insert(i);
@@ -577,52 +592,62 @@ pub fn hand_decode_violations(program: &IrProgram) -> Vec<HandDecodeViolation> {
             by_key.entry((Some(m.to_string()), last_segment(e.f.name.as_str()).to_string())).or_insert(i);
         }
     }
-    let cx = Cx { fns, by_key, types, sources, decode_methods };
+    by_key
+}
 
-    // Per-parameter summaries, to a fixpoint (a summary only grows).
-    let judged = |e: &FnEntry<'_>| !has_attr(e.f, INPUT_SINK_ATTR);
-    let mut summaries: Vec<Summary> = cx.fns.iter()
+fn judged(e: &FnEntry<'_>) -> bool {
+    !has_attr(e.f, INPUT_SINK_ATTR)
+}
+
+/// Per-parameter summaries, to a fixpoint (a summary only grows).
+fn solve_summaries(cx: &Cx<'_>) -> Vec<Summary> {
+    let mut summaries: Vec<Summary> = cx
+        .fns
+        .iter()
         .map(|e| Summary { ret_from: vec![false; e.f.params.len()], sink_from: vec![None; e.f.params.len()] })
         .collect();
+    // Each pass only grows a summary, so this stops.
     loop {
-        let mut grew = false;
-        for (ix, e) in cx.fns.iter().enumerate() {
-            if !judged(e) {
-                continue;
-            }
-            for (pi, p) in e.f.params.iter().enumerate() {
-                let mut w = Walk {
-                    cx: &cx, summaries: &summaries, entry: e, source_mode: false,
-                    tainted: HashSet::from([p.var]), changed: false, hits: Vec::new(),
-                };
-                w.solve(&e.f.body);
-                let ret = w.taint(&e.f.body);
-                let hit = w.hits.into_iter().next();
-                let s = &mut summaries[ix];
-                if ret && !s.ret_from[pi] {
-                    s.ret_from[pi] = true;
-                    grew = true;
-                }
-                if hit.is_some() && s.sink_from[pi].is_none() {
-                    s.sink_from[pi] = hit;
-                    grew = true;
-                }
-            }
-        }
-        if !grew {
+        if !summarize_once(cx, &mut summaries) {
             break;
         }
     }
+    summaries
+}
 
-    // The judging run: untrusted-input values are the sources.
+/// One pass over every judged fn's parameters; whether a summary grew.
+fn summarize_once(cx: &Cx<'_>, summaries: &mut [Summary]) -> bool {
+    let mut grew = false;
+    for (ix, e) in cx.fns.iter().enumerate().filter(|(_, e)| judged(e)) {
+        for (pi, p) in e.f.params.iter().enumerate() {
+            let mut w = Walk {
+                cx, summaries: &*summaries, entry: e, source_mode: false,
+                tainted: HashSet::from([p.var]), changed: false, hits: Vec::new(),
+            };
+            w.solve(&e.f.body);
+            let ret = w.taint(&e.f.body);
+            let hit = w.hits.into_iter().next();
+            let s = &mut summaries[ix];
+            if ret && !s.ret_from[pi] {
+                s.ret_from[pi] = true;
+                grew = true;
+            }
+            if hit.is_some() && s.sink_from[pi].is_none() {
+                s.sink_from[pi] = hit;
+                grew = true;
+            }
+        }
+    }
+    grew
+}
+
+/// The judging run: untrusted-input values are the sources.
+fn judge(cx: &Cx<'_>, summaries: &[Summary]) -> Vec<HandDecodeViolation> {
     let mut out = Vec::new();
     let mut seen: HashSet<(String, usize, usize)> = HashSet::new();
-    for e in cx.fns.iter() {
-        if !judged(e) {
-            continue;
-        }
+    for e in cx.fns.iter().filter(|e| judged(e)) {
         let mut w = Walk {
-            cx: &cx, summaries: &summaries, entry: e, source_mode: true,
+            cx, summaries, entry: e, source_mode: true,
             tainted: HashSet::new(), changed: false, hits: Vec::new(),
         };
         w.solve(&e.f.body);

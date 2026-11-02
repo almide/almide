@@ -1,75 +1,38 @@
 <!-- description: Capability-based effect system for sandboxed AI agent containers -->
 # Capability-Based Effect System
 
-> **Active scope: Phase 1** — capability annotation + compiler checking。
-> **Exit criteria**: porta の全テストが `almide check --capabilities` を通過。
-> Phase 2-5 (WASM pruning, per-dep restriction, type-level, MCP) は on-hold。
+> **Current scope**: permission analysis/checking already exists; the remaining
+> work is the stronger capability chain and the proposals below. Use
+> `almide check` / `almide check --effects`, not the unimplemented
+> `--capabilities` spelling. Passing checks is not a whole-runtime sandbox proof.
 > **設計裁定 2026-10-03**: [ADR-0026](../../adr/0026-effect-categories-ride-the-transparent-fn-type.md) — 型レベル(Phase 4)の形、カテゴリ階層(下の `IO` shorthand を置き換え)、静的⊆manifest⊆host の鎖。
 
-Compile-time enforcement of least privilege for AI agent containers. The compiler proves that an agent's code never exceeds its declared capabilities. WASM output contains only the WASI imports the manifest permits.
+## Implemented baseline and remaining design
 
-## The Problem
+`crates/almide-ir/src/effect.rs` defines 14 leaves and four parents (`FS`,
+`Net`, `IO`, `Env`). `IO` contains only stdin/stdout/stderr, not filesystem
+access; `Abort` is a leaf. This replaces the original 13-category sketch.
+`src/cli/check.rs` and `src/cli/mod.rs` enforce project permissions against
+inferred effects; `src/project.rs` parses the grants. The effect bit and the
+category analysis are distinct: a pure `fn` is not a promise of zero categories
+(output/abort are admitted by ADR-0022).
 
-```almide
-// Today: effect fn = can do ANYTHING
-effect fn agent(cmd: String) -> String =
-  fs.write_text("/etc/passwd", "pwned")  // ← compiles fine
-```
+The intended least-privilege chain is inferred effects ⊆ manifest ⊆ host
+(ADR-0026). Existing analysis is not a proof that arbitrary foreign code or
+host behavior respects it. `@extern` bodies are opaque and receive all leaves
+in inference; native permission and process command grants have their own
+boundaries. Host configuration remains necessary.
 
-`effect fn` is binary: either no I/O or all I/O. An AI-generated agent with `effect fn` has unrestricted access to every WASI capability the runtime grants. The only defense is WASI's coarse-grained `--dir` flags at runtime.
-
-## The Solution
-
-```toml
-# almide.toml
-[permissions]
-allow = ["FS.read", "IO.stdout"]
-```
-
-```almide
-effect fn agent(cmd: String) -> String = {
-  let content = fs.read_text(cmd)   // ✅ FS.read is allowed
-  println(content)                   // ✅ IO.stdout is allowed
-  fs.write_text(cmd, "x")           // ❌ compile error: FS.write not in permissions
-}
-```
-
-The compiler rejects the binary. The WASM file is never produced. No runtime check needed.
-
-## Capability Taxonomy (13 categories)
-
-| Category | Stdlib functions | WASI imports |
-|----------|-----------------|-------------|
-| `FS.read` | fs.read_text, fs.exists, fs.stat, fs.list_dir | path_open(read), fd_read |
-| `FS.write` | fs.write_text, fs.remove, fs.mkdir_p, fs.rename | path_open(write), fd_write(fd>2) |
-| `Net.fetch` | http.get, http.post, http.put, http.delete | host-provided fetch |
-| `Net.listen` | http.serve | host-provided listen |
-| `Env.read` | env.get, env.args, env.cwd, env.os | environ_get, args_get |
-| `Env.write` | env.set | environ_set |
-| `Proc` | process.exec, process.exit | host-provided proc |
-| `Time` | datetime.now, env.millis | clock_time_get |
-| `Rand` | random.int, random.float | random_get |
-| `Fan` | fan { }, fan.map | (internal: threads/async) |
-| `IO.stderr` | eprintln | fd_write(fd=2) |
-| `IO.stdin` | io.read_line | fd_read(fd=0) |
-| `IO.stdout` | println, io.print | fd_write(fd=1) |
-| `IO.stderr` | eprintln | fd_write(fd=2) |
-
-Shorthand: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, `Net` = Net.fetch + Net.listen, `All` = all 13
-
-## Three Layers of Defense
-
-```
-Layer 1: Compiler          — code that exceeds manifest → compile error (BLOCKED)
-Layer 2: WASM binary       — WASI imports pruned to match manifest (ABSENT)
-Layer 3: Runtime (WASI)    — --dir, --env flags as final wall (DENIED)
-```
-
-Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything else. Defense in depth.
+The phase sketches below record the original implementation decomposition,
+not five wholly unimplemented tasks or a set of shipped end-to-end guarantees.
+In particular, a declared category does not by itself remove a WASI import:
+read/write operations can share an import and rely on handle rights. Import
+inspection cannot prove all application or host behavior. A host is a separate
+trust boundary, not a catch-all proof of safety.
 
 ## Implementation Phases
 
-### Phase 1: Capability Annotation + Compiler Checking
+### Phase 1: Original checking plan (core enforcement now exists)
 
 **Goal**: `[permissions]` in almide.toml → compile error on violation.
 
@@ -79,7 +42,7 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    - Stored as a static table in `almide-frontend`
 
 2. Parse `[permissions]` from almide.toml
-   - `allow = ["FS.read", "IO.stdout"]` → `CapabilitySet` (u16 bitset, 13 bits)
+   - `allow = ["FS.read", "IO.stdout"]` → the planned `CapabilitySet` representation (current registry has 14 leaves)
    - Default when `[permissions]` absent: all capabilities allowed (backward compat)
 
 3. Capability checking pass in the type checker
@@ -87,7 +50,7 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    - For each stdlib call, look up its required capability
    - If not in `allow` → emit error with actionable hint:
      ```
-     error[E010]: capability violation: fs.write_text requires FS.write
+     error[CAPABILITY_VIOLATION]: capability violation: fs.write_text requires FS.write
        --> agent.almd:5:3
        |
      5 |   fs.write_text(path, content)
@@ -95,17 +58,18 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
        = note: [permissions] allows: FS.read, IO.stdout
        = hint: add "FS.write" to [permissions].allow in almide.toml
      ```
+   - The symbolic diagnostic above is illustrative, not an allocated code (`E010` is exhaustiveness).
    - Transitive: if `fn foo` calls `fn bar` calls `fs.write`, `foo` requires `FS.write`
 
 4. Effect function inference update
    - `effect fn` without [permissions] → all capabilities (existing behavior)
    - `effect fn` with [permissions] → only declared capabilities
-   - Pure `fn` → zero capabilities (unchanged)
+   - Pure `fn` does not imply zero categories: output/abort remain admissible (ADR-0022).
 
 **Files to modify**:
 - stdlib `.almd` sources — declare the capability on each function (the stdlib/defs TOML pipeline is gone; per-fn metadata lives in the .almd bodies)
 - `crates/almide-frontend/src/check/` — capability checking pass
-- `src/resolve.rs` (root crate) — parse [permissions] from almide.toml
+- `src/project.rs` — current manifest parsing (the original resolver attribution was stale)
 - `crates/almide-base/src/` — CapabilitySet type (u16 bitset)
 
 **Test**: Write an agent test that compiles with `allow = ["FS.read"]` and fails with `fs.write_text` call.
@@ -121,7 +85,7 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    - If capability not allowed → don't emit the WASI import
 
 2. Update WASM emitter import section
-   - Current: always imports all WASI functions
+   - Original assumption: all WASI functions were imported. This is not a current emitter inventory.
    - New: only import WASI functions required by CapabilitySet
    - Runtime functions that reference pruned imports → replace with `unreachable` trap
 
@@ -138,13 +102,12 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    Orchestrator reads this before loading the WASM binary — verify capabilities match policy.
 
 **Files to modify**:
-- `crates/almide-mir/src/render_wasm*` — conditional WASI import emission (this plan predates #782; v0's emit_wasm/ is deleted)
-- `crates/almide-types/src/self_host_registry.rs` — WASI import registration (v0 path deleted, #782)
+- `crates/almide-wasm/src/` — current structural emitter; the old `render_wasm*` / `self_host_registry.rs` modification targets are retired
 - `src/cli/build.rs` — emit manifest.json
 
 **Test**: Build with `allow = ["IO.stdout"]` → verify WASM binary has no `path_open` import.
 
-### Phase 3: Per-Dependency Capability Restriction
+### Phase 3: Proposed per-dependency category restriction
 
 **Goal**: Restrict what capabilities a dependency package is allowed to use.
 
@@ -170,31 +133,27 @@ deny = ["Proc", "FS.write"]  # explicit deny
 - `crates/almide-frontend/src/check/` — cross-module capability propagation
 - Module interface format — include capability requirements
 
-### Phase 4: EffectSet in Ty::Fn (Internal Type System)
+### Phase 4: Original Ty::Fn sketch superseded by category-flow analysis
 
-**Goal**: Track capabilities at the type level for higher-order functions.
+The original plan stored `CapabilitySet` in `Ty::Fn`. Current
+`crates/almide-codegen/src/effect_flow/mod.rs` instead computes sets after type
+checking, tracks them through function values/positions, and stores the result
+in the `EffectMap`, not `Ty::Fn`. Its tracked-position and conservative-pool
+rules define the implemented scope; this does not complete every future phase.
 
-```rust
-// Internal compiler representation (not user-facing syntax)
-Fn { params: Vec<Ty>, ret: Box<Ty>, effects: CapabilitySet }
-```
+Bare fn-typed callback parameters are transparent (ADR-0009/0026): their
+callers inherit the supplied callback's effects. Passing an effectful callback
+to such a parameter is not categorically rejected. An explicit purity boundary
+is different; see `crates/almide-frontend/src/check/pure_attr.rs`.
+The old mandatory-rejection rule is not current language guidance.
 
-- `list.map(f, xs)` where `f` requires `FS.read` → result expression requires `FS.read`
-- Passing an effect fn to a pure HOF parameter → compile error
-- Lambda inference: `(x) => fs.read_text(x)` → inferred capability `FS.read`
+### Phase 5: Proposed MCP Server Stdlib Module
 
-This is the most invasive change (touches Ty enum, unification, inference) but enables precise tracking through HOFs.
-
-**Files to modify**:
-- `crates/almide-types/src/types/mod.rs` — CapabilitySet field on Ty::Fn
-- `crates/almide-frontend/src/check/infer.rs` — effect propagation through HOFs
-- `crates/almide-types/src/types/unify.rs` — CapabilitySet unification
-
-### Phase 5: MCP Server Stdlib Module
+There is no shipped `mcp` stdlib module. The compiler's MCP tooling is a different interface; the examples below are design sketches, not runnable deployment instructions.
 
 **Goal**: `mcp` stdlib module implementing Model Context Protocol (JSON-RPC over stdio). No custom protocol, no language changes.
 
-MCP is the de facto standard for AI agent tool communication (Claude Code, Cursor, Windsurf, GitHub Copilot). An Almide WASM binary that speaks MCP is immediately pluggable into any MCP client.
+MCP is the de facto standard for AI agent tool communication (Claude Code, Cursor, Windsurf, GitHub Copilot). The proposed module would require explicit client/protocol compatibility tests; speaking JSON-RPC alone does not establish compatibility with every MCP client.
 
 ```almide
 import mcp
@@ -228,7 +187,7 @@ effect fn main() -> Unit =
 - `mcp.resource(uri, handler)` — resource exposure (future)
 - All stdlib, no language changes. MCP spec compliance, not a custom protocol.
 
-## AI Agent Container Example
+## Proposed AI Agent Container Example (not a shipped end-to-end recipe)
 
 ```toml
 # almide.toml
@@ -263,7 +222,7 @@ effect fn main() -> Unit =
 ```
 
 ```bash
-# Build: small WASM binary + capability manifest
+# Proposed build/manifest output — not current CLI behavior
 almide build agent.almd --target wasm -o agent.wasm
 # → also outputs agent.manifest.json
 
@@ -278,38 +237,33 @@ almide build agent.almd --target wasm -o agent.wasm
 wasmtime run --dir /workspace agent.wasm
 ```
 
-**What the compiler guarantees:**
-- Agent cannot write files (FS.write not in permissions → compile error)
-- Agent cannot access env vars (Env.read not in permissions → compile error)
-- Agent cannot make HTTP requests (Net.fetch not in permissions → compile error)
-- WASM binary doesn't even contain the WASI imports for those operations
+### Required boundaries before claiming a secure deployment
 
-**What WASI guarantees:**
-- Agent can only read from /workspace (--dir scoping)
-- Agent cannot access any other filesystem path
-
-**What MCP guarantees:**
-- Tool interface is discoverable (tools/list)
-- Input/output schema is typed
-- Any MCP client can use the agent without custom integration
-
-**No other language provides all three layers.** Rust/Go agents can call any syscall. Python/JS MCP servers have no compile-time capability restriction. Deno has runtime permissions but no compile-time proof and no WASM sandboxing.
+- Compiler permission checks cover the analysis implemented for the selected
+  route, not arbitrary external/host code. The proposed manifest-emission and
+  import-pruning steps need their own implementation and evidence.
+- `wasmtime --dir /workspace` is directory preopening, **not a read-only grant**.
+  Read/write rights and all other host capabilities must be configured and
+  verified separately. These sketches do not establish a read-only container.
+- The proposed MCP module would need protocol/schema compatibility tests.
+  A typed Almide handler does not establish compatibility with every client.
+- No uniqueness claim against all other languages follows from this plan.
 
 ## Implementation Priority
 
 | Phase | Impact | Effort | Ship independently? |
 |-------|--------|--------|---------------------|
 | **Phase 1** | Compile-time capability checking | M | ✅ Yes — immediate value |
-| **Phase 2** | WASM import pruning + manifest | S | ✅ Yes — binary-level proof |
-| **Phase 3** | Per-dependency restriction | S | ✅ Yes — supply chain safety |
+| **Phase 2** | WASM import pruning + manifest | S | Potentially — import inventory, not a complete behavior proof |
+| **Phase 3** | Per-dependency restriction | S | Potentially — one supply-chain control, not complete safety |
 | **Phase 4** | Type-level effects (HOF) | L | ✅ Yes — precision |
 | **Phase 5** | Agent stdlib module | S | ✅ Yes — stdlib only, no language changes |
 
-Phase 1 alone is enough to claim "compile-time sandboxed AI agent containers."
+Phase 1 supplies a static permission check, not a sufficient basis for calling an arbitrary agent deployment sandboxed.
 
 ## What We Don't Do
 
 - Algebraic effect handlers — too complex, not needed for capability checking
-- User-defined effect categories — 13 built-in categories cover stdlib
+- User-defined effect categories — current registry has 14 built-in leaves
 - Effect syntax in function signatures — capabilities declared in almide.toml, not code
-- Runtime capability requests — everything is compile-time
+- Dynamic capability requests are not part of this proposal; host grants and runtime enforcement still matter

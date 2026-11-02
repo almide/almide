@@ -14,6 +14,8 @@
 //! - `init`, every construction site the emitter fills itself — the
 //!   allocation and the slot stores that initialize it (witness_init.rs,
 //!   #4013);
+//! - `fields`, every record / tuple / variant construction site and field
+//!   access, held to the kind's layout (witness_fields.rs, #4279);
 //! - `names`, over the stock-WASI bytes the build ships: `(module:<space>)`
 //!   per shared index space, `locals:<fn>` per function (cert_project.rs);
 //! - `caps` per source-declared function and one `caps-transitive` call
@@ -52,6 +54,7 @@ pub fn records(
 /// alloc <function index of $alloc in the shipped bytes>
 /// init <one token per init event: position:ordinal | ->
 /// bounds <one token per bounds token: position:ordinal | ->
+/// fields <one token per fields event: position:ordinal | ->
 /// judges <one token per copy-on-write judge call: position:ordinal | ->
 /// holds <one token per list `for` loop's +1 on its subject (#4280)>
 /// ```
@@ -81,10 +84,12 @@ fn records_inner(
     let modes = super::take_modes();
     let bounds = super::take_bounds();
     let init = super::take_init();
+    let fields = super::take_fields();
+    let fields_anchors = super::fields::take_anchors();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
     let hold_anchors = super::bounds::take_holds();
-    let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids) = super::rc::take(pass);
+    let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -106,6 +111,11 @@ fn records_inner(
     if let Some((_, w)) = modes.into_iter().find(|(p, _)| *p == pass) {
         records.push(Record { property: "call-modes", function: "(program)".into(), bytes: w });
     }
+    // #4278 B1: each shipped runtime helper's own certificate, named by its
+    // emitted function index (the anchor file's `rchelpers` line places it).
+    for (f, record, _) in &rc_helpers {
+        records.push(Record { property: "rc-sig", function: format!("${f}"), bytes: record.clone() });
+    }
     // A pass with no index access records no stretch; its witness is the
     // empty program, which the checker accepts vacuously.
     let pick = |v: Vec<(usize, String)>| v.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -114,7 +124,7 @@ fn records_inner(
         Some(fmap) => {
     let locate = Locator::new(emitted, shipped, seals, fmap)?;
     format!(
-        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\njudges {}\nholds {}\n",
+        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
             let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
@@ -125,15 +135,18 @@ fn records_inner(
         },
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
+        locate.text(&pick(fields_anchors))?,
         locate.text(&pick(judge_anchors))?,
         locate.text(&pick(hold_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines, &rc_window_ids)?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcRecords { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids, helpers: &rc_helpers })?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
     records.push(Record { property: "bounds", function: "(program)".into(), bytes: b });
     let i = init.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
     records.push(Record { property: "init", function: "(program)".into(), bytes: i });
+    let fw = fields.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
+    records.push(Record { property: "fields", function: "(program)".into(), bytes: fw });
     use crate::cert_project as cp;
     // `to_wasi` keeps every defined function's order and moves it by the
     // change in the import count — up for the imports it adds, down for the
@@ -162,17 +175,34 @@ fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::
     frames.iter().filter(|(_, n, _)| names.contains(n)).map(|(k, _, e)| (*k, e.clone())).collect()
 }
 
-/// #4277, measurement-gated (`ALMIDE_RC_ANCHORS=1`, witness_rc.rs): the
+/// #4277 (witness_rc.rs): the
 /// release routines as shipped function indices, and per certified frame its
 /// shipped position and live RC events:
 ///
 /// ```text
 /// rcfns <inc index | -> <release index> ...
 /// rc <position>|<events>;...
+/// rcarms <position>:<from>-<to> ...
+/// rcroutines <position>:<from>-<to> ...
+/// rchelpers <position>:$<emitted index> ...
 /// ```
+///
+/// A signed runtime helper's body (#4278 B1) is an `rc` frame like any
+/// other, and `rchelpers` names, per such body, the bundle's `rc-sig`
+/// record that declares it.
 ///
 /// An `m<local>#<window id>` event (a credit moved into an arm or a routine)
 /// renders as `m<local>@<from>-<to>`: that window's instruction ordinals.
+/// The rc sink's records beside the frames: each taken arm's and compound
+/// routine's instruction window, the window a move event's id names, and the
+/// signed runtime helpers (#4278 B1).
+struct RcRecords<'w> {
+    arms: &'w [(u64, usize, usize)],
+    routines: &'w [(u64, usize, usize)],
+    window_ids: &'w std::collections::HashMap<u64, (u64, usize, usize)>,
+    helpers: &'w [(u32, String, String)],
+}
+
 fn rc_lines(
     locate: &Locator,
     emitted: &[u8],
@@ -180,13 +210,9 @@ fn rc_lines(
     fmap: &[Option<u32>],
     frames: &[(u64, String)],
     releases: &std::collections::BTreeSet<u32>,
-    arms: &[(u64, usize, usize)],
-    routines: &[(u64, usize, usize)],
-    window_ids: &std::collections::HashMap<u64, (u64, usize, usize)>,
+    records: RcRecords<'_>,
 ) -> Result<String, String> {
-    if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
-        return Ok(String::new());
-    }
+    let RcRecords { arms, routines, window_ids, helpers } = records;
     use crate::cert_project as cp;
     let (ei, si) = (
         cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
@@ -195,7 +221,7 @@ fn rc_lines(
     let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
     let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
     let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
-    let rc: Vec<String> = frames
+    let mut rc: Vec<String> = frames
         .iter()
         .filter_map(|(k, ev)| {
             let ev: Vec<String> = ev
@@ -220,6 +246,14 @@ fn rc_lines(
             locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
         })
         .collect();
+    let mut signed: Vec<String> = Vec::new();
+    for (f, _, ev) in helpers {
+        if let Some(j) = ship(*f) {
+            let pos = j - si;
+            rc.push(format!("{pos}|{ev}"));
+            signed.push(format!("{pos}:${f}"));
+        }
+    }
     let windows = |w: &[(u64, usize, usize)]| -> String {
         w.iter()
             .filter_map(|&(k, a, b)| locate.window(k, a, b).map(|(j, x, y)| format!("{j}:{x}-{y}")))
@@ -227,11 +261,12 @@ fn rc_lines(
             .join(" ")
     };
     Ok(format!(
-        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\n",
+        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\nrchelpers {}\n",
         decs.join(" "),
         rc.join(";"),
         windows(arms),
-        windows(routines)
+        windows(routines),
+        signed.join(" ")
     ))
 }
 
@@ -405,7 +440,8 @@ fn one_line(s: &str) -> String {
 /// The bundle text. `artifact` is `(sha256 hex, path)` of the shipped file
 /// the witnesses describe: present, the bundle is version 2 and
 /// almide-verify recomputes the digest from that file and rejects a
-/// mismatch; absent, version 1.
+/// mismatch; absent, version 1. A bundle whose ownership witness carries an
+/// arm share-out `s` (#4278) is version 3 either way.
 pub fn render(
     producer: &str,
     source: &str,
@@ -413,10 +449,17 @@ pub fn render(
     records: &[Record],
     uncertified: &[(String, String)],
 ) -> String {
-    let mut out = match artifact {
-        None => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
-        Some((hex, path)) => format!(
-            "almide-certificate-bundle 2\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
+    // Version 3 (#4278): an ownership witness carries an arm share-out `s`,
+    // which a reader before version 3 must refuse rather than skip.
+    let share_out = records.iter().any(|r| r.property == "ownership" && r.bytes.contains(['s', 'S']));
+    // Version 4 (#4278, B1): a runtime helper's own certificate (`rc-sig`).
+    let helper_sig = records.iter().any(|r| r.property == "rc-sig");
+    let mut out = match (artifact, share_out, helper_sig) {
+        (None, false, false) => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
+        (None, _, sig) => format!("almide-certificate-bundle {}\nproducer {}\nsource {}\n", if sig { 4 } else { 3 }, one_line(producer), one_line(source)),
+        (Some((hex, path)), _, _) => format!(
+            "almide-certificate-bundle {}\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
+            if helper_sig { 4 } else if share_out { 3 } else { 2 },
             one_line(producer),
             one_line(source),
             one_line(path)

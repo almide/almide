@@ -1,0 +1,18 @@
+diff --git a/crates/almide-wasm/src/witness_rc.rs b/crates/almide-wasm/src/witness_rc.rs
+index 856b64860..d5a648ee9 100644
+--- a/crates/almide-wasm/src/witness_rc.rs
++++ b/crates/almide-wasm/src/witness_rc.rs
+@@ -72,6 +72,13 @@ pub(crate) fn event(kind: char, local: Option<u32>) {
+     let Some(serial) = crate::witness::anchor::current() else { return };
+     with(|s| {
+         let window = s.open_windows.last().copied();
++        // RE-INJECTED (#4278 drill): a share-out names the arm window that
++        // closed last (the arm emitted before its own) instead of its own.
++        let window = if kind == 's' {
++            s.window_ids.get(&s.pass).and_then(|m| m.keys().max().copied())
++        } else {
++            window
++        };
+         let moves = matches!(kind, 'm' | 'h');
+         if moves && (window.is_none() || local.is_none()) {
+             return;

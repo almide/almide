@@ -227,7 +227,7 @@ impl UnionFind {
                     // Variables are keyed past any list address.
                     root == r
                         || (seen.insert(usize::MAX - r as usize)
-                            && self.resolve(id).map_or(false, |s| self.occurs_in(root, s, seen)))
+                            && self.resolve(id).is_some_and(|s| self.occurs_in(root, s, seen)))
                 } else { false }
             }
             Ty::Applied(_, args) | Ty::Tuple(args) => {
@@ -470,13 +470,13 @@ fn resolve_in(ty: &Ty, uf: &UnionFind, left: &mut u64, memo: &mut Memo) -> Optio
             is_effect: *is_effect,
         },
         Ty::Named(name, args) if !args.is_empty() => {
-            Ty::Named(name.clone(), args.iter().map(&mut each).collect::<Option<_>>()?)
+            Ty::Named(*name, args.iter().map(&mut each).collect::<Option<_>>()?)
         }
         Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| Some((n.clone(), each(t)?))).collect::<Option<_>>()?,
+            fields: fields.iter().map(|(n, t)| Some((*n, each(t)?))).collect::<Option<_>>()?,
         },
         Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| Some((n.clone(), each(t)?))).collect::<Option<_>>()?,
+            fields: fields.iter().map(|(n, t)| Some((*n, each(t)?))).collect::<Option<_>>()?,
         },
         _ => ty.clone(),
     };

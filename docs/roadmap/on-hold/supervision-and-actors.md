@@ -3,16 +3,22 @@
 
 ## Overview
 
-Layer 3 of Almide's async model. Provides long-lived concurrent processes, typed message passing, and automatic fault recovery — inspired by Erlang/OTP but with compile-time guarantees.
+Unimplemented library proposal for long-lived concurrent processes, typed
+message passing and fault recovery, inspired by Erlang/OTP. The examples below
+are design sketches, not supported Almide APIs or established guarantees.
 
-This layer is designed as a **library/stdlib extension**, not a language-level construct. It builds on Layer 1 (async/await) and Layer 2 (structured concurrency).
+The proposed library boundary is retained, but its original `async fn` / `await`
+prerequisite was not adopted as the current surface. Any revival must be checked
+against [ADR-0024](../../adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md)
+and [ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md), not assume
+that actor semantics are already part of the `fan` contract.
 
 ## Why Library, Not Language
 
 | Concern | Reason |
 |---------|--------|
 | Complexity budget | Adding `process`, `supervisor`, `actor` as keywords bloats the grammar |
-| Multi-target cost | Actor semantics differ vastly between Rust (OS threads/tokio tasks), TS (Workers), WASM (single-threaded) |
+| Multi-target cost | An actor runtime would need an explicit mapping to native and supported Wasm hosts; neither mapping is supplied by this proposal |
 | Usage frequency | Most programs don't need supervision — services and servers do |
 | Almide's mission | LLM accuracy is served by a small language + rich stdlib, not a large language |
 
@@ -160,7 +166,11 @@ Receiver.receive() -> Stream[T]         // async iterator
 Receiver.try_receive() -> Result[T, Empty]
 ```
 
-## Codegen Strategy
+## Original backend sketch (historical, not the current target matrix)
+
+TypeScript output is no longer a compiler target. The TS column below records
+the original alternatives only. Wasm is not inherently threadless: embedded
+host worker support does not itself implement this proposed actor runtime.
 
 | Concept | Rust | TypeScript |
 |---------|------|------------|
@@ -170,7 +180,7 @@ Receiver.try_receive() -> Result[T, Empty]
 
 ### Platform limitations
 
-- **WASM**: No threads. Actors run as cooperative tasks on a single thread. Useful for state encapsulation but no true parallelism.
+- **WASM proposal**: the original sketch used cooperative tasks on a single thread. This is a proposed actor-runtime choice, not a restriction on all current Wasm hosts.
 - **Browser TS**: No `child_process`. Supervisor degrades to error-boundary style recovery. Web Workers for parallelism.
 - **Deno/Node TS**: Full Worker thread support. Supervisor viable.
 
@@ -180,7 +190,7 @@ Receiver.try_receive() -> Result[T, Empty]
 
 - [ ] `Channel.new`, `Sender`, `Receiver` types
 - [ ] Rust codegen → `tokio::sync::mpsc`
-- [ ] TS codegen → async queue with backpressure
+- [ ] Choose a supported Wasm-host mapping; the original TS async-queue target is retired
 - [ ] Tests in `spec/stdlib/channel_test.almd`
 
 ### Phase 2: Actor
@@ -206,8 +216,8 @@ Receiver.try_receive() -> Result[T, Empty]
 
 ## Dependencies
 
-- Layer 1 (`async fn` / `await`) — DONE
-- Layer 2 (structured concurrency) — required for concurrent actor patterns (see Structured Concurrency (removed from the tree — `git log --diff-filter=D -- docs/roadmap/done/structured-concurrency.md`). `concurrent` block syntax is TBD)
+- Reconcile the original `async fn` / `await` sketches with the current effect/fan surface; no shipped actor prerequisite is established by the former “DONE” label
+- Establish compatibility with current structured `fan` semantics (ADRs linked above). The old `concurrent` block sketch is not a current API.
 - Async streams (`Stream[T]` type) — required for `Actor.receive()` and `Channel.receive()`
 
 ## References

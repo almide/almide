@@ -30,11 +30,10 @@ destination holds every value the source can carry; a narrowing destination
 chooses abort, `none`, clamp or wrap by name, never silently.
 
 > **Convert to `Int` before passing to an `Int`-taking function.** A sized value
-> is not implicitly widened, and the checker currently accepts the mismatch
-> where the generated code does not build ([#867]). `int.from(x)` is the idiom
-> that works on both targets.
-
-[#867]: https://github.com/almide/almide/issues/867
+> is not implicitly widened: the checker rejects the mismatched types.
+> Use `int.from(x)` to request the conversion explicitly on both targets;
+> an out-of-range value aborts (use the checked, saturating, or wrapping
+> variant when that is the intended policy).
 
 Literals of a sized type are range-checked at compile time — `let a: UInt8 = 256`
 is an E024 error, not a silent fold.
@@ -163,7 +162,7 @@ uint8.bit_length(x: UInt8) -> Int
 // @since unreleased
 uint8.parse(s: String) -> Result[UInt8, String]
 
-// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+// Digits of x in radix, lowercase, no sign; radix outside 2..36 aborts.
 // @since unreleased
 uint8.to_string_radix(x: UInt8, radix: Int) -> String
 

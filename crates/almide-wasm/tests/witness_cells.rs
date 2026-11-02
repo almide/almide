@@ -83,8 +83,10 @@ fn cell_frames_witness_exactly_and_a_dropped_cell_release_is_refused() {
     // (`am`) — no longer a `store:retain-cell` decline.
     // Both loop frames are pinned as rendered (the per-path renderer,
     // witness_paths.rs, orders the lines), so any drift is reviewed here.
-    assert_eq!(w["stored"], "\nim\nid\namam\nibamd\n\nibd\n\nim\n\nid\nim\nim\n");
-    assert_eq!(w["latest"], "\nim\niamd\nam\n\nibd\n\nim\n\nid\nim\nim\n");
+    // The `for` loop's hold on the list it walks (#4351) is its own line:
+    // taken (`a`) before the loop and released (`d`) after it.
+    assert_eq!(w["stored"], "\nim\nid\namam\nibamd\nad\n\nibd\n\nim\n\nid\nim\nim\n");
+    assert_eq!(w["latest"], "\nim\niamd\nam\nad\n\nibd\n\nim\n\nid\nim\nim\n");
 
     // The cell's line is checked like any block's: a cell the frame never
     // releases, or releases twice, is refused.

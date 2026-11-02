@@ -133,7 +133,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
         (10, ValType::I32),
         (10, ValType::I32),
         (8, ValType::I32),
+        (10, ValType::I32),
     ]);
+    // Op 65's lossy header decode (wasi_p3_http_resp.rs, #4390).
+    let ll = LossyLocals { k: 78, b0: 79, extra: 80, lo: 81, hi: 82, vlen: 83, ok: 84, j: 85, c: 86, chars: 87 };
     // The URL's userinfo (wasi_p3_http_auth.rs).
     let al = AuthLocals { ui_ptr: 60, ui_len: 61, j: 62, b: 63, v: 64, w: 65, dec: 66, dlen: 67, enc: 68, flag: 69 };
     // The port check (wasi_p3_http_err.rs, #4231).
@@ -553,7 +556,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.i32_const(0).local_set(total);
     // op 65: `<status>\n<hlen>\n<header cells>` ahead of the body.
     i.local_get(op).i32_const(65).i32_eq().if_(BlockType::Empty);
-    resp_write_prefix(&mut i, (f_alloc, fns.check), tmp, (buf, cap, total), rl);
+    resp_write_prefix(&mut i, (f_alloc, fns.check), tmp, (buf, cap, total), rl, ll);
     i.end();
     // op 49 (`request_status`): `<status>\n` precedes the body — the host
     // lane's `format!("{code}\n{text}")`. Decimal, no padding: count the

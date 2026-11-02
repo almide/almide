@@ -31,7 +31,9 @@
 //! BOUNDS, per token: a `c` is `i64.ge_u` (the list compare) or `i32.eqz`
 //! (the Bytes room test), then `if` (empty), then `i32.const` — anchored at
 //! the const — and that `if` has no `else` and ends in `unreachable` (the
-//! abort); an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
+//! abort); or (#4281, a string's byte) the surface's own `i32.ge_u` /
+//! `i32.eqz` test, then an `if` with an `else` — anchored at the `if` —
+//! whose `else` holds the access; an `e` (#4280) is `i32.ge_u` then `br_if 1` — anchored at the
 //! `br_if` — straight inside a `loop` whose parent `block` it leaves to (a
 //! loop's exit test, operands.rs `loop_exit`); an `a` is a load (or a load then the `call` that releases what it
 //! loaded); a `w` is a store; a slot's located events lie in one function,
@@ -53,14 +55,24 @@
 //! (#4280), and the representation R (init); the rest of
 //! operands.rs's TRUSTED list.
 
-use wasmparser::{BlockType, Operator as Op};
 
+use wasmparser::Operator as Op;
+
+mod anchors;
+mod bounds;
 mod decode;
+mod fields;
+mod init;
 mod operands;
 pub mod rc;
-pub use rc::{check_rc, RcReport};
-use decode::{branch_target, is_load};
+pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, Anchors, AnchorsHeld, RcLines};
+pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
+pub use rc::{check_rc, RcFns, RcReport};
+use anchors::helper_sigs;
+use decode::branch_target;
 pub use decode::{decode, function_imports, store_width, Body};
+pub use fields::check_fields;
+pub use init::check_init;
 
 /// A located event: a defined function's position and an instruction index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +82,7 @@ pub struct At {
 }
 
 /// An anchor token: located, unlocated (`-`), or broken (anything else).
-fn parse_at(t: &str) -> Result<Option<At>, String> {
+pub(crate) fn parse_at(t: &str) -> Result<Option<At>, String> {
     if t == "-" {
         return Ok(None);
     }
@@ -81,19 +93,6 @@ fn parse_at(t: &str) -> Result<Option<At>, String> {
         (Ok(func), Ok(op)) => Ok(Some(At { func, op })),
         _ => Err(format!("anchor `{t}` is not position:ordinal")),
     }
-}
-
-/// A fill site's anchor row: header bytes `hdr`, element width `w`, the
-/// count local `k`, the counter local `l`, the cursor stride `s`, and the
-/// site (`a`) and fill (`f`) anchors.
-struct Fill {
-    hdr: u64,
-    w: u64,
-    k: u32,
-    l: u32,
-    s: u64,
-    a: At,
-    f: At,
 }
 
 /// What a check saw.
@@ -108,6 +107,16 @@ pub struct Report {
     pub bounds_unlocated: usize,
     /// Located accesses whose guard's operands were held to them.
     pub bounds_operands: usize,
+    /// #4013 / #4279: the fields witness's located construction sites,
+    /// their field stores, field accesses (of which `field_guarded` are
+    /// variant case fields held to their tag test), tag reads, and events
+    /// in bodies that did not ship.
+    pub field_sites: usize,
+    pub field_stores: usize,
+    pub field_accesses: usize,
+    pub field_guarded: usize,
+    pub field_tags: usize,
+    pub field_unlocated: usize,
     /// #4277, when the anchor file carries `rc` lines.
     pub rc: Option<RcReport>,
 }
@@ -176,493 +185,6 @@ impl<'a> Ctx<'_, 'a> {
     fn writes(op: &Op<'_>, l: u32) -> bool {
         matches!(op, Op::LocalSet { local_index } | Op::LocalTee { local_index } if *local_index == l)
     }
-
-    fn fixed_site(
-        &self,
-        hdr: u64,
-        w: u64,
-        n: u64,
-        a: At,
-        stores: &[(u64, Option<At>)],
-    ) -> Result<usize, String> {
-        let b = self.body(a)?;
-        if a.op < 2 {
-            return Err("site: no room for its allocation".into());
-        }
-        let bl = match b.ops[a.op] {
-            Op::LocalSet { local_index } => local_index,
-            ref o => {
-                return Err(format!(
-                    "site: anchored at {o:?}, not the block's local.set"
-                ))
-            }
-        };
-        let size = (n * w) as i64;
-        let alloc = self.alloc;
-        self.expect(
-            b,
-            a.op - 2,
-            &[
-                &|o| matches!(o, Op::I32Const { value } if i64::from(*value) == size),
-                &|o| matches!(o, Op::Call { function_index } if *function_index == alloc),
-            ],
-            "site allocation",
-        )?;
-        let d0 = b.depth[a.op];
-        let mut last = a.op;
-        let mut seen = std::collections::BTreeSet::new();
-        for &(i, at) in stores {
-            let Some(at) = at else {
-                return Err(format!("site: store s{i} unlocated in a located site"));
-            };
-            if at.func != a.func || at.op <= last {
-                return Err(format!(
-                    "site: store s{i} is not after the site and its earlier stores"
-                ));
-            }
-            let (sw, off) = store_width(&b.ops[at.op])
-                .ok_or_else(|| format!("site: s{i} anchored at {:?}, not a store", b.ops[at.op]))?;
-            if u64::from(sw) != w || off != hdr + i * w {
-                return Err(format!(
-                    "site: s{i} stores {sw} bytes at offset {off}, the site says {w} at {}",
-                    hdr + i * w
-                ));
-            }
-            if b.depth[at.op] != d0 {
-                return Err(format!("site: s{i} is not at the site's control depth"));
-            }
-            self.address_is(b, a.op, at.op, bl, &format!("site s{i}"))?;
-            seen.insert(at.op);
-            last = at.op;
-        }
-        self.stays(b, a.op, last, d0, "site")?;
-        // None unrecorded: every store in the window addressed through the
-        // block's local is one of the site's.
-        for k in a.op + 1..last {
-            if store_width(&b.ops[k]).is_some() && !seen.contains(&k) {
-                if let Some(p) = b.addr[k] {
-                    if matches!(b.ops[p], Op::LocalGet { local_index } if local_index == bl) {
-                        return Err(format!(
-                            "site: instruction {k} stores into the block unrecorded"
-                        ));
-                    }
-                }
-            }
-        }
-        Ok(stores.len())
-    }
-
-    /// The store at `s` takes its address from `local.get l`, pushed after
-    /// `from` with `l` unwritten in between.
-    fn address_is(
-        &self,
-        b: &Body<'a>,
-        from: usize,
-        s: usize,
-        l: u32,
-        what: &str,
-    ) -> Result<(), String> {
-        let p = b.addr[s]
-            .ok_or_else(|| format!("{what}: the store's address has no known producer"))?;
-        if p <= from || !matches!(b.ops[p], Op::LocalGet { local_index } if local_index == l) {
-            return Err(format!("{what}: the store's address comes from {:?}, not local.get {l} after the allocation", b.ops[p]));
-        }
-        if let Some(k) = (from + 1..s).find(|&k| Self::writes(&b.ops[k], l)) {
-            return Err(format!(
-                "{what}: instruction {k} overwrites the block's local before the store"
-            ));
-        }
-        Ok(())
-    }
-
-    fn fill_site(&self, site: Fill) -> Result<(), String> {
-        let Fill { hdr, w, k, l, s, a, f } = site;
-        let b = self.body(a)?;
-        self.body(f)?;
-        if f.func != a.func || a.op < 5 {
-            return Err("fill: the fill is not in the site's function".into());
-        }
-        let bl = match b.ops[a.op] {
-            Op::LocalSet { local_index } => local_index,
-            ref o => {
-                return Err(format!(
-                    "fill: anchored at {o:?}, not the block's local.set"
-                ))
-            }
-        };
-        let alloc = self.alloc;
-        let (w_i, h_i, s_i) = (w as i64, hdr as i32, s as i32);
-        self.expect(
-            b,
-            a.op - 5,
-            &[
-                &|o| matches!(o, Op::LocalGet { local_index } if *local_index == k),
-                &|o| matches!(o, Op::I64Const { value } if *value == w_i),
-                &|o| matches!(o, Op::I64Mul),
-                &|o| matches!(o, Op::I32WrapI64),
-                &|o| matches!(o, Op::Call { function_index } if *function_index == alloc),
-            ],
-            "fill allocation",
-        )?;
-        let c = match b.ops.get(a.op + 4) {
-            Some(Op::LocalSet { local_index }) => *local_index,
-            other => return Err(format!("fill: the cursor's local.set is {other:?}")),
-        };
-        if [bl, l, k].contains(&c) || bl == l {
-            return Err(
-                "fill: the cursor, the block and the counter must be distinct locals".into(),
-            );
-        }
-        self.expect(
-            b,
-            a.op + 1,
-            &[
-                &|o| matches!(o, Op::LocalGet { local_index } if *local_index == bl),
-                &|o| matches!(o, Op::I32Const { value } if *value == h_i),
-                &|o| matches!(o, Op::I32Add),
-                &|o| matches!(o, Op::LocalSet { .. }),
-                &|o| matches!(o, Op::Block { blockty: BlockType::Empty }),
-                &|o| matches!(o, Op::Loop { blockty: BlockType::Empty }),
-                &|o| matches!(o, Op::LocalGet { local_index } if *local_index == l),
-                &|o| matches!(o, Op::I64Const { value: 0 }),
-                &|o| matches!(o, Op::I64LeS),
-                &|o| matches!(o, Op::BrIf { relative_depth: 1 }),
-            ],
-            "fill loop head",
-        )?;
-        let body_from = a.op + 11;
-        if f.op < body_from + 11 {
-            return Err("fill: no room for the loop's tail".into());
-        }
-        let tail = f.op - 11;
-        self.expect(
-            b,
-            tail,
-            &[
-                &|o| matches!(o, Op::LocalGet { local_index } if *local_index == c),
-                &|o| matches!(o, Op::I32Const { value } if *value == s_i),
-                &|o| matches!(o, Op::I32Add),
-                &|o| matches!(o, Op::LocalSet { local_index } if *local_index == c),
-                &|o| matches!(o, Op::LocalGet { local_index } if *local_index == l),
-                &|o| matches!(o, Op::I64Const { value: 1 }),
-                &|o| matches!(o, Op::I64Sub),
-                &|o| matches!(o, Op::LocalSet { local_index } if *local_index == l),
-                &|o| matches!(o, Op::Br { relative_depth: 0 }),
-                &|o| matches!(o, Op::End),
-                &|o| matches!(o, Op::End),
-                &|o| matches!(o, Op::LocalGet { local_index } if *local_index == bl),
-            ],
-            "fill loop tail",
-        )?;
-        let stores = Self::fill_body_stores(b, body_from..tail, [bl, c, l, k], w)?;
-        if stores != 1 {
-            return Err(format!(
-                "fill: the loop body holds {stores} stores, not one"
-            ));
-        }
-        Ok(())
-    }
-
-    /// The fill loop's body (`body`): no branch, no write to the block,
-    /// cursor, counter or count local (`locals`, the cursor second), and
-    /// every store `w` bytes wide at offset 0, addressed by the cursor.
-    /// Answers how many stores it holds.
-    fn fill_body_stores(
-        b: &Body,
-        body: std::ops::Range<usize>,
-        locals: [u32; 4],
-        w: u64,
-    ) -> Result<usize, String> {
-        let (body_from, c) = (body.start, locals[1]);
-        let d_body = b.depth[body_from];
-        let mut stores = 0;
-        for j in body {
-            let op = &b.ops[j];
-            if branch_target(op, b.depth[j]).is_some() {
-                return Err(format!("fill: the loop body branches at instruction {j}"));
-            }
-            if locals.iter().any(|&x| Self::writes(op, x)) {
-                return Err(format!(
-                    "fill: the loop body writes the block, cursor or counter at instruction {j}"
-                ));
-            }
-            let Some((sw, off)) = store_width(op) else { continue };
-            stores += 1;
-            if u64::from(sw) != w || off != 0 || b.depth[j] != d_body {
-                return Err(format!("fill: the loop body's store is {op:?}"));
-            }
-            let by_cursor = b.addr[j].is_some_and(|p| {
-                p >= body_from && matches!(b.ops[p], Op::LocalGet { local_index } if local_index == c)
-            });
-            if !by_cursor {
-                return Err("fill: the loop body's store is not addressed by the cursor".into());
-            }
-        }
-        Ok(stores)
-    }
-
-    fn check_guard(&self, at: At) -> Result<(), String> {
-        let b = self.body(at)?;
-        if at.op < 2 {
-            return Err("c: no room for the compare".into());
-        }
-        self.expect(
-            b,
-            at.op - 2,
-            &[
-                &|o| matches!(o, Op::I64GeU | Op::I32Eqz),
-                &|o| {
-                    matches!(
-                        o,
-                        Op::If {
-                            blockty: BlockType::Empty
-                        }
-                    )
-                },
-                &|o| matches!(o, Op::I32Const { .. }),
-            ],
-            "c",
-        )?;
-        // The `if`'s own body: no `else`, and it ends in `unreachable`.
-        let d_in = b.depth[at.op];
-        let end = (at.op..b.ops.len())
-            .find(|&j| b.depth[j] == d_in && matches!(b.ops[j], Op::End | Op::Else))
-            .ok_or("c: the guard's `if` has no end")?;
-        if !matches!(b.ops[end], Op::End) {
-            return Err("c: the guard's `if` has an `else`".into());
-        }
-        if !matches!(b.ops[end - 1], Op::Unreachable) {
-            return Err(format!(
-                "c: the guard's `if` ends in {:?}, not an abort",
-                b.ops[end - 1]
-            ));
-        }
-        Ok(())
-    }
-
-    fn access(&self, at: At, write: bool) -> Result<(), String> {
-        let b = self.body(at)?;
-        let op = &b.ops[at.op];
-        let ok = if write {
-            store_width(op).is_some()
-        } else {
-            is_load(op)
-                || (matches!(op, Op::Call { .. }) && at.op > 0 && is_load(&b.ops[at.op - 1]))
-        };
-        if ok {
-            Ok(())
-        } else {
-            Err(format!(
-                "{}: anchored at {op:?}",
-                if write { "w" } else { "a" }
-            ))
-        }
-    }
-}
-
-fn num(t: &str, tag: char) -> Result<u64, String> {
-    t.strip_prefix(tag)
-        .and_then(|n| n.parse().ok())
-        .ok_or_else(|| format!("witness token `{t}` is not {tag}<n>"))
-}
-
-/// Check the init witness `init` against its anchors `anch` over `bodies`.
-pub fn check_init(
-    bodies: &[Body<'_>],
-    alloc: u32,
-    init: &str,
-    anch: &str,
-    rep: &mut Report,
-) -> Result<(), String> {
-    let ctx = Ctx { bodies, alloc };
-    let (sites, anchors): (Vec<&str>, Vec<&str>) =
-        (init.split(';').collect(), anch.split(';').collect());
-    if init.trim().is_empty() && anch.trim().is_empty() {
-        return Ok(());
-    }
-    if sites.len() != anchors.len() {
-        return Err(format!(
-            "init: {} sites, {} anchor groups",
-            sites.len(),
-            anchors.len()
-        ));
-    }
-    for (n, (site, group)) in sites.iter().zip(&anchors).enumerate() {
-        let t: Vec<&str> = site.split_whitespace().collect();
-        let g: Vec<Option<At>> = group
-            .split_whitespace()
-            .map(parse_at)
-            .collect::<Result<_, _>>()?;
-        let at = |k: usize| g.get(k).copied().flatten();
-        let what = |e: String| format!("init site {n} `{site}`: {e}");
-        if t.len() < 4 {
-            return Err(what("too short".into()));
-        }
-        let (h, w) = (num(t[0], 'h').map_err(what)?, num(t[1], 'w').map_err(what)?);
-        if g.iter().all(Option::is_none) {
-            rep.init_unlocated += 1;
-            continue;
-        }
-        if t[2].starts_with('v') {
-            // `h H w W v K r R f L t S`
-            if t.len() != 6 || g.len() != 2 {
-                return Err(what(
-                    "a fill site is `h w v r f t`, with two anchors".into(),
-                ));
-            }
-            let (k, l, s) = (
-                num(t[2], 'v').map_err(what)?,
-                num(t[4], 'f').map_err(what)?,
-                num(t[5], 't').map_err(what)?,
-            );
-            let (a, f) = (
-                at(0).ok_or_else(|| what("unlocated site".into()))?,
-                at(1).ok_or_else(|| what("unlocated fill".into()))?,
-            );
-            ctx.fill_site(Fill { hdr: h, w, k: k as u32, l: l as u32, s, a, f })
-                .map_err(what)?;
-            rep.fill_sites += 1;
-        } else {
-            let nn = num(t[2], 'n').map_err(what)?;
-            let stores: Vec<u64> = t[4..]
-                .iter()
-                .map(|x| num(x, 's'))
-                .collect::<Result<_, _>>()
-                .map_err(what)?;
-            if g.len() != 1 + stores.len() {
-                return Err(what(format!(
-                    "{} anchors for {} events",
-                    g.len(),
-                    1 + stores.len()
-                )));
-            }
-            let a = at(0).ok_or_else(|| what("unlocated site".into()))?;
-            let paired: Vec<(u64, Option<At>)> = stores
-                .iter()
-                .enumerate()
-                .map(|(k, &i)| (i, at(k + 1)))
-                .collect();
-            rep.init_stores += ctx.fixed_site(h, w, nn, a, &paired).map_err(what)?;
-            rep.init_sites += 1;
-        }
-    }
-    Ok(())
-}
-
-/// Check the bounds witness `bounds` against its anchors `anch`.
-pub fn check_bounds(
-    bodies: &[Body<'_>],
-    bounds: &str,
-    anch: &str,
-    judges: &[At],
-    rep: &mut Report,
-) -> Result<(), String> {
-    check_bounds_held(bodies, bounds, anch, judges, &[], rep)
-}
-
-/// [`check_bounds`] with the located loop HOLDS (#4280): each a `call` that
-/// takes +1 on a list a `for` loop iterates, before the loop.
-pub fn check_bounds_held(
-    bodies: &[Body<'_>],
-    bounds: &str,
-    anch: &str,
-    judges: &[At],
-    holds: &[At],
-    rep: &mut Report,
-) -> Result<(), String> {
-    let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
-    let ctx = Ctx {
-        bodies,
-        alloc: u32::MAX,
-    };
-    if bounds.trim().is_empty() && anch.trim().is_empty() {
-        return Ok(());
-    }
-    let (st, an): (Vec<&str>, Vec<&str>) = (bounds.split(';').collect(), anch.split(';').collect());
-    if st.len() != an.len() {
-        return Err(format!(
-            "bounds: {} stretches, {} anchor groups",
-            st.len(),
-            an.len()
-        ));
-    }
-    for (n, (s, g)) in st.iter().zip(&an).enumerate() {
-        let t: Vec<&str> = s.split_whitespace().collect();
-        let g: Vec<&str> = g.split_whitespace().collect();
-        let what = |e: String| format!("bounds stretch {n}: {e}");
-        if t.len() != g.len() {
-            return Err(what(format!("{} tokens, {} anchors", t.len(), g.len())));
-        }
-        // Per slot, its located events in byte order (a slot's events are
-        // one access's, in one function; slots are independent in the
-        // checker, so their mutual order is not a claim).
-        let mut last: std::collections::HashMap<String, At> = std::collections::HashMap::new();
-        // Per slot, its latest located check.
-        // Per slot, its latest located check: its anchor and its compare.
-        let mut guard: std::collections::HashMap<String, (At, usize)> = std::collections::HashMap::new();
-        for (tok, a) in t.iter().zip(&g) {
-            let kind = tok.chars().next().unwrap_or('?');
-            let at = parse_at(a).map_err(what)?;
-            match (kind, at) {
-                ('s', None) | ('x', None) => continue,
-                ('s' | 'x', Some(_)) => return Err(what(format!("`{tok}` carries an anchor"))),
-                ('c' | 'e' | 'a' | 'w', None) => {
-                    rep.bounds_unlocated += 1;
-                    continue;
-                }
-                ('c' | 'e' | 'a' | 'w', Some(at)) => {
-                    if let Some(&p) = last.get(&tok[1..]) {
-                        if p.func != at.func || at.op <= p.op {
-                            return Err(what(format!("`{tok}` is not after its slot's earlier events in the same function")));
-                        }
-                    }
-                    last.insert(tok[1..].to_string(), at);
-                    match kind {
-                        'c' => {
-                            ctx.check_guard(at)
-                                .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            // The guard's compare: two before the anchor.
-                            guard.insert(tok[1..].to_string(), (at, at.op - 2));
-                            rep.bounds_checks += 1;
-                        }
-                        'e' => {
-                            ctx.body(at).map_err(what)?;
-                            let flow = flows.entry(at.func).or_insert_with(|| {
-                                let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
-                                operands::Flow::new(&bodies[at.func], js)
-                                    .with_holds(holds.iter().filter(|h| h.func == at.func).map(|h| h.op).collect())
-                            });
-                            operands::loop_exit(flow, at.op)
-                                .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            // The exit test's compare: the one before the `br_if`.
-                            guard.insert(tok[1..].to_string(), (at, at.op - 1));
-                            rep.bounds_checks += 1;
-                        }
-                        _ => {
-                            ctx.access(at, kind == 'w')
-                                .map_err(|e| what(format!("`{tok}`: {e}")))?;
-                            rep.bounds_accesses += 1;
-                            let c = guard
-                                .get(&tok[1..])
-                                .copied()
-                                .ok_or_else(|| what(format!("`{tok}` has no located check of its slot")))?;
-                            let flow = flows.entry(at.func).or_insert_with(|| {
-                                let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
-                                operands::Flow::new(&bodies[at.func], js)
-                                    .with_holds(holds.iter().filter(|h| h.func == at.func).map(|h| h.op).collect())
-                            });
-                            let (c, cmp) = c;
-                            operands::covers(flow, cmp, at.op)
-                                .map_err(|e| what(format!("`{tok}` against its check at {}:{}: {e}", c.func, c.op)))?;
-                            rep.bounds_operands += 1;
-                        }
-                    }
-                }
-                _ => return Err(what(format!("unknown token `{tok}`"))),
-            }
-        }
-    }
-    Ok(())
 }
 
 /// The witness of `property` about `(program)` in a certificate bundle.
@@ -699,126 +221,26 @@ pub fn bundle_witness(bundle: &[u8], property: &str) -> Result<String, String> {
     Ok(String::new())
 }
 
-/// #4277's lines: the rc_inc routine, the release routines, and per
-/// certified frame its position and live RC events.
-pub type RcLines = (
-    Option<u32>,
-    std::collections::HashSet<u32>,
-    Vec<(usize, String)>,
-    Vec<(usize, usize, usize)>,
-    Vec<(usize, usize, usize)>,
-);
-
-/// The anchor file: `(alloc, init anchors, bounds anchors, judge sites, rc
-/// lines)`. The `judges` line is optional (a file without it locates no
-/// judge, and an access a judge sits in front of is then refused); so are
-/// the `rcfns` / `rc` pair (measurement-gated, #4277).
-pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option<RcLines>), String> {
-    parse_anchors_held(text).map(|(a, i, b, j, _, r)| (a, i, b, j, r))
-}
-
-/// [`parse_anchors`] and the optional `holds` line after `judges` (#4280).
-pub fn parse_anchors_held(text: &str) -> Result<(u32, String, String, Vec<At>, Vec<At>, Option<RcLines>), String> {
-    let mut lines = text.lines();
-    if lines.next() != Some("almide-anchors 1") {
-        return Err("anchors: not an `almide-anchors 1` file".into());
-    }
-    let mut field = |key: &str| -> Result<String, String> {
-        let l = lines
-            .next()
-            .ok_or_else(|| format!("anchors: no `{key}` line"))?;
-        if l == key {
-            return Ok(String::new());
-        }
-        l.strip_prefix(&format!("{key} "))
-            .map(str::to_string)
-            .ok_or_else(|| format!("anchors: expected `{key}`, read `{l}`"))
-    };
-    // `-`: the module has no `$alloc` (nothing allocates), and no site can
-    // name one.
-    let alloc = match field("alloc")?.as_str() {
-        "-" => u32::MAX,
-        x => x
-            .parse()
-            .map_err(|_| "anchors: bad alloc index".to_string())?,
-    };
-    let (init, bounds) = (field("init")?, field("bounds")?);
-    let mut rest: Vec<&str> = lines.collect();
-    let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
-    let rc_lines = match rc_at {
-        None => None,
-        Some(i) => {
-            let fns: Vec<&str> = rest[i].split_whitespace().skip(1).collect();
-            let inc = fns.first().and_then(|t| t.parse().ok());
-            let decs = fns.iter().skip(1).filter_map(|t| t.parse().ok()).collect();
-            let frames = rest
-                .get(i + 1)
-                .and_then(|l| l.strip_prefix("rc"))
-                .unwrap_or("")
-                .split(';')
-                .filter_map(|g| {
-                    let (p, e) = g.trim().split_once('|')?;
-                    Some((p.parse().ok()?, e.to_string()))
-                })
-                .collect();
-            let windows = |line: Option<&&str>, key: &str| -> Vec<(usize, usize, usize)> {
-                line.and_then(|l| l.strip_prefix(key))
-                    .unwrap_or("")
-                    .split_whitespace()
-                    .filter_map(|t| {
-                        let (p, r) = t.split_once(':')?;
-                        let (a, b) = r.split_once('-')?;
-                        Some((p.parse().ok()?, a.parse().ok()?, b.parse().ok()?))
-                    })
-                    .collect()
-            };
-            let arms = windows(rest.get(i + 2), "rcarms");
-            let routines = windows(rest.get(i + 3), "rcroutines");
-            rest.truncate(i);
-            Some((inc, decs, frames, arms, routines))
-        }
-    };
-    let mut lines = rest.into_iter();
-    let judges = match lines.next() {
-        None => Vec::new(),
-        Some(l) => {
-            let rest = if l == "judges" {
-                ""
-            } else {
-                l.strip_prefix("judges ")
-                    .ok_or_else(|| format!("anchors: expected `judges`, read `{l}`"))?
-            };
-            let mut v = Vec::new();
-            for t in rest.split_whitespace() {
-                if let Some(at) = parse_at(t)? {
-                    v.push(at);
-                }
+/// Every record of `property` in the bundle, as `(function, bytes)`.
+pub fn bundle_records(bundle: &[u8], property: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let mut i = bundle.iter().position(|&b| b == b'\n').ok_or("bundle: no header")? + 1;
+    while i < bundle.len() {
+        let j = i + bundle[i..].iter().position(|&b| b == b'\n').ok_or("bundle: unterminated line")?;
+        let line = std::str::from_utf8(&bundle[i..j]).map_err(|e| e.to_string())?;
+        i = j + 1;
+        if let Some(rest) = line.strip_prefix("witness ") {
+            let mut parts = rest.splitn(3, ' ');
+            let (p, n, f) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            let n: usize = n.parse().map_err(|_| format!("bundle: bad length in `{line}`"))?;
+            let w = bundle.get(i..i + n).ok_or("bundle: witness past the end")?;
+            if p == property {
+                out.push((f.to_string(), String::from_utf8(w.to_vec()).map_err(|e| e.to_string())?));
             }
-            v
+            i += n + 1;
         }
-    };
-    let holds = match lines.next() {
-        None => Vec::new(),
-        Some(l) => {
-            let rest = if l == "holds" {
-                ""
-            } else {
-                l.strip_prefix("holds ")
-                    .ok_or_else(|| format!("anchors: expected `holds`, read `{l}`"))?
-            };
-            let mut v = Vec::new();
-            for t in rest.split_whitespace() {
-                if let Some(at) = parse_at(t)? {
-                    v.push(at);
-                }
-            }
-            v
-        }
-    };
-    if let Some(l) = lines.next() {
-        return Err(format!("anchors: unexpected line `{l}`"));
     }
-    Ok((alloc, init, bounds, judges, holds, rc_lines))
+    Ok(out)
 }
 
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
@@ -834,10 +256,12 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds_held(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &holds, &mut rep)?;
-    if let Some((inc, decs, frames, arms, routines)) = rc_lines {
+    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds }, alloc, &mut rep)?;
+    check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
+    if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, function_imports(wasm), inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
+        let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;
+        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs, sigs: &sigs, judges: &judges }, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

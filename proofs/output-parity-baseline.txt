@@ -116,6 +116,7 @@ spec/programs/safe_parse_sum.almd
 spec/programs/sum_of_squares.almd
 spec/programs/validate_age.almd
 spec/stdlib/heredoc_test.almd
+spec/stdlib/list_mutable_test.almd
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -377,6 +378,7 @@ spec/wasm_cross/fold_family_source_before_init.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/fold_init_rebinds_source.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/for_in_list_value_semantics.almd
 spec/wasm_cross/fs_error_path_escape.almd
 spec/wasm_cross/fs_fallible_walker_call_head.almd
 spec/wasm_cross/fs_relative_path.almd
@@ -661,6 +663,7 @@ spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd
 spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
+spec/wasm_cross/matrix_mul_no_fma.almd
 spec/wasm_cross/matrix_neg_signed_zero.almd
 spec/wasm_cross/matrix_pow_libm.almd
 spec/wasm_cross/matrix_product_family.almd
@@ -810,6 +813,7 @@ spec/wasm_cross/range_first_class.almd
 spec/wasm_cross/range_head_fold_edges.almd
 spec/wasm_cross/range_head_fold_huge.almd
 spec/wasm_cross/range_inclusive_end_at_max.almd
+spec/wasm_cross/range_inclusive_runtime_max.almd
 spec/wasm_cross/range_materialize_oom.almd
 spec/wasm_cross/rc_alloc_stress.almd
 spec/wasm_cross/rc_reclaim_churn.almd
@@ -849,6 +853,7 @@ spec/wasm_cross/regex_engine.almd
 spec/wasm_cross/regex_fuzz_batch.almd
 spec/wasm_cross/regex_invalid_pattern.almd
 spec/wasm_cross/regex_linear_time.almd
+spec/wasm_cross/regex_many_patterns.almd
 spec/wasm_cross/regex_repetition_depth.almd
 spec/wasm_cross/regex_size_cap.almd
 spec/wasm_cross/repeat_size_ceiling.almd
@@ -1111,3 +1116,4 @@ spec/wasm_host_js/effect_exports.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd
+spec/wasm_host_js/region_export_push.almd

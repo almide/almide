@@ -1,6 +1,6 @@
 # Native Performance Measurement
 
-Measure native binary size and runtime performance, then update the README.
+Measure the sample native CLI; publish only with compiler/build, host, and date provenance.
 
 ## Steps
 
@@ -9,9 +9,9 @@ Measure native binary size and runtime performance, then update the README.
    bash research/benchmark/perf/native/measure.sh
    ```
 
-2. Compare with current README values in the "Native Performance" section (~line 195)
+2. Compare with the matching dated measurement, if any, in `docs/benchmarks/README.md` or its linked ledgers; the old front-README section is gone.
 
-3. Update the table if any values changed
+3. Update the appropriate source measurement and regenerate derived blocks where applicable; do not edit generated tables by hand.
 
 4. Commit: `Update native performance stats: {brief summary}`
 
@@ -19,7 +19,7 @@ Measure native binary size and runtime performance, then update the README.
 
 - **Binary size**: Stripped native binary of a real CLI app (minigit, ~350 LOC)
 - **Runtime**: 100 init+add+commit operations against the CLI binary
-- **Dependencies**: Always 0 (Almide compiles to a single static binary)
+- **Dependencies**: The script prints a literal zero, not a linkage measurement. Inspect the produced artifact before making static-linkage or dependency claims.
 
 ## Source
 

@@ -491,7 +491,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         type_name = ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", type_name.as_str()), ("fields", fields_str.as_str())])
             .unwrap_or_else(|| format!("{}::{}", enum_name, type_name));
     }
-    let fallback = format!("{{ {} }}", &fields_str);
+    let fallback = format!("{{ {} }}", fields_str);
     ctx.templates.render_with("record_literal", None, &[], &[("type_name", type_name.as_str()), ("fields", fields_str.as_str())])
         .unwrap_or(fallback)
 }

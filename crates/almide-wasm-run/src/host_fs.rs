@@ -656,7 +656,8 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     if op == 42 {
         return (pack(0, 0), Vec::new());
     }
-    if matches!(op, 2 | 3 | 7..=9 | 15 | 16) {
+    // 66 is `fs.append_bytes`: op 16's append under its own name (#4382).
+    if matches!(op, 2 | 3 | 7..=9 | 15 | 16 | 66) {
         return fs_dispatch_w(op, a, b);
     }
     // 51/52 are `fold_lines` / `for_each_line`: the SAME framed-lines body as

@@ -1,6 +1,6 @@
 # Result, Option, Effect — 完全仕様
 
-> Last updated: 2026-09-27
+> Last updated: 2026-10-31
 > 2026-08-05 の 287 セル実測 matrix(#1122)に基づき全面改訂。設計判断の出典は
 > ADR-0002〜0009。本文はすべて「動くコード」の記述であり、各節に検証テストを明記する。
 > 2026-08-13: §8.0(二層モデル)と §9(非目標)を ADR-0012 D1/D4 から本文へ昇格。
@@ -53,9 +53,10 @@ process.exit(n) : Never   // 戻らない関数の戻り値型
 ```
 Never はどの型にも代入可能。guard else, if then, match arm で使える。
 
-### 可謬マーカー `-> T!`(ADR-0002 Phase 1 + 1b)
+### 可謬マーカー `-> T!` / `-> T!E`
 
-fn 宣言の戻り位置に限り、`T!` は `Result[T, String]` の糖衣。可謬性(fallibility)と
+fn 宣言と関数型の戻り位置では、`T!` は `Result[T, String]`、
+`T!E` は `Result[T, E]` の糖衣。可謬性(fallibility)と
 効果(effect)は直交する 2 軸であり、4 象限すべてが綴れる:
 
 ```almide
@@ -72,8 +73,10 @@ test "the four quadrants" {
 }
 ```
 
-E は常に String(ADR-0002 D2)。カスタムエラー型は明示の `Result[T, MyError]` で綴る。
-`!` マーカーは fn 宣言の戻り位置**のみ**で合法 — let 注釈などでは parse エラー。
+bare `T!` の既定エラー型は `String`。カスタムエラー型は `T!MyError`
+または明示の `Result[T, MyError]` で綴る (ADR-0012 D2)。関数型の
+`(A) -> B!` / `(A) -> B!E` も合法 (ADR-0009 D1)。通常の値型注釈
+`let x: Int! = ...` のように、関数の戻り位置以外では使えない。
 `!` 演算子は本体内で伝搬し、**値 tail は ok(...) に自動 lift** される
 (Phase 1b — effect fn の lift と同じ人間工学。Result 型の exit は不変):
 
@@ -87,7 +90,8 @@ fn checked(s: String) -> Int! = {
 }
 ```
 
-テスト: `spec/lang/fallible_marker_test.almd`
+テスト: `spec/lang/fallible_marker_test.almd`、
+`spec/lang/fallible_typed_error_test.almd`、`spec/lang/fallible_lambda_test.almd`
 
 ## 2. 演算子
 
@@ -230,7 +234,7 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 ### lambda の可謬性(ADR-0006 D1 / ADR-0009 — #1108 Phase 2b)
 
 lambda は「ミニ可謬 fn」— 本体の `!` は **lambda 自身の失敗チャネル**
-(`Result[T, String]`)に落ち、クロージャ境界は越えない(#489 の不変条件は保存)。
+(`Result[T, E]`。E の決定規則は下記 L3)に落ち、クロージャ境界は越えない(#489 の不変条件は保存)。
 使用駆動で可謬性が推論される(L1〜L9、2026-08-07 批准):
 
 ```almide
@@ -271,7 +275,7 @@ test "fallible lambdas (in fn bodies — test bodies keep unwrap semantics, L9)"
 
 | Almide | Rust codegen | 備考 |
 |---|---|---|
-| `fn main() = ...` | `fn main()` | 純粋。副作用なし |
+| `fn main() = ...` | `fn main()` | `fn` の効果規則。出力・assert・panic の builtin 例外は ADR-0022 / [effect-system.md](effect-system.md) §2.1 を参照 |
 | `effect fn main() -> Unit = ...` | `fn main() -> Result<(), String>` | 自動リフト |
 
 - **main は引数を取らない。** コマンドライン引数は `env.args()`(プログラム名を除く argv)
@@ -303,8 +307,10 @@ test "name" {
 test 内で effect fn を呼ぶと結果は Result のまま返る — `!` で unwrap するか、
 `??` / match で処理する(「test では ! 不要」という旧記述は誤り)。
 
-`assert_eq` の失敗出力は現状 Rust debug 形(`left: Ok(1) / right: Err("x")`)。
-almide repr 形(ok/err)への統一は未実施(既知の表示形差)。
+`assert_eq` / `assert_ne` の失敗出力は Almide の repr に基づく。
+operand は ALS-R2 の表示形を C-418 の規則でエスケープし、native / wasm の
+実行・テスト経路で共通に表示する (Rust `Debug` ではない)。
+回帰テスト: `tests/assert_operand_escape_lanes_test.rs`。
 
 テスト: `spec/lang/expr_test.almd` ほか全 `*_test.almd`
 
@@ -320,7 +326,7 @@ fn positive(n: Int) -> Int! = {
 }
 
 effect fn main() -> Unit = {
-  let n = list.len(env.args())
+  let n = list.len(env.args()!)
   guard n > 0 else process.exit(3)             // else: Never(process.exit)
   println(int.to_string(n))
 }
@@ -380,11 +386,11 @@ Result / Option を含む match の腕の欠落(err / none 腕なし)は**ハー
   分岐条件は E035 警告。分岐が要るなら variant E を定義して構造で match する
 - `map_err` のラムダがエラー引数を使わないと E036 警告(意図的破棄は `(_) =>`)
 - 文脈前置の正準形: `r |> result.map_err((e) => "context: ${e}")`(区切り `": "`)
-- 全エラー収集は `result.partition`(`result.collect` / `collect_map` は E039 で
-  非推奨 — 削除予定)
+- 全エラー収集は `result.partition`。`result.collect` / `collect_map` は削除済み
+  (ADR-0007)。
 - fs の「不在」は値: `fs.read_text_if_exists(p)! ?? default`(C-215)
 
-テスト: `tests/diagnostics/e035-*/`, `e036-*/`, `e039-*/`, `spec/stdlib/fs_if_exists_test.almd`
+テスト: `tests/diagnostics/e035-*/`, `e036-*/`, `spec/stdlib/fs_if_exists_test.almd`
 
 ## 9. 非目標 — 検討して採らなかったもの(ADR-0012 D4)
 
@@ -411,5 +417,4 @@ References)。ここに列挙するのは、同じ提案が周期的に戻って
    そこを消すと降格が見えなくなる。
 
 テスト: `spec/lang/fallible_marker_test.almd`, `tests/diagnostics/e035-*/`,
-`e036-*/`(`T!E` の綴り自体の仕様は #1193 が入るまで書かない — 動くコードが
-無いものは書かない、`docs/specs/CLAUDE.md`)
+`e036-*/`、`spec/lang/fallible_typed_error_test.almd` (`T!E` の実装済み仕様は §1)。

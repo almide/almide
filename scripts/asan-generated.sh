@@ -54,7 +54,7 @@ trap 'rm -rf "$WORK"' EXIT
 # the runtime is compiled — and instrumented — with the program), then run it.
 # The explicit --target keeps build scripts and proc macros uninstrumented,
 # as the sanitizer requires.
-one() {
+one_inner() {
   local f="$1" d
   d="$WORK/$(printf '%s' "$f" | tr '/.' '__')"
   mkdir -p "$d"
@@ -80,7 +80,15 @@ one() {
   fi
   rm -rf "$d/target"
 }
-export -f one
+# GEN_TIMES=<file>: each program's verdict line, prefixed with its wall seconds
+# (the slice job's budget is computed from these, scripts/miri-asan-slice.sh).
+one() {
+  local t0=$SECONDS v
+  v="$(one_inner "$1")"
+  echo "$v"
+  [ -z "${GEN_TIMES:-}" ] || echo "$((SECONDS - t0)) $v" >> "$GEN_TIMES"
+}
+export -f one one_inner
 export WORK ALMIDE_BIN ASAN_TOOLCHAIN HOST
 
 # The control.

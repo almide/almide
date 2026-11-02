@@ -1,5 +1,20 @@
-<!-- description: v1 リリース路線 — opt-in 検証 codegen(v0 fallback) を beachhead に、カバレッジ→証明書 emit→flight-grade へ段階リリースする計画。4案のメリデメと選定理由、各段の受入基準。 -->
+<!-- description: Historical July 2026 release-path decision with correction of zero-risk and qualification overclaims -->
 # v1 リリース路線 — 段階リリース計画
+
+## Correction to the historical release rationale
+
+This is the July 5, 2026 release-path decision, not current flag or release
+guidance. Its categorical “no miscompile risk” / “always correct bytes”
+premises were too strong: ownership/capability certificates establish modeled
+properties, and byte parity establishes observations on tested programs.
+Neither proves full lowering semantics. Byte binding alone also does not
+confer flight qualification; that requires a scoped assurance case and the
+remaining trust assumptions.
+
+Read [proven versus trusted](../../contracts/proven-vs-trusted.md) for the
+boundary and [the Wasm overview](../../wasm/README.md) for today's route.
+The options and original decision rationale below are retained as history,
+not repeated as a zero-risk guarantee.
 
 > 2026-07-05 策定。「v1 をはやくリリースしたい」に対し、**正しさ(honest-wall + PCC)は
 > 既に保証済み**という事実を土台に、最速で「実体のある v1」を出す路線を選定した記録。
@@ -40,7 +55,7 @@
 - **メリット**: 完成域では「v1 が実プログラムを単独コンパイル」＝強く正直なマイルストーン／
   Gap 3(実プログラム被覆)を直接前進／① の器の上で自動的に「v1 発動域の拡大」として価値化。
 - **デメリット**: 遅い／終端が見えにくい（1関数でも壁だと whole-program は v0 fallback）／
-  残件に **capturing closure = 証明モデルの根本制約**（[closure-architecture-v2](closure-architecture-v2.md)、
+  残件に **capturing closure = 証明モデルの根本制約**（[closure-architecture-v2](../done/closure-architecture-v2.md)、
   証明拡張＝研究）が混ざる／これ単体では何もリリースされない（①③で製品化が要る）。
 - **受入基準の例**: 対象 repo の全 fn が v1 で lower（壁ゼロ）→ `--verified` で v0 fallback が
   一度も発火しない。現状の残壁: Set（`Option/Result[Set]` は self-host 化可、`some(set)` は

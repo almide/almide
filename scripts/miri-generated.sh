@@ -42,7 +42,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 # One program: build its self-contained crate (no prebuilt runtime rlib, so
 # the runtime's source is in the crate Miri interprets), then run it.
-one() {
+one_inner() {
   local f="$1" d
   d="$WORK/$(printf '%s' "$f" | tr '/.' '__')"
   mkdir -p "$d"
@@ -67,7 +67,15 @@ one() {
   fi
   rm -rf "$d/target"
 }
-export -f one
+# GEN_TIMES=<file>: each program's verdict line, prefixed with its wall seconds
+# (the slice job's budget is computed from these, scripts/miri-asan-slice.sh).
+one() {
+  local t0=$SECONDS v
+  v="$(one_inner "$1")"
+  echo "$v"
+  [ -z "${GEN_TIMES:-}" ] || echo "$((SECONDS - t0)) $v" >> "$GEN_TIMES"
+}
+export -f one one_inner
 export WORK ALMIDE_BIN MIRI_TOOLCHAIN
 
 # The control.

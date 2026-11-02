@@ -13,11 +13,10 @@ applicant and an authority).
   its git tag; its evidence state is the seal (`proofs/releases/<tag>.toml`),
   re-measured against the tag by CI forever.
 - Compiler-below-the-tool: the Ferrocene lane
-  (`scripts/check-ferrocene-lane.sh`, weekly workflow) proves generated
-  Rust builds under the qualified toolchain's upstream pin (Ferrocene
-  26.05.0 == rustc 1.95.0); the responsibility split — Almide = the code
-  generator, Ferrocene = the qualified compiler — is stated in the lane's
-  headers (#573, closed on the full-corpus green run).
+  (`scripts/check-ferrocene-lane.sh`, weekly workflow) tests generated
+  Rust with stock rustc 1.95.0, the recorded upstream compatibility pin.
+  The lane explicitly awaits access to a qualified Ferrocene binary;
+  matching its upstream version does not confer qualification on stock rustc.
 - Release integrity: every asset Sigstore-attested
   (`gh attestation verify <asset> -R almide/almide`), checksummed, and the
   dependency tree audited against RustSec weekly (`SECURITY.md`, #1534).
@@ -31,8 +30,8 @@ is outside the trust base; `make verify-trust && make receipt` locally).
 
 ## 3. Tool verification data
 
-- The gate ledger: `proofs/gate-verification.toml` — 66 verdict-bearing
-  gates, EVERY one classified by how it can fail (KERNEL_PROVEN /
+- The gate ledger: `proofs/gate-verification.toml` — verdict-bearing
+  gates, each classified by how it can fail (KERNEL_PROVEN /
   MUTATION_TESTED / NEGATIVE_TESTED / EXERCISED; UNVERIFIED ceiling 0,
   shrink-only). A gate without demonstrated failure evidence cannot ship.
 - Structural coverage: `proofs/coverage.sh` ratchet + per-file safety
@@ -47,11 +46,11 @@ is outside the trust base; `make verify-trust && make receipt` locally).
 
 ## 4. Qualification test cases, derived from the ALS
 
-The ALS (almide/als) is the normative spec — 128 sections, every one
-carrying validation rows; the almide-side derivation:
+The adopted ALS sections and their contract links are tracked in the
+repository's conformance ledgers; the Almide-side derivation:
 
-- The contract ledger: `docs/contracts/contracts.toml` — 320 cross-target
-  contracts, each citing its ALS section (`spec = "ALS-…"`), every
+- The contract ledger: `docs/contracts/contracts.toml` — cross-target
+  contracts (current totals in the ledger; dated aggregate in STAGE-STATUS), each citing its ALS section (`spec = "ALS-…"`), every
   normative section cited by ≥1 contract, every fixture bidirectionally
   linked (`scripts/check-contracts.sh`).
 - The executable corpora: `spec/` (the run/check/ast parity manifests —
@@ -71,7 +70,7 @@ explicitly excluded from credit.
 ## 6. Known limitations
 
 - Per-release: the seal's `known_problems` field (mandatory).
-- Standing: the trusted rows of `docs/contracts/proven-vs-trusted.md`
+- Standing: the trusted rows of `docs/contracts/README.md`
   (the IR→MIR row above all), the design walls (a wall is a refusal, not
   an error — TOR-3; the target-availability doctrine #1423), and the
   contract ledger's flagged-for-revision list (currently zero; the count
@@ -98,12 +97,12 @@ attested and attached to the release by the trust-spine tag run.
 |---|---|---|
 | WCET-analyzable codegen for the Critical profile | #569 | story + gated reference kernel (`docs/project/WCET-STORY.md`); target calibration external |
 | Line-level source traceability in generated Rust | #572 | closed — `--trace-map` + review guide |
-| Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | closed — the StructuralRuntime arc (45 theorems, `StructuralRuntime/Alloc/Decode/Run.v`): emitted bytes decode to proven trees, trees realize the model transitions, and whole runs preserve `RINV` on the concrete memory; the F-class is a violated lemma of the emitted code. Grow retry / unclassed bump stay at the declared abstraction boundary |
+| Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | closed — the StructuralRuntime arc (`StructuralRuntime/Alloc/Decode/Run.v`): emitted bytes decode to proven trees, trees realize the model transitions, and whole runs preserve `RINV` on the concrete memory; the F-class is a violated lemma of the emitted code. Grow retry / unclassed bump stay at the declared abstraction boundary |
 | Qualified/minimal wasm execution environment | #865 | not started |
 | Critical-profile subset (`almide check --profile critical`) | #567 | closed — bounded profile on every fn, deny-all capabilities with `--allow` grants, subset property CI-enforced |
 | Static memory mode for the Critical profile | #568 | closed — the reference app is critical-clean with allocation-free kernel emission and completes under a fixed enforced `--heap-cap` budget; host requirements in `docs/project/PARTITIONED-RUNTIME.md` |
 | Flight reference app through `make verify` | #776 | closed — G-F4 chain evidenced end to end; the receipt derives all six stages (`proofs/receipt.sh`) |
-| First dossier-carrying release (fires #571/#1534 closure) | #571, #1534 | machinery live; next tag |
+| First dossier-carrying release (fires #571/#1534 closure) | #571, #1534 | assembly/attestation machinery live; verify the dossier attached to the particular release |
 
 A qualification engineer reading this package starts at §2 (what the
 operator must do), verifies §3's ledgers re-derive (`make verify-trust`),

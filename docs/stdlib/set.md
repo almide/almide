@@ -222,7 +222,7 @@ true
 false
 ```
 
-### `set.filter(s: Set[A], f: Fn[A] -> Bool) -> Set[A]`
+### `set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]`
 
 Keep elements that satisfy a predicate.
 
@@ -236,7 +236,7 @@ fn main() -> Unit = {
 set.from_list([3, 4])
 ```
 
-### `set.map(s: Set[A], f: Fn[A] -> B) -> Set[B]`
+### `set.map(s: Set[A], f: (A) -> B) -> Set[B]`
 
 Apply a function to each element, returning a new set.
 
@@ -250,7 +250,7 @@ fn main() -> Unit = {
 set.from_list([2, 4, 6])
 ```
 
-### `set.fold(s: Set[A], init: B, f: Fn[B, A] -> B) -> B`
+### `set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B`
 
 Reduce a set with an initial accumulator.
 
@@ -264,7 +264,7 @@ fn main() -> Unit = {
 6
 ```
 
-### `set.any(s: Set[A], f: Fn[A] -> Bool) -> Bool`
+### `set.any(s: Set[A], f: (A) -> Bool) -> Bool`
 
 Check if any element satisfies a predicate.
 
@@ -280,7 +280,7 @@ true
 false
 ```
 
-### `set.all(s: Set[A], f: Fn[A] -> Bool) -> Bool`
+### `set.all(s: Set[A], f: (A) -> Bool) -> Bool`
 
 Check if all elements satisfy a predicate.
 

@@ -9,10 +9,12 @@
 
 Language adoption is decided by "what can be built with it." Go won with Docker and Kubernetes. Rust claimed the "fast CLI tools" position with ripgrep and fd.
 
-Almide has three weapons:
-1. **WASM binary size** — Hello World 4.5KB (self-contained)
-2. **4-target output** — Rust / TypeScript / JavaScript / WASM from the same source
-3. **LLM modification survival rate** — The language LLMs can read and write most accurately
+The campaign would test three hypotheses, not assume an existing advantage:
+1. **Wasm binary size** — the original 4.5KB Hello World observation lacks a
+   recorded version/build recipe here; measure current artifacts before reusing it.
+2. **Native and Wasm output** — TS/JS code-generation targets are retired.
+3. **LLM modification survival rate** — evaluate scoped tasks/models through
+   Almide Dojo; do not infer a universal language ranking.
 
 The Rumbling is a plan to rewrite license-compatible OSS in Almide to demonstrate these weapons.
 
@@ -40,24 +42,27 @@ Write Almide's own toolchain in Almide. The entry point for self-hosting.
 
 ---
 
-## Block 1: WASM Showcase (Proving 4.5KB)
+## Block 1: Wasm Showcase (measure size for the actual workload)
 
 Demonstrate the extraordinarily small WASM binary sizes. All with browser-running demos.
 
 | Tool | Existing | Almide's advantage |
 |---|---|---|
-| markdown → HTML | marked.js (50KB min) | Runs in browser at a few KB WASM |
-| JSON formatter / validator | jq (WASM 800KB+) | Orders of magnitude smaller |
-| TOML parser | toml-rs (crate) | No browser-running WASM version exists |
+| markdown → HTML | marked.js (original comparison, unversioned) | Measure runtime + host + artifact size for equivalent behavior |
+| JSON formatter / validator | jq (original comparison, unversioned) | Compare equivalent workload/builds; no size advantage established here |
+| TOML parser | toml-rs (crate) | Browser deployment comparison not verified by this record |
 | base64 encode / decode | btoa/atob | Self-contained WASM |
 
 **Success criteria**: Being able to say "the WASM running on this page is X KB."
 
 ---
 
-## Block 2: Multi-Target Showcase (1 Source, 4 Targets)
+## Block 2: Native/Wasm Showcase (distribution adapters are separate work)
 
-Show that the same code outputs a Rust crate + npm package + WASM module. Actually publish to npm and crates.io.
+Demonstrate native/Wasm reuse. npm or crates.io packaging would require explicit
+wrapper, API and publication work; npm distribution must not be confused with
+a retired TS/JS compiler target. The table below lists candidate distributions,
+not available outputs or authorization to publish packages.
 
 | Library | Purpose | Distribution |
 |---|---|---|

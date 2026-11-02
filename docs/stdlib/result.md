@@ -4,7 +4,7 @@
 
 Result type operations. auto-imported.
 
-### `result.map(r: Result[A, E], f: Fn[A] -> B) -> Result[B, E]`
+### `result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]`
 
 Transform the ok value using a function. If err, passes through unchanged.
 
@@ -24,7 +24,7 @@ ok(20)
 err("fail")
 ```
 
-### `result.map_err(r: Result[A, E], f: Fn[E] -> F) -> Result[A, F]`
+### `result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]`
 
 Transform the err value using a function. If ok, passes through unchanged.
 
@@ -44,7 +44,7 @@ err("wrapped: fail")
 ok(1)
 ```
 
-### `result.flat_map(r: Result[A, E], f: Fn[A] -> Result[B, E]) -> Result[B, E]`
+### `result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]`
 
 Chain a Result-returning function on the ok value. Flattens nested Results.
 
@@ -83,7 +83,7 @@ fn main() -> Unit = {
 7
 ```
 
-### `result.unwrap_or_else(r: Result[A, E], f: Fn[E] -> A) -> A`
+### `result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A`
 
 Get the ok value, or compute a default from the error using a function.
 

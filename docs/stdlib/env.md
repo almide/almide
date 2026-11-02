@@ -136,7 +136,9 @@ effect fn main() -> Unit = {
 
 ### `env.os() -> String`
 
-Get the operating system name (linux, macos, windows).
+Get the operating system name reported by the host (`linux`, `macos`,
+`windows`, or `unknown` on the native runtime). The embedded Wasm host also
+reports its host OS; stock-WASI adaptation reports `wasi`.
 
 ```almd check
 import env
@@ -180,7 +182,7 @@ effect env.vars() -> Map[String, String]
 // @since 0.5.0 or earlier
 effect env.cwd() -> String
 
-// Blocks ms milliseconds; a negative ms hangs.
+// Blocks ms milliseconds; zero or negative ms returns without waiting.
 // @since 0.5.0 or earlier
 effect env.sleep_ms(ms: Int) -> Unit
 

@@ -34,10 +34,33 @@ fn zfill(buf: Region) -> Unit
 ```
 
 A `Region` parameter of an `@extern(c)` fn is two C arguments, the pointer and
-its `size_t` length (`void zfill(uint8_t *buf, size_t len)`), and of an
+its `size_t` length (`void zfill(uint8_t *buf, size_t len)`), of an
+`@extern(rust)` fn the same pair `(base: *mut u8, len: usize)`, and of an
 `@extern(wasm)` fn two numbers, base and length: the callee always gets the
-length the runtime holds. A foreign region's release function runs once, when
-the last copy of the region goes away; Almide code never frees.
+length the runtime holds, and a host never names the runtime's Region type. A
+binding with both `@extern(wasm)` and `@extern(rust)` therefore has one
+parameter shape on both hosts (#4353):
+
+```almide
+import ffi
+
+@extern(wasm, "sys", "log")
+@extern(rust, "crate::sys", "log")
+fn log(buf: Region) -> Unit = _
+```
+
+```rust
+// native/sys.rs
+pub fn log(base: *mut u8, len: usize) {
+    let bytes = unsafe { std::slice::from_raw_parts(base, len) };
+    println!("{}", String::from_utf8_lossy(bytes));
+}
+```
+
+The pointer is valid for the call only, and a host writes through it only
+when the Region is writable (`ffi.alloc`). A foreign region's release
+function runs once, when the last copy of the region goes away; Almide code
+never frees.
 
 `import ffi` is the opt-in: outside the stdlib, a call to any `ffi` function is
 E100 in a file that does not write `import ffi` (#4043). `almide check
@@ -100,7 +123,18 @@ always comes from the Region.
   reads it (a top-level `var` holds the program's copy). An empty Region
   crosses as `(0, 0)`. A slice crosses as its own address, with no copy:
   the share keeps its parent alive until the host releases it. Releasing an
-  address twice traps. An `effect fn` export's `err` prints and traps.
+  address twice traps. An `effect fn` export's `err` prints and traps. The
+  pair is the view's data address and the Region's own length, never the
+  address of the Region's record (#4354). With `--host js` the glue wraps
+  the export as `f(…) → [ptr, len]` and adds `regionRelease(ptr)`.
+- *Lent to a wasm export.* An `@export(wasm)` fn may take a Region
+  parameter. The host passes it as `(base, len)`, the same pair an import
+  receives, in the memory's address width. The fn gets a read-only Region
+  over that range of the module's memory, lent for the one call: it owns
+  nothing, and every access is checked against the host's length. A copy
+  the body stores in a top-level `var`, returns or captures in a closure is
+  E119. A host usually passes back a range it got from a push export, which
+  its share keeps alive.
 - *Pull.* A writable `ffi.alloc` Region passed to an `@extern(wasm)` or
   `@extern(c)` fn is lent for that call, as `(base, len)` in the memory's
   address width (`i32` on wasm32) or `(uint8_t*, size_t)`, and the foreign
@@ -124,6 +158,10 @@ effect fn inbox_open(n: Int) -> Region = {
   inbox = ffi.alloc(n)!
   inbox
 }
+
+@export(wasm, "inbox_sum")
+effect fn inbox_sum(part: Region) -> Int =
+  bytes.to_list(ffi.read(part, 0, ffi.len(part))!) |> list.fold(0, (a, x) => a + x)
 
 @export(c, "fill")
 @region(out = out)

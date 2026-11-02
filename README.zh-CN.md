@@ -66,8 +66,10 @@ Or use `_ => todo()` to compile incrementally.
 
 **[在浏览器里试 →](https://almide.github.io/playground/)** —— 无需安装。
 
+请先安装 GitHub CLI（`gh`）：默认安装脚本会验证发布证明，缺少 `gh` 时会停止安装。详情见 [SECURITY.md](./SECURITY.md#release-integrity)。
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 

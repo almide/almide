@@ -1,5 +1,28 @@
-<!-- description: Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads -->
+<!-- description: Historical platform survey with current core/component/embedded route pointers -->
 # WASM Platform Frontier — beyond core Wasm 3.0
+
+## Current route boundary (2026-10-31)
+
+The Phase 0–1 status below is historical. Almide now has a structural core
+Wasm emitter, supported component packaging, an embedded WASI 0.3 HTTP lane,
+and embedded filesystem/network/process operations. Availability is still
+operation- and route-specific; this does **not** mean every host serves every
+operation (the child-handle process family remains a pending Wasm port).
+
+Use [the host overview](../../wasm/README.md),
+[target availability](../../../proofs/target-availability.toml),
+[build_wasm.rs](../../../src/cli/build_wasm.rs) and
+[component_host.rs](../../../crates/almide-wasm-run/src/component_host.rs).
+`env.cwd` is served on the embedded route; current filesystem scoping and
+preopen defaults must not be inferred from the old `--dir=/` sketch below.
+The embedded fan implementation uses isolated worker instances, so a blanket
+“Wasm fan is sequential” premise is also obsolete.
+
+The following standards/version survey is retained as its June–August
+snapshot, not a newly verified external roadmap or deployment recommendation.
+Current repository tool pins are in [toolchain-pins.txt](../../../scripts/toolchain-pins.txt).
+The implementation plans below are not a claim that their complete future
+architecture has landed.
 
 > **Active scope: Phase 0-1** — deterministic profile 明文化 + `almide_host` ABI 設計。
 > Phase 2-4 (component target, 0.3 async, threads) は標準側の成熟待ちで段階導入。

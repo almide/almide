@@ -72,6 +72,13 @@ use wasmparser::Operator as Op;
 
 use crate::decode::{branch_target, is_load, store_width, Body};
 
+mod arms;
+mod covers;
+mod tags;
+
+pub(crate) use covers::{covers, loop_exit};
+pub(crate) use tags::{case_guarded, readonly_calls};
+
 /// almide-layout `LEN.offset` and `PAYLOAD` — the block ABI the shipped
 /// bytes and the runtime share.
 const LEN_OFF: u64 = 4;
@@ -167,6 +174,19 @@ pub(crate) fn load_parts(t: &T) -> Option<(&T, u64)> {
     }
 }
 
+/// A memory address as (base, byte offset): `base + c` with the access's
+/// static offset folded in, so `(B + 4) + off 0` and `B + off 4` name one
+/// slot (#4278 B1, the slot consume's store over its release's load).
+pub(crate) fn effective(addr: &T, off: u64) -> (&T, i64) {
+    match op(addr, "i32.add") {
+        Some([b, c]) => match cst(c) {
+            Some(c) => (b, c + off as i64),
+            None => (addr, off as i64),
+        },
+        _ => (addr, off as i64),
+    }
+}
+
 /// The address a loaded value was read from.
 pub(crate) fn loaded_from(t: &T) -> Option<&T> {
     match pl(t) {
@@ -246,6 +266,8 @@ pub(crate) struct Flow<'b, 'a> {
     /// The recorded loop holds (#4280): calls that take +1 on a list a
     /// `for` loop then iterates.
     holds: HashSet<usize>,
+    /// Functions (by index) whose call writes no memory (`readonly_calls`).
+    ro_calls: HashSet<u32>,
 }
 
 impl<'b, 'a> Flow<'b, 'a> {
@@ -291,7 +313,7 @@ impl<'b, 'a> Flow<'b, 'a> {
                 ret_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
             }
         }
-        Flow { b, close, parent, abort_arm, ret_arm, judges, holds: HashSet::new() }
+        Flow { b, close, parent, abort_arm, ret_arm, judges, holds: HashSet::new(), ro_calls: HashSet::new() }
     }
 
     /// This function's recorded loop holds.
@@ -330,10 +352,6 @@ impl<'b, 'a> Flow<'b, 'a> {
             c = self.parent[s];
         }
         false
-    }
-
-    pub(crate) fn in_abort_arm(&self, k: usize) -> bool {
-        self.abort_arm[k]
     }
 
     /// Every path from the entry to `q` passes `p` (`p < q`, structured
@@ -653,39 +671,58 @@ impl<'b, 'a> Flow<'b, 'a> {
             }
             let ins = &self.b.ops[k];
             if let Some(src) = src {
-                if self.writes(k, src) {
-                    // A write of the judge's verdict on the variable's own block.
-                    let val = self.arg(k, 0, FUEL);
-                    let judged = matches!(pl(&val), T::Call { site, .. } if self.judges.contains(site));
-                    let own = chain(self.strip(&val)).iter().any(|&(s1, _)| s1 == src);
-                    if !(judged && own) {
-                        return Err(format!("instruction {k} ({ins:?}) changes the list between the check and the access"));
-                    }
-                }
+                self.judged_write(k, src)?;
             }
             if !counted.contains(&k) {
                 continue;
             }
-            if matches!(ins, Op::Call { .. } | Op::CallIndirect { .. }) && !self.judges.contains(&k) {
-                let n = self.b.args[k].len();
-                if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) && !held {
-                    return Err(format!("instruction {k} ({ins:?}) is handed the list between the check and the access"));
-                }
+            if self.hands_list(k, x) && !held {
+                return Err(format!("instruction {k} ({ins:?}) is handed the list between the check and the access"));
             }
-            if let Some((4, off)) = store_width(ins) {
-                // The effective address `base + constant`: the count word is
-                // the block's own address plus LEN, whatever the split.
-                let addr = self.arg(k, 0, FUEL);
-                let (base, eff) = match op(&addr, "i32.add") {
-                    Some([b, c]) if cst(c).is_some() => (b, off as i64 + cst(c).unwrap_or(0)),
-                    _ => (&addr, off as i64),
-                };
-                if eff == LEN_OFF as i64 && !matches!(pl(base), T::Op(..)) && self.mentions(base, x) {
-                    return Err(format!("instruction {k} writes the list's count between the check and the access"));
-                }
+            if self.writes_count_word(k, x) {
+                return Err(format!("instruction {k} writes the list's count between the check and the access"));
             }
         }
         Ok(())
+    }
+
+    /// Instruction `k`, when it writes `src`, writes the judge's verdict on
+    /// the variable's own block.
+    fn judged_write(&self, k: usize, src: Src) -> Result<(), String> {
+        if !self.writes(k, src) {
+            return Ok(());
+        }
+        // A write of the judge's verdict on the variable's own block.
+        let val = self.arg(k, 0, FUEL);
+        let judged = matches!(pl(&val), T::Call { site, .. } if self.judges.contains(site));
+        let own = chain(self.strip(&val)).iter().any(|&(s1, _)| s1 == src);
+        if !(judged && own) {
+            let ins = &self.b.ops[k];
+            return Err(format!("instruction {k} ({ins:?}) changes the list between the check and the access"));
+        }
+        Ok(())
+    }
+
+    /// Instruction `k` is a call, not a judge's, handed the block `x`.
+    fn hands_list(&self, k: usize, x: &T) -> bool {
+        if !matches!(self.b.ops[k], Op::Call { .. } | Op::CallIndirect { .. }) || self.judges.contains(&k) {
+            return false;
+        }
+        let n = self.b.args[k].len();
+        (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x))
+    }
+
+    /// Instruction `k` stores the count word of the block `x`.
+    fn writes_count_word(&self, k: usize, x: &T) -> bool {
+        let Some((4, off)) = store_width(&self.b.ops[k]) else { return false };
+        // The effective address `base + constant`: the count word is
+        // the block's own address plus LEN, whatever the split.
+        let addr = self.arg(k, 0, FUEL);
+        let (base, eff) = match op(&addr, "i32.add") {
+            Some([b, c]) if cst(c).is_some() => (b, off as i64 + cst(c).unwrap_or(0)),
+            _ => (&addr, off as i64),
+        };
+        eff == LEN_OFF as i64 && !matches!(pl(base), T::Op(..)) && self.mentions(base, x)
     }
 }
 
@@ -696,178 +733,5 @@ fn affine(t: &T) -> (&T, i64) {
             None => (t, 0),
         },
         _ => (t, 0),
-    }
-}
-
-/// `len(B)`: `(B, the load)`.
-fn len(l: &T) -> Option<(&T, usize)> {
-    match pl(l) {
-        T::Load { name: "i32.load", off: LEN_OFF, addr, site } => Some((&**addr, *site)),
-        _ => None,
-    }
-}
-
-/// `0 <= I && I <= len(B) - w` (signed): `(I, I again, (B, its count's
-/// load), w)`.
-fn room_of(room: &T) -> Option<(&T, &T, (&T, usize), i64)> {
-    let [lo, hi] = op(room, "i32.and")? else { return None };
-    let [i1, z] = op(lo, "i64.ge_s")? else { return None };
-    let [i2, d] = op(hi, "i64.le_s")? else { return None };
-    if cst(z)? != 0 {
-        return None;
-    }
-    let [e, w] = op(d, "i64.sub")? else { return None };
-    let [l] = op(e, "i64.extend_i32_u")? else { return None };
-    Some((i1, i2, len(l)?, cst(w)?))
-}
-
-/// `len(B) / S` as the count operand: `((B, its count's load), S)`.
-fn count_of(t: &T) -> Option<((&T, usize), i64)> {
-    if let Some([d]) = op(t, "i64.extend_i32_u") {
-        let [l, s] = op(d, "i32.div_u")? else { return None };
-        return Some((len(l)?, cst(s)?));
-    }
-    let [e, s] = op(t, "i64.div_u")? else { return None };
-    let [l] = op(e, "i64.extend_i32_u")? else { return None };
-    Some((len(l)?, cst(s)?))
-}
-
-/// `len(B) / S` as an i32 count (a loop's captured count, #4280).
-fn count_of32(t: &T) -> Option<((&T, usize), i64)> {
-    let [l, s] = op(t, "i32.div_u")? else { return None };
-    Some((len(l)?, cst(s)?))
-}
-
-/// The `br_if` at `at` is a loop's exit test (module header): an
-/// `i32.ge_u` right before it, it sits straight inside a `loop`, and it
-/// branches to the `block` that loop's parent is.
-pub(crate) fn loop_exit(fl: &Flow<'_, '_>, at: usize) -> Result<(), String> {
-    if !matches!(fl.b.ops[at], Op::BrIf { relative_depth: 1 }) {
-        return Err(format!("anchored at {:?}, not `br_if 1`", fl.b.ops[at]));
-    }
-    if at == 0 || !matches!(fl.b.ops[at - 1], Op::I32GeU) {
-        return Err(format!("the exit test is {:?}, not `i32.ge_u`", at.checked_sub(1).map(|k| &fl.b.ops[k])));
-    }
-    let lp = fl.parent[at].ok_or("the exit test is in no loop")?;
-    if !matches!(fl.b.ops[lp], Op::Loop { .. }) {
-        return Err(format!("the exit test sits in {:?}, not a loop", fl.b.ops[lp]));
-    }
-    let bk = fl.parent[lp].ok_or("the loop is in no block")?;
-    if !matches!(fl.b.ops[bk], Op::Block { .. }) {
-        return Err(format!("the loop sits in {:?}, not the block the exit leaves to", fl.b.ops[bk]));
-    }
-    Ok(())
-}
-
-/// The access instruction (`acc`; for an `a` anchored at the release call,
-/// the load before it): its address term, memarg offset and width.
-fn access_parts(fl: &Flow<'_, '_>, acc: usize) -> Result<(T, u64, u64), String> {
-    let op = &fl.b.ops[acc];
-    let (off, width) = if let Some((w, off)) = store_width(op) {
-        (off, u64::from(w))
-    } else if is_load(op) {
-        let (_, off, w) = load_name(op);
-        (off, w)
-    } else {
-        return Err(format!("{op:?} is no access"));
-    };
-    Ok((fl.arg(acc, 0, FUEL), off, width))
-}
-
-/// Check that the guard whose compare is at `cmp` covers the access at
-/// `acc`, both in `b` (module header).
-pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), String> {
-    let acc = if matches!(fl.b.ops[acc], Op::Call { .. }) && acc > 0 { acc - 1 } else { acc };
-    if !fl.dominates(cmp, acc) {
-        return Err("the check does not dominate the access".into());
-    }
-    let (addr, off, width) = access_parts(fl, acc)?;
-    match fl.b.ops[cmp] {
-        Op::I64GeU => {
-            let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
-            let ((cb, count_at), s) = count_of(&cnt).ok_or_else(|| format!("the compare's right operand is not a list's count: {cnt:?}"))?;
-            let Some([base, scaled]) = op(&addr, "i32.add") else {
-                return Err(format!("the access's address is not block + scaled index: {addr:?}"));
-            };
-            let (ai, s2) = match op(scaled, "i32.mul") {
-                Some([w, c]) => match (op(w, "i32.wrap_i64"), cst(c)) {
-                    (Some([i]), Some(s2)) => (i, s2),
-                    _ => return Err(format!("the access's index is not scaled by a constant: {scaled:?}")),
-                },
-                _ => return Err(format!("the access's index is not scaled: {scaled:?}")),
-            };
-            let (ab, total) = match op(base, "i32.add") {
-                Some([b, c]) if cst(c).is_some() => (b, off as i64 + cst(c).unwrap_or(0)),
-                _ => (base, off as i64),
-            };
-            if s <= 0 || s2 != s {
-                return Err(format!("the check counts slots of {s} bytes, the access scales by {s2}"));
-            }
-            if width as i64 > s {
-                return Err(format!("the access is {width} bytes wide, its slots {s}"));
-            }
-            let k = total - PAYLOAD;
-            if k < 0 || k % s != 0 {
-                return Err(format!("the access lies at payload offset {k}, not a whole slot"));
-            }
-            let ((ci, cc), (ai, ac)) = (affine(&ix), affine(ai));
-            if !fl.same(ci, ai) || cc != ac + k / s {
-                return Err(format!("the check tests index {ix:?}, the access reads slot {ai:?} + {}", k / s));
-            }
-            fl.same_count(cb, ab, count_at, acc)
-        }
-        Op::I32GeU => {
-            // The loop exit test (#4280): its `br_if` must dominate too.
-            if !fl.dominates(cmp + 1, acc) {
-                return Err("the exit test's br_if does not dominate the access".into());
-            }
-            let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
-            let ((cb, count_at), s) = count_of32(&cnt).ok_or_else(|| format!("the exit test's right operand is not a list's count: {cnt:?}"))?;
-            let Some([ab, scaled]) = op(&addr, "i32.add") else {
-                return Err(format!("the access's address is not block + scaled counter: {addr:?}"));
-            };
-            let (ai, s2) = match op(scaled, "i32.mul") {
-                Some([i, c]) => match cst(c) {
-                    Some(s2) => (i, s2),
-                    None => return Err(format!("the access's counter is not scaled by a constant: {scaled:?}")),
-                },
-                _ => return Err(format!("the access's counter is not scaled: {scaled:?}")),
-            };
-            if s <= 0 || s2 != s {
-                return Err(format!("the exit test counts slots of {s} bytes, the access scales by {s2}"));
-            }
-            if width as i64 > s {
-                return Err(format!("the access is {width} bytes wide, its slots {s}"));
-            }
-            if off as i64 != PAYLOAD {
-                return Err(format!("the access lies at offset {off}, not the payload's first slot"));
-            }
-            if !fl.same(&ix, ai) {
-                return Err(format!("the exit test tests {ix:?}, the access reads slot {ai:?}"));
-            }
-            fl.same_count(cb, ab, count_at, acc)
-        }
-        Op::I32Eqz => {
-            let room = fl.arg(cmp, 0, FUEL);
-            let (i1, i2, (cb, count_at), w) = room_of(&room).ok_or_else(|| format!("the room test is not `0 <= i <= len - w`: {room:?}"))?;
-            if !fl.same(i1, i2) {
-                return Err("the room test's two bounds test different indices".into());
-            }
-            let Some([ab, wi]) = op(&addr, "i32.add") else {
-                return Err(format!("the byte access is not block + index: {addr:?}"));
-            };
-            let Some(ai) = op(wi, "i32.wrap_i64") else {
-                return Err(format!("the byte access's index is {wi:?}"));
-            };
-            let k = off as i64 - PAYLOAD;
-            if k < 0 || k + width as i64 > w {
-                return Err(format!("the byte access covers [{k}, {}), the room test {w} bytes", k + width as i64));
-            }
-            if ai.len() != 1 || !fl.same(i1, &ai[0]) {
-                return Err("the room test and the byte access use different indices".into());
-            }
-            fl.same_count(cb, ab, count_at, acc)
-        }
-        ref o => Err(format!("the guard's compare is {o:?}")),
     }
 }

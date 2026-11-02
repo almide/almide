@@ -1,5 +1,25 @@
-<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets -->
-# Fan v2 — one execution-policy grammar
+<!-- description: Fan v2 design and migration history; current selection surface follows ADR-0028 and SPEC -->
+# Fan v2 — execution-policy design and migration record
+
+## Current navigation
+
+The authoritative surface is [SPEC §13](../../SPEC.md#13-concurrency-fan),
+with [ADR-0028](../../adr/0028-fan-selection-names-and-cost-contract.md) deciding
+selection names and clocks after this design:
+
+- `fan.any` is removed; use `??` / `list.find_map`.
+- `fan.race` is renamed `fan.min`; current calls require a Compute clock.
+  Duration min is an ADR-0028 design decision pending #3788, rejected by the
+  current checker. Compute belongs to the deterministic tier; logical cost is scoped
+  to a meter version, not invariant across arbitrary compiler versions.
+- `fan.timeout(duration.ms(n)) { body }` exists; it is not a pending tombstone.
+- The August T1-1/T1-2 items below were completed in
+  [BURNDOWN.md](../../../research/spike/charge-probe/BURNDOWN.md).
+- Current accepted/rejected forms are covered by
+  `tests/fan_surface_matrix_test.rs`; the historical six-head matrix below is
+  not a second current grammar specification.
+
+## Implementation records
 
 > **実装状況（worktree-stage1-charge-probe、2026-08-02）**: 表面は実装済み —
 > block heads 全部（fan{} / any / settle / race / bounded、settle は tuple 契約）、
@@ -18,13 +38,14 @@
 > 移行（edition 境界）。
 
 
-> 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。
+> 当初の憲章: [async-inception.md](./async-inception.md)。以下は導入時の設計理由と
+> 移行計画を保存する。現在の文法・契約を上書きするものではない。
 >
 > [logical-time-async.md](./logical-time-async.md)（意味論）の上に、fan の**表面全体**を
 > 一つの文法に畳む設計。[concurrency-stance.md](./concurrency-stance.md) の決定
 > （決定的データ並列）は前提であり、変更しない。
 
-## 統一テーゼ
+## 導入時の統一テーゼ
 
 **fan は「実行ポリシー」の文法である。** すべての fan 構文は
 
@@ -32,12 +53,12 @@
 
 の 1 セルであり、それ以外の形は存在しない。thunk（`() => …`）は表面から**全廃**する。
 
-現行の fan 表面は 3 つの呼び出し規約が混在している — block は式の列、`fan.map` は
+v2 導入前の fan 表面は 3 つの呼び出し規約が混在している — block は式の列、`fan.map` は
 (list, mapper)、`fan.any`/`fan.settle` は thunk リスト。しかも auto-wrap 契約が
 コンビネータごとに違う（「race/any/settle thunks auto-wrap, map mappers do not」）。
 v2 はこれを **head × form の直積 1 枚**に置き換える。
 
-## v2 マトリクス（これが文法仕様の全体）
+## 導入時の v2 マトリクス（履歴 — 現行文法ではない）
 
 | head | 選択規則 | block form（静的 arm） | mapper form（動的） | arm 効果上限 | 並列化 |
 |---|---|---|---|---|---|
@@ -66,7 +87,7 @@ head ごとの例外はゼロになる。
 ### 1. 表面から `() =>` が消える
 
 ```almide
-// v1（現行）
+// v2 導入前の v1
 fan.any([() => http_fetch(a), () => http_fetch(b)])
 fan.any(mirrors |> list.map((m) => () => fetch(m)))
 
@@ -82,7 +103,7 @@ fan-concurrency.md §3.4「Why Thunks Are Needed」は、fan.* が**関数だか
 
 ### 2. wasm の wall クラスが 1 つ死ぬ
 
-現行の動的 thunk リスト（非リテラル）は v1 で `List[funcref]` が表現できず、
+当時の動的 thunk リスト（非リテラル）は v1 で `List[funcref]` が表現できず、
 `desugar_fan.rs` はリテラル・let 束縛リテラルだけを inline し、真に動的なリストは
 purity wall に落としている。mapper form は「データのリスト + 閉包 1 個」— `fan.map` と
 同じ形 — なので、**この wall クラスは構文の変更だけで消滅する**。意味論の犠牲はゼロ。
@@ -108,7 +129,7 @@ fan.bounded(100)                        // 型エラー: expected Compute, found
 fan の表面のためだけに字句規則を広げる取引は割に合わない（将来足す場合の脱糖先が
 この関数形になる）。
 
-## 各 head の意味論（確定事項の整理）
+## 導入時に整理した各 head の意味論（後続変更は上の Current navigation 参照）
 
 - **all / settle**: 現行のまま。C-004 / C-199 / C-200 は statement ごと生存する。
   arm 出力のバッファリング（リスト順 flush、C-004 EXCEPTION 節の退役）は
@@ -131,11 +152,11 @@ fan の表面のためだけに字句規則を広げる取引は割に合わな�
   } ?? default_answer
   ```
 
-- **timeout**: Stage 4（Path C / R_Ω）まで tombstone 維持。再導入時の形だけここで
+- **timeout（当初の段階計画）**: Stage 4（Path C / R_Ω）まで保留していた。再導入時の形だけここで
   確定する — `fan.timeout(duration.s(5)) { body }`、中断点は charge site（logical-time-async の
   中断点統一原理）、契約クラスは oracle-relative。
 
-## 完備性規則（matrix gate に載せる文）
+## 導入時の完備性規則（matrix gate の設計）
 
 1. すべての head は block form を持つ。
 2. mapper form を持つのは「同型の動的データに対して arm を量産できる head」
@@ -149,7 +170,7 @@ fan の表面のためだけに字句規則を広げる取引は割に合わな�
 4. 新しい head を足すときは、この表に行を足し、全列（選択規則・両 form の型・効果上限・
    並列化可能性）を埋めることが PR の受理条件（API 族の matrix 原則）。
 
-## 移行 — 何が壊れて、どれだけか
+## 当初の移行 — 何が壊れて、どれだけか
 
 **不動**: `fan { }` と `fan.map(xs, f)` — 最多使用の 2 表面は文字も変わらない。
 契約（C-004/C-005/C-199/C-200）も statement ごと生存。
@@ -186,7 +207,7 @@ tombstone（check 時、書き換え例つき）にする。共存させない �
 - 走るたび同じ、はそのまま: v2 に非決定的なセルは 1 つもない（timeout は oracle 層で
   契約クラスごと分離）。
 
-## 実装 Wave（logical-time-async のステージと交差する）
+## 当初の実装 Wave（現在の未完了一覧ではない）
 
 1. **Wave 1 — 表面統一（fuel 不要、今すぐ可能）**: any/settle の block form + mapper
    form、thunk リスト形の E0xx tombstone、spec 8 ファイル移行、SPEC.md §13 再記述、

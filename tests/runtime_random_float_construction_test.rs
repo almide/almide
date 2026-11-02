@@ -14,7 +14,7 @@
 // quotient rounded to 1.0.
 //
 // So this test compiles the SHIPPED source text itself. `runtime/rs/src/random.rs`
-// is self-contained (`std::cell::Cell`, libc's entropy call, and the prelude's
+// is self-contained (`std::cell::Cell`, sys.rs's entropy call, and the prelude's
 // `almide_abort`, stubbed below), which is what makes
 // the include legal here and not a general answer: most of runtime/rs resolves
 // only under the embedder's flat concatenation plus a synthesised prelude, so
@@ -35,6 +35,10 @@ mod runtime_random {
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"
     ));
+    // random.bytes reads the OS source through sys.rs's `fill_entropy`
+    // (#4007: the runtime's foreign calls live in that one module), which is
+    // std-only too; the embedder pulls it in beside random.rs the same way.
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/rs/src/sys.rs"));
 
     // The emitted prelude's abort, which random.bytes calls on a negative n.
     fn almide_abort(msg: impl std::fmt::Display) -> ! {
@@ -58,6 +62,13 @@ mod runtime_random {
     // The per-OS entropy arm, private for the same reason.
     pub fn os_entropy(chunk: &mut [u8]) -> bool {
         almide_os_entropy(chunk)
+    }
+
+    // sys.rs's console handler (http.serve's Ctrl-C stop on Windows), private
+    // inside the included module like the rest.
+    #[cfg(windows)]
+    pub fn set_console_ctrl_handler(handler: extern "system" fn(u32) -> i32, add: bool) -> bool {
+        almide_rt_sys_ffi::set_console_ctrl_handler(handler, add)
     }
 }
 
@@ -151,4 +162,26 @@ fn the_os_random_source_answers_on_this_host() {
     assert!(runtime_random::os_entropy(&mut b), "the OS random source failed on this host");
     assert!(a.iter().any(|&x| x != 0), "the OS random source left the buffer zeroed");
     assert_ne!(a, b, "two 256-byte OS draws were equal");
+}
+
+/// The one `unsafe` site of sys.rs no other test reached (#4007 left it to
+/// #4009): `SetConsoleCtrlHandler`, which http.serve arms on Windows to stop on
+/// Ctrl-C and disarms when it returns. Its SAFETY: invariant is the prototype
+/// (a PHANDLER_ROUTINE and a BOOL, wincon.h) and a handler alive for the whole
+/// program. The OS answers for both here: the add succeeds, the remove finds
+/// the very handler the add installed, and a second remove fails because it is
+/// gone — a wrong signature or a mangled pointer cannot round-trip that way.
+/// No console event is raised: the runner's other processes share its console.
+#[cfg(windows)]
+#[test]
+fn the_console_ctrl_handler_is_added_and_removed_by_the_os() {
+    extern "system" fn on_ctrl(_event: u32) -> i32 {
+        0
+    }
+    assert!(runtime_random::set_console_ctrl_handler(on_ctrl, true), "SetConsoleCtrlHandler refused to add the handler");
+    assert!(runtime_random::set_console_ctrl_handler(on_ctrl, false), "SetConsoleCtrlHandler did not find the handler it had just added");
+    assert!(
+        !runtime_random::set_console_ctrl_handler(on_ctrl, false),
+        "SetConsoleCtrlHandler removed a handler a second time: the first remove did not take out the one the add installed"
+    );
 }

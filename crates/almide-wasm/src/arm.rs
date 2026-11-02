@@ -194,6 +194,8 @@ impl crate::emitter::Emitter<'_> {
         i.local_get(tmp).i32_load(crate::slot_memarg(almide_layout::OPTION_FIELD)).call(crate::F_INC);
         i.end();
         i.local_get(tmp);
+        // #4278 B1: the payload's share stays in the Option block.
+        self.arm_share_stored();
     }
 
     /// The scope's half: release every temporary the arms borrowed since

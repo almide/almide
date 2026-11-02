@@ -61,16 +61,16 @@ C-SAFE は**ソース不要・成果物だけで検証できる最強の型**。
 
 「コンパイル時チェックを著者が騙したら?」への即答を可能にする分離:
 
-1. **wasm import セクション = 構造的上界。** import に無いものは呼べない —
-   健全性は wasm 仕様が担保する。言語解析ゼロ、`wasm-objdump` で誰でも検証
-   できる。**敵対的著者に対しても健全。**
-2. **言語 capability チェック = 粒度。** fs のパススコープ等。健全性ではなく
-   精密性を足す層([effect-system-capability](effect-system-capability.md)
-   Phase 1-2)。
-3. **wasmtime = 実行時の床。** 防御の最終層。
+1. **import は host との接点の一部。** 未インポートの関数は直接呼べないが、
+   共有 gateway の内部操作、引数、host が与える権限まで import 名だけで制限できない。
+   artifact の import と host の実装/許可を対応させて検査する。
+2. **言語 capability チェックは別の検査。** 到達可能性と宣言の包含を、その
+   モデルと解析範囲で確認する。host/FFI の任意の実行意味を証明するものではない。
+3. **runtime 設定と native-code trust。** Wasm の host 設定と、native build /
+   dependency / FFI の信頼境界を分ける。manifest/hash があるだけで sandbox は完成しない。
 
-騙しても無駄 — 上界は成果物自体が運んでいる。これが L1 を「コンパイラを
-信じてください」から「成果物を見てください」に変える。
+artifact hash は「どの成果物を指すか」を束縛する。witness がその成果物の実行を
+忠実に表すことは別の義務であり、receipt の C-FAITHFUL scope を超えて主張しない。
 
 ### T3 の精密化 — 検査の非対称性
 
@@ -78,15 +78,17 @@ C-SAFE は**ソース不要・成果物だけで検証できる最強の型**。
 毎回検証する**(proof-carrying code の古典的非対称性)。信頼は
 「コンパイラ + rustc」から「小さな検査器 + それを建てた rustc」に縮む。
 
-現在稼働中のコンパイル毎検証(translation-validation 性質台帳の seed、5 性質):
+元の Perceus/StackBalance 表は旧 emitter の検査台帳だった。これを現行の
+全コンパイル経路の保証一覧として使わない。現行の確認入口は次のとおり:
 
-| # | 性質 | 検証器 | モード |
-|---|---|---|---|
-| 1 | Perceus RC 均衡 | perceus_verify_function | hard-error(`--emit-unverified` waiver) |
-| 2 | wasm モジュール妥当性 | wasmparser::validate | 常時・致死 |
-| 3 | 名前解決全域性 | verify_names::assert_names_resolvable | 常時・両ターゲット |
-| 4 | 型 concretize 完了 | AllTypesConcrete | hard |
-| 5 | スタック平衡 | StackBalancePass | by construction |
+| 対象 | 根拠入口 | 限界 |
+|---|---|---|
+| Wasm 経路選択 | `src/wasm_route.rs` | structural-only。旧 `--emit-unverified` waiver を現行回避策にしない |
+| IR pass の不変条件 | `crates/almide-codegen/src/pass.rs` | 違反時の致死的 postcondition 検査であり、全翻訳忠実性の証明ではない |
+| 証明/受理/byte 対応 | `proofs/receipt.sh` | C-PROVEN/C-SAFE/C-FAITHFUL ごとの対象と trusted boundary。fixture 数・decline を伴う |
+
+この表は根拠への案内であり、kernel 証明が通常の全ビルドで自動実行されるという
+主張ではない。再導出手順と各証拠の適用範囲は receipt を参照する。
 
 「完全」への道はこの台帳を伸ばすこと(§6 U₂)であって、コンパイラ全証明
 (CompCert 級、データ付きで棄却済み)ではない。

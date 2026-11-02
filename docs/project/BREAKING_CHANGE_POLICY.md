@@ -6,6 +6,14 @@
 
 ---
 
+## 現行実装と post-1.0 方針の区別
+
+以下の post-1.0 / edition 方針は将来の運用設計であり、現在の実装機能ではない。
+現行 `src/project.rs::PACKAGE_METADATA_KEYS` の `edition` は挙動を変えない
+metadata として受理される。edition ごとの parser 切替や `almide migrate`
+subcommand は実装されていない。現在の removed syntax / migration hints は
+`proofs/dialect-epochs.toml` と checker が扱う。将来方針自体は以下に保持する。
+
 ## 原則
 
 ### 1. Silent な挙動変更は絶対禁止
@@ -22,7 +30,7 @@ stdlib 関数の削除・改名:
 2. **v1.(x+1)**: warning を継続
 3. **v1.(x+2)**: 削除可能。ただし compile error + hint で代替関数を案内
 
-### 3. 構文変更は edition で吸収
+### 3. 構文変更は edition で吸収（post-1.0 構想）
 
 新キーワードの追加や構文の変更は `edition` フィールドで制御:
 - `edition = "2026"` のコードは 2026 のルールでコンパイル
@@ -51,7 +59,7 @@ stdlib 関数の削除・改名:
 
 ---
 
-## edition の仕組み
+## edition の仕組み（未実装の設計）
 
 ```toml
 # almide.toml

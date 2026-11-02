@@ -92,6 +92,9 @@ impl Emitter<'_> {
         self.hof_step(index);
         self.f.instructions().local_get(pair_p).call(F_DEC_FLAT)
             .local_get(base).call(F_DEC_FLAT).local_get(acc_p);
+        // #4278 B1: the pair slot and the snapshot are the arm's own blocks.
+        self.arm_temp_released();
+        self.arm_temp_released();
         self.release_i32();
         self.release_i32();
         self.release_i32();

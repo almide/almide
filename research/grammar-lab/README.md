@@ -14,14 +14,14 @@ export CLAUDE_BIN=/path/to/claude          # optional, auto-detected via `which`
 # Build the runner
 almide build src/mod.almd -o /tmp/grammar-lab-bin
 
-# Run experiment (all models, 5 trials)
-/tmp/grammar-lab-bin experiments/lambda-syntax/
+# Run the current-schema experiment (configured models, 3 trials; invokes the model)
+/tmp/grammar-lab-bin experiments/law-spec/
 
 # Run with specific model
-/tmp/grammar-lab-bin experiments/lambda-syntax/ --model claude-sonnet-4-6
+/tmp/grammar-lab-bin experiments/law-spec/ --model claude-haiku-4-5
 
 # Override trial count
-/tmp/grammar-lab-bin experiments/lambda-syntax/ --trials 3
+/tmp/grammar-lab-bin experiments/law-spec/ --trials 1
 ```
 
 ### Path Resolution
@@ -31,7 +31,16 @@ Binary paths are resolved in this order:
 2. `which` lookup (if the binary is in PATH)
 3. Fallback (relative path `../../target/release/almide`)
 
-## Structure
+## Current schema and historical experiments
+
+`src/mod.almd::load_task` reads each task's `source_dir` and `test_file`, plus
+optional `hidden_file`, `laws_file`, and `laws_compiled_file`. Variants can set
+`with_laws`, and the experiment can request a repair round. `law-spec` supplies
+this schema. `lambda-syntax` below is historical: its old task JSON and
+`paren-to-fn-lambda` experiment are not a drop-in current-compiler quick start.
+The runner itself can be checked without model calls using `almide check src/mod.almd`.
+
+## Historical lambda-syntax layout
 
 ```
 grammar-lab/
@@ -72,22 +81,29 @@ Results are JSON arrays:
 ```json
 [
   {
-    "experiment": "lambda-syntax",
-    "variant": "fn-lambda",
-    "model": "claude-sonnet-4-6",
-    "task": "add-filter-condition",
+    "experiment": "law-spec",
+    "variant": "laws",
+    "model": "claude-haiku-4-5",
+    "task": "t01_rle",
     "trial": 1,
-    "compiled": true,
-    "tests_passed": true,
-    "error": ""
+    "compiled_1": true,
+    "gate_1": true,
+    "hidden_1": true,
+    "repaired": false,
+    "gate_2": true,
+    "hidden_2": true
   }
 ]
 ```
+
+A passing visible/law gate with a failing hidden test is reported as
+"survived but wrong"; gate pass alone is not correctness. The example above
+illustrates the current output schema, not a measured trial.
 
 ## Adding Experiments
 
 1. Create `experiments/<name>/experiment.json`
 2. Create variant dirs with source `.almd` files
-3. Create `tasks/` with task `.json` definitions and `_test.almd` files
+3. Create `tasks/` JSON with `source_dir`, `test_file`, and optional hidden/law paths, following `law-spec/tasks/`; source paths are relative to the experiment and test/law paths to `tasks/`
 4. Add variant-specific `prompts/layer2_<variant>.md`
 5. Run: `almide run src/mod.almd -- experiments/<name>/`

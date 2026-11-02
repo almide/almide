@@ -29,6 +29,10 @@ NOT_FRAMES=(
   map_ordered.rs   # map_index.rs's flood-fallback AVL helper bodies (#4104): no RC frame of their own
   utf8_helpers.rs value_helpers.rs   # decoder / Value-equality helper bodies
   display.rs   # display/eq/scan helper bodies: no RC frame of their own
+  display_helpers.rs   # display.rs's helper-body build phase, split out (1347f266d): the same hand-written scan bodies
+  runtime_push.rs   # $list_push_{8,4} / $bytes_push, split from runtime.rs for the file budget (#4278 B1)
+  value_set_path.rs   # the hand-written $value.__set_path_steps walk on the structural leg (#4315): no RC frame of its own
+  region_export.rs   # the @export(wasm) Region adapter body (ADR-0031 A1, #4007): a hand-written shim, no RC frame of its own
   deep_walk.rs   # the deep drop / eq / display walk of a recursive type's helper bodies (#4250, #4252): no RC frame of their own
   fuel.rs      # the deterministic-budget unwind (BudgetUnwind): the run terminates
 )

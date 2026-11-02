@@ -135,7 +135,7 @@ pub(crate) fn build_native_cached(
     let cpu = release.then(super::native_target::release_target_cpu).flatten().unwrap_or_default();
     let hash_input = format!(
         "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:cpu={}:env={}",
-        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, cpu, env_key
+        rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, cpu, env_key
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };

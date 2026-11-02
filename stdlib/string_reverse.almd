@@ -16,11 +16,14 @@ else {
 }
 
 // Walk source codepoints front-to-back, placing each at the tail of the output (`out_end`
-// shrinks by each codepoint's length), so the char order is reversed.
+// shrinks by each codepoint's length), so the char order is reversed. The width a lead byte
+// claims is capped at the bytes left (`send - src`): the widths then sum to exactly blen, so
+// `off` never goes negative and no read passes `send`, whatever the bytes are (A4, #4005).
 fn __rev_walk(src: Int, send: Int, dst_base: Int, out_end: Int) -> Int = if src >= send then 0
 else {
   let b = prim.load8(src)
-  let cl = __cp_len(b)
+  let w = __cp_len(b)
+  let cl = if w > send - src then send - src else w
   let off = out_end - cl
   let dst = dst_base + off
   let _x = __rev_copy_n(src, dst, cl)

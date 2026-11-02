@@ -1,6 +1,18 @@
 <!-- description: Built-in LLM commands for library generation, auto-fix, and code explanation -->
 # LLM Integration
 
+## Status and current CLI boundary (2026-10-31)
+
+This is an **unimplemented AI-integration proposal**, not a description of the
+current CLI. In particular, shipped `almide fix` applies locally computed,
+machine-applicable diagnostic repairs and rechecks them; it does **not** send
+source code to an LLM. See [`src/cli/fix.rs`](../../../src/cli/fix.rs).
+A future AI-assisted repair command would need a distinct interface and explicit
+source-transmission/provider consent; it must not silently change that contract.
+`forge`, `pilot`, `[ai]`, and `--no-ai` below are proposed interfaces.
+The per-function AI `explain` proposal is distinct from the shipped
+`almide explain <diagnostic-code>` command.
+
 ## Thesis
 
 Embed LLMs into the compiler of "the language LLMs can write most accurately." LLMs write, LLMs fix, LLMs grow libraries — this loop runs with a single compiler.
@@ -23,12 +35,12 @@ almide forge csv --ref python:csv,rust:csv,go:encoding/csv
 
 **Why:** Bootstrapping the ecosystem. Having LLMs mass-produce and humans review is faster than writing each library by hand.
 
-### `almide fix` — Self-repair
+### Proposed AI-assisted repair — not the shipped `almide fix`
 
 Pass compile errors to LLM for automatic fix.
 
 ```bash
-almide fix app.almd
+almide <proposed-ai-repair-command> app.almd
 ```
 
 1. Collect errors with `almide check`
@@ -78,7 +90,7 @@ model = "claude-sonnet-4-20250514"
 
 ## Implementation Plan
 
-### Phase 1: `almide fix`
+### Phase 1: Separate AI-assisted repair command
 - [ ] Add HTTP client (`ureq` or `reqwest`)
 - [ ] `[ai]` config loading
 - [ ] `almide check` → errors + source → LLM API → fix diff → apply
@@ -106,7 +118,7 @@ LLM → token generation → almide parser (incremental) → valid?
 - [ ] Speculation buffer: backtrack invalid tokens and return valid continuations as hints
 - [ ] Benchmark: compare compile success rate and generation speed with/without constrained decoding
 
-**Why:** `almide fix` is "fix after writing." pilot is "make it correct at the moment of writing." MoonBit has a prior implementation, but Almide's simple grammar and type system make implementation cost low. Being able to use multi-target (Rust + TS) type information is a strength unique to Almide.
+**Why:** the proposed AI-assisted repair is "fix after writing." pilot is "make it correct at the moment of writing." MoonBit has a prior implementation, but Almide's simple grammar and type system make implementation cost low. The current compiler targets Rust and Wasm; this proposal must use their shared checked IR, not the retired TypeScript target.
 
 ### Phase 4: `almide explain`
 - [ ] Per-function explanation generation

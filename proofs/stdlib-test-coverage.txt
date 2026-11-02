@@ -1,0 +1,17 @@
+# proofs/stdlib-test-coverage.txt — the stdlib test-coverage ledger, enforced by
+# tests/stdlib_test_coverage_test.rs (CI: the test-rust shards; locally
+# `make stdlib-test-coverage`).
+#
+# Every public stdlib fn (proofs/stdlib-inspection.toml) is called by a test
+# that runs on BOTH legs, native Rust and wasm, or it has one row here:
+#
+#   module.fn :: native | wasm | both :: why, naming its tracking issue (#NNNN)
+#
+# `legs` is the leg with no test. The ledger is equality-pinned (a missing leg
+# with no row fails, a covered row fails as STALE) and shrink-only (MAX_ROWS).
+# A fn proofs/target-availability.toml declares unavailable on the embedded leg
+# cites that declaration's issue.
+#
+# Empty since the merge of sec-post-rc1b (#4379), which serves uuid.v7 (#4307),
+# UDP and name resolution (#4306) and the process.start family (#4308) on the
+# embedded leg: every public fn is tested on both legs.

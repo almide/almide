@@ -519,6 +519,7 @@ evidence  = [
   { path = "spec/wasm_cross/regex_repetition_depth.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_linear_time.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_counted_repetition.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_many_patterns.almd", class = "fixture" },
   { path = "tests/regex_fuzz_test.rs", name = "regex_differential_fuzz", class = "fuzz", n = 220 },
   { path = "tests/regex_pike_differential_test.rs", name = "nested_groups_agree_native_and_wasm", class = "fuzz", n = 300 },
 ]
@@ -4107,6 +4108,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_no_contraction.almd", class = "fixture" },
   { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_mul_no_fma.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-304"
@@ -4390,6 +4392,8 @@ evidence  = [
   { path = "tests/http_response_cross_test.rs", class = "fixture", name = "the_full_response_family_reads_the_same_on_native_and_the_embedded_lane" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_spec_fixtures_read_the_same_on_native_embedded_and_p3" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_server_classes_read_the_same_on_native_embedded_and_p3" },
+  { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "a_non_utf8_body_reads_as_the_lossy_decode_on_native_embedded_and_p3" },
+  { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "a_non_utf8_header_value_reads_as_the_lossy_decode_on_native_embedded_and_p3" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "a_url_userinfo_is_sent_as_basic_credentials_on_native_embedded_and_p3" },
 ]
 [[contract]]
@@ -4987,6 +4991,8 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_loopback.almd", class = "fixture" },
   { path = "spec/embedded_cross/net_tcp_fan_handles.almd", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "tcp_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_wasm_default_route_test.rs", name = "a_socket_program_builds_as_the_p3_component_by_default_and_names_its_grant", class = "fixture" },
 ]
 [[contract]]
 id        = "C-378"
@@ -4997,6 +5003,8 @@ since     = "0.68.0"
 status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_errors.almd", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "tcp_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "an_ungranted_component_reads_the_permission_text", class = "fixture" },
 ]
 [[contract]]
 id        = "C-379"
@@ -5007,6 +5015,7 @@ since     = "0.68.0"
 status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_timeouts.almd", class = "fixture" },
+  { path = "tests/net_tcp_p3_cross_test.rs", name = "tcp_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
 ]
 [[contract]]
 id        = "C-380"
@@ -5828,4 +5837,56 @@ since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_display.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-445"
+spec      = "ALS-R5"
+title     = "The embedded wasm host stops a process.start child neither waited on nor stopped when the run ends by main's return, process.exit or an effect error, as native does"
+statement = "ALS-R5 (almide/almide#4347, almide/almide#4348): on the embedded wasm host (`almide run --target wasm` and the wasm leg of `almide test`), when a run ends because main returns, because `process.exit` is called, or because an effect error ends main, every child the program started with `process.start` and has neither waited on nor stopped is stopped the way `process.stop(child, 500)` stops it — SIGTERM to the child's process group, 500 ms to end, then SIGKILL — before the run's exit status is reported, as C-437 states for native. A host that serves the `almide:process/spawn` import a stand-alone artifact carries keeps the children each run starts as that run's own and stops them in the same way when the run ends. A child already waited on or stopped is left as it is, and the exit neither waits for a running child's own end nor changes the exit code, stdout or stderr, which are the ones native reports. An exit by a runtime abort or a signal is outside it."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/process_start_run_end_stops_children.almd", class = "fixture" },
+  { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_cross_fixture_sees_both_legs_stop_the_child", class = "fixture" },
+  { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_embedded_wasm_host_stops_an_unwaited_child_on_every_exit_route", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-446"
+spec      = "ALS-D7"
+title     = "A Region crosses the wasm host boundary as (base, len) in the memory's address width: an exported Region stays the host's to write until it releases the address, and a Region lent across the boundary is read and written in place"
+statement = "ALS-D7 (almide/almide#4354, ADR-0031 amendment A1, A1b, A4): on the wasm target a Region crosses the host boundary as two values, the view's data address and the length the Region holds, in the memory's address width (two i32 on wasm32), never as the address of the Region's record and never with a length the caller typed. (1) Push: an `@export(wasm)` fn returning a Region returns `(ptr, len)` through the multi-value return; the host holds one share of the block per address handed out, so bytes the host writes at `ptr` stay in place and are what the program then reads through its own copy, until the host passes `ptr` to `__region_release`. A sub-Region (`ffi.slice`) is returned as its own address inside its parent's block, and its share alone keeps the parent alive. An empty Region is `(0, 0)` and releasing 0 is a no-op; releasing an address the module does not hold (released already, or never handed out) traps. A host that releases every address it was handed leaks no memory. (2) An `@export(wasm)` fn taking a Region receives the host's `(base, len)` as a read-only Region over that range, lent for the call, every access checked against that length. (3) Pull: a writable `ffi.alloc` Region passed to an `@extern(wasm)` import arrives as `(base, len)`, and bytes the host writes there are what the program reads back; a slice arrives as its own sub-range. No Bytes copy is made at the boundary in any direction. NOT covered: the addresses' numeric values, memory64 (the emitter declares a 32-bit memory), the WASI 0.2/0.3 component lowering."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_host_js/region_export_push.almd", class = "fixture" },
+  { path = "spec/wasm_host_js/region_extern_pull.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-447"
+spec      = "ALS-R5"
+title     = "fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length"
+statement = "ALS-R5 (almide/almide#4382): `fs.append_bytes(path, data)` opens `path` for appending, creating the file when it is missing (never its parent), and writes `data` after whatever the file holds, bytes another call wrote included, on native, on the embedded wasm lane, on the stock WASI preview-1 artifact and on the WASI 0.3 component. The file's content is never read: an append to a file one byte past the 1 GiB whole-file read limit (C-431), which `fs.read_bytes` refuses with `File too large`, answers ok and grows the file by exactly `bytes.len(data)`, so what an append costs depends on the appended bytes alone. Every byte value 0..=255 is written verbatim, and an empty `data` leaves the file as it was. An error names the call and the path as written, `fs.append_bytes(\"<path>\"): <text>`, with the text the leg's classified errno table gives: a directory at `path` errs from the open, before anything is written, and a missing parent errs without being created. NOT covered: atomicity against a concurrent writer (no single program observes it), and the WASI 0.2 component, which carries no filesystem."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_append_bytes_true_append.almd", class = "fixture" },
+  { path = "spec/embedded_cross/append_bytes_past_read_bound.almd", class = "fixture" },
+  { path = "tests/fs_append_bytes_true_append_test.rs", name = "append_bytes_reaches_only_the_append_op", class = "fixture" },
+  { path = "tests/fs_append_bytes_true_append_test.rs", name = "appending_does_not_read_the_file_on_every_leg", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-448"
+spec      = "ALS-R5"
+title     = "net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native"
+statement = "ALS-R5 (almide/almide#4306): a program calling `net.udp_bind`, `net.udp_local_port`, `net.udp_send_to`, `net.udp_recv_from`, `io.close` of a `UdpSocket` or `net.lookup_host`, built as a WASI 0.3 component (`ALMIDE_COMPONENT_P3=1 almide build --target wasm --component`), imports `wasi:sockets/types@0.3.0` and `wasi:sockets/ip-name-lookup@0.3.0` and no interface outside the WASI 0.3 command world; a component whose program calls none of them imports no `wasi:sockets` interface. Run on a stock wasmtime with the network granted (`-S inherit-network -S allow-ip-name-lookup`), the component answers C-442's and C-443's programs with the same stdout and exit code as the native leg, byte for byte: the same handle numbering (the lowest free slot, reused after a close), datagram boundaries and max-bytes rule, the sender's address as the native leg prints it, and every err text from the one table C-443 states. An IP literal (IPv4, IPv6, or IPv6 in brackets) is read by the native leg's grammar and never reaches the host's resolver. Run without the network grant, a bind is an `err` reading that table's permission text: `udp_bind(127.0.0.1:0): permission denied` for `udp_bind(\"127.0.0.1\", 0)`. Evidence: tests/net_udp_p3_cross_test.rs builds spec/embedded_cross/net_udp_loopback.almd and net_udp_errors.almd as the component, runs each natively and on wasmtime, and requires both legs to reach the program's closing `done` line with identical stdout and exit code; a second test builds an echo program and a bind program and reads the imports and the ungranted bind."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/net_udp_loopback.almd", class = "fixture" },
+  { path = "spec/embedded_cross/net_udp_errors.almd", class = "fixture" },
+  { path = "tests/net_udp_p3_cross_test.rs", name = "udp_and_lookup_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
+  { path = "tests/net_udp_p3_cross_test.rs", name = "sockets_ship_only_with_udp_ops_and_a_missing_grant_is_the_permission_text", class = "fixture" },
 ]

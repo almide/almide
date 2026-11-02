@@ -3,7 +3,7 @@
 // names (`json.null`, `json.as_int`, `value.get`, …) were dropped after
 // their one-release E040 deprecation window (#1078); every fn on this
 // surface has exactly one name. Runtime impls stay in `runtime/rs/src/json.rs`.
-/// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
+/// Strict JSON Value or err; trailing non-whitespace text and nesting over 1000 are errors.
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 

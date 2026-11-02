@@ -13,6 +13,7 @@ TypeConcretization.v
 CapabilityBound.v
 CapabilityReach.v
 CallModes.v
+HelperSig.v
 StackBalance.v
 Termination.v
 FreeList.v

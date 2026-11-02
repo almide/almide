@@ -1,5 +1,6 @@
 //! E119: a Region lent to an `@export(c)` fn escapes its call (ADR-0031
-//! amendment A2).
+//! amendment A2), and the same for an `@export(wasm)` fn, whose Region
+//! parameter is lent from the host's `(base, len)` (#4354).
 //!
 //! An `@export(c)` fn's Region parameter views its C caller's buffer, which
 //! the caller may free as soon as the call returns. So a copy of the Region
@@ -36,9 +37,12 @@ impl Checker {
             .collect();
         for decl in &program.decls {
             let Decl::Fn { name, params, return_type, export_attrs, body: Some(body), span, .. } = decl else { continue };
-            if !export_attrs.iter().any(|a| a.target.as_str() == "c") {
+            // #4354: an `@export(wasm)` fn's Region parameter is lent from
+            // the host's `(base, len)` for the call, the same rule.
+            let Some(target) = export_attrs.iter().map(|a| a.target.as_str()).find(|t| matches!(*t, "c" | "wasm")) else {
                 continue;
-            }
+            };
+            let host = if target == "c" { "the C caller's buffer" } else { "the wasm host's range of the module's memory" };
             let lent: Vec<Sym> = params.iter().filter(|p| is_region(&self.resolve_type_expr(&p.ty))).map(|p| p.name).collect();
             if lent.is_empty() {
                 continue;
@@ -52,8 +56,8 @@ impl Checker {
             self.find_escapes(body, &tainted, &globals, &mut found);
             for (how, at) in found {
                 let mut d = err(
-                    format!("a Region lent to @export(c) fn '{name}' escapes its call: {how}"),
-                    "a lent Region views the C caller's buffer only for the call: copy what you need out with `ffi.read` / `ffi.to_bytes` and keep the Bytes (ADR-0031 amendment A2)".to_string(),
+                    format!("a Region lent to @export({target}) fn '{name}' escapes its call: {how}"),
+                    format!("a lent Region views {host} only for the call: copy what you need out with `ffi.read` / `ffi.to_bytes` and keep the Bytes (ADR-0031 amendment A2, #4354)"),
                     format!("fn {name}"),
                 )
                 .with_code("E119");

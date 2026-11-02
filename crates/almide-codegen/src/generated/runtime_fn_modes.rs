@@ -232,6 +232,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fs___root_remove" => &[false],
         "almide_rt_fs___root_write_text" => &[false, false],
         "almide_rt_fs_append" => &[false, false],
+        "almide_rt_fs_append_bytes" => &[false, false],
         "almide_rt_fs_copy" => &[false, false],
         "almide_rt_fs_create_temp_dir" => &[false],
         "almide_rt_fs_create_temp_file" => &[false],

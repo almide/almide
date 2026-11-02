@@ -1,0 +1,69 @@
+// net.parse_ip, net.ip_to_string and net.is_loopback are pure text <-> address
+// functions: no socket, no host op. spec/stdlib/net_test.almd runs them only on
+// native (it is a native-fallback file for its socket tests), so this file runs
+// them on both legs (proofs/stdlib-test-coverage.txt).
+import net
+
+fn text(s: String) -> String = match net.parse_ip(s) {
+  ok(ip) => net.ip_to_string(ip),
+  err(e) => "err: ${e}",
+}
+
+fn loopback(s: String) -> Bool = match net.parse_ip(s) {
+  ok(ip) => net.is_loopback(ip),
+  err(_) => false,
+}
+
+test "parse_ip and ip_to_string round-trip IPv4" {
+  assert_eq(text("10.0.0.1"), "10.0.0.1")
+  assert_eq(text("0.0.0.0"), "0.0.0.0")
+  assert_eq(text("255.255.255.255"), "255.255.255.255")
+  let parts = match net.parse_ip("192.168.1.20") {
+    ok(net.V4(a, b, c, d)) => [a, b, c, d],
+    _ => [],
+  }
+  assert_eq(parts, [192, 168, 1, 20])
+}
+
+test "ip_to_string writes IPv6 in its RFC 5952 short form" {
+  assert_eq(text("2001:DB8:0:0:0:0:0:1"), "2001:db8::1")
+  assert_eq(text("::1"), "::1")
+  assert_eq(text("::"), "::")
+  assert_eq(text("::ffff:1.2.3.4"), "::ffff:102:304")
+  assert_eq(text("fe80:0:0:1:0:0:0:2"), "fe80:0:0:1::2")
+  assert_eq(
+    net.ip_to_string(net.V6([
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ])),
+    "1:2:3:4:5:6:7:8",
+  )
+}
+
+test "parse_ip refuses malformed addresses" {
+  assert_eq(text("256.1.1.1"), "err: net.parse_ip: not an IP address: \"256.1.1.1\"")
+  assert_eq(text(""), "err: net.parse_ip: not an IP address: \"\"")
+  assert_eq(net.parse_ip("256.1.1.1") |> result.is_err, true)
+  assert_eq(net.parse_ip("1.2.3") |> result.is_err, true)
+  assert_eq(net.parse_ip("01.2.3.4") |> result.is_err, true)
+  assert_eq(net.parse_ip("1::2::3") |> result.is_err, true)
+  assert_eq(net.parse_ip("1:2:3:4:5:6:7:8:9") |> result.is_err, true)
+  assert_eq(net.parse_ip("") |> result.is_err, true)
+  assert_eq(net.parse_ip("localhost") |> result.is_err, true)
+}
+
+test "is_loopback is 127/8 and ::1, nothing else" {
+  assert_eq(loopback("127.0.0.1"), true)
+  assert_eq(loopback("127.9.9.9"), true)
+  assert_eq(loopback("::1"), true)
+  assert_eq(loopback("10.0.0.1"), false)
+  assert_eq(loopback("128.0.0.1"), false)
+  assert_eq(loopback("::"), false)
+  assert_eq(loopback("::2"), false)
+}

@@ -1,5 +1,15 @@
-<!-- description: Fuzz (nightly) is red — triage the differential findings to zero and re-green the workflow -->
+<!-- description: Historical nightly differential-fuzz triage, preserving findings, fixes and retracted hypotheses -->
 # Fuzz Findings Triage: Re-green the Nightly Differential Gate
+
+## Historical triage log, not live CI status
+
+This page preserves the July–August campaign reports, including hypotheses
+that later probes explicitly retracted. The opening nightly-red report is
+about July 2026 and commit `25585249`; the original twelve findings are
+recorded as clean on July 18. Later waves have their own dates and outcomes.
+None of those entries establishes whether today's nightly run is green or
+red. Use the actual workflow run for live CI status; do not reopen a
+superseded hypothesis from this log as a new finding.
 
 Fuzz (nightly) has been red since 2026-07-15. The generative differential
 fuzzer (`tools/xtarget-fuzz`) is finding REAL native ⇄ wasm observable

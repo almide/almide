@@ -24,11 +24,11 @@ declaration. Eight built-in protocols are registered in
 | `Encode` / `Decode` | the one-directional halves of Codec |
 | `Numeric` | numeric-bound for generics |
 
-**Pre-step (immediate, tiny):** `Encode`, `Decode`, and `Numeric` are
-UNDOCUMENTED — `docs/specs/type-system.md` and the CHEATSHEET list only five.
-Sync the docs and add a drift gate (the llms.txt precedent): a check that the
-documented protocol table matches the registration table, so built-ins can
-never silently fall out of the docs again.
+**Pre-step: finish the documentation inventory.** The CHEATSHEET already
+explains `Encode` and `Decode` in its serialization section; claiming they are
+wholly undocumented is stale. Audit the main protocol tables and `Numeric`
+against the registration table, then add a drift gate (the llms.txt precedent).
+This documentation task is separate from implementing `any P` existentials.
 
 ## The 2026 landscape, in one map
 
@@ -46,11 +46,11 @@ never silently fall out of the docs again.
            └───────────────────────┴───────────────────────┘
 ```
 
-Settled verdicts we inherit (not relitigated here):
+Design preferences adopted by this proposal (not universal industry verdicts):
 
 - **Static dispatch by default, existentials explicit** (Swift `some`/`any`,
-  Rust `impl`/`dyn`) — the industry converged; nobody mixes them silently
-  anymore.
+  Rust `impl`/`dyn`) — this proposal chooses an explicit distinction; it does not establish
+  universal industry convergence.
 - **Coherence is non-negotiable** (Scala 2 implicits are the cautionary tale).
   Almide's declared-at-the-type conformance is coherent BY CONSTRUCTION: a
   type's conformances live in one place, so "which instance wins" cannot arise.
@@ -59,8 +59,8 @@ Settled verdicts we inherit (not relitigated here):
 
 ## What we take, and from whom
 
-**From Go — the interface-value ergonomics, as an opt-in.** Go proved that 80%
-of practical interface use is the existential: a heterogeneous list of
+**From Go — interface-value ergonomics, as an opt-in.** The motivating use
+cases are existential: a heterogeneous list of
 handlers, a plugin table, "anything I can write to". LLMs carry this prior
 from Python/TS/Go and write it constantly:
 

@@ -276,8 +276,9 @@ fn main() -> Unit = {
 A conversion is named after the type it builds (R-L0-40): `int.from(x)` (aborts
 outside the range), `int.from_checked(x)` (`none`), `int.from_saturating(x)`
 (clamp, NaN 0) and `int.from_wrapping(x)` (integer sources, two's complement)
-take any numeric source — `UInt64 → Int`, the one lossy widening, included.
-Every sized module carries the same family for its own type, and every carrier
+take numeric sources, including `UInt64 → Int`, whose upper range does not
+fit in `Int`. Every sized module carries the same family for its own type,
+and every fixed-width numeric carrier
 has `min_value()`/`max_value()`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->

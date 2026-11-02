@@ -6,11 +6,12 @@ Test assertions. import testing.
 
 Assert that `f` aborts with text containing `expected`. Only `f` runs, in a
 child process (native) or a fresh instance (wasm) that starts the program
-afresh, so every abort counts — `panic`, an index out of bounds, a division by
+afresh, so structured Almide aborts count — `panic`, an index out of bounds, a division by
 zero, a failed assert — and the test continues after the call. `f` must be a
 lambda written in the call that captures nothing of the test (E098), and the
 call must sit directly in a `test` block (E099). The child's output is shown
-only when the assertion fails.
+only when the assertion fails. A raw host panic, unstructured Wasm trap,
+or non-abort exit is not accepted as an Almide abort.
 
 ```almd check
 import testing
@@ -48,7 +49,7 @@ test "close enough" {
 }
 ```
 
-### `testing.assert_gt(a: Int, b: Int) -> Unit`
+### `testing.assert_gt(a: A, b: A) -> Unit`
 
 Assert that a is greater than b.
 
@@ -60,7 +61,7 @@ test "greater" {
 }
 ```
 
-### `testing.assert_lt(a: Int, b: Int) -> Unit`
+### `testing.assert_lt(a: A, b: A) -> Unit`
 
 Assert that a is less than b.
 
@@ -72,7 +73,7 @@ test "less" {
 }
 ```
 
-### `testing.assert_some(opt: Option[String]) -> Unit`
+### `testing.assert_some(opt: Option[A]) -> Unit`
 
 Assert that an Option is some (not none).
 
@@ -84,7 +85,7 @@ test "option is some" {
 }
 ```
 
-### `testing.assert_ok(result: Result[String, String]) -> Unit`
+### `testing.assert_ok(result: Result[A, E]) -> Unit`
 
 Assert that a Result is ok (not err).
 

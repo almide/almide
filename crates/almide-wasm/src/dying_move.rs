@@ -348,6 +348,13 @@ impl Emitter<'_> {
         self.witness_move_and_empty(id, false);
     }
 
+    /// [`Self::empty_dying`] of a credit that moves on through a routine's
+    /// hold, whose hold move is its one byte-check event.
+    pub(crate) fn empty_dying_into_hold(&mut self, id: VarId, idx: u32) {
+        self.f.instructions().i32_const(0).local_set(idx);
+        self.witness_move_into_hold(id);
+    }
+
     /// The receiver `m` of a consuming map op whose credit the op may take:
     /// `Some(dying)` — the dying var whose local the op empties, if the
     /// receiver is one — or `None` when `m` is borrowed (the op copies). A
@@ -406,13 +413,19 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
+        // #4278 B1: the receiver's and a fresh key's credits move into the
+        // judged write through their holds (`try_map_set_owned`'s rule).
         if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         // `ih` ends up holding the value stored: init, or the callback's.
         let ih = self.hold_for(v)?;
         // An inert init (literals, reads, constructors of them) cannot trap
@@ -437,7 +450,7 @@ impl Emitter<'_> {
         self.rc_share_guard(body, v);
         self.witness_store(body, v);
         if !lazy {
-            self.emit_release_hold(ih, v);
+            self.arm_release_hold(ih, v, init);
         }
         self.f.instructions().local_set(ih);
         self.witness_once_arm();
@@ -477,13 +490,19 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
+        // #4278 B1: the receiver's and a fresh key's credits move into the
+        // judged write through their holds (`try_map_set_owned`'s rule).
         if let Some((id, idx, _)) = dying {
-            self.empty_dying(id, idx);
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
+        if self.witness_src_local(key).is_none() && self.rc_droppable(k) {
+            self.witness_rc_hold_move(kh);
+        }
         let ih = self.hold_for(v)?;
         let (oh, eh) = (self.hold_i32()?, self.hold_i32()?);
         self.emit_map_scan_into(mh, kh, eh, (k, v), fns);
@@ -531,13 +550,15 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
-        match dying {
-            Some((id, idx, _)) => self.empty_dying(id, idx),
-            // #4277: an owned temporary receiver's credit moves into this
-            // routine through `mh`; the judged set releases it there when the
-            // block is shared and it copies.
-            None => self.witness_rc_hold_move(mh),
+        // #4277: the receiver's credit — a dying var's, emptied here, or an
+        // owned temporary's — moves into this routine through `mh`, its one
+        // byte-check event (a second would let a lost release read as
+        // moved). The judged set releases it when the block is shared and
+        // it copies.
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying_into_hold(id, idx);
         }
+        self.witness_rc_hold_move(mh);
         let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
@@ -571,9 +592,13 @@ impl Emitter<'_> {
         let SliceTy::Named(ti) = ty else { return Ok(None) };
         let NamedDef::Record(def) = &self.types.def(ti) else { return Ok(None) };
         let mut slots = Vec::new();
+        let mut poss = Vec::new();
         for (fname, _) in fields {
-            match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                Some(fi) => slots.push((fi.ty, fi.offset)),
+            match def.fields.iter().position(|fi| fi.name == fname.as_str()) {
+                Some(k) => {
+                    slots.push((def.fields[k].ty, def.fields[k].offset));
+                    poss.push(k);
+                }
                 None => return Ok(None),
             }
         }
@@ -616,16 +641,23 @@ impl Emitter<'_> {
         for &(e, _) in &takes {
             self.owned_call_marks.set_take(e, None);
         }
-        for (&(fty, off), &vh) in slots.iter().zip(&vals) {
+        for ((&(fty, off), &vh), &pos) in slots.iter().zip(&vals).zip(&poss) {
             // The overwritten field's credit goes with it (a moved slot is
             // NULL: a release of nothing).
             if self.elem_is_handle(fty) {
                 let dec = self.dec_fn_of(fty);
-                self.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                // #4278 B1: the overwritten field is the slot's consume (`r`).
+                self.slot_release(|em| {
+                    em.f.instructions().local_get(hold).i32_load(slot_memarg(off));
+                    em.fw_field(ty, None, pos);
+                    em.f.instructions().call(dec);
+                    Ok(())
+                })?;
             }
             self.f.instructions().local_get(hold);
             self.f.instructions().local_get(vh);
             self.store_ty_slot(fty, off);
+            self.fw_field(ty, None, pos);
         }
         self.empty_dying(id, idx);
         self.f.instructions().local_get(hold);
@@ -639,12 +671,14 @@ impl Emitter<'_> {
     /// The field read `e` (its record's address on the stack) when it was
     /// noted a slot take: load the slot, null it, and hand the value on
     /// owned. `false`: not a take — nothing emitted.
-    pub(crate) fn try_take_slot(&mut self, e: &IrExpr, fty: SliceTy) -> Result<bool, EmitError> {
+    pub(crate) fn try_take_slot(&mut self, e: &IrExpr, fty: SliceTy, (rty, pos): (SliceTy, usize)) -> Result<bool, EmitError> {
         let Some(off) = self.owned_call_marks.take_slot(e) else { return Ok(false) };
         let t = self.hold_i32()?;
         self.f.instructions().local_tee(t);
         self.load_ty_slot(fty, off);
+        self.fw_field(rty, None, pos);
         self.f.instructions().local_get(t).i32_const(0).i32_store(slot_memarg(off));
+        self.fw_field(rty, None, pos);
         self.release_i32();
         self.owned_call_marks.mark(e);
         Ok(true)

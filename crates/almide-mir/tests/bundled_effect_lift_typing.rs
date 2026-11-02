@@ -37,7 +37,7 @@ fn a_lifted_bundled_secret_reader_types_as_a_result() {
 import secret
 
 effect fn main() -> Unit = {
-  let tok = env.secret("ALMIDE_LIFT_TYPING_UNSET")!
+  let tok = env.secret("LIFT_TYPING_UNSET_PROBE")!
   match tok {
     some(t) => println("${string.len(secret.reveal(t))}"),
     none => println("unset"),
@@ -55,7 +55,7 @@ fn a_template_effect_fn_keeps_its_raw_return() {
         r#"import env
 
 effect fn main() -> Unit = {
-  println(env.get("ALMIDE_LIFT_TYPING_UNSET") ?? "none")
+  println(env.get("LIFT_TYPING_UNSET_PROBE") ?? "none")
 }
 "#,
     );

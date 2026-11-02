@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/string_ext.rs b/crates/almide-wasm/src/string_ext.rs
+--- a/crates/almide-wasm/src/string_ext.rs
++++ b/crates/almide-wasm/src/string_ext.rs
+@@ -142,7 +142,8 @@ impl Emitter<'_> {
+         i.i32_const(0);
+         i.else_();
+         i.local_get(hs).local_get(hn).call(F_CP_OFF).local_set(hoff);
+-        i.local_get(hoff).local_get(hs).i32_load(len_memarg()).i32_ge_u();
++        // RE-INJECTED (#4281 drill): the test admits the byte at len.
++        i.local_get(hoff).local_get(hs).i32_load(len_memarg()).i32_const(1).i32_add().i32_ge_u();
+         i.if_(BlockType::Result(ValType::I32));
+         let site = self.str_test();
+         i = self.f.instructions();

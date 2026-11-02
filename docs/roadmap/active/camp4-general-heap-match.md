@@ -384,5 +384,8 @@ diverging arm from the start.
   `lean4/src/Lean/Compiler/LCNF/ExplicitRC.lean:421,624`,
   `roc/src/lir/arc.zig`,
   `grain/compiler/src/codegen/garbage_collection.re:719`.
-- Prior art in-tree: `RESEARCH.md` synthesis + Surveys 3a and 4,
-  `v1-value-model.md` §263-308.
+- The cited `RESEARCH.md` synthesis / Surveys 3a and 4 are not included
+  in this repository snapshot. Their line references below
+  are historical provenance, not resolvable in-tree source anchors.
+- In-tree prior art: [v1-value-model.md](v1-value-model.md), the ownership
+  and recursive-drop discussion.

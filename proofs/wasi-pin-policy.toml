@@ -33,9 +33,9 @@ minor = "0.3.0"
 # experimental and get no patch backports, so they move with the major);
 # `ci` is the release CI installs for the execution legs.
 floor = 46
-crate_major = 49
-ci = "v49.0.1"
-# The flag surface the p3 execution legs pass (47.x, unchanged on 49.x): NO feature flag
+crate_major = 50
+ci = "v50.0.1"
+# The flag surface the p3 execution legs pass (47.x, unchanged on 49.x and 50.x): NO feature flag
 # (ADR-0023 step 1). The shim uses only the baseline async builtins
 # (`waitable-set.*`, the `[async-lower]` stream/future copies), which
 # need `component-model-async` alone — on by default since 46, as is p3
@@ -70,6 +70,7 @@ evidence = [
   "wasmtime v49.0.1 release 2026-09-24 (crates.io publish time) — the security release fixing RUSTSEC-2026-0315/-0316 (#2955); rust-version 1.96.0; the embedded host compiled unchanged and the p3 legs pass with no feature flag on the 49.0.1 CLI",
   "wasmtime crate 49.0.2 2026-10-02 — the security release fixing RUSTSEC-2026-0325/-0326/-0327 (GC rooting and tag-import typing, and an unvalidated async-lifted callback result count); the embedded host compiles unchanged, and the CI CLI stays v49.0.1",
   "wasmtime crate 49.0.3 and rustls 0.23.46, both 2026-10-14 — the security releases for RUSTSEC-2026-0346/-0347/-0348/-0349 (rustls: TLS secrets in client-session Debug output, ECH-rejection data leak, pre-auth brotli 1 GiB allocation, ServerHello key-exchange downgrade) and RUSTSEC-2026-0353..0364 (wasmtime 49.0.2, 12 advisories, including a host panic on yield in a component start function and on pending calls after a trap); cranelift 0.136.3 and pulley 49.0.3 come with it; the CI CLI stays v49.0.1",
+  "wasmtime 50.0.0 release 2026-10-20 and 50.0.1 2026-10-29 (crates.io publish time; RELEASES.md at v50.0.1) — 50.0.1 is the security release for GHSA-hmmr-87qq-258j (wasi-sockets UDP `connect` accepted an address permitted for send OR receive), GHSA-qw58-7h65-crq2, GHSA-3982-jqvv-277m, GHSA-6fr9-xmw9-5352 and GHSA-h4wp-g4x3-7398; rust-version 1.97.0 (#14466), so RUST_TOOLCHAIN and MIN_RUSTC move to 1.97.0; the crate depends on the wasm-tools 0.261 train while the workspace family stays 0.262; the 50.0.0 component-model-async spec update (#14244 etc.: `cancellable` removed from intrinsics, use of a stream/future handle after the other end dropped traps) is the change the p3 legs were re-run against; the CLI no longer enables WASIp0 by default (#14479) and no leg runs a `wasi_unstable` module",
   "wasm-tools 0.259.0 release 2026-09-10 (crates.io publish time of wasmparser 0.259.0); `SizeAlign::fill` became fallible, the only API change this tree touches",
   "wasm-tools 0.261.0 release 2026-10-02 (crates.io publish time of wasmparser 0.261.0); `wit_component::embed_component_metadata` gained a `canonical_names: bool` argument, the only API change this tree touches",
   "wasm-tools 0.262.0 release 2026-10-13 (crates.io publish time of wasmparser 0.262.0); `Payload::CodeSectionStart { range }` became `unchecked_range`, the only API change this tree touches",

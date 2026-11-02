@@ -1,0 +1,16 @@
+// @wall: `unix.listen` is not available on --target wasm
+// A socket op routes the default build to the WASI 0.3 component (preview 1
+// has no sockets, the net/tcp design step 4) — and a unix op beside it has
+// no interface in that component either. The component route must not
+// carry the unix call along: the build refuses it as the E081 availability
+// diagnostic, the same verdict `almide check --target wasm` gives.
+import net
+import io
+import unix
+
+effect fn main() -> Unit = {
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let u = unix.listen("/tmp/almide-wall.sock")!
+  println("${net.tcp_local_port(l)! > 0}")
+  io.close(u)!
+}

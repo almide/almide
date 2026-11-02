@@ -123,7 +123,7 @@ struct Host {
     /// 91..=116, #3620; 140..=145, #4306) — closed when the run ends.
     net: Arc<Mutex<crate::net_host::NetRun>>,
     /// The children `process.start` made on this run (#4308).
-    procs: Arc<crate::host_process::ProcTable>,
+    procs: Arc<crate::host_process::RunChildren>,
     /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
     /// buffer flushed at every line end, and per write on a terminal —
     /// native's rule (#3417) — and stderr
@@ -236,6 +236,14 @@ fn stdout_is_terminal() -> bool {
 /// The store limiter of every store of a run: linear-memory growth is
 /// metered against the run's shared budget (#4135); tables, instance and
 /// memory counts keep wasmtime's defaults, as `StoreLimits` did.
+/// The canonical `almide:process/spawn` import (a p1 artifact's form) keeps
+/// its children in the run's own table, the one ops 146..=151 use (#4347).
+impl crate::host_process::SpawnHost for Host {
+    fn spawn_children(&self) -> &crate::host_process::RunChildren {
+        &self.procs
+    }
+}
+
 impl wasmtime::ResourceLimiter for Host {
     fn memory_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
         if maximum.is_some_and(|m| desired > m) {

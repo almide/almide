@@ -122,6 +122,24 @@ pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(
     Ok(())
 }
 
+/// `fs.append_bytes` (#4382): `data` after what the file holds — the overlay's
+/// content, else the real file's (read-only), else nothing (native's O_CREAT).
+/// A directory is native's EISDIR from the open; every other precondition is
+/// [`write_bytes`]'s, which stores the result in the overlay.
+pub(crate) fn append_bytes(vfs: &mut Vfs, path: &str, data: &[u8]) -> Result<(), String> {
+    let key = normalize(path);
+    let host = std::path::Path::new(key.as_str());
+    let mut content = match vfs.get(key.as_str()) {
+        Some(VfsEntry::File(content)) => content.clone(),
+        Some(VfsEntry::Dir) => return Err(EISDIR.to_string()),
+        None if host.is_dir() => return Err(EISDIR.to_string()),
+        None if host.is_file() => host_read(&key).map_err(host_err)?,
+        None => Vec::new(),
+    };
+    content.extend_from_slice(data);
+    write_bytes(vfs, path, &content)
+}
+
 /// A path component ABOVE `path` that is a file — in the overlay or on the
 /// real filesystem: every write-side floor answers the native ENOTDIR for
 /// it (`std::fs::write` / `create_dir_all` through a plain file), before any
@@ -366,4 +384,24 @@ fn dir_has_entries(vfs: &Vfs, dst: &str) -> bool {
     let prefix = format!("{dst}/");
     vfs.keys().any(|k| k.starts_with(&prefix))
         || std::fs::read_dir(dst).is_ok_and(|mut it| it.next().is_some())
+}
+
+#[cfg(test)]
+mod append_tests {
+    use super::*;
+
+    #[test]
+    fn append_bytes_lands_after_the_content_and_refuses_a_directory() {
+        let mut vfs = Vfs::new();
+        let dir = std::env::temp_dir().join("almide-vfs-append-test");
+        let dir = dir.to_str().unwrap().to_string();
+        vfs.insert(normalize(&dir), VfsEntry::Dir);
+        let f = format!("{dir}/f.bin");
+        append_bytes(&mut vfs, &f, &[1, 2]).unwrap();
+        append_bytes(&mut vfs, &f, &[]).unwrap();
+        append_bytes(&mut vfs, &f, &[255]).unwrap();
+        assert_eq!(read_bytes(&vfs, &f).unwrap(), vec![1, 2, 255]);
+        assert_eq!(append_bytes(&mut vfs, &dir, &[1]), Err(EISDIR.to_string()));
+        assert_eq!(append_bytes(&mut vfs, &format!("{dir}/no/f"), &[1]), Err(ENOENT.to_string()));
+    }
 }

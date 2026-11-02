@@ -263,7 +263,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hw).i32_const(okoff as i32).i32_add();
         self.f.instructions().local_get(hcur).i32_const(koff as i32).i32_add();
         self.load_ty_slot_at(k);
-        self.share_handle_top(k);
+        self.arm_share_handle_top(k);
         self.store_ty_slot_at(k);
         self.f.instructions().local_get(hw).i32_const(ovoff as i32).i32_add();
         let got = self.lower(body, Some(b_ty))?;
@@ -494,7 +494,15 @@ impl Emitter<'_> {
                 .i32_const(voff as i32)
                 .i32_add();
         }
-        self.emit_release_slot_at(v);
+        // #4278 B1: the replaced value is the slot's consume (`r`).
+        if self.elem_is_handle(v) {
+            self.slot_release(|em| {
+                em.emit_release_slot_at(v);
+                Ok(())
+            })?;
+        } else {
+            self.emit_release_slot_at(v);
+        }
         self.f.instructions().local_get(hnew);
         self.store_ty_slot_at(v);
         self.release_for(v);
@@ -572,8 +580,8 @@ impl Emitter<'_> {
         self.witness_once_arm();
         self.witness_once_close();
         // present: the Retain credits of the unstored key and init go back
-        self.emit_release_hold(hkey, k);
-        self.emit_release_hold(hinit, v);
+        self.arm_release_hold(hkey, k, key);
+        self.arm_release_hold(hinit, v, init);
         {
             let mut i = self.f.instructions();
             i.else_();

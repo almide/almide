@@ -10,6 +10,22 @@
 
 ---
 
+## Current foundation and remaining proposal (2026-10-31)
+
+`Matrix` and CPU matrix operations already exist: see
+[`stdlib/matrix.almd`](../../../stdlib/matrix.almd), including constructors,
+shape/transpose and operator lowering helpers. The runtime is in
+[`runtime/rs/src/matrix.rs`](../../../runtime/rs/src/matrix.rs).
+The repository also has [`almide-gpu-run`](../../../crates/almide-gpu-run),
+a separate GPU execution path; its existence does not implement the proposed
+`--target cuda`, `grad`, or automatic training loop below.
+
+The checklist below is the **original staged design**, not a current list of
+missing Matrix features. In particular, Step 1's type/CPU/operator foundation
+has shipped through the `.almd` stdlib (the old `stdlib/defs/*.toml` source
+format is retired). CUDA/autograd integration and the proposed type-level
+shape design remain separate decisions, not inferred completion.
+
 ## Design Philosophy
 
 ### Why
@@ -33,7 +49,7 @@ Almide's type system + compiler optimization can eliminate these.
 
 ## Phases
 
-### Step 1: Matrix Primitive Type
+### Step 1: Matrix Primitive Type (historical foundation)
 
 Same pattern as the Bytes type. Minimal compiler changes.
 
@@ -60,7 +76,7 @@ let shape = matrix.shape(y)  // → (32, 1536)
 - [ ] `*` `/` for `(Matrix, Float)` → scalar operations
 - [ ] Add Matrix patterns to codegen Binary op dispatch
 
-**Verification:** Matrix operations run on CPU via `almide run`
+**Current foundation:** Matrix operations run on CPU via `almide run`; the old implementation checklist above records the initial plan.
 
 ### Step 2: GPU Backend
 

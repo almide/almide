@@ -59,6 +59,8 @@ pub const P1_SERVED_OPS: &[i32] = &[
     // no longer carries their bodies (62 is fold_lines_chunked's size probe).
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
+    // fs.append_bytes (#4382): the fs service's append under its own name.
+    66,
     // `env.vars`' environ frames (#3908): the args shim over the environ pair.
     77,
     // The instance-parallel fan offer (#3003): answered "not served" (0), so
