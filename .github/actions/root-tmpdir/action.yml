@@ -10,9 +10,23 @@ description: >-
   right after its checkout, so no job drifts back to the tmpfs. Linux only: the
   macOS and Windows runners keep their own temp dirs.
 
+  The root volume itself then filled (#4408): on 2026-11-02 four jobs died with
+  "No space left on device" (the runner's own diag log, a shard's test, the
+  release build). The first step below deletes the preinstalled SDKs no job
+  uses (.NET, Android, GHC, CodeQL, Swift; PowerShell stays, the installer
+  attestation check runs it) before the job writes anything, and prints the
+  free space before and after so the margin stays visible.
+
 runs:
   using: "composite"
   steps:
+    - name: Free the root volume of unused preinstalled SDKs
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        df -h /
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+        df -h /
     - name: TMPDIR on the root volume
       if: runner.os == 'Linux'
       shell: bash
