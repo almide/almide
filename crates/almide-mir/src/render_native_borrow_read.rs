@@ -36,6 +36,12 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
                     root.insert(*dst, r);
                 }
             }
+            // A bounds-checked element address of a list block.
+            Op::Prim { kind: PrimKind::ElemAddr, dst: Some(d), args } if args.len() == 2 => {
+                if let Some(r) = root.get(&args[0]).copied() {
+                    root.insert(*d, r);
+                }
+            }
             _ => {}
         }
     }
@@ -73,6 +79,9 @@ fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
                 // An address into `d`'s own block, or a load through one.
                 Op::IntBinOp { op: IntOp::Add, .. } => names_root,
+                Op::Prim { kind: PrimKind::ElemAddr, args, .. } => {
+                    args.len() == 2 && root.get(&args[0]) == Some(&d) && args[1] != d
+                }
                 Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => {
                     args.len() == 1 && root.get(&args[0]) == Some(&d)
                 }
@@ -105,7 +114,7 @@ fn block_untouched(func: &MirFunction, from: usize, to: usize, base: ValueId, ro
         let ok = match op {
             Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [base],
             Op::IntBinOp { op: IntOp::Add, .. } => true,
-            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, .. } => true,
+            Op::Prim { kind: PrimKind::ElemAddr | PrimKind::Load { .. } | PrimKind::LoadHandle, .. } => true,
             Op::ListGetScalar { list, .. } => *list == base,
             _ => false,
         };
