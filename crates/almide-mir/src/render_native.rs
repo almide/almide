@@ -276,13 +276,19 @@ pub fn try_render_native_program(
     if !user_fns.contains_key("main") {
         return Err(wall("native: no main in the MIR program"));
     }
-    render_native_items(prog, sigs)
+    render_items(prog, sigs, true)
 }
 
 /// [`try_render_native_program`] without the `main` requirement: the shims,
 /// every fn and the closure dispatch tables. The metered-region splice
 /// (#3669) renders its region fns through here, with no `main` of its own.
 pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
+    // The splice lives inside the host program, whose runtime it shares: no
+    // runtime module of its own.
+    render_items(prog, sigs, false)
+}
+
+fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
@@ -309,7 +315,7 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     used_shims.sort();
     used_shims.dedup();
     let (runtime, glue): (Vec<&str>, Vec<&str>) = used_shims.into_iter().partition(|s| crate::native_floor::is_runtime_text(s));
-    if fan_rendered() {
+    if fan_rendered() || !runtime_module {
         // The fan runtime's output macros and exit routing reach every item
         // after them, the runtime's included: one crate, as before.
         out.push_str(&crate::render_native_str::almide_string_alias());
