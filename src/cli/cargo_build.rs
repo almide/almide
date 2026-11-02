@@ -183,16 +183,6 @@ const FAST_PATH_RELEASE_ARGS: [&str; 4] = ["-C", "lto=fat", "-C", "codegen-units
 
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
-    // A crate with no runtime boundary carries everything it calls (the v1
-    // trust-spine render, #4006): it is compiled by the same rustc invocation
-    // as the standard codegen's main crate, minus the runtime it does not
-    // link — so both legs ship with one set of codegen flags. Through cargo's
-    // dev profile it would gain debug assertions the standard route never
-    // builds with (std's ub_checks inside every inlined runtime loop: a v1
-    // string scan read 1.29x the standard build's instructions, 1.05x without).
-    if !rs_code.contains(almide_codegen::RT_BOUNDARY_MARKER) {
-        return try_self_contained_build(rs_code, project_dir, release, opt_level);
-    }
     // The runtime is built for the same CPU as the main crate: fat LTO does
     // not inline across functions whose target features differ.
     let cpu = release.then(super::native_target::release_target_cpu).flatten();
@@ -225,39 +215,6 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
         Some(source_still_ours(&rs_path, &slim).map(|()| bin_path))
     } else {
         // else: fall through to the self-contained cargo build
-        None
-    }
-}
-
-/// [`try_rlib_fast_build`] for a crate that links no runtime: the same
-/// rustc flags, no `--extern`. `None` falls through to the cargo build.
-fn try_self_contained_build(
-    rs_code: &str,
-    project_dir: &std::path::Path,
-    release: bool,
-    opt_level: &str,
-) -> Option<Result<std::path::PathBuf, String>> {
-    let mut code = rs_code.to_string();
-    if !defines_entry_point(&code) {
-        code.push_str("\nfn main() {}\n");
-    }
-    let rs_path = project_dir.join("almide_gen_main.rs");
-    let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
-    std::fs::write(&rs_path, &code).ok()?;
-    let mut cmd = std::process::Command::new(crate::find_rustc());
-    cmd.arg(&rs_path)
-        .arg("-o").arg(&bin_path)
-        .arg("--edition").arg("2021")
-        .arg("-C").arg(format!("opt-level={opt_level}"))
-        .arg("-A").arg("warnings");
-    if release {
-        cmd.args(FAST_PATH_RELEASE_ARGS);
-        cmd.args(super::native_target::release_codegen_rustc_args());
-    }
-    let output = cmd.output().ok()?;
-    if output.status.success() {
-        Some(source_still_ours(&rs_path, &code).map(|()| bin_path))
-    } else {
         None
     }
 }
