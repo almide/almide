@@ -57,8 +57,29 @@ in_main() {
     --toggle-collect='*almide_stack_guard_install' \
     --callgrind-out-file="$out" "$1" </dev/null >/dev/null 2>&1
   [ -s "$out" ] || return 0
-  callgrind_annotate --auto=no "$out" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }'
+  local n
+  n=$(callgrind_annotate --auto=no "$out" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
   rm -f "$out"
+  # Valgrind 3.22 reads no symbols from a binary whose two writable PT_LOAD
+  # segments land in one mapping (a link-layout accident: guard_statement's
+  # v1 binary). It then names each block by its address, so the same three
+  # entry points are toggled by address: the symbol's address from `nm`
+  # plus the load base valgrind gives a PIE on amd64 (0x108000). Both sides
+  # fail closed: a wrong base toggles nothing, and nothing collected is
+  # MEASURE-FAIL.
+  if ! [[ "$n" =~ ^[0-9]+$ ]] && command -v nm >/dev/null; then
+    local addrs=()
+    while read -r a _k _name; do
+      addrs+=("--toggle-collect=$(printf '0x%016x' $((0x$a + 0x108000)))")
+    done < <(nm -C "$1" 2>/dev/null | grep -E ' almide_[A-Za-z0-9_]*::main$|thread_start$|::almide_stack_guard_install$')
+    if [ "${#addrs[@]}" -gt 0 ]; then
+      timeout 900 valgrind --tool=callgrind --collect-atstart=no "${addrs[@]}" \
+        --callgrind-out-file="$out" "$1" </dev/null >/dev/null 2>&1
+      [ -s "$out" ] && n=$(callgrind_annotate --auto=no "$out" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
+      rm -f "$out"
+    fi
+  fi
+  echo "$n"
 }
 ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (a > 0) printf "%.3f", b / a; else print "inf" }'; }
 
