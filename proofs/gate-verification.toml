@@ -1468,9 +1468,9 @@ path = "scripts/check-native-v1-perf-shapes.sh"
 reads = "scalar"
 wired_by = ".github/workflows/native-v1-perf-nightly.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#4006 (2026-11-03, GCE c1-native, sec-c1-perf-r1): the unforged run read 6 unexercised render paths in 4 renderer functions, equal to the baseline, exit 0; with NATIVE_V1_SHAPES_DROP='^spec/wasm_cross/[a-m]' (half the floor left out of the corpus) it read 12 and named 5 functions UNEXERCISED, exit 1."
+evidence = "#4006 (2026-11-03, GCE c1-native, sec-c1-perf-r1): the unforged run read 1119 unexercised render paths in 162 renderer functions (554 mapped), equal to the baseline, exit 0; with NATIVE_V1_SHAPES_DROP='^spec/wasm_cross/[a-m]' (half the floor left out of the corpus) it read 2002 and named 72 functions UNEXERCISED, exit 1."
 measures = "the code regions of crates/almide-mir/src/render_native*.rs that no program in the perf gates' corpus (the floor's spec programs and research/benchmark/perf/v1-shapes) executes when rendered, less those whose own straight-line code walls (nested blocks and closures left out), counted per renderer function by llvm-cov region coverage of an instrumented render, against proofs/native-v1-perf-shapes-baseline.txt"
-varies = "2026-11-03: the first baseline reads 6 paths in 4 functions (finish_native_fn, render_typed_call_indirect, render_fan_group, the map emitter)"
+varies = "2026-11-03: the first baseline read 6 paths in 4 functions while only regions with a recorded zero count of their own were taken; counting every unexercised region that neither walls nor is code-less (a propagating `?`) it reads 1119 paths in 162 functions"
 blind = "a path whose cost depends on the shape it composes with, though every path is executed -> scripts/check-native-v1-perf.sh (the ratio of every composition the corpus holds)"
 
 [[gate]]
