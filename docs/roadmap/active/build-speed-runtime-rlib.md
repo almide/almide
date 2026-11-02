@@ -17,6 +17,42 @@ The timings and no-LTO/inline plan below describe the earlier implementation;
 they are retained as measurement and design history, not a current prescription.
 Native-dependency support in the rlib fast path and prebuilt distribution remain separate proposals.
 
+### The v1 render's runtime crate (owner ruling 2026-11-02)
+
+A program the v1 trust spine renders (#4006) carries no runtime boundary
+marker, so it takes the cargo path, not the rlib path. Its runtime part — the
+shared string buffer (`almide-str`) and the runtime bodies the render takes
+along (`almide_mir::native_floor`) — is rendered as one module,
+`almide_v1_rt`, between two marker lines. The build
+(`cargo_toml::split_runtime_crate`) compiles that module as a crate of its
+own, and the manifest pins its profile under
+`[profile.dev.package.almide_v1_rt]`:
+
+- `debug-assertions = false`, as v0's runtime rlib is built (`rustc` without
+  `-C debug-assertions`);
+- `overflow-checks = false`, pinned explicitly.
+
+The program's own code keeps `[profile.dev]` unchanged, its debug assertions
+included.
+
+Why: through cargo's dev profile the spliced runtime ran std's `ub_checks`
+inside every runtime loop. A per-codepoint string scan read 1.29x the standard
+build's instructions with them on and 1.05x with them off.
+
+What still holds:
+
+- The runtime's `unsafe` is judged by Miri and ASan on the single-file render,
+  as before (`scripts/miri-asan-slice.sh`).
+- A fan program keeps one crate, because the fan runtime's output macros and
+  exit routing must reach the runtime's items.
+
+`tests/native_runtime_profile_test.rs` checks this on a real build's project:
+
+- both profile lines are present, and overflow wraps in the program and
+  through the runtime;
+- a `debug_assert!` planted in the program crate fires (the negative control);
+- the same assertion planted in the runtime crate does not.
+
 ## Earlier implementation and inlining proposal
 
 > Goal: Go-like build speed. The dev/test/run loop and shipping builds should not pay to recompile the runtime every time.
